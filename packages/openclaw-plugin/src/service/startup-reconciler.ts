@@ -51,8 +51,12 @@ export async function reconcileStartup(stateDir: string): Promise<Reconciliation
             JSON.parse(raw); // Validate JSON
             state = readStateSync(stateDir);
         } catch {
-            // Corrupted JSON — readStateSync would return defaults, but we detect it here
-            state = { principleCooldowns: {}, recentRunTimestamps: [] };
+            // Corrupted JSON — back up and reset to canonical defaults
+            try {
+                const backupPath = stateFilePath + '.corrupted.' + Date.now();
+                fs.renameSync(stateFilePath, backupPath);
+            } catch { /* best effort backup */ }
+            state = readStateSync(stateDir); // Returns canonical defaults
             await writeState(stateDir, state);
             result.stateReset = true;
         }

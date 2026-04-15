@@ -17,7 +17,7 @@ import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
-import { loadNocturnalConfig, loadKeywordOptimizationConfig } from './nocturnal-config.js';
+import { loadNocturnalConfig, loadKeywordOptimizationConfig, loadCooldownEscalationConfig } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
@@ -38,10 +38,18 @@ import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import { classifyFailure, type ClassifiableTaskKind } from './failure-classifier.js';
 import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from './cooldown-strategy.js';
-import { loadCooldownEscalationConfig } from './nocturnal-config.js';
 import { reconcileStartup } from './startup-reconciler.js';
 import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
+
+/**
+ * Atomic file write — write to temp then rename to prevent partial writes on crash.
+ */
+function atomicWriteFileSync(filePath: string, data: string): void {
+    const tmpPath = filePath + '.tmp';
+    fs.writeFileSync(tmpPath, data, 'utf8');
+    fs.renameSync(tmpPath, filePath);
+}
 
 /**
  * Phase 40: Handle failure classification after task outcome.
@@ -60,10 +68,10 @@ async function handleTaskOutcome(
         if (succeeded) {
             await resetFailureState(wctx.stateDir, taskKind);
         } else {
-            const result = classifyFailure(queue, taskKind);
+            const config = loadCooldownEscalationConfig(wctx.stateDir);
+            const result = classifyFailure(queue, taskKind, config.consecutive_threshold);
             if (result.classification === 'persistent') {
-                const config = loadCooldownEscalationConfig(wctx.stateDir);
-                await recordPersistentFailure(wctx.stateDir, taskKind, config);
+                await recordPersistentFailure(wctx.stateDir, taskKind, config, result.consecutiveFailures);
                 logger?.warn?.(`[PD:EvolutionWorker] ${taskKind} persistent failure detected (${result.consecutiveFailures} consecutive), escalating cooldown`);
             } else {
                 logger?.info?.(`[PD:EvolutionWorker] ${taskKind} transient failure (${result.consecutiveFailures} consecutive)`);
@@ -758,7 +766,7 @@ function enqueueNewSleepReflectionTask(
         recentPainContext,
     });
 
-    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
     logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
 }
 
@@ -844,7 +852,7 @@ async function enqueueKeywordOptimizationTask(
             maxRetries: 1,
         });
 
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         logger?.info?.(`[PD:EvolutionWorker] Enqueued keyword_optimization task ${taskId}`);
     } finally {
         releaseLock();
@@ -903,7 +911,7 @@ async function doEnqueuePainTask(
             retryCount: 0, maxRetries: 3,
         });
 
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         result.enqueued = true;
 
@@ -1698,7 +1706,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
-                fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+                atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
             }
             releaseLock();
             // Phase 40: Track outcomes for failure classification after queue write
@@ -1963,7 +1971,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             freshQueue[idx] = sleepTask;
                         }
                     }
-                    fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+                    atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
 
                     // Log completions to EvolutionLogger
                     for (const sleepTask of sleepReflectionTasks) {
@@ -2023,7 +2031,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             if (keywordOptTasks.length > 0) {
                 // Skip all keyword_optimization tasks this cycle; release lock and return
                 if (queueChanged) {
-                    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+                    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
                 }
                 releaseLock();
                 lockReleased = true;
@@ -2039,7 +2047,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             queueChanged = queueChanged || pendingKeywordOptTasks.length > 0;
 
             // Release lock during LLM dispatch (long-running)
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
             releaseLock();
             lockReleased = true;
 
@@ -2167,7 +2175,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         freshQueue.push(koTask);
                     }
                 }
-                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+                atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
             } catch (koResultErr) {
                 logger?.warn?.(`[PD:EvolutionWorker] Failed to write keyword_optimization results: ${String(koResultErr)}`);
             } finally {
@@ -2188,7 +2196,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         if (queueChanged) {
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         }
 
         // Pipeline observability: log stage-level summary at end of cycle
@@ -2306,7 +2314,7 @@ export async function registerEvolutionTaskSession(
         if (!task.started_at) {
             task.started_at = new Date().toISOString();
         }
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         return true;
     } finally {
         releaseLock();
@@ -2346,7 +2354,7 @@ interface WorkerStatusReport {
 function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
-        fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
+        atomicWriteFileSync(statusPath, JSON.stringify(report, null, 2));
     } catch (statusErr) {
         // Non-critical: worker-status.json is for monitoring, failure is acceptable
         // (no logger available in this standalone helper)
@@ -2377,7 +2385,7 @@ async function processEvolutionQueueWithResult(
         const purgeResult = purgeStaleFailedTasks(queue, logger);
         if (purgeResult.purged > 0) {
             // Write back the cleaned queue
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         }
 
         queueResult.total = queue.length;

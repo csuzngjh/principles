@@ -31,6 +31,7 @@ export async function recordPersistentFailure(
     stateDir: string,
     taskKind: ClassifiableTaskKind,
     config?: CooldownEscalationConfig,
+    classifierCount?: number,
 ): Promise<void> {
     const resolvedConfig = config ?? loadCooldownEscalationConfig(stateDir);
 
@@ -42,10 +43,10 @@ export async function recordPersistentFailure(
         escalationTier: 0,
     };
 
-    current.consecutiveFailures++;
+    current.consecutiveFailures = classifierCount ?? (current.consecutiveFailures + 1);
     current.escalationTier = Math.min(current.escalationTier + 1, 3);
 
-    const tierKey = Math.min(current.escalationTier, 3) as 1 | 2 | 3;
+    const tierKey = current.escalationTier as 1 | 2 | 3;
     const durationMs = resolvedConfig[`tier${tierKey}_ms` as keyof CooldownEscalationConfig] as number;
     current.cooldownUntil = new Date(Date.now() + durationMs).toISOString();
 
