@@ -1,49 +1,68 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.18
-milestone_name: Nocturnal State Safety & Recovery
+milestone: v1.17
+milestone_name: Keyword Learning Engine
 status: shipped
-last_updated: "2026-04-15"
-last_activity: 2026-04-15 — Milestone v1.18 shipped
+last_updated: "2026-04-14T08:11:41.764Z"
+last_activity: 2026-04-14 -- Phase 40 llm-discovery complete
 progress:
   total_phases: 4
   completed_phases: 4
-  total_plans: 10
-  completed_plans: 10
+  total_plans: 5
+  completed_plans: 5
   percent: 100
 ---
 
-# State: v1.18 Nocturnal State Safety & Recovery
+# State: v1.17 Keyword Learning Engine
 
 ## Project Reference
 
 See `.planning/PROJECT.md` (updated 2026-04-14)
 
-**Core Value:** AI agents improve their own behavior through a structured evolution loop
+**Milestone:** v1.17
+**Name:** Keyword Learning Engine
+**Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
+**Current Focus:** Phase 40 — llm-discovery
 
-**Current Focus:** Awaiting next milestone definition
+## Previous Milestone (v1.16)
+
+- v1.16 Trinity Training Trajectory Quality Enhancement complete (4 phases, shipped 2026-04-13)
+- Reasoning Deriver, Dreamer diversity, Philosopher 6D, Scribe contrastive analysis all shipped
 
 ## Current Position
 
-Milestone v1.18 shipped. All phases complete (4/4 phases, 10/10 plans).
+Phase: v1.17 — **SHIPPED** (4/4 phases complete)
+Last activity: 2026-04-14 -- Phase 40 llm-discovery complete
+Phase 40 summary: `.planning/phases/40-llm-discovery/40-01-SUMMARY.md`
 
-Progress: [████████████████████] 100%
+Progress: [■■■■■■■■■■] 100%
 
-## Accomplishments
+## Phase 40 Accomplishments
 
-- Atomic Write Utility (Phase 38): crash-safe writes via tmp+fsync+rename
-- Nocturnal Write Migration (Phase 39): all writeFileSync sites migrated to atomic writes
-- Failure Classification & Cooldown Recovery (Phase 40): transient/persistent classification, tiered escalation
-- Startup Reconciliation (Phase 41): state validation, stale cooldown cleanup, orphan removal
-- Reasoning Deriver Module (Phase 34): deriveReasoningChain, deriveDecisionPoints, deriveContextualFactors
-- Dreamer Enhancement (Phase 35): strategic perspectives, riskLevel, validateCandidateDiversity
-- Philosopher 6D Evaluation (Phase 36): 6-dimension scoring, risk assessment
-- Scribe Contrastive Analysis (Phase 37): rejectedAnalysis, chosenJustification, contrastiveAnalysis
+- CORR-09: LLM optimizer dispatches subagent workflow via CorrectionObserverWorkflowManager, applies ADD/UPDATE/REMOVE mutations to keyword store
+- CORR-12: correctionDetected flag verified in prompt.ts:327 → trajectory.ts:857 → listUserTurnsForSession
+- keyword_optimization task fires every 6h via evolution-worker heartbeat cycle
+- Fire-and-poll: workflowId stored in task.resultRef, polled on subsequent cycles
+- trajectoryHistory field in CorrectionObserverPayload for FPR trend analysis
 
-## Pending Todos
+## Accumulated Context
 
-Next milestone not yet defined. Run `/gsd-new-milestone` to start.
+### Decisions
 
-## Blockers/Concerns
+Decisions are logged in PROJECT.md Key Decisions table.
 
-None
+### Pending Todos
+
+None — Phase 39 context gathered
+
+### Blockers/Concerns
+
+- None
+
+## Session Continuity
+
+**Previous milestone:** v1.16 Trinity Training Trajectory Quality Enhancement
+**Current milestone:** v1.17 Keyword Learning Engine
+**Just completed:** Phase 40 llm-discovery — v1.17 shipped
+**Ready for:** `/gsd-complete-milestone` or `/gsd-new-milestone`
+**Summary:** `.planning/phases/40-llm-discovery/40-01-SUMMARY.md`

@@ -382,7 +382,7 @@ export async function handleBeforePromptBuild(
   // prependContext: Only short dynamic directives: evolutionDirective + heartbeat
 
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let prependSystemContext: string;
   let prependContext = '';
   let appendSystemContext = '';
@@ -698,7 +698,7 @@ ${taskBlocks}${processingNote}
 
   // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let attitudeDirective: string;
   const currentGfi = session?.currentGfi || 0;
   
@@ -924,7 +924,7 @@ ${taskBlocks}${processingNote}
         const toolMatches = toolPatterns.flatMap(({ pattern, tool }) => {
           const matches: string[] = [];
            
-          // eslint-disable-next-line @typescript-eslint/init-declarations
+           
           let _m;
           const r = new RegExp(pattern.source, pattern.flags);
            
