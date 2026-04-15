@@ -1,49 +1,51 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.17
-milestone_name: Keyword Learning Engine
-status: shipped
-last_updated: "2026-04-15T03:17:43.486Z"
-last_activity: 2026-04-14 -- Phase 40 llm-discovery complete
+milestone: v1.19
+milestone_name: Tech Debt Remediation
+status: planning
+last_updated: "2026-04-15T07:30:00.000Z"
+last_activity: 2026-04-15 -- v1.19 milestone started
 progress:
-  total_phases: 4
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: v1.17 Keyword Learning Engine
+# State: v1.19 Tech Debt Remediation
 
 ## Project Reference
 
-See `.planning/PROJECT.md` (updated 2026-04-14)
+See `.planning/PROJECT.md` (updated 2026-04-15)
 
-**Milestone:** v1.17
-**Name:** Keyword Learning Engine
+**Milestone:** v1.19
+**Name:** Tech Debt Remediation
 **Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
-**Current Focus:** Phase 40 — llm-discovery
+**Current Focus:** Defining requirements
 
-## Previous Milestone (v1.16)
+## Previous Milestone (v1.18)
 
-- v1.16 Trinity Training Trajectory Quality Enhancement complete (4 phases, shipped 2026-04-13)
-- Reasoning Deriver, Dreamer diversity, Philosopher 6D, Scribe contrastive analysis all shipped
+- v1.18 Nocturnal State Safety & Recovery complete (22 phases, shipped 2026-04-14)
+- Atomic write utility, failure classifier + cooldown strategy, startup reconciler, correction keyword learning loop all shipped
 
 ## Current Position
 
-Phase: v1.17 — **SHIPPED** (4/4 phases complete)
-Last activity: 2026-04-14 -- Phase 40 llm-discovery complete
-Phase 40 summary: `.planning/phases/40-llm-discovery/40-01-SUMMARY.md`
+Phase: Not started — defining requirements
+Last activity: 2026-04-15 -- v1.19 milestone started
 
-Progress: [■■■■■■■■■■] 100%
+## Debt Inventory (from analysis)
 
-## Phase 40 Accomplishments
-
-- CORR-09: LLM optimizer dispatches subagent workflow via CorrectionObserverWorkflowManager, applies ADD/UPDATE/REMOVE mutations to keyword store
-- CORR-12: correctionDetected flag verified in prompt.ts:327 → trajectory.ts:857 → listUserTurnsForSession
-- keyword_optimization task fires every 6h via evolution-worker heartbeat cycle
-- Fire-and-poll: workflowId stored in task.resultRef, polled on subsequent cycles
-- trajectoryHistory field in CorrectionObserverPayload for FPR trend analysis
+| Type | Item | Severity |
+|------|------|----------|
+| God Classes | evolution-worker.ts (2689L), nocturnal-trinity.ts (2429L) | 🔴 Critical |
+| Type Safety | 36× `as any`/`as unknown` casts | 🟡 Medium |
+| Busy-Wait Loop | Spin-based retry in io.ts:32-33 | 🟡 Medium |
+| JSON.parse risk | evolution-worker.ts:1148 — no pre-validation | 🔴 High |
+| Security | No constant-time token compare in HTTP route | 🟡 Medium |
+| Testing | evolution-worker.ts, nocturnal-service.ts untested | 🔴 High |
+| Queue Tests | No enqueue/dequeue/migration integration tests | 🔴 High |
+| Known Bugs | #185, #188, #214/#219 active | 🔴 High |
 
 ## Accumulated Context
 
@@ -53,7 +55,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ### Pending Todos
 
-None — Phase 39 context gathered
+None — milestone just started
 
 ### Blockers/Concerns
 
@@ -61,8 +63,6 @@ None — Phase 39 context gathered
 
 ## Session Continuity
 
-**Previous milestone:** v1.16 Trinity Training Trajectory Quality Enhancement
-**Current milestone:** v1.17 Keyword Learning Engine
-**Just completed:** Phase 40 llm-discovery — v1.17 shipped
-**Ready for:** `/gsd-complete-milestone` or `/gsd-new-milestone`
-**Summary:** `.planning/phases/40-llm-discovery/40-01-SUMMARY.md`
+**Previous milestone:** v1.18 Nocturnal State Safety & Recovery (shipped 2026-04-14)
+**Current milestone:** v1.19 Tech Debt Remediation
+**Ready for:** `/gsd-discuss-phase [N]` after roadmap created
