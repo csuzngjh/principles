@@ -7,18 +7,13 @@
 
 import type { OpenClawPluginService, OpenClawPluginServiceContext, PluginLogger } from '../openclaw-sdk.js';
 import { CentralDatabase } from './central-database.js';
+import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let logger: PluginLogger | undefined = undefined;
 let centralDb: CentralDatabase | null = null;
 
-/**
- * Default sync interval: 5 minutes.
- * Can be overridden via config: intervals.central_sync_ms
- */
-const DEFAULT_SYNC_INTERVAL_MS = 5 * 60 * 1000;
-
-    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
+     
 async function runSyncCycle(): Promise<void> {
   if (!centralDb) {
     logger?.warn?.('[PD:CentralSync] CentralDatabase not initialized, skipping sync');
@@ -51,7 +46,7 @@ export const CentralSyncService: OpenClawPluginService = {
     logger = ctxLogger;
 
     const { intervals } = config as { intervals?: { central_sync_ms?: number } };
-    const intervalMs = intervals?.central_sync_ms ?? DEFAULT_SYNC_INTERVAL_MS;
+    const intervalMs = intervals?.central_sync_ms ?? WORKFLOW_TTL_MS;
 
     // Initialize CentralDatabase
     centralDb = new CentralDatabase();

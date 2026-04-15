@@ -11,6 +11,7 @@
 
 import type {
     NocturnalArtifact,
+    ArbiterResult,
 } from '../../core/nocturnal-arbiter.js';
 import type {
     BoundedAction,
@@ -19,11 +20,15 @@ import type {
     NocturnalSessionSnapshot,
 } from '../../core/nocturnal-trajectory-extractor.js';
 import type {
-    NocturnalRunDiagnostics,
-} from '../nocturnal-service.js';
-import type {
     TrinityResult,
 } from '../../core/nocturnal-trinity.js';
+import type {
+    IdleCheckResult,
+    PreflightCheckResult,
+} from '../nocturnal-runtime.js';
+import type {
+    NocturnalSelectionResult,
+} from '../nocturnal-target-selector.js';
 
 // ── Workflow Transport ────────────────────────────────────────────────────────
 
@@ -367,6 +372,27 @@ export type { PluginLogger } from '../../openclaw-sdk.js';
 // ── Nocturnal Workflow Types ───────────────────────────────────────────────────
 
 /**
+ * Recent pain context for sleep_reflection tasks.
+ * Used by target selector for ranking bias and context enrichment.
+ * Originally from evolution-worker.ts, moved here to break circular dependency.
+ */
+export interface RecentPainContext {
+    /** Most recent unresolved pain event */
+    mostRecent: {
+        score: number;
+        source: string;
+        reason: string;
+        timestamp: string;
+        /** Session ID where the pain occurred */
+        sessionId: string;
+    } | null;
+    /** Count of pain events in the recent window (for signal strength) */
+    recentPainCount: number;
+    /** Highest pain score in the recent window */
+    recentMaxPainScore: number;
+}
+
+/**
  * Nocturnal workflow result type.
  * Mirrors NocturnalRunResult from nocturnal-service.ts (per D-02).
  */
@@ -381,3 +407,43 @@ export type NocturnalResult = {
     diagnostics: NocturnalRunDiagnostics;
     trinityTelemetry?: TrinityResult['telemetry'];
 };
+
+/**
+ * Diagnostics from each pipeline stage.
+ * Duplicated from nocturnal-service.ts to break circular dependency.
+ */
+export interface NocturnalRunDiagnostics {
+    /** Pre-flight check result */
+    preflight: PreflightCheckResult | null;
+    /** Selection result */
+    selection: NocturnalSelectionResult | null;
+    /** Idle check result */
+    idle: IdleCheckResult | null;
+    /** Whether Trinity chain was attempted */
+    trinityAttempted: boolean;
+    /** Trinity result (if trinityAttempted === true) */
+    trinityResult: TrinityResult | null;
+    /** Which chain mode was used */
+    chainModeUsed: 'trinity' | 'single-reflector' | null;
+    /** Arbiter validation result */
+    arbiterResult: ArbiterResult | null;
+    /** Executability validation result (if arbiter passed) */
+    executabilityResult: { executable: boolean; failures: string[] } | null;
+    /** Whether artifact was persisted */
+    persisted: boolean;
+    /** Persistence path (if persisted) */
+    persistedPath?: string;
+    /** Code-candidate sidecar diagnostics */
+    artificer: NocturnalArtificerDiagnostics;
+}
+
+export interface NocturnalArtificerDiagnostics {
+    status: 'skipped' | 'validation_failed' | 'persisted_candidate';
+    reason?:
+        | 'behavioral_artifact_unavailable'
+        | 'no_deterministic_rule'
+        | 'persistence_failed'
+        | 'cancelled';
+    validationErrors?: string[];
+    persistedPath?: string;
+}
