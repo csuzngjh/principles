@@ -303,6 +303,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
                 await this.notifyWaitResult(workflowId, 'error', errMsg);
             }
         }, 100);
+        timeout.unref(); // Don't keep process alive for wait poll
 
         this.activeWorkflows.set(workflowId, timeout);
     }

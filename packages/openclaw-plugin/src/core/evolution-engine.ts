@@ -469,6 +469,7 @@ export class EvolutionEngine {
       this.retryTimer = setTimeout(() => {
         this.processRetryQueue();
       }, 1000);
+      this.retryTimer.unref(); // Don't keep process alive for retry
     }
   }
 
