@@ -53,6 +53,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     pool: 'threads',
     teardownTimeout: 15000,
+    globalSetup: ['./tests/globalSetup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
@@ -64,27 +65,5 @@ export default defineConfig({
         statements: 70,
       },
     },
-    // Workspace projects for layered testing
-    projects: [
-      {
-        test: {
-          name: 'unit',
-          include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-          exclude: integrationTests,
-          // Unit tests use forks pool for isolation
-          pool: 'forks',
-          globalSetup: ['./tests/globalSetup.ts'],
-        },
-      },
-      {
-        test: {
-          name: 'integration',
-          include: integrationTests,
-          // Integration tests use threads pool for better-sqlite3 compatibility
-          pool: 'threads',
-          globalSetup: ['./tests/globalSetup.ts'],
-        },
-      },
-    ],
   },
 });
