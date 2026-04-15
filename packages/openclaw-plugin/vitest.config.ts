@@ -51,9 +51,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    // Use threads pool with singleThread to avoid race conditions
+    // Use threads pool for better performance
     pool: 'threads',
-    singleThread: true,
     teardownTimeout: 30000,
     globalSetup: ['./tests/globalSetup.ts'],
     coverage: {
