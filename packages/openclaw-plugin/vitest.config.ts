@@ -51,9 +51,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    // Use forks pool to avoid teardown hangs
-    pool: 'forks',
-    teardownTimeout: 15000,
+    // Use threads pool with singleThread to avoid race conditions
+    pool: 'threads',
+    singleThread: true,
+    teardownTimeout: 30000,
     globalSetup: ['./tests/globalSetup.ts'],
     coverage: {
       provider: 'v8',
