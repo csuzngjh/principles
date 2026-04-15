@@ -332,7 +332,24 @@ export async function handleBeforePromptBuild(
 
     if (latestUserIndex) {
       const userText = getTextContent(latestUserIndex.message);
-      const correctionCue = detectCorrectionCue(userText);
+      // Use CorrectionCueLearner for detection — supports learned keywords, not just hardcoded list
+      let correctionCue: string | null = null;
+      try {
+        const learner = CorrectionCueLearner.get(wctx.stateDir);
+        const matchResult = learner.match(userText);
+        if (matchResult.matched) {
+          correctionCue = matchResult.matchedTerms[0] ?? null;
+          // Record hit for all matched terms (hitCount tracking for FPR analysis)
+          learner.recordHits(matchResult.matchedTerms);
+          // Record TP only for high-confidence matches (confidence ≥ 0.5)
+          if (correctionCue && matchResult.confidence >= 0.5) {
+            learner.recordTruePositive(correctionCue);
+          }
+        }
+      } catch {
+        // Fallback to hardcoded detection if learner fails
+        correctionCue = detectCorrectionCue(userText);
+      }
       let referencesAssistantTurnId: number | null = null;
       const hasPriorAssistant = event.messages
         .slice(0, latestUserIndex.index)
@@ -352,19 +369,6 @@ export async function handleBeforePromptBuild(
         correctionCue,
         referencesAssistantTurnId,
       });
-
-      // CR-01 fix: When a correction cue is detected, the keyword match is a
-      // confirmed true positive (the keyword correctly identified a correction pattern).
-      // Record as TP to increment accuracy counters. FP would apply x0.8 weight decay
-      // on correct detections, progressively suppressing valid keywords.
-      if (correctionCue) {
-        try {
-          const learner = CorrectionCueLearner.get(wctx.stateDir);
-          learner.recordTruePositive(correctionCue);
-        } catch {
-          // Non-critical: FPR feedback is best-effort, must not break prompt flow
-        }
-      }
     }
   }
 

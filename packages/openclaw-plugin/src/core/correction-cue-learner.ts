@@ -151,9 +151,12 @@ export class CorrectionCueLearner {
 
   /**
    * Checks whether text contains a correction cue (D-11).
+   * Pure read-only — does NOT modify the store.
    * Normalisation is equivalent to the original detectCorrectionCue():
    *   trim → lowercase → strip punctuation
    * Returns weighted score based on keyword accuracy (D-39-03, D-39-04).
+   *
+   * To record hits/TPs, call recordHit() and recordTruePositive() separately.
    */
   match(text: string): CorrectionMatchResult {
     const normalized = text
@@ -167,28 +170,15 @@ export class CorrectionCueLearner {
     for (const keyword of this.store.keywords) {
       if (normalized.includes(keyword.term.toLowerCase())) {
         // D-39-03, D-39-04: Weighted score formula
-        // score = weight x (TP / (TP + FP + 1))
-        // +1 smoothing in denominator avoids division by zero
+        // No history (tp=0, fp=0) → accuracy = 1 (trust raw weight)
+        // Has history → accuracy = tp / (tp + fp) (proportional to true positive rate)
         const tp = keyword.truePositiveCount ?? 0;
         const fp = keyword.falsePositiveCount ?? 0;
-        const accuracy = tp / (tp + fp + 1);
+        const accuracy = (tp + fp) > 0 ? tp / (tp + fp) : 1;
         const score = keyword.weight * accuracy;
 
         totalScore += score;
         matchedTerms.push(keyword.term);
-
-        // Increment hitCount
-        keyword.hitCount = (keyword.hitCount ?? 0) + 1;
-        keyword.lastHitAt = new Date().toISOString();
-      }
-    }
-
-    // Persist hitCount updates in store for next flush
-    for (const term of matchedTerms) {
-      const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
-      if (keywordIndex >= 0) {
-        const kw = this.store.keywords[keywordIndex];
-        this.store.keywords[keywordIndex] = { ...kw };
       }
     }
 
@@ -206,6 +196,21 @@ export class CorrectionCueLearner {
       score: cappedScore,
       confidence,
     };
+  }
+
+  /**
+   * Records a keyword hit (for hitCount/FPR tracking).
+   * Increments hitCount and updates lastHitAt for all matched terms.
+   * Call this for EVERY match — regardless of confidence.
+   */
+  recordHits(terms: string[]): void {
+    for (const term of terms) {
+      const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
+      if (!keyword) continue;
+      keyword.hitCount = (keyword.hitCount ?? 0) + 1;
+      keyword.lastHitAt = new Date().toISOString();
+    }
+    this.flush();
   }
 
   /**

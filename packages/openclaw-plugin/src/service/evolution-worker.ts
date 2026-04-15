@@ -16,7 +16,7 @@ import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
-import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
+import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
 import { loadNocturnalConfig, loadKeywordOptimizationConfig, loadCooldownEscalationConfig } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import type { WorkflowRow } from './subagent-workflow/types.js';
@@ -2129,6 +2129,10 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             koTask.completed_at = new Date().toISOString();
                             koTask.resolution = 'marker_detected';
                             kwOptOutcomes.push({ taskKind: 'keyword_optimization', succeeded: true });
+                            // CORR-08: Record throttle quota (max 4/day)
+                            recordCooldown(wctx.stateDir).catch(err =>
+                                logger?.warn?.(`[PD:EvolutionWorker] recordCooldown failed (non-blocking): ${String(err)}`)
+                            );
                             logger?.info?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow completed`);
                         } else if (summary.state === 'terminal_error') {
                             koTask.status = 'failed';
