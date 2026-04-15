@@ -838,14 +838,43 @@ function main() {
             stdio: 'pipe'
         });
         console.log('✅ Native dependencies verified (better-sqlite3 loads correctly)');
-    } catch {
-        console.error('\n❌ Installed plugin cannot load native dependencies!');
-        console.error('   This usually means npm install failed to compile better-sqlite3.');
-        console.error(`   Fix: cd ${INSTALL_DIR} && npm rebuild better-sqlite3`);
-        process.exit(1);
+    } catch (error) {
+        console.warn('\n⚠️  Native module better-sqlite3 failed to load. Attempting automatic rebuild...');
+        try {
+            execSync('npm rebuild better-sqlite3', { cwd: INSTALL_DIR, stdio: 'inherit' });
+            execSync(`node -e "require('better-sqlite3')"`, { cwd: INSTALL_DIR, stdio: 'pipe' });
+            console.log('✅ Rebuild successful!');
+        } catch (rebuildErr) {
+            console.error('\n❌ CRITICAL: better-sqlite3 rebuild failed!');
+            console.error('   OpenClaw will likely fail to load this plugin.');
+            console.error(`   Fix: cd ${INSTALL_DIR} && npm install --build-from-source better-sqlite3`);
+            process.exit(1);
+        }
     }
 
-    // Step 10: Verify installation
+    // Step 10: AUTOMATED PRINCIPLE BOOTSTRAP (The "Neural Link")
+    // Sync PRINCIPLES.md changes to the active ledger immediately.
+    const bootstrapScript = join(SOURCE_DIR, 'scripts', 'bootstrap-rules.mjs');
+    if (existsSync(bootstrapScript)) {
+        console.log('\n🧠 Synchronizing principles to active rules (Bootstrap)...');
+        try {
+            // Target the main workspace state dir by default
+            const targetStateDir = join(process.env.HOME, '.openclaw', 'workspace-main', '.state');
+            if (existsSync(targetStateDir)) {
+                execSync(`STATE_DIR=${targetStateDir} BOOTSTRAP_LIMIT=100 node scripts/bootstrap-rules.mjs`, {
+                    cwd: SOURCE_DIR,
+                    stdio: 'inherit'
+                });
+                console.log('✅ Principles synchronized to active enforcement rules.');
+            } else {
+                console.warn('⚠️  Target state directory not found, skipping rule bootstrap.');
+            }
+        } catch (e) {
+            console.warn(`⚠️  Principle synchronization failed: ${e.message}`);
+        }
+    }
+
+    // Step 11: Verify installation
     const installedVersion = getVersion(INSTALL_DIR);
     if (installedVersion !== sourceVersion) {
         console.error('\n❌ VERSION MISMATCH after sync!');
@@ -854,13 +883,20 @@ function main() {
         process.exit(1);
     }
 
-    // Step 10: Verify installed fingerprint matches current source
+    // Step 12: Verify installed fingerprint matches current source
     verifyInstalledFingerprint();
 
-    // Step 11: Clean stale backup directories (dev mode or explicit restart)
+    // Step 13: Clean stale backup directories (dev mode or explicit restart)
     if (args.dev || args.restart) {
         cleanStaleBackups();
     }
+
+    // Step 14: Signal for reload
+    try {
+        const reloadSignal = join(OPENCLAW_DIR, '.plugin_reload_signal');
+        writeFileSync(reloadSignal, new Date().toISOString(), 'utf-8');
+        console.log(`\n🔔 Reload signal sent to ${reloadSignal}`);
+    } catch { /* ignore */ }
 
     // Build fingerprint info for report
     let fpReport = '';
@@ -882,6 +918,15 @@ function main() {
     console.log(`   Target:   ${INSTALL_DIR}`);
 
     // Handle automatic restart if requested
+    if (args.restart) {
+        restartGateway();
+    } else {
+        console.log('\n💡 Restart OpenClaw Gateway to load the new version.');
+    }
+}
+
+main();
+atic restart if requested
     if (args.restart) {
         restartGateway();
     } else {
