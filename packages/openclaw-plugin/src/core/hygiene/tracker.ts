@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { HygieneStats, PersistenceAction } from '../../types/hygiene-types.js';
 import { createEmptyHygieneStats } from '../../types/hygiene-types.js';
+import { atomicWriteFileSync } from '../../utils/io.js';
 import type { PluginLogger } from '../../openclaw-sdk.js';
 
 /**
@@ -79,7 +80,7 @@ export class HygieneTracker {
     
     try {
       // Use a temporary file for atomic write if possible, or simple write
-      fs.writeFileSync(this.statsFile, JSON.stringify(allStats, null, 2), 'utf-8');
+      atomicWriteFileSync(this.statsFile, JSON.stringify(allStats, null, 2));
     } catch (e) {
       this.logger?.error(`[PD] Failed to write hygiene-stats.json: ${String(e)}`);
     }

@@ -5,6 +5,7 @@ import type { PDTaskSpec } from './pd-task-types.js';
 import { BUILTIN_PD_TASKS } from './pd-task-types.js';
 import { readTasks, writeTasks } from './pd-task-store.js';
 import { withLockAsync } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 const CRON_STORE_PATH = path.join(
   os.homedir(),
@@ -97,9 +98,7 @@ async function readCronStore(logger?: { info?: (_: string) => void; warn?: (_: s
 
 async function writeCronStore(store: CronStoreFile): Promise<void> {
   await withLockAsync(CRON_STORE_PATH, async () => {
-    const tmpPath = CRON_STORE_PATH + '.tmp';
-    fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), 'utf-8');
-    fs.renameSync(tmpPath, CRON_STORE_PATH);
+    atomicWriteFileSync(CRON_STORE_PATH, JSON.stringify(store, null, 2));
   });
 }
 
@@ -160,7 +159,7 @@ function buildCronJob(
     payload: {
       kind: 'agentTurn',
        
-      // eslint-disable-next-line @typescript-eslint/no-use-before-define
+       
       message: buildTaskPrompt(task, logger),
       lightContext: task.execution.lightContext ?? true,
       timeoutSeconds: task.execution.timeoutSeconds ?? 120,
@@ -295,7 +294,7 @@ export async function reconcilePDTasks(
 
   const cronStore = await readCronStore(logger);
    
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   const healthUpdated = healthCheck(declared, cronStore, logger);
   const actions = diff(healthUpdated, cronStore.jobs);
 

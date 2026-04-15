@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { PDTaskSpec } from './pd-task-types.js';
 import { withLockAsync } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 const PD_TASKS_FILENAME = 'pd_tasks.json';
 
@@ -39,9 +40,7 @@ export async function writeTasks(workspaceDir: string, tasks: PDTaskSpec[]): Pro
   ensureStateDir(workspaceDir);
 
   await withLockAsync(filePath, async () => {
-    const tmpPath = filePath + '.tmp';
-    fs.writeFileSync(tmpPath, JSON.stringify(tasks, null, 2), 'utf-8');
-    fs.renameSync(tmpPath, filePath);
+    atomicWriteFileSync(filePath, JSON.stringify(tasks, null, 2));
   });
 }
 
@@ -56,7 +55,7 @@ export function initTaskMeta(task: PDTaskSpec): PDTaskSpec {
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function updateSyncMeta(
   task: PDTaskSpec,
   status: 'ok' | 'error',

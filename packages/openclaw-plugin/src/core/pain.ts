@@ -225,7 +225,7 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
       const kvData = convertJsonToKv(json);
 
       const repaired = serializeKvLines(kvData);
-      fs.writeFileSync(painFlagPath, repaired, 'utf-8');
+      atomicWriteFileSync(painFlagPath, repaired);
       SystemLogger.log(projectDir, 'PAIN_FLAG_AUTO_REPAIRED', `Auto-repaired pain flag from JSON to KV format (${Object.keys(json).length} fields)`);
       return kvData;
     }

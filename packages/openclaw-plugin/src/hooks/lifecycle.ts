@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { buildPainFlag, writePainFlag } from '../core/pain.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { PD_DIRS } from '../core/paths.js';
 import {
@@ -197,7 +198,7 @@ export async function handleBeforeCompaction(
 
     // 新增：提取并保存工作记忆
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     await extractAndSaveWorkingMemory(event.sessionFile, ctx, wctx);
   }
 }
@@ -286,7 +287,7 @@ async function extractAndSaveWorkingMemory(
     }
     
     // 写入文件
-    fs.writeFileSync(focusPath, updatedContent, 'utf-8');
+    atomicWriteFileSync(focusPath, updatedContent);
     
     if (ctx.logger) {
       ctx.logger.info(`[WorkingMemory] Preserved ${snapshot.artifacts.length} artifacts, ` +

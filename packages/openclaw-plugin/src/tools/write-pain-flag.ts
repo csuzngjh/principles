@@ -5,6 +5,7 @@ import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 // Pain flag contract required fields
 const PAIN_FLAG_REQUIRED_FIELDS = ['source', 'score', 'time', 'reason'] as const;
@@ -18,9 +19,7 @@ function writePainFlagAtomic(filePath: string, content: string): void {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
-    const tmpPath = `${filePath}.tmp.${Date.now()}.${process.pid}`;
-    fs.writeFileSync(tmpPath, content, 'utf-8');
-    fs.renameSync(tmpPath, filePath);
+    atomicWriteFileSync(filePath, content);
 }
 
 /**
