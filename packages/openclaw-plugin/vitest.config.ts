@@ -71,7 +71,8 @@ export default defineConfig({
           name: 'unit',
           include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
           exclude: integrationTests,
-          pool: 'threads',
+          // Unit tests use forks pool for isolation
+          pool: 'forks',
           globalSetup: ['./tests/globalSetup.ts'],
         },
       },
@@ -79,6 +80,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           include: integrationTests,
+          // Integration tests use threads pool for better-sqlite3 compatibility
           pool: 'threads',
           globalSetup: ['./tests/globalSetup.ts'],
         },
