@@ -43,6 +43,39 @@ import { reconcileStartup } from './startup-reconciler.js';
 import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
+// ── Queue Event Payload Validation ─────────────────────────────────────────
+
+/**
+ * Validates a queue event payload string before JSON.parse.
+ * Checks:
+ *   1. typeof payload === 'string'
+ *   2. Parsed object has required fields: 'type' and 'workspaceId'
+ * Returns the parsed object only if validation passes.
+ * Returns empty object {} if payload is falsy.
+ * Throws Error if payload is a non-empty string that fails validation.
+ */
+function validateQueueEventPayload(payload: string | null | undefined): Record<string, unknown> {
+    if (!payload) return {};
+    if (typeof payload !== 'string') {
+        throw new Error(`Queue event payload must be a string, got: ${typeof payload}`);
+    }
+    try {
+        const parsed = JSON.parse(payload);
+        if (typeof parsed !== 'object' || parsed === null) {
+            throw new Error('Queue event payload must be a JSON object');
+        }
+        if (!('type' in parsed) || !('workspaceId' in parsed)) {
+            throw new Error('Queue event payload missing required fields: type, workspaceId');
+        }
+        return parsed;
+    } catch (err) {
+        if (err instanceof SyntaxError) {
+            throw new Error(`Invalid JSON in queue event payload: ${err.message}`);
+        }
+        throw err;
+    }
+}
+
 // ── Workflow Watchdog ────────────────────────────────────────────────────────
 // Detects stale/orphaned workflows, invalid results, and cleanup failures.
 // Runs every heartbeat cycle, catching bugs like:
@@ -1145,7 +1178,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             e.event_type.includes('failed') || e.event_type.includes('error')
                         ).pop();
                         if (failureEvent) {
-                            const payload = failureEvent.payload_json ? JSON.parse(failureEvent.payload_json) : {};
+                            const payload = validateQueueEventPayload(failureEvent.payload_json);
                             detailedError = `sleep_reflection failed: ${failureEvent.reason}`;
                             if (payload.skipReason) {
                                 detailedError += ` (skipReason: ${payload.skipReason})`;
