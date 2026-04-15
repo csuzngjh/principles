@@ -95,7 +95,7 @@ export function recordGateBlockAndReturn(
   } catch (error: unknown) {
     logWarn(`[PD_GATE] Failed to record trajectory gate block: ${String(error)}`);
 
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, logWarn, logError);
   }
 
@@ -123,7 +123,7 @@ export function recordGateBlockAndReturn(
 
       // Write to pain flag file (merge with existing if present)
       try {
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         const workspaceDir = wctx.workspaceDir;
         const currentFlag = wctx.eventLog.findLatestPainSignal(sessionId);
         const currentScore = currentFlag?.score ?? 0;
@@ -183,7 +183,7 @@ This is a mandatory security gate. The operation was blocked because the modific
  * Failures are logged but do not affect the runtime block decision.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function scheduleTrajectoryGateBlockRetry(
   wctx: WorkspaceContext,
   payload: {
