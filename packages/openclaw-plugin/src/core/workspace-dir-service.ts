@@ -81,6 +81,7 @@ export function resolveRequiredWorkspaceDir(
 
 // Re-export helpers that live in workspace-dir-validation.ts for API compatibility
 export { validateWorkspaceDir } from './workspace-dir-validation.js';
+export type { WorkspaceResolutionContext } from './workspace-dir-validation.js';
 
 export function resolveValidWorkspaceDir(
   ctx: WorkspaceResolutionContext,

@@ -26,6 +26,7 @@ const integrationTests = [
   'tests/core/replay-engine.test.ts',
   'tests/core/trajectory.test.ts',
   'tests/integration/**/*.test.ts',
+  'tests/integration/**/*.test.tsx',
   'tests/service/nocturnal-service-code-candidate.test.ts',
   'tests/service/nocturnal-target-selector.test.ts',
 ];
