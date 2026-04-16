@@ -37,6 +37,8 @@ import {
     type NocturnalSessionSnapshot,
 } from '../core/nocturnal-trajectory-extractor.js';
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
+import { PrincipleCompiler } from '../core/principle-compiler/index.js';
+import { loadLedger, updatePrinciple } from '../core/principle-tree-ledger.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { readPainFlagContract } from '../core/pain.js';
 import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
@@ -567,8 +569,113 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
     return result;
 }
 
- 
- 
+/**
+ * Process compilation backfill and retry loop.
+ * Phase 1 — Backfill: on first call, scan for old principles (compilationRetryCount === undefined)
+ *            with evaluability !== 'manual_only' and no active implementation, queue them (set to 0).
+ * Phase 2 — Retry: compile all principles with compilationRetryCount >= 0.
+ * After 5 consecutive failures, downgrades to manual_only and logs COMPILE_EXHAUSTED.
+ */
+async function processCompilationBackfill(
+    wctx: WorkspaceContext,
+    logger: PluginLogger,
+): Promise<void> {
+    if (!wctx.stateDir) return;
+
+    let ledger: ReturnType<typeof loadLedger>;
+    try {
+        ledger = loadLedger(wctx.stateDir);
+    } catch (err) {
+        logger?.warn?.(`[PD:EvolutionWorker] CompilationBackfill: failed to load ledger: ${String(err)}`);
+        return;
+    }
+
+    // ── Phase 1: Backfill old principles (runs once per process) ─────────────────
+    const backfillMarkerPath = path.join(wctx.stateDir, 'COMPILATION_BACKFILL_DONE');
+    const hasBackfillRun = fs.existsSync(backfillMarkerPath);
+    if (!hasBackfillRun) {
+        let backfillQueued = 0;
+        for (const [principleId, principle] of Object.entries(ledger.tree.principles)) {
+            if (principle.compilationRetryCount !== undefined) continue; // already processed
+            if (principle.evaluability === 'manual_only') continue;
+            // Check if already has active implementation
+            const hasActiveImpl = Object.values(ledger.tree.implementations).some(
+                (impl) => impl.lifecycleState === 'active' && (
+                    ledger.tree.rules[impl.ruleId]?.principleId === principleId
+                )
+            );
+            if (hasActiveImpl) {
+                // Already compiled — mark as done
+                updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: undefined });
+            } else {
+                // Needs compilation — queue it
+                updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: 0 });
+                backfillQueued++;
+            }
+        }
+        if (backfillQueued > 0) {
+            SystemLogger.log(wctx.workspaceDir, 'COMPILE_BACKFILL_QUEUED',
+                `Queued ${backfillQueued} old principles for compilation`);
+        }
+        // Write marker so we don't backfill again in this process
+        fs.writeFileSync(backfillMarkerPath, new Date().toISOString(), 'utf8');
+    }
+
+    // ── Phase 2: Retry pending compilations ───────────────────────────────────
+    const trajectory = TrajectoryRegistry.get(wctx.workspaceDir);
+    const compiler = new PrincipleCompiler(wctx.stateDir, trajectory);
+
+    // Re-load ledger after potential backfill updates
+    ledger = loadLedger(wctx.stateDir);
+
+    for (const [principleId, principle] of Object.entries(ledger.tree.principles)) {
+        const count = principle.compilationRetryCount;
+
+        // Skip: not in retry queue (undefined = done/succeeded)
+        if (count === undefined) continue;
+
+        // Skip: already exhausted
+        if (count > 5) continue;
+
+        try {
+            const result = compiler.compileOne(principleId);
+            if (result.success) {
+                updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: undefined });
+                SystemLogger.log(wctx.workspaceDir, 'COMPILE_SUCCESS',
+                    `Principle ${principleId} compiled successfully (attempt ${count + 1})`);
+            } else {
+                const nextCount = count + 1;
+                updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: nextCount });
+                if (nextCount >= 5) {
+                    updatePrinciple(wctx.stateDir, principleId, {
+                        evaluability: 'manual_only',
+                        compilationRetryCount: undefined,
+                    });
+                    SystemLogger.log(wctx.workspaceDir, 'COMPILE_EXHAUSTED',
+                        `Principle ${principleId} compilation exhausted after 5 attempts: ${result.reason ?? 'unknown'}`);
+                } else {
+                    SystemLogger.log(wctx.workspaceDir, 'COMPILE_FAILED',
+                        `Principle ${principleId} compile failed: ${result.reason ?? 'unknown'} (attempt ${nextCount}/5)`);
+                }
+            }
+        } catch (compileErr) {
+            const nextCount = count + 1;
+            updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: nextCount });
+            if (nextCount >= 5) {
+                updatePrinciple(wctx.stateDir, principleId, {
+                    evaluability: 'manual_only',
+                    compilationRetryCount: undefined,
+                });
+                SystemLogger.log(wctx.workspaceDir, 'COMPILE_EXHAUSTED',
+                    `Principle ${principleId} compilation exhausted after 5 attempts: threw ${String(compileErr)}`);
+            } else {
+                SystemLogger.log(wctx.workspaceDir, 'COMPILE_FAILED',
+                    `Principle ${principleId} compile threw: ${String(compileErr)} (attempt ${nextCount}/5)`);
+            }
+        }
+    }
+}
+
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
@@ -1956,6 +2063,12 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // Load config on each cycle (supports runtime updates) — single file read
                 const mergedConfig = loadNocturnalConfigMerged(wctx.stateDir);
                 const { sleepReflection: sleepConfig, keywordOptimization: kwOptConfig } = mergedConfig;
+
+                // Compilation backfill: runs on every heartbeat to retry failed compilations.
+                // Fire-and-forget — errors are logged within the function.
+                processCompilationBackfill(wctx, logger).catch((err) => {
+                    logger?.error?.(`[PD:EvolutionWorker] CompilationBackfill threw: ${String(err)}`);
+                });
 
                 const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
                 logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt} triggerMode=${sleepConfig.trigger_mode}`);

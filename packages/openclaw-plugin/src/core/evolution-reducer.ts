@@ -21,7 +21,8 @@ import type {
   PrincipleSuggestedRule,
 } from './evolution-types.js';
 import { isCompleteDetectorMetadata } from './evolution-types.js';
-import { updateTrainingStore, addPrincipleToLedger, type LedgerPrinciple } from './principle-tree-ledger.js';
+import { updateTrainingStore, addPrincipleToLedger, updatePrinciple, type LedgerPrinciple } from './principle-tree-ledger.js';
+import { PrincipleCompiler } from './principle-compiler/index.js';
 
  
 export interface EvolutionReducer {
@@ -420,6 +421,35 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         };
         addPrincipleToLedger(this.stateDir, ledgerPrinciple);
         SystemLogger.log(this.workspaceDir, 'LEDGER_PRINCIPLE_ADDED', `Principle ${principleId} added to ledger tree`);
+
+        // Sync compile: attempt to compile immediately unless evaluability is manual_only.
+        // Failures are not fatal — heartbeat backfill will retry automatically.
+        if (evaluability !== 'manual_only' && this.stateDir) {
+          const trajectory = TrajectoryRegistry.get(this.workspaceDir);
+          const compiler = new PrincipleCompiler(this.stateDir, trajectory);
+          try {
+            const result = compiler.compileOne(principleId);
+            if (result.success) {
+              // Reset retry count on success
+              updatePrinciple(this.stateDir, principleId, { compilationRetryCount: undefined });
+              SystemLogger.log(this.workspaceDir, 'COMPILE_SUCCESS', `Principle ${principleId} compiled successfully`);
+            } else {
+              // Compile returned failure — increment retry count
+              updatePrinciple(this.stateDir, principleId, { compilationRetryCount: 1 });
+              SystemLogger.log(
+                this.workspaceDir, 'COMPILE_FAILED',
+                `Principle ${principleId} compile failed: ${result.reason ?? 'unknown'} (attempt 1/5)`
+              );
+            }
+          } catch (compileErr) {
+            // Unexpected error during compilation — increment retry count
+            updatePrinciple(this.stateDir, principleId, { compilationRetryCount: 1 });
+            SystemLogger.log(
+              this.workspaceDir, 'COMPILE_FAILED',
+              `Principle ${principleId} compile threw: ${String(compileErr)} (attempt 1/5)`
+            );
+          }
+        }
       } catch (err) {
         SystemLogger.log(this.workspaceDir, 'LEDGER_PRINCIPLE_ADD_FAILED', `Failed to add ${principleId} to ledger tree: ${String(err)}`);
       }
