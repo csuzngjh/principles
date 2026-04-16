@@ -6,6 +6,7 @@ import { PD_DIRS } from './paths.js';
 import { defaultContextConfig } from '../types.js';
 import { loadStore, setPrincipleState, type PrincipleTrainingState } from './principle-training-state.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+import { createDefaultKeywordStore, saveKeywordStore } from './empathy-keyword-matcher.js';
 
 /**
  * Default PROFILE.json content
@@ -244,6 +245,17 @@ export function ensureStateTemplates(ctx: { logger: PluginLogger }, stateDir: st
         if (!fs.existsSync(dictDest) && fs.existsSync(dictTemplate)) {
             fs.copyFileSync(dictTemplate, dictDest);
             ctx.logger.info(`[PD] Initialized pain dictionary in stateDir: ${dictDest} (Lang: ${language})`);
+        }
+
+        // 3. Initialize empathy keyword store for new users
+        // loadKeywordStore() creates the file if missing, but we call it explicitly
+        // here so the file exists before any agent/workflow tries to read it
+        const empathyFile = path.join(stateDir, 'empathy_keywords.json');
+        if (!fs.existsSync(empathyFile)) {
+            const lang = language === 'zh' || language === 'en' ? language : 'en';
+            const store = createDefaultKeywordStore(lang);
+            saveKeywordStore(stateDir, store);
+            ctx.logger.info(`[PD] Initialized empathy keyword store in stateDir: ${empathyFile}`);
         }
     } catch (err) {
         ctx.logger.error(`[PD] Failed to initialize state templates: ${String(err)}`);
