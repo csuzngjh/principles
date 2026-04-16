@@ -55,6 +55,12 @@ export interface CorrectionObserverResult {
     falsePositiveRate?: number;
     reasoning: string;
   }>;
+  /**
+   * Terms identified as false positives — user message didn't actually indicate
+   * frustration/correction despite correctionDetected firing for these terms.
+   * CORR-10 / H-1: Calling recordFalsePositive() decays weight by x0.8 per term.
+   */
+  fpTerms?: string[];
   /** Human-readable summary */
   summary: string;
 }

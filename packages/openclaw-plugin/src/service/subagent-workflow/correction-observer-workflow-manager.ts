@@ -115,6 +115,7 @@ export const correctionObserverWorkflowSpec: SubagentWorkflowSpec<CorrectionObse
             '## TASK',
             'Analyze the current correction keyword store and recent user messages.',
             'Recommend ADD/UPDATE/REMOVE actions to improve correction cue accuracy.',
+            'Also identify terms that triggered false positives (correctionDetected fired but user message doesn\'t indicate actual frustration).',
             '',
             '## Current Keyword Store (' + keywordStoreSummary.totalKeywords + ' terms):',
             termsList,
@@ -129,11 +130,13 @@ export const correctionObserverWorkflowSpec: SubagentWorkflowSpec<CorrectionObse
             '- ADD: If a correction pattern is detected in messages but not in store',
             '- UPDATE: If a term\'s weight should change based on TP/FP ratio',
             '- REMOVE: If a term has 0 hits after many uses AND high false positive rate (>0.3)',
+            '- FALSE POSITIVE: If a term appears in trajectory but the user message doesn\'t actually express frustration (e.g., user said "wrong" but in a factual context, not emotional)',
             '- Keep reasoning concise (max 100 chars)',
             '- Weight range: 0.1-0.9',
             '',
             'Return strict JSON (no markdown):',
-            '{"updated": boolean, "updates": {...}, "summary": string}',
+            '{"updated": boolean, "updates": {...}, "fpTerms": ["term1", ...], "summary": string}',
+            'Note: fpTerms is optional — only include if you identified clear false positives from trajectory analysis.',
         ].join('\n');
     },
 

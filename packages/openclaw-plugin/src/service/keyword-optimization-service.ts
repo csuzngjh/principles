@@ -33,10 +33,9 @@ export class KeywordOptimizationService {
 
     if (!result.updated || !result.updates) {
       this.logger?.info?.('[KeywordOptimizationService] No updates to apply');
-      return;
     }
 
-    for (const [term, update] of Object.entries(result.updates)) {
+    for (const [term, update] of Object.entries(result.updates ?? {})) {
       try {
         switch (update.action) {
           case 'add': {
@@ -72,6 +71,19 @@ export class KeywordOptimizationService {
       } catch (opErr) {
         // Log and skip individual operation failures — don't fail the whole batch
         this.logger?.warn?.(`[KeywordOptimizationService] ${update.action.toUpperCase()} failed for term="${term}": ${String(opErr)}`);
+      }
+    }
+
+    // H-1: Record confirmed false positives — terms where correctionDetected fired
+    // but trajectory analysis shows user wasn't actually expressing frustration.
+    if (result.fpTerms && result.fpTerms.length > 0) {
+      for (const term of result.fpTerms) {
+        try {
+          learner.recordFalsePositive(term);
+          this.logger?.info?.(`[KeywordOptimizationService] FP recorded for term="${term}" (weight x0.8)`);
+        } catch (fpErr) {
+          this.logger?.warn?.(`[KeywordOptimizationService] recordFalsePositive failed for term="${term}": ${String(fpErr)}`);
+        }
       }
     }
   }

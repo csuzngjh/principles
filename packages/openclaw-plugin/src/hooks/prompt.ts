@@ -402,9 +402,12 @@ export async function handleBeforePromptBuild(
             learner.flush();
           }
         }
-      } catch {
-        // Fallback to hardcoded detection if learner fails
+      } catch (learnerErr) {
+        // Fallback to hardcoded detection if learner fails — log for observability
         correctionCue = detectCorrectionCue(userText);
+        if (correctionCue) {
+          logger?.warn?.(`[PD:Prompt] CorrectionCueLearner.match() failed (${String(learnerErr)}), fallback triggered for term="${correctionCue}"`);
+        }
       }
       let referencesAssistantTurnId: number | null = null;
       const hasPriorAssistant = event.messages
