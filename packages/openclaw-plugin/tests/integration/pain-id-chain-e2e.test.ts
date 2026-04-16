@@ -51,7 +51,6 @@ function createTestWorkspace(): TestWorkspace {
 }
 
 function disposeTestWorkspace(ws: TestWorkspace): void {
-  ws.reducer.dispose?.();
   ws.trajectory.dispose();
   fs.rmSync(ws.workspaceDir, { recursive: true, force: true });
 }
@@ -128,6 +127,7 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
     expect(compileResult.success).toBe(true);
     expect(compileResult.principleId).toBe(principleId);
     expect(compileResult.code).toBeDefined();
+    expect(compileResult.code).toContain('heartbeat');
     expect(compileResult.ruleId).toBeDefined();
     expect(compileResult.implementationId).toBeDefined();
 
@@ -199,6 +199,12 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
 
     const passResult = host.evaluate(nonMatchingInput);
     expect(passResult).toBeUndefined();
+  });
+
+  it('compileOne returns failure for non-existent principle ID', () => {
+    const compiler = new PrincipleCompiler(ws.stateDir, ws.trajectory);
+    const badResult = compiler.compileOne('non-existent-principle-id');
+    expect(badResult.success).toBe(false);
   });
 
   it('recordPainEvent returns sequential IDs for multiple events', () => {
