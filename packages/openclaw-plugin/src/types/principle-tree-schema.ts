@@ -76,6 +76,10 @@ export interface Principle {
 
   // Detector metadata (for auto-training eligibility)
   detectorMetadata?: PrincipleDetectorSpec;
+
+  // Compilation retry tracking (for runtime auto-trigger)
+  // undefined = not yet attempted or succeeded; 0 = queued; n >= 1 = retry attempt n
+  compilationRetryCount?: number;
 }
 
 // =========================================================================
