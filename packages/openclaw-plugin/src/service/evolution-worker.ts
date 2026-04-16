@@ -619,7 +619,7 @@ async function processCompilationBackfill(
                 `Queued ${backfillQueued} old principles for compilation`);
         }
         // Write marker so we don't backfill again in this process
-        fs.writeFileSync(backfillMarkerPath, new Date().toISOString(), 'utf8');
+        atomicWriteFileSync(backfillMarkerPath, new Date().toISOString());
     }
 
     // ── Phase 2: Retry pending compilations ───────────────────────────────────
@@ -647,8 +647,8 @@ async function processCompilationBackfill(
                     `Principle ${principleId} compiled successfully (attempt ${count + 1})`);
             } else {
                 const nextCount = count + 1;
-                safeUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
                 if (nextCount >= 5) {
+                    // Exhausted: single write to set manual_only (no intermediate count write)
                     safeUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
                         evaluability: 'manual_only',
                         compilationRetryCount: undefined,
@@ -656,14 +656,15 @@ async function processCompilationBackfill(
                     SystemLogger.log(wctx.workspaceDir, 'COMPILE_EXHAUSTED',
                         `Principle ${principleId} compilation exhausted after 5 attempts: ${result.reason ?? 'unknown'}`);
                 } else {
+                    safeUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
                     SystemLogger.log(wctx.workspaceDir, 'COMPILE_FAILED',
                         `Principle ${principleId} compile failed: ${result.reason ?? 'unknown'} (attempt ${nextCount}/5)`);
                 }
             }
         } catch (compileErr) {
             const nextCount = count + 1;
-            safeUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
             if (nextCount >= 5) {
+                // Exhausted: single write to set manual_only (no intermediate count write)
                 safeUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
                     evaluability: 'manual_only',
                     compilationRetryCount: undefined,
@@ -671,6 +672,7 @@ async function processCompilationBackfill(
                 SystemLogger.log(wctx.workspaceDir, 'COMPILE_EXHAUSTED',
                     `Principle ${principleId} compilation exhausted after 5 attempts: threw ${String(compileErr)}`);
             } else {
+                safeUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
                 SystemLogger.log(wctx.workspaceDir, 'COMPILE_FAILED',
                     `Principle ${principleId} compile threw: ${String(compileErr)} (attempt ${nextCount}/5)`);
             }
