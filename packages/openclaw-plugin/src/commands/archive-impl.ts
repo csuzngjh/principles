@@ -8,6 +8,8 @@
  * Used for permanent cleanup of implementations that are no longer relevant.
  */
 
+ 
+
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { refreshPrincipleLifecycle } from '../core/principle-internalization/lifecycle-refresh.js';
 import {
@@ -52,14 +54,14 @@ export function handleArchiveImplCommand(ctx: PluginCommandContext): PluginComma
   // Subcommand: list
   if (subcommand === 'list') {
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     return _handleListArchivable(stateDir, isZh);
   }
 
   // Archive by ID
   const targetId = subcommand;
    
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   return _handleArchiveImpl(workspaceDir, stateDir, targetId, isZh);
 }
 
@@ -97,7 +99,7 @@ function _handleListArchivable(
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function _handleArchiveImpl(
   workspaceDir: string,
   stateDir: string,

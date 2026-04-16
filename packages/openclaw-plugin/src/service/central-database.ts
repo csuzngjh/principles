@@ -1,3 +1,4 @@
+ 
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
@@ -200,7 +201,7 @@ export class CentralDatabase {
   /**
    * Sync data from a single workspace into the central database
    */
-    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
+     
   syncWorkspace(workspaceName: string): number {
     const workspace = this.workspaces.find(w => w.name === workspaceName);
     if (!workspace) {
@@ -714,7 +715,7 @@ export class CentralDatabase {
       syncEnabled: c.sync_enabled === 1,
     }));
   }
-    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
+     
 
   updateWorkspaceConfig(
     workspaceName: string,

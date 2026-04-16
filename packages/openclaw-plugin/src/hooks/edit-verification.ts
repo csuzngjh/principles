@@ -127,7 +127,7 @@ This is enforced by P-03 (精确匹配前验证原则).`;
  * This enforces P-03 at the tool layer
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function handleEditVerification(
   event: PluginHookBeforeToolCallEvent,
   wctx: WorkspaceContext,
@@ -157,7 +157,7 @@ export function handleEditVerification(
 
   // 2. Resolve and read file
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let absolutePath: string;
   try {
     absolutePath = wctx.resolve(filePath);
@@ -225,7 +225,7 @@ export function handleEditVerification(
 
     // 3. Read current file content with improved error handling
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let currentContent: string;
     try {
       currentContent = fs.readFileSync(absolutePath, 'utf-8');

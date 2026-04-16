@@ -62,7 +62,7 @@ export function loadModelIndex(
         const customConfig = loadCustomConfig(wctx);
         
          
-        // eslint-disable-next-line @typescript-eslint/init-declarations
+         
         let modelsDir: string;
         if (customConfig?.modelsDir) {
             modelsDir = path.isAbsolute(customConfig.modelsDir) 

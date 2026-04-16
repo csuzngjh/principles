@@ -55,7 +55,6 @@ Usage:
      
     let eventId: string | null;
      
-    const _triggerMethod = 'user_command' as const;
 
     if (args === 'last') {
         // Find the last empathy event in current session
