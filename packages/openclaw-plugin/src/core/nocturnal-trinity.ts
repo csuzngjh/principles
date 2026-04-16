@@ -704,6 +704,10 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     return /timeout/i.test(detail) ? 'runtime_timeout' : 'runtime_run_failed';
   }
 
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   async invokeDreamer(
     snapshot: NocturnalSessionSnapshot,
     principleId: string,
@@ -808,44 +812,59 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     _config: TrinityConfig
   ): Promise<TrinityDraftArtifact | null> {
     this.lastFailureReason = null;
-    const runId = `scribe-${randomUUID()}`;
-    const sessionFile = this.createSessionFile('scribe');
     const prompt = this.buildScribePrompt(dreamerOutput, philosopherOutput, snapshot, principleId);
     const model = this.resolveModel();
 
-    try {
-      const result = await this.api.runtime.agent.runEmbeddedPiAgent({
-        sessionId: runId,
-        sessionFile,
-        prompt,
-        extraSystemPrompt: NOCTURNAL_SCRIBE_PROMPT,
-        config: this.loadFullConfig(),
-        provider: model.provider,
-        model: model.model,
-        timeoutMs: this.stageTimeoutMs,
-        runId,
-        disableTools: true,
-      });
+    // Retry up to 2 times on JSON parse / missing-field errors (common LLM output issues)
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const runId = `scribe-${randomUUID()}`;
+      const sessionFile = this.createSessionFile('scribe');
 
-      const outputText = this.extractPayloadText(result);
-      if (!outputText) {
-        this.recordFailure('runtime_session_read_failed', 'Scribe returned empty response');
+      try {
+        const result = await this.api.runtime.agent.runEmbeddedPiAgent({
+          sessionId: runId,
+          sessionFile,
+          prompt,
+          extraSystemPrompt: NOCTURNAL_SCRIBE_PROMPT,
+          config: this.loadFullConfig(),
+          provider: model.provider,
+          model: model.model,
+          timeoutMs: this.stageTimeoutMs,
+          runId,
+          disableTools: true,
+        });
+
+        const outputText = this.extractPayloadText(result);
+        if (!outputText) {
+          this.recordFailure('runtime_session_read_failed', 'Scribe returned empty response');
+          if (attempt < maxAttempts) { await this.sleep(1000); continue; }
+          return null;
+        }
+
+        // DEBUG: Log Scribe's actual output
+        this.api.logger?.info(`[Trinity:Scribe] Output preview (attempt ${attempt}): ${outputText.slice(0, 800)}`);
+
+        const artifact = this.parseScribeOutput(outputText, snapshot, principleId, telemetry);
+        if (artifact) return artifact;
+
+        // JSON parse or missing-field error — retry
+        if (attempt < maxAttempts) {
+          await this.sleep(1500);
+          continue;
+        }
         return null;
+      } catch (err) {
+        this.recordFailure(this.classifyRuntimeError(err), err);
+        if (attempt < maxAttempts) { await this.sleep(2000); continue; }
+        return null;
+      } finally {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
       }
-
-      // DEBUG: Log Scribe's actual output
-      this.api.logger?.info(`[Trinity:Scribe] Output preview: ${outputText.slice(0, 800)}`);
-
-      return this.parseScribeOutput(outputText, snapshot, principleId, telemetry);
-    } catch (err) {
-      this.recordFailure(this.classifyRuntimeError(err), err);
-      return null;
-    } finally {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
     }
+    return null;
   }
-
 
   async close(): Promise<void> {
     // Clean up temp directory
