@@ -24,7 +24,20 @@ import { isCompleteDetectorMetadata } from './evolution-types.js';
 import { updateTrainingStore, addPrincipleToLedger, updatePrinciple, type LedgerPrinciple } from './principle-tree-ledger.js';
 import { PrincipleCompiler } from './principle-compiler/index.js';
 
- 
+/**
+ * Wrapper for updatePrinciple calls in the compilation retry path.
+ * If updatePrinciple throws, logs the error instead of propagating —
+ * compilation retry state is best-effort and should not crash principle creation.
+ */
+function updateRetryCount(stateDir: string, workspaceDir: string, principleId: string, count: number): void {
+  try {
+    updatePrinciple(stateDir, principleId, { compilationRetryCount: count });
+  } catch (err) {
+    SystemLogger.log(workspaceDir, 'RETRY_COUNT_UPDATE_FAILED',
+      `Failed to update compilationRetryCount for ${principleId}: ${String(err)}`);
+  }
+}
+
 export interface EvolutionReducer {
 
   emit(_event: EvolutionLoopEvent): void;
@@ -434,16 +447,17 @@ export class EvolutionReducerImpl implements EvolutionReducer {
               updatePrinciple(this.stateDir, principleId, { compilationRetryCount: undefined });
               SystemLogger.log(this.workspaceDir, 'COMPILE_SUCCESS', `Principle ${principleId} compiled successfully`);
             } else {
-              // Compile returned failure — increment retry count
-              updatePrinciple(this.stateDir, principleId, { compilationRetryCount: 1 });
+              // Compile returned failure — queue for backfill retry (count=0 means "queued", Phase 2 will pick it up).
+              // This gives exactly 5 total attempts before exhaustion (backfill: 0-4, sync: 0-4).
+              updateRetryCount(this.stateDir, this.workspaceDir, principleId, 0);
               SystemLogger.log(
                 this.workspaceDir, 'COMPILE_FAILED',
                 `Principle ${principleId} compile failed: ${result.reason ?? 'unknown'} (attempt 1/5)`
               );
             }
           } catch (compileErr) {
-            // Unexpected error during compilation — increment retry count
-            updatePrinciple(this.stateDir, principleId, { compilationRetryCount: 1 });
+            // Unexpected error during compilation — queue for backfill retry
+            updateRetryCount(this.stateDir, this.workspaceDir, principleId, 0);
             SystemLogger.log(
               this.workspaceDir, 'COMPILE_FAILED',
               `Principle ${principleId} compile threw: ${String(compileErr)} (attempt 1/5)`

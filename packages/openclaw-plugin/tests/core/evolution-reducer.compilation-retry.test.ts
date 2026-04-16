@@ -152,8 +152,9 @@ describe('createPrincipleFromDiagnosis — compilationRetryCount increments on f
     const ledger = loadLedger(stateDir);
     const principle = ledger.tree.principles[id as string];
     expect(principle).toBeDefined();
-    // Compilation was attempted and failed (no trajectory data) → count should be 1
-    expect(principle?.compilationRetryCount).toBe(1);
+    // Compilation was attempted and failed (no trajectory data) → count should be 0
+    // (sync failure sets count=0 so Phase 2 gets exactly 5 total attempts)
+    expect(principle?.compilationRetryCount).toBe(0);
   });
 });
 

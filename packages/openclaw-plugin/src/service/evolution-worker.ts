@@ -15,6 +15,7 @@ import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
+import type { PrincipleEvaluability } from '../types/principle-tree-schema.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 
@@ -634,20 +635,21 @@ async function processCompilationBackfill(
         // Skip: not in retry queue (undefined = done/succeeded)
         if (count === undefined) continue;
 
-        // Skip: already exhausted
-        if (count > 5) continue;
+        // Skip: already exhausted (count >= 5 means 5 attempts already made)
+        if (count >= 5) continue;
 
+        // Error-isolate each principle so one failure doesn't stop all other retries
         try {
             const result = compiler.compileOne(principleId);
             if (result.success) {
-                updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: undefined });
+                safeUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, undefined);
                 SystemLogger.log(wctx.workspaceDir, 'COMPILE_SUCCESS',
                     `Principle ${principleId} compiled successfully (attempt ${count + 1})`);
             } else {
                 const nextCount = count + 1;
-                updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: nextCount });
+                safeUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
                 if (nextCount >= 5) {
-                    updatePrinciple(wctx.stateDir, principleId, {
+                    safeUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
                         evaluability: 'manual_only',
                         compilationRetryCount: undefined,
                     });
@@ -660,9 +662,9 @@ async function processCompilationBackfill(
             }
         } catch (compileErr) {
             const nextCount = count + 1;
-            updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: nextCount });
+            safeUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
             if (nextCount >= 5) {
-                updatePrinciple(wctx.stateDir, principleId, {
+                safeUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
                     evaluability: 'manual_only',
                     compilationRetryCount: undefined,
                 });
@@ -673,6 +675,37 @@ async function processCompilationBackfill(
                     `Principle ${principleId} compile threw: ${String(compileErr)} (attempt ${nextCount}/5)`);
             }
         }
+    }
+}
+
+/**
+ * Wrapper for updatePrinciple in the retry loop — logs but does not propagate errors.
+ * If update fails, the principle stays in its current retry state and will be
+ * picked up again on the next heartbeat.
+ */
+function safeUpdateRetryCount(stateDir: string, workspaceDir: string, principleId: string, count: number | undefined): void {
+    try {
+        updatePrinciple(stateDir, principleId, { compilationRetryCount: count });
+    } catch (err) {
+        SystemLogger.log(workspaceDir, 'RETRY_COUNT_UPDATE_FAILED',
+            `Failed to update retry count for ${principleId}: ${String(err)}`);
+    }
+}
+
+/**
+ * Wrapper for updatePrinciple with multiple fields — logs but does not propagate errors.
+ */
+function safeUpdatePrinciple(
+    stateDir: string,
+    workspaceDir: string,
+    principleId: string,
+    updates: { evaluability?: PrincipleEvaluability; compilationRetryCount?: number },
+): void {
+    try {
+        updatePrinciple(stateDir, principleId, updates);
+    } catch (err) {
+        SystemLogger.log(workspaceDir, 'RETRY_PRINCIPLE_UPDATE_FAILED',
+            `Failed to update principle ${principleId}: ${String(err)}`);
     }
 }
 
