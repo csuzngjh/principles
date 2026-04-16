@@ -1,3 +1,4 @@
+ 
 /* global NodeJS */
 import * as fs from 'fs';
 import { isRisky } from '../utils/io.js';
@@ -95,7 +96,7 @@ export function getTargetFileLineCount(absoluteFilePath: string): number | null 
  * @returns Maximum allowed lines (at least minLines, at most maxLines if provided)
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function calculatePercentageThreshold(
     targetLineCount: number,
     percentage: number,

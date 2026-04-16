@@ -5,7 +5,7 @@
  *
  * Callers should suppress warnings for these errors — they are not real failures.
  */
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
 export function isExpectedSubagentError(err: unknown): boolean {
     const msg = String(err);
     return (

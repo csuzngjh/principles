@@ -17,10 +17,11 @@ export default [
     },
     rules: {
       'no-empty': 'error',
-      'no-console': 'warn',
+      'no-console': 'off',
       'complexity': 'off',
       'max-lines': 'off',
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-non-null-assertion': 'warn',
     },

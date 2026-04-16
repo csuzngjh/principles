@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import type { PluginLogger } from '../../openclaw-sdk.js';
 import type {
     SubagentWorkflowSpec,

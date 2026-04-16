@@ -420,7 +420,7 @@ export class RuntimeSummaryService {
    * Queue is the only authoritative execution truth source.
    */
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   private static buildDirectiveSummary(
     queue: QueueItem[] | null,
     directive: DirectiveFile | null,

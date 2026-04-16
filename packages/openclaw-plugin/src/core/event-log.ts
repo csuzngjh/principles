@@ -1,4 +1,4 @@
-/* eslint-disable max-lines */
+ 
 import * as fs from 'fs';
 import * as path from 'path';
 import type {
@@ -221,7 +221,7 @@ export class EventLog {
     }
   }
 
-  /* eslint-disable complexity */
+   
   private updateStats(entry: EventLogEntry): void {
     let stats = this.statsCache.get(entry.date);
     if (!stats) {
@@ -500,7 +500,7 @@ export class EventLog {
   /**
    * Aggregate empathy stats for a specific session.
    */
-  /* eslint-disable complexity */
+   
   private aggregateSessionEmpathy(sessionId: string, result: EmpathyEventStats): void {
     for (const entry of this.getMergedEvents()) {
       if (entry.sessionId === sessionId && entry.type === 'pain_signal') {

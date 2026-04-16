@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { getCentralDatabase } from './central-database.js';
 import { HealthQueryService } from './health-query-service.js';
 
@@ -18,7 +19,7 @@ export interface CentralHealthResponse {
  */
 export class CentralHealthService {
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   getAllWorkspaceHealth(): CentralHealthResponse {
     const centralDb = getCentralDatabase();
     const workspaces: WorkspaceHealthEntry[] = [];
