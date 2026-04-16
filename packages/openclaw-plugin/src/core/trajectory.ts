@@ -257,14 +257,20 @@ export class TrajectoryDatabase {
         input.createdAt ?? nowIso(),
       );
       insertedId = runResult.lastInsertRowid as number;
-
-      // Maintain FTS5 index: insert text into pain_events_fts if text is provided (MEM-03, MEM-04)
-      if (input.text) {
+    });
+    // FTS indexing is best-effort — run outside the transaction so it cannot
+    // roll back the committed pain event row (MEM-03, MEM-04).
+    if (input.text && insertedId > 0) {
+      try {
         this.db.prepare(`
           INSERT INTO pain_events_fts (text, pain_event_id) VALUES (?, ?)
         `).run(input.text, insertedId);
+      } catch (err) {
+        // Non-fatal: FTS index is for search convenience, not correctness.
+        // Log but do not re-throw — the pain event itself is already committed.
+        console.warn(`[trajectory] FTS index insert failed for pain_event ${insertedId}: ${String(err)}`);
       }
-    });
+    }
     return insertedId;
   }
 
