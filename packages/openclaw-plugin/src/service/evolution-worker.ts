@@ -915,7 +915,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 } else {
                                     logger.info(`[PD:EvolutionWorker] Creating principle from report for task ${task.id}`);
                                     const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
-                                        painId: task.id,
+                                        painId: task.painEventId !== undefined ? String(task.painEventId) : task.id,
                                         painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
                                         triggerPattern: principle.trigger_pattern,
                                         action: principle.action,
