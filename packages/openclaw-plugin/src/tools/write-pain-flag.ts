@@ -1,8 +1,9 @@
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { Type } from '@sinclair/typebox';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { buildPainFlag, writePainFlag } from '../core/pain.js';
+import { buildPainFlag } from '../core/pain.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
+import { TrajectoryRegistry } from '../core/trajectory.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -116,6 +117,29 @@ export function createWritePainFlagTool(api: OpenClawPluginApi) {
             }
 
             try {
+                // ── Record pain event to trajectory DB first (before flag file) ──
+                // This ensures we have a real AUTOINCREMENT ID that flows through
+                // the entire pain→principle→compile chain (painEventId propagation).
+                let painEventId: number | undefined;
+                try {
+                    const trajectory = TrajectoryRegistry.get(workspaceDir);
+                    painEventId = trajectory.recordPainEvent({
+                        sessionId: sessionId || 'unknown',
+                        source,
+                        score,
+                        reason,
+                        severity: null,
+                        origin: 'manual',
+                        confidence: null,
+                        text: undefined,
+                    });
+                } catch (trajErr) {
+                    // If trajectory write fails, log but continue — the pain flag
+                    // itself is still valid and should be processed. The pain event
+                    // ID simply won't be available for the compiler's exact matching.
+                    api.logger?.warn?.(`[PD:write_pain_flag] Failed to record pain event to trajectory: ${String(trajErr)}`);
+                }
+
                 // ── Build pain flag data (KV format) ──
                 const painData = buildPainFlag({
                     source,
@@ -123,6 +147,7 @@ export function createWritePainFlagTool(api: OpenClawPluginApi) {
                     reason,
                     session_id: sessionId,
                     is_risky: isRisky,
+                    pain_event_id: painEventId !== undefined ? String(painEventId) : undefined,
                 });
 
                 // ── Validate contract compliance ──
