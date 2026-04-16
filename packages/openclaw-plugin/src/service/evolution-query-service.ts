@@ -349,13 +349,13 @@ export class EvolutionQueryService {
     for (const task of recentTasks) {
       const [createdDay] = task.createdAt.split('T');
       if (activityByDay.has(createdDay)) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: has() check guarantees entry exists
+         
         activityByDay.get(createdDay)!.created++;
       }
       if (task.completedAt) {
         const [completedDay] = task.completedAt.split('T');
         if (activityByDay.has(completedDay)) {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: has() check guarantees entry exists
+           
           activityByDay.get(completedDay)!.completed++;
         }
       }

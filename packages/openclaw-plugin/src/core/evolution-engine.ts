@@ -557,7 +557,7 @@ export function getEvolutionEngine(workspaceDir: string): EvolutionEngine {
   if (!_instances.has(resolved)) {
     _instances.set(resolved, new EvolutionEngine(resolved));
   }
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: set() above guarantees get() returns non-null
+   
   return _instances.get(resolved)!;
 }
 
