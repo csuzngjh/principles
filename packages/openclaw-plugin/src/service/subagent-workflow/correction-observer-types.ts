@@ -55,6 +55,19 @@ export interface CorrectionObserverResult {
     falsePositiveRate?: number;
     reasoning: string;
   }>;
+  /**
+   * Terms identified as false positives — user message didn't actually indicate
+   * frustration/correction despite correctionDetected firing for these terms.
+   * CORR-10 / H-1: Calling recordFalsePositive() decays weight by x0.8 per term.
+   * Only meaningful when fpAnalysisStatus='completed'.
+   */
+  fpTerms?: string[];
+  /**
+   * Whether FP analysis was performed. 'skipped' means the LLM did not run
+   * trajectory analysis (e.g., trajectory was empty). 'completed' means fpTerms
+   * contains the LLM's FP findings (may be empty if no FPs were found).
+   */
+  fpAnalysisStatus?: 'completed' | 'skipped';
   /** Human-readable summary */
   summary: string;
 }
