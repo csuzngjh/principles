@@ -128,19 +128,24 @@ function containsPlaceholder(val: string): boolean {
 
 /**
  * Check if a string contains raw/private content patterns.
- * This is a heuristic check — not foolproof.
+ * Only matches actual code syntax or credential literals — not
+ * incidental words that happen to appear in code context.
  */
 function containsRawContent(val: string): boolean {
-  // Detect file paths with actual code (not just path shapes)
-  const rawPatterns = [
-    /function\s+\w+\s*\(/,           // function definitions
-    /class\s+\w+/,                   // class definitions
-    /const\s+\w+\s*=/,              // variable declarations
-    /import\s+.*from/,              // import statements
-    /export\s+(default\s+)?/,        // export statements
-    /api_key|secret|password|token/, // credential patterns (case insensitive)
+  // Actual code syntax — these are unambiguous and won't appear in normal decision text
+  const codePatterns = [
+    /function\s+\w+\s*\(/,           // function definitions: "function foo("
+    /class\s+\w+/,                   // class definitions: "class Foo"
+    /const\s+\w+\s*=/,              // const declarations: "const x ="
+    /let\s+\w+\s*=/,                // let declarations: "let x ="
+    /import\s+.+\s+from/,           // import statements: "import ... from"
+    /export\s+(default\s+)?/,       // export statements
+    /\bapi[_-]?key\s*=\s*\S+/i,    // api_key= or api-key= with a value
+    /\bpassword\s*=\s*\S+/i,       // password= with a value
+    /\bsecret\s*=\s*\S+/i,          // secret= with a value
+    /\btoken\s*=\s*\S+/i,           // token= with a value
   ];
-  return rawPatterns.some((p) => p.test(val));
+  return codePatterns.some((p) => p.test(val));
 }
 
 // ---------------------------------------------------------------------------

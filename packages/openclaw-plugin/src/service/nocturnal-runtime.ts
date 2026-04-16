@@ -24,6 +24,7 @@ import type { SessionState } from '../core/session-tracker.js';
 import { listSessions } from '../core/session-tracker.js';
 import { withLockAsync } from '../utils/file-lock.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+import { DEFAULT_IDLE_THRESHOLD_MS, DEFAULT_QUOTA_WINDOW_MS } from '../config/defaults/runtime.js';
 
 // ---------------------------------------------------------------------------
 // System Session Detection
@@ -86,9 +87,6 @@ function isSystemSession(state: SessionState): boolean {
 /** File name for nocturnal runtime bookkeeping */
 export const NOCTURNAL_RUNTIME_FILE = 'nocturnal-runtime.json';
 
-/** Default idle threshold: workspace is considered idle if no activity for this duration (ms) */
-export const DEFAULT_IDLE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
-
 /** Default cooldown between nocturnal runs (ms) */
 export const DEFAULT_GLOBAL_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
@@ -97,9 +95,6 @@ export const DEFAULT_PRINCIPLE_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 /** Default maximum nocturnal runs per quota window */
 export const DEFAULT_MAX_RUNS_PER_WINDOW = 3;
-
-/** Default quota window size (ms) */
-export const DEFAULT_QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 /** Abandoned session threshold: sessions inactive for longer than this are ignored (ms) */
 export const DEFAULT_ABANDONED_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -143,6 +138,12 @@ export interface NocturnalRuntimeState {
      * Used for quota enforcement.
      */
     recentRunTimestamps: string[];
+
+    /**
+     * Sliding window of keyword optimization run timestamps.
+     * Separate from regular nocturnal runs to avoid quota pollution (fixes #321).
+     */
+    keywordOptRunTimestamps: string[];
 
     /** Metadata about last run (for debugging) */
     lastRunMeta?: {
@@ -206,6 +207,7 @@ function createDefaultState(): NocturnalRuntimeState {
     return {
         principleCooldowns: {},
         recentRunTimestamps: [],
+        keywordOptRunTimestamps: [],
     };
 }
 
@@ -225,6 +227,7 @@ export async function readState(stateDir: string): Promise<NocturnalRuntimeState
         return {
             principleCooldowns: parsed.principleCooldowns ?? {},
             recentRunTimestamps: parsed.recentRunTimestamps ?? [],
+            keywordOptRunTimestamps: parsed.keywordOptRunTimestamps ?? [],
             lastRunAt: parsed.lastRunAt,
             lastSuccessfulRunAt: parsed.lastSuccessfulRunAt,
             globalCooldownUntil: parsed.globalCooldownUntil,
@@ -248,6 +251,7 @@ export function readStateSync(stateDir: string): NocturnalRuntimeState {
         return {
             principleCooldowns: parsed.principleCooldowns ?? {},
             recentRunTimestamps: parsed.recentRunTimestamps ?? [],
+            keywordOptRunTimestamps: parsed.keywordOptRunTimestamps ?? [],
             lastRunAt: parsed.lastRunAt,
             lastSuccessfulRunAt: parsed.lastSuccessfulRunAt,
             globalCooldownUntil: parsed.globalCooldownUntil,
@@ -448,6 +452,81 @@ export function checkCooldown(
 }
 
 /**
+ * Check keyword optimization cooldown using its dedicated timestamp array.
+ * Fixes #321: keyword optimization quota must not be polluted by regular nocturnal runs.
+ *
+ * @param stateDir - State directory
+ * @param options - Quota options (default: 4 runs per 24 hours)
+ */
+export function checkKeywordOptCooldown(
+    stateDir: string,
+    options: {
+        maxRunsPerWindow?: number;
+        quotaWindowMs?: number;
+    } = {}
+): CooldownCheckResult {
+    const {
+        maxRunsPerWindow = 4,
+        quotaWindowMs = 24 * 60 * 60 * 1000,
+    } = options;
+
+    const now = Date.now();
+    const state = readStateSync(stateDir);
+
+    const windowStart = now - quotaWindowMs;
+    const recentKeywordOpts: number[] = [];
+    for (const ts of state.keywordOptRunTimestamps) {
+        const parsed = new Date(ts).getTime();
+        if (Number.isNaN(parsed)) {
+            console.warn(`[NocturnalRuntime] Malformed timestamp in keywordOptRunTimestamps: "${ts}"`);
+            continue;
+        }
+        if (parsed > windowStart) {
+            recentKeywordOpts.push(parsed);
+        }
+    }
+
+    // Keyword optimization uses a dedicated quota (keywordOptRunTimestamps)
+    // separate from the regular nocturnal run quota (runStartTimestamps).
+    // Global/principle cooldowns from regular nocturnal runs do NOT apply here.
+    return {
+        globalCooldownActive: false,
+        globalCooldownUntil: null,
+        globalCooldownRemainingMs: 0,
+        principleCooldownActive: false,
+        principleCooldownUntil: null,
+        principleCooldownRemainingMs: 0,
+        quotaExhausted: recentKeywordOpts.length >= maxRunsPerWindow,
+        runsRemaining: Math.max(0, maxRunsPerWindow - recentKeywordOpts.length),
+    };
+}
+
+/**
+ * Record a keyword optimization run in its dedicated timestamp array.
+ * Does NOT affect regular nocturnal quota tracking.
+ *
+ * @param stateDir - State directory
+ * @param quotaWindowMs - Window size in ms (default: 24 hours)
+ */
+export async function recordKeywordOptRun(
+    stateDir: string,
+    quotaWindowMs: number = 24 * 60 * 60 * 1000
+): Promise<void> {
+    const state = await readState(stateDir);
+    const now = new Date().toISOString();
+
+    state.keywordOptRunTimestamps.push(now);
+
+    const windowStart = Date.now() - quotaWindowMs;
+    state.keywordOptRunTimestamps = state.keywordOptRunTimestamps
+        .map(ts => new Date(ts).getTime())
+        .filter(ts => ts > windowStart)
+        .map(ts => new Date(ts).toISOString());
+
+    await writeState(stateDir, state);
+}
+
+/**
  * Records a cooldown event for quota tracking (keyword_optimization etc.).
  * Adds a timestamp to recentRunTimestamps and prunes entries outside the window.
  * Does NOT set globalCooldownUntil — callers that need it should call recordRunStart.
@@ -567,6 +646,7 @@ export async function clearAllCooldowns(stateDir: string): Promise<void> {
     state.globalCooldownUntil = undefined;
     state.principleCooldowns = {};
     state.recentRunTimestamps = [];
+    state.keywordOptRunTimestamps = [];
     state.lastRunMeta = undefined;
     await writeState(stateDir, state);
 }

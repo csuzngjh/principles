@@ -163,6 +163,62 @@ export function writePainFlag(projectDir: string, painData: PainFlagData): void 
 }
 
 /**
+ * Combined trajectory record + pain flag write.
+ *
+ * Records the pain event to trajectory first to get the AUTOINCREMENT ID,
+ * then builds and writes the pain flag with that ID embedded.
+ * This guarantees the pain→principle→compile chain has the exact matching ID.
+ *
+ * Error handling: if trajectory write fails, continues without pain_event_id.
+ * If flag write fails, the error propagates to the caller.
+ */
+export function recordAndWritePainFlag(
+  wctx: {
+    trajectory?: { recordPainEvent(input: { sessionId: string; source: string; score: number; reason?: string | null; severity?: string | null; origin?: string | null; confidence?: number | null; text?: string }): number } | null;
+    workspaceDir: string;
+  },
+  trajectoryParams: {
+    sessionId: string;
+    source: string;
+    score: number;
+    reason?: string | null;
+    severity?: string | null;
+    origin?: string | null;
+    confidence?: number | null;
+    text?: string;
+  },
+  painFlagParams: {
+    source: string;
+    score: string;
+    reason: string;
+    session_id?: string;
+    agent_id?: string;
+    is_risky?: boolean;
+    trace_id?: string;
+    trigger_text_preview?: string;
+  }
+): void {
+  const trajectoryPainId = wctx.trajectory?.recordPainEvent({
+    sessionId: trajectoryParams.sessionId,
+    source: trajectoryParams.source,
+    score: trajectoryParams.score,
+    reason: trajectoryParams.reason ?? null,
+    severity: trajectoryParams.severity ?? null,
+    origin: trajectoryParams.origin ?? null,
+    confidence: trajectoryParams.confidence ?? null,
+    text: trajectoryParams.text,
+  });
+
+  const painData = buildPainFlag({
+    ...painFlagParams,
+    pain_event_id:
+      trajectoryPainId !== undefined && trajectoryPainId >= 0 ? String(trajectoryPainId) : undefined,
+  });
+
+  writePainFlag(wctx.workspaceDir, painData);
+}
+
+/**
  * Converts a JSON pain flag object to KV format.
  */
 function convertJsonToKv(json: Record<string, unknown>): Record<string, string> {
