@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -96,7 +97,7 @@ function createService(api: OpenClawPluginApi): ControlUiQueryService {
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function handleApiRoute(
   api: OpenClawPluginApi,
   pathname: string,
@@ -105,13 +106,13 @@ function handleApiRoute(
 ): Promise<boolean> | boolean {
   // Check authentication for API routes
    
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   if (!validateGatewayAuth(req)) {
     json(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
     return true;
   }
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let service: ControlUiQueryService;
   try {
     service = createService(api);
@@ -566,7 +567,23 @@ function validateGatewayAuth(req: IncomingMessage): boolean {
   const authHeader = (req.headers?.authorization as string) || '';
   const tokenMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
   const providedToken = tokenMatch?.[1];
-  return providedToken === gatewayToken;
+
+  if (!providedToken) {
+    return false;
+  }
+
+  // Constant-time comparison to prevent timing attacks (per D-07)
+  // Use Buffer comparison — both tokens must be same length for timingSafeEqual
+  const providedBuffer = Buffer.from(providedToken, 'utf8');
+  const expectedBuffer = Buffer.from(gatewayToken, 'utf8');
+
+  if (providedBuffer.length !== expectedBuffer.length) {
+    // Length mismatch — fail fast but without timing leak
+    // Return false immediately rather than letting timingSafeEqual throw
+    return false;
+  }
+
+  return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
 /**

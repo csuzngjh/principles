@@ -1,5 +1,19 @@
 # Milestones
 
+## v1.19 Tech Debt Remediation (Shipped: 2026-04-15)
+
+**Phases completed:** 4 phases, 9 plans, 0 tasks
+
+**Key accomplishments:**
+
+- None
+- Objective:
+- Objective:
+- Rule 3 Auto-fix: Export internal functions for testing
+- Rule 3 Auto-fix: Export asyncLockQueues Map for test isolation
+
+---
+
 ## v1.18 Nocturnal State Safety & Recovery (Shipped: 2026-04-14)
 
 **Phases completed:** 22 phases, 33 plans, 34 tasks

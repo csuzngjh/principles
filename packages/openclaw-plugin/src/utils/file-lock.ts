@@ -322,7 +322,7 @@ export async function withLockAsync<T>(
  * 注意：这是一个简化的实现，适用于单进程内的异步并发控制
  * 对于多进程场景，应使用同步版本的 acquireLock
  */
-const asyncLockQueues = new Map<string, Promise<void>>();
+export const asyncLockQueues = new Map<string, Promise<void>>();
 
 export async function withAsyncLock<T>(
   filePath: string,
@@ -335,7 +335,7 @@ export async function withAsyncLock<T>(
   
   // 创建新的 Promise 链
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let resolveRelease: () => void;
   const releasePromise = new Promise<void>(resolve => {
     resolveRelease = resolve;

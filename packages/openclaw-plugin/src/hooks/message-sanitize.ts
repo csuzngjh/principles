@@ -6,6 +6,21 @@ const INTERNAL_TAG_PATTERNS = [
   /<empathy\s+[^>]*\/?>(?:<\/empathy>)?/gi,
 ];
 
+/**
+ * Type predicate: true if msg is an assistant message with content.
+ * Used for safe narrowing after spread operations on message union.
+ */
+function isAssistantMessageWithContent(
+  msg: unknown
+): msg is { role: 'assistant'; content: string } {
+  return (
+    typeof msg === 'object' &&
+    msg !== null &&
+    (msg as { role?: string }).role === 'assistant' &&
+    typeof (msg as { content?: unknown }).content === 'string'
+  );
+}
+
 export function sanitizeAssistantText(text: string): string {
   let result = text;
   for (const pattern of INTERNAL_TAG_PATTERNS) {
@@ -23,11 +38,10 @@ export function handleBeforeMessageWrite(
   const msg = event.message as { role?: string; content?: unknown } | undefined;
   if (!msg || msg.role !== 'assistant') return;
 
-  if (typeof msg.content === 'string') {
+  if (isAssistantMessageWithContent(msg)) {
     const sanitized = sanitizeAssistantText(msg.content);
     if (sanitized !== msg.content) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: message content is dynamically modified, type preserved from event.message union
-      return { message: { ...msg, content: sanitized } as any };
+      return { message: { ...msg, content: sanitized } };
     }
     return;
   }
@@ -39,8 +53,7 @@ export function handleBeforeMessageWrite(
       }
       return part;
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: message content is dynamically modified, type preserved from event.message union
-    return { message: { ...msg, content: next } as any };
+    return { message: { ...msg, content: next } };
   }
 
   return;
