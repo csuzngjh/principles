@@ -1,5 +1,5 @@
 /* global NodeJS */
-/* eslint-disable max-lines */
+ 
 import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
@@ -38,6 +38,7 @@ import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-con
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { readPainFlagContract } from '../core/pain.js';
 import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
+import { findRecentDuplicateTask } from './evolution-dedup.js';
 import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
@@ -163,7 +164,7 @@ function isSessionAtOrBeforeTriggerTime(
     return true;
 }
 
-/* eslint-disable complexity */
+ 
 function buildFallbackNocturnalSnapshot(
     sleepTask: EvolutionQueueItem,
     extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null,
@@ -638,8 +639,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             if (payload.skipReason) {
                                 detailedError += ` (skipReason: ${payload.skipReason})`;
                             }
-                            if (payload.failures && payload.failures.length > 0) {
-                                detailedError += ` | failures: ${payload.failures.slice(0, 3).join(', ')}`;
+                            if (payload.failures && Array.isArray(payload.failures) && payload.failures.length > 0) {
+                                detailedError += ` | failures: ${(payload.failures as string[]).slice(0, 3).join(', ')}`;
                             }
                         }
                     } catch (fetchErr) {
