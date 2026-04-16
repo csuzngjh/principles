@@ -882,7 +882,7 @@ export function executeNocturnalReflection(
           diagnostics,
         };
       }
-      trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
+      trinityArtifact = trinityResult.artifact!;  
       // Convert Trinity draft to arbiter-compatible artifact
       const artifactData = draftToArtifact(trinityArtifact);
       rawJson = JSON.stringify(artifactData);
@@ -933,7 +933,7 @@ export function executeNocturnalReflection(
             diagnostics,
           };
         }
-        trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
+        trinityArtifact = trinityResult.artifact!;  
         // Convert Trinity draft to arbiter-compatible artifact
         const artifactData = draftToArtifact(trinityArtifact);
         rawJson = JSON.stringify(artifactData);
@@ -1387,7 +1387,7 @@ async function executeNocturnalReflectionWithAdapter(
       adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
       return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: [`Trinity override failed: ${failures.join('; ')}`], snapshot, diagnostics };
     }
-    trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
+    trinityArtifact = trinityResult.artifact!;  
     const artifactData = draftToArtifact(trinityArtifact);
     rawJson = JSON.stringify(artifactData);
   } else {
@@ -1414,7 +1414,7 @@ async function executeNocturnalReflectionWithAdapter(
           adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
           return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: failures, snapshot, diagnostics };
         }
-        trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
+        trinityArtifact = trinityResult.artifact!;  
         const artifactData = draftToArtifact(trinityArtifact);
         rawJson = JSON.stringify(artifactData);
       } else {

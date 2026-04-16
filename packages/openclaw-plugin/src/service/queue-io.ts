@@ -185,7 +185,7 @@ export function shouldSkipForDedup(
     const recentSimilarReflection = hasRecentSimilarReflection(queue, painSourceKey, now);
 
     if (recentSimilarReflection) {
-        const completedTime = new Date(recentSimilarReflection.completed_at!).getTime(); /* eslint-disable-line @typescript-eslint/no-non-null-assertion */
+        const completedTime = new Date(recentSimilarReflection.completed_at!).getTime();  
         logger?.debug?.(`[PD:EvolutionWorker] Skipping sleep_reflection — similar reflection completed ${Math.round((now - completedTime) / 60000)}min ago (same pain pattern: ${painSourceKey})`);
         return true;
     }
