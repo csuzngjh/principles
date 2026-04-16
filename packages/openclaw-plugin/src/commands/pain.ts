@@ -81,6 +81,14 @@ function formatEmpathyCard(stats: EmpathyEventStats, range: string, isZh: boolea
 }
 
 /**
+ * Extended context interface that includes sessionId injected by the plugin framework.
+ * PluginCommandContext does not include sessionId in its type definition.
+ */
+interface SessionAwareCommandContext extends PluginCommandContext {
+  sessionId: string;
+}
+
+/**
  * Handles the /pd-status command
  */
 export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResult {
@@ -89,15 +97,14 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
     const lang = (ctx.config?.language as string) || 'en';
     const isZh = lang === 'zh';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: sessionId injected by OpenClaw plugin framework - type not available in PluginCommandContext
-    const {sessionId} = (ctx as any);
+    const { sessionId } = ctx as SessionAwareCommandContext;
 
     const args = (ctx.args || '').trim();
 
     // Handle empathy subcommand
     if (args.startsWith('empathy')) {
          
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+         
         return handleEmpathySubcommand(wctx, args, sessionId, isZh);
     }
 
@@ -138,7 +145,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     
     // Determine health status based on GFI
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let healthLabel: string;
     let suggestionText = '';
 
@@ -218,7 +225,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
  * Handle /pd-status empathy subcommand
  */
  
-    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 13, refactor candidate
+     
 function handleEmpathySubcommand(
     wctx: WorkspaceContext,
     args: string,

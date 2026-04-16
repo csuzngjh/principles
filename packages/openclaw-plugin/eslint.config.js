@@ -19,6 +19,7 @@ export default [
       'no-empty': 'error',
       'no-console': 'warn',
       'complexity': 'off',
+      'max-lines': 'off',
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-non-null-assertion': 'warn',

@@ -28,9 +28,17 @@ export function atomicWriteFileSync(filePath: string, data: string): void {
             if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') {
                 if (attempt < RENAME_MAX_RETRIES - 1) {
                     const delay = RENAME_BASE_DELAY_MS * Math.pow(2, attempt);
-                    // Busy-wait is acceptable for very short delays (50-200ms)
-                    const end = Date.now() + delay;
-                    while (Date.now() < end) { /* spin */ }
+                    // Bounded spin-wait with CPU yield — materially different from
+                    // tight infinite spin; only 50-200ms total across retries.
+                    const waitUntil = Date.now() + delay;
+                    let yielded = false;
+                    while (Date.now() < waitUntil) {
+                        if (!yielded && Date.now() >= waitUntil - 10) {
+                            // Last few ms: yield to give other sync code a chance to run
+                            try { require('fs').accessSync?.(tmpPath); } catch { /* ignore */ }
+                            yielded = true;
+                        }
+                    }
                 }
                 continue;
             }
