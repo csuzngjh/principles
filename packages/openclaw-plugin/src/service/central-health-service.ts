@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { getCentralDatabase } from './central-database.js';
 import { HealthQueryService } from './health-query-service.js';
 

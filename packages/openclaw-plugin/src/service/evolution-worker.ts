@@ -1,3 +1,4 @@
+ 
 /* global NodeJS */
  
 import * as fs from 'fs';
