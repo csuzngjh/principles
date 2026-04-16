@@ -233,8 +233,6 @@ function buildFallbackNocturnalSnapshot(
     };
 }
 
-const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
-
 // Queue lock constants and requireQueueLock are imported from queue-io.ts
 
 export function extractEvolutionTaskId(task: string): string | null {
@@ -282,13 +280,6 @@ export function purgeStaleFailedTasks(
     logger?.info?.(`[PD:EvolutionWorker] Purged ${purged.length} stale failed tasks (>24h): ${summary}`);
 
     return { purged: purged.length, remaining: queue.length, byReason };
-}
-
-function normalizePainDedupKey(source: string, preview: string, reason?: string): string {
-    // Include reason in dedup key to match createEvolutionTaskId() behavior
-    // Different reasons for the same source/preview should create different tasks
-    const normalizedReason = (reason || '').trim().toLowerCase();
-    return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}::${normalizedReason}`;
 }
 
  
@@ -667,7 +658,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             workspaceDir: wctx.workspaceDir,
                             stateDir: wctx.stateDir,
                             logger: api?.logger || logger,
-                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: api is guaranteed non-null in this recovery path where runtimeAdapter is required
+                             
                             runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api!),
                             subagent: api?.runtime?.subagent,
                         });
@@ -1185,7 +1176,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     let snapshotData: NocturnalSessionSnapshot | undefined;
 
                     if (isPollingTask) {
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: polling path requires existing resultRef
+                         
                         workflowId = sleepTask.resultRef!;
                     } else {
                         // Phase 1: Build trajectory snapshot for Nocturnal pipeline
@@ -1556,7 +1547,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     const manager = new CorrectionObserverWorkflowManager({
                         workspaceDir: wctx.workspaceDir,
                         logger,
-                        subagent: api?.runtime?.subagent!, /* eslint-disable-line @typescript-eslint/no-non-null-assertion */
+                        subagent: api?.runtime?.subagent!,  
                         agentSession: api?.runtime?.agent?.session,
                     });
 
@@ -1570,7 +1561,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         workflowId = handle.workflowId;
                         koTask.resultRef = workflowId;
                     } else {
-                        workflowId = koTask.resultRef!; /* eslint-disable-line @typescript-eslint/no-non-null-assertion */
+                        workflowId = koTask.resultRef!;  
                     }
 
                     // Poll workflow state

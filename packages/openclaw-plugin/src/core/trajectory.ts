@@ -209,10 +209,6 @@ export class TrajectoryDatabase {
   recordToolCall(input: TrajectoryToolCallInput): number {
     this.recordSession({ sessionId: input.sessionId, startedAt: input.createdAt });
     const createdAt = input.createdAt ?? nowIso();
-    // Extract filePath from paramsJson if provided and is an object with filePath
-    const paramsObj = input.paramsJson as Record<string, unknown> | undefined;
-     
-    const _filePath = paramsObj && typeof paramsObj.filePath === 'string' ? paramsObj.filePath : null;
     const rowId = this.withWrite(() => {
       const result = this.db.prepare(`
         INSERT INTO tool_calls (

@@ -8,7 +8,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { TSchema, Static } from '@sinclair/typebox';
+import type { Static } from '@sinclair/typebox';
 
 // ── Logger Types ──────────────────────────────────────────────────────
 

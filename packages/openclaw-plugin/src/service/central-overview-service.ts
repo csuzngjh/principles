@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 import { getCentralDatabase, type CentralDatabase } from './central-database.js';
 import { getThinkingModelDefinitions } from '../core/thinking-models.js';
 import type { OverviewResponse } from './control-ui-query-service.js';

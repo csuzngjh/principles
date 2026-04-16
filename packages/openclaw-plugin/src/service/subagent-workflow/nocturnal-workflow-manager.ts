@@ -453,7 +453,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
 
     async sweepExpiredWorkflows(
         maxAgeMs = 30 * 60 * 1000,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: subagentRuntime param is intentionally any for backward compatibility with callers
+         
         subagentRuntime?: any,
          
         agentSession?: {

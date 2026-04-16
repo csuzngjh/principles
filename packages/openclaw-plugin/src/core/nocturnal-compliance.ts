@@ -384,7 +384,7 @@ function detectT05Opportunity(session: SessionEvents): OpportunityMatch {
     if (RISKY_TOOLS.has(call.toolName)) return true;
     // Check bash for dangerous patterns
     if (call.toolName === 'bash' && call.errorMessage) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: call.errorMessage guard above ensures truthiness
+       
       return DANGEROUS_BASH_PATTERNS.some((p) => p.test(call.errorMessage!));
     }
     return false;
@@ -432,7 +432,7 @@ function detectT06Opportunity(session: SessionEvents): OpportunityMatch {
 function detectT07Opportunity(session: SessionEvents): OpportunityMatch {
   const filePaths = session.toolCalls
     .filter((call) => call.filePath !== undefined)
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: filter ensures filePath is defined
+     
     .map((call) => normalizePathPosix(call.filePath!));
   const uniqueFiles = new Set(filePaths);
   if (uniqueFiles.size >= 3) {
@@ -478,7 +478,7 @@ function detectT09Opportunity(session: SessionEvents): OpportunityMatch {
   const uniqueFiles = new Set(
     session.toolCalls
       .filter((call) => call.filePath !== undefined)
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: filter ensures filePath is defined
+       
       .map((call) => normalizePathPosix(call.filePath!))
   );
   const hasComplexity = toolCallCount >= 5 || uniqueFiles.size >= 3;
@@ -592,7 +592,7 @@ function detectT01Violation(session: SessionEvents): ViolationMatch {
   const readFiles = new Set(
     session.toolCalls
       .filter((call) => READ_TOOLS.has(call.toolName) && call.filePath !== undefined)
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: filter ensures filePath is defined
+       
       .map((call) => normalizePathPosix(call.filePath!))
   );
 
@@ -786,7 +786,7 @@ function detectT07Violation(session: SessionEvents): ViolationMatch {
   const modifiedFiles = new Set(
     session.toolCalls
       .filter((call) => EDIT_TOOLS.has(call.toolName) && call.filePath !== undefined)
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: filter ensures filePath is defined
+       
       .map((call) => normalizePathPosix(call.filePath!))
   );
 
@@ -843,7 +843,7 @@ function detectT09Violation(session: SessionEvents): ViolationMatch {
   const uniqueFiles = new Set(
     session.toolCalls
       .filter((call) => call.filePath !== undefined)
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: filter ensures filePath is defined
+       
       .map((call) => normalizePathPosix(call.filePath!))
   );
 
@@ -1086,7 +1086,7 @@ export function groupEventsIntoSessions(events: RawEventEntry[]): Map<string, Se
       });
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: set() above guarantees get() returns non-null
+     
     const session = sessionMap.get(sessionId)!;
 
     switch (event.type) {

@@ -283,7 +283,7 @@ const plugin = {
 
           if (shouldRecordShadow) {
             const observation = recordShadowRouting(workspaceDir, {
-              checkpointId: decision.activeCheckpointId!, // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: !!decision.activeCheckpointId guard above ensures truthiness
+              checkpointId: decision.activeCheckpointId!,  
               workerProfile: agentId as WorkerProfile,
               taskFingerprint: computeRuntimeShadowTaskFingerprint(event),
             });
@@ -362,7 +362,7 @@ const plugin = {
 
     // ── Slash Commands ──
     // Register command with optional short alias
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const registerCommandWithAlias = (name: string, alias: string | null, desc: string, handler: any, opts?: { acceptsArgs?: boolean }) => {
       const base = {
         name,
@@ -380,17 +380,17 @@ const plugin = {
       }
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     registerCommandWithAlias('pd-init', 'pdi', getCommandDescription('pd-init', language), (ctx: any) => handleInitStrategy(ctx));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     registerCommandWithAlias('pd-okr', 'pdk', getCommandDescription('pd-okr', language), (ctx: any) => handleManageOkr(ctx));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     registerCommandWithAlias('pd-bootstrap', 'pdb', getCommandDescription('pd-bootstrap', language), (ctx: any) => handleBootstrapTools(ctx));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     registerCommandWithAlias('pd-research', 'pdr', getCommandDescription('pd-research', language), (ctx: any) => handleResearchTools(ctx));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => {
       try {
         // Resolve agentId from sessionKey (if available), fallback to 'main'

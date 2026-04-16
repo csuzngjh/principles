@@ -323,8 +323,6 @@ export function evaluatePromotionGate(
 ): PromotionGateResult {
   const {
     checkpointId,
-     
-    targetProfile: _targetProfile,
     baselineMetrics,
     minDelta = DEFAULT_MIN_DELTA,
     allowedMargin = DEFAULT_ALLOWED_MARGIN,

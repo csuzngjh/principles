@@ -131,7 +131,7 @@ This is enforced by P-03 (精确匹配前验证原则).`;
 export function handleEditVerification(
   event: PluginHookBeforeToolCallEvent,
   wctx: WorkspaceContext,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: logger is typed as any by plugin framework - type not available
+   
   ctx: { logger?: any; sessionId?: string },
   config: EditVerificationConfig = {}
 ): PluginHookBeforeToolCallResult | void {

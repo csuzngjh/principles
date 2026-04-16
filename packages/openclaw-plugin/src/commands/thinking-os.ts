@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 import * as fs from 'fs';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
