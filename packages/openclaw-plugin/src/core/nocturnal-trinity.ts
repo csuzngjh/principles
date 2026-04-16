@@ -876,7 +876,9 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         }
         fs.rmSync(this.tempDir, { recursive: true, force: true });
       }
-    } catch { /* ignore cleanup errors */ }
+    } catch (err) {
+      this.api.logger?.warn?.(`[Trinity] Session cleanup failed: ${String(err)}`);
+    }
   }
 
   // ---------------------------------------------------------------------------

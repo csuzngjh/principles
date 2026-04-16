@@ -474,10 +474,21 @@ export function checkKeywordOptCooldown(
     const state = readStateSync(stateDir);
 
     const windowStart = now - quotaWindowMs;
-    const recentKeywordOpts = state.keywordOptRunTimestamps
-        .map(ts => new Date(ts).getTime())
-        .filter(ts => ts > windowStart);
+    const recentKeywordOpts: number[] = [];
+    for (const ts of state.keywordOptRunTimestamps) {
+        const parsed = new Date(ts).getTime();
+        if (Number.isNaN(parsed)) {
+            console.warn(`[NocturnalRuntime] Malformed timestamp in keywordOptRunTimestamps: "${ts}"`);
+            continue;
+        }
+        if (parsed > windowStart) {
+            recentKeywordOpts.push(parsed);
+        }
+    }
 
+    // Keyword optimization uses a dedicated quota (keywordOptRunTimestamps)
+    // separate from the regular nocturnal run quota (runStartTimestamps).
+    // Global/principle cooldowns from regular nocturnal runs do NOT apply here.
     return {
         globalCooldownActive: false,
         globalCooldownUntil: null,

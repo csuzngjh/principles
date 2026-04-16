@@ -276,16 +276,14 @@ export class CorrectionCueLearner {
 
   /**
    * Records that an optimization was performed.
-   * Updates lastOptimizedAt for the store. Throttle state is managed
-   * by checkCooldown() — no separate throttle file needed (CORR-08).
+   * Updates lastOptimizedAt for the store and records the run in the
+   * keyword-optimization quota (dedicated from regular nocturnal quota).
+   * @throws Error if quota recording fails — caller should propagate
    */
-  recordOptimizationPerformed(): void {
+  async recordOptimizationPerformed(): Promise<void> {
     this.store.lastOptimizedAt = new Date().toISOString();
     this.flush();
-    // Record to dedicated keyword opt quota array (does NOT affect regular nocturnal quota)
-    recordKeywordOptRun(this.stateDir).catch(err =>
-      console.warn(`[CorrectionCueLearner] recordKeywordOptRun failed: ${String(err)}`)
-    );
+    await recordKeywordOptRun(this.stateDir);
   }
 
   /**
