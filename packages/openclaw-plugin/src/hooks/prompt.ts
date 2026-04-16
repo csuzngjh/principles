@@ -533,8 +533,11 @@ The empathy observer subagent handles pain detection independently.
 
   const empathyEnabled = wctx.config.get('empathy_engine.enabled') !== false;
   logger?.info?.(`[PD:Empathy] Conditions: enabled=${empathyEnabled}, isUser=${isUserInteraction}, sessionId=${!!sessionId}, api=${!!api}, !agentToAgent=${!isAgentToAgent}, workspaceDir=${!!workspaceDir}, hasMessage=${!!latestUserMessage}`);
+
+  // Track if we should inject behavioral constraints (will be added to appendSystemContext later)
+  let shouldInjectBehavioralConstraints = false;
   if (empathyEnabled && isUserInteraction && sessionId && api && !isAgentToAgent) {
-    prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
+    shouldInjectBehavioralConstraints = true;
 
     // ── Empathy Hybrid Matching (keyword + subagent sampling) ──
     // Fast keyword scan on every turn, with strategic subagent sampling
@@ -935,8 +938,17 @@ ${taskBlocks}${processingNote}
   }
 
   // Build appendSystemContext with recency effect
-  // Content order (most important last): project_context -> working_memory -> reflection_log -> thinking_os -> principles
+  // Content order (most important last): behavioral_constraints -> project_context -> working_memory -> reflection_log -> thinking_os -> principles
   const appendParts: string[] = [];
+
+  // 0. Behavioral Constraints (empathy observer coordination)
+  // Injected here (appendSystemContext) instead of prependContext to hide from WebUI users.
+  // See: https://github.com/csuzngjh/principles/issues/XXX
+  if (shouldInjectBehavioralConstraints) {
+    appendParts.push(`<behavioral_constraints>
+${empathySilenceConstraint}
+</behavioral_constraints>`);
+  }
 
   // 1. Project Context (lowest priority, goes first)
   if (projectContextContent) {
@@ -1087,6 +1099,7 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 ---
 
 **【EXECUTION RULES】** (Priority: Low → High):
+- \`<behavioral_constraints>\` - Output format restrictions (hide diagnostic JSON)
 - \`<project_context>\` - Current priorities (can be overridden)
 - \`<reflection_log>\` - Past lessons (inform your approach)
 - \`<thinking_os>\` - Thinking models (guide your reasoning)
