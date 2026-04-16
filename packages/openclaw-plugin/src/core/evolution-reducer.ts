@@ -21,9 +21,23 @@ import type {
   PrincipleSuggestedRule,
 } from './evolution-types.js';
 import { isCompleteDetectorMetadata } from './evolution-types.js';
-import { updateTrainingStore } from './principle-tree-ledger.js';
+import { updateTrainingStore, addPrincipleToLedger, updatePrinciple, type LedgerPrinciple } from './principle-tree-ledger.js';
+import { PrincipleCompiler } from './principle-compiler/index.js';
 
- 
+/**
+ * Wrapper for updatePrinciple calls in the compilation retry path.
+ * If updatePrinciple throws, logs the error instead of propagating —
+ * compilation retry state is best-effort and should not crash principle creation.
+ */
+function updateRetryCount(stateDir: string, workspaceDir: string, principleId: string, count: number): void {
+  try {
+    updatePrinciple(stateDir, principleId, { compilationRetryCount: count });
+  } catch (err) {
+    SystemLogger.log(workspaceDir, 'RETRY_COUNT_UPDATE_FAILED',
+      `Failed to update compilationRetryCount for ${principleId}: ${String(err)}`);
+  }
+}
+
 export interface EvolutionReducer {
 
   emit(_event: EvolutionLoopEvent): void;
@@ -379,6 +393,80 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     const synced = this.syncPrincipleToFile(principle);
     if (!synced) {
       SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${principleId} created in memory but failed to sync to PRINCIPLES.md — manual file check required`);
+    }
+
+    // Add to ledger tree so the compiler can find this principle.
+    // Without this, newly diagnosed principles are invisible to the compiler
+    // (which reads tree.principles, not trainingStore or PRINCIPLES.md).
+    if (this.stateDir) {
+      try {
+        // Build a LedgerPrinciple (tree schema) from the evolution-types Principle.
+        // Tree schema Principle does NOT have: source, guardrails, contextTags, validation,
+        // feedbackScore, usageCount, activatedAt, abstractedPrinciple, valueMetrics.
+        // Pain source info is stored via derivedFromPainIds (which the compiler uses).
+        const ledgerPrinciple: LedgerPrinciple = {
+          id: principle.id,
+          version: principle.version,
+          text: principle.text,
+          triggerPattern: principle.trigger,
+          action: principle.action,
+          status: principle.status,
+          evaluability: principle.evaluability,
+          coreAxiomId: principle.coreAxiomId,
+          priority: principle.priority ?? 'P1',
+          scope: principle.scope ?? 'general',
+          domain: principle.domain,
+          suggestedRules: principle.suggestedRules?.map((r) => r.name),
+          detectorMetadata: principle.detectorMetadata,
+          deprecatedAt: principle.deprecatedAt,
+          deprecatedReason: undefined,
+          createdAt: principle.createdAt,
+          updatedAt: now,
+          // Ledger-only fields (derived from evolution-types Principle where applicable):
+          valueScore: 0,
+          adherenceRate: 0,
+          painPreventedCount: 0,
+          lastPainPreventedAt: undefined,
+          derivedFromPainIds: [params.painId],
+          ruleIds: [],
+          conflictsWithPrincipleIds: [],
+          supersedesPrincipleId: undefined,
+        };
+        addPrincipleToLedger(this.stateDir, ledgerPrinciple);
+        SystemLogger.log(this.workspaceDir, 'LEDGER_PRINCIPLE_ADDED', `Principle ${principleId} added to ledger tree`);
+
+        // Sync compile: attempt to compile immediately unless evaluability is manual_only.
+        // Failures are not fatal — heartbeat backfill will retry automatically.
+        if (evaluability !== 'manual_only' && this.stateDir) {
+          const trajectory = TrajectoryRegistry.get(this.workspaceDir);
+          const compiler = new PrincipleCompiler(this.stateDir, trajectory);
+          try {
+            const result = compiler.compileOne(principleId);
+            if (result.success) {
+              // Reset retry count on success
+              updatePrinciple(this.stateDir, principleId, { compilationRetryCount: undefined });
+              SystemLogger.log(this.workspaceDir, 'COMPILE_SUCCESS', `Principle ${principleId} compiled successfully`);
+            } else {
+              // Compile returned failure — queue for backfill retry (count=0 means "queued", Phase 2 will pick it up).
+              // This gives exactly 5 total attempts before exhaustion (backfill: 0-4, sync: 0-4).
+              updateRetryCount(this.stateDir, this.workspaceDir, principleId, 0);
+              SystemLogger.log(
+                this.workspaceDir, 'COMPILE_FAILED',
+                `Principle ${principleId} compile failed: ${result.reason ?? 'unknown'} (attempt 1/5)`
+              );
+            }
+          } catch (compileErr) {
+            // Unexpected error during compilation — queue for backfill retry
+            updateRetryCount(this.stateDir, this.workspaceDir, principleId, 0);
+            SystemLogger.log(
+              this.workspaceDir, 'COMPILE_FAILED',
+              `Principle ${principleId} compile threw: ${String(compileErr)} (attempt 1/5)`
+            );
+          }
+        }
+      } catch (err) {
+        SystemLogger.log(this.workspaceDir, 'LEDGER_PRINCIPLE_ADD_FAILED', `Failed to add ${principleId} to ledger tree: ${String(err)}`);
+      }
     }
 
     // #204: Write to training store so listEvaluablePrinciples() can find this principle

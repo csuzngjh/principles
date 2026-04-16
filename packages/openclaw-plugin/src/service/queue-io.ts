@@ -34,7 +34,7 @@ export const LOCK_MAX_RETRIES = 50;
 export const LOCK_RETRY_DELAY_MS = 50;
 export const LOCK_STALE_MS = 30_000;
 
-export const PAIN_QUEUE_DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
+export const SLEEP_REFLECTION_DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 // ---------------------------------------------------------------------------
 // requireQueueLock — thin wrapper that adds LockUnavailableError
@@ -68,6 +68,8 @@ export interface RecentPainContext {
         reason: string;
         timestamp: string;
         sessionId: string;
+        /** Trajectory pain_events row ID — set when pain flag includes pain_event_id */
+        painEventId?: number;
     } | null;
     recentPainCount: number;
     recentMaxPainScore: number;
@@ -127,7 +129,7 @@ function hasRecentSimilarReflection(
         if (t.status !== 'completed') return false;
         if (!t.completed_at) return false;
         const age = now - new Date(t.completed_at).getTime();
-        if (age > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
+        if (age > SLEEP_REFLECTION_DEDUP_WINDOW_MS) return false;
         const taskPainKey = buildPainSourceKey(t.recentPainContext ?? { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 });
         if (!taskPainKey) return false;
         return taskPainKey === painSourceKey;
@@ -150,10 +152,12 @@ export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext
         const reason = contract.data.reason ?? '';
         const timestamp = contract.data.time ?? '';
         const sessionId = contract.data.session_id ?? '';
+        const painEventIdRaw = contract.data.pain_event_id;
+        const painEventId = painEventIdRaw ? parseInt(painEventIdRaw, 10) : undefined;
 
         if (score > 0) {
             return {
-                mostRecent: { score, source, reason, timestamp, sessionId },
+                mostRecent: { score, source, reason, timestamp, sessionId, painEventId },
                 recentPainCount: 1,
                 recentMaxPainScore: score,
             };

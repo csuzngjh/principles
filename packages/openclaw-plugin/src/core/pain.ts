@@ -32,9 +32,11 @@ export interface PainFlagData {
   /** Whether this involves risky operation ('true' / 'false') */
   is_risky: string;
   /** Correlation trace ID (for linking events across the pipeline) */
-  trace_id?: string;
-  /** Short preview of text that triggered this pain signal */
-  trigger_text_preview?: string;
+  trace_id: string;
+  /** Preview of the text that triggered this pain */
+  trigger_text_preview: string;
+  /** Trajectory pain_events row ID (set by recordPainEvent) */
+  pain_event_id?: string;
 }
 
 export interface PainFlagContractResult {
@@ -65,6 +67,7 @@ export function buildPainFlag(input: {
   is_risky?: boolean;
   trace_id?: string;
   trigger_text_preview?: string;
+  pain_event_id?: string;
 }): PainFlagData {
   // Omit optional fields when not provided — prevents writing empty lines to disk
   // which causes agent confusion (SKILL.md vs reality drift)
@@ -78,6 +81,7 @@ export function buildPainFlag(input: {
     is_risky: input.is_risky ? 'true' : 'false',
     trace_id: input.trace_id ?? '',
     trigger_text_preview: input.trigger_text_preview ?? '',
+    pain_event_id: input.pain_event_id,
   };
 }
 
@@ -156,6 +160,62 @@ export function writePainFlag(projectDir: string, painData: PainFlagData): void 
     fs.mkdirSync(dir, { recursive: true });
   }
   atomicWriteFileSync(painFlagPath, serializeKvLines(painData));
+}
+
+/**
+ * Combined trajectory record + pain flag write.
+ *
+ * Records the pain event to trajectory first to get the AUTOINCREMENT ID,
+ * then builds and writes the pain flag with that ID embedded.
+ * This guarantees the pain→principle→compile chain has the exact matching ID.
+ *
+ * Error handling: if trajectory write fails, continues without pain_event_id.
+ * If flag write fails, the error propagates to the caller.
+ */
+export function recordAndWritePainFlag(
+  wctx: {
+    trajectory?: { recordPainEvent(input: { sessionId: string; source: string; score: number; reason?: string | null; severity?: string | null; origin?: string | null; confidence?: number | null; text?: string }): number } | null;
+    workspaceDir: string;
+  },
+  trajectoryParams: {
+    sessionId: string;
+    source: string;
+    score: number;
+    reason?: string | null;
+    severity?: string | null;
+    origin?: string | null;
+    confidence?: number | null;
+    text?: string;
+  },
+  painFlagParams: {
+    source: string;
+    score: string;
+    reason: string;
+    session_id?: string;
+    agent_id?: string;
+    is_risky?: boolean;
+    trace_id?: string;
+    trigger_text_preview?: string;
+  }
+): void {
+  const trajectoryPainId = wctx.trajectory?.recordPainEvent({
+    sessionId: trajectoryParams.sessionId,
+    source: trajectoryParams.source,
+    score: trajectoryParams.score,
+    reason: trajectoryParams.reason ?? null,
+    severity: trajectoryParams.severity ?? null,
+    origin: trajectoryParams.origin ?? null,
+    confidence: trajectoryParams.confidence ?? null,
+    text: trajectoryParams.text,
+  });
+
+  const painData = buildPainFlag({
+    ...painFlagParams,
+    pain_event_id:
+      trajectoryPainId !== undefined && trajectoryPainId >= 0 ? String(trajectoryPainId) : undefined,
+  });
+
+  writePainFlag(wctx.workspaceDir, painData);
 }
 
 /**

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 import { trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
-import { buildPainFlag, writePainFlag } from '../core/pain.js';
+import { recordAndWritePainFlag } from '../core/pain.js';
 import { normalizeSeverity } from '../core/empathy-types.js';
 import { ControlUiDatabase } from '../core/control-ui-db.js';
 import { DetectionService } from '../core/detection-service.js';
@@ -234,7 +234,14 @@ export function handleLlmOutput(
         const snippet = text.length > 200 ? text.substring(0, 100) + '...' + text.substring(text.length - 100) : text;
 
         try {
-            writePainFlag(ctx.workspaceDir, buildPainFlag({
+            recordAndWritePainFlag(wctx, {
+                sessionId: ctx.sessionId || 'unknown',
+                source,
+                score: painScore,
+                reason: matchedReason,
+                severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
+                origin: 'system_infer',
+            }, {
                 source,
                 score: String(painScore),
                 reason: matchedReason,
@@ -242,7 +249,7 @@ export function handleLlmOutput(
                 trigger_text_preview: snippet,
                 session_id: ctx.sessionId || '',
                 agent_id: ctx.agentId || '',
-            }));
+            });
         } catch (e) {
             ctx.logger?.warn?.(`[PD:LLM] Failed to write pain flag: ${String(e)}`);
         }

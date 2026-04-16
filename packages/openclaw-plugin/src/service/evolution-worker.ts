@@ -7,7 +7,7 @@ import * as path from 'path';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
-import { ensureStateTemplates } from '../core/init.js';
+import { ensureStateTemplates, ensureCorePrinciples } from '../core/init.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
@@ -15,6 +15,7 @@ import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
+import type { PrincipleEvaluability } from '../types/principle-tree-schema.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 
@@ -37,6 +38,8 @@ import {
     type NocturnalSessionSnapshot,
 } from '../core/nocturnal-trajectory-extractor.js';
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
+import { PrincipleCompiler } from '../core/principle-compiler/index.js';
+import { loadLedger, updatePrinciple } from '../core/principle-tree-ledger.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { readPainFlagContract } from '../core/pain.js';
 import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
@@ -141,6 +144,9 @@ export interface EvolutionQueueItem {
     // Attaches explicit recent pain signal without merging task kinds.
     // Used by target selector for ranking bias and context enrichment.
     recentPainContext?: RecentPainContext;
+
+    /** Trajectory pain_events row ID — set when pain flag includes pain_event_id */
+    painEventId?: number;
 }
 
 // ── Queue Migration (extracted to queue-migration.ts) ────────────────────────
@@ -305,6 +311,7 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
 interface ParsedPainValues {
     score: number; source: string; reason: string; preview: string;
     traceId: string; sessionId: string; agentId: string;
+    painEventId?: number;
 }
 
  
@@ -352,6 +359,7 @@ async function doEnqueuePainTask(
             status: 'pending', session_id: v.sessionId || undefined,
             agent_id: v.agentId || undefined, traceId: effectiveTraceId,
             retryCount: 0, maxRetries: 3,
+            painEventId: v.painEventId,
         });
 
         saveEvolutionQueue(queuePath, queue);
@@ -400,6 +408,8 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             const traceId = contract.data.trace_id ?? '';
             const sessionId = contract.data.session_id ?? '';
             const agentId = contract.data.agent_id ?? '';
+            const painEventIdRaw = contract.data.pain_event_id;
+            const painEventId = painEventIdRaw ? parseInt(painEventIdRaw, 10) : undefined;
 
             result.exists = true;
             result.score = score;
@@ -414,7 +424,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 
             if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
             return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
-                score, source, reason, preview, traceId, sessionId, agentId,
+                score, source, reason, preview, traceId, sessionId, agentId, painEventId,
             });
         }
 
@@ -470,6 +480,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
                     preview: jsonPreview, traceId: '',
                     sessionId: jsonPain.session_id || '',
                     agentId: jsonPain.agent_id || '',
+                    painEventId: jsonPain.pain_event_id ? parseInt(jsonPain.pain_event_id, 10) : undefined,
                 });
             }
         } catch { /* Not JSON — fall through to KV/Markdown parsing */ }
@@ -492,6 +503,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
         let traceId = '';
         let sessionId = '';
         let agentId = '';
+        let painEventId: number | undefined;
 
         for (const line of lines) {
             // KV format: "key: value"
@@ -503,6 +515,10 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             if (line.startsWith('trace_id:')) traceId = line.split(':', 2)[1].trim();
             if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
             if (line.startsWith('agent_id:')) agentId = line.slice('agent_id:'.length).trim();
+            if (line.startsWith('pain_event_id:')) {
+                const raw = line.slice('pain_event_id:'.length).trim();
+                painEventId = parseInt(raw, 10) || undefined;
+            }
 
             // Key=Value fallback format: "key=value" (pain skill manual output)
             // Handles both uppercase (Source=X) and lowercase (source=x) variants
@@ -544,7 +560,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 
         return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
             score, source, reason, preview,
-            traceId, sessionId, agentId,
+            traceId, sessionId, agentId, painEventId,
         });
 
     } catch (err) {
@@ -554,8 +570,166 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
     return result;
 }
 
- 
- 
+/**
+ * Process compilation backfill and retry loop.
+ * Phase 1 — Backfill: on first call, scan for old principles (compilationRetryCount === undefined)
+ *            with evaluability !== 'manual_only' and no active implementation, queue them (set to 0).
+ * Phase 2 — Retry: compile all principles with compilationRetryCount >= 0.
+ * After 5 consecutive failures, downgrades to manual_only and logs COMPILE_EXHAUSTED.
+ */
+export async function processCompilationBackfill(
+    wctx: WorkspaceContext,
+    logger: PluginLogger,
+): Promise<void> {
+    if (!wctx.stateDir) return;
+
+    let ledger: ReturnType<typeof loadLedger>;
+    try {
+        ledger = loadLedger(wctx.stateDir);
+    } catch (err) {
+        logger?.warn?.(`[PD:EvolutionWorker] CompilationBackfill: failed to load ledger: ${String(err)}`);
+        return;
+    }
+
+    // ── Phase 1: Backfill old principles (runs once per process) ─────────────────
+    const backfillMarkerPath = path.join(wctx.stateDir, 'COMPILATION_BACKFILL_DONE');
+    const hasBackfillRun = fs.existsSync(backfillMarkerPath);
+    if (!hasBackfillRun) {
+        let backfillQueued = 0;
+        for (const [principleId, principle] of Object.entries(ledger.tree.principles)) {
+            if (principle.compilationRetryCount !== undefined) continue; // already processed
+            if (principle.evaluability === 'manual_only') continue;
+            // Check if already has active implementation
+            const hasActiveImpl = Object.values(ledger.tree.implementations).some(
+                (impl) => impl.lifecycleState === 'active' && (
+                    ledger.tree.rules[impl.ruleId]?.principleId === principleId
+                )
+            );
+            if (hasActiveImpl) {
+                // Already compiled — mark as done
+                try {
+                    updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: undefined });
+                } catch (err) {
+                    SystemLogger.log(wctx.workspaceDir, 'BACKFILL_UPDATE_FAILED',
+                        `Failed to mark principle ${principleId} as done: ${String(err)}`);
+                    continue;
+                }
+            } else {
+                // Needs compilation — queue it
+                try {
+                    updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: 0 });
+                    backfillQueued++;
+                } catch (err) {
+                    SystemLogger.log(wctx.workspaceDir, 'BACKFILL_UPDATE_FAILED',
+                        `Failed to queue principle ${principleId}: ${String(err)}`);
+                    continue;
+                }
+            }
+        }
+        if (backfillQueued > 0) {
+            SystemLogger.log(wctx.workspaceDir, 'COMPILE_BACKFILL_QUEUED',
+                `Queued ${backfillQueued} old principles for compilation`);
+        }
+        // Write marker so we don't backfill again in this process
+        try {
+            atomicWriteFileSync(backfillMarkerPath, new Date().toISOString());
+        } catch (err) {
+            SystemLogger.log(wctx.workspaceDir, 'BACKFILL_MARKER_WRITE_FAILED',
+                `Failed to write backfill marker: ${String(err)}`);
+        }
+    }
+
+    // ── Phase 2: Retry pending compilations ───────────────────────────────────
+    const trajectory = TrajectoryRegistry.get(wctx.workspaceDir);
+    const compiler = new PrincipleCompiler(wctx.stateDir, trajectory);
+
+    // Re-load ledger after potential backfill updates
+    ledger = loadLedger(wctx.stateDir);
+
+    for (const [principleId, principle] of Object.entries(ledger.tree.principles)) {
+        const count = principle.compilationRetryCount;
+
+        // Skip: not in retry queue (undefined = done/succeeded)
+        if (count === undefined) continue;
+
+        // Skip: already exhausted (count >= 5 means 5 attempts already made)
+        if (count >= 5) continue;
+
+        // Error-isolate each principle so one failure doesn't stop all other retries
+        try {
+            const result = compiler.compileOne(principleId);
+            if (result.success) {
+                tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, undefined);
+                SystemLogger.log(wctx.workspaceDir, 'COMPILE_SUCCESS',
+                    `Principle ${principleId} compiled successfully (attempt ${count + 1})`);
+            } else {
+                const nextCount = count + 1;
+                if (nextCount >= 5) {
+                    // Exhausted: single write to set manual_only (no intermediate count write)
+                    tryUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
+                        evaluability: 'manual_only',
+                        compilationRetryCount: undefined,
+                    });
+                    SystemLogger.log(wctx.workspaceDir, 'COMPILE_EXHAUSTED',
+                        `Principle ${principleId} compilation exhausted after 5 attempts: ${result.reason ?? 'unknown'}`);
+                } else {
+                    tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
+                    SystemLogger.log(wctx.workspaceDir, 'COMPILE_FAILED',
+                        `Principle ${principleId} compile failed: ${result.reason ?? 'unknown'} (attempt ${nextCount}/5)`);
+                }
+            }
+        } catch (compileErr) {
+            const nextCount = count + 1;
+            if (nextCount >= 5) {
+                // Exhausted: single write to set manual_only (no intermediate count write)
+                tryUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
+                    evaluability: 'manual_only',
+                    compilationRetryCount: undefined,
+                });
+                SystemLogger.log(wctx.workspaceDir, 'COMPILE_EXHAUSTED',
+                    `Principle ${principleId} compilation exhausted after 5 attempts: threw ${String(compileErr)}`);
+            } else {
+                tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
+                SystemLogger.log(wctx.workspaceDir, 'COMPILE_FAILED',
+                    `Principle ${principleId} compile threw: ${String(compileErr)} (attempt ${nextCount}/5)`);
+            }
+        }
+    }
+}
+
+/**
+ * Wrapper for updateRetryCount — logs but does not propagate errors.
+ * Errors are silently swallowed: if update fails, the principle stays in its
+ * current retry state and will be picked up again on the next heartbeat.
+ */
+function tryUpdateRetryCount(stateDir: string, workspaceDir: string, principleId: string, count: number | undefined): void {
+    try {
+        updatePrinciple(stateDir, principleId, { compilationRetryCount: count });
+    } catch (err) {
+        SystemLogger.log(workspaceDir, 'RETRY_COUNT_UPDATE_FAILED',
+            `Failed to update retry count for ${principleId}: ${String(err)}`);
+    }
+}
+
+/**
+ * Wrapper for updatePrinciple with multiple fields — logs but does not propagate errors.
+ * Errors are silently swallowed: if update fails, the principle stays in its
+ * current state and will be picked up again on the next heartbeat.
+ */
+function tryUpdatePrinciple(
+    stateDir: string,
+    workspaceDir: string,
+    principleId: string,
+    updates: { evaluability?: PrincipleEvaluability; compilationRetryCount?: number },
+): void {
+    try {
+        updatePrinciple(stateDir, principleId, updates);
+    } catch (err) {
+        SystemLogger.log(workspaceDir, 'RETRY_PRINCIPLE_UPDATE_FAILED',
+            `Failed to update principle ${principleId}: ${String(err)}`);
+    }
+}
+
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
@@ -760,7 +934,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 } else {
                                     logger.info(`[PD:EvolutionWorker] Creating principle from report for task ${task.id}`);
                                     const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
-                                        painId: task.id,
+                                        painId: task.painEventId !== undefined ? String(task.painEventId) : task.id,
                                         painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
                                         triggerPattern: principle.trigger_pattern,
                                         action: principle.action,
@@ -858,7 +1032,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 logger.info(`[PD:EvolutionWorker] Diagnostician marked principle as duplicate: ${principle.duplicate_of || 'unknown'} — skipping for task ${task.id}`);
                             } else {
                                 const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
-                                    painId: task.id,
+                                    painId: task.painEventId !== undefined ? String(task.painEventId) : task.id,
                                     painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
                                     triggerPattern: principle.trigger_pattern,
                                     action: principle.action,
@@ -1573,7 +1747,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                             if (parsedResult?.updated) {
                                 koService.applyResult(parsedResult);
-                                learner.recordOptimizationPerformed();
+                                await learner.recordOptimizationPerformed();
                                 logger?.info?.(`[PD:EvolutionWorker] keyword_optimization applied mutations: ${parsedResult.summary}`);
                             } else {
                                 logger?.info?.(`[PD:EvolutionWorker] keyword_optimization completed with no updates`);
@@ -1906,6 +2080,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const {config} = wctx;
         const language = config.get('language') || 'en';
         ensureStateTemplates({ logger }, wctx.stateDir, language);
+        ensureCorePrinciples(wctx.stateDir, logger);
 
         const initialDelay = 5000;
         const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
@@ -1943,6 +2118,12 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // Load config on each cycle (supports runtime updates) — single file read
                 const mergedConfig = loadNocturnalConfigMerged(wctx.stateDir);
                 const { sleepReflection: sleepConfig, keywordOptimization: kwOptConfig } = mergedConfig;
+
+                // Compilation backfill: runs on every heartbeat to retry failed compilations.
+                // Fire-and-forget — errors are logged within the function.
+                processCompilationBackfill(wctx, logger).catch((err) => {
+                    logger?.error?.(`[PD:EvolutionWorker] CompilationBackfill threw: ${String(err)}`);
+                });
 
                 const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
                 logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt} triggerMode=${sleepConfig.trigger_mode}`);

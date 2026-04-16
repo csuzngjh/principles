@@ -47,9 +47,9 @@ import {
 import {
   checkWorkspaceIdle,
   checkCooldown,
-  DEFAULT_IDLE_THRESHOLD_MS,
   type IdleCheckResult,
 } from './nocturnal-runtime.js';
+import { DEFAULT_IDLE_THRESHOLD_MS } from '../config/defaults/runtime.js';
 import { detectViolation } from '../core/nocturnal-compliance.js';
 
 // ---------------------------------------------------------------------------
