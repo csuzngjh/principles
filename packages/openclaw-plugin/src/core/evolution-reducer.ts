@@ -21,7 +21,7 @@ import type {
   PrincipleSuggestedRule,
 } from './evolution-types.js';
 import { isCompleteDetectorMetadata } from './evolution-types.js';
-import { updateTrainingStore } from './principle-tree-ledger.js';
+import { updateTrainingStore, addPrincipleToLedger, type LedgerPrinciple } from './principle-tree-ledger.js';
 
  
 export interface EvolutionReducer {
@@ -379,6 +379,50 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     const synced = this.syncPrincipleToFile(principle);
     if (!synced) {
       SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${principleId} created in memory but failed to sync to PRINCIPLES.md — manual file check required`);
+    }
+
+    // Add to ledger tree so the compiler can find this principle.
+    // Without this, newly diagnosed principles are invisible to the compiler
+    // (which reads tree.principles, not trainingStore or PRINCIPLES.md).
+    if (this.stateDir) {
+      try {
+        // Build a LedgerPrinciple (tree schema) from the evolution-types Principle.
+        // Tree schema Principle does NOT have: source, guardrails, contextTags, validation,
+        // feedbackScore, usageCount, activatedAt, abstractedPrinciple, valueMetrics.
+        // Pain source info is stored via derivedFromPainIds (which the compiler uses).
+        const ledgerPrinciple: LedgerPrinciple = {
+          id: principle.id,
+          version: principle.version,
+          text: principle.text,
+          triggerPattern: principle.trigger,
+          action: principle.action,
+          status: principle.status,
+          evaluability: principle.evaluability,
+          coreAxiomId: principle.coreAxiomId,
+          priority: principle.priority ?? 'P1',
+          scope: principle.scope ?? 'general',
+          domain: principle.domain,
+          suggestedRules: principle.suggestedRules?.map((r) => r.name),
+          detectorMetadata: principle.detectorMetadata,
+          deprecatedAt: principle.deprecatedAt,
+          deprecatedReason: undefined,
+          createdAt: principle.createdAt,
+          updatedAt: now,
+          // Ledger-only fields (derived from evolution-types Principle where applicable):
+          valueScore: 0,
+          adherenceRate: 0,
+          painPreventedCount: 0,
+          lastPainPreventedAt: undefined,
+          derivedFromPainIds: [params.painId],
+          ruleIds: [],
+          conflictsWithPrincipleIds: [],
+          supersedesPrincipleId: undefined,
+        };
+        addPrincipleToLedger(this.stateDir, ledgerPrinciple);
+        SystemLogger.log(this.workspaceDir, 'LEDGER_PRINCIPLE_ADDED', `Principle ${principleId} added to ledger tree`);
+      } catch (err) {
+        SystemLogger.log(this.workspaceDir, 'LEDGER_PRINCIPLE_ADD_FAILED', `Failed to add ${principleId} to ledger tree: ${String(err)}`);
+      }
     }
 
     // #204: Write to training store so listEvaluablePrinciples() can find this principle

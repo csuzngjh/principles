@@ -141,6 +141,9 @@ export interface EvolutionQueueItem {
     // Attaches explicit recent pain signal without merging task kinds.
     // Used by target selector for ranking bias and context enrichment.
     recentPainContext?: RecentPainContext;
+
+    /** Trajectory pain_events row ID — set when pain flag includes pain_event_id */
+    painEventId?: number;
 }
 
 // ── Queue Migration (extracted to queue-migration.ts) ────────────────────────
@@ -305,6 +308,7 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
 interface ParsedPainValues {
     score: number; source: string; reason: string; preview: string;
     traceId: string; sessionId: string; agentId: string;
+    painEventId?: number;
 }
 
  
@@ -352,6 +356,7 @@ async function doEnqueuePainTask(
             status: 'pending', session_id: v.sessionId || undefined,
             agent_id: v.agentId || undefined, traceId: effectiveTraceId,
             retryCount: 0, maxRetries: 3,
+            painEventId: v.painEventId,
         });
 
         saveEvolutionQueue(queuePath, queue);
@@ -400,6 +405,8 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             const traceId = contract.data.trace_id ?? '';
             const sessionId = contract.data.session_id ?? '';
             const agentId = contract.data.agent_id ?? '';
+            const painEventIdRaw = contract.data.pain_event_id;
+            const painEventId = painEventIdRaw ? parseInt(painEventIdRaw, 10) : undefined;
 
             result.exists = true;
             result.score = score;
@@ -414,7 +421,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 
             if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
             return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
-                score, source, reason, preview, traceId, sessionId, agentId,
+                score, source, reason, preview, traceId, sessionId, agentId, painEventId,
             });
         }
 
@@ -470,6 +477,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
                     preview: jsonPreview, traceId: '',
                     sessionId: jsonPain.session_id || '',
                     agentId: jsonPain.agent_id || '',
+                    painEventId: jsonPain.pain_event_id ? parseInt(jsonPain.pain_event_id, 10) : undefined,
                 });
             }
         } catch { /* Not JSON — fall through to KV/Markdown parsing */ }
@@ -492,6 +500,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
         let traceId = '';
         let sessionId = '';
         let agentId = '';
+        let painEventId: number | undefined;
 
         for (const line of lines) {
             // KV format: "key: value"
@@ -503,6 +512,10 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             if (line.startsWith('trace_id:')) traceId = line.split(':', 2)[1].trim();
             if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
             if (line.startsWith('agent_id:')) agentId = line.slice('agent_id:'.length).trim();
+            if (line.startsWith('pain_event_id:')) {
+                const raw = line.slice('pain_event_id:'.length).trim();
+                painEventId = parseInt(raw, 10) || undefined;
+            }
 
             // Key=Value fallback format: "key=value" (pain skill manual output)
             // Handles both uppercase (Source=X) and lowercase (source=x) variants
@@ -544,7 +557,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 
         return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
             score, source, reason, preview,
-            traceId, sessionId, agentId,
+            traceId, sessionId, agentId, painEventId,
         });
 
     } catch (err) {
