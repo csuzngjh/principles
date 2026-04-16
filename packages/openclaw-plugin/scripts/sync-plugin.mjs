@@ -27,8 +27,36 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const SOURCE_DIR = join(__dirname, '..');
-const OPENCLAW_DIR = join(process.env.HOME, '.openclaw');
+
+/**
+ * Cross-platform home directory resolution.
+ * Linux/macOS: HOME=/home/user
+ * Windows: USERPROFILE=C:\Users\user or HOMEDRIVE/HOMEPATH
+ */
+function getHomeDir() {
+  return process.env.HOME
+    || process.env.USERPROFILE
+    || (process.env.HOMEDRIVE && process.env.HOMEPATH ? process.env.HOMEDRIVE + process.env.HOMEPATH : null)
+    || '.';
+}
+
+const OPENCLAW_DIR = join(getHomeDir(), '.openclaw');
 const INSTALL_DIR = join(OPENCLAW_DIR, 'extensions', 'principles-disciple');
+function getConfiguredWorkspaceDir() {
+  const configPath = join(OPENCLAW_DIR, 'openclaw.json');
+  try {
+    const raw = readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(raw);
+    const workspace = config?.agents?.defaults?.workspace;
+    if (workspace && existsSync(workspace)) {
+      return workspace;
+    }
+  } catch {
+    // Fall through to fallback
+  }
+  // Fallback: try workspace-main (legacy default)
+  return join(OPENCLAW_DIR, 'workspace-main');
+}
 
 // Files and directories to sync
 const SYNC_ITEMS = [
@@ -177,7 +205,11 @@ function checkPrerequisites() {
         // Check for global package conflicts that cause module resolution traps
         console.log('🔍 Checking for global package conflicts...');
         try {
-            const globalConflict = execSync('npm list -g principles-disciple --depth=0 2>/dev/null', { encoding: 'utf-8' });
+            // Cross-platform: use stdio: 'pipe' to capture stderr, then check output
+            const globalConflict = execSync('npm list -g principles-disciple --depth=0', {
+                encoding: 'utf-8',
+                stdio: ['pipe', 'pipe', 'pipe']  // Capture all streams
+            });
             if (globalConflict.includes('principles-disciple')) {
                 console.error('\n❌ CONFLICT DETECTED: A version of "principles-disciple" is installed globally via npm.');
                 console.error('This will block OpenClaw from loading the extension version you are trying to install.');
@@ -187,7 +219,17 @@ function checkPrerequisites() {
             }
         } catch (e) {
             // npm list returns non-zero if not found, which is what we want
-            console.log('✅ No global package conflicts detected.');
+            // Check if the error output contains the package name
+            const output = e.stdout || e.stderr || '';
+            if (!output.includes('principles-disciple')) {
+                console.log('✅ No global package conflicts detected.');
+            } else {
+                console.error('\n❌ CONFLICT DETECTED: A version of "principles-disciple" is installed globally via npm.');
+                console.error('This will block OpenClaw from loading the extension version you are trying to install.');
+                console.error('\nACTION REQUIRED: Please run the following command first:');
+                console.error('   npm uninstall -g principles-disciple\n');
+                process.exit(1);
+            }
         }
     } catch {
         console.error('❌ npm not found. Please install Node.js with npm.');
@@ -481,7 +523,7 @@ function verifyInstalledFingerprint() {
 }
 
 /**
- * Remove existing installation directory.
+ * Remove existing installation directory with Windows-friendly retry logic.
  */
 function cleanTargetDir(force) {
     if (!existsSync(INSTALL_DIR)) return;
@@ -495,7 +537,34 @@ function cleanTargetDir(force) {
     }
 
     console.log('\n🗑️  Removing existing installation...');
-    rmSync(INSTALL_DIR, { recursive: true, force: true });
+
+    // Windows often returns EPERM due to file locks, add retry logic
+    const maxRetries = isWindows() ? 3 : 1;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            rmSync(INSTALL_DIR, { recursive: true, force: true });
+            console.log('   ✅ Removed successfully.');
+            return;
+        } catch (err) {
+            lastError = err;
+            if (err.code === 'EPERM' && attempt < maxRetries) {
+                console.log(`   ⚠️  Attempt ${attempt}/${maxRetries} failed (EPERM), retrying in 2s...`);
+                // Synchronous sleep for retry
+                Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+            }
+        }
+    }
+
+    // If all retries failed on Windows, try graceful fallback
+    if (isWindows() && lastError?.code === 'EPERM') {
+        console.log('   ⚠️  Windows file lock detected, skipping removal.');
+        console.log('   📁 Will overwrite files in place.');
+        return;  // Continue with overwrite installation
+    }
+
+    throw lastError;
 }
 
 /**
@@ -573,17 +642,115 @@ function cleanStaleBackups() {
 }
 
 /**
- * Restart OpenClaw Gateway.
+ * Check if running on Windows.
+ */
+function isWindows() {
+    return process.platform === 'win32';
+}
+
+/**
+ * Get temporary directory path (cross-platform).
+ */
+function getTempDir() {
+    if (isWindows()) {
+        return process.env.TEMP || process.env.TMP || 'C:\\Windows\\Temp';
+    }
+    return '/tmp';
+}
+
+/**
+ * Restart OpenClaw Gateway (cross-platform).
  */
 function restartGateway() {
     console.log('\n🔄 Restarting OpenClaw Gateway...');
+
+    if (isWindows()) {
+        return restartGatewayWindows();
+    } else {
+        return restartGatewayLinux();
+    }
+}
+
+/**
+ * Restart Gateway on Windows using PowerShell.
+ */
+function restartGatewayWindows() {
+    const logPath = join(getTempDir(), 'openclaw-auto-restart.log');
+
     try {
+        // Step 1: Find and terminate existing gateway processes
+        console.log('   Looking for existing gateway processes...');
+        try {
+            // PowerShell command to find and kill openclaw gateway processes
+            // Note: Use single quotes inside -like pattern for proper escaping
+            const findCmd = "Get-Process -Name 'node' -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*openclaw*' } | Select-Object -ExpandProperty Id";
+            const pids = execSync(`powershell -NoProfile -Command "${findCmd}"`, { encoding: 'utf-8' }).trim();
+
+            if (pids) {
+                console.log(`   Terminating existing gateway process(es): ${pids.replace(/\n/g, ', ')}...`);
+                // Kill by PID
+                const pidList = pids.split('\n').filter(p => p.trim());
+                for (const pid of pidList) {
+                    try {
+                        execSync(`taskkill /PID ${pid.trim()} /F`, { stdio: 'pipe' });
+                    } catch { /* ignore if process already gone */ }
+                }
+                // Wait a moment for process to terminate
+                execSync('timeout /t 3 /nobreak > nul', { shell: true, stdio: 'ignore' });
+            }
+        } catch { /* no existing processes */ }
+
+        // Step 2: Start new gateway process in background
+        console.log(`   Starting new gateway (logs: ${logPath})...`);
+
+        // Use openclaw CLI to start gateway (more reliable than direct node invocation)
+        const gatewayCmd = join(getHomeDir(), '.openclaw', 'gateway.cmd');
+        const startCmd = `Start-Process -FilePath 'cmd.exe' -ArgumentList '/c ${gatewayCmd}' -WindowStyle Hidden -RedirectStandardOutput '${logPath}' -RedirectStandardError '${join(getTempDir(), 'openclaw-auto-restart.err')}'`;
+        execSync(`powershell -NoProfile -Command "${startCmd}"`, { stdio: 'inherit' });
+        console.log('✅ Gateway restart triggered.');
+
+        // Step 3: Wait and verify
+        setTimeout(() => {
+            try {
+                if (existsSync(logPath)) {
+                    const logs = readFileSync(logPath, 'utf-8');
+                    if (logs.includes('Principles Disciple Plugin registered')) {
+                        console.log('✅ SUCCESS: Principles Disciple plugin registered successfully!');
+                    } else if (logs.includes('failed to load') || logs.includes('Error: Cannot find module')) {
+                        console.error('\n❌ CRITICAL: Gateway started but PD plugin FAILED to load!');
+                        console.error('   Check logs at: ' + logPath);
+                        process.exit(1);
+                    } else {
+                        console.warn('⚠️  Gateway started but PD registration not confirmed in recent logs.');
+                        console.log('   Check logs at: ' + logPath);
+                    }
+                }
+            } catch (e) {
+                console.warn(`⚠️  Post-restart verification skipped: ${e.message}`);
+            }
+        }, 8000);
+
+    } catch (error) {
+        console.error(`\n❌ Failed to restart gateway: ${error.message}`);
+        console.error('   You may need to manually restart OpenClaw Gateway.');
+        process.exit(1);
+    }
+}
+
+/**
+ * Restart Gateway on Linux using systemctl or process management.
+ */
+function restartGatewayLinux() {
+    const logPath = '/tmp/openclaw-auto-restart.log';
+
+    try {
+        // Try systemctl first (Linux systemd)
         try {
             execSync('systemctl --user is-active openclaw-gateway.service', { stdio: 'pipe' });
             console.log('   Restarting via systemctl...');
             execSync('systemctl --user restart openclaw-gateway.service', { stdio: 'inherit' });
             console.log('✅ Gateway restarted via systemctl.');
-            
+
             console.log('   Waiting for Gateway to initialize and load PD plugin (8s)...');
             setTimeout(() => {
                 try {
@@ -608,8 +775,9 @@ function restartGateway() {
                 }
             }, 8000);
             return;
-        } catch { /* ignore */ }
+        } catch { /* systemctl not available, fall through to manual restart */ }
 
+        // Manual process management
         const pids = execSync('pgrep -f "openclaw-gateway|openclaw gateway"', { encoding: 'utf-8' }).trim();
         if (pids) {
             console.log(`   Terminating existing gateway process(es)...`);
@@ -617,11 +785,10 @@ function restartGateway() {
             execSync('sleep 3');
         }
 
-        const logPath = '/tmp/openclaw-auto-restart.log';
         console.log(`   Starting new gateway (logs: ${logPath})...`);
         execSync(`nohup openclaw gateway --force > ${logPath} 2>&1 &`, { stdio: 'ignore' });
         console.log('✅ Gateway restart triggered.');
-        
+
         setTimeout(() => {
             if (existsSync(logPath)) {
                 const logs = readFileSync(logPath, 'utf-8');
@@ -699,9 +866,10 @@ function main() {
     if (existsSync(bootstrapScript)) {
         console.log('\n🧠 Synchronizing principles to active rules (Bootstrap)...');
         try {
-            const targetStateDir = join(process.env.HOME, '.openclaw', 'workspace-main', '.state');
+            const workspaceDir = getConfiguredWorkspaceDir();
+            const targetStateDir = join(workspaceDir, '.state');
             if (existsSync(targetStateDir)) {
-                execSync(`STATE_DIR=${targetStateDir} BOOTSTRAP_LIMIT=100 node scripts/bootstrap-rules.mjs`, { cwd: SOURCE_DIR, stdio: 'inherit' });
+                execSync(`node scripts/bootstrap-rules.mjs`, { cwd: SOURCE_DIR, stdio: 'inherit', env: { ...process.env, STATE_DIR: targetStateDir, BOOTSTRAP_LIMIT: '100' } });
                 console.log('✅ Principles synchronized.');
             }
         } catch (e) {
@@ -713,7 +881,8 @@ function main() {
     if (existsSync(compileScript)) {
         console.log('\n⚙️  Compiling pain-derived principles into rules...');
         try {
-            const targetWorkspaceDir = join(process.env.HOME, '.openclaw', 'workspace-main');
+            const workspaceDir = getConfiguredWorkspaceDir();
+            const targetWorkspaceDir = workspaceDir;
             if (existsSync(targetWorkspaceDir)) {
                 execSync(`node scripts/compile-principles.mjs ${targetWorkspaceDir}`, { cwd: SOURCE_DIR, stdio: 'inherit' });
                 console.log('✅ Principle compilation complete.');
@@ -732,12 +901,6 @@ function main() {
     verifyInstalledFingerprint();
     if (args.dev || args.restart) cleanStaleBackups();
 
-    try {
-        const reloadSignal = join(OPENCLAW_DIR, '.plugin_reload_signal');
-        writeFileSync(reloadSignal, new Date().toISOString(), 'utf-8');
-        console.log(`\n🔔 Reload signal sent to ${reloadSignal}`);
-    } catch { /* ignore */ }
-
     console.log('\n╔════════════════════════════════════════════════════════════╗');
     console.log('║                  ✅ Installation Complete                  ║');
     console.log('╚════════════════════════════════════════════════════════════╝');
@@ -746,6 +909,7 @@ function main() {
         restartGateway();
     } else {
         console.log('\n💡 Restart OpenClaw Gateway to load the new version.');
+        console.log('   (Plugin code changes require a full gateway restart)');
     }
 }
 

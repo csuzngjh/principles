@@ -1,9 +1,9 @@
 /**
- * EventLog Auditor — Search and verify events across all .state directories
- * 
+ * EventLog Auditor - Search and verify events across all .state directories
+ *
  * This tool addresses a common debugging issue where hook events may be
  * written to the wrong .state directory due to workspaceDir resolution bugs.
- * 
+ *
  * Usage:
  *   const report = await auditEventLogs(openclawDir, ['after_tool_call', 'before_tool_call']);
  *   console.log(report.summary);
@@ -42,7 +42,7 @@ interface AuditReport {
  */
 function findEventLogs(baseDir: string, maxDepth = 4): string[] {
   const results: string[] = [];
-  
+
   function scan(dir: string, depth: number): void {
     if (depth > maxDepth) return;
     try {
@@ -58,37 +58,50 @@ function findEventLogs(baseDir: string, maxDepth = 4): string[] {
       // Permission denied or directory doesn't exist
     }
   }
-  
+
   scan(baseDir, 0);
   return results;
 }
 
 /**
  * Find events.jsonl in well-known locations.
+ * Dynamically discovers workspace directories instead of hardcoding names.
  */
 function findKnownEventLogPaths(): string[] {
   const homeDir = os.homedir();
   const candidates: string[] = [];
-  
-  // Common patterns
-  const patterns = [
+
+  // Common patterns (legacy, non-workspace paths)
+  const legacyPatterns = [
     path.join(homeDir, '.state', 'logs', 'events.jsonl'),
     path.join(homeDir, '.openclaw', '.state', 'logs', 'events.jsonl'),
-    path.join(homeDir, '.openclaw', 'workspace-main', '.state', 'logs', 'events.jsonl'),
-    path.join(homeDir, '.openclaw', 'workspace-builder', '.state', 'logs', 'events.jsonl'),
-    path.join(homeDir, '.openclaw', 'workspace-pm', '.state', 'logs', 'events.jsonl'),
-    path.join(homeDir, '.openclaw', 'workspace-hr', '.state', 'logs', 'events.jsonl'),
-    path.join(homeDir, '.openclaw', 'workspace-repair', '.state', 'logs', 'events.jsonl'),
-    path.join(homeDir, '.openclaw', 'workspace-research', '.state', 'logs', 'events.jsonl'),
-    path.join(homeDir, '.openclaw', 'workspace-scout', '.state', 'logs', 'events.jsonl'),
   ];
-  
-  for (const p of patterns) {
+
+  for (const p of legacyPatterns) {
     if (fs.existsSync(p)) {
       candidates.push(p);
     }
   }
-  
+
+  // Dynamically discover workspace directories under ~/.openclaw/
+  const openclawDir = path.join(homeDir, '.openclaw');
+  if (fs.existsSync(openclawDir)) {
+    try {
+      const entries = fs.readdirSync(openclawDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        // Skip known non-workspace directories
+        if (entry.name.startsWith('.') || entry.name === 'extensions' || entry.name === 'memory') continue;
+        const eventLogPath = path.join(openclawDir, entry.name, '.state', 'logs', 'events.jsonl');
+        if (fs.existsSync(eventLogPath)) {
+          candidates.push(eventLogPath);
+        }
+      }
+    } catch {
+      // Directory read failed, skip dynamic discovery
+    }
+  }
+
   return candidates;
 }
 
@@ -133,25 +146,25 @@ function countAllHooks(filePath: string): Record<string, number> {
 
 /**
  * Audit all events.jsonl files.
- * 
+ *
  * @param openclawDir - Base OpenClaw directory (e.g., ~/.openclaw)
  * @param expectedToolHooks - Hook names that should appear in the primary workspace
  */
-     
+
 export async function auditEventLogs(
   openclawDir: string,
   expectedToolHooks: string[] = ['before_tool_call', 'after_tool_call'],
 ): Promise<AuditReport> {
   const homeDir = os.homedir();
-  
+
   // Find all event logs
   const knownPaths = findKnownEventLogPaths();
   const scannedPaths = findEventLogs(homeDir, 4);
   const allPaths = [...new Set([...knownPaths, ...scannedPaths])];
-  
+
   const locations: LocationReport[] = [];
   let primaryPath: string | null = null;
-  
+
   for (const filePath of allPaths) {
     try {
       const stat = fs.statSync(filePath);
@@ -165,7 +178,7 @@ export async function auditEventLogs(
         hookCounts: allCounts,
         recentEntries: recent,
       });
-      
+
       // Determine primary path (workspace-main or most recent)
       if (filePath.includes('workspace-main') || filePath.includes('workspace-main')) {
         primaryPath = filePath;
@@ -174,7 +187,7 @@ export async function auditEventLogs(
       // Skip unreadable files
     }
   }
-  
+
   // If no primary found, use most recent
   if (!primaryPath && locations.length > 0) {
     locations.sort((a, b) => {
@@ -184,21 +197,21 @@ export async function auditEventLogs(
     });
     primaryPath = locations[0].path;
   }
-  
+
   // Detect misplaced tool hook events
   const misplacedEvents: { path: string; entries: EventLogEntry[] }[] = [];
   for (const loc of locations) {
     if (loc.path === primaryPath) continue;
-    
-    const toolHookEntries = loc.recentEntries.filter(e => 
+
+    const toolHookEntries = loc.recentEntries.filter(e =>
       e.type === 'hook_execution' && expectedToolHooks.includes(e.data?.hook as string)
     );
-    
+
     if (toolHookEntries.length > 0) {
       misplacedEvents.push({ path: loc.path, entries: toolHookEntries });
     }
   }
-  
+
   return {
     searchedPaths: allPaths,
     locations,
@@ -210,37 +223,37 @@ export async function auditEventLogs(
 /**
  * Format audit report for display.
  */
-     
+
 export function formatAuditReport(report: AuditReport): string {
   const lines: string[] = [];
-  
+
   lines.push('=== Event Log Audit Report ===\n');
-  
+
   lines.push(`Searched ${report.searchedPaths.length} paths:\n`);
   for (const p of report.searchedPaths) {
     lines.push(`  ${p}`);
   }
   lines.push('');
-  
+
   lines.push(`Primary: ${report.primaryPath ?? 'NOT FOUND'}\n`);
-  
+
   for (const loc of report.locations) {
     const isPrimary = loc.path === report.primaryPath;
     lines.push(`─── ${isPrimary ? '[PRIMARY]' : '[OTHER]   '}${loc.path}`);
     lines.push(`    Last modified: ${loc.lastModified?.toISOString() ?? 'never'}`);
     lines.push(`    Hook counts:`);
-    
+
     const hooks = Object.entries(loc.hookCounts).sort((a, b) => b[1] - a[1]);
     for (const [hook, count] of hooks) {
       lines.push(`      ${hook}: ${count}`);
     }
-    
+
     if (hooks.length === 0) {
       lines.push(`      (no hooks recorded)`);
     }
     lines.push('');
   }
-  
+
   if (report.misplacedEvents.length > 0) {
     lines.push('⚠️  MISPLACED tool hook events detected:');
     for (const me of report.misplacedEvents) {
@@ -258,6 +271,6 @@ export function formatAuditReport(report: AuditReport): string {
   } else {
     lines.push('✅ No misplaced tool hook events detected.');
   }
-  
+
   return lines.join('\n');
 }
