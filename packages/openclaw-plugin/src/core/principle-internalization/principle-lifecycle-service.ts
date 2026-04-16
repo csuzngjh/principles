@@ -38,7 +38,7 @@ export interface PrincipleLifecycleAssessment {
   routeRecommendation: InternalizationRouteRecommendation;
 }
 
-    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
+     
 function createValueMetrics(
   principle: PrincipleLifecycleEvidence,
   adherence: PrincipleAdherenceResult,

@@ -137,7 +137,7 @@ function countAllHooks(filePath: string): Record<string, number> {
  * @param openclawDir - Base OpenClaw directory (e.g., ~/.openclaw)
  * @param expectedToolHooks - Hook names that should appear in the primary workspace
  */
-    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+     
 export async function auditEventLogs(
   openclawDir: string,
   expectedToolHooks: string[] = ['before_tool_call', 'after_tool_call'],
@@ -210,7 +210,7 @@ export async function auditEventLogs(
 /**
  * Format audit report for display.
  */
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
 export function formatAuditReport(report: AuditReport): string {
   const lines: string[] = [];
   

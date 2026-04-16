@@ -1,7 +1,7 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext } from '../openclaw-sdk.js';
 
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
 export function handlePrincipleRollbackCommand(ctx: PluginCommandContext): { text: string } {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const argText = (ctx.args || '').trim();

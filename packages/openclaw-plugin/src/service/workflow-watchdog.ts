@@ -30,7 +30,7 @@ export interface WatchdogResult {
   scanError?: string;
 }
 
-/* eslint-disable complexity */
+ 
 export async function runWorkflowWatchdog(
   wctx: WorkspaceContext,
   api: OpenClawPluginApi | null,

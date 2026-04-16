@@ -278,7 +278,7 @@ function isTooGeneric(text: string): boolean {
  * @param artifact - The validated artifact from arbiter (passed = true)
  * @returns ExecutabilityResult
  */
-    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
+     
 export function validateExecutability(artifact: {
   badDecision: string;
   betterDecision: string;

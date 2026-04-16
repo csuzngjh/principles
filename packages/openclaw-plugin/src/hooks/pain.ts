@@ -131,7 +131,7 @@ export function handleAfterToolCall(
     
     // ── Trust Engine: Record failure ──
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     const errorType = extractErrorType(event.error || errorText);
     const filePath = params.file_path || params.path || params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
@@ -194,7 +194,7 @@ export function handleAfterToolCall(
     const session = getSession(sessionId);
     const toolFailureGfi = session?.gfiBySource?.tool_failure || 0;
     
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let resetState: SessionState;
     if (toolFailureGfi > 0) {
       // Reduce tool_failure source by 50% (relief from successful tool execution)
