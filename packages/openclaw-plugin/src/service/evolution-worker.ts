@@ -607,11 +607,23 @@ export async function processCompilationBackfill(
             );
             if (hasActiveImpl) {
                 // Already compiled — mark as done
-                updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: undefined });
+                try {
+                    updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: undefined });
+                } catch (err) {
+                    SystemLogger.log(wctx.workspaceDir, 'BACKFILL_UPDATE_FAILED',
+                        `Failed to mark principle ${principleId} as done: ${String(err)}`);
+                    continue;
+                }
             } else {
                 // Needs compilation — queue it
-                updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: 0 });
-                backfillQueued++;
+                try {
+                    updatePrinciple(wctx.stateDir, principleId, { compilationRetryCount: 0 });
+                    backfillQueued++;
+                } catch (err) {
+                    SystemLogger.log(wctx.workspaceDir, 'BACKFILL_UPDATE_FAILED',
+                        `Failed to queue principle ${principleId}: ${String(err)}`);
+                    continue;
+                }
             }
         }
         if (backfillQueued > 0) {
@@ -619,7 +631,12 @@ export async function processCompilationBackfill(
                 `Queued ${backfillQueued} old principles for compilation`);
         }
         // Write marker so we don't backfill again in this process
-        atomicWriteFileSync(backfillMarkerPath, new Date().toISOString());
+        try {
+            atomicWriteFileSync(backfillMarkerPath, new Date().toISOString());
+        } catch (err) {
+            SystemLogger.log(wctx.workspaceDir, 'BACKFILL_MARKER_WRITE_FAILED',
+                `Failed to write backfill marker: ${String(err)}`);
+        }
     }
 
     // ── Phase 2: Retry pending compilations ───────────────────────────────────
@@ -642,21 +659,21 @@ export async function processCompilationBackfill(
         try {
             const result = compiler.compileOne(principleId);
             if (result.success) {
-                safeUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, undefined);
+                tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, undefined);
                 SystemLogger.log(wctx.workspaceDir, 'COMPILE_SUCCESS',
                     `Principle ${principleId} compiled successfully (attempt ${count + 1})`);
             } else {
                 const nextCount = count + 1;
                 if (nextCount >= 5) {
                     // Exhausted: single write to set manual_only (no intermediate count write)
-                    safeUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
+                    tryUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
                         evaluability: 'manual_only',
                         compilationRetryCount: undefined,
                     });
                     SystemLogger.log(wctx.workspaceDir, 'COMPILE_EXHAUSTED',
                         `Principle ${principleId} compilation exhausted after 5 attempts: ${result.reason ?? 'unknown'}`);
                 } else {
-                    safeUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
+                    tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
                     SystemLogger.log(wctx.workspaceDir, 'COMPILE_FAILED',
                         `Principle ${principleId} compile failed: ${result.reason ?? 'unknown'} (attempt ${nextCount}/5)`);
                 }
@@ -665,14 +682,14 @@ export async function processCompilationBackfill(
             const nextCount = count + 1;
             if (nextCount >= 5) {
                 // Exhausted: single write to set manual_only (no intermediate count write)
-                safeUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
+                tryUpdatePrinciple(wctx.stateDir, wctx.workspaceDir, principleId, {
                     evaluability: 'manual_only',
                     compilationRetryCount: undefined,
                 });
                 SystemLogger.log(wctx.workspaceDir, 'COMPILE_EXHAUSTED',
                     `Principle ${principleId} compilation exhausted after 5 attempts: threw ${String(compileErr)}`);
             } else {
-                safeUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
+                tryUpdateRetryCount(wctx.stateDir, wctx.workspaceDir, principleId, nextCount);
                 SystemLogger.log(wctx.workspaceDir, 'COMPILE_FAILED',
                     `Principle ${principleId} compile threw: ${String(compileErr)} (attempt ${nextCount}/5)`);
             }
@@ -681,11 +698,11 @@ export async function processCompilationBackfill(
 }
 
 /**
- * Wrapper for updatePrinciple in the retry loop — logs but does not propagate errors.
- * If update fails, the principle stays in its current retry state and will be
- * picked up again on the next heartbeat.
+ * Wrapper for updateRetryCount — logs but does not propagate errors.
+ * Errors are silently swallowed: if update fails, the principle stays in its
+ * current retry state and will be picked up again on the next heartbeat.
  */
-function safeUpdateRetryCount(stateDir: string, workspaceDir: string, principleId: string, count: number | undefined): void {
+function tryUpdateRetryCount(stateDir: string, workspaceDir: string, principleId: string, count: number | undefined): void {
     try {
         updatePrinciple(stateDir, principleId, { compilationRetryCount: count });
     } catch (err) {
@@ -696,8 +713,10 @@ function safeUpdateRetryCount(stateDir: string, workspaceDir: string, principleI
 
 /**
  * Wrapper for updatePrinciple with multiple fields — logs but does not propagate errors.
+ * Errors are silently swallowed: if update fails, the principle stays in its
+ * current state and will be picked up again on the next heartbeat.
  */
-function safeUpdatePrinciple(
+function tryUpdatePrinciple(
     stateDir: string,
     workspaceDir: string,
     principleId: string,
