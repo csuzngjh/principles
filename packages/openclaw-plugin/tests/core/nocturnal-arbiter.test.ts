@@ -349,11 +349,19 @@ describe('Nocturnal Arbiter', () => {
       expect(result.failures.some(f => f.reason.includes('raw/private content'))).toBe(true);
     });
 
-    it('rejects betterDecision containing credential pattern', () => {
-      const artifact = makeValidArtifact({ betterDecision: 'Check the api_key before proceeding' });
+    it('rejects betterDecision containing credential assignment pattern', () => {
+      // api_key= with an actual value is a credential leak
+      const artifact = makeValidArtifact({ betterDecision: 'Check the api_key=ABC123 before proceeding' });
       const result = validateArtifact(artifact);
       expect(result.passed).toBe(false);
       expect(result.failures.some(f => f.reason.includes('raw/private content'))).toBe(true);
+    });
+
+    it('accepts credential-like words without assignment (not raw content)', () => {
+      // "api_key" as a word in natural decision text is not a credential leak
+      const artifact = makeValidArtifact({ betterDecision: 'Check the api_key before proceeding' });
+      const result = validateArtifact(artifact);
+      expect(result.passed).toBe(true);
     });
 
     it('accepts text without raw content patterns', () => {

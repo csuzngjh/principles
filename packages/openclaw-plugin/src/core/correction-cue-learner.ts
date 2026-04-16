@@ -21,7 +21,7 @@ import {
   CORRECTION_SEED_KEYWORDS,
   MAX_CORRECTION_KEYWORDS,
 } from './correction-types.js';
-import { checkCooldown } from '../service/nocturnal-runtime.js';
+import { checkKeywordOptCooldown, recordKeywordOptRun } from '../service/nocturnal-runtime.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 
 const KEYWORD_STORE_FILE = 'correction_keywords.json';
@@ -266,21 +266,24 @@ export class CorrectionCueLearner {
    */
   canRunKeywordOptimization(): boolean {
     // D-39-12, D-39-13: Per-workspace throttle, 4 calls/day
-    const cooldown = checkCooldown(this.stateDir, 'keyword_optimization', {
+    // Uses dedicated keywordOptRunTimestamps array to avoid pollution from regular nocturnal runs (#321)
+    const cooldown = checkKeywordOptCooldown(this.stateDir, {
       maxRunsPerWindow: 4,
       quotaWindowMs: 24 * 60 * 60 * 1000,
     });
-    return !cooldown.globalCooldownActive && !cooldown.quotaExhausted;
+    return !cooldown.quotaExhausted;
   }
 
   /**
    * Records that an optimization was performed.
-   * Updates lastOptimizedAt for the store. Throttle state is managed
-   * by checkCooldown() — no separate throttle file needed (CORR-08).
+   * Updates lastOptimizedAt for the store and records the run in the
+   * keyword-optimization quota (dedicated from regular nocturnal quota).
+   * @throws Error if quota recording fails — caller should propagate
    */
-  recordOptimizationPerformed(): void {
+  async recordOptimizationPerformed(): Promise<void> {
     this.store.lastOptimizedAt = new Date().toISOString();
     this.flush();
+    await recordKeywordOptRun(this.stateDir);
   }
 
   /**
