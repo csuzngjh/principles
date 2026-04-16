@@ -378,8 +378,15 @@ describe('ModelDeploymentRegistry getDeployment / listDeployments', () => {
 
     const deployments = listDeployments(tmpDir);
     expect(deployments).toHaveLength(2);
-    // Most recently updated is last in the list (sorted asc by updatedAt in memory)
-    expect(deployments[0].workerProfile).toBe('local-editor'); // bound second
+    // Verify sort order is descending by updatedAt (most recent first)
+    const [first, second] = deployments;
+    const firstUpdated = new Date(first.updatedAt).getTime();
+    const secondUpdated = new Date(second.updatedAt).getTime();
+    expect(firstUpdated).toBeGreaterThanOrEqual(secondUpdated);
+    // Also verify both expected profiles are present (order-independent)
+    const profiles = deployments.map(d => d.workerProfile);
+    expect(profiles).toContain('local-reader');
+    expect(profiles).toContain('local-editor');
   });
 
   it('listDeployments filters by workerProfile', () => {

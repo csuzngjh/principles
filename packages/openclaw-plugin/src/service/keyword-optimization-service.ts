@@ -31,12 +31,13 @@ export class KeywordOptimizationService {
   applyResult(result: CorrectionObserverResult): void {
     const learner = CorrectionCueLearner.get(this.stateDir);
 
-    if (!result.updated || !result.updates) {
+    const updates = result.updates ?? {};
+    if (!result.updated || Object.keys(updates).length === 0) {
       this.logger?.info?.('[KeywordOptimizationService] No updates to apply');
       return;
     }
 
-    for (const [term, update] of Object.entries(result.updates)) {
+    for (const [term, update] of Object.entries(updates)) {
       try {
         switch (update.action) {
           case 'add': {
@@ -72,6 +73,27 @@ export class KeywordOptimizationService {
       } catch (opErr) {
         // Log and skip individual operation failures — don't fail the whole batch
         this.logger?.warn?.(`[KeywordOptimizationService] ${update.action.toUpperCase()} failed for term="${term}": ${String(opErr)}`);
+      }
+    }
+
+    // H-1: Record confirmed false positives — terms where correctionDetected fired
+    // but trajectory analysis shows user wasn't actually expressing frustration.
+    if (result.fpAnalysisStatus === 'completed' && result.fpTerms && result.fpTerms.length > 0) {
+      // Normalize: trim, lowercase, dedupe, sanity cap
+      const MAX_FP_TERMS = 20;
+      const normalizedFpTerms = [...new Set(
+        result.fpTerms
+          .map(t => t.trim().toLowerCase())
+          .filter(t => t.length > 0)
+      )].slice(0, MAX_FP_TERMS);
+
+      for (const term of normalizedFpTerms) {
+        try {
+          learner.recordFalsePositive(term);
+          this.logger?.info?.(`[KeywordOptimizationService] FP recorded for term="${term}" (weight x0.8)`);
+        } catch (fpErr) {
+          this.logger?.warn?.(`[KeywordOptimizationService} recordFalsePositive failed for term="${term}": ${String(fpErr)}`);
+        }
       }
     }
   }
