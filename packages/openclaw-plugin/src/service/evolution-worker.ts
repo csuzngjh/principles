@@ -577,7 +577,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
  * Phase 2 — Retry: compile all principles with compilationRetryCount >= 0.
  * After 5 consecutive failures, downgrades to manual_only and logs COMPILE_EXHAUSTED.
  */
-async function processCompilationBackfill(
+export async function processCompilationBackfill(
     wctx: WorkspaceContext,
     logger: PluginLogger,
 ): Promise<void> {
