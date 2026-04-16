@@ -144,7 +144,7 @@ function diff(declared: PDTaskSpec[], actual: CronJob[]): DiffAction[] {
 function buildCronJob(
   task: PDTaskSpec,
   nowMs: number,
-   
+  workspaceDir: string,
   logger?: { info?: (_: string) => void },
 ): CronJob {
   logger?.info?.(`[PD:Reconciler] Building cron job: ${task.name} (id=${task.id}, interval=${task.schedule.everyMs}ms)`);
@@ -159,9 +159,7 @@ function buildCronJob(
     wakeMode: 'now',
     payload: {
       kind: 'agentTurn',
-       
-       
-      message: buildTaskPrompt(task, logger),
+      message: buildTaskPrompt(task, workspaceDir, logger),
       lightContext: task.execution.lightContext ?? true,
       timeoutSeconds: task.execution.timeoutSeconds ?? 120,
       toolsAllow: task.execution.toolsAllow,
@@ -180,7 +178,12 @@ function buildCronJob(
 }
 
  
-function buildTaskPrompt(task: PDTaskSpec, logger?: { info?: (_: string) => void }): string {
+function buildTaskPrompt(task: PDTaskSpec, workspaceDir: string, logger?: { info?: (_: string) => void }): string {
+  // Resolve paths dynamically from workspaceDir instead of hardcoding
+  const stateDir = path.join(workspaceDir, '.state');
+  const empathyKeywordsPath = path.join(stateDir, 'empathy_keywords.json');
+  const eventsJsonlPath = path.join(stateDir, 'logs', 'events.jsonl');
+
   if (task.id === 'empathy-optimizer') {
     logger?.info?.(`[PD:Reconciler] Building empathy optimizer prompt`);
     return `You are the Principles Disciple Empathy Keyword Optimizer.
@@ -195,7 +198,7 @@ Analyze the current empathy keyword store and recent user message logs to:
 
 ### Step 1: Read current keyword store
 Use read_file to load:
-\`~/.openclaw/workspace-main/.state/empathy_keywords.json\`
+\`${empathyKeywordsPath}\`
 
 Examine the "terms" object. For each term note:
 - weight (0.1-0.9): higher = stronger frustration signal
@@ -204,7 +207,7 @@ Examine the "terms" object. For each term note:
 
 ### Step 2: Read recent message logs
 Use search_file_content to scan:
-\`~/.openclaw/workspace-main/.state/logs/events.jsonl\`
+\`${eventsJsonlPath}\`
 
 Look for user messages containing frustration signals:
 - Negation: "不对", "错了", "不行", "重做"
@@ -214,7 +217,7 @@ Look for user messages containing frustration signals:
 
 ### Step 3: Write updated keyword store
 Use write_file to save the updated store back to:
-\`~/.openclaw/workspace-main/.state/empathy_keywords.json\`
+\`${empathyKeywordsPath}\`
 
 The file format is:
 \`\`\`json
@@ -304,7 +307,7 @@ export async function reconcilePDTasks(
       case 'CREATE':
         if (action.task) {
           if (!dryRun) {
-            const job = buildCronJob(action.task, nowMs, logger);
+            const job = buildCronJob(action.task, nowMs, workspaceDir, logger);
             cronStore.jobs.push(job);
             logger.info?.(`[PD:Reconciler] Created job: ${action.task.name}`);
           }
@@ -315,7 +318,7 @@ export async function reconcilePDTasks(
         if (action.task && action.job) {
           if (!dryRun) {
             const idx = cronStore.jobs.indexOf(action.job);
-            const newJob = buildCronJob(action.task, nowMs, logger);
+            const newJob = buildCronJob(action.task, nowMs, workspaceDir, logger);
             newJob.id = action.job.id;
             // Preserve original state — only CronService should recalculate nextRunAtMs
             newJob.state = {
@@ -449,7 +452,7 @@ export async function trigger(
     existingJob.deleteAfterRun = undefined;
   } else {
     log(`Creating new job for manual trigger: ${task.name}`);
-    const newJob = buildCronJob(task, nowMs, { info: log });
+    const newJob = buildCronJob(task, nowMs, workspaceDir, { info: log });
     newJob.enabled = true;
     newJob.state.nextRunAtMs = nowMs;
     cronStore.jobs.push(newJob);

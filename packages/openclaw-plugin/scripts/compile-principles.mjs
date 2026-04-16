@@ -18,10 +18,20 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+/**
+ * Cross-platform home directory (Linux: HOME, Windows: USERPROFILE/HOMEDRIVE+HOMEPATH)
+ */
+function getHomeDir() {
+  return process.env.HOME
+    || process.env.USERPROFILE
+    || (process.env.HOMEDRIVE && process.env.HOMEPATH ? process.env.HOMEDRIVE + process.env.HOMEPATH : null)
+    || '.';
+}
+
 // Resolve workspace directory: CLI arg > env var > default
 const WORKSPACE_DIR = process.argv[2]
   || process.env.WORKSPACE_DIR
-  || join(process.env.HOME, '.openclaw', 'workspace-main');
+  || join(getHomeDir(), '.openclaw', 'workspace');
 
 const STATE_DIR = join(WORKSPACE_DIR, '.state');
 
