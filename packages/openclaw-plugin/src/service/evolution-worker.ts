@@ -1,4 +1,5 @@
  
+ 
 /* global NodeJS */
  
 import * as fs from 'fs';
@@ -1336,15 +1337,15 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                              
                             try {
                                 payload = lastEvent?.payload ?? {};
-                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                 
                                 if ((payload as any).skipReason) {
-                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                     
                                     detailedError += ` (skipReason: ${(payload as any).skipReason})`;
                                  
                                 }
-                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                 
                                 if ((payload as any).failures && Array.isArray((payload as any).failures) && (payload as any).failures.length > 0) {
-                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                     
                                     detailedError += ` | failures: ${((payload as any).failures as string[]).slice(0, 3).join(', ')}`;
                                 }
                             } catch { /* ignore parse errors */ }
@@ -1360,7 +1361,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
 
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${errorReason}`);
-                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                             
                             } else if ((payload as any).skipReason === 'no_violating_sessions') {
                                 // #244: No meaningful violations found (thin filter) → skip without failure
                                 sleepTask.status = 'completed';

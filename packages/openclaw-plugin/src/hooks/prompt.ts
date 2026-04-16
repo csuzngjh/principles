@@ -1,4 +1,5 @@
-/* eslint-disable no-console */
+ 
+ 
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
