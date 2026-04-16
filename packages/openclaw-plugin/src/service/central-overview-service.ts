@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { getCentralDatabase, type CentralDatabase } from './central-database.js';
 import { getThinkingModelDefinitions } from '../core/thinking-models.js';
 import type { OverviewResponse } from './control-ui-query-service.js';
@@ -24,7 +25,7 @@ export class CentralOverviewService {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   dispose(): void {
     // Do NOT dispose centralDb — it's a singleton shared across all requests.
     // Individual services that open per-request connections (e.g. HealthQueryService)
@@ -62,7 +63,7 @@ export class CentralOverviewService {
 
     // D-06: sampleQueue.counters from aggregated_correction_samples GROUP BY review_status
      
-    // eslint-disable-next-line no-useless-assignment
+     
     let sampleCounters: Record<string, number> = {};
     try {
       sampleCounters = this.centralDb.getSampleCountersByStatus();

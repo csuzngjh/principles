@@ -65,7 +65,7 @@ export function assessDeprecatedReadiness(
   );
 
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let status: DeprecatedReadinessStatus;
   if (blockingReasons.length === 0 && stableCoverageRatio === 1) {
     status = 'ready';

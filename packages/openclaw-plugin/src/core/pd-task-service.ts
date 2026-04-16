@@ -4,7 +4,7 @@ import { reconcilePDTasks } from './pd-task-reconciler.js';
 export const PDTaskService: OpenClawPluginService = {
   id: 'principles-disciple-task-manager',
 
-    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
+     
   async start(ctx: OpenClawPluginServiceContext): Promise<void> {
     const {workspaceDir} = ctx;
     if (!workspaceDir) {

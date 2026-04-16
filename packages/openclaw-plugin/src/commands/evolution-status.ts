@@ -46,7 +46,7 @@ function formatRouteRecommendations(
 }
 
  
-    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 15, refactor candidate
+     
 function buildEnglishOutput(
   workspaceDir: string,
   sessionId: string | null,
@@ -99,7 +99,7 @@ function buildEnglishOutput(
 }
 
  
-    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 15, refactor candidate
+     
 function buildChineseOutput(
   workspaceDir: string,
   sessionId: string | null,

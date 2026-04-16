@@ -288,7 +288,7 @@ export class NocturnalTargetSelector {
   };
 
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   constructor(
     workspaceDir: string,
     stateDir: string,
@@ -533,7 +533,7 @@ export class NocturnalTargetSelector {
  * This is a convenience wrapper for the common case.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function selectNocturnalTarget(
   workspaceDir: string,
   stateDir: string,

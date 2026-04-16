@@ -53,7 +53,7 @@ export function validateNocturnalSnapshotIngress(
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+   
   const stats = value.stats;
   if (!isObjectRecord(stats)) {
     reasons.push('snapshot.stats must be an object');
