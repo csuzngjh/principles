@@ -173,7 +173,7 @@ export class WorkspaceContext {
      * Uses PathResolver to handle path normalization and fallback logic.
      * @throws Error if workspaceDir is missing and no fallback available.
      */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: OpenClaw plugin framework hook context has dynamic shape - type not available
+     
     static fromHookContext(ctx: any): WorkspaceContext {
         const {logger} = ctx;
         const log = (msg: string) => logger?.info?.(msg);

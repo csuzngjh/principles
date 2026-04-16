@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 import * as path from 'path';
 import * as fs from 'fs';
 import { atomicWriteFileSync } from '../utils/io.js';

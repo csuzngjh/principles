@@ -538,7 +538,7 @@ Next steps:
         }
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: JSON.parse returns dynamic JSON - type unknown at parse time, narrowed via type narrowing below
+       
       let result: any;
       try {
         result = JSON.parse(resultJson);

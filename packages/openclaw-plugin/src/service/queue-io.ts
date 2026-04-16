@@ -160,9 +160,9 @@ export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext
         }
     } catch (err) {
       // Best effort — non-fatal, but surface unexpected errors
-      /* eslint-disable no-console */
+       
       console.warn(`[queue-io] Failed to read pain context (non-fatal): ${String(err)}`);
-      /* eslint-enable no-console */
+       
     }
 
     return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
@@ -358,9 +358,9 @@ export function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
             rawQueue = [];
         } else {
             // Corrupted JSON or other read error — warn and recover with empty queue
-            /* eslint-disable no-console */
+             
             console.warn(`[queue-io] Failed to load evolution queue (recovering with empty): ${String(err)}`);
-            /* eslint-enable no-console */
+             
             rawQueue = [];
         }
     }

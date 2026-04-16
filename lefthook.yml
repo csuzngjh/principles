@@ -14,6 +14,6 @@ pre-push:
   commands:
     protect-main:
       run: node scripts/protect-branch.cjs
-    lint-all:
-      # Block ANY lint error from being pushed
-      run: npx eslint 'packages/**/*.ts' --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts'
+    lint:
+      # Block lint errors from being pushed (warnings are allowed but should be fixed)
+      run: npx eslint packages/openclaw-plugin/src

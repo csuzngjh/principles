@@ -57,7 +57,7 @@ export const PROFILE_DEFAULTS = {
   custom_guards: [] as { pattern: string; message: string; severity: string }[],
 };
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 // Reason: normalizeProfile handles arbitrary JSON profile shapes where static typing cannot capture runtime field existence
 export function normalizeProfile(rawProfile: any): any {
   const defaults = JSON.parse(JSON.stringify(PROFILE_DEFAULTS));
