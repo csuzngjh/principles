@@ -1,229 +1,508 @@
-# Feature Research: KeywordLearningEngine for Correction Cues
+# Feature Landscape: Tech Debt Remediation
 
-**Domain:** Dynamic keyword learning for AI agent correction signal detection
-**Researched:** 2026-04-14
-**Confidence:** HIGH (based on existing empathy implementation analysis)
+**Domain:** TypeScript plugin refactoring (openclaw-plugin)
+**Focus:** Splitting god classes, fixing type safety, adding queue tests
+**Researched:** 2026-04-15
+**Confidence:** MEDIUM (based on codebase analysis + established patterns; external docs services were unavailable for verification)
 
-## Executive Summary
+---
 
-The KeywordLearningEngine extends the existing `empathy-keyword-matcher.ts` pattern to correction cue detection. The existing codebase already has a production-ready implementation for empathy keywords with FPR tracking, LLM-based optimization, and persistent storage. The correction cue system reuses this exact pattern but with different seed keywords and a separate store file.
+## 1. God Class Refactoring Patterns
 
-The current `detectCorrectionCue()` in `prompt.ts:87-111` uses 15 hardcoded static keywords. The KeywordLearningEngine replaces this with the dynamic keyword store pattern, enabling:
-1. Learning from false positives (user said "not this" but was not frustrated)
-2. Weight adjustment based on actual hit frequency
-3. LLM-discovered new correction expressions
-4. Separate `correction_keywords.json` store
+### Table Stakes (Foundational Patterns)
 
-## Feature Landscape
+These patterns are industry-standard and expected when splitting TypeScript god classes.
 
-### Table Stakes (Users Expect These)
-
-Features users assume exist. Missing these = product feels broken.
-
-| Feature | Why Expected | Complexity | Notes |
+| Pattern | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Keyword matching | Users expect the system to detect when they are correcting the agent | LOW | Simple substring match (existing pattern: `text.includes(term)`) |
-| FPR tracking | Overly aggressive detection creates user annoyance | MEDIUM | Track when keywords fire but user was not actually correcting |
-| Persistence across restarts | Keyword store must survive plugin reload | LOW | JSON file in stateDir |
-| Basic severity mapping | Not all corrections are equal | LOW | Score thresholds already exist in empathy-types.ts |
+| **Single Responsibility via Module Extraction** | Each module does one thing; makes testing and reasoning possible | Medium | See `evolution-worker.ts` - currently 144KB with ~10 concerns |
+| **Interface Segregation** | Clients shouldn't depend on methods they don't use | Low | Current code uses broad interfaces like `OpenClawPluginApi as any` |
+| **Dependency Injection** | Decouples creation from usage; enables mocking | Medium | Already used in `WorkflowManagerBase` constructor pattern |
+| **Strategy Pattern for Variants** | When behavior differs by type but shares structure | Medium | Already used: `NocturnalWorkflowManager`, `EmpathyObserverWorkflowManager`, etc. |
 
-### Differentiators (Competitive Advantage)
+### Differentiators (Advanced Patterns)
 
-Features that set the product apart. Not required, but valuable.
+Patterns that go beyond basic refactoring to enable testability and extensibility.
 
-| Feature | Value Proposition | Complexity | Notes |
+| Pattern | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| LLM-based keyword discovery | System learns new correction expressions from actual user language | MEDIUM | Subagent workflow triggers optimization every 50 turns or 6 hours |
-| Adaptive weight adjustment | Frequently matched keywords become more sensitive; rarely matched become less | MEDIUM | Weight * (1 - FPR) formula in matchEmpathyKeywords |
-| Feedback loop integration | Trajectory recording with correctionDetected flag feeds back into keyword learning | MEDIUM | Requires subagent validation to mark false positives |
-| Multi-language support | Both Chinese and English correction cues | LOW | Language-filtered seed keywords in createDefaultKeywordStore |
+| **Domain Event Emission** | Replace direct side effects with event streams | High | Enables async testing without mocking the world |
+| **State Machine for Complex Objects** | Replaces ad-hoc state with explicit transitions | Medium | `EvolutionQueueItem` has `QueueStatus` - could use `xstate` |
+| **Repository Pattern for Persistence** | Abstracts storage; enables in-memory test implementations | Medium | `WorkflowStore` already exists - could generalize |
+| **Command/Query Separation** | Distinguish mutating operations from reads | Medium | `EvolutionWorkerService` mixes both |
 
-### Anti-Features (Commonly Requested, Often Problematic)
+### Current God Class: `evolution-worker.ts` (144KB)
 
-Features that seem good but create problems.
+**Responsibilities currently mixed together:**
+1. Workflow Watchdog (lines 46-190)
+2. Queue V2 Schema + Migration (lines 203-346)
+3. File Locking helpers (lines 435-482)
+4. Deduplication logic (lines 492-564)
+5. Pain context reading (lines 586+)
+6. Nocturnal snapshot building (lines 366-430)
+7. Cooldown strategy integration
+8. Session cleanup
+9. Trajectory registry
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| Real-time FPR updates after every message | "Immediate feedback" seems good | Too noisy; single messages cannot establish reliable FPR | Batch updates every N turns via subagent |
-| Fuzzy/approximate matching | "What if user types 'thsi' instead of 'this'?" | Dramatically increases false positives, performance cost | Accept exact match with LLM discovery of typos |
-| Keyword auto-removal | "Let the system clean itself up" | May remove important keywords prematurely | LLM subagent makes deliberate removal decisions with reasoning |
-| Per-user keyword stores | "Each user has different expressions" | Complexity explosion, cold-start problem | Global store with per-user feedback weighting (defer to v2) |
+**Suggested module boundaries based on existing patterns:**
+
+| Module | Responsibility | Boundary Rationale |
+|--------|---------------|-------------------|
+| `queue-core.ts` | Queue schema, migration, deduplication, purging | Pure data transformations on `EvolutionQueueItem[]` |
+| `queue-persistence.ts` | File locking, queue file I/O | Handles `acquireQueueLock`, `requireQueueLock` |
+| `snapshot-builder.ts` | Nocturnal session snapshot building | `buildFallbackNocturnalSnapshot` and related logic |
+| `watchdog.ts` | Workflow anomaly detection | `runWorkflowWatchdog` - already isolated function |
+| `pain-context.ts` | Pain flag reading, recent context extraction | `readRecentPainContext` - pure transformation |
+
+### Dependencies Identified
+
+```
+evolution-worker.ts imports:
+├── ../core/workspace-context.js         (WorkspaceContext)
+├── ../core/dictionary-service.js         (DictionaryService)
+├── ../core/detection-service.js          (DetectionService)
+├── ./subagent-workflow/workflow-store.js (WorkflowStore)
+├── ./subagent-workflow/*-workflow-manager.js (multiple managers)
+├── ../core/nocturnal-trajectory-extractor.js
+├── ./nocturnal-runtime.js               (checkWorkspaceIdle, checkCooldown, recordCooldown)
+├── ./cooldown-strategy.js               (recordPersistentFailure, resetFailureState, isTaskKindInCooldown)
+└── ... 20+ more
+```
+
+**Refactoring risk:** High coupling to context objects. Recommend extracting to **Facade pattern** first before splitting.
+
+---
+
+## 2. Type-Safe Alternatives to `as any` Casts
+
+### Table Stakes (Essential Patterns)
+
+| Pattern | Use Case | Complexity | Notes |
+|---------|----------|------------|-------|
+| **Discriminated Unions** | When a value can be one of several shapes | Low | `QueueStatus = 'pending' \| 'in_progress' \| 'completed' \| 'failed' \| 'canceled'` already used |
+| **Type Guards** | Narrow union types based on runtime checks | Low | `isLegacyQueueItem(item)` already exists (line 336) |
+| **Const Assertions** | Lock object literal to literal types | Low | `as const` on enums and config objects |
+| **Unknown vs any** | Replace `any` with `unknown` + type narrowing | Low | Force callers to validate before use |
+
+### Differentiators (Advanced Patterns)
+
+| Pattern | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| **Branded Types** | Prevent mixing IDs that share same primitive type | Medium | e.g., `type WorkflowId = string & { readonly brand: unique symbol }` |
+| **Template Literal Types** | Encode format in type system | Medium | `type SessionKey = \`agent:main:subagent:workflow-${string}\`` |
+| **Mapped Types + Infer** | Transform types systematically | High | Useful for deriving `WorkflowHandle` from `WorkflowSpec` |
+| **ThisType** | Methods that return instance type | High | Rarely needed |
+
+### Current `as any` Hotspots (from codebase grep: 597 occurrences)
+
+**High-impact locations to fix first:**
+
+| Location | Count | Risk | Suggested Fix |
+|----------|-------|------|---------------|
+| `evolution-worker.ts` | 6 | High | Queue operations need branded `QueueItemId` |
+| `tests/hooks/gate-*.test.ts` | ~100+ | Low | Test mocks - acceptable with `as any` |
+| `test-utils.ts` helpers | 3 | Medium | Use `vi.mocked()` instead |
+| Service mock definitions | 50+ | Medium | Define proper mock interfaces |
+
+### Existing Type Safety in Codebase
+
+**Already well-done:**
+```typescript
+// Discriminated union (evolution-worker.ts:203-204)
+export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | ...;
+
+// Type guard (evolution-worker.ts:336-338)
+function isLegacyQueueItem(item: RawQueueItem): boolean {
+    return item && typeof item === 'object' && !('taskKind' in item);
+}
+```
+
+### Branded Type Example for Queue
+
+```typescript
+// brands.ts
+declare const brand: unique symbol;
+export type Brand<T, B> = T & { readonly [brand]: B };
+export type WorkflowId = Brand<string, 'WorkflowId'>;
+export type QueueItemId = Brand<string, 'QueueItemId'>;
+export type SessionKey = Brand<string, 'SessionKey'>;
+
+// Conversion functions
+export function toWorkflowId(id: string): WorkflowId {
+    return id as WorkflowId;
+}
+
+export function toQueueItemId(id: string): QueueItemId {
+    return id as QueueItemId;
+}
+
+// Validation
+export function isQueueItemId(id: string): id is QueueItemId {
+    return /^[\w-]{8}$/.test(id); // Matches MD5 hash format used in createEvolutionTaskId
+}
+```
+
+---
+
+## 3. Queue Integration Testing Patterns
+
+### Table Stakes (Essential Patterns)
+
+| Pattern | Use Case | Complexity | Notes |
+|---------|----------|------------|-------|
+| **In-Memory Queue Implementation** | Test queue logic without file I/O | Low | Create `InMemoryQueueStore` implementing same interface as `WorkflowStore` |
+| **Fixture Factories** | Generate test data programmatically | Low | `createMockQueueItem()`, `createLegacyQueueItem()` |
+| **Snapshot Testing** | Verify queue serialization format | Medium | Use `toMatchSnapshot()` for JSON structure |
+| **Temp Directory for File Tests** | Isolate file-based tests | Low | `fs.mkdtempSync(path.join(os.tmpdir(), 'pd-queue-'))` |
+
+### Differentiators (Advanced Patterns)
+
+| Pattern | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| **State Transition Table Tests** | Exhaustively test all valid/invalid transitions | Medium | `describe('QueueStatus transitions', ...)` |
+| **Migration Testing** | Test V1 to V2 migration with fixtures | Medium | `describe('migrateToV2')` with legacy item fixtures |
+| **Concurrency Simulation** | Test file locking behavior | High | Multiple `acquireQueueLock` calls in parallel |
+| **Property-Based Testing** | Random valid inputs to find edge cases | High | Use `fast-check` library |
+
+### Queue Test Architecture
+
+```
+tests/
+├── unit/
+│   ├── queue-core.test.ts        # Schema validation, migration, deduplication
+│   ├── queue-dedup.test.ts       # findRecentDuplicateTask, hasRecentDuplicateTask
+│   └── queue-purge.test.ts      # purgeStaleFailedTasks
+├── integration/
+│   ├── queue-persistence.test.ts # File locking, concurrent writes
+│   └── queue-workflow.test.ts    # Queue + workflow interaction
+└── fixtures/
+    ├── legacy-queue-v1.json       # Pre-V2 queue items
+    └── queue-migration-cases.json # Known migration scenarios
+```
+
+### Migration Testing Pattern
+
+```typescript
+describe('migrateToV2', () => {
+    const cases: Array<{
+        name: string;
+        input: LegacyEvolutionQueueItem;
+        expectedTaskKind: TaskKind;
+        expectedPriority: TaskPriority;
+    }> = [
+        {
+            name: 'legacy item without taskKind defaults to pain_diagnosis',
+            input: { id: 'abc', score: 85, source: 'gate', reason: 'test', timestamp: '2026-01-01' },
+            expectedTaskKind: 'pain_diagnosis',
+            expectedPriority: 'medium',
+        },
+        // Add more cases
+    ];
+
+    test.each(cases)('$name', ({ input, expectedTaskKind, expectedPriority }) => {
+        const result = migrateToV2(input);
+        expect(result.taskKind).toBe(expectedTaskKind);
+        expect(result.priority).toBe(expectedPriority);
+        expect(result.retryCount).toBe(0);
+        expect(result.maxRetries).toBe(3);
+    });
+});
+```
+
+### Deduplication Testing Pattern
+
+```typescript
+describe('findRecentDuplicateTask', () => {
+    const now = Date.now();
+    const thirtyMinAgo = now - (30 * 60 * 1000);
+
+    const queue: EvolutionQueueItem[] = [
+        {
+            id: 'task-1',
+            taskKind: 'pain_diagnosis',
+            priority: 'high',
+            source: 'gate',
+            score: 85,
+            reason: 'gate block',
+            timestamp: new Date(thirtyMinAgo + 1000).toISOString(),
+            enqueued_at: new Date(thirtyMinAgo + 1000).toISOString(),
+            status: 'pending',
+            retryCount: 0,
+            maxRetries: 3,
+        },
+    ];
+
+    it('returns existing task if duplicate within dedup window', () => {
+        const result = findRecentDuplicateTask(queue, 'gate', '', thirtyMinAgo + 5000, 'gate block');
+        expect(result).toBeDefined();
+        expect(result?.id).toBe('task-1');
+    });
+
+    it('returns undefined if outside dedup window', () => {
+        const outsideWindow = now - (31 * 60 * 1000);
+        const result = findRecentDuplicateTask(queue, 'gate', '', outsideWindow, 'gate block');
+        expect(result).toBeUndefined();
+    });
+});
+```
+
+### Purge Testing Pattern
+
+```typescript
+describe('purgeStaleFailedTasks', () => {
+    const logger = { info: vi.fn(), warn: vi.fn() };
+    const dayAgo = Date.now() - (25 * 60 * 60 * 1000);
+    const hourAgo = Date.now() - (30 * 60 * 1000);
+
+    it('removes failed tasks older than 24 hours', () => {
+        const queue: EvolutionQueueItem[] = [
+            { id: 'old-failed', status: 'failed', timestamp: new Date(dayAgo).toISOString(), score: 80, source: 'test', reason: 'old', taskKind: 'pain_diagnosis', priority: 'medium', retryCount: 0, maxRetries: 3 },
+            { id: 'recent-failed', status: 'failed', timestamp: new Date(hourAgo).toISOString(), score: 80, source: 'test', reason: 'recent', taskKind: 'pain_diagnosis', priority: 'medium', retryCount: 0, maxRetries: 3 },
+        ];
+
+        const result = purgeStaleFailedTasks(queue, logger as any);
+
+        expect(result.purged).toBe(1);
+        expect(result.remaining).toBe(1);
+        expect(queue.find(t => t.id === 'old-failed')).toBeUndefined();
+        expect(queue.find(t => t.id === 'recent-failed')).toBeDefined();
+    });
+});
+```
+
+---
+
+## 4. Workflow Manager Testing Approaches
+
+### Table Stakes (Essential Patterns)
+
+| Pattern | Use Case | Complexity | Notes |
+|---------|----------|------------|-------|
+| **Mock AsyncFn Helper** | Create typed async mocks | Low | Already exists in codebase (`mockAsyncFn`) |
+| **WorkflowHandle Extraction** | Access internal state for assertions | Low | Uses `(manager as any).activeWorkflows.get(handle.workflowId)` |
+| **Timeout Cleanup** | Prevent test pollution from timers | Low | `clearTimeout(timeout)` before assertions |
+| **Dispose Verification** | Ensure cleanup in `afterEach` | Low | `manager.dispose()` followed by `fs.rmSync` |
+
+### Differentiators (Advanced Patterns)
+
+| Pattern | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| **Spec-Driven Testing** | Test any workflow type via `SubagentWorkflowSpec` | Medium | Already used in empathy-observer tests |
+| **Transport Abstraction** | Test both `runtime_direct` and future transports | Medium | `runtime_direct` is current only option |
+| **TTL Expiry Simulation** | Test orphan cleanup without waiting | Medium | Manipulate `created_at` in store |
+| **Event Sequence Verification** | Verify workflow events in order | Medium | `store.getEvents(wf.workflow_id)` |
+
+### Key Test Scenarios for Workflow Managers
+
+| Scenario | What to Test | Approach |
+|----------|-------------|----------|
+| **startWorkflow success** | Workflow created, session started, timeout scheduled | Assert `store.getWorkflow()`, assert `subagent.run` called |
+| **startWorkflow surface degrade** | Boot session rejection, subagent unavailable | Assert error thrown |
+| **notifyWaitResult(ok)** | Finalize called, session deleted | Spy on `finalizeOnce`, assert `subagent.deleteSession` |
+| **notifyWaitResult(timeout)** | Workflow marked `terminal_error` | Assert `store.getWorkflow().state === 'terminal_error'` |
+| **TTL expiry** | Workflow swept as expired | Manipulate `wf.created_at`, run watchdog |
+| **getWorkflowDebugSummary** | Returns correct summary | Assert structure matches `WorkflowDebugSummary` |
+| **dispose cleanup** | All timeouts cleared | Track active timeouts, call dispose, verify cleared |
+
+### Existing Workflow Manager Test Pattern
+
+**From `tests/service/empathy-observer-workflow-manager.test.ts`:**
+
+```typescript
+function mockAsyncFn<T extends (...args: any[]) => Promise<any>>(impl: (...args: any[]) => any) {
+    const fn = vi.fn(impl) as unknown as T;
+    Object.defineProperty(fn, 'constructor', {
+        value: function AsyncFunction() {},
+        writable: true,
+        configurable: true,
+    });
+    return fn;
+}
+
+describe('EmpathyObserverWorkflowManager', () => {
+    let subagent = {
+        run: mockAsyncFn(async () => ({ runId: 'run-123' })),
+        waitForRun: mockAsyncFn(async () => ({ status: 'ok' as const })),
+        getSessionMessages: mockAsyncFn(async () => ({ messages: [], assistantTexts: ['{"ok":true}'] })),
+        deleteSession: mockAsyncFn(async () => {}),
+    };
+
+    // Test pattern: clear internal timeout before assertions
+    const timeout = (manager as any).activeWorkflows.get(handle.workflowId);
+    if (timeout) {
+        clearTimeout(timeout);
+        (manager as any).activeWorkflows.delete(handle.workflowId);
+    }
+});
+```
+
+### Workflow Manager Base Test Pattern
+
+Tests shared behavior in `WorkflowManagerBase` that all workflow managers inherit:
+
+```typescript
+describe('WorkflowManagerBase', () => {
+    describe('startWorkflow', () => {
+        it('creates workflow record with correct initial state', async () => {
+            const handle = await manager.startWorkflow(spec, {
+                parentSessionId: 'parent-1',
+                taskInput: 'test',
+            });
+
+            const workflow = (manager as any).store.getWorkflow(handle.workflowId);
+            expect(workflow.state).toBe('active');
+            expect(workflow.workflowType).toBe('empathy-observer');
+        });
+
+        it('schedules timeout for workflow TTL', async () => {
+            const handle = await manager.startWorkflow(spec, {
+                parentSessionId: 'parent-2',
+                taskInput: 'test',
+            });
+
+            const timeout = (manager as any).activeWorkflows.get(handle.workflowId);
+            expect(timeout).toBeDefined();
+            // TTL is 300000ms (5 min), verify timeout is set correctly
+        });
+    });
+
+    describe('notifyWaitResult', () => {
+        it('finalizes workflow on ok status', async () => {
+            const handle = await manager.startWorkflow(spec, {
+                parentSessionId: 'parent-3',
+                taskInput: 'test',
+            });
+
+            // Clear timeout to prevent actual timer firing
+            const timeout = (manager as any).activeWorkflows.get(handle.workflowId);
+            clearTimeout(timeout);
+            (manager as any).activeWorkflows.delete(handle.workflowId);
+
+            const finalizeSpy = vi.spyOn(manager, 'finalizeOnce').mockResolvedValue();
+            await manager.notifyWaitResult(handle.workflowId, 'ok');
+
+            expect(finalizeSpy).toHaveBeenCalledWith(handle.workflowId);
+        });
+
+        it('marks terminal_error on timeout status', async () => {
+            const handle = await manager.startWorkflow(spec, {
+                parentSessionId: 'parent-4',
+                taskInput: 'test',
+            });
+
+            const timeout = (manager as any).activeWorkflows.get(handle.workflowId);
+            clearTimeout(timeout);
+            (manager as any).activeWorkflows.delete(handle.workflowId);
+
+            await manager.notifyWaitResult(handle.workflowId, 'timeout', 'timed out');
+
+            const workflow = (manager as any).store.getWorkflow(handle.workflowId);
+            expect(workflow.state).toBe('terminal_error');
+        });
+    });
+});
+```
+
+---
 
 ## Feature Dependencies
 
 ```
-[Match Keywords] ──requires──> [Load Keyword Store]
-[LLM Optimization] ──requires──> [Match Keywords]
-[LLM Optimization] ──requires──> [Trajectory Feedback]
-[FPR Tracking] ──requires──> [Subagent Validation]
-[FPR Tracking] ──enhances──> [Match Keywords]
-[Save Keyword Store] ──requires──> [Match Keywords]
+God Class Refactoring (evolution-worker.ts)
+    │
+    ├── Module: queue-core.ts
+    │       └── Types: EvolutionQueueItem, QueueStatus, TaskResolution
+    │
+    ├── Module: queue-persistence.ts
+    │       └── Depends on: queue-core.ts
+    │       └── External: fs, file-lock utilities
+    │
+    ├── Module: snapshot-builder.ts
+    │       └── Depends on: queue-core.ts, nocturnal-trajectory-extractor
+    │       └── Produces: NocturnalSessionSnapshot
+    │
+    └── Module: watchdog.ts
+            └── Depends on: workflow-store, subagent runtime
+            └── Produces: WatchdogResult
 
-[correction_keywords.json] (new) ──mirrors──> [empathy_keywords.json] (existing)
+Type Safety Improvements
+    │
+    ├── Brand types for IDs
+    │       └── QueueItemId, WorkflowId, SessionKey
+    │
+    ├── Type guards for queue items
+    │       └── isValidQueueItem, isLegacyQueueItem
+    │
+    └── Replace `as any` with unknown + narrowing
+            └── Target: evolution-worker.ts queue operations
+
+Queue Testing
+    │
+    ├── Unit tests for migration (migrateToV2)
+    │       └── Fixture: legacy queue items
+    │
+    ├── Unit tests for deduplication
+    │       └── findRecentDuplicateTask, hasRecentDuplicateTask
+    │
+    ├── Unit tests for purging
+    │       └── purgeStaleFailedTasks
+    │
+    └── Integration tests for file persistence
+            └── Concurrent lock acquisition
+
+Workflow Manager Testing
+    │
+    ├── Base class tests (shared behavior)
+    │       └── startWorkflow, notifyWaitResult, dispose
+    │
+    ├── Subclass tests (specific behavior)
+    │       └── surfaceDegrade checks, metadata creation
+    │
+    └── TTL expiry tests (via store manipulation)
 ```
 
-### Dependency Notes
+---
 
-- **Match Keywords requires Load Keyword Store:** The `matchEmpathyKeywords` function requires a loaded `EmpathyKeywordStore`. This store is cached in module-level `_empathyKeywordCache` in prompt.ts.
-- **LLM Optimization requires Trajectory Feedback:** The optimization subagent prompt uses recent messages to identify new patterns. The trajectory system records whether each user turn had a correction detected.
-- **FPR Tracking enhances Match Keywords:** FPR directly adjusts the effective weight via `adjustedWeight = entry.weight * (1 - entry.falsePositiveRate)`. Higher FPR = lower effective weight.
-- **correction_keywords.json mirrors empathy_keywords.json:** The correction store reuses the exact same `EmpathyKeywordStore` interface and `empathy-keyword-matcher.ts` functions, just with different seed keywords.
+## MVP Recommendation
 
-## MVP Definition
+**Prioritize in this order:**
 
-### Launch With (v1)
+1. **Type Safety First** (Low risk, high value)
+   - Add branded types for `QueueItemId`, `WorkflowId`, `SessionKey`
+   - Replace `as any` in queue operations with proper type guards
+   - This enables safe refactoring in subsequent steps
 
-Minimum viable product -- what is needed to validate the concept.
+2. **Queue Core Extraction** (Medium risk, high value)
+   - Extract `migrateToV2`, `isLegacyQueueItem`, `findRecentDuplicateTask`, `purgeStaleFailedTasks` to `queue-core.ts`
+   - These are pure functions, easily testable in isolation
+   - Creates clear module boundary for queue operations
 
-- [ ] **Static keyword store with seed keywords** -- Copy the 15 hardcoded keywords from `detectCorrectionCue()` into `EMPATHY_SEED_KEYWORDS`-style seed list. Reuse existing `EmpathyKeywordStore` interface.
-- [ ] **Basic keyword matching** -- Replace `detectCorrectionCue()` with `matchEmpathyKeywords()` call against the correction store. `matched: true` = correction detected.
-- [ ] **Correction store persistence** -- Save to `correction_keywords.json` (separate from empathy store). Use existing `loadKeywordStore`/`saveKeywordStore` functions.
-- [ ] **In-memory cache** -- Cache correction keyword store in `_correctionKeywordCache` (parallel to `_empathyKeywordCache`).
+3. **Queue Unit Tests** (Low risk, medium value)
+   - Test migration logic with legacy fixtures
+   - Test deduplication window behavior
+   - Test purge logic
 
-### Add After Validation (v1.x)
+4. **Workflow Manager Base Tests** (Low risk, medium value)
+   - Add tests for shared `WorkflowManagerBase` behavior
+   - Enables safe refactoring of workflow managers
+   - Uses existing `mockAsyncFn` pattern
 
-Features to add once core is working.
+**Defer:**
+- `watchdog.ts` extraction (high coupling to `WorkflowStore` internals)
+- `snapshot-builder.ts` extraction (depends on trajectory extractor)
+- Event emission refactoring (high complexity, low immediate value)
+- File-based queue persistence tests (requires complex temp directory setup)
 
-- [ ] **Subagent optimization trigger** -- Implement `shouldTriggerOptimization()` for correction store. Trigger every 50 turns or 6 hours. Reuse `EmpathyObserverWorkflowManager` pattern.
-- [ ] **FPR feedback integration** -- When trajectory shows `correctionDetected: true` but user was not actually correcting (via subagent validation), update the keyword's FPR upward.
-- [ ] **LLM-discovered keywords** -- Add new correction expressions discovered by the optimization subagent to the store.
-
-### Future Consideration (v2+)
-
-Features to defer until product-market fit is established.
-
-- [ ] **Per-user keyword adaptation** -- Different users may have different correction styles. Requires user identification and per-user stores.
-- [ ] **Multi-word pattern matching** -- Support phrases like "that is not what I asked for" as a single keyword entry.
-- [ ] **Stemming/lemmatization** -- Reduce keywords needed by matching word roots. Adds complexity, test burden.
-
-## Feature Prioritization Matrix
-
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Static keyword store with seeds | HIGH | LOW | P1 |
-| Basic keyword matching replacement | HIGH | LOW | P1 |
-| Correction store persistence | HIGH | LOW | P1 |
-| In-memory cache | MEDIUM | LOW | P1 |
-| Subagent optimization trigger | MEDIUM | MEDIUM | P2 |
-| FPR feedback integration | MEDIUM | MEDIUM | P2 |
-| LLM-discovered keywords | MEDIUM | MEDIUM | P2 |
-
-**Priority key:**
-- P1: Must have for launch
-- P2: Should have, add when possible
-- P3: Nice to have, future consideration
-
-## Technical Implementation Details (from existing codebase)
-
-### Matching Algorithm (from empathy-keyword-matcher.ts:139-201)
-
-```typescript
-// Simple substring match with FPR-adjusted weight
-const lowerText = text.toLowerCase();
-for (const [term, entry] of Object.entries(store.terms)) {
-  if (lowerText.includes(term.toLowerCase())) {
-    const adjustedWeight = entry.weight * (1 - entry.falsePositiveRate);
-    totalScore += adjustedWeight;
-    matchedTerms.push(term);
-  }
-}
-const cappedScore = Math.min(1, totalScore);
-const isMatched = cappedScore >= config.matchThreshold && matchedTerms.length > 0;
-```
-
-**Key characteristics:**
-- Case-insensitive via `toLowerCase()`
-- No stemming or fuzzy matching
-- FPR-adjusted weight: higher FPR = lower effective weight
-- Score capped at 1.0
-- Match threshold default: 0.3
-
-### Seed Keywords (from current detectCorrectionCue vs empathy pattern)
-
-Current hardcoded correction cues (15):
-```
-'不是这个', '不对', '错了', '搞错了', '理解错了', '你理解错了',
-'重新来', '再试一次', 'you are wrong', 'wrong file', 'not this',
-'redo', 'try again', 'again', 'please redo', 'please try again'
-```
-
-Note: The current list has 16 entries (I count 16), but PROJECT.md says "15 hardcoded keywords". The discrepancy should be verified during implementation.
-
-### FPR Tracking (from empathy-types.ts)
-
-```typescript
-interface EmpathyKeywordEntry {
-  weight: number;                    // 0-1, contribution when matched
-  source: 'seed' | 'llm_discovered' | 'user_reported';
-  hitCount: number;                  // Total times matched
-  lastHitAt?: string;               // Last match timestamp
-  falsePositiveRate: number;        // 0-1, from subagent validation
-  examples?: string[];              // Example contexts
-  discoveredAt?: string;             // When LLM discovered this
-}
-```
-
-**FPR update mechanism:**
-- FPR is NOT updated in real-time
-- FPR is updated by the LLM optimization subagent after analyzing recent messages
-- FPR affects weight: `adjustedWeight = weight * (1 - FPR)`
-- Range: 0.05 (specific anger signals) to 0.5 (generic negation)
-
-### LLM Optimization (from prompt.ts:269-299)
-
-```typescript
-// Triggered every 50 turns OR 6 hours
-const optimizationPrompt = buildOptimizationPrompt(keywordStore, recentMessages);
-// Subagent returns JSON: {"updates": {"TERM": {"action": "add|update|remove", ...}}}
-// Applied via applyKeywordUpdates()
-```
-
-**Optimization rules:**
-- ADD: If a message contains correction signals not in current terms
-- UPDATE: If a term's weight should change (high hits -> increase, low hits -> decrease)
-- REMOVE: If a term has 0 hits after many turns AND high FPR (>0.3)
-
-### Persistence (from empathy-keyword-matcher.ts:77-127)
-
-```typescript
-const KEYWORD_STORE_FILE = 'empathy_keywords.json';
-// For correction: 'correction_keywords.json'
-
-export function loadKeywordStore(stateDir: string, lang?: 'zh' | 'en'): EmpathyKeywordStore
-export function saveKeywordStore(stateDir: string, store: EmpathyKeywordStore): void
-```
-
-**File format:** JSON with `version`, `lastUpdated`, `lastOptimizedAt`, `terms`, `stats`.
-
-### Learning Loop (from prompt.ts:461-604)
-
-The empathy system uses a hybrid approach:
-1. **Every turn:** Fast keyword matching (sub-millisecond)
-2. **10% sampling:** Subagent called for verification on boundary cases
-3. **5% random:** Subagent called randomly to discover new patterns
-4. **Every 50 turns / 6 hours:** Optimization subagent updates weights and discovers new terms
-
-For correction cues, the loop would be similar but simpler (correction detection is binary, not severity-scored).
-
-## Competitor Feature Analysis
-
-| Feature | GitHub Copilot | Cursor | Claude Code | Our Approach |
-|---------|---------------|---------|-------------|--------------|
-| Error correction detection | Implicit via feedback loops | Implicit via teacher mode | Explicit "redo" commands | Dynamic keyword learning with FPR |
-| False positive handling | Unknown | Unknown | Unknown | FPR tracking + LLM optimization |
-| User expression learning | No public evidence | No public evidence | No public evidence | LLM subagent discovers new expressions |
-| Persistence | Unknown | Unknown | Unknown | JSON file per workspace |
-
-No direct competitor publicly describes their correction cue detection mechanism in detail.
+---
 
 ## Sources
 
-- Existing implementation: `packages/openclaw-plugin/src/core/empathy-keyword-matcher.ts`
-- Existing types: `packages/openclaw-plugin/src/core/empathy-types.ts`
-- Existing integration: `packages/openclaw-plugin/src/hooks/prompt.ts:87-111` (detectCorrectionCue) and :461-604 (empathy keyword integration)
-- Existing tests: `packages/openclaw-plugin/tests/core/empathy-keyword-matcher.test.ts`
-- Project context: `.planning/PROJECT.md` (v1.14 milestone definition)
+- God class analysis: `packages/openclaw-plugin/src/service/evolution-worker.ts` (144KB, 488+ lines)
+- Existing refactoring: `packages/openclaw-plugin/src/service/subagent-workflow/workflow-manager-base.ts` (demonstrates Strategy pattern extraction)
+- Existing tests: `packages/openclaw-plugin/tests/service/empathy-observer-workflow-manager.test.ts`
+- Existing queue schema: `evolution-worker.ts:203-346` (QueueStatus, TaskResolution, migration)
+- Existing type guard: `evolution-worker.ts:336-338` (isLegacyQueueItem)
+- Testing patterns: `docs/maps/testing-patterns.md`
 
----
-*Feature research for: KeywordLearningEngine for correction cues*
-*Researched: 2026-04-14*
+**Confidence Note:** External documentation services (Context7, WebSearch) were unavailable during research. Findings are based on codebase analysis combined with established TypeScript/Node.js patterns. Recommend validation of specific API choices before implementation.

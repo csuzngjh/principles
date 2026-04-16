@@ -919,3 +919,13 @@ export function getCentralDatabase(): CentralDatabase {
   }
   return centralDbInstance;
 }
+
+/**
+ * Reset the singleton instance. Used for testing.
+ */
+export function resetCentralDatabase(): void {
+  if (centralDbInstance && !centralDbInstance.isClosed) {
+    centralDbInstance.dispose();
+  }
+  centralDbInstance = null;
+}

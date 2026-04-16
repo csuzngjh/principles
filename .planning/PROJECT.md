@@ -26,15 +26,16 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 ## Active
 
 - Production stabilization is more important than new surface features
-- Boundary contracts around workspace resolution, runtime capability checks, and critical state-file parsing are the current bottleneck
-- End-to-end trust in nocturnal depends on fail-fast behavior, not silent fallback
+- God classes (evolution-worker.ts 2689L, nocturnal-trinity.ts 2429L) are the primary maintenance bottleneck
+- Type safety (`as any` casts) causes missed compile-time errors and runtime bugs
+- Queue integration tests are missing — bugs in enqueue/dequeue/migration go undetected
 
 ## Out of Scope
 
-- Thinking Models page improvements during this milestone
 - New UI/dashboard work
+- New feature surface areas
 - LoRA or full fine-tune internalization paths
-- General cleanup not tied to boundary risk reduction
+- General cleanup not tied to debt reduction
 
 ## Context
 
@@ -52,15 +53,16 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Introduce one contract per boundary type | Path, runtime, and schema logic must stop being reimplemented ad hoc | Active |
 | Use end-to-end tests for boundary protection | Unit tests did not catch integration drift with OpenClaw | Active |
 
-## Current Milestone: v1.14 Keyword Learning Engine
+## Current Milestone: v1.19 Tech Debt Remediation
 
-**Goal:** 为 correction cue 检测创建动态关键词学习机制，复用 empathy engine 的抽象模式
+**Goal:** 逐步清理技术债，提升代码质量、可维护性和系统稳定性
 
 **Target features:**
-- 创建 `KeywordLearningEngine` 抽象层，支持多类型关键词（empathy、correction）
-- correction cue 替换硬编码关键词为动态存储
-- 实现学习循环：匹配 → 反馈 → FPR 跟踪 → LLM 优化
-- 持久化到 `correction_keywords.json`
+- Quick Wins: 修复 busy-wait loop、JSON parse 安全、constant-time token compare
+- God Class 拆分: 将 `evolution-worker.ts` (2689L) 和 `nocturnal-trinity.ts` (2429L) 拆分为专注模块
+- Type Safety: 清理 `as any`/`as unknown` casts，建立 proper 类型接口
+- Queue Integration Tests: 为 enqueue/dequeue/migration 路径添加集成测试
+- Security Hardening: constant-time token compare, JSON validate before parse
 
 ## Evolution
 
