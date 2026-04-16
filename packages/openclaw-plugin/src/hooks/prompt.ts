@@ -405,9 +405,7 @@ export async function handleBeforePromptBuild(
       } catch (learnerErr) {
         // Fallback to hardcoded detection if learner fails — log for observability
         correctionCue = detectCorrectionCue(userText);
-        if (correctionCue) {
-          logger?.warn?.(`[PD:Prompt] CorrectionCueLearner.match() failed (${String(learnerErr)}), fallback triggered for term="${correctionCue}"`);
-        }
+        logger?.warn?.(`[PD:Prompt] CorrectionCueLearner.match() failed (${String(learnerErr)}), fallback=${correctionCue ? `matched="${correctionCue}"` : 'no-match'}`);
       }
       let referencesAssistantTurnId: number | null = null;
       const hasPriorAssistant = event.messages
