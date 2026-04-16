@@ -32,9 +32,11 @@ export interface PainFlagData {
   /** Whether this involves risky operation ('true' / 'false') */
   is_risky: string;
   /** Correlation trace ID (for linking events across the pipeline) */
-  trace_id?: string;
-  /** Short preview of text that triggered this pain signal */
-  trigger_text_preview?: string;
+  trace_id: string;
+  /** Preview of the text that triggered this pain */
+  trigger_text_preview: string;
+  /** Trajectory pain_events row ID (set by recordPainEvent) */
+  pain_event_id?: string;
 }
 
 export interface PainFlagContractResult {
@@ -65,6 +67,7 @@ export function buildPainFlag(input: {
   is_risky?: boolean;
   trace_id?: string;
   trigger_text_preview?: string;
+  pain_event_id?: string;
 }): PainFlagData {
   // Omit optional fields when not provided — prevents writing empty lines to disk
   // which causes agent confusion (SKILL.md vs reality drift)
@@ -78,6 +81,7 @@ export function buildPainFlag(input: {
     is_risky: input.is_risky ? 'true' : 'false',
     trace_id: input.trace_id ?? '',
     trigger_text_preview: input.trigger_text_preview ?? '',
+    pain_event_id: input.pain_event_id,
   };
 }
 

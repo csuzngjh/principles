@@ -68,6 +68,8 @@ export interface RecentPainContext {
         reason: string;
         timestamp: string;
         sessionId: string;
+        /** Trajectory pain_events row ID — set when pain flag includes pain_event_id */
+        painEventId?: number;
     } | null;
     recentPainCount: number;
     recentMaxPainScore: number;
@@ -150,10 +152,12 @@ export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext
         const reason = contract.data.reason ?? '';
         const timestamp = contract.data.time ?? '';
         const sessionId = contract.data.session_id ?? '';
+        const painEventIdRaw = contract.data.pain_event_id;
+        const painEventId = painEventIdRaw ? parseInt(painEventIdRaw, 10) : undefined;
 
         if (score > 0) {
             return {
-                mostRecent: { score, source, reason, timestamp, sessionId },
+                mostRecent: { score, source, reason, timestamp, sessionId, painEventId },
                 recentPainCount: 1,
                 recentMaxPainScore: score,
             };

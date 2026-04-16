@@ -368,11 +368,29 @@ export async function saveLedgerAsync(stateDir: string, store: HybridLedgerStore
 
 export function updateTrainingStore(
   stateDir: string,
-   
+
   mutate: (store: LegacyPrincipleTrainingStore) => void,
 ): void {
   mutateLedger(stateDir, (store) => {
     mutate(store.trainingStore);
+  });
+}
+
+/**
+ * Add a new principle directly to the ledger tree.
+ * This is the companion to updatePrinciple() — use this when creating a NEW
+ * principle so the compiler can find it in tree.principles.
+ *
+ * Idempotent: if the principle already exists, overwrites (update semantics).
+ */
+export function addPrincipleToLedger(
+  stateDir: string,
+  principle: LedgerPrinciple,
+): LedgerPrinciple {
+  return mutateLedger(stateDir, (store) => {
+    store.tree.principles[principle.id] = principle;
+    store.tree.lastUpdated = new Date().toISOString();
+    return principle;
   });
 }
 
