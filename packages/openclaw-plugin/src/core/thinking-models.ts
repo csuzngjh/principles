@@ -202,7 +202,7 @@ let _cachedWorkspace: string | null = null;
  *
  * @param workspaceDir Optional. If provided, loads from that workspace's THINKING_OS.md.
  */
-    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
+     
 export function listThinkingModels(workspaceDir?: string): ThinkingModelDefinition[] {
   const cacheKey = workspaceDir ?? '__global__';
   if (_cachedDefinitions && _cachedWorkspace === cacheKey) {

@@ -41,7 +41,7 @@ export interface ThinkingCheckpointConfig {
  * @returns Block result if thinking required, undefined otherwise
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function checkThinkingCheckpoint(
   event: PluginHookBeforeToolCallEvent,
   config: ThinkingCheckpointConfig,

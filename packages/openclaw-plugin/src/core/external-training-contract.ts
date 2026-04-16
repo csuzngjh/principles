@@ -405,7 +405,7 @@ export function computeConfigFingerprint(config: Partial<TrainingHyperparameters
  */
 export function computeDatasetFingerprint(exportPath: string, sampleCount: number): string {
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let contentHash: string;
   try {
     const content = fs.readFileSync(exportPath, 'utf-8');
