@@ -3,7 +3,7 @@
  *
  * Registers a compiled rule into the principle tree ledger:
  * 1. Creates a LedgerRule with type 'gate', enforcement 'block', status 'proposed'
- * 2. Creates an Implementation with type 'code', lifecycleState 'candidate'
+ * 2. Creates an Implementation with type 'code', lifecycleState 'active'
  *
  * IDEMPOTENCY: If the rule already exists, returns existing registration.
  * ROLLBACK: If implementation creation fails after rule creation, attempts cleanup.

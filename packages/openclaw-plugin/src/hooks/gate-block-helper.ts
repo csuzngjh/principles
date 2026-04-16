@@ -105,7 +105,7 @@ export function recordGateBlockAndReturn(
   if (sessionId) {
     const GATE_BLOCK_PAIN_SCORE = 30; // Moderate — not a failure but a blocked intent
     try {
-      wctx.trajectory?.recordPainEvent?.({
+      const trajectoryPainId = wctx.trajectory?.recordPainEvent?.({
         sessionId,
         source: 'gate_blocked',
         score: GATE_BLOCK_PAIN_SCORE,
@@ -135,6 +135,7 @@ export function recordGateBlockAndReturn(
             session_id: sessionId,
             agent_id: 'main',
             is_risky: false,
+            pain_event_id: trajectoryPainId !== undefined && trajectoryPainId >= 0 ? String(trajectoryPainId) : undefined,
           });
           writePainFlag(workspaceDir, flag);
         }

@@ -7,7 +7,7 @@ import * as path from 'path';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
-import { ensureStateTemplates } from '../core/init.js';
+import { ensureStateTemplates, ensureCorePrinciples } from '../core/init.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
@@ -1747,7 +1747,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                             if (parsedResult?.updated) {
                                 koService.applyResult(parsedResult);
-                                learner.recordOptimizationPerformed();
+                                await learner.recordOptimizationPerformed();
                                 logger?.info?.(`[PD:EvolutionWorker] keyword_optimization applied mutations: ${parsedResult.summary}`);
                             } else {
                                 logger?.info?.(`[PD:EvolutionWorker] keyword_optimization completed with no updates`);
@@ -2080,6 +2080,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const {config} = wctx;
         const language = config.get('language') || 'en';
         ensureStateTemplates({ logger }, wctx.stateDir, language);
+        ensureCorePrinciples(wctx.stateDir, logger);
 
         const initialDelay = 5000;
         const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);

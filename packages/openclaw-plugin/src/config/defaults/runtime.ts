@@ -79,9 +79,6 @@ export const EVOLUTION_WORKER_POLL_INTERVAL_MS = 15 * ONE_MINUTE_MS;
 /** Evolution queue batch size */
 export const EVOLUTION_QUEUE_BATCH_SIZE = 10;
 
-/** Pain queue dedup window (30 minutes) */
-export const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * ONE_MINUTE_MS;
-
 // ── Session Tracker Settings ───────────────────────────────────────────────────
 
 export const SESSION_TOKEN_WARNING_THRESHOLD = 8000;
@@ -90,7 +87,7 @@ export const SESSION_MAX_IDLE_MS = 30 * ONE_MINUTE_MS;
 // ── Event Log Buffer Settings ───────────────────────────────────────────────────
 
 export const EVENT_LOG_BUFFER_SIZE = 20;
-export const EVENT_LOG_FLUSH_INTERVAL_MS = 30 * ONE_MINUTE_MS;
+export const EVENT_LOG_FLUSH_INTERVAL_MS = 30 * MS_PER_SECOND;
 
 // ── Default Busy Timeout ───────────────────────────────────────────────────────
 

@@ -9,6 +9,7 @@ import type { WorkspaceContext } from '../core/workspace-context.js';
 import { readPainFlagContract } from '../core/pain.js';
 import type { EvolutionQueueItem } from './evolution-queue-migration.js';
 import type { RecentPainContext } from './evolution-queue-migration.js';
+import { SLEEP_REFLECTION_DEDUP_WINDOW_MS } from './queue-io.js';
 
 /**
  * Read recent pain context from PAIN_FLAG file.
@@ -63,14 +64,13 @@ export function hasRecentSimilarReflection(
     painSourceKey: string,
     now: number,
 ): EvolutionQueueItem | null {
-    const DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
     return queue.find((t) => {
         if (t.taskKind !== 'sleep_reflection') return false;
         // Only match completed tasks (exclude failed to allow retries)
         if (t.status !== 'completed') return false;
         if (!t.completed_at) return false;
         const age = now - new Date(t.completed_at).getTime();
-        if (age > DEDUP_WINDOW_MS) return false;
+        if (age > SLEEP_REFLECTION_DEDUP_WINDOW_MS) return false;
         const taskPainKey = buildPainSourceKey(t.recentPainContext ?? { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 });
         // If either side has no pain context, they don't match
         if (!taskPainKey) return false;

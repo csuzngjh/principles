@@ -1,8 +1,27 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createWritePainFlagTool } from '../../src/tools/write-pain-flag.js';
+
+// ─── Mock state shared between isolated tests ────────────────────────────────
+type MockFn = (...args: unknown[]) => unknown;
+let mockRecordPainEventFn: MockFn | undefined;
+let mockRecordPainEventThrows = false;
+
+function makeTrajectoryMock() {
+  const fn = vi.fn((...args: unknown[]) => {
+    if (mockRecordPainEventThrows) throw new Error('trajectory DB write error');
+    return mockRecordPainEventFn ? mockRecordPainEventFn(...args) : 1;
+  });
+  return { recordPainEvent: fn };
+}
+
+vi.mock('../../src/core/trajectory.js', () => ({
+  TrajectoryRegistry: {
+    get: vi.fn(() => makeTrajectoryMock()),
+  },
+}));
 
 function safeRmDir(dir: string): void {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -106,6 +125,8 @@ describe('write_pain_flag tool', () => {
     expect(fields.score).toBe('85');
     expect(fields.reason).toBe('Agent forgot to read file before editing');
     expect(fields.time).toBeDefined();
+    expect(fields.pain_event_id).toBeDefined();
+    expect(fields.pain_event_id).toMatch(/^\d+$/);
   });
 
   // ─────────────────────────────────────────────────────────
@@ -252,5 +273,86 @@ describe('write_pain_flag tool', () => {
     expect(text).toContain('80'); // default score
     expect(text).toContain('manual'); // default source
     expect(text).toContain('No'); // default is_risky
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // Graceful degradation: trajectory write failure still writes flag
+  // ─────────────────────────────────────────────────────────
+  it('writes pain flag even when recordPainEvent throws', async () => {
+    // Configure the module-level mock to throw
+    mockRecordPainEventThrows = true;
+
+    const api = createMockApi(workspaceDir) as any;
+    const tool = createWritePainFlagTool(api);
+
+    const result = await tool.execute('test-degradation', {
+      reason: 'Pain signal with failing trajectory',
+      score: 60,
+      source: 'user_empathy',
+    });
+
+    // Should still succeed (graceful degradation)
+    expect(result.content[0].text).toContain('✅');
+    expect(result.content[0].text).toContain('60');
+
+    // Flag file should still exist
+    const painFlagPath = path.join(stateDir, '.pain_flag');
+    expect(fs.existsSync(painFlagPath)).toBe(true);
+    const content = fs.readFileSync(painFlagPath, 'utf-8');
+    expect(content).toContain('Pain signal with failing trajectory');
+
+    // pain_event_id should NOT be present since trajectory failed
+    expect(content).not.toContain('pain_event_id:');
+
+    // Should have logged a warning
+    expect(api._logs.some((l: any) => l.level === 'warn')).toBe(true);
+
+    // Reset for next test
+    mockRecordPainEventThrows = false;
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // recordPainEvent called with correct arguments
+  // ─────────────────────────────────────────────────────────
+  it('calls recordPainEvent with correct arguments from tool params', async () => {
+    // Set up the spy result via the module-level mock factory
+    mockRecordPainEventFn = vi.fn(() => 42);
+
+    const api = createMockApi(workspaceDir) as any;
+    const tool = createWritePainFlagTool(api);
+
+    await tool.execute('test-spy', {
+      reason: 'Spy test reason',
+      score: 55,
+      source: 'tool_failure',
+      session_id: 'session-spy-001',
+      is_risky: true,
+    });
+
+    // Access the spy through the TrajectoryRegistry.get mock
+    const { TrajectoryRegistry } = await import('../../src/core/trajectory.js');
+    const mockGet = TrajectoryRegistry.get as ReturnType<typeof vi.fn>;
+    const mockTraj = mockGet.mock.results.at(-1)!.value as { recordPainEvent: ReturnType<typeof vi.fn> };
+
+    expect(mockTraj.recordPainEvent).toHaveBeenCalledOnce();
+    expect(mockTraj.recordPainEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-spy-001',
+        source: 'tool_failure',
+        score: 55,
+        reason: 'Spy test reason',
+        severity: null,
+        origin: 'manual',
+        confidence: null,
+      })
+    );
+
+    // Also verify pain_event_id: 42 appears in the flag file
+    const painFlagPath = path.join(stateDir, '.pain_flag');
+    const content = fs.readFileSync(painFlagPath, 'utf-8');
+    expect(content).toContain('pain_event_id: 42');
+
+    // Reset for next test
+    mockRecordPainEventFn = undefined;
   });
 });
