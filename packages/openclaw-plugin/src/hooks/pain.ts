@@ -295,6 +295,19 @@ export function handleAfterToolCall(
   const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, effectiveWorkspaceDir);
   const traceId = createTraceId();
 
+  // Record to trajectory FIRST so we get the real auto-increment ID.
+  // This ID propagates through the pain flag → evolution task → principle,
+  // so the compiler can later resolve derivedFromPainIds correctly.
+  const trajectoryPainId = wctx.trajectory?.recordPainEvent({
+    sessionId,
+    source: 'tool_failure',
+    score: painScore,
+    reason: `Tool ${event.toolName} failed on ${relPath}`,
+    severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
+    origin: 'system_infer',
+    text: params.text ?? params.content ?? undefined,
+  });
+
   const painData = buildPainFlag({
     source: 'tool_failure',
     score: String(painScore),
@@ -303,6 +316,7 @@ export function handleAfterToolCall(
     trace_id: traceId,
     session_id: sessionId,
     agent_id: ctx.agentId || '',
+    pain_event_id: trajectoryPainId !== undefined && trajectoryPainId >= 0 ? String(trajectoryPainId) : undefined,
   });
 
   try {
@@ -355,15 +369,6 @@ export function handleAfterToolCall(
     reason: `Tool ${event.toolName} failed on ${relPath}`,
     isRisky: isRisk,
   });
-    wctx.trajectory?.recordPainEvent?.({
-      sessionId,
-      source: 'tool_failure',
-      score: painScore,
-      reason: `Tool ${event.toolName} failed on ${relPath}`,
-      severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
-      origin: 'system_infer',
-      text: params.text ?? params.content ?? undefined,  // Store original text/content that failed
-    });
 
   // Log to EvolutionLogger
   const evoLogger = getEvolutionLogger(effectiveWorkspaceDir, wctx.trajectory);
