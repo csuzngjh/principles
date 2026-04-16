@@ -1,34 +1,30 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-11T01:56:08.373Z",
-  "phase": "23",
-  "phase_name": "v1.13 Phase Verification Completion",
-  "phase_dir": ".planning/phases/23-v113-phase-verification-completion",
-  "plan": 0,
-  "task": 0,
-  "total_tasks": 0,
-  "status": "paused_between_phases",
-  "completed_tasks": [
-    {"id": "22", "name": "BC-02 Residual Fallback Cleanup", "status": "done", "commit": "8587a75"}
-  ],
+  "timestamp": "2026-04-15T13:32:24.179Z",
+  "phase": "46",
+  "phase_name": "God-Class-Split",
+  "phase_dir": ".planning/phases/46-God-Class-Split",
+  "plan": 4,
+  "task": 1,
+  "total_tasks": 4,
+  "status": "in_progress",
+  "completed_tasks": [],
   "remaining_tasks": [
-    {"id": "23", "name": "v1.13 Phase Verification Completion", "status": "not_started"}
+    {"id": 1, "name": "Verify nocturnal-runtime.ts does not import from evolution-worker.ts", "status": "in_progress"},
+    {"id": 2, "name": "Create sleep-cycle.ts with runCycle orchestrator", "status": "not_started"},
+    {"id": 3, "name": "Create integration test for sleep-cycle.ts", "status": "not_started"},
+    {"id": 4, "name": "Update evolution-worker.ts to re-export from sleep-cycle.ts", "status": "not_started"}
   ],
   "blockers": [],
   "human_actions_pending": [],
   "decisions": [
-    {"decision": "Both deep-reflect.ts and critique-prompt.ts must throw when workspace resolution fails", "rationale": "User wants consistent hard-failure behavior", "phase": "22"},
-    {"decision": "Autonomous mode running for v1.13 milestone phases 22-23", "rationale": "/gsd-autonomous invoked after Phase 22 context gathered", "phase": "22"}
+    {"decision": "queue-io.ts is a FULL persistence layer (not thin I/O wrapper)", "rationale": "D-07 in 46-CONTEXT.md", "phase": "46"},
+    {"decision": "withQueueLock() RAII guard is part of queue-io.ts", "rationale": "D-09 in 46-CONTEXT.md", "phase": "46"},
+    {"decision": "Fix all three bugs (BUG-01, BUG-02, BUG-03) within Phase 46", "rationale": "D-03 in 46-CONTEXT.md", "phase": "46"},
+    {"decision": "Extraction order: queue-migration → workflow-watchdog → queue-io → sleep-cycle", "rationale": "D-10 in 46-CONTEXT.md", "phase": "46"},
+    {"decision": "sleep-cycle.ts imports enqueueSleepReflectionTask/enqueueKeywordOptimizationTask from evolution-worker.js facade", "rationale": "Plan 04 key_links fix during verification iteration 2", "phase": "46"}
   ],
-  "uncommitted_files": [
-    ".planning/REQUIREMENTS.md",
-    ".planning/ROADMAP.md",
-    ".planning/STATE.md",
-    ".planning/phases/22-bc02-residual-fallback-cleanup/22-01-SUMMARY.md",
-    ".planning/phases/22-bc02-residual-fallback-cleanup/22-CONTEXT.md",
-    ".planning/phases/22-bc02-residual-fallback-cleanup/22-DISCUSSION-LOG.md",
-    ".planning/v1.13-MILESTONE-AUDIT.md"
-  ],
-  "next_action": "Run /gsd-autonomous --from 23 to execute Phase 23 (generate VERIFICATION.md and SUMMARY.md for phases 19-21)",
-  "context_notes": "Phase 22 completed. Phase 23 is doc-only — no code changes. Generates formal verification artifacts for phases 19-21 so all 11 milestone requirements move to satisfied."
+  "uncommitted_files": [],
+  "next_action": "Plan 46-04 executor is running in background (agent aa701569b8806f223). After it completes, execute plan 46-05 (facade finalization). Wave 5 is the last wave.",
+  "context_notes": "All 4 extraction modules have been successfully extracted: queue-migration.ts (Wave 1), workflow-watchdog.ts (Wave 2), queue-io.ts (Wave 3). Wave 4 is sleep-cycle.ts extraction. Wave 5 (plan 46-05) finalizes evolution-worker.ts as facade — all re-exports, backward compatibility check, BUG-03 post-split verification."
 }

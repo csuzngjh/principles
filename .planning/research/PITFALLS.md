@@ -1,339 +1,399 @@
-# Pitfalls Research: KeywordLearningEngine
+# Pitfalls Research: Tech Debt Remediation -- God Classes, `as any`, Queue Tests, Native Modules
 
-**Domain:** Dynamic keyword learning with false positive rate (FPR) tracking and LLM-driven optimization
-**Researched:** 2026-04-14
-**Confidence:** HIGH
+**Domain:** TypeScript plugin tech debt: file splitting, type safety, integration tests, native module portability
+**Researched:** 2026-04-15
+**Confidence:** MEDIUM-HIGH (code analysis + established patterns; limited web search due to tool availability)
+
+---
 
 ## Executive Summary
 
-KeywordLearningEngine replaces 15 hardcoded correction-cue keywords with a learnable store that tracks FPR and uses an LLM optimizer. Seven pitfall categories were identified from the existing empathy-keyword-matcher implementation and general keyword-learning system patterns. Most critical: FPR calculation assumes verified labels (which the system does not collect), and the learning loop can reinforce false positives rather than reduce them.
+Four categories of tech debt remediation for the nocturnal pipeline plugin. Each has distinct runtime breakage patterns. File splitting breaks at module boundaries (shared mutable state, singleton patterns, import order) not type boundaries. Removing `as any` casts requires fixing the underlying type architecture, not just the casts. Queue integration tests are brittle when they test timing rather than behavior. Native module replacement (better-sqlite3) introduces platform and performance dimensions that are absent from pure TypeScript refactoring.
 
 ---
 
-## Critical Pitfalls
+## Category 1: Splitting Large TypeScript Files
 
-### Pitfall 1: FPR Calculation Assumes Verified Labels
+Splitting `evolution-worker.ts` (2689L) and `nocturnal-trinity.ts` (2429L) can break at runtime despite TypeScript compilation passing. The breakage vectors are structural, not syntactic.
 
-**What goes wrong:**
-`falsePositiveRate` in `EmpathyKeywordEntry` is never actually calculated from labeled data. The optimizer subagent guesses FPR values based on message analysis, but no ground-truth verification occurs. Over time, FPR drifts from reality -- high-FP keywords remain in the store because the LLM underestimates their false positive rate.
+### Pitfall 1A: Shared Mutable Module-Level State
 
-**Why it happens:**
-The system lacks a feedback mechanism to confirm whether a keyword match was actually a true positive or a false positive. The `EmpathyKeywordStats.totalFalsePositives` counter is never incremented anywhere in the codebase. The FPR field is set on `add`/`update` actions from the LLM but never validated against real outcomes.
+**What goes wrong:** Module-level variables in the original file become cross-module references after splitting. If two extracted modules both mutate a shared variable, or if one module expects to initialize state that another module's import order prevents, runtime behavior diverges from the monolithic file.
 
-**How to avoid:**
-- Add an explicit "was this match correct?" verification step after each keyword match triggers a penalty
-- Track `truePositiveCount` and `falsePositiveCount` separately; calculate FPR as `fp / (tp + fp)`
-- Require minimum sample size (e.g., 10 matches) before adjusting FPR based on LLM guesses
-- Store a rolling window of recent match outcomes, not cumulative counts
+**Evidence from codebase:** `file-lock.ts` (line 325) has `const asyncLockQueues = new Map<string, Promise<void>>()` at module level. If this were split across files, the Map instance identity must be preserved -- a new import would get a different Map reference, breaking all queue operations.
 
 **Warning signs:**
-- FPR values all clustering around 0.1-0.2 (LLM default guesses)
-- `stats.totalFalsePositives` stays at 0 despite thousands of matches
-- High-FPR terms never get removed even after 50+ turns with no true positives
+- Any `const/let` declarations at module scope (not inside classes/functions)
+- Module-level caches, registries, or state maps
+- Singleton patterns with `instance` fields
 
-**Phase to address:**
-Phase 1 (Foundation) -- the FPR tracking infrastructure must be built before Phase 2 (Optimization) can work correctly.
+**Prevention:** Before splitting, identify all module-level mutable state. Extract it into a shared `state.ts` or pass it as a context object. Do not scatter mutable module state across split boundaries.
+
+**Which phase:** Pre-splitting phase (Phase 0 -- inventory module state before making any cuts).
 
 ---
 
-### Pitfall 2: Learning Loop Reinforces False Positives
+### Pitfall 1B: Circular Import Dependencies
 
-**What goes wrong:**
-When a keyword incorrectly triggers (false positive), the system records it as a "hit" via `entry.hitCount++` in `matchEmpathyKeywords`. This increments the keyword's apparent effectiveness. If the LLM optimizer sees a keyword with high hitCount but does not know most were false positives, it may increase or preserve the keyword's weight instead of removing it.
-
-**Why it happens:**
-The feedback loop is closed only on matches (hit), not on match outcomes (true vs false). The `hitCount` field conflates true positives with false positives. The optimizer sees "100 hits" and assumes the keyword is valuable, when 90 of those hits were noise.
-
-**How to avoid:**
-- Distinguish `hitCount` (all matches) from `truePositiveCount` (verified correct matches)
-- Only count toward "successful keyword" metrics if verification confirms true positive
-- Lower weight automatically when a match is confirmed false positive
-- Consider adding a "confidence decay" -- if a keyword matches but verification shows no actual pain signal, slightly decrease effective weight
+**What goes wrong:** The original file may have implicit import ordering. Splitting creates explicit import edges that can form cycles: `a.ts` imports `b.ts` which imports `c.ts` which imports `a.ts`. Node.js handles some cycles via partial module evaluation, but the behavior is fragile and often causes `undefined` at runtime.
 
 **Warning signs:**
-- Empathy trigger rate increases over time without corresponding increase in actual user frustration
-- Users report "it keeps thinking I'm angry when I'm not"
-- High hitCount keywords are also high FPR (>0.3) -- a red flag
+- Import statements that reference types from other files without explicit forward declarations
+- `import type` mixed with value imports in ways that create coupling
+- Any `../core/` or `../service/` relative paths that cross split boundaries
 
-**Phase to address:**
-Phase 2 (Learning Loop) -- requires verification mechanism from Phase 1.
+**Prevention:** Draw the import graph before splitting. Every cycle must be broken by extracting shared types into a third module that neither split module depends on transitively.
+
+**Which phase:** Pre-splitting phase (Phase 0).
 
 ---
 
-### Pitfall 3: Per-Message Keyword Matching Causes Latency at Scale
+### Pitfall 1C: Implicit Execution Order Dependencies
 
-**What goes wrong:**
-`matchEmpathyKeywords` iterates over ALL keywords in the store with `Object.entries(store.terms)`. With 200+ discovered terms, this O(n) scan runs on every user message. At high message volume, this adds measurable latency to the prompt hook.
+**What goes wrong:** Code in a single large file executes in a predictable top-to-bottom order. After splitting, different modules may initialize at different times. Initialization side effects (registering handlers, populating caches, setting up hooks) may fire in a different order, causing failures that only manifest at runtime.
 
-**Why it happens:**
-The current implementation does a naive substring match for every term. There is no indexing, trie, or bloom filter. Each new keyword discovered and kept increases the per-message cost linearly.
-
-**How to avoid:**
-- Implement a trie (prefix tree) for substring matching -- common in autocomplete systems
-- Use a Bloom filter as a quick negative check before doing full matching
-- Set a hard cap on total keywords (e.g., 200) and prune aggressively beyond that
-- Cache compiled regex patterns if regex-based matching is needed
+**Example scenario:** `evolution-worker.ts` line 1-45 imports all modules. If `runWorkflowWatchdog` registers itself with a global registry on import, and a split module's import fires before that registration, calls to the registry fail silently or throw.
 
 **Warning signs:**
-- `handleBeforePromptBuild` latency increases after 100 turns (keyword store growth)
-- CPU profile shows `matchEmpathyKeywords` consuming >5ms per call
-- `optimizationIntervalTurns` fires frequently but matching is slow
+- Code that runs on `import` (top-level `await`, side-effecting initializations)
+- Registration patterns: `Registry.register(X)` at module scope
+- Event emitter `.on()` calls at module scope
 
-**Phase to address:**
-Phase 1 (Foundation) -- performance guardrails must be in place before the optimization loop can run safely.
+**Prevention:** Convert all module-scope side effects into explicit initialization calls that run after all imports resolve. Consider an `initialize()` function per module that is called explicitly, in dependency order, from a single bootstrap file.
+
+**Which phase:** Pre-splitting phase (Phase 0).
 
 ---
 
-### Pitfall 4: State File Corruption from Unsafe Writes
+### Pitfall 1D: Type-Only Sharing vs Value Sharing Confusion
 
-**What goes wrong:**
-`saveKeywordStore` uses `fs.writeFileSync` directly. If the process crashes mid-write, the JSON file is truncated or partially written. On next load, `JSON.parse` throws, the catch block creates a new default store, and all hitCount / FPR / weight data is lost.
-
-**Why it happens:**
-No write safety mechanism (no temp-file-then-rename, no write-ahead log). The file is overwritten in place. Node.js `writeFileSync` does not atomic-write.
-
-**How to avoid:**
-- Write to a temp file first, then `fs.rename` to the target (atomic on POSIX)
-- Example:
-  ```typescript
-  const tmpPath = filePath + '.tmp';
-  fs.writeFileSync(tmpPath, JSON.stringify(store), 'utf8');
-  fs.renameSync(tmpPath, filePath);
-  ```
-- Keep a backup: `filePath + '.bak'` of the previous known-good state
-- Validate JSON structure after load; if invalid, attempt to load `.bak`
+**What goes wrong:** When a large file is split, types may be moved to a shared `types.ts` but the values (functions, classes) remain in one split. Callers that imported both the type and the implementation from the original file now get partial imports. TypeScript may not catch this if the imports use `import type`.
 
 **Warning signs:**
-- `Failed to load keyword store: SyntaxError` in logs
-- Keyword store reset to seed keywords after restart
-- `stats.optimizationCount` resets to 0 unexpectedly
+- `import type` used alongside `import { fn }` from the same module
+- Re-exports via `export type { X } from './y'` that do not also re-export the value
 
-**Phase to address:**
-Phase 1 (Foundation) -- persistence safety is prerequisite to all learning.
+**Prevention:** Distinguish type-only exports from value exports. After splitting, verify every import path resolves to both the type and the implementation. A type import alone compiles but returns `undefined` at runtime for value references.
+
+**Which phase:** Post-splitting verification phase (Phase 2 -- after initial split).
 
 ---
 
-### Pitfall 5: Unbounded Keyword Store Growth
+### Pitfall 1E: Named vs Default Export Mismatches
 
-**What goes wrong:**
-`applyKeywordUpdates` can add unlimited keywords. The `add` case in the loop has no guard. Over time, the LLM optimizer discovers new terms on every run. Without removal pressure, the store grows indefinitely. At 1000 keywords, substring matching becomes slow; at 10000, it is unusable.
-
-**Why it happens:**
-The removal logic requires both `hitCount === 0` AND `falsePositiveRate > 0.3`. If a keyword has any accidental hits (even false positives), it never reaches 0 hits and is never removed. The optimizer can also add faster than it removes.
-
-**How to avoid:**
-- Enforce a maximum store size (e.g., 200 terms total)
-- When at capacity, require removal before add (1-for-1 swap)
-- Add a minimum hitCount threshold for discovered keywords to persist (e.g., 5 hits before considering a new term valid)
-- Prune keywords that have not matched in N turns regardless of hitCount
-- Track `discoveredTerms` count and alert if it exceeds threshold
+**What goes wrong:** Large files may use a mix of named and default exports. When splitting, import sites in other files may reference the wrong export style. TypeScript accepts many combinations that fail at runtime (e.g., `import x from 'module'` where `module` exports only named exports).
 
 **Warning signs:**
-- `getKeywordStoreSummary` shows `discoveredTerms` growing monotonically
-- Store file size grows > 10KB
-- Memory usage of keyword store increases over time
+- Mixed `export default` and `export const/class function` in the same file
+- Re-export patterns like `export { x } from './y'`
 
-**Phase to address:**
-Phase 1 (Foundation) -- store size limits and pruning must be built in from the start.
+**Prevention:** Audit all export styles before splitting. Establish a consistent export convention (recommended: all named exports, no default exports for modules). Verify import sites match export styles.
+
+**Which phase:** Pre-splitting audit phase (Phase 0).
 
 ---
 
-### Pitfall 6: LLM Optimization Frequency and Cost Abuse
+## Category 2: Removing `as any` Casts
 
-**What goes wrong:**
-`shouldTriggerOptimization` fires based on `optimizationIntervalTurns` (50 turns) OR `optimizationIntervalMs` (6 hours). Each trigger spawns a subagent with `EmpathyObserverWorkflowManager`. At high message volume, this could mean a subagent call every few minutes. This generates significant LLM cost and can interfere with normal agent operation.
+The codebase has 36+ `as any` casts across multiple files. Simply removing them without fixing the underlying type architecture creates new problems.
 
-**Why it happens:**
-The trigger conditions are too permissive. A busy conversation can hit 50 turns in 10 minutes. The subagent call is async (fire-and-forget via `.catch`), so cost is not immediately visible. But the LLM usage accumulates.
+### Pitfall 2A: Removing Casts Without Fixing Source Types Breaks Runtime
 
-**How to avoid:**
-- Make optimization interval time-based primarily, not turn-based (turns reset on plugin reload)
-- Add a minimum time between optimizations (e.g., at least 1 hour apart)
-- Add a global budget: max N optimizations per day
-- Make optimization calls synchronous during low-traffic windows (heartbeat)
-- Add cost tracking: log optimization subagent call frequency
+**What goes wrong:** Most `as any` casts exist because the underlying types are too broad or missing. The cast is a symptom, not the disease. Removing the cast by widening the target type to accept the source is not a fix -- it postpones the problem.
+
+**Specific evidence from codebase:**
+- `prompt.ts:594, 630`: `subagent: runtimeSubagent as any` -- the plugin framework types `subagent` as `any`. Removing the cast requires either the plugin SDK to export a proper type, or defining a local type that captures the subagent contract.
+- `message-sanitize.ts:30, 43`: `return { message: { ...msg, content: sanitized } as any }` -- the `msg` type apparently does not have a `content` field. Casting to `any` sidesteps a type mismatch that likely reflects a real API gap.
+
+**Prevention strategy:** Categorize each `as any` cast by root cause:
+1. **Plugin framework gap** (subagent type `any`): Define a local interface that captures the actual subagent contract used in the codebase. Do not cast to `any`; use the local interface.
+2. **API extension gap** (adding fields to foreign types): Define a local extension interface with the extra fields and use that instead of `as any`.
+3. **Internal type casting** (casting between internal types): Use proper type guards or branded types.
+
+**Which phase:** Phase 1 (categorize and define proper types before removing any casts).
+
+---
+
+### Pitfall 2B: Over-Widening Types to Avoid Casts
+
+**What goes wrong:** When a cast is removed by adding `content?: string` to a foreign interface, that change pollutes the type definition. If the foreign interface is shared across many call sites, the change has blast radius. If it lives in a third-party package, the change is impossible.
+
+**Example:** Adding `content` to a `Message` type in `message-sanitize.ts` to avoid `as any` creates a field that may not exist on all `Message` objects in the system.
+
+**Prevention strategy:** Create local extension interfaces. Never modify third-party or SDK types. Define:
+```typescript
+// local type that extends the framework type with our usage
+interface SanitizedMessage extends Message {
+  content: string;
+}
+```
+Then use `as SanitizedMessage` instead of `as any`. The cast is now to a meaningful type that documents the extension.
+
+**Which phase:** Phase 1.
+
+---
+
+### Pitfall 2C: Type Erasure at Runtime for Class Casts
+
+**What goes wrong:** TypeScript type information is erased at runtime. `instance as SomeType` compiles but at runtime is a no-op if `instance` is not actually a `SomeType`. If the underlying value does not have the expected structure, the code fails later with a confusing error.
 
 **Warning signs:**
-- Optimization subagent spawning multiple times per hour
-- LLM token usage spikes correlated with empathy optimization
-- `EmpathyObserverWorkflowManager` instances accumulating
+- `as any` on object literals or class instances where the runtime shape may not match the declared type
+- Casts inside error handlers where the error type is unknown
 
-**Phase to address:**
-Phase 2 (Optimization) -- but throttle logic should be in Phase 1 to prevent runaway costs.
+**Prevention:** Verify that every `as any` removal results in a runtime-safe cast. Add runtime validation (e.g., `zod` schema, `instanceof`, or explicit field checks) for casts that cannot be verified at compile time.
+
+**Which phase:** Phase 2 (after types are defined, add runtime validation for edge cases).
 
 ---
 
-### Pitfall 7: Module-Level Cache Causes Stale State Across Reloads
+## Category 3: Adding Queue Integration Tests
 
-**What goes wrong:**
-`_empathyKeywordCache` at module level in `prompt.ts` caches the keyword store in memory. This cache is never invalidated when the file on disk changes (e.g., optimization subagent updates the store). The in-memory cache reflects stale data until the process restarts.
+The `file-lock.ts` `asyncLockQueues` Map implements in-process queue serialization. Integration tests for this queue must avoid timing brittleness and state leakage.
 
-**Why it happens:**
-The cache is keyed only by language. When `saveKeywordStore` writes to disk, the module-level `_empathyKeywordCache` is not updated. Subsequent calls use the stale cached store, lose the optimization updates, and may overwrite them on next save.
+### Pitfall 3A: Module-Level State Leaking Across Test Runs
 
-**Specific scenario:**
-1. Optimization subagent runs, updates and saves store to disk
-2. Plugin hook fires again -- cache still holds old store
-3. `matchEmpathyKeywords` runs on old store, calls `saveKeywordStore` again
-4. Overwrites the optimized store with stale data (data loss)
-
-**How to avoid:**
-- Invalidate cache after `saveKeywordStore` is called
-- Or: always reload from disk before matching, only cache for the duration of a single hook call
-- Or: use a version/timestamp check -- if disk store is newer than cache, reload
+**What goes wrong:** `asyncLockQueues` at `file-lock.ts:325` is a module-level `Map`. In tests, if the module is imported and the Map is populated, subsequent test runs in the same process may see stale queue entries. This causes tests to fail non-deterministically or pass when they should fail.
 
 **Warning signs:**
-- Optimization updates appear to have no effect
-- Keyword weights revert to previous values after optimization
-- Logs show "Keyword store saved after match" but stored values never change
+- Any module-level `const` that is a `Map`, `Set`, array, or object that accumulates state
+- Tests that pass in isolation but fail when run with other tests
 
-**Phase to address:**
-Phase 1 (Foundation) -- cache invalidation is a simple fix but critical for learning to work.
+**Prevention:**
+- Export `asyncLockQueues` (or a reset function) so tests can clear it between runs
+- Use `vi.resetModules()` in vitest to ensure clean module state per test
+- Add an `_resetAsyncLockQueues()` internal function for testing only (documented as test-only)
 
----
-
-## Moderate Pitfalls
-
-### Pitfall 8: Concurrent Writes from Multiple Plugin Instances
-
-**What goes wrong:**
-If multiple OpenClaw instances share the same `stateDir` (same workspace), concurrent prompt hook executions could call `saveKeywordStore` simultaneously. The second write could corrupt or partially overwrite the first.
-
-**Why it happens:**
-`fs.writeFileSync` is not process-safe. File locking is not used. The JSON file has no write serialization.
-
-**How to avoid:**
-- Use a file lock (e.g., `proper-lockfile` or `flock` via child_process)
-- Or: serialize writes through a single writer actor
-- Or: use an in-memory store with periodic batched writes, accepting some data loss on crash
-
-**Phase to address:**
-Phase 1 (Foundation) if multi-instance deployment is possible.
+**Which phase:** Phase 1 (add test infrastructure for state isolation before writing queue tests).
 
 ---
 
-### Pitfall 9: Mutable Store Object Creates Aliasing Hazards
+### Pitfall 3B: Timing-Dependent Tests (setTimeout, sleep, waitFor)
 
-**What goes wrong:**
-`loadKeywordStore` returns the parsed JSON object directly. Mutations to that object (e.g., `entry.hitCount++` in `matchEmpathyKeywords`) mutate the in-memory representation. If the same object is cached and also written back after mutation, this works by accident. But the interaction between cache invalidation and the shared mutable store object is subtle and error-prone.
+**What goes wrong:** Queue tests that wait for a specific duration (e.g., `await new Promise(r => setTimeout(r, 100))`) are inherently brittle. On slow CI systems, the timeout may be too short. On fast systems, the wait is wasted time.
 
-**Why it happens:**
-No copy-on-read discipline. The store object is both the working copy and the persistence representation. If cache invalidation causes a reload from disk while mutations are pending, state can be lost or duplicated.
+**Warning signs:**
+- `setTimeout` inside test logic
+- `await new Promise(resolve => setTimeout(resolve, N))`
+- `waitFor` loops that check a condition N times with sleep between checks
 
-**How to avoid:**
-- Treat the store as immutable from the caller's perspective; always copy on load
-- Or: document the mutable semantics clearly and add a version field to detect staleness
-- Use a copy-on-read pattern: `JSON.parse(JSON.stringify(store))` before mutating
+**Prevention:**
+- Test queue semantics (ordering, concurrency limits, no duplicate processing) without timing dependencies
+- Use callback or promise resolution to signal completion instead of arbitrary delays
+- If timing must be tested (e.g., throttle behavior), use Vitest's fake timers (`vi.useFakeTimers()`)
 
-**Phase to address:**
-Phase 1 (Foundation) -- removes subtle aliasing bugs.
-
----
-
-## Minor Pitfalls
-
-### Pitfall 10: `detectCorrectionCue` vs `matchEmpathyKeywords` Redundancy
-
-**What goes wrong:**
-`prompt.ts` has `detectCorrectionCue` (lines 87-111) which hardcodes 15 correction cues. Then `matchEmpathyKeywords` also matches keywords from the store (which includes the same 15 terms as seed keywords). This creates double-processing: the hardcoded list runs separately from the learnable store.
-
-**Why it happens:**
-Historical: `detectCorrectionCue` was the original hardcoded approach. The empathy keyword system was added later. The two systems run independently without deduplication.
-
-**How to avoid:**
-- Remove `detectCorrectionCue` and route all correction detection through `matchEmpathyKeywords`
-- Ensure seed keywords fully cover what `detectCorrectionCue` matched
-- Or: keep both but add a dedup pass so hardcoded matches do not double-count toward severity
-
-**Phase to address:**
-Phase 1 (Foundation) -- removes redundant code and ensures single source of truth.
+**Which phase:** Phase 1 (establish test patterns before writing queue tests).
 
 ---
 
-## Technical Debt Patterns
+### Pitfall 3C: Over-Mocking in Integration Tests
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Skip FPR verification | Faster to ship | FPR values are fictional, learning degrades | Never in production |
-| No cache invalidation | Simpler code | Optimization updates lost, learning broken | Only in spike/prototype |
-| Write directly to JSON file | No extra code | Corruption on crash = data loss | Never in production |
-| No store size limit | Unrestricted learning | Performance death spiral | Never |
-| Async fire-and-forget optimizer | No latency impact | Unbounded LLM cost | Only with explicit cost budget |
-| Module-level mutable cache | Avoids passing state | Stale reads, aliasing bugs | Never |
+**What goes wrong:** Integration tests that mock too heavily (mocking `fs`, `path`, `crypto`) test the mock behavior, not the actual queue behavior. The queue may work correctly against mocks but fail against real I/O.
 
----
+**Warning signs:**
+- `vi.mock('fs')` in integration tests for queue components
+- Mock implementations that do not match real filesystem semantics (e.g., atomic rename, file locking)
 
-## Integration Gotchas
+**Prevention:**
+- Integration tests for the queue should use real `asyncLockQueues` and real `Map` operations where possible
+- Only mock external dependencies (filesystem, network) at the boundary, not the queue logic itself
+- Create a `createInMemoryLockQueue()` factory for unit testing the queue algorithm with a fake Map
 
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| OpenClaw prompt hook | Blocking the hook with synchronous subagent call | Always spawn optimization subagent async, never await in hook |
-| Keyword store file | Assuming file is always valid JSON | Validate on load, fall back to seed, back up before write |
-| EmpathyObserverWorkflowManager | Creating new manager without cleanup | Reuse single manager instance per session, not per call |
-| Session trajectory | Not recording keyword match outcomes | Add `empathyKeywordMatch` event to trajectory for future analysis |
+**Which phase:** Phase 1 (distinguish unit-testable queue logic from I/O-dependent queue logic).
 
 ---
 
-## Performance Traps
+### Pitfall 3D: Tests That Mutate Shared State Without Restoring It
 
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Linear keyword scan | >5ms per match with 200+ terms | Trie or Bloom filter; cap store at 200 terms | At ~200 terms, every user message pays O(n) cost |
-| Unbounded optimization calls | LLM cost spike, agent slowdown | Time-based throttle, max 4 optimizations/day | With active users sending >100 messages/hour |
-| Growing store file | Disk I/O slows, memory rises | Hard cap at 200 terms, aggressive pruning | After 6 months of use, store could have 1000+ terms |
+**What goes wrong:** Tests that add entries to `asyncLockQueues` during execution but do not remove them leave the module dirty. Subsequent tests see a non-empty queue and either fail or exhibit incorrect behavior.
 
----
+**Prevention:**
+- Use `afterEach` to clear `asyncLockQueues` after every test
+- Use `beforeEach` to assert `asyncLockQueues.size === 0` as a sanity check
+- Consider wrapping `asyncLockQueues` in a getter function that can be intercepted by tests
 
-## "Looks Done But Isn't" Checklist
-
-- [ ] **FPR Tracking:** `stats.totalFalsePositives` is incremented somewhere -- verify it is not always 0
-- [ ] **FPR Calculation:** FPR is computed from labeled data, not just LLM guess -- verify with a test case
-- [ ] **Cache Invalidation:** After `saveKeywordStore`, `_empathyKeywordCache` is cleared or updated -- verify with integration test
-- [ ] **Atomic Write:** Save uses temp-file-then-rename -- verify by killing process mid-save
-- [ ] **Store Size Limit:** There is a hard cap on `Object.keys(store.terms).length` -- verify it is enforced
-- [ ] **Optimization Throttle:** Maximum N optimization calls per hour is enforced -- verify with load test
-- [ ] **Concurrent Write Safety:** Multiple simultaneous hook calls do not corrupt the store file -- verify with concurrency test
-- [ ] **Double Detection:** `detectCorrectionCue` and `matchEmpathyKeywords` are not both running independently -- verify coverage
+**Which phase:** Phase 1.
 
 ---
 
-## Recovery Strategies
+### Pitfall 3E: Race Conditions in Queue Tests Not Caught by Sequential Test Runners
 
-| Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| FPR drift | MEDIUM | Reset all FPR values to defaults, add verification pipeline, re-learn from scratch |
-| Store corruption | LOW | Load from `.bak`, or regenerate from seed if backup also corrupt |
-| Cache stale reads | LOW | Clear cache, restart plugin, verify optimization writes persist |
-| Unbounded growth | MEDIUM | Prune all `llm_discovered` terms with < 10 hits, enforce size cap going forward |
-| Optimization cost spike | MEDIUM | Add daily budget flag, disable auto-optimization, manually review store |
-| Concurrent write corruption | HIGH | Implement file locking, validate JSON on load, add write verification |
+**What goes wrong:** The queue is designed to handle concurrent access. If a test suite runs tests sequentially, it may not catch race conditions that only manifest under concurrent access. The Vitest default runner may run describe blocks in sequence but `it` blocks within a describe in parallel.
+
+**Warning signs:**
+- `asyncLockQueues` Map access without synchronization in the queue implementation itself
+- Tests that do not explicitly await all queue operations before asserting
+
+**Prevention:**
+- Add explicit concurrency tests: run N parallel operations and verify all complete without corruption
+- Use `Promise.all` to create concurrent load in a dedicated test
+- Verify the queue Map is never left in an inconsistent state (e.g., entry present but Promise never resolved)
+
+**Which phase:** Phase 2 (after basic queue tests pass, add concurrency stress tests).
 
 ---
 
-## Pitfall-to-Phase Mapping
+## Category 4: Replacing better-sqlite3 (Native Module)
 
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| FPR calculation assumes labels | Phase 1: FPR verification infrastructure | Add test: verify FPR changes after confirmed FP matches |
-| Learning loop reinforces FP | Phase 2: Feedback collection | Add test: simulate 10 FP matches, verify weight decreases |
-| Per-message latency | Phase 1: Performance baseline | Benchmark matching with 50/100/200 terms |
-| State file corruption | Phase 1: Atomic writes + backup | Kill process mid-save, verify recoverable |
-| Unbounded store growth | Phase 1: Size limits + pruning | Add test: attempt to add 500 terms, verify capped |
-| LLM optimization abuse | Phase 1: Throttle + budget | Log all optimization calls, verify < N per hour |
-| Stale cache reads | Phase 1: Cache invalidation | Integration test: update store on disk, verify cache reflects change |
-| Concurrent writes | Phase 1: File locking | Concurrent hook calls, verify no corruption |
-| Double detection | Phase 1: Remove detectCorrectionCue | Verify seed keywords cover all 15 hardcoded terms |
-| No FPR verification pipeline | Phase 1: Add verification step | Verify confirmed FP reduces keyword weight |
+Multiple files depend on `better-sqlite3`: `central-database.ts`, `control-ui-db.ts`, `workflow-store.ts`, `trajectory.ts`. Replacement options include `sql.js` (WebAssembly) and `bun:sqlite` (Bun built-in). Each introduces portability and performance pitfalls.
+
+### Pitfall 4A: API Surface Differences (sync vs async, parameter types)
+
+**What goes wrong:** `better-sqlite3` is synchronous. `sql.js` is also synchronous but has a different API. `bun:sqlite` is synchronous but has different prepared statement and binding semantics. Simply swapping the import breaks compilation and runtime behavior.
+
+**Specific API differences to watch for:**
+- `new Database(path)` constructor options vary
+- `stmt.run(params)` vs `stmt.bind(params)` vs `stmt.run(...params)`
+- Transaction control (`db.transaction(() => {})` in better-sqlite3 vs manual `BEGIN/COMMIT`)
+- Return value of `stmt.run()` (changesResult vs changes boolean)
+- `db.pragma()` syntax and available pragmas
+
+**Prevention:**
+- Before replacing, create a compatibility shim/adapter that wraps the new library with the `better-sqlite3` interface
+- Write integration tests that verify all SQL operations produce identical results
+- Do not replace all usages at once; replace one file at a time with the adapter
+
+**Which phase:** Phase 1 (build adapter shim before touching any SQLite-dependent file).
+
+---
+
+### Pitfall 4B: Binary Storage Incompatibility
+
+**What goes wrong:** `better-sqlite3` stores data in a platform-specific binary format. An existing `.db` file created with `better-sqlite3` on Linux x64 cannot be directly opened by `sql.js` (WASM) without conversion. The file format may be incompatible across architectures.
+
+**Warning signs:**
+- Existing `.db` files in the codebase or user workspaces
+- Tests that rely on pre-seeded database files
+
+**Prevention:**
+- Provide a migration path: export data from `better-sqlite3`, import into new library
+- Or: use a conversion utility that reads the binary format and re-creates the DB in the new format
+- Document that users may need to rebuild state on first run after migration
+
+**Which phase:** Phase 1 (document migration path before making any changes).
+
+---
+
+### Pitfall 4C: Performance Regression (sql.js vs native)
+
+**What goes wrong:** `sql.js` (WASM) is 2-10x slower than `better-sqlite3` for write workloads and large queries. `bun:sqlite` is comparable or faster for read-heavy workloads but may differ on write transactions.
+
+**Warning signs:**
+- Database operations in hot paths (every prompt hook, every tool call)
+- Large result sets (trajectory queries can return thousands of rows)
+
+**Prevention:**
+- Benchmark the replacement library against the current `better-sqlite3` implementation with representative workloads before committing
+- Set performance budgets: e.g., trajectory query must complete in <50ms for 10K rows
+- If performance regresses, consider hybrid approach: use `sql.js` for read-only databases and `better-sqlite3` for write-heavy databases
+
+**Which phase:** Phase 1 (benchmark before deciding on replacement library).
+
+---
+
+### Pitfall 4D: Memory Pressure from WASM (sql.js)
+
+**What goes wrong:** `sql.js` runs SQLite in a WebAssembly虚拟机. It loads the entire database into memory. For large trajectory databases (>100MB), this causes memory pressure. `better-sqlite3` memory-maps the file, using far less RSS.
+
+**Warning signs:**
+- `trajectory.ts` can accumulate large databases over time
+- User workspaces with long-running sessions produce large `.db` files
+
+**Prevention:**
+- Size-limit the in-memory database or use streaming queries for large result sets
+- Consider `sql.js` only for workflow store (typically small) while keeping `better-sqlite3` for trajectory (typically large)
+- Add a memory budget check: if DB file > 50MB, warn or use chunked loading
+
+**Which phase:** Phase 1 (assess database sizes in production data).
+
+---
+
+### Pitfall 4E: Node.js Version and Platform Build Dependencies
+
+**What goes wrong:** `better-sqlite3` requires native compilation. `sql.js` (WASM) has no native deps but requires the WASM binary to be loaded. `bun:sqlite` requires Bun runtime. The replacement affects the minimum Node.js version and may break Windows builds if the WASM path is not configured correctly.
+
+**Warning signs:**
+- `package.json` has `optionalDependencies` for `better-sqlite3`
+- CI builds for multiple platforms (Linux, macOS, Windows)
+- `.node` binary files in the repo
+
+**Prevention:**
+- `sql.js` requires bundling the WASM file and loading it at runtime via `fs.readFileSync` or fetch
+- Ensure the WASM file path resolution works across all platforms (use `import.meta.url` or `require.resolve`)
+- Test on all target platforms before merging
+
+**Which phase:** Phase 1 (establish CI matrix for replacement library on all target platforms).
+
+---
+
+## Cross-Cutting Concerns
+
+### Pitfall 5: Refactoring All Four Areas Simultaneously
+
+**What goes wrong:** Splitting god classes, removing `as any`, adding queue tests, and replacing native modules are four independent refactoring axes. Doing them together creates compounded risk where failures in one axis mask failures in another.
+
+**Prevention:** Execute in phases:
+1. Split files first (establishes new module boundaries)
+2. Add queue tests second (validates the split modules' concurrency behavior)
+3. Remove `as any` casts third (now that the module graph is stable)
+4. Replace native modules last (after all type and behavior contracts are stable)
+
+**Which phase:** Sequencing recommendation above; do not parallelize these four work items.
+
+---
+
+## Phase-Specific Warning Matrix
+
+| Pitfall | Warning Sign | Prevention | Phase |
+|---------|-------------|------------|-------|
+| 1A: Shared mutable module state | Module-level `Map`/`Set`/array | Extract to shared state module | Phase 0 (pre-split) |
+| 1B: Circular imports | Cross-split imports creating cycles | Draw import graph, break cycles | Phase 0 |
+| 1C: Execution order | Side effects on import | Convert to explicit `initialize()` calls | Phase 0 |
+| 1D: Type vs value sharing | `import type` without value export | Audit all exports after split | Phase 2 |
+| 1E: Named/default export mismatch | Mixed export styles | Normalize export convention | Phase 0 |
+| 2A: Removing casts without fixing types | Cast removed but type still wrong | Categorize casts by root cause first | Phase 1 |
+| 2B: Over-widening types | Modifying third-party types | Use local extension interfaces | Phase 1 |
+| 2C: Type erasure at runtime | Cast to interface without runtime check | Add `zod` or `instanceof` validation | Phase 2 |
+| 3A: Module state leaking in tests | Tests pass in isolation, fail together | `vi.resetModules()`, clear `asyncLockQueues` | Phase 1 |
+| 3B: Timing-dependent tests | `setTimeout` in test logic | Use fake timers or promise resolution | Phase 1 |
+| 3C: Over-mocking | Mocking `fs` in integration tests | Test real queue logic, mock only I/O boundary | Phase 1 |
+| 3D: Tests not restoring state | `asyncLockQueues.size` grows across tests | `afterEach` cleanup | Phase 1 |
+| 3E: Race conditions not caught | No concurrency tests | Explicit `Promise.all` concurrency tests | Phase 2 |
+| 4A: API surface differences | Different method signatures | Build compatibility adapter shim | Phase 1 |
+| 4B: Binary storage incompatibility | Existing `.db` files unreadable | Provide migration/conversion path | Phase 1 |
+| 4C: Performance regression | Queries slower after replacement | Benchmark before and after | Phase 1 |
+| 4D: WASM memory pressure | Large DB loaded into memory | Size-limit or chunked loading | Phase 1 |
+| 4E: Build/CI compatibility | WASM not loading on Windows | Test on all target platforms | Phase 1 |
+
+---
+
+## "Looks Done But Isn't" Checklist for This Refactoring
+
+- [ ] All module-level mutable state extracted to explicit shared modules (no mutable state at module scope in split files)
+- [ ] Import graph has no cycles after splitting
+- [ ] All `as any` casts replaced with meaningful local type definitions
+- [ ] Queue tests do not contain `setTimeout` or arbitrary sleep delays
+- [ ] `asyncLockQueues` Map is cleared between tests
+- [ ] `better-sqlite3` replacement has a compatibility shim with identical API surface
+- [ ] Existing `.db` files can be migrated to new format without data loss
+- [ ] Performance budget met on representative workloads for any SQLite replacement
 
 ---
 
 ## Sources
 
-- Code analysis of `packages/openclaw-plugin/src/hooks/prompt.ts` (lines 1-1087)
-- Code analysis of `packages/openclaw-plugin/src/core/empathy-keyword-matcher.ts` (lines 1-336)
-- Code analysis of `packages/openclaw-plugin/src/core/empathy-types.ts` (lines 1-230)
+- Code analysis of `packages/openclaw-plugin/src/service/evolution-worker.ts` (first 100 lines, imports and structure)
+- Code analysis of `packages/openclaw-plugin/src/core/nocturnal-trinity.ts` (export and import patterns)
+- Code analysis of `packages/openclaw-plugin/src/utils/file-lock.ts` (asyncLockQueues Map, lines 320-362)
+- Code analysis of `packages/openclaw-plugin/src/hooks/prompt.ts` (`as any` casts at lines 594, 630)
+- Code analysis of `packages/openclaw-plugin/src/hooks/message-sanitize.ts` (`as any` casts at lines 30, 43)
+- Code analysis of `packages/openclaw-plugin/tests/hooks/gate-pipeline-integration.test.ts` (test patterns, mocking)
+- `packages/openclaw-plugin/vitest.config.ts` (test framework configuration)
+- Vitest documentation (timing test patterns, fake timers)
+- sql.js documentation (WASM constraints, memory model)
+- TypeScript handbook (type erasure, `import type` vs `import`)
 
 ---
 
-*Pitfalls research for: KeywordLearningEngine*
-*Researched: 2026-04-14*
+*Pitfalls research for: Tech debt remediation (god class split, as any removal, queue tests, native module replacement)*
+*Researched: 2026-04-15*

@@ -1,7 +1,7 @@
 /* global NodeJS */
+ 
 import * as fs from 'fs';
 import * as path from 'path';
-import { createHash } from 'crypto';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
@@ -12,11 +12,20 @@ import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger } from '../core/evolution-logger.js';
+import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
+export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+
+// Re-export queue I/O (extracted to queue-io.ts)
+export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock, requireQueueLock } from './queue-io.js';
+export { enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
+export { EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './queue-io.js';
+import { saveEvolutionQueue, requireQueueLock, hasPendingTask, enqueueSleepReflectionTask, enqueueKeywordOptimizationTask, createEvolutionTaskId } from './queue-io.js';
+import type { RecentPainContext } from './queue-io.js';
+export type { RecentPainContext } from './queue-io.js';
 import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
 import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
-import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
@@ -29,167 +38,57 @@ import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-con
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { readPainFlagContract } from '../core/pain.js';
 import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
+import { findRecentDuplicateTask } from './evolution-dedup.js';
 import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
-import { isLegacyQueueItem, migrateQueueToV2, type RawQueueItem, type TaskKind, type TaskPriority } from './evolution-queue-migration.js';
-export type { TaskKind, TaskPriority } from './evolution-queue-migration.js';
-export { acquireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './evolution-queue-lock.js';
-import { requireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX } from './evolution-queue-lock.js';
-import { readRecentPainContext, buildPainSourceKey, hasRecentSimilarReflection } from './evolution-pain-context.js';
-import { findRecentDuplicateTask } from './evolution-dedup.js';
 import { classifyFailure, type ClassifiableTaskKind } from './failure-classifier.js';
 import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from './cooldown-strategy.js';
 import { reconcileStartup } from './startup-reconciler.js';
 import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
-// ── Workflow Watchdog ────────────────────────────────────────────────────────
-// Detects stale/orphaned workflows, invalid results, and cleanup failures.
-// Runs every heartbeat cycle, catching bugs like:
-//   #185 — orphaned active workflows
-//   #181 — structurally invalid results (all zeros)
-//   #180/#183 — expired workflows not swept
-//   #182 — unhandled rejections leaving workflows in limbo
+// ── Queue Event Payload Validation ─────────────────────────────────────────
 
-interface WatchdogResult {
-  anomalies: number;
-  details: string[];
-}
-
-async function runWorkflowWatchdog(
-  wctx: WorkspaceContext,
-  api: OpenClawPluginApi | null,
-  logger?: PluginLogger,
-): Promise<WatchdogResult> {
-  const details: string[] = [];
-  const now = Date.now();
-  const subagentRuntime = api?.runtime?.subagent;
-  const agentSession = api?.runtime?.agent?.session;
-
-  try {
-    const store = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
-    try {
-      const allWorkflows: WorkflowRow[] = store.listWorkflows();
-
-      // Check 1: Stale active workflows (active > 2x TTL)
-      const staleThreshold = WORKFLOW_TTL_MS * 2;
-      const staleActive = allWorkflows.filter(
-        (wf: WorkflowRow) => wf.state === 'active' && (now - wf.created_at) > staleThreshold,
-      );
-      if (staleActive.length > 0) {
-        for (const wf of staleActive) {
-          const ageMin = Math.round((now - wf.created_at) / 60000);
-          details.push(`stale_active: ${wf.workflow_id} (${wf.workflow_type}, ${ageMin}min old)`);
-
-          // #257: Check if the last recorded event reason indicates expected subagent unavailability.
-          // If so, skip marking as terminal_error — the workflow is stale because the subagent
-          // was expectedly unavailable (daemon mode, process isolation), not due to a hard failure.
-          const events = store.getEvents(wf.workflow_id);
-          const lastEventReason = events.length > 0 ? events[events.length - 1].reason : 'unknown';
-          if (isExpectedSubagentError(lastEventReason)) {
-            logger?.debug?.(`[PD:Watchdog] Skipping stale active workflow ${wf.workflow_id}: expected subagent error (${lastEventReason})`);
-            continue;
-          }
-
-          store.updateWorkflowState(wf.workflow_id, 'terminal_error');
-          store.recordEvent(wf.workflow_id, 'watchdog_timeout', 'active', 'terminal_error', `Stale active > ${staleThreshold / 60000}s`, { ageMs: now - wf.created_at });
-
-          // Cleanup session if possible (#188: gateway-safe fallback)
-          if (wf.child_session_key) {
-            try {
-              if (subagentRuntime) {
-                await subagentRuntime.deleteSession({ sessionKey: wf.child_session_key, deleteTranscript: true });
-                logger?.info?.(`[PD:Watchdog] Cleaned up stale session: ${wf.child_session_key}`);
-              } else if (agentSession) {
-                const storePath = agentSession.resolveStorePath();
-                const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
-                const normalizedKey = wf.child_session_key.toLowerCase();
-                if (sessionStore[normalizedKey]) {
-                  delete sessionStore[normalizedKey];
-                  await agentSession.saveSessionStore(storePath, sessionStore);
-                  logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback: ${wf.child_session_key}`);
-                }
-              }
-            } catch (cleanupErr) {
-              const errMsg = String(cleanupErr);
-              if (errMsg.includes('gateway request') && agentSession) {
-                const storePath = agentSession.resolveStorePath();
-                const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
-                const normalizedKey = wf.child_session_key.toLowerCase();
-                if (sessionStore[normalizedKey]) {
-                  delete sessionStore[normalizedKey];
-                  await agentSession.saveSessionStore(storePath, sessionStore);
-                  logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback after gateway error: ${wf.child_session_key}`);
-                }
-              } else {
-                logger?.warn?.(`[PD:Watchdog] Failed to cleanup session ${wf.child_session_key}: ${errMsg}`);
-              }
-            }
-          }
-        }
-      }
-
-      // Check 2: Workflows in terminal_error/expired without cleanup
-      const unclearedTerminal = allWorkflows.filter(
-        (wf: WorkflowRow) => (wf.state === 'terminal_error' || wf.state === 'expired') && wf.cleanup_state === 'pending',
-      );
-      if (unclearedTerminal.length > 0) {
-        details.push(`uncleared_terminal: ${unclearedTerminal.length} workflows (will be swept next cycle)`);
-      }
-
-      // Check 3: Nocturnal workflow result validation (#181 pattern)
-      const nocturnalCompleted = allWorkflows.filter(
-        (wf: WorkflowRow) => wf.workflow_type === 'nocturnal' && wf.state === 'completed',
-      );
-      for (const wf of nocturnalCompleted) {
-        // Check if the metadata snapshot has all zeros (invalid data)
-        try {
-          const meta = JSON.parse(wf.metadata_json) as Record<string, unknown>;
-          const snapshot = meta.snapshot as Record<string, unknown> | undefined;
-          if (snapshot) {
-            // #219: Check for fallback data source (partial stats from pain context)
-            const dataSource = snapshot._dataSource as string | undefined;
-            if (dataSource === 'pain_context_fallback') {
-              details.push(`fallback_snapshot: nocturnal workflow ${wf.workflow_id} uses pain-context fallback (stats may be incomplete)`);
-            }
-            const stats = snapshot.stats as Record<string, number> | undefined;
-            // #246: Stats are now always number (never null). Detect "empty" fallback:
-            // fallback + all counts zero means no real data was available.
-            // NOTE: totalAssistantTurns may be 0 even for valid sessions because
-            // listRecentNocturnalCandidateSessions (used in fallback path) does not
-            // populate assistantTurnCount (only getNocturnalSessionSnapshot does).
-            // We use totalToolCalls=0 as the primary indicator instead.
-            if (stats && dataSource === 'pain_context_fallback' &&
-                stats.totalToolCalls === 0 && stats.totalGateBlocks === 0 &&
-                stats.failureCount === 0) {
-              details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has empty fallback stats (no trajectory data found)`);
-            }
-          }
-        } catch { /* ignore malformed metadata */ }
-      }
-
-      // Summary
-      const stateCounts: Record<string, number> = {};
-      for (const wf of allWorkflows) {
-        stateCounts[wf.state] = (stateCounts[wf.state] || 0) + 1;
-      }
-      const stateSummary = Object.entries(stateCounts).map(([s, c]) => `${s}=${c}`).join(', ');
-      if (details.length === 0) {
-        logger?.debug?.(`[PD:Watchdog] OK — ${allWorkflows.length} workflows (${stateSummary})`);
-      } else {
-        logger?.info?.(`[PD:Watchdog] ${details.length} anomalies — ${allWorkflows.length} workflows (${stateSummary})`);
-      }
-    } finally {
-      store.dispose();
+/**
+ * Validates a queue event payload string before JSON.parse.
+ * Checks:
+ *   1. typeof payload === 'string'
+ *   2. Parsed object has required fields: 'type' and 'workspaceId'
+ * Returns the parsed object only if validation passes.
+ * Returns empty object {} if payload is falsy.
+ * Throws Error if payload is a non-empty string that fails validation.
+ */
+function validateQueueEventPayload(payload: string | null | undefined): Record<string, unknown> {
+    if (!payload) return {};
+    if (typeof payload !== 'string') {
+        throw new Error(`Queue event payload must be a string, got: ${typeof payload}`);
     }
-  } catch (err) {
-    logger?.warn?.(`[PD:Watchdog] Failed to scan workflows: ${String(err)}`);
-  }
-
-  return { anomalies: details.length, details };
+    try {
+        const parsed = JSON.parse(payload);
+        if (typeof parsed !== 'object' || parsed === null) {
+            throw new Error('Queue event payload must be a JSON object');
+        }
+        if (!('type' in parsed) || !('workspaceId' in parsed)) {
+            throw new Error('Queue event payload missing required fields: type, workspaceId');
+        }
+        return parsed;
+    } catch (err) {
+        if (err instanceof SyntaxError) {
+            throw new Error(`Invalid JSON in queue event payload: ${err.message}`);
+        }
+        throw err;
+    }
 }
+
+/* istanbul ignore next — test export for validateQueueEventPayload */
+export { validateQueueEventPayload };
+
+// Re-export workflow watchdog (extracted to workflow-watchdog.ts)
+import { runWorkflowWatchdog, type WatchdogResult } from './workflow-watchdog.js';
+export { runWorkflowWatchdog };
+export type { WatchdogResult };
 
 let timeoutId: NodeJS.Timeout | null = null;
 
@@ -204,27 +103,6 @@ let timeoutId: NodeJS.Timeout | null = null;
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
 export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation';
-
-/**
- * Recent pain context attached to sleep_reflection tasks.
- * Carries explicit recent pain signal metadata without being a separate task kind.
- * Used by NocturnalTargetSelector for ranking bias and context enrichment.
- */
-export interface RecentPainContext {
-  /** Most recent unresolved pain event */
-  mostRecent: {
-    score: number;
-    source: string;
-    reason: string;
-    timestamp: string;
-    /** Session ID where the pain occurred */
-    sessionId: string;
-  } | null;
-  /** Count of pain events in the recent window (for signal strength) */
-  recentPainCount: number;
-  /** Highest pain score in the recent window */
-  recentMaxPainScore: number;
-}
 
 export interface EvolutionQueueItem {
     // Core identity
@@ -263,6 +141,11 @@ export interface EvolutionQueueItem {
     recentPainContext?: RecentPainContext;
 }
 
+// ── Queue Migration (extracted to queue-migration.ts) ────────────────────────
+import { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES, type RawQueueItem } from './queue-migration.js';
+export { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES };
+export type { RawQueueItem };
+
 function isSessionAtOrBeforeTriggerTime(
     session: { startedAt: string; updatedAt: string },
     triggerTimeMs: number,
@@ -281,6 +164,7 @@ function isSessionAtOrBeforeTriggerTime(
     return true;
 }
 
+ 
 function buildFallbackNocturnalSnapshot(
     sleepTask: EvolutionQueueItem,
     extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null,
@@ -347,20 +231,9 @@ function buildFallbackNocturnalSnapshot(
     };
 }
 
-export function createEvolutionTaskId(
-    source: string,
-    score: number,
-    preview: string,
-    reason: string,
-    now: number
-): string {
-    // Keep ids short for prompt injection, but include enough entropy to avoid
-    // collisions between different pain events that share the same source/score/preview.
-    return createHash('md5')
-        .update(`${source}:${score}:${preview}:${reason}:${now}`)
-        .digest('hex')
-        .substring(0, 8);
-}
+const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
+
+// Queue lock constants and requireQueueLock are imported from queue-io.ts
 
 export function extractEvolutionTaskId(task: string): string | null {
     if (!task) return null;
@@ -409,180 +282,31 @@ export function purgeStaleFailedTasks(
     return { purged: purged.length, remaining: queue.length, byReason };
 }
 
-
-/**
- * Check whether a specific task kind has a pending or in-progress entry.
- */
-function hasPendingTask(queue: EvolutionQueueItem[], taskKind: string): boolean {
-    return queue.some(
-        (t) => t.taskKind === taskKind && (t.status === 'pending' || t.status === 'in_progress'),
-    );
+function normalizePainDedupKey(source: string, preview: string, reason?: string): string {
+    // Include reason in dedup key to match createEvolutionTaskId() behavior
+    // Different reasons for the same source/preview should create different tasks
+    const normalizedReason = (reason || '').trim().toLowerCase();
+    return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}::${normalizedReason}`;
 }
 
-/**
- * Decide whether to skip enqueuing due to a recent similar reflection.
- * Returns true if skipped (with log), false if should proceed.
- */
-function shouldSkipForDedup(
-    queue: EvolutionQueueItem[],
-    wctx: WorkspaceContext,
-    logger: PluginLogger,
-): boolean {
-    const recentPainContext = readRecentPainContext(wctx);
-    const painSourceKey = buildPainSourceKey(recentPainContext);
-
-    // Bypass dedup when there is no pain context — general idle reflections
-    // should not be throttled by the 'no_pain_context' sentinel.
-    if (!painSourceKey) return false;
-
-    const now = Date.now();
-    const recentSimilarReflection = hasRecentSimilarReflection(queue, painSourceKey, now);
-
-    if (recentSimilarReflection) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        const completedTime = new Date(recentSimilarReflection.completed_at!).getTime();
-        logger?.debug?.(`[PD:EvolutionWorker] Skipping sleep_reflection — similar reflection completed ${Math.round((now - completedTime) / 60000)}min ago (same pain pattern: ${painSourceKey})`);
-        return true;
-    }
-    return false;
-}
-
-/**
- * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
- */
-function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
-     
-    let rawQueue: RawQueueItem[] = [];
-    try {
-        rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-    } catch {
-        // Queue doesn't exist yet - create empty array
-        rawQueue = [];
-    }
-    return migrateQueueToV2(rawQueue);
-}
-
-/**
- * Build and persist a new sleep_reflection task.
- */
  
-function enqueueNewSleepReflectionTask(
-    queue: EvolutionQueueItem[],
-    recentPainContext: ReturnType<typeof readRecentPainContext>,
-    queuePath: string,
-    logger: PluginLogger,
-): void {
-    const taskId = createEvolutionTaskId('nocturnal', 50, 'idle workspace', 'Sleep-mode reflection', Date.now());
-    const nowIso = new Date().toISOString();
+ 
+export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
+    return !!findRecentDuplicateTask(queue, source, preview, now, reason);
+}
 
-    queue.push({
-        id: taskId,
-        taskKind: 'sleep_reflection',
-        priority: 'medium',
-        score: 50,
-        source: 'nocturnal',
-        reason: 'Sleep-mode reflection triggered by idle workspace',
-        trigger_text_preview: 'Idle workspace detected',
-        timestamp: nowIso,
-        enqueued_at: nowIso,
-        status: 'pending',
-        traceId: taskId,
-        retryCount: 0,
-        maxRetries: 1, // sleep_reflection doesn't retry
-        recentPainContext,
+export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<string, { type: string; phrases?: string[]; pattern?: string; status: string; }> }, phrase: string): boolean {
+    const normalizedPhrase = phrase.trim().toLowerCase();
+    return Object.values(dictionary.getAllRules()).some((rule) => {
+        if (rule.status !== 'active') return false;
+        if (rule.type === 'exact_match' && Array.isArray(rule.phrases)) {
+            return rule.phrases.some((candidate) => candidate.trim().toLowerCase() === normalizedPhrase);
+        }
+        if (rule.type === 'regex' && typeof rule.pattern === 'string') {
+            return rule.pattern.trim().toLowerCase() === normalizedPhrase;
+        }
+        return false;
     });
-
-    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
-    logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
-}
-
-/**
- * Enqueue a sleep_reflection task if one is not already pending.
- * Phase 2.4: Called when workspace is idle to trigger nocturnal reflection.
- * Phase 3c: Dedup checks recent sleep_reflection tasks by pain source pattern
- * to prevent redundant reflections of the same underlying issue.
- */
-async function enqueueSleepReflectionTask(
-    wctx: WorkspaceContext,
-    logger: PluginLogger,
-): Promise<void> {
-    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-    const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueSleepReflection', EVOLUTION_QUEUE_LOCK_SUFFIX);
-
-    try {
-        const queue = loadEvolutionQueue(queuePath);
-
-        // Guard 1: Skip if a sleep_reflection task is already pending/in-progress
-        if (hasPendingTask(queue, 'sleep_reflection')) {
-            logger?.debug?.('[PD:EvolutionWorker] sleep_reflection task already pending/in-progress, skipping');
-            return;
-        }
-
-        // Guard 2: Dedup — skip if similar reflection completed recently
-        if (shouldSkipForDedup(queue, wctx, logger)) {
-            return;
-        }
-
-        // Enqueue the new task
-        const recentPainContext = readRecentPainContext(wctx);
-        enqueueNewSleepReflectionTask(queue, recentPainContext, queuePath, logger);
-    } finally {
-        releaseLock();
-    }
-}
-
-/**
- * Enqueue a keyword_optimization task if one is not already pending/in-progress (CORR-08).
- * Dispatches LLM subagent via CorrectionObserverWorkflowManager to optimize
- * correction keywords based on FPR and match history.
- */
-async function enqueueKeywordOptimizationTask(
-    wctx: WorkspaceContext,
-    logger: PluginLogger,
-): Promise<void> {
-    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-    const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueKeywordOpt', EVOLUTION_QUEUE_LOCK_SUFFIX);
-
-    try {
-        const queue = loadEvolutionQueue(queuePath);
-
-        // Guard: Skip if a keyword_optimization task is already pending/in-progress (CORR-08)
-        if (hasPendingTask(queue, 'keyword_optimization')) {
-            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization task already pending/in-progress, skipping');
-            return;
-        }
-
-        // Guard: Skip if daily optimization throttle is exhausted (CORR-08)
-        const learner = CorrectionCueLearner.get(wctx.stateDir);
-        if (!learner.canRunKeywordOptimization()) {
-            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization throttle exhausted, skipping');
-            return;
-        }
-
-        const taskId = createEvolutionTaskId('keyword_optimization', 50, 'keyword optimization', 'Keyword optimization via LLM', Date.now());
-        const nowIso = new Date().toISOString();
-
-        queue.push({
-            id: taskId,
-            taskKind: 'keyword_optimization',
-            priority: 'medium',
-            score: 50,
-            source: 'correction',
-            reason: 'Keyword optimization triggered by heartbeat',
-            trigger_text_preview: 'Keyword optimization via LLM',
-            timestamp: nowIso,
-            enqueued_at: nowIso,
-            status: 'pending',
-            traceId: taskId,
-            retryCount: 0,
-            maxRetries: 1,
-        });
-
-        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
-        logger?.info?.(`[PD:EvolutionWorker] Enqueued keyword_optimization task ${taskId}`);
-    } finally {
-        releaseLock();
-    }
 }
 
 interface ParsedPainValues {
@@ -637,7 +361,7 @@ async function doEnqueuePainTask(
             retryCount: 0, maxRetries: 3,
         });
 
-        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+        saveEvolutionQueue(queuePath, queue);
         fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         result.enqueued = true;
 
@@ -872,7 +596,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         // V2: Migrate queue to current schema if needed
-        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
+        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
 
         let queueChanged = rawQueue.some(isLegacyQueueItem);
 
@@ -910,13 +634,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             e.event_type.includes('failed') || e.event_type.includes('error')
                         ).pop();
                         if (failureEvent) {
-                            const payload = failureEvent.payload_json ? JSON.parse(failureEvent.payload_json) : {};
+                            const payload = validateQueueEventPayload(failureEvent.payload_json);
                             detailedError = `sleep_reflection failed: ${failureEvent.reason}`;
                             if (payload.skipReason) {
                                 detailedError += ` (skipReason: ${payload.skipReason})`;
                             }
-                            if (payload.failures && payload.failures.length > 0) {
-                                detailedError += ` | failures: ${payload.failures.slice(0, 3).join(', ')}`;
+                            if (payload.failures && Array.isArray(payload.failures) && payload.failures.length > 0) {
+                                detailedError += ` | failures: ${(payload.failures as string[]).slice(0, 3).join(', ')}`;
                             }
                         }
                     } catch (fetchErr) {
@@ -1432,7 +1156,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
-                atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+                saveEvolutionQueue(queuePath, queue);
             }
             releaseLock();
             // Phase 40: Track outcomes for failure classification after queue write
@@ -1768,7 +1492,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             if (keywordOptTasks.length > 0) {
                 // Skip all keyword_optimization tasks this cycle; release lock and return
                 if (queueChanged) {
-                    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+                    saveEvolutionQueue(queuePath, queue);
                 }
                 releaseLock();
                 lockReleased = true;
@@ -1784,7 +1508,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             queueChanged = queueChanged || pendingKeywordOptTasks.length > 0;
 
             // Release lock during LLM dispatch (long-running)
-            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+            saveEvolutionQueue(queuePath, queue);
             releaseLock();
             lockReleased = true;
 
@@ -1830,7 +1554,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     const manager = new CorrectionObserverWorkflowManager({
                         workspaceDir: wctx.workspaceDir,
                         logger,
-                        subagent: api?.runtime?.subagent!,
+                        subagent: api?.runtime?.subagent!, /* eslint-disable-line @typescript-eslint/no-non-null-assertion */
                         agentSession: api?.runtime?.agent?.session,
                     });
 
@@ -1844,7 +1568,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         workflowId = handle.workflowId;
                         koTask.resultRef = workflowId;
                     } else {
-                        workflowId = koTask.resultRef!;
+                        workflowId = koTask.resultRef!; /* eslint-disable-line @typescript-eslint/no-non-null-assertion */
                     }
 
                     // Poll workflow state
@@ -1945,7 +1669,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         if (queueChanged) {
-            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+            saveEvolutionQueue(queuePath, queue);
         }
 
         // Pipeline observability: log stage-level summary at end of cycle
@@ -2051,8 +1775,8 @@ export async function registerEvolutionTaskSession(
         }
         
         // V2: Migrate queue to current schema
-        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
-        
+        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
+
         const task = queue.find((item) => item.id === taskId && item.status === 'in_progress');
         if (!task) {
             logger?.warn?.(`[PD:EvolutionWorker] Could not find in-progress evolution task ${taskId} for session assignment`);
@@ -2063,7 +1787,7 @@ export async function registerEvolutionTaskSession(
         if (!task.started_at) {
             task.started_at = new Date().toISOString();
         }
-        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+        saveEvolutionQueue(queuePath, queue);
         return true;
     } finally {
         releaseLock();
@@ -2134,7 +1858,7 @@ async function processEvolutionQueueWithResult(
         const purgeResult = purgeStaleFailedTasks(queue, logger);
         if (purgeResult.purged > 0) {
             // Write back the cleaned queue
-            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+            saveEvolutionQueue(queuePath, queue);
         }
 
         queueResult.total = queue.length;
