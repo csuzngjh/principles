@@ -14,7 +14,7 @@ const TOOLS_TO_SCAN = [
   { name: 'shellcheck', cmd: ['shellcheck', '--version'] },
 ];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: third-party API execSync returns dynamic output - type structure unknown at call site
+ 
 function scanEnvironment(wctx: WorkspaceContext): any {
   const tools: Record<string, { available: boolean; version?: string }> = {};
 

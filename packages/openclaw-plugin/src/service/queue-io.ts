@@ -160,9 +160,9 @@ export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext
         }
     } catch (err) {
       // Best effort — non-fatal, but surface unexpected errors
-      /* eslint-disable no-console */
+       
       console.warn(`[queue-io] Failed to read pain context (non-fatal): ${String(err)}`);
-      /* eslint-enable no-console */
+       
     }
 
     return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
@@ -185,7 +185,7 @@ export function shouldSkipForDedup(
     const recentSimilarReflection = hasRecentSimilarReflection(queue, painSourceKey, now);
 
     if (recentSimilarReflection) {
-        const completedTime = new Date(recentSimilarReflection.completed_at!).getTime(); /* eslint-disable-line @typescript-eslint/no-non-null-assertion */
+        const completedTime = new Date(recentSimilarReflection.completed_at!).getTime();  
         logger?.debug?.(`[PD:EvolutionWorker] Skipping sleep_reflection — similar reflection completed ${Math.round((now - completedTime) / 60000)}min ago (same pain pattern: ${painSourceKey})`);
         return true;
     }
@@ -358,9 +358,9 @@ export function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
             rawQueue = [];
         } else {
             // Corrupted JSON or other read error — warn and recover with empty queue
-            /* eslint-disable no-console */
+             
             console.warn(`[queue-io] Failed to load evolution queue (recovering with empty): ${String(err)}`);
-            /* eslint-enable no-console */
+             
             rawQueue = [];
         }
     }

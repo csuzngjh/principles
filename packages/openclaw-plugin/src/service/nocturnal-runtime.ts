@@ -390,9 +390,6 @@ export function checkCooldown(
     } = {}
 ): CooldownCheckResult {
     const {
-         
-        globalCooldownMs: _globalCooldownMs = DEFAULT_GLOBAL_COOLDOWN_MS,
-        principleCooldownMs: _principleCooldownMs = DEFAULT_PRINCIPLE_COOLDOWN_MS,
         maxRunsPerWindow = DEFAULT_MAX_RUNS_PER_WINDOW,
         quotaWindowMs = DEFAULT_QUOTA_WINDOW_MS,
     } = options;

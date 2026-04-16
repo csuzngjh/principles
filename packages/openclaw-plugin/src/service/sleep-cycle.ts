@@ -71,7 +71,7 @@ export interface CycleOptions {
  * @param options.heartbeatCounterRef — mutable counter, incremented by runCycle
  */
 export async function runCycle(options: CycleOptions): Promise<WorkerStatusReport> {
-    const { wctx, logger, eventLog: _eventLog, api: _api, heartbeatCounterRef } = options;
+    const { wctx, logger, api: _api, heartbeatCounterRef } = options;
     const cycleStart = Date.now();
     heartbeatCounterRef.value++;
 

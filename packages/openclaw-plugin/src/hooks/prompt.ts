@@ -981,12 +981,8 @@ ${taskBlocks}${processingNote}
         const filePattern = /\b([a-zA-Z]:\\?[^\s,]+\.[a-z]{2,10}|[./][^\s,]+\.[a-z]{2,10})\b/gi;
         const toolMatches = toolPatterns.flatMap(({ pattern, tool }) => {
           const matches: string[] = [];
-           
-           
-          let _m;
           const r = new RegExp(pattern.source, pattern.flags);
-           
-          while ((_m = r.exec(latestUserText)) !== null) matches.push(tool);
+          while (r.exec(latestUserText) !== null) matches.push(tool);
           return matches;
         });
         const fileMatches = latestUserText.match(filePattern) ?? [];

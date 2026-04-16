@@ -46,12 +46,12 @@ export function handleExportCommand(ctx: PluginCommandContext): PluginCommandRes
        
       return {
         text: zh
-          ? `已导出 ORPO 决策点样本到 ${result.manifest!.exportPath}，` + // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: caller guarantees manifest exists via success check
-              `共 ${result.manifest!.sampleCount} 条，模型家族: ${result.manifest!.targetModelFamily}，` + // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: caller guarantees manifest exists via success check
-              `数据集指纹: ${result.manifest!.datasetFingerprint.substring(0, 16)}...` // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: caller guarantees manifest exists via success check
-          : `Exported ORPO decision-point samples to ${result.manifest!.exportPath}, ` + // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: caller guarantees manifest exists via success check
-              `${result.manifest!.sampleCount} samples, target: ${result.manifest!.targetModelFamily}, ` + // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: caller guarantees manifest exists via success check
-              `dataset fingerprint: ${result.manifest!.datasetFingerprint.substring(0, 16)}...`, // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: caller guarantees manifest exists via success check
+          ? `已导出 ORPO 决策点样本到 ${result.manifest!.exportPath}，` +  
+              `共 ${result.manifest!.sampleCount} 条，模型家族: ${result.manifest!.targetModelFamily}，` +  
+              `数据集指纹: ${result.manifest!.datasetFingerprint.substring(0, 16)}...`  
+          : `Exported ORPO decision-point samples to ${result.manifest!.exportPath}, ` +  
+              `${result.manifest!.sampleCount} samples, target: ${result.manifest!.targetModelFamily}, ` +  
+              `dataset fingerprint: ${result.manifest!.datasetFingerprint.substring(0, 16)}...`,  
       };
     }
 

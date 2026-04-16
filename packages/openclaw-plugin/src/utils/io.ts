@@ -126,7 +126,7 @@ export function parseKvLines(text: string): Record<string, string> {
   return result;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: serializeKvLines handles arbitrary object shapes for kv line serialization
+ 
 export function serializeKvLines(data: Record<string, any>): string {
   const lines: string[] = [];
   const keys = Object.keys(data).sort();

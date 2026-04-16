@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PDTaskSpec } from './pd-task-types.js';

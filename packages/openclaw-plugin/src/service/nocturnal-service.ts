@@ -116,7 +116,7 @@ function incrementGeneratedSampleCount(stateDir: string, principleId: string): v
     state.generatedSampleCount += 1;
     setPrincipleState(stateDir, state);
   } catch (err) {
-    // eslint-disable-next-line no-console -- Non-critical warning in helper function
+     
     console.warn(`[nocturnal-service] Failed to sync generatedSampleCount for ${principleId}:`, err instanceof Error ? err.stack : err);
   }
 }
@@ -522,7 +522,7 @@ function persistCodeCandidate(
     try {
       refreshPrincipleLifecycle(workspaceDir, stateDir);
     } catch (err) {
-      // eslint-disable-next-line no-console -- Non-critical warning in helper function
+       
       console.warn('[nocturnal-service] Lifecycle refresh failed after code candidate persistence:', err instanceof Error ? err.stack : err);
     }
     return {
@@ -702,7 +702,7 @@ export function executeNocturnalReflection(
 ): NocturnalRunResult {
   // Use provided logger or fallback to console
   const logger = options.logger;
-  // eslint-disable-next-line no-console -- Intentional console fallback when no logger provided
+   
   const warn = logger?.warn?.bind(logger) ?? console.warn.bind(console);
 
   const diagnostics: NocturnalRunDiagnostics = {
@@ -882,7 +882,7 @@ export function executeNocturnalReflection(
           diagnostics,
         };
       }
-      trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
+      trinityArtifact = trinityResult.artifact!;  
       // Convert Trinity draft to arbiter-compatible artifact
       const artifactData = draftToArtifact(trinityArtifact);
       rawJson = JSON.stringify(artifactData);
@@ -933,7 +933,7 @@ export function executeNocturnalReflection(
             diagnostics,
           };
         }
-        trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
+        trinityArtifact = trinityResult.artifact!;  
         // Convert Trinity draft to arbiter-compatible artifact
         const artifactData = draftToArtifact(trinityArtifact);
         rawJson = JSON.stringify(artifactData);
@@ -1187,7 +1187,7 @@ async function executeNocturnalReflectionWithAdapter(
 ): Promise<NocturnalRunResult> {
   // Use provided logger or fallback to console
   const logger = options.logger;
-  // eslint-disable-next-line no-console -- Intentional console fallback when no logger provided
+   
   const warn = logger?.warn?.bind(logger) ?? console.warn.bind(console);
 
   const diagnostics: NocturnalRunDiagnostics = {
@@ -1387,7 +1387,7 @@ async function executeNocturnalReflectionWithAdapter(
       adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
       return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: [`Trinity override failed: ${failures.join('; ')}`], snapshot, diagnostics };
     }
-    trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
+    trinityArtifact = trinityResult.artifact!;  
     const artifactData = draftToArtifact(trinityArtifact);
     rawJson = JSON.stringify(artifactData);
   } else {
@@ -1414,7 +1414,7 @@ async function executeNocturnalReflectionWithAdapter(
           adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
           return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: failures, snapshot, diagnostics };
         }
-        trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
+        trinityArtifact = trinityResult.artifact!;  
         const artifactData = draftToArtifact(trinityArtifact);
         rawJson = JSON.stringify(artifactData);
       } else {
