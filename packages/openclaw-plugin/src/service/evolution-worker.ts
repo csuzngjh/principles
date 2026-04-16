@@ -1013,7 +1013,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 logger.info(`[PD:EvolutionWorker] Diagnostician marked principle as duplicate: ${principle.duplicate_of || 'unknown'} — skipping for task ${task.id}`);
                             } else {
                                 const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
-                                    painId: task.id,
+                                    painId: task.painEventId !== undefined ? String(task.painEventId) : task.id,
                                     painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
                                     triggerPattern: principle.trigger_pattern,
                                     action: principle.action,
