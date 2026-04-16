@@ -237,10 +237,11 @@ export class TrajectoryDatabase {
     return rowId;
   }
 
-  recordPainEvent(input: TrajectoryPainEventInput): void {
+  recordPainEvent(input: TrajectoryPainEventInput): number {
     this.recordSession({ sessionId: input.sessionId, startedAt: input.createdAt });
+    let insertedId = -1;
     this.withWrite(() => {
-      this.db.prepare(`
+      const runResult = this.db.prepare(`
         INSERT INTO pain_events (
           session_id, source, score, reason, severity, origin, confidence, text, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -255,15 +256,16 @@ export class TrajectoryDatabase {
         input.text ?? null,
         input.createdAt ?? nowIso(),
       );
+      insertedId = runResult.lastInsertRowid as number;
 
       // Maintain FTS5 index: insert text into pain_events_fts if text is provided (MEM-03, MEM-04)
       if (input.text) {
-        const lastId = this.db.prepare('SELECT last_insert_rowid() as id').get() as { id: number };
         this.db.prepare(`
           INSERT INTO pain_events_fts (text, pain_event_id) VALUES (?, ?)
-        `).run(input.text, lastId.id);
+        `).run(input.text, insertedId);
       }
     });
+    return insertedId;
   }
 
   /**
