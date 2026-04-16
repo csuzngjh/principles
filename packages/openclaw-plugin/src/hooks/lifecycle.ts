@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
-import { buildPainFlag, writePainFlag } from '../core/pain.js';
+import { recordAndWritePainFlag } from '../core/pain.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { PD_DIRS } from '../core/paths.js';
@@ -154,7 +154,14 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
 
       const hasFatal = painPoints.some(p => p.includes('[FATAL INTERCEPT]'));
       if (hasFatal) {
-        writePainFlag(workspaceDir, buildPainFlag({
+        recordAndWritePainFlag(wctx, {
+          sessionId: ctx.sessionId || 'unknown',
+          source: 'intercept_extraction',
+          score: 100,
+          reason: 'Hard intercept detected in session history compaction.',
+          severity: 'severe',
+          origin: 'system_infer',
+        }, {
           source: 'intercept_extraction',
           score: '100',
           reason: 'Hard intercept detected in session history compaction.',
@@ -162,7 +169,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
           trigger_text_preview: painPoints.find(p => p.includes('[FATAL INTERCEPT]'))?.substring(0, 150) || 'Fatal intercept',
           session_id: ctx.sessionId || '',
           agent_id: ctx.agentId || '',
-        }));
+        });
       }
     } catch (err) {
       ctx.logger?.error?.(`[PD:Lifecycle] Failed to write pain signals: ${String(err)}`);

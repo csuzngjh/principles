@@ -92,7 +92,7 @@ export class KeywordOptimizationService {
           learner.recordFalsePositive(term);
           this.logger?.info?.(`[KeywordOptimizationService] FP recorded for term="${term}" (weight x0.8)`);
         } catch (fpErr) {
-          this.logger?.warn?.(`[KeywordOptimizationService} recordFalsePositive failed for term="${term}": ${String(fpErr)}`);
+          this.logger?.warn?.(`[KeywordOptimizationService] recordFalsePositive failed for term="${term}": ${String(fpErr)}`);
         }
       }
     }

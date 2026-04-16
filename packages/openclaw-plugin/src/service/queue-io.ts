@@ -34,7 +34,7 @@ export const LOCK_MAX_RETRIES = 50;
 export const LOCK_RETRY_DELAY_MS = 50;
 export const LOCK_STALE_MS = 30_000;
 
-export const PAIN_QUEUE_DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
+export const SLEEP_REFLECTION_DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 // ---------------------------------------------------------------------------
 // requireQueueLock — thin wrapper that adds LockUnavailableError
@@ -129,7 +129,7 @@ function hasRecentSimilarReflection(
         if (t.status !== 'completed') return false;
         if (!t.completed_at) return false;
         const age = now - new Date(t.completed_at).getTime();
-        if (age > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
+        if (age > SLEEP_REFLECTION_DEDUP_WINDOW_MS) return false;
         const taskPainKey = buildPainSourceKey(t.recentPainContext ?? { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 });
         if (!taskPainKey) return false;
         return taskPainKey === painSourceKey;
