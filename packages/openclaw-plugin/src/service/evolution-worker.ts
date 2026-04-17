@@ -52,6 +52,7 @@ import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import { classifyFailure, type ClassifiableTaskKind } from './failure-classifier.js';
 import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from './cooldown-strategy.js';
 import { reconcileStartup } from './startup-reconciler.js';
+import { clearPainFlag } from '../core/pain-lifecycle.js';
 import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
@@ -338,9 +339,9 @@ async function doEnqueuePainTask(
         score: v.score,
         timestamp: new Date().toISOString(),
         reason: v.reason,
-        sessionId: v.sessionId || '',
-        agentId: v.agentId || '',
-        traceId: v.traceId || '',
+        sessionId: v.sessionId ?? undefined,
+        agentId: v.agentId ?? undefined,
+        traceId: v.traceId ?? undefined,
         triggerTextPreview: v.preview,
     };
     const validation: PainSignalValidationResult = validatePainSignal(signalInput);
@@ -348,6 +349,7 @@ async function doEnqueuePainTask(
         result.skipped_reason = `invalid_pain_signal (${validation.errors.join('; ')})`;
         if (logger) logger.warn(`[PD:EvolutionWorker] Pain signal validation failed, skipping enqueue: ${validation.errors.join('; ')}`);
         SystemLogger.log(wctx.workspaceDir, 'PAIN_SIGNAL_INVALID', `Validation errors: ${validation.errors.join('; ')} | source=${v.source} score=${v.score}`);
+        clearPainFlag(wctx.workspaceDir);
         return result;
     }
 
@@ -365,6 +367,7 @@ async function doEnqueuePainTask(
             result.enqueued = true;
             result.skipped_reason = 'duplicate';
             if (logger) logger.info(`[PD:EvolutionWorker] Duplicate pain task skipped for source=${v.source} preview=${v.preview || 'N/A'}`);
+            clearPainFlag(wctx.workspaceDir);
             return result;
         }
 
@@ -408,6 +411,7 @@ async function doEnqueuePainTask(
             enqueuedAt: nowIso,
         });
     } finally { releaseLock(); }
+    clearPainFlag(wctx.workspaceDir);
     return result;
 }
 
@@ -440,6 +444,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             if (isQueued) {
                 result.skipped_reason = 'already_queued';
                 if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${score}, source=${source})`);
+                clearPainFlag(wctx.workspaceDir, painEventId);
                 return result;
             }
 
@@ -453,6 +458,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             result.exists = true;
             result.skipped_reason = `invalid_pain_flag (${contract.missingFields.join(', ') || contract.format})`;
             if (logger) logger.warn(`[PD:EvolutionWorker] Invalid pain flag skipped: ${result.skipped_reason}`);
+            clearPainFlag(wctx.workspaceDir);
             return result;
         }
 
@@ -493,6 +499,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
                     result.enqueued = true;
                     result.skipped_reason = 'already_queued';
                     if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${jsonScore}, source=${jsonSource})`);
+                    clearPainFlag(wctx.workspaceDir, jsonPain.pain_event_id ? parseInt(jsonPain.pain_event_id, 10) : undefined);
                     return result;
                 }
 

@@ -59,7 +59,15 @@ Plans:
   2. Coding adapter and a second domain adapter (e.g. writing/service) are functional.
   3. Adapter conformance test suite validates both reference adapters.
   4. Performance targets (p99 < 50ms for pain, < 100ms for injection) are met and documented.
-**Plans**: TBD
+**Plans**: 7 plans
+Plans:
+- [ ] 01-01-PLAN.md -- Package scaffold + move 6 interface files from openclaw-plugin
+- [ ] 01-02-PLAN.md -- PainSignal validation logic (validatePainSignal, deriveSeverity) tests
+- [ ] 01-03-PLAN.md -- Coding adapter (OpenClawPainAdapter) implementation
+- [ ] 01-04-PLAN.md -- Writing adapter (WritingPainAdapter) implementation
+- [ ] 01-05-PLAN.md -- Conformance test factories (describePainAdapterConformance, describeInjectorConformance)
+- [ ] 01-06-PLAN.md -- Performance benchmarks with p99 targets
+- [ ] 01-07-PLAN.md -- Semver setup, CHANGELOG, package smoke test
 
 ### Phase 1.5: Cross-Domain Validation
 **Goal**: Stress test universality against an extreme domain before API freeze.
@@ -77,8 +85,8 @@ Plans:
 |-------|----------------|--------|-----------|
 | 0a: Interface & Core | 4/4 | Completed | 2026-04-17 |
 | 0b: Adapter Abstraction | 0/3 | Planning | - |
-| 1: SDK Core Implementation | 0/4 | Not started | - |
+| 1: SDK Core Implementation | 0/7 | Planning | - |
 | 1.5: Cross-Domain Validation | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-04-17 for Phase 0b planning*
+*Last updated: 2026-04-17 for Phase 1 planning*
