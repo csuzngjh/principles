@@ -2483,7 +2483,7 @@ export function validateExtraction(
   const badDecisionLower = artifact.badDecision.toLowerCase();
 
   // 1. Failed tool calls
-  const failedToolCalls = snapshot.toolCalls.filter(tc => tc.outcome === 'failure');
+  const failedToolCalls = (snapshot.toolCalls ?? []).filter(tc => tc.outcome === 'failure');
   if (failedToolCalls.length > 0) {
     evidenceTypes.push('tool_failures');
     for (const tc of failedToolCalls) {
@@ -2507,7 +2507,7 @@ export function validateExtraction(
   }
 
   // 2. Pain events (score >= 50 indicates meaningful pain)
-  const significantPainEvents = snapshot.painEvents.filter(pe => pe.score >= 50);
+  const significantPainEvents = (snapshot.painEvents ?? []).filter(pe => pe.score >= 50);
   if (significantPainEvents.length > 0) {
     evidenceTypes.push('pain_events');
     for (const pe of significantPainEvents) {
@@ -2522,7 +2522,7 @@ export function validateExtraction(
   }
 
   // 3. Gate blocks
-  if (snapshot.gateBlocks.length > 0) {
+  if ((snapshot.gateBlocks ?? []).length > 0) {
     evidenceTypes.push('gate_blocks');
     for (const gb of snapshot.gateBlocks) {
       evidenceTokens.add(gb.toolName.toLowerCase());
@@ -2538,7 +2538,7 @@ export function validateExtraction(
   }
 
   // 4. User corrections
-  const userCorrections = snapshot.userTurns.filter(ut => ut.correctionDetected);
+  const userCorrections = (snapshot.userTurns ?? []).filter(ut => ut.correctionDetected);
   if (userCorrections.length > 0) {
     evidenceTypes.push('user_corrections');
     evidenceTokens.add('correction');
