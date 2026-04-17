@@ -46,4 +46,29 @@ describe('Pain Lifecycle E2E', () => {
         fs.rmSync(stateDir, { recursive: true, force: true });
         expect(() => clearPainFlag(workspaceDir)).not.toThrow();
     });
+
+    it('should NOT delete file when expectedPainEventId does not match (concurrent rewrite guard)', () => {
+        // Write a flag with pain_event_id: 5
+        fs.writeFileSync(painFlagPath, 'source: test\nscore: 80\nreason: old\ntime: 2026-01-01\npain_event_id: 5\n', 'utf8');
+        expect(fs.existsSync(painFlagPath)).toBe(true);
+
+        // Simulate: another write_pain_flag runs and writes a NEW signal (pain_event_id: 7)
+        // before our clearPainFlag with expected id=5 runs
+        fs.writeFileSync(painFlagPath, 'source: test\nscore: 90\nreason: new\ntime: 2026-01-02\npain_event_id: 7\n', 'utf8');
+
+        // clearPainFlag with expected id=5 should NOT delete the new signal (id=7)
+        clearPainFlag(workspaceDir, 5);
+        expect(fs.existsSync(painFlagPath)).toBe(true);
+
+        // The file should still contain the new signal
+        const remaining = fs.readFileSync(painFlagPath, 'utf8');
+        expect(remaining).toContain('pain_event_id: 7');
+    });
+
+    it('should delete file when expectedPainEventId matches', () => {
+        fs.writeFileSync(painFlagPath, 'source: test\nscore: 80\nreason: idem\ntime: 2026-01-01\npain_event_id: 42\n', 'utf8');
+        expect(fs.existsSync(painFlagPath)).toBe(true);
+        clearPainFlag(workspaceDir, 42);
+        expect(fs.existsSync(painFlagPath)).toBe(false);
+    });
 });

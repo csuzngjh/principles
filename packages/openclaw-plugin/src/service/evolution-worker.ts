@@ -444,7 +444,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             if (isQueued) {
                 result.skipped_reason = 'already_queued';
                 if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${score}, source=${source})`);
-                clearPainFlag(wctx.workspaceDir);
+                clearPainFlag(wctx.workspaceDir, painEventId);
                 return result;
             }
 
@@ -499,7 +499,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
                     result.enqueued = true;
                     result.skipped_reason = 'already_queued';
                     if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${jsonScore}, source=${jsonSource})`);
-                    clearPainFlag(wctx.workspaceDir);
+                    clearPainFlag(wctx.workspaceDir, jsonPain.pain_event_id ? parseInt(jsonPain.pain_event_id, 10) : undefined);
                     return result;
                 }
 
