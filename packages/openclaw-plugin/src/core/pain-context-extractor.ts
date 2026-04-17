@@ -15,7 +15,7 @@
  * SAFETY:
  * - Never load entire file (tail-only, max 512KB)
  * - Skip lines > 100KB (real files have 11MB single lines)
- * - Cap total output at 1500 chars
+ * - Cap total output at 2000 chars
  * - All errors caught silently — return empty string on failure
  */
 
