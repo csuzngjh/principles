@@ -1,15 +1,16 @@
 import type { PainSignalAdapter } from '../../pain-signal-adapter.js';
 import type { PainSignal } from '../../pain-signal.js';
 import { deriveSeverity } from '../../pain-signal.js';
-import type { ReviewEvent, ReviewComment, ChangedFile, ReviewPainTriggerType } from './review-event-types.js';
-
-const NEGATIVE_KEYWORDS = [
-  'wrong', 'broken', 'bad', 'terrible', 'awful',
-  'frustrat', 'annoy', 'dismiss', 'reject',
-  'this is a problem', 'lgtm but', 'almost',
-];
+import type { ReviewEvent, ReviewPainTriggerType } from './review-event-types.js';
 
 const SECURITY_LABELS = ['security', 'CVE', 'vulnerability', 'auth', 'crypto'];
+
+/** Result of a single-pass comment analysis. */
+interface CommentAnalysis {
+  avgSentiment: number;
+  topNegativeComment: string | null;
+  unresolvedNegativeCount: number;
+}
 
 export class CodeReviewPainAdapter implements PainSignalAdapter<ReviewEvent> {
   capture(rawEvent: ReviewEvent): PainSignal | null {
@@ -30,7 +31,8 @@ export class CodeReviewPainAdapter implements PainSignalAdapter<ReviewEvent> {
     }
 
     const complexityScore = this.deriveComplexityScore(rawEvent);
-    const sentimentScore = this.deriveSentimentScore(rawEvent);
+    const commentAnalysis = this.analyzeComments(rawEvent);
+    const sentimentScore = this.deriveSentimentScore(rawEvent, commentAnalysis);
     const processViolationScore = this.deriveProcessViolationScore(rawEvent);
 
     const score = Math.round(
@@ -45,13 +47,8 @@ export class CodeReviewPainAdapter implements PainSignalAdapter<ReviewEvent> {
       processViolationScore
     );
 
-    const topNegativeComment = this.findTopNegativeComment(rawEvent.comments);
-    const triggerTextPreview = topNegativeComment
+    const triggerTextPreview = commentAnalysis.topNegativeComment
       ?? `Process violation: ${primaryTrigger}`;
-
-    const avgSentiment = rawEvent.comments.length > 0
-      ? rawEvent.comments.reduce((sum, c) => sum + c.sentimentScore, 0) / rawEvent.comments.length
-      : 0;
 
     return {
       source: primaryTrigger,
@@ -75,7 +72,7 @@ export class CodeReviewPainAdapter implements PainSignalAdapter<ReviewEvent> {
         affectedFiles: (rawEvent.filesChanged ?? []).slice(0, 10).map(f => f.path),
         totalCommentCount: rawEvent.comments?.length ?? 0,
         unresolvedThreadCount: rawEvent.unresolvedThreadCount ?? 0,
-        avgSentiment: Math.round(avgSentiment),
+        avgSentiment: Math.round(commentAnalysis.avgSentiment),
         hasTests: rawEvent.hasTests ?? false,
         isBreakingChange: rawEvent.isBreakingChange ?? false,
         reviewAgeDays: rawEvent.reviewAgeDays ?? 0,
@@ -83,9 +80,9 @@ export class CodeReviewPainAdapter implements PainSignalAdapter<ReviewEvent> {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private deriveComplexityScore(event: ReviewEvent): number {
     const fileCount = event.filesChanged?.length ?? 0;
-    const totalChanges = (event.totalLinesAdded ?? 0) + (event.totalLinesDeleted ?? 0);
     const avgMagnitude = fileCount > 0
       ? (event.filesChanged ?? []).reduce((sum, f) => sum + (f.changeMagnitude ?? 0), 0) / fileCount
       : 0;
@@ -96,23 +93,45 @@ export class CodeReviewPainAdapter implements PainSignalAdapter<ReviewEvent> {
     return Math.min(100, 85 + (complexity - 5000) / 5000 * 15);
   }
 
-  private deriveSentimentScore(event: ReviewEvent): number {
-    const negativeComments = (event.comments ?? []).filter(c => {
-      const body = c.body?.toLowerCase() ?? '';
-      return NEGATIVE_KEYWORDS.some(k => body.includes(k));
-    });
-    const unresolvedNegative = negativeComments.filter(c => !c.resolvedAt);
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private analyzeComments(event: ReviewEvent): CommentAnalysis {
+    const comments = event.comments ?? [];
+    if (comments.length === 0) {
+      return { avgSentiment: 0, topNegativeComment: null, unresolvedNegativeCount: 0 };
+    }
+
+    let totalSentiment = 0;
+    let topNegativeComment: string | null = null;
+    let topNegativeScore = Infinity;
+
+    for (const c of comments) {
+      const sentiment = c.sentimentScore ?? 0;
+      totalSentiment += sentiment;
+
+      if (sentiment < 0 && sentiment < topNegativeScore) {
+        topNegativeScore = sentiment;
+        topNegativeComment = c.body;
+      }
+    }
+
+    return {
+      avgSentiment: totalSentiment / comments.length,
+      topNegativeComment,
+      unresolvedNegativeCount: comments.filter(c => !c.resolvedAt && (c.sentimentScore ?? 0) < 0).length,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private deriveSentimentScore(event: ReviewEvent, analysis: CommentAnalysis): number {
     const recencyDays = event.reviewAgeDays ?? 0;
     const recencyMultiplier = recencyDays > 7 ? 1.5 : 1.0;
-    const negativeCount = unresolvedNegative.length * recencyMultiplier;
-    const avgSentiment = (event.comments ?? []).length > 0
-      ? (event.comments ?? []).reduce((sum, c) => sum + (c.sentimentScore ?? 0), 0) / (event.comments ?? []).length
-      : 0;
-    const sentimentPain = Math.round((100 - avgSentiment) / 2);
+    const negativeCount = analysis.unresolvedNegativeCount * recencyMultiplier;
+    const sentimentPain = Math.round((100 - analysis.avgSentiment) / 2);
     const commentPain = Math.min(50, negativeCount * 15);
     return Math.min(100, sentimentPain + commentPain);
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private deriveProcessViolationScore(event: ReviewEvent): number {
     let score = 0;
     const fileCount = event.filesChanged?.length ?? 0;
@@ -128,20 +147,14 @@ export class CodeReviewPainAdapter implements PainSignalAdapter<ReviewEvent> {
     return Math.min(100, score);
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private derivePrimaryTrigger(complexity: number, sentiment: number, process: number): ReviewPainTriggerType {
     if (process >= 40) return 'process_violation';
     if (sentiment >= 40) return 'negative_sentiment';
     return 'diff_complexity';
   }
 
-  private findTopNegativeComment(comments: ReviewComment[]): string | null {
-    if (!comments || comments.length === 0) return null;
-    const negative = comments.filter(c => (c.sentimentScore ?? 0) < 0);
-    if (negative.length === 0) return null;
-    negative.sort((a, b) => (a.sentimentScore ?? 0) - (b.sentimentScore ?? 0));
-    return negative[0]?.body ?? null;
-  }
-
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private buildReason(trigger: ReviewPainTriggerType, event: ReviewEvent): string {
     const reasons: Record<ReviewPainTriggerType, string> = {
       diff_complexity: `Diff complexity pain in ${event.filesChanged?.length ?? 0} files, ${(event.totalLinesAdded ?? 0) + (event.totalLinesDeleted ?? 0)} lines changed`,

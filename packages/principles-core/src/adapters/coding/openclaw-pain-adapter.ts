@@ -51,6 +51,7 @@ export class OpenClawPainAdapter implements PainSignalAdapter<PluginHookAfterToo
    * Derive pain score from error message and tool name.
    * Higher scores for more severe/critical errors.
    */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private deriveScoreFromError(error: string, _toolName: string): number {
     const err = error.toLowerCase();
 
@@ -94,6 +95,7 @@ export class OpenClawPainAdapter implements PainSignalAdapter<PluginHookAfterToo
   /**
    * Build trigger text preview from tool params.
    */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private buildTriggerPreview(event: PluginHookAfterToolCallEvent): string {
     if (!event.params) return '';
 

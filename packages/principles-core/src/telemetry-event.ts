@@ -92,6 +92,16 @@ export function validateTelemetryEvent(input: unknown): TelemetryEventValidation
     return { valid: false, errors: ['Input must be a non-null object'] };
   }
 
+  const raw = input as Record<string, unknown>;
+
+  // Validate ISO 8601 timestamp format
+  if (
+    typeof raw.timestamp === 'string' &&
+    isNaN(Date.parse(raw.timestamp))
+  ) {
+    return { valid: false, errors: ['timestamp must be a valid ISO 8601 date string'] };
+  }
+
   const errors = [...Value.Errors(TelemetryEventSchema, input)];
   if (errors.length > 0) {
     return {

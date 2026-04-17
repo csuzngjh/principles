@@ -56,6 +56,8 @@ export const PainSignalSchema = Type.Object({
   traceId: Type.String({ minLength: 1 }),
   /** Preview of the text that triggered this pain */
   triggerTextPreview: Type.String(),
+  /** Schema version for forward compatibility (e.g., '0.1.0') */
+  version: Type.Optional(Type.String({ default: '0.1.0' })),
   /** Domain context (e.g., 'coding', 'writing', 'analysis') */
   domain: Type.String({ default: 'coding' }),
   /** Severity level derived from score */
@@ -98,7 +100,7 @@ export interface PainSignalValidationResult {
  * - `errors`: human-readable list of validation failures
  * - `signal`: the typed signal (only present when valid)
  *
- * Missing optional fields (domain, severity, context) are filled with defaults
+ * Missing optional fields (domain, severity, context, version) are filled with defaults
  * before validation so callers get a fully-formed signal back.
  */
 export function validatePainSignal(input: unknown): PainSignalValidationResult {
@@ -109,16 +111,31 @@ export function validatePainSignal(input: unknown): PainSignalValidationResult {
   const raw = input as Record<string, unknown>;
 
   // Apply defaults for optional fields before validation
-  const hydrated = {
+  const hydrated: Record<string, unknown> = {
     ...raw,
     domain: raw.domain ?? 'coding',
+    version: raw.version ?? '0.1.0',
     severity: raw.severity ?? deriveSeverity(
       typeof raw.score === 'number' ? raw.score : 0,
     ),
     context: raw.context ?? {},
   };
 
-  // Collect TypeBox errors
+  // Security: enforce context size limit to prevent memory exhaustion
+  const MAX_CONTEXT_SIZE = 10_000;
+  if (JSON.stringify(hydrated.context).length > MAX_CONTEXT_SIZE) {
+    return { valid: false, errors: ['Context object exceeds maximum size (10KB)'] };
+  }
+
+  // Validate ISO 8601 timestamp format
+  if (
+    typeof hydrated.timestamp === 'string' &&
+    isNaN(Date.parse(hydrated.timestamp))
+  ) {
+    return { valid: false, errors: ['timestamp must be a valid ISO 8601 date string'] };
+  }
+
+  // Collect TypeBox errors using Decode (strict, not Cast which coerces)
   const errors = [...Value.Errors(PainSignalSchema, hydrated)];
   if (errors.length > 0) {
     return {

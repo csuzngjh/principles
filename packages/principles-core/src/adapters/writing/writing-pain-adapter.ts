@@ -59,6 +59,7 @@ export class WritingPainAdapter implements PainSignalAdapter<TextAnalysisResult>
   /**
    * Build human-readable reason string.
    */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private buildReason(issueType: WritingIssueType, description: string): string {
     const labels: Record<WritingIssueType, string> = {
       text_coherence_violation: 'Text coherence violation',

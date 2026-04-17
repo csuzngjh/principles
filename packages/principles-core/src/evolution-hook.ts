@@ -52,13 +52,28 @@ export interface PrinciplePromotedEvent {
  *   onPainDetected(signal) { console.log(signal); },
  * };
  * ```
+ *
+ * Error handling: implementations MUST NOT throw. Throwing will propagate
+ * exceptions to the caller of the hook. If a hook needs to perform fallible
+ * operations (e.g., network calls, file I/O), it should catch internally
+ * and return gracefully. This constraint ensures the core evolution pipeline
+ * is not disrupted by hook failures.
  */
 export interface EvolutionHook {
-  /** Called when a pain signal is detected and recorded. */
+  /**
+   * Called when a pain signal is detected and recorded.
+   * Implementations MUST NOT throw.
+   */
   onPainDetected(signal: PainSignal): void;
-  /** Called when a new principle candidate is created. */
+  /**
+   * Called when a new principle candidate is created.
+   * Implementations MUST NOT throw.
+   */
   onPrincipleCreated(event: PrincipleCreatedEvent): void;
-  /** Called when a principle is promoted to a higher tier. */
+  /**
+   * Called when a principle is promoted to a higher tier.
+   * Implementations MUST NOT throw.
+   */
   onPrinciplePromoted(event: PrinciplePromotedEvent): void;
 }
 

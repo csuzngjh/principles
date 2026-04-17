@@ -4,12 +4,18 @@
  * These types are minimal shapes duplicated from openclaw-plugin to avoid
  * cross-package imports. principles-core must NOT depend on openclaw-plugin.
  *
- * DO NOT import from openclaw-plugin here.
+ * MAINTENANCE CONTRACT: When updating these types, also update the corresponding
+ * source types in openclaw-plugin and vice-versa. These are the same shapes --
+ * drift between them will cause subtle storage/pipeline bugs.
+ *
+ * Source locations:
+ * - InjectablePrinciple  -> openclaw-plugin/src/core/principle-injection.ts
+ * - HybridLedgerStore     -> openclaw-plugin/src/core/principle-tree-ledger.ts
  */
 
 /**
  * Minimal InjectablePrinciple shape for principle injection.
- * Duplicated from openclaw-plugin/src/core/principle-injection.ts.
+ * Must stay in sync with openclaw-plugin/src/core/principle-injection.ts.
  */
 export interface InjectablePrinciple {
   id: string;
@@ -21,7 +27,11 @@ export interface InjectablePrinciple {
 
 /**
  * Minimal HybridLedgerStore shape for storage adapter interface.
- * Duplicated from openclaw-plugin/src/core/principle-tree-ledger.ts.
+ * Must stay in sync with openclaw-plugin/src/core/principle-tree-ledger.ts.
+ *
+ * Note: tree.* fields use `unknown` to avoid importing the actual node types.
+ * This is an intentional trade-off -- StorageAdapter implementations must
+ * be careful to validate the shape of objects they store/retrieve.
  */
 export interface HybridLedgerStore {
   trainingStore: Record<string, {

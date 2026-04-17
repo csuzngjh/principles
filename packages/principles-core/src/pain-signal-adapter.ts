@@ -25,15 +25,14 @@ export interface PainSignalAdapter<TRawEvent> {
   /**
    * Translate a framework-specific event into a universal PainSignal.
    *
-   * Returns null when the event does not produce a pain signal (e.g., the
-   * event type is not a failure, or the event lacks required fields).
+   * Returns null when the event does not constitute a pain signal:
+   *  - "Not applicable": event type is not a failure (e.g., tool succeeded)
+   *  - "Malformed": required fields are missing or invalid (e.g., no sessionId)
    *
+   * In both cases null is returned -- callers do not need to distinguish.
    * This method performs pure translation only. Trigger decision logic
    * (e.g., GFI threshold checks, tool name filtering) stays in the
    * framework-side hook logic. Per D-02, capture() only translates.
-   *
-   * Translation failures (malformed events, missing required fields)
-   * return null rather than throwing. This keeps the adapter resilient.
    *
    * @param rawEvent - The framework-specific event to translate
    * @returns A valid PainSignal, or null if the event does not produce one

@@ -62,13 +62,29 @@ const PRIORITY_ORDER: Record<string, number> = {
 };
 
 /**
+ * Parse a priority string to its numeric order value.
+ * @throws Error if priority is unknown (not P0, P1, or P2)
+ */
+function priorityValue(priority: string | undefined): number {
+  const p = PRIORITY_ORDER[priority ?? 'P1'];
+  if (p === undefined) {
+    throw new Error(`Unknown principle priority: ${priority}`);
+  }
+  return p;
+}
+
+/**
  * Default implementation of PrincipleInjector.
  *
  * A minimal framework-agnostic injector using only SDK types.
  * Selection algorithm:
- * 1. Separate P0 principles (always included) from P1/P2
+ * 1. Separate P0 principles (forced inclusion) from P1/P2
  * 2. Sort all principles by priority (P0 first), then by createdAt (oldest first)
- * 3. Fit P0 principles first, then P1/P2 until budgetChars is exhausted
+ * 3. Include all P0 principles (forced, may exceed budgetChars)
+ * 4. Fill remaining budget with P1/P2 principles in priority order
+ *
+ * Note: P0 forced inclusion may cause total output to exceed budgetChars.
+ * Callers should monitor total formatted length against their budget limit.
  */
 export class DefaultPrincipleInjector implements PrincipleInjector {
   getRelevantPrinciples(
@@ -83,30 +99,36 @@ export class DefaultPrincipleInjector implements PrincipleInjector {
     const p0Principles = principles.filter((p) => p.priority === 'P0');
     const otherPrinciples = principles.filter((p) => p.priority !== 'P0');
 
-    // Sort P0 by createdAt (oldest first)
-    p0Principles.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    // Pre-parse dates once to avoid repeated Date allocations during sort
+    const p0WithEpoch = p0Principles.map((p) => ({
+      p,
+      epoch: new Date(p.createdAt).getTime(),
+    }));
+    p0WithEpoch.sort((a, b) => a.epoch - b.epoch);
 
-    // Sort other principles by priority, then createdAt
-    otherPrinciples.sort((a, b) => {
-      const pA = PRIORITY_ORDER[a.priority ?? 'P1'] ?? 1;
-      const pB = PRIORITY_ORDER[b.priority ?? 'P1'] ?? 1;
-      if (pA !== pB) return pA - pB;
-      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    const othersWithEpoch = otherPrinciples.map((p) => ({
+      p,
+      priorityVal: priorityValue(p.priority),
+      epoch: new Date(p.createdAt).getTime(),
+    }));
+    othersWithEpoch.sort((a, b) => {
+      if (a.priorityVal !== b.priorityVal) return a.priorityVal - b.priorityVal;
+      return a.epoch - b.epoch;
     });
 
-    // Build result: P0 first (forced), then others until budget exhausted
+    // Build result: P0 first (forced, may exceed budget), then others
     const result: InjectablePrinciple[] = [];
     let usedChars = 0;
 
     // ALWAYS include P0 principles (forced inclusion, even if exceeds budget)
-    for (const p of p0Principles) {
+    for (const { p } of p0WithEpoch) {
       const formatted = this.formatForInjection(p);
       result.push(p);
       usedChars += formatted.length;
     }
 
-    // Add P1/P2 principles until budget exhausted
-    for (const p of otherPrinciples) {
+    // Add P1/P2 principles until main budget exhausted
+    for (const { p } of othersWithEpoch) {
       const formatted = this.formatForInjection(p);
       if (usedChars + formatted.length <= context.budgetChars) {
         result.push(p);
