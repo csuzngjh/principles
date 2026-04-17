@@ -13,8 +13,26 @@
  *   npm run bootstrap-rules                               (production)
  */
 
-import { loadLedger, createRule, updatePrinciple } from './principle-tree-ledger.js';
+import { loadLedger, createRule, updatePrinciple, addPrincipleToLedger } from './principle-tree-ledger.js';
+import type { LedgerPrinciple } from './principle-tree-ledger.js';
 import { loadStore } from './principle-training-state.js';
+
+/**
+ * Core thinking model definitions (T-01 through T-10).
+ * Duplicated from init.ts to avoid circular dependency.
+ */
+const CORE_THINKING_MODELS = [
+  { id: 'T-01', name: 'Survey Before Acting', description: 'Understand the structure first before making changes.' },
+  { id: 'T-02', name: 'Respect Constraints', description: 'Trust files, not your context window. Write conclusions to files.' },
+  { id: 'T-03', name: 'Evidence Over Assumption', description: 'Use logs, code, and outputs before inferring causes.' },
+  { id: 'T-04', name: 'Reversible First', description: 'Prefer changes that are safe to roll back when risk is high.' },
+  { id: 'T-05', name: 'Safety Rails', description: 'Call out guardrails, prohibitions, and failure-prevention constraints.' },
+  { id: 'T-06', name: 'Simplicity First', description: 'Prefer the smallest understandable solution over over-engineering.' },
+  { id: 'T-07', name: 'Minimal Change Surface', description: 'Limit the blast radius and touch only what is necessary.' },
+  { id: 'T-08', name: 'Pain As Signal', description: 'Treat failures and friction as clues to step back and rethink.' },
+  { id: 'T-09', name: 'Divide And Conquer', description: 'Split the task into smaller phases before execution.' },
+  { id: 'T-10', name: 'Memory Externalization', description: 'Write intermediate conclusions to files for persistence.' },
+];
 
 export interface BootstrapResult {
   principleId: string;
@@ -77,11 +95,46 @@ export function selectPrinciplesForBootstrap(stateDir: string, limit = 3): strin
  * @throws Error if no deterministic principles found
  */
 export function bootstrapRules(stateDir: string, limit = 3): BootstrapResult[] {
+  // Migration: if T-01..T-10 exist in Training Store but not in Ledger Tree, backfill.
+  // This handles workspaces initialized before Ledger Tree was added.
+  const store = loadStore(stateDir);
+  const ledger = loadLedger(stateDir);
+  const hasTrainingT = Object.keys(store).some((id) => id.startsWith('T-'));
+  const hasAnyLedgerT = Object.keys(ledger.tree.principles).some((id) => id.startsWith('T-'));
+  if (hasTrainingT && !hasAnyLedgerT) {
+    console.warn('[bootstrap] Migrating T-01..T-10 from Training Store to Ledger Tree');
+    const now = new Date().toISOString();
+    for (const [id, entry] of Object.entries(store)) {
+      if (!id.startsWith('T-')) continue;
+      const model = CORE_THINKING_MODELS.find((m) => m.id === id);
+      if (!model) continue;
+      const lp: LedgerPrinciple = {
+        id,
+        version: 1,
+        text: model.description,
+        coreAxiomId: id,
+        triggerPattern: '',
+        action: '',
+        status: 'active',
+        priority: 'P1',
+        scope: 'general',
+        evaluability: entry.evaluability,
+        valueScore: 0,
+        adherenceRate: 0,
+        painPreventedCount: 0,
+        derivedFromPainIds: [],
+        ruleIds: [],
+        conflictsWithPrincipleIds: [],
+        createdAt: now,
+        updatedAt: now,
+        suggestedRules: [],
+      };
+      addPrincipleToLedger(stateDir, lp);
+    }
+  }
+
   // Select principles for bootstrap
   const selectedPrincipleIds = selectPrinciplesForBootstrap(stateDir, limit);
-
-  // Load current ledger state
-  const ledger = loadLedger(stateDir);
 
   const results: BootstrapResult[] = [];
 
