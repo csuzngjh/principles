@@ -2,7 +2,7 @@
 
 ## Milestones
 
-- [ ] **v1.20** - Universal SDK Foundation (Phases 0a-1.5)
+- [x] **v1.20** - Universal SDK Foundation (Phases 0a-1.5)
 - [x] **v1.19** - Tech Debt Remediation (Phases 42-46, shipped 2026-04-15)
 - [x] **v1.18** - Nocturnal State Safety & Recovery (shipped 2026-04-14)
 - [x] **v1.17** - Keyword Learning Engine (shipped 2026-04-14)
@@ -14,9 +14,9 @@
 ## Phases
 
 - [x] **Phase 0a: Interface & Core** - Define foundational interfaces and harden core logic with observability baselines.
-- [ ] **Phase 0b: Adapter Abstraction** - Abstract framework-specific logic and design telemetry.
+- [x] **Phase 0b: Adapter Abstraction** - Abstract framework-specific logic and design telemetry.
 - [x] **Phase 1: SDK Core Implementation** - Implement universal SDK core with reference adapters and benchmarks. (completed 2026-04-17)
-- [ ] **Phase 1.5: Cross-Domain Validation** - Stress test universality against an extreme domain before API freeze.
+- [x] **Phase 1.5: Cross-Domain Validation** - Stress test universality against an extreme domain before API freeze.
 
 ## Phase Details
 
@@ -90,7 +90,7 @@ Plans:
 | 0a: Interface & Core | 4/4 | Completed | 2026-04-17 |
 | 0b: Adapter Abstraction | 3/3 | Completed | 2026-04-17 |
 | 1: SDK Core Implementation | 7/7 | Completed | 2026-04-17 |
-| 1.5: Cross-Domain Validation | 0/3 | Not started | - |
+| 1.5: Cross-Domain Validation | 3/3 | Completed | 2026-04-17 |
 
 ---
 *Last updated: 2026-04-17 for Phase 1 planning*
