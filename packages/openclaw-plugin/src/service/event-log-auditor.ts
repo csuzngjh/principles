@@ -181,13 +181,13 @@ export async function auditEventLogs(
 
       // Determine primary path - prefer configured workspace over workspace-main
       // The configured workspace path is {openclawDir}/workspace (without -main suffix)
-      const workspaceDir = path.join(openclawDir, 'workspace');
-      const workspaceMainDir = path.join(openclawDir, 'workspace-main');
+      const workspaceDir = path.join(openclawDir, 'workspace') + path.sep;
+      const workspaceMainDir = path.join(openclawDir, 'workspace-main') + path.sep;
       
-      if (filePath.includes(workspaceDir) && !filePath.includes(workspaceMainDir)) {
-        // Configured workspace (e.g., ~/.openclaw/workspace) takes priority
+      if (filePath.startsWith(workspaceDir)) {
+        // Configured workspace (e.g., ~/.openclaw/workspace/) takes priority
         primaryPath = filePath;
-      } else if (!primaryPath && filePath.includes(workspaceMainDir)) {
+      } else if (!primaryPath && filePath.startsWith(workspaceMainDir)) {
         // Fallback to workspace-main only if no configured workspace found yet
         primaryPath = filePath;
       }

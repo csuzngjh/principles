@@ -168,7 +168,7 @@ function extractTurn(msg: ParsedMessage): string | null {
       const tools = msg.toolCalls.map(tc => tc.name).filter(Boolean);
       const uniqueTools = [...new Set(tools)];
       if (uniqueTools.length > 0) {
-        parts.push(`[→ ${uniqueTools.join(', ')}]`);
+        parts.push(`[Assistant → ${uniqueTools.join(', ')}]`);
       }
     }
     
