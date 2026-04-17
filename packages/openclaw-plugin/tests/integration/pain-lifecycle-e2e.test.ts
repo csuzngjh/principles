@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { clearPainFlag } from '../../src/core/pain-lifecycle.js';
 import { resolvePdPath } from '../../src/core/paths.js';
 
 describe('Pain Lifecycle E2E', () => {
-    const workspaceDir = fs.mkdtempSync(path.join(fs.realpathSync('/tmp'), 'pain-lifecycle-e2e-'));
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pain-lifecycle-e2e-'));
     const painFlagPath = resolvePdPath(workspaceDir, 'PAIN_FLAG');
     const stateDir = path.dirname(painFlagPath);
 
