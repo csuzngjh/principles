@@ -5,6 +5,8 @@ import type { OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { PD_DIRS } from './paths.js';
 import { defaultContextConfig } from '../types.js';
 import { loadStore, setPrincipleState, type PrincipleTrainingState } from './principle-training-state.js';
+import { addPrincipleToLedger } from './principle-tree-ledger.js';
+import type { LedgerPrinciple } from './principle-tree-ledger.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { createDefaultKeywordStore, saveKeywordStore } from './empathy-keyword-matcher.js';
 
@@ -150,7 +152,7 @@ function copyRecursiveSync(srcDir: string, destDir: string, api: OpenClawPluginA
  * Core thinking model definitions (T-01 through T-10).
  * These are the built-in cognitive patterns that every workspace should have.
  */
-const CORE_THINKING_MODELS: Array<{
+export const CORE_THINKING_MODELS: Array<{
   id: string;
   name: string;
   description: string;
@@ -190,7 +192,7 @@ export function ensureCorePrinciples(stateDir: string, logger: PluginLogger): bo
     for (const model of CORE_THINKING_MODELS) {
       const state: PrincipleTrainingState = {
         principleId: model.id,
-        evaluability: 'deterministic',
+        evaluability: 'manual_only',
         applicableOpportunityCount: 0,
         observedViolationCount: 0,
         complianceRate: 0,
@@ -202,6 +204,31 @@ export function ensureCorePrinciples(stateDir: string, logger: PluginLogger): bo
         internalizationStatus: 'needs_training',
       };
       setPrincipleState(stateDir, state);
+
+      // Also write to Ledger Tree so bootstrapRules() can find them
+      const now = new Date().toISOString();
+      const ledgerPrinciple: LedgerPrinciple = {
+        id: model.id,
+        version: 1,
+        text: model.description,
+        coreAxiomId: model.id,
+        triggerPattern: '',
+        action: '',
+        status: 'active',
+        priority: 'P1',
+        scope: 'general',
+        evaluability: 'manual_only',
+        valueScore: 0,
+        adherenceRate: 0,
+        painPreventedCount: 0,
+        derivedFromPainIds: [],
+        ruleIds: [],
+        conflictsWithPrincipleIds: [],
+        createdAt: now,
+        updatedAt: now,
+        suggestedRules: [],
+      };
+      addPrincipleToLedger(stateDir, ledgerPrinciple);
     }
 
     logger.info(`[PD] Initialized ${CORE_THINKING_MODELS.length} core thinking models: T-01 through T-10`);

@@ -16,53 +16,47 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - Nocturnal background reflection pipeline exists and can emit production-facing artifacts
 - Minimal rule bootstrap and live replay validation shipped in `v1.12`
 - CI and lint baseline are green from `v1.9.3`
-
-## Validated (Phase 39)
-
-- Correction keyword learning loop: FPR/TP counters, weighted confidence scoring, CorrectionObserverWorkflowManager, keyword_optimization trigger system
-- CR-01 fix: correction cue detection correctly records true positives (not false positives)
-- keyword_optimization periodic trigger fires independently of trigger_mode
+- v1.19 Tech Debt Remediation: God classes split, type safety improved, queue tests added.
+- Phase 0a: Universal PainSignal schema, StorageAdapter interface, FileStorageAdapter, hallucination detection, budget-aware injection, observability baselines.
+- Phase 0b: PainSignalAdapter, EvolutionHook, PrincipleInjector, TelemetryEvent interfaces — framework-agnostic adapter abstraction layer.
 
 ## Active
 
-- Production stabilization is more important than new surface features
-- God classes (evolution-worker.ts 2689L, nocturnal-trinity.ts 2429L) are the primary maintenance bottleneck
-- Type safety (`as any` casts) causes missed compile-time errors and runtime bugs
-- Queue integration tests are missing — bugs in enqueue/dequeue/migration go undetected
+- SDK Core Implementation: Implement universal SDK core with reference adapters and benchmarks (Phase 1).
+- SDK Core Implementation: Implement universal SDK core with reference adapters and benchmarks (Phase 1).
+- Cross-Domain Universality: Validating the system against non-coding domains (Phase 1.5).
 
 ## Out of Scope
 
 - New UI/dashboard work
-- New feature surface areas
+- New feature surface areas (outside SDK scope)
 - LoRA or full fine-tune internalization paths
-- General cleanup not tied to debt reduction
 
 ## Context
 
-- Main runtime lives in `packages/openclaw-plugin/src/`
-- Primary production path under scrutiny: pain -> queue -> nocturnal -> replay -> promotion
-- Recent production debugging showed repeated failures from wrong workspace resolution, runtime capability guessing, and format drift
-- Existing milestone state had drifted; `v1.13` resets planning to the actual current problem
+- Main runtime is being extracted from `packages/openclaw-plugin/src/` into `@principles/core`.
+- High priority on interface stability (Semver) and performance benchmarks (p99 targets).
+- CEO Plan: 2026-04-16-universal-agent-evolution-sdk.md defines the current strategic direction.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Stabilize production path before new UI work | A richer UI is low value if the underlying loop is not trustworthy | Active |
-| Prefer fail-fast over fallback | Silent fallback caused hidden corruption and delayed failures | Active |
-| Introduce one contract per boundary type | Path, runtime, and schema logic must stop being reimplemented ad hoc | Active |
-| Use end-to-end tests for boundary protection | Unit tests did not catch integration drift with OpenClaw | Active |
+| From zero build for SDK | SDK should be framework-agnostic; refactoring legacy code might bake in coupling | Active |
+| evolution-worker is core | It's the functional core, not a god class to be arbitrarily split further | Active |
+| Phase 1.5 Validation | N=2 (coding + 1) is not enough for "Universal" claim; need extreme case | Active |
+| Freeze Semver after Ph 1.5 | Ensure stability only after cross-domain stress testing | Active |
 
-## Current Milestone: v1.19 Tech Debt Remediation
+## Current Milestone: v1.20 Universal SDK Foundation
 
-**Goal:** 逐步清理技术债，提升代码质量、可维护性和系统稳定性
+**Goal:** Establish core interface contracts and functional hardening for the universal evolution engine.
 
 **Target features:**
-- Quick Wins: 修复 busy-wait loop、JSON parse 安全、constant-time token compare
-- God Class 拆分: 将 `evolution-worker.ts` (2689L) 和 `nocturnal-trinity.ts` (2429L) 拆分为专注模块
-- Type Safety: 清理 `as any`/`as unknown` casts，建立 proper 类型接口
-- Queue Integration Tests: 为 enqueue/dequeue/migration 路径添加集成测试
-- Security Hardening: constant-time token compare, JSON validate before parse
+- Universal PainSignal & StorageAdapter interfaces
+- Hardening: malformed signal validation, LLM hallucination detection
+- Reference Adapters: Coding + 1 additional domain
+- Cross-Domain Validation: Extreme case testing (e.g. Creative Writing)
+- SDK Packaging: `@principles/core` with Semver
 
 ## Evolution
 
@@ -81,4 +75,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-14 after Phase 39 (learning-loop) completion*
+*Last updated: 2026-04-17 after Phase 0a completion*
