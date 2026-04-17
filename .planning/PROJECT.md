@@ -18,10 +18,11 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - CI and lint baseline are green from `v1.9.3`
 - v1.19 Tech Debt Remediation: God classes split, type safety improved, queue tests added.
 - Phase 0a: Universal PainSignal schema, StorageAdapter interface, FileStorageAdapter, hallucination detection, budget-aware injection, observability baselines.
+- Phase 0b: PainSignalAdapter, EvolutionHook, PrincipleInjector, TelemetryEvent interfaces — framework-agnostic adapter abstraction layer.
 
 ## Active
 
-- Adapter Abstraction: Decoupling OpenClaw-specific logic from the core evolution pipeline (Phase 0b).
+- SDK Core Implementation: Implement universal SDK core with reference adapters and benchmarks (Phase 1).
 - SDK Core Implementation: Implement universal SDK core with reference adapters and benchmarks (Phase 1).
 - Cross-Domain Universality: Validating the system against non-coding domains (Phase 1.5).
 

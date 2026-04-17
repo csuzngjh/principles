@@ -13,7 +13,7 @@
 
 ## Phases
 
-- [ ] **Phase 0a: Interface & Core** - Define foundational interfaces and harden core logic with observability baselines.
+- [x] **Phase 0a: Interface & Core** - Define foundational interfaces and harden core logic with observability baselines.
 - [ ] **Phase 0b: Adapter Abstraction** - Abstract framework-specific logic and design telemetry.
 - [ ] **Phase 1: SDK Core Implementation** - Implement universal SDK core with reference adapters and benchmarks.
 - [ ] **Phase 1.5: Cross-Domain Validation** - Stress test universality against an extreme domain before API freeze.
@@ -29,7 +29,12 @@
   2. Malformed signal validation and LLM hallucination detection are implemented and tested.
   3. Storage failure scenarios are handled gracefully (fail-fast or safe-retry).
   4. System observability baselines (stock, sub-structure, association, internalization) are measured and recorded.
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [x] 00a-01-PLAN.md -- PainSignal schema + StorageAdapter interface definition
+- [x] 00a-02-PLAN.md -- Malformed signal validation + storage failure handling
+- [x] 00a-03-PLAN.md -- Hallucination detection + principle text overflow protection
+- [x] 00a-04-PLAN.md -- Observability baselines + storage conformance test suite
 
 ### Phase 0b: Adapter Abstraction
 **Goal**: Abstract framework-specific logic and design telemetry.
@@ -39,7 +44,11 @@
   1. Framework-agnostic PainSignal capture and principle injection interfaces are implemented.
   2. `EvolutionHook` and generic `StorageAdapter` methods are defined.
   3. Telemetry schema for in-process events is documented.
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [x] 00b-01-PLAN.md -- PainSignalAdapter generic interface + contract tests
+- [x] 00b-02-PLAN.md -- EvolutionHook callback interface + PrincipleInjector delegation interface + contract tests
+- [x] 00b-03-PLAN.md -- TelemetryEvent TypeBox schema + validation tests
 
 ### Phase 1: SDK Core Implementation
 **Goal**: Implement universal SDK core with reference adapters and performance benchmarks.
@@ -66,11 +75,10 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 0a: Interface & Core | 0/3 | Not started | - |
-| 0b: Adapter Abstraction | 0/2 | Not started | - |
+| 0a: Interface & Core | 4/4 | Completed | 2026-04-17 |
+| 0b: Adapter Abstraction | 0/3 | Planning | - |
 | 1: SDK Core Implementation | 0/4 | Not started | - |
 | 1.5: Cross-Domain Validation | 0/2 | Not started | - |
 
 ---
-
-*Last updated: 2026-04-17 for v1.20 milestone initialization*
+*Last updated: 2026-04-17 for Phase 0b planning*
