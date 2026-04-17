@@ -94,17 +94,15 @@ export class DefaultPrincipleInjector implements PrincipleInjector {
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     });
 
-    // Build result: P0 first, then others until budget exhausted
+    // Build result: P0 first (forced), then others until budget exhausted
     const result: InjectablePrinciple[] = [];
     let usedChars = 0;
 
-    // Always include P0 principles
+    // ALWAYS include P0 principles (forced inclusion, even if exceeds budget)
     for (const p of p0Principles) {
       const formatted = this.formatForInjection(p);
-      if (usedChars + formatted.length <= context.budgetChars) {
-        result.push(p);
-        usedChars += formatted.length;
-      }
+      result.push(p);
+      usedChars += formatted.length;
     }
 
     // Add P1/P2 principles until budget exhausted
