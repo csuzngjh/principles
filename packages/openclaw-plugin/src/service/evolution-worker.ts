@@ -1065,7 +1065,6 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     summary: `Task ${task.id} completed - marker file detected.`
                 });
                 queueChanged = true;
-                clearPainFlag(wctx.workspaceDir);
                 continue;
             }
 
@@ -1154,7 +1153,6 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     summary: `Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout.`
                 });
                 queueChanged = true;
-                clearPainFlag(wctx.workspaceDir);
             }
         }
 

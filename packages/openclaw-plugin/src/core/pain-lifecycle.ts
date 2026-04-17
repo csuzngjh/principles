@@ -11,10 +11,8 @@ export const PAIN_FLAG_FILENAME = '.pain_flag';
 export function clearPainFlag(workspaceDir: string): void {
     const painFlagPath = resolvePdPath(workspaceDir, 'PAIN_FLAG');
     try {
-        if (fs.existsSync(painFlagPath)) {
-            fs.unlinkSync(painFlagPath);
-        }
+        fs.unlinkSync(painFlagPath);
     } catch {
-        // Best-effort cleanup — don't throw if file is locked or already gone.
+        // Best-effort cleanup — ENOENT means already gone, other errors are ignored.
     }
 }

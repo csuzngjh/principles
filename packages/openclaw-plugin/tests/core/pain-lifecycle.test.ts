@@ -2,14 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { clearPainFlag, PAIN_FLAG_FILENAME } from '../../src/core/pain-lifecycle.js';
+import { resolvePdPath } from '../../src/core/paths.js';
 
 describe('PainLifecycle', () => {
     const workspaceDir = fs.mkdtempSync(path.join(fs.realpathSync('/tmp'), 'pain-lifecycle-test-'));
-    const painFlagPath = path.join(workspaceDir, '.state', '.pain_flag');
+    const painFlagPath = resolvePdPath(workspaceDir, 'PAIN_FLAG');
 
     beforeEach(() => {
-        if (!fs.existsSync(path.join(workspaceDir, '.state'))) {
-            fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+        const stateDir = path.dirname(painFlagPath);
+        if (!fs.existsSync(stateDir)) {
+            fs.mkdirSync(stateDir, { recursive: true });
         }
     });
 
