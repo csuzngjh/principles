@@ -1,6 +1,5 @@
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { Type } from '@sinclair/typebox';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { buildPainFlag } from '../core/pain.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
