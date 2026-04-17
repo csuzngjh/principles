@@ -115,6 +115,8 @@ export function bootstrapRules(stateDir: string, limit = 3): BootstrapResult[] {
       };
       addPrincipleToLedger(stateDir, lp);
     }
+    // Reload ledger after migration so subsequent reads see the new data.
+    ledger = loadLedger(stateDir);
   }
 
   // Select principles for bootstrap
