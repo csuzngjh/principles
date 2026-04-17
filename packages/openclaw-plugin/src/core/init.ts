@@ -152,7 +152,7 @@ function copyRecursiveSync(srcDir: string, destDir: string, api: OpenClawPluginA
  * Core thinking model definitions (T-01 through T-10).
  * These are the built-in cognitive patterns that every workspace should have.
  */
-const CORE_THINKING_MODELS: Array<{
+export const CORE_THINKING_MODELS: Array<{
   id: string;
   name: string;
   description: string;

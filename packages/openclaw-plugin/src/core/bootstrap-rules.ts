@@ -16,23 +16,7 @@
 import { loadLedger, createRule, updatePrinciple, addPrincipleToLedger } from './principle-tree-ledger.js';
 import type { LedgerPrinciple } from './principle-tree-ledger.js';
 import { loadStore } from './principle-training-state.js';
-
-/**
- * Core thinking model definitions (T-01 through T-10).
- * Duplicated from init.ts to avoid circular dependency.
- */
-const CORE_THINKING_MODELS = [
-  { id: 'T-01', name: 'Survey Before Acting', description: 'Understand the structure first before making changes.' },
-  { id: 'T-02', name: 'Respect Constraints', description: 'Trust files, not your context window. Write conclusions to files.' },
-  { id: 'T-03', name: 'Evidence Over Assumption', description: 'Use logs, code, and outputs before inferring causes.' },
-  { id: 'T-04', name: 'Reversible First', description: 'Prefer changes that are safe to roll back when risk is high.' },
-  { id: 'T-05', name: 'Safety Rails', description: 'Call out guardrails, prohibitions, and failure-prevention constraints.' },
-  { id: 'T-06', name: 'Simplicity First', description: 'Prefer the smallest understandable solution over over-engineering.' },
-  { id: 'T-07', name: 'Minimal Change Surface', description: 'Limit the blast radius and touch only what is necessary.' },
-  { id: 'T-08', name: 'Pain As Signal', description: 'Treat failures and friction as clues to step back and rethink.' },
-  { id: 'T-09', name: 'Divide And Conquer', description: 'Split the task into smaller phases before execution.' },
-  { id: 'T-10', name: 'Memory Externalization', description: 'Write intermediate conclusions to files for persistence.' },
-];
+import { CORE_THINKING_MODELS } from './init.js';
 
 export interface BootstrapResult {
   principleId: string;
