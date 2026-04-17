@@ -13,8 +13,10 @@
  *   npm run bootstrap-rules                               (production)
  */
 
-import { loadLedger, createRule, updatePrinciple } from './principle-tree-ledger.js';
+import { loadLedger, createRule, updatePrinciple, addPrincipleToLedger } from './principle-tree-ledger.js';
+import type { LedgerPrinciple } from './principle-tree-ledger.js';
 import { loadStore } from './principle-training-state.js';
+import { CORE_THINKING_MODELS } from './init.js';
 
 export interface BootstrapResult {
   principleId: string;
@@ -77,11 +79,46 @@ export function selectPrinciplesForBootstrap(stateDir: string, limit = 3): strin
  * @throws Error if no deterministic principles found
  */
 export function bootstrapRules(stateDir: string, limit = 3): BootstrapResult[] {
+  // Migration: if T-01..T-10 exist in Training Store but not in Ledger Tree, backfill.
+  // This handles workspaces initialized before Ledger Tree was added.
+  const store = loadStore(stateDir);
+  const ledger = loadLedger(stateDir);
+  const hasTrainingT = Object.keys(store).some((id) => id.startsWith('T-'));
+  const hasAnyLedgerT = Object.keys(ledger.tree.principles).some((id) => id.startsWith('T-'));
+  if (hasTrainingT && !hasAnyLedgerT) {
+    console.warn('[bootstrap] Migrating T-01..T-10 from Training Store to Ledger Tree');
+    const now = new Date().toISOString();
+    for (const [id, entry] of Object.entries(store)) {
+      if (!id.startsWith('T-')) continue;
+      const model = CORE_THINKING_MODELS.find((m) => m.id === id);
+      if (!model) continue;
+      const lp: LedgerPrinciple = {
+        id,
+        version: 1,
+        text: model.description,
+        coreAxiomId: id,
+        triggerPattern: '',
+        action: '',
+        status: 'active',
+        priority: 'P1',
+        scope: 'general',
+        evaluability: entry.evaluability,
+        valueScore: 0,
+        adherenceRate: 0,
+        painPreventedCount: 0,
+        derivedFromPainIds: [],
+        ruleIds: [],
+        conflictsWithPrincipleIds: [],
+        createdAt: now,
+        updatedAt: now,
+        suggestedRules: [],
+      };
+      addPrincipleToLedger(stateDir, lp);
+    }
+  }
+
   // Select principles for bootstrap
   const selectedPrincipleIds = selectPrinciplesForBootstrap(stateDir, limit);
-
-  // Load current ledger state
-  const ledger = loadLedger(stateDir);
 
   const results: BootstrapResult[] = [];
 

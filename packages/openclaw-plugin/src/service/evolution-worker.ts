@@ -18,6 +18,7 @@ import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import type { PrincipleEvaluability } from '../types/principle-tree-schema.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+import { validatePainSignal, type PainSignalValidationResult } from '../core/pain-signal.js';
 
 // Re-export queue I/O (extracted to queue-io.ts)
 export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock, requireQueueLock } from './queue-io.js';
@@ -327,6 +328,26 @@ async function doEnqueuePainTask(
     if (v.score < 30) {
         result.skipped_reason = `score_too_low (${v.score} < 30)`;
         if (logger) logger.info(`[PD:EvolutionWorker] Pain flag score too low: ${v.score} (source=${v.source})`);
+        return result;
+    }
+
+    // Validate pain signal through TypeBox schema before enqueuing.
+    // Malformed signals are logged and skipped — they never enter the queue.
+    const signalInput = {
+        source: v.source,
+        score: v.score,
+        timestamp: new Date().toISOString(),
+        reason: v.reason,
+        sessionId: v.sessionId || '',
+        agentId: v.agentId || '',
+        traceId: v.traceId || '',
+        triggerTextPreview: v.preview,
+    };
+    const validation: PainSignalValidationResult = validatePainSignal(signalInput);
+    if (!validation.valid) {
+        result.skipped_reason = `invalid_pain_signal (${validation.errors.join('; ')})`;
+        if (logger) logger.warn(`[PD:EvolutionWorker] Pain signal validation failed, skipping enqueue: ${validation.errors.join('; ')}`);
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_SIGNAL_INVALID', `Validation errors: ${validation.errors.join('; ')} | source=${v.source} score=${v.score}`);
         return result;
     }
 
@@ -763,9 +784,38 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         // V2: Migrate queue to current schema if needed
-        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
+        let queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
 
-        let queueChanged = rawQueue.some(isLegacyQueueItem);
+        // Validate queue items — filter out malformed entries before processing.
+        // Malformed items are logged + skipped; they never crash the evolution cycle.
+        const beforeValidation = queue.length;
+        queue = queue.filter((item) => {
+            const errors: string[] = [];
+            if (!item.id || typeof item.id !== 'string') errors.push('missing/invalid id');
+            if (!item.source || typeof item.source !== 'string') errors.push('missing/invalid source');
+            if (typeof item.score !== 'number') errors.push('missing/invalid score');
+            if (!item.status || typeof item.status !== 'string') errors.push('missing/invalid status');
+            if (!item.taskKind || typeof item.taskKind !== 'string') errors.push('missing/invalid taskKind');
+            else {
+                const validTaskKinds = ['pain_diagnosis', 'sleep_reflection', 'model_eval', 'keyword_optimization'];
+                if (!validTaskKinds.includes(item.taskKind)) {
+                    errors.push(`invalid taskKind value '${item.taskKind}' (expected one of: ${validTaskKinds.join(', ')})`);
+                }
+            }
+            if (typeof item.retryCount !== 'number') errors.push('missing/invalid retryCount');
+            if (typeof item.maxRetries !== 'number') errors.push('missing/invalid maxRetries');
+            if (errors.length > 0) {
+                logger?.warn?.(`[PD:EvolutionWorker] Skipping malformed queue item: ${errors.join(', ')} | ${JSON.stringify(item).slice(0, 200)}`);
+                SystemLogger.log(wctx.workspaceDir, 'QUEUE_ITEM_MALFORMED', `Skipped: ${errors.join(', ')} | id=${item.id || 'N/A'}`);
+                return false;
+            }
+            return true;
+        });
+        if (queue.length < beforeValidation) {
+            logger?.info?.(`[PD:EvolutionWorker] Filtered ${beforeValidation - queue.length} malformed queue item(s)`);
+        }
+
+        let queueChanged = rawQueue.some(isLegacyQueueItem) || queue.length < beforeValidation;
 
         // Guard: Skip keyword_optimization if one is already pending/in-progress (CORR-08)
         if (hasPendingTask(queue, 'keyword_optimization')) {

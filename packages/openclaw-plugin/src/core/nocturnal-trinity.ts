@@ -2211,6 +2211,20 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
       telemetry.eligibleCandidateCount = draftArtifact.telemetry.eligibleCandidateCount;
     }
 
+    // Hallucination detection (SDK-QUAL-02): validate extraction against snapshot
+    const hallucinationResult = validateExtraction(draftArtifact, snapshot);
+    if (!hallucinationResult.isGrounded) {
+      const reason = hallucinationResult.reason ?? 'Extraction not grounded in session evidence';
+      console.warn(`[Trinity] HALLUCINATION_DETECTED: ${reason}`);
+      telemetry.stageFailures.push(`Hallucination: ${reason}`);
+      return {
+        success: false,
+        telemetry,
+        failures: [{ stage: 'scribe', reason }],
+        fallbackOccurred: false,
+      };
+    }
+
     return {
       success: true,
       artifact: draftArtifact,
@@ -2339,6 +2353,20 @@ function runTrinityWithStubs(
     telemetry.eligibleCandidateCount = draftArtifact.telemetry.eligibleCandidateCount;
   }
 
+  // Hallucination detection (SDK-QUAL-02): validate extraction against snapshot
+  const hallucinationResult = validateExtraction(draftArtifact, snapshot);
+  if (!hallucinationResult.isGrounded) {
+    const reason = hallucinationResult.reason ?? 'Extraction not grounded in session evidence';
+    console.warn(`[Trinity] HALLUCINATION_DETECTED: ${reason}`);
+    telemetry.stageFailures.push(`Hallucination: ${reason}`);
+    return {
+      success: false,
+      telemetry,
+      failures: [{ stage: 'scribe', reason }],
+      fallbackOccurred: false,
+    };
+  }
+
   return {
     success: true,
     artifact: draftArtifact,
@@ -2402,6 +2430,208 @@ export function validateDraftArtifact(draft: TrinityDraftArtifact): DraftValidat
   return {
     valid: failures.length === 0,
     failures,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Hallucination Detection (SDK-QUAL-02)
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of hallucination validation against session snapshot evidence.
+ */
+export interface HallucinationDetectionResult {
+  /** Whether the extraction is grounded in real session evidence */
+  isGrounded: boolean;
+  /** List of evidence types found in the snapshot supporting the extraction */
+  evidenceTypes: string[];
+  /** Detailed reason if hallucination is detected */
+  reason?: string;
+  /** Matching evidence items for telemetry (truncated for safety) */
+  evidencePreview: string[];
+}
+
+/**
+ * Validate that an extracted badDecision corresponds to actual events in the
+ * NocturnalSessionSnapshot. This catches hallucinated extractions where the
+ * Trinity chain produces a badDecision that has no grounding in real failures,
+ * pain events, or gate blocks.
+ *
+ * Evidence sources checked:
+ *  1. Failed tool calls (snapshot.toolCalls with outcome='failure')
+ *  2. Pain events (snapshot.painEvents with score >= 50)
+ *  3. Gate blocks (snapshot.gateBlocks)
+ *  4. User corrections (snapshot.userTurns with correctionDetected=true)
+ *
+ * The function uses keyword overlap heuristics: it extracts tool names, file
+ * paths, error messages, and pain reasons from the snapshot and checks if the
+ * badDecision text overlaps meaningfully with any of them.
+ *
+ * @param artifact The draft artifact produced by the Scribe stage
+ * @param snapshot The session snapshot used to generate the extraction
+ * @returns HallucinationDetectionResult indicating whether the extraction is grounded
+ */
+export function validateExtraction(
+  artifact: TrinityDraftArtifact,
+  snapshot: NocturnalSessionSnapshot
+): HallucinationDetectionResult {
+  const evidenceTypes: string[] = [];
+  const evidencePreview: string[] = [];
+
+  // Shared token normalizer: lowercase + strip punctuation, same as badDecisionTokens
+  const normalizeEvidenceToken = (value: string): string =>
+    value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  // Build a set of evidence tokens from the snapshot
+  const evidenceTokens = new Set<string>();
+  const badDecisionLower = artifact.badDecision.toLowerCase();
+
+  // 1. Failed tool calls
+  const failedToolCalls = (snapshot.toolCalls ?? []).filter(tc => tc.outcome === 'failure');
+  if (failedToolCalls.length > 0) {
+    evidenceTypes.push('tool_failures');
+    for (const tc of failedToolCalls) {
+      // Extract tool name tokens
+      evidenceTokens.add(tc.toolName.toLowerCase());
+      if (tc.filePath) {
+        // Extract all path segments and normalize each for matching
+        const rawPathParts = [tc.filePath, ...tc.filePath.split(/[\\/]/)];
+        for (const part of rawPathParts) {
+          const normalized = normalizeEvidenceToken(part);
+          if (normalized.length > 0) evidenceTokens.add(normalized);
+        }
+      }
+      if (tc.errorMessage) {
+        // Extract key words from error messages (filter stop words)
+        const errorWords = tc.errorMessage.toLowerCase().split(/\s+/)
+          .filter(w => w.length > 3 && !['with', 'from', 'that', 'this', 'which', 'been', 'have', 'were', 'they', 'their'].includes(w));
+        for (const w of errorWords) {
+          const normalized = normalizeEvidenceToken(w);
+          if (normalized.length > 0) evidenceTokens.add(normalized);
+        }
+      }
+      if (tc.errorType) evidenceTokens.add(tc.errorType.toLowerCase());
+      evidencePreview.push(`tool:${tc.toolName}${tc.filePath ? `@${tc.filePath}` : ''} -> ${tc.errorMessage ?? 'unknown'}`.slice(0, 100));
+    }
+  }
+
+  // 2. Pain events (score >= 50 indicates meaningful pain)
+  const significantPainEvents = (snapshot.painEvents ?? []).filter(pe => pe.score >= 50);
+  if (significantPainEvents.length > 0) {
+    evidenceTypes.push('pain_events');
+    for (const pe of significantPainEvents) {
+      evidenceTokens.add(pe.source.toLowerCase());
+      if (pe.reason) {
+        const painWords = pe.reason.toLowerCase().split(/\s+/)
+          .filter(w => w.length > 3 && !['with', 'from', 'that', 'this', 'which', 'been', 'have', 'were', 'they', 'their'].includes(w));
+        for (const w of painWords) {
+          const normalized = normalizeEvidenceToken(w);
+          if (normalized.length > 0) evidenceTokens.add(normalized);
+        }
+      }
+      evidencePreview.push(`pain:${pe.score} [${pe.source}] ${pe.reason ?? ''}`.slice(0, 100));
+    }
+  }
+
+  // 3. Gate blocks
+  if ((snapshot.gateBlocks ?? []).length > 0) {
+    evidenceTypes.push('gate_blocks');
+    for (const gb of snapshot.gateBlocks) {
+      evidenceTokens.add(gb.toolName.toLowerCase());
+      evidenceTokens.add('gate');
+      evidenceTokens.add('blocked');
+      if (gb.reason) {
+        const blockWords = gb.reason.toLowerCase().split(/\s+/)
+          .filter(w => w.length > 3);
+        for (const w of blockWords) {
+          const normalized = normalizeEvidenceToken(w);
+          if (normalized.length > 0) evidenceTokens.add(normalized);
+        }
+      }
+      evidencePreview.push(`gate:${gb.toolName} -> ${gb.reason}`.slice(0, 100));
+    }
+  }
+
+  // 4. User corrections
+  const userCorrections = (snapshot.userTurns ?? []).filter(ut => ut.correctionDetected);
+  if (userCorrections.length > 0) {
+    evidenceTypes.push('user_corrections');
+    evidenceTokens.add('correction');
+    evidenceTokens.add('wrong');
+    evidenceTokens.add('incorrect');
+    evidencePreview.push(`corrections:${userCorrections.length}`);
+  }
+
+  // If no evidence exists at all in the snapshot, we cannot validate.
+  // Allow the extraction through — the pipeline already has guardrails for
+  // empty snapshots (Dreamer returns valid:false).
+  if (evidenceTypes.length === 0) {
+    return {
+      isGrounded: true,
+      evidenceTypes: [],
+      reason: undefined,
+      evidencePreview: [],
+    };
+  }
+
+  // Check for overlap between badDecision text and evidence tokens
+  // We look for meaningful keyword matches (tokens of length > 4)
+  const badDecisionTokens = badDecisionLower.split(/\s+/)
+    .map(t => t.replace(/[^a-z0-9]/g, ''))
+    .filter(t => t.length > 4);
+
+  let matchCount = 0;
+  const matchedTokens: string[] = [];
+  for (const token of badDecisionTokens) {
+    // Direct match
+    if (evidenceTokens.has(token)) {
+      matchCount++;
+      matchedTokens.push(token);
+      continue;
+    }
+    // Partial match: check if any evidence token contains this token or vice versa
+    for (const evToken of evidenceTokens) {
+      if (evToken.length > 4 && (evToken.includes(token) || token.includes(evToken))) {
+        matchCount++;
+        matchedTokens.push(token);
+        break;
+      }
+    }
+  }
+
+  // Heuristic: if at least 2 meaningful tokens overlap, consider grounded
+  // Single overlap is acceptable if the token is highly specific (length > 8)
+  const minOverlap = badDecisionTokens.length > 0
+    ? Math.max(1, Math.ceil(badDecisionTokens.length * 0.15))
+    : 0;
+
+  if (matchCount >= Math.max(2, minOverlap)) {
+    return {
+      isGrounded: true,
+      evidenceTypes,
+      evidencePreview: evidencePreview.slice(0, 5),
+    };
+  }
+
+  // Also check for at least one highly-specific match (length > 8)
+  const hasHighlySpecificMatch = matchedTokens.some(t => t.length > 8);
+  if (hasHighlySpecificMatch) {
+    return {
+      isGrounded: true,
+      evidenceTypes,
+      evidencePreview: evidencePreview.slice(0, 5),
+    };
+  }
+
+  // Hallucination detected — badDecision has no grounding in snapshot evidence
+  const reason = `Hallucinated extraction: badDecision "${artifact.badDecision.slice(0, 80)}" has insufficient overlap with session evidence. ` +
+    `Evidence types available: [${evidenceTypes.join(', ')}]. Matched tokens: [${matchedTokens.join(', ')}] (needed >= ${Math.max(2, minOverlap)}).`;
+
+  return {
+    isGrounded: false,
+    evidenceTypes,
+    reason,
+    evidencePreview: evidencePreview.slice(0, 5),
   };
 }
 
