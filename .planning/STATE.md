@@ -1,80 +1,72 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.17
-milestone_name: Keyword Learning Engine
-status: v1.19 milestone complete
-last_updated: "2026-04-15T13:47:15.841Z"
-last_activity: 2026-04-15
+milestone: v1.20
+milestone_name: milestone
+status: planning
+last_updated: "2026-04-17T00:59:14.699Z"
 progress:
   total_phases: 4
-  completed_phases: 4
-  total_plans: 9
-  completed_plans: 10
-  percent: 100
+  completed_phases: 0
+  total_plans: 1
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: v1.19 Tech Debt Remediation
+# Project State: Principles
 
 ## Project Reference
 
-See `.planning/PROJECT.md` (updated 2026-04-15)
+**Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Milestone:** v1.19
-**Name:** Tech Debt Remediation
-**Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
-**Current Focus:** Phase 46 — COMPLETE
-
-## Previous Milestone (v1.18)
-
-- v1.18 Nocturnal State Safety & Recovery complete (22 phases, shipped 2026-04-14)
-- Atomic write utility, failure classifier + cooldown strategy, startup reconciler, correction keyword learning loop all shipped
+**Current Focus:** Phase 00a — interface-core
 
 ## Current Position
 
-Phase: 46 — COMPLETE
-Last activity: 2026-04-15
+Phase: 00a (interface-core) — EXECUTING
+Plan: 1 of 4
+**Phase:** 01
+**Plan:** Not started
+**Status:** Ready to plan
+**Progress:** [--------------------] 0%
 
-## Phase 46 Summary
+## Performance Metrics
 
-| Wave | Plan | Status | Key Deliverable |
-|------|------|--------|-----------------|
-| 1 | 46-01 | ✅ | queue-migration.ts extracted (migrateToV2, isLegacyQueueItem) |
-| 2 | 46-02 | ✅ | workflow-watchdog.ts extracted + BUG-01/02/03 fixes |
-| 3 | 46-03 | ✅ | queue-io.ts full persistence layer + withQueueLock RAII |
-| 4 | 46-04 | ✅ | sleep-cycle.ts extracted (enqueue functions in queue-io.ts) |
-| 5 | 46-05 | ✅ | SPLIT-06 facade finalized, backward compat verified |
-
-**Extraction totals:** 288+ lines removed from evolution-worker.ts, 4 new modules, 32+ tests passing
-
-## Debt Inventory (from analysis)
-
-| Type | Item | Severity |
-|------|------|----------|
-| God Classes | evolution-worker.ts (2689L), nocturnal-trinity.ts (2429L) | 🔴 Critical |
-| Type Safety | 36× `as any`/`as unknown` casts | 🟡 Medium |
-| Busy-Wait Loop | Spin-based retry in io.ts:32-33 | 🟡 Medium |
-| JSON.parse risk | evolution-worker.ts:1148 — no pre-validation | 🔴 High |
-| Security | No constant-time token compare in HTTP route | 🟡 Medium |
-| Testing | evolution-worker.ts, nocturnal-service.ts untested | 🔴 High |
-| Queue Tests | No enqueue/dequeue/migration integration tests | 🔴 High |
-| Known Bugs | #185, #188, #214/#219 active | 🔴 High |
+- **Principle Stock:** TBD (Measuring in Phase 0a)
+- **Sub-principle Ratio:** TBD (Measuring in Phase 0a)
+- **Association Rate (Pain -> Principle):** TBD (Measuring in Phase 0a)
+- **Internalization Rate:** TBD (Measuring in Phase 0a)
+- **Pain Processing p99:** TBD (Target < 50ms)
+- **Principle Injection p99:** TBD (Target < 100ms)
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
+- SDK is built "from zero" for framework-agnosticism.
+- `evolution-worker.ts` is preserved as the functional core, not split further.
+- Phase 1.5 added for extreme-case validation before Semver freeze.
 
-### Pending Todos
+### Todos
 
-None — milestone just started
+- [ ] Measure baseline observability metrics (Phase 0a)
+- [ ] Define PainSignal and StorageAdapter interfaces (Phase 0a)
+- [ ] Implement malformed signal validation (Phase 0a)
+- [ ] Design generic adapter interfaces (Phase 0b)
+- [ ] Select extreme-case domain for Phase 1.5 validation (Phase 1)
 
-### Blockers/Concerns
+### Blockers
 
-- None
+- None.
 
 ## Session Continuity
 
-**Previous milestone:** v1.18 Nocturnal State Safety & Recovery (shipped 2026-04-14)
-**Current milestone:** v1.19 Tech Debt Remediation
-**Ready for:** `/gsd-execute-phase 44` after roadmap updated
+**Last Session:**
+
+- Created milestone v1.20 requirements and roadmap based on CEO Plan 2026-04-16.
+- Initialized ROADMAP.md, STATE.md, and updated PROJECT.md.
+- Defined phases 0a, 0b, 1, and 1.5.
+
+**Next Session:**
+
+- Start Phase 0a: Interface & Core.
+- Begin defining the universal PainSignal schema.

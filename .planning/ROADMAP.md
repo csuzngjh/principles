@@ -2,78 +2,75 @@
 
 ## Milestones
 
-- [x] **v1.9.3** - Remaining lint stabilization (shipped 2026-04-09)
-- [x] **v1.12** - Nocturnal Production Stabilization (Phases 16-18, shipped 2026-04-10)
-- [x] **v1.13** - Boundary Contract Hardening (Phases 19-23, shipped 2026-04-11) - [Archive](milestones/v1.13/v1.13-ROADMAP.md)
-- [x] **v1.14** - Evolution Worker Decomposition & Contract Hardening (Phases 24-29, baseline complete on branch `fix/bugs-231-228` / PR #245)
-- [x] **v1.15** - Runtime & Truth Contract Hardening (Phases 30-33, shipped 2026-04-12)
-- [x] **v1.16** - Trinity Training Trajectory Quality Enhancement (Phases 34-37, shipped 2026-04-13)
-- [x] **v1.17** - Keyword Learning Engine (Phases 38-41, shipped 2026-04-14)
-- [x] **v1.18** - Nocturnal State Safety & Recovery (shipped 2026-04-14)
+- [ ] **v1.20** - Universal SDK Foundation (Phases 0a-1.5)
 - [x] **v1.19** - Tech Debt Remediation (Phases 42-46, shipped 2026-04-15)
-- [ ] **v1.10** - Thinking Models page optimization (deferred)
+- [x] **v1.18** - Nocturnal State Safety & Recovery (shipped 2026-04-14)
+- [x] **v1.17** - Keyword Learning Engine (shipped 2026-04-14)
+- [x] **v1.16** - Trinity Training Quality (shipped 2026-04-13)
+- [x] **v1.15** - Runtime & Truth (shipped 2026-04-12)
+- [x] **v1.14** - Decomposition (shipped)
+- [x] **v1.13** - Boundary Contracts (shipped 2026-04-11)
 
 ## Phases
 
-**Phase Numbering:**
-- Integer phases (42-46): v1.19 Tech Debt Remediation (shipped)
-- Decimal phases: Urgent insertions (marked with INSERTED)
+- [ ] **Phase 0a: Interface & Core** - Define foundational interfaces and harden core logic with observability baselines.
+- [ ] **Phase 0b: Adapter Abstraction** - Abstract framework-specific logic and design telemetry.
+- [ ] **Phase 1: SDK Core Implementation** - Implement universal SDK core with reference adapters and benchmarks.
+- [ ] **Phase 1.5: Cross-Domain Validation** - Stress test universality against an extreme domain before API freeze.
 
-<details>
-<summary>Shipped milestones (Phases 1-37)</summary>
+## Phase Details
 
-- [x] **Phase 24: Queue Store Extraction** - Extract queue persistence, locking, and migration into EvolutionQueueStore with read/write contracts
-- [x] **Phase 25: Pain Flag Detector Extraction** - Extract pain flag detection into PainFlagDetector with entry-point validation (completed 2026-04-11)
-- [x] **Phase 26: Task Dispatcher Extraction** - Extract task dispatch and execution into EvolutionTaskDispatcher with entry-point validation
-- [x] **Phase 27: Workflow Orchestrator Extraction** - Extract workflow watchdog and lifecycle into WorkflowOrchestrator with entry-point validation
-- [x] **Phase 28: Context Builder + Service Slim + Fallback Audit** - Extract context building, slim the worker, and audit all 16 silent fallback points (completed 2026-04-11)
-- [x] **Phase 29: Integration Verification** - Verify end-to-end flow, public API preservation, test passing, and lifecycle correctness (completed 2026-04-11)
-- [x] **Phase 30: Runtime & Truth Contract Framing** - Create runtime/truth contract matrix, merge-gate checklist, and milestone framing (completed 2026-04-12)
-- [x] **Phase 31: Runtime Adapter Contract Hardening** - Contract embedded runtime invocation, model/provider resolution, fail-fast behavior (completed 2026-04-12)
-- [x] **Phase 32: Evidence-Bound Export and Dataset Hardening** - Harden export/dataset against fabricated facts (completed 2026-04-12)
-- [x] **Phase 33: Production Invariants and Merge-Gate Verification** - Invariant checks, merge-gate audit (completed 2026-04-12, audit=defer)
-- [x] **Phase 34: Reasoning Deriver Module** - Build leaf module for runtime reasoning derivation from existing snapshot data (completed 2026-04-13)
-- [x] **Phase 35: Dreamer Enhancement** - Enhance Dreamer prompt for candidate diversity with deriver integration and soft post-validation (completed 2026-04-13)
-- [x] **Phase 36: Philosopher 6D Evaluation** - Expand Philosopher evaluation to 6 dimensions with risk assessment (completed 2026-04-13)
-- [x] **Phase 37: Scribe Contrastive Analysis** - Add contrastive analysis to Scribe output with backward-compatible optional fields (completed 2026-04-13)
+### Phase 0a: Interface & Core
+**Goal**: Define foundational interfaces and harden core logic with observability baselines.
+**Depends on**: Nothing
+**Requirements**: SDK-CORE-01, SDK-CORE-02, SDK-QUAL-01, SDK-QUAL-02, SDK-QUAL-03, SDK-QUAL-04, SDK-TEST-01, SDK-OBS-01, SDK-OBS-02, SDK-OBS-03, SDK-OBS-04
+**Success Criteria** (what must be TRUE):
+  1. Universal PainSignal and StorageAdapter interfaces are defined and exported.
+  2. Malformed signal validation and LLM hallucination detection are implemented and tested.
+  3. Storage failure scenarios are handled gracefully (fail-fast or safe-retry).
+  4. System observability baselines (stock, sub-structure, association, internalization) are measured and recorded.
+**Plans**: TBD
 
-</details>
+### Phase 0b: Adapter Abstraction
+**Goal**: Abstract framework-specific logic and design telemetry.
+**Depends on**: Phase 0a
+**Requirements**: SDK-ADP-01, SDK-ADP-02, SDK-ADP-03, SDK-ADP-04, SDK-ADP-05, SDK-ADP-06, SDK-OBS-05
+**Success Criteria** (what must be TRUE):
+  1. Framework-agnostic PainSignal capture and principle injection interfaces are implemented.
+  2. `EvolutionHook` and generic `StorageAdapter` methods are defined.
+  3. Telemetry schema for in-process events is documented.
+**Plans**: TBD
 
-### v1.17 Keyword Learning Engine (Shipped 2026-04-14)
+### Phase 1: SDK Core Implementation
+**Goal**: Implement universal SDK core with reference adapters and performance benchmarks.
+**Depends on**: Phase 0b
+**Requirements**: SDK-CORE-03, SDK-ADP-07, SDK-ADP-08, SDK-TEST-02, SDK-TEST-03, SDK-MGMT-01, SDK-MGMT-02
+**Success Criteria** (what must be TRUE):
+  1. SDK is available as `@principles/core` with stable Semver.
+  2. Coding adapter and a second domain adapter (e.g. writing/service) are functional.
+  3. Adapter conformance test suite validates both reference adapters.
+  4. Performance targets (p99 < 50ms for pain, < 100ms for injection) are met and documented.
+**Plans**: TBD
 
-**Milestone Goal:** Create dynamic keyword learning mechanism for correction cue detection, reusing empathy engine abstraction patterns.
-
-- [x] **Phase 38: Foundation** -- Seed store, atomic persistence, cache, integration entry point (completed 2026-04-14)
-- [x] **Phase 39: Learning Loop** -- FPR tracking, 6-hour optimization trigger, throttle, weight decay (completed 2026-04-14)
-- [x] **Phase 40: LLM Discovery** -- LLM optimizer adds/updates/removes keywords, trajectory flag (completed 2026-04-14)
-- [x] **Phase 41: Testing** -- Integration test, atomic write recovery test (completed 2026-04-14)
-
-<details>
-<summary>✅ v1.19 Tech Debt Remediation (Phases 42-46) — SHIPPED 2026-04-15</summary>
-
-**Milestone Goal:** 逐步清理技术债：拆分 god classes、修复 type safety、添加 queue integration tests、强化安全
-
-- [x] **Phase 42: Quick Wins** (1/1 plans) — busy-wait loop fix, JSON validation, constant-time token compare (completed 2026-04-15)
-- [x] **Phase 43: Type Safety** (2/2 plans) — branded types, discriminated unions, replace `as any` casts (completed 2026-04-15)
-- [x] **Phase 44: Pre-Split Inventory** (2/2 plans) — document module-level mutable state, draw import graph (completed 2026-04-15)
-- [x] **Phase 45: Queue Tests** (2/2 plans) — migration tests, fake-timers unit tests, concurrency tests (completed 2026-04-15)
-- [x] **Phase 46: God Class Split** (5/5 plans) — extract queue-migration, workflow-watchdog, queue-io, sleep-cycle modules (completed 2026-04-15)
-
-</details>
+### Phase 1.5: Cross-Domain Validation
+**Goal**: Stress test universality against an extreme domain before API freeze.
+**Depends on**: Phase 1
+**Requirements**: SDK-VAL-01, SDK-VAL-02, SDK-VAL-03, SDK-MGMT-03
+**Success Criteria** (what must be TRUE):
+  1. SDK successfully handles extreme non-coding domain triggers and injection.
+  2. Any interface adjustments required by the extreme case are incorporated.
+  3. API and Semver frozen after validation.
+**Plans**: TBD
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
-
-| Phase | Milestone | Plans Complete | Status | Completed |
-|-------|-----------|----------------|--------|-----------|
-| 42. Quick Wins | v1.19 | 1/1 | Complete    | 2026-04-15 |
-| 43. Type Safety | v1.19 | 2/2 | Complete    | 2026-04-15 |
-| 44. Pre-Split Inventory | v1.19 | 2/2 | Complete    | 2026-04-15 |
-| 45. Queue Tests | v1.19 | 2/2 | Complete    | 2026-04-15 |
-| 46. God Class Split | v1.19 | 5/5 | Complete    | 2026-04-15 |
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 0a: Interface & Core | 0/3 | Not started | - |
+| 0b: Adapter Abstraction | 0/2 | Not started | - |
+| 1: SDK Core Implementation | 0/4 | Not started | - |
+| 1.5: Cross-Domain Validation | 0/2 | Not started | - |
 
 ---
 
-*Last updated: 2026-04-15 after v1.19 milestone shipped*
+*Last updated: 2026-04-17 for v1.20 milestone initialization*
