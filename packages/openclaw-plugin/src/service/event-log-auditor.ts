@@ -179,8 +179,16 @@ export async function auditEventLogs(
         recentEntries: recent,
       });
 
-      // Determine primary path (workspace-main or most recent)
-      if (filePath.includes('workspace-main') || filePath.includes('workspace-main')) {
+      // Determine primary path - prefer configured workspace over workspace-main
+      // The configured workspace path is {openclawDir}/workspace (without -main suffix)
+      const workspaceDir = path.join(openclawDir, 'workspace');
+      const workspaceMainDir = path.join(openclawDir, 'workspace-main');
+      
+      if (filePath.includes(workspaceDir) && !filePath.includes(workspaceMainDir)) {
+        // Configured workspace (e.g., ~/.openclaw/workspace) takes priority
+        primaryPath = filePath;
+      } else if (!primaryPath && filePath.includes(workspaceMainDir)) {
+        // Fallback to workspace-main only if no configured workspace found yet
         primaryPath = filePath;
       }
     } catch {
