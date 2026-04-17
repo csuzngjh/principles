@@ -35,9 +35,9 @@ const TAIL_READ_SIZE = 512_000; // 512KB
 /** Max turns to extract */
 const MAX_TURNS = 8;
 /** Max chars per turn entry */
-const MAX_TURN_CHARS = 250;
+const MAX_TURN_CHARS = 400;
 /** Max total output */
-const MAX_OUTPUT_CHARS = 1500;
+const MAX_OUTPUT_CHARS = 2000;
 
 /** Valid characters for session IDs and agent IDs — prevents path traversal */
 const SAFE_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
@@ -155,19 +155,24 @@ function extractTurn(msg: ParsedMessage): string | null {
   }
 
   if (msg.role === 'assistant') {
-    // Priority 1: final text reply
+    const parts: string[] = [];
+    
+    // Priority 1: final text reply (if present)
     if (msg.textParts.length > 0) {
       const text = msg.textParts.join(' ').trim();
-      if (text) return `[Assistant]: ${text.substring(0, MAX_TURN_CHARS)}`;
+      if (text) parts.push(`[Assistant]: ${text.substring(0, MAX_TURN_CHARS)}`);
     }
-    // Priority 2: tool call summary (what operations were performed)
+    
+    // Priority 2: tool call summary (always include if present, for context)
     if (msg.toolCalls.length > 0) {
       const tools = msg.toolCalls.map(tc => tc.name).filter(Boolean);
       const uniqueTools = [...new Set(tools)];
       if (uniqueTools.length > 0) {
-        return `[Assistant → ${uniqueTools.join(', ')}]`;
+        parts.push(`[→ ${uniqueTools.join(', ')}]`);
       }
     }
+    
+    return parts.length > 0 ? parts.join(' ') : null;
   }
 
   if (msg.role === 'toolResult') {
