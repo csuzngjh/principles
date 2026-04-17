@@ -88,7 +88,8 @@ export function describeInjectorConformance(
 
     it('getRelevantPrinciples respects character budget', () => {
       const principles = createTestPrinciples();
-      const ctx = createTestContext({ budgetChars: 50 });
+      // Use a budget large enough for P0 (forced) + some P1/P2
+      const ctx = createTestContext({ budgetChars: 100 });
       const result = injector.getRelevantPrinciples(principles, ctx);
 
       const totalChars = result.reduce((sum, p) => {
