@@ -11,6 +11,7 @@ import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec, isExpectedSubagentError } from '../service/subagent-workflow/index.js';
 import { PathResolver } from '../core/path-resolver.js';
+import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
 import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
 import {
@@ -901,12 +902,26 @@ ${taskBlocks}${processingNote}
   }
 
 
-  // Evolution principles injection (active + probation summary)
+  // Evolution principles injection — budget-aware selection (SDK-QUAL-04)
   let evolutionPrinciplesContent = '';
   try {
     const reducer = wctx.evolutionReducer;
-    const active = reducer.getActivePrinciples().slice(-3);
-    const probation = reducer.getProbationPrinciples().slice(0, 5);
+    const allActive = reducer.getActivePrinciples();
+    const allProbation = reducer.getProbationPrinciples();
+
+    // Budget-aware selection: prioritize P0>P1>P2 and recency
+    const activeSelection = selectPrinciplesForInjection(allActive, DEFAULT_PRINCIPLE_BUDGET);
+    const active = activeSelection.selected;
+
+    // Probation principles get a smaller sub-budget (1000 chars)
+    const probationBudget = 1000;
+    const probationSelection = selectPrinciplesForInjection(allProbation, probationBudget);
+    const probation = probationSelection.selected;
+
+    if (activeSelection.wasTruncated || probationSelection.wasTruncated) {
+      logger?.info?.(`[PD:Prompt] Principles truncated: active=${activeSelection.breakdown.p0 + activeSelection.breakdown.p1 + activeSelection.breakdown.p2}/${allActive.length} (${activeSelection.totalChars}c), probation=${probation.length}/${allProbation.length} (${probationSelection.totalChars}c)`);
+    }
+
     if (ctx.sessionId) {
       if (probation.length > 0) {
         setInjectedProbationIds(ctx.sessionId, probation.map((p) => p.id), workspaceDir);
