@@ -15,7 +15,7 @@
 
 - [x] **Phase 0a: Interface & Core** - Define foundational interfaces and harden core logic with observability baselines.
 - [ ] **Phase 0b: Adapter Abstraction** - Abstract framework-specific logic and design telemetry.
-- [ ] **Phase 1: SDK Core Implementation** - Implement universal SDK core with reference adapters and benchmarks.
+- [x] **Phase 1: SDK Core Implementation** - Implement universal SDK core with reference adapters and benchmarks. (completed 2026-04-17)
 - [ ] **Phase 1.5: Cross-Domain Validation** - Stress test universality against an extreme domain before API freeze.
 
 ## Phase Details
@@ -77,16 +77,20 @@ Plans:
   1. SDK successfully handles extreme non-coding domain triggers and injection.
   2. Any interface adjustments required by the extreme case are incorporated.
   3. API and Semver frozen after validation.
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [x] 01.5-01-PLAN.md -- CodeReviewPainAdapter + 6 test scenarios
+- [x] 01.5-02-PLAN.md -- E2E validation (conformance + pain-to-injection pipeline)
+- [x] 01.5-03-PLAN.md -- API freeze + Semver lock + final smoke test
 
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 0a: Interface & Core | 4/4 | Completed | 2026-04-17 |
-| 0b: Adapter Abstraction | 0/3 | Planning | - |
-| 1: SDK Core Implementation | 0/7 | Planning | - |
-| 1.5: Cross-Domain Validation | 0/2 | Not started | - |
+| 0b: Adapter Abstraction | 3/3 | Completed | 2026-04-17 |
+| 1: SDK Core Implementation | 7/7 | Completed | 2026-04-17 |
+| 1.5: Cross-Domain Validation | 0/3 | Not started | - |
 
 ---
 *Last updated: 2026-04-17 for Phase 1 planning*
