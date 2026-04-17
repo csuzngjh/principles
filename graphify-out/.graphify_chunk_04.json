@@ -1,0 +1,1085 @@
+{
+  "nodes": [
+    {
+      "id": "limix-structural-data-model",
+      "label": "LimiX结构化数据通用基础模型",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\limix-structural-data-model.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "llm-architecture-innovations",
+      "label": "LLM架构创新",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-architecture-innovations.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "llm-wiki-pattern",
+      "label": "LLM Wiki模式",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-wiki-pattern.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "llm-harness",
+      "label": "LLM Harness",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-harness.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "llm-memory-systems",
+      "label": "LLM记忆系统",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-memory-systems.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "meta-harness",
+      "label": "Meta-Harness",
+      "file_type": "paper",
+      "source_file": "D:\\llm_dir\\wiki\\meta-harness.md",
+      "source_location": null,
+      "source_url": "https://yoonholee.com/meta-harness/",
+      "captured_at": "2026-04-07",
+      "author": "Yoonho Lee, Roshen Nair, Qizheng Zhang, Kangwook Lee, Omar Khattab, Chelsea Finn",
+      "contributor": null
+    },
+    {
+      "id": "autoharness",
+      "label": "AutoHarness",
+      "file_type": "paper",
+      "source_file": "D:\\llm_dir\\wiki\\autoharness.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "meta-learning",
+      "label": "元学习与高效学习方法论",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\meta-learning.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "principles-ai-model",
+      "label": "用《原则》构建可进化的AI认知与协作模型",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\principles-ai-model.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "prompt-engineering-guide",
+      "label": "提示工程方法论",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\prompt-engineering-guide.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "prompt-templates",
+      "label": "提示词模板集",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\prompt-templates.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "representation-alignment",
+      "label": "表示对齐技术",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "multi-agent-coordination",
+      "label": "多智能体协作指南",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "source_url": "https://baoyu.io/translations/2026-04-11/multi-agent-coordination-patterns",
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "llm-pretraining",
+      "label": "LLM预训练与元学习",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "principles-raidal-principles",
+      "label": "Ray Dalio《原则》框架",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\principles-raidal-principles.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "magic-academy-story",
+      "label": "魔法学院：铭记之痕",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\magic-academy-story.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "lora-adaptation",
+      "label": "LoRA参数高效适配",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\lora-adaptation.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent-systems",
+      "label": "AI智能体系统",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\agent-systems.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context-engineering",
+      "label": "上下文工程",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\context-engineering.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "guided-learning",
+      "label": "引导学习",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\guided-learning.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "diffusion-foundations",
+      "label": "扩散模型基础",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\diffusion-foundations.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "flow-matching",
+      "label": "流匹配理论",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\flow-matching.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "doc-to-lora",
+      "label": "Doc-to-LoRA (D2L)",
+      "file_type": "paper",
+      "source_file": "D:\\llm_dir\\wiki\\doc-to-lora.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "coding-agent-harness",
+      "label": "Coding Agent Harness组件",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\coding-agent-harness.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "code-as-policy",
+      "label": "代码即策略",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\code-as-policy.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "muddformer",
+      "label": "MUDDFormer",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-architecture-innovations.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "ebt",
+      "label": "能量转换器EBT",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-architecture-innovations.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "ptcf",
+      "label": "PTCF提示框架",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\prompt-engineering-guide.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "riper-5",
+      "label": "RIPER-5编码协议",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\prompt-engineering-guide.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "gyroscope-protocol",
+      "label": "Gyroscope陀螺仪协议",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\prompt-engineering-guide.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "generator-verifier",
+      "label": "生成器-验证器模式",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "orchestrator-subagent",
+      "label": "编排器-子智能体模式",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent-teams",
+      "label": "智能体团队模式",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "message-bus",
+      "label": "消息总线模式",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "shared-state",
+      "label": "共享状态模式",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "repa",
+      "label": "REPA表征对齐",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "sra",
+      "label": "SRA自表示对齐",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "repa-e",
+      "label": "REPA-E端到端解锁",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "ddo",
+      "label": "DDO直接判别优化",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "dispersive-loss",
+      "label": "Dispersive Loss分散正则化",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rpt",
+      "label": "强化预训练RPT",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "kblam",
+      "label": "KBLAM知识库增强语言模型",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "dgm",
+      "label": "Darwin Godel Machine",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "gepa",
+      "label": "GEPA反思性提示演进",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "five-step-process",
+      "label": "Ray Dalio五步流程",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\principles-raidal-principles.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "obsidian",
+      "label": "Obsidian知识库",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-wiki-pattern.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "memex",
+      "label": "Vannevar Bush Memex",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\llm-wiki-pattern.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "super-learner",
+      "label": "超级学习者九大原则",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\meta-learning.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "learning-loop",
+      "label": "学习回路四步闭环",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\wiki\\meta-learning.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-07",
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "limix-structural-data-model",
+      "target": "llm-architecture-innovations",
+      "relation": "related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\limix-structural-data-model.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-wiki-pattern",
+      "target": "llm-harness",
+      "relation": "is_type_of",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "D:\\llm_dir\\wiki\\llm-wiki-pattern.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-wiki-pattern",
+      "target": "memex",
+      "relation": "inspired_by",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-wiki-pattern.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-wiki-pattern",
+      "target": "obsidian",
+      "relation": "uses_tool",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-wiki-pattern.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-harness",
+      "target": "meta-harness",
+      "relation": "related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-harness.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-harness",
+      "target": "autoharness",
+      "relation": "related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-harness.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-harness",
+      "target": "code-as-policy",
+      "relation": "related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-harness.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-harness",
+      "target": "llm-memory-systems",
+      "relation": "coordinates",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:\\llm_dir\\wiki\\llm-harness.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "meta-harness",
+      "target": "llm-harness",
+      "relation": "optimizes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\meta-harness.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "meta-harness",
+      "target": "coding-agent-harness",
+      "relation": "related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:\\llm_dir\\wiki\\meta-harness.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "autoharness",
+      "target": "llm-harness",
+      "relation": "automates",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\meta-harness.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-memory-systems",
+      "target": "agent-systems",
+      "relation": "enables",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "D:\\llm_dir\\wiki\\llm-memory-systems.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-memory-systems",
+      "target": "context-engineering",
+      "relation": "part_of",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:\\llm_dir\\wiki\\llm-memory-systems.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-architecture-innovations",
+      "target": "muddformer",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-architecture-innovations.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-architecture-innovations",
+      "target": "ebt",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-architecture-innovations.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-architecture-innovations",
+      "target": "lora-adaptation",
+      "relation": "complementary_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:\\llm_dir\\wiki\\llm-architecture-innovations.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-architecture-innovations",
+      "target": "llm-pretraining",
+      "relation": "requires",
+      "confidence": "INFERRED",
+      "confidence_score": 0.6,
+      "source_file": "D:\\llm_dir\\wiki\\llm-architecture-innovations.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "prompt-engineering-guide",
+      "target": "ptcf",
+      "relation": "defines",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\prompt-engineering-guide.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "prompt-engineering-guide",
+      "target": "riper-5",
+      "relation": "defines",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\prompt-engineering-guide.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "prompt-engineering-guide",
+      "target": "gyroscope-protocol",
+      "relation": "defines",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\prompt-engineering-guide.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "prompt-engineering-guide",
+      "target": "context-engineering",
+      "relation": "part_of",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\prompt-engineering-guide.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "prompt-engineering-guide",
+      "target": "agent-systems",
+      "relation": "applies_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:\\llm_dir\\wiki\\prompt-engineering-guide.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "prompt-templates",
+      "target": "prompt-engineering-guide",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\prompt-templates.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "representation-alignment",
+      "target": "repa",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "representation-alignment",
+      "target": "sra",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "representation-alignment",
+      "target": "repa-e",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "representation-alignment",
+      "target": "ddo",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "representation-alignment",
+      "target": "dispersive-loss",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "representation-alignment",
+      "target": "diffusion-foundations",
+      "relation": "accelerates",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "representation-alignment",
+      "target": "flow-matching",
+      "relation": "complements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "multi-agent-coordination",
+      "target": "generator-verifier",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "multi-agent-coordination",
+      "target": "orchestrator-subagent",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "multi-agent-coordination",
+      "target": "agent-teams",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "multi-agent-coordination",
+      "target": "message-bus",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "multi-agent-coordination",
+      "target": "shared-state",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "multi-agent-coordination",
+      "target": "agent-systems",
+      "relation": "belongs_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-pretraining",
+      "target": "rpt",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-pretraining",
+      "target": "kblam",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-pretraining",
+      "target": "dgm",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-pretraining",
+      "target": "gepa",
+      "relation": "includes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-pretraining",
+      "target": "lora-adaptation",
+      "relation": "precedes",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "principles-raidal-principles",
+      "target": "five-step-process",
+      "relation": "defines",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\principles-raidal-principles.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "principles-ai-model",
+      "target": "principles-raidal-principles",
+      "relation": "applies_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\principles-ai-model.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "principles-ai-model",
+      "target": "llm-wiki-pattern",
+      "relation": "related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:\\llm_dir\\wiki\\principles-ai-model.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "principles-ai-model",
+      "target": "agent-systems",
+      "relation": "related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:\\llm_dir\\wiki\\principles-ai-model.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "magic-academy-story",
+      "target": "meta-learning",
+      "relation": "theme_aligned_with",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:\\llm_dir\\wiki\\magic-academy-story.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "meta-learning",
+      "target": "super-learner",
+      "relation": "defines",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\meta-learning.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "meta-learning",
+      "target": "learning-loop",
+      "relation": "defines",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\meta-learning.md",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "nodes": [
+        "llm-harness",
+        "autoharness",
+        "meta-harness"
+      ],
+      "relation": "harness_automation_methods",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-harness.md",
+      "weight": 1.0
+    },
+    {
+      "nodes": [
+        "representation-alignment",
+        "repa",
+        "sra",
+        "repa-e",
+        "ddo",
+        "dispersive-loss"
+      ],
+      "relation": "representation_alignment_techniques",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\representation-alignment.md",
+      "weight": 1.0
+    },
+    {
+      "nodes": [
+        "multi-agent-coordination",
+        "generator-verifier",
+        "orchestrator-subagent",
+        "agent-teams",
+        "message-bus",
+        "shared-state"
+      ],
+      "relation": "multi_agent_coordination_patterns",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\multi-agent-coordination.md",
+      "weight": 1.0
+    },
+    {
+      "nodes": [
+        "llm-pretraining",
+        "rpt",
+        "kblam",
+        "dgm",
+        "gepa"
+      ],
+      "relation": "llm_pretraining_methods",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\wiki\\llm-pretraining.md",
+      "weight": 1.0
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

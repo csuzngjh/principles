@@ -82,7 +82,7 @@ export function bootstrapRules(stateDir: string, limit = 3): BootstrapResult[] {
   // Migration: if T-01..T-10 exist in Training Store but not in Ledger Tree, backfill.
   // This handles workspaces initialized before Ledger Tree was added.
   const store = loadStore(stateDir);
-  const ledger = loadLedger(stateDir);
+  let ledger = loadLedger(stateDir);
   const hasTrainingT = Object.keys(store).some((id) => id.startsWith('T-'));
   const hasAnyLedgerT = Object.keys(ledger.tree.principles).some((id) => id.startsWith('T-'));
   if (hasTrainingT && !hasAnyLedgerT) {

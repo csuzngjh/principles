@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.20
 milestone_name: milestone
-status: completed
-last_updated: "2026-04-17T10:38:04.916Z"
+status: planning
+last_updated: "2026-04-17T02:46:35.318Z"
 progress:
   total_phases: 4
-  completed_phases: 3
-  total_plans: 11
-  completed_plans: 11
-  percent: 100
+  completed_phases: 0
+  total_plans: 1
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State: Principles
@@ -18,14 +18,16 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** Phase 01.5 — cross-domain-validation
+**Current Focus:** Phase 00b — adapter-abstraction
 
 ## Current Position
 
-**Phase:** 01.5 (cross-domain-validation)
-**Plan:** 3/3 — Complete
-**Status:** v1.20 milestone complete
-**Progress:** [██████████] 100%
+Phase: 00b (adapter-abstraction) — EXECUTING
+Plan: 1 of 3
+**Phase:** 01
+**Plan:** Not started
+**Status:** Ready to plan
+**Progress:** [--------------------] 0%
 
 ## Performance Metrics
 
@@ -33,8 +35,8 @@ progress:
 - **Sub-principle Ratio:** TBD (Measuring in Phase 0a)
 - **Association Rate (Pain -> Principle):** TBD (Measuring in Phase 0a)
 - **Internalization Rate:** TBD (Measuring in Phase 0a)
-- **Pain Processing p99:** < 1ms (measured in Phase 1 benchmarks)
-- **Principle Injection p99:** < 1ms (measured in Phase 1 benchmarks)
+- **Pain Processing p99:** TBD (Target < 50ms)
+- **Principle Injection p99:** TBD (Target < 100ms)
 
 ## Accumulated Context
 
@@ -43,15 +45,14 @@ progress:
 - SDK is built "from zero" for framework-agnosticism.
 - `evolution-worker.ts` is preserved as the functional core, not split further.
 - Phase 1.5 added for extreme-case validation before Semver freeze.
-- @principles/core v0.1.0 released with PainSignal, PainSignalAdapter, EvolutionHook, TelemetryEvent, StorageAdapter, PrincipleInjector.
 
 ### Todos
 
-- [x] Define PainSignal and StorageAdapter interfaces (Phase 0a)
-- [x] Implement malformed signal validation (Phase 0a)
-- [x] Design generic adapter interfaces (Phase 0b)
-- [x] Implement universal SDK core with reference adapters (Phase 1)
-- [x] Select extreme-case domain for Phase 1.5 validation
+- [ ] Measure baseline observability metrics (Phase 0a)
+- [ ] Define PainSignal and StorageAdapter interfaces (Phase 0a)
+- [ ] Implement malformed signal validation (Phase 0a)
+- [ ] Design generic adapter interfaces (Phase 0b)
+- [ ] Select extreme-case domain for Phase 1.5 validation (Phase 1)
 
 ### Blockers
 
@@ -61,22 +62,12 @@ progress:
 
 **Last Session:**
 
-2026-04-17T09:30:00.000Z
+2026-04-17T01:22:42.101Z
 
-- Phase 1 execution completed (7/7 plans).
-- Gap fixed: describeInjectorConformance factory now exercised (74 tests pass).
-- Phase 1 UAT complete (8/8 tests passed).
-- Phase 1 marked complete, ROADMAP/STATE updated.
-
-**Current Session:**
-
-2026-04-17T09:35:00.000Z
-
-- Phase 1.5 context gathered.
-- Extreme domain: Code Review Feedback (diff complexity + comment sentiment + process violations)
-- Pain trigger and success criteria defined (Claude's discretion for implementation details)
-- 01.5-CONTEXT.md and 01.5-DISCUSSION-LOG.md created.
+- Initialized ROADMAP.md, STATE.md, and updated PROJECT.md.
+- Defined phases 0a, 0b, 1, and 1.5.
 
 **Next Session:**
 
-- Plan Phase 1.5: CodeReviewPainAdapter + E2E validation
+- Start Phase 0a: Interface & Core.
+- Begin defining the universal PainSignal schema.
