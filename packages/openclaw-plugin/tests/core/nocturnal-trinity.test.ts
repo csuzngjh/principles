@@ -2044,12 +2044,10 @@ describe('validateExtraction — Hallucination Detection (SDK-QUAL-02)', () => {
 
     // The stub Dreamer generates candidates mentioning "failing operation" and "config.json"
     // The snapshot has a Grep failure with "search timed out"
-    // There should be some overlap ("failing", "failure") so the extraction should pass
-    // But if the overlap is too weak, it should fail
-    // Either way, the pipeline should complete (success or hallucination failure)
-    expect([true, false]).toContain(result.success);
-    if (!result.success) {
-      expect(result.failures.some(f => f.reason?.includes('Hallucinated'))).toBe(true);
-    }
+    // With the normalized token matching: badDecisionTokens = {retry,faili,oper,diagnos,root,caus}
+    // and evidenceTokens = {search,timed,after,seconds,timedout} — no overlap → extraction fails
+    // So result.success must be false with a Hallucinated failure.
+    expect(result.success).toBe(false);
+    expect(result.failures.some(f => f.reason?.includes('Hallucinated'))).toBe(true);
   });
 });

@@ -361,21 +361,16 @@ export function describeStorageConformance(
       });
 
       it('saveLedger throws on write errors (read-only dir)', async () => {
-        // Create a read-only scenario by pointing to a non-existent nested path
-        // where the parent doesn't exist and can't be created
-        const readOnlyDir = path.join(tmpDir, 'nonexistent', 'nested');
+        // Create a scenario where mkdir would succeed but write fails:
+        // make the parent path a regular file so attempting to create nested dirs fails with ENOTDIR
+        const nestedParent = path.join(tmpDir, 'nonexistent');
+        fs.writeFileSync(nestedParent, 'blocker', 'utf8');
+        const readOnlyDir = path.join(nestedParent, 'nested');
         const roAdapter = factory(readOnlyDir);
 
-        // Depending on the adapter implementation, this may or may not throw.
-        // For FileStorageAdapter, the dir is created so this should succeed.
-        // We test that the adapter either succeeds or throws a meaningful error.
         const store = createEmptyStore();
-        try {
-          await roAdapter.saveLedger(store);
-          // If it succeeds (adapter creates dirs), that's fine
-        } catch (err) {
-          expect(err).toBeInstanceOf(Error);
-        }
+        expect.assertions(1);
+        await expect(roAdapter.saveLedger(store)).rejects.toThrow(Error);
       });
 
       it('mutateLedger propagates errors from the mutate function', async () => {
@@ -430,5 +425,5 @@ export function describeStorageConformance(
 import { FileStorageAdapter } from '../../src/core/file-storage-adapter.js';
 
 describeStorageConformance('FileStorageAdapter', (stateDir) => {
-  return new FileStorageAdapter(stateDir, stateDir);
+  return new FileStorageAdapter(stateDir);
 });

@@ -115,8 +115,14 @@ export function calculateBaselines(
     : 0;
 
   // Internalization Rate from training store
+  // Filter to only entries whose principleId still exists in the ledger tree
+  // to avoid orphaned/deleted entries inflating the ratio
   const trainingEntries = Object.values(trainingStore);
-  const internalizedCount = trainingEntries.filter(
+  const activePrincipleIds = new Set(Object.keys(tree.principles));
+  const activeEntries = trainingEntries.filter(
+    (entry) => activePrincipleIds.has(entry.principleId),
+  );
+  const internalizedCount = activeEntries.filter(
     (entry) => entry.internalizationStatus === 'internalized',
   ).length;
   const internalizationRate = principleStock > 0
@@ -201,7 +207,7 @@ function countPainEvents(stateDir: string): number {
   try {
     // Use dynamic import for better-sqlite3 to avoid hard dependency
     // at module load time. If not available, return 0.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const Database = require('better-sqlite3') as typeof import('better-sqlite3');
     const db = new Database(dbPath, { readonly: true });
 
@@ -211,8 +217,9 @@ function countPainEvents(stateDir: string): number {
     } finally {
       db.close();
     }
-  } catch {
-    // better-sqlite3 not available, or table doesn't exist
+  } catch (err) {
+    // better-sqlite3 not available, or table doesn't exist — log and return 0
+    SystemLogger.log(stateDir, 'OBSERVABILITY_SQL_ERROR', `countPainEvents failed: ${String(err)}`);
     return 0;
   }
 }

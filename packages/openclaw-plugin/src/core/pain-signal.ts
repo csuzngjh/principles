@@ -48,11 +48,11 @@ export const PainSignalSchema = Type.Object({
   /** Human-readable reason / error description */
   reason: Type.String({ minLength: 1 }),
   /** Session ID — identifies which conversation this happened in */
-  sessionId: Type.String(),
+  sessionId: Type.String({ minLength: 1 }),
   /** Agent ID — identifies which agent (main, builder, diagnostician, etc.) */
-  agentId: Type.String(),
+  agentId: Type.String({ minLength: 1 }),
   /** Correlation trace ID for linking events across the pipeline */
-  traceId: Type.String(),
+  traceId: Type.String({ minLength: 1 }),
   /** Preview of the text that triggered this pain */
   triggerTextPreview: Type.String(),
   /** Domain context (e.g., 'coding', 'writing', 'analysis') */

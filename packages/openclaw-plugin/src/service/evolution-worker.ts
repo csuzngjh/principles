@@ -796,6 +796,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             if (typeof item.score !== 'number') errors.push('missing/invalid score');
             if (!item.status || typeof item.status !== 'string') errors.push('missing/invalid status');
             if (!item.taskKind || typeof item.taskKind !== 'string') errors.push('missing/invalid taskKind');
+            else {
+                const validTaskKinds = ['pain_diagnosis', 'sleep_reflection', 'model_eval', 'keyword_optimization'];
+                if (!validTaskKinds.includes(item.taskKind)) {
+                    errors.push(`invalid taskKind value '${item.taskKind}' (expected one of: ${validTaskKinds.join(', ')})`);
+                }
+            }
             if (typeof item.retryCount !== 'number') errors.push('missing/invalid retryCount');
             if (typeof item.maxRetries !== 'number') errors.push('missing/invalid maxRetries');
             if (errors.length > 0) {

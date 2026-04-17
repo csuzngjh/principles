@@ -2478,6 +2478,10 @@ export function validateExtraction(
   const evidenceTypes: string[] = [];
   const evidencePreview: string[] = [];
 
+  // Shared token normalizer: lowercase + strip punctuation, same as badDecisionTokens
+  const normalizeEvidenceToken = (value: string): string =>
+    value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
   // Build a set of evidence tokens from the snapshot
   const evidenceTokens = new Set<string>();
   const badDecisionLower = artifact.badDecision.toLowerCase();
@@ -2490,16 +2494,21 @@ export function validateExtraction(
       // Extract tool name tokens
       evidenceTokens.add(tc.toolName.toLowerCase());
       if (tc.filePath) {
-        // Extract file name (without path) for broader matching
-        const fileName = tc.filePath.split('/').pop()?.split('\\').pop()?.toLowerCase() ?? '';
-        if (fileName) evidenceTokens.add(fileName);
-        evidenceTokens.add(tc.filePath.toLowerCase());
+        // Extract all path segments and normalize each for matching
+        const rawPathParts = [tc.filePath, ...tc.filePath.split(/[\\/]/)];
+        for (const part of rawPathParts) {
+          const normalized = normalizeEvidenceToken(part);
+          if (normalized.length > 0) evidenceTokens.add(normalized);
+        }
       }
       if (tc.errorMessage) {
         // Extract key words from error messages (filter stop words)
         const errorWords = tc.errorMessage.toLowerCase().split(/\s+/)
           .filter(w => w.length > 3 && !['with', 'from', 'that', 'this', 'which', 'been', 'have', 'were', 'they', 'their'].includes(w));
-        for (const w of errorWords) evidenceTokens.add(w);
+        for (const w of errorWords) {
+          const normalized = normalizeEvidenceToken(w);
+          if (normalized.length > 0) evidenceTokens.add(normalized);
+        }
       }
       if (tc.errorType) evidenceTokens.add(tc.errorType.toLowerCase());
       evidencePreview.push(`tool:${tc.toolName}${tc.filePath ? `@${tc.filePath}` : ''} -> ${tc.errorMessage ?? 'unknown'}`.slice(0, 100));
@@ -2515,7 +2524,10 @@ export function validateExtraction(
       if (pe.reason) {
         const painWords = pe.reason.toLowerCase().split(/\s+/)
           .filter(w => w.length > 3 && !['with', 'from', 'that', 'this', 'which', 'been', 'have', 'were', 'they', 'their'].includes(w));
-        for (const w of painWords) evidenceTokens.add(w);
+        for (const w of painWords) {
+          const normalized = normalizeEvidenceToken(w);
+          if (normalized.length > 0) evidenceTokens.add(normalized);
+        }
       }
       evidencePreview.push(`pain:${pe.score} [${pe.source}] ${pe.reason ?? ''}`.slice(0, 100));
     }
@@ -2531,7 +2543,10 @@ export function validateExtraction(
       if (gb.reason) {
         const blockWords = gb.reason.toLowerCase().split(/\s+/)
           .filter(w => w.length > 3);
-        for (const w of blockWords) evidenceTokens.add(w);
+        for (const w of blockWords) {
+          const normalized = normalizeEvidenceToken(w);
+          if (normalized.length > 0) evidenceTokens.add(normalized);
+        }
       }
       evidencePreview.push(`gate:${gb.toolName} -> ${gb.reason}`.slice(0, 100));
     }

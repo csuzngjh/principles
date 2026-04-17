@@ -35,12 +35,12 @@ overrides_applied: 0
 | `src/core/file-storage-adapter.ts` | Reference StorageAdapter implementation | VERIFIED (203 lines) | FileStorageAdapter with withLockAsync, 5-retry backoff, atomicWriteFileSync |
 | `src/core/principle-injection.ts` | Budget-aware principle selection | VERIFIED (208 lines) | selectPrinciplesForInjection, formatPrinciple, InjectablePrinciple, DEFAULT_PRINCIPLE_BUDGET |
 | `src/core/observability.ts` | SDK metrics calculation | VERIFIED (235 lines) | calculateBaselines with 4 dimensions, SystemLogger logging, atomic persistence |
-| `tests/core/pain-signal.test.ts` | PainSignal validation tests | VERIFIED (190 lines, 23 tests) |
-| `tests/core/file-storage-adapter.test.ts` | FileStorageAdapter tests | VERIFIED (285 lines, 9 tests) |
-| `tests/core/principle-injection.test.ts` | Principle injection tests | VERIFIED (223 lines, 12 tests) |
-| `tests/core/nocturnal-trinity.test.ts` | Hallucination detection tests | VERIFIED (2055 lines, 102 tests total, 10 new for validateExtraction) |
-| `tests/core/storage-conformance.test.ts` | Reusable conformance suite | VERIFIED (434 lines, 19 tests) | Exported describeStorageConformance factory |
-| `tests/core/observability.test.ts` | Observability tests | VERIFIED (383 lines, 16 tests) |
+| `tests/core/pain-signal.test.ts` | PainSignal validation tests | VERIFIED | 190 lines, 23 tests |
+| `tests/core/file-storage-adapter.test.ts` | FileStorageAdapter tests | VERIFIED | 285 lines, 9 tests |
+| `tests/core/principle-injection.test.ts` | Principle injection tests | VERIFIED | 223 lines, 12 tests |
+| `tests/core/nocturnal-trinity.test.ts` | Hallucination detection tests | VERIFIED | 2055 lines, 102 tests total, 10 new for validateExtraction |
+| `tests/core/storage-conformance.test.ts` | Reusable conformance suite | VERIFIED | 434 lines, 19 tests, exported describeStorageConformance factory |
+| `tests/core/observability.test.ts` | Observability tests | VERIFIED | 383 lines, 16 tests |
 
 ### Key Link Verification
 
