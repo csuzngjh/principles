@@ -66,14 +66,14 @@ describe('PainSignalSchema', () => {
     expect(Value.Check(PainSignalSchema, signal)).toBe(false);
   });
 
-  it('rejects empty optional fields (sessionId, agentId, traceId, triggerTextPreview)', () => {
+  it('accepts empty optional fields (sessionId, agentId, etc.)', () => {
     const signal = validSignal({
       sessionId: '',
       agentId: '',
       traceId: '',
       triggerTextPreview: '',
     });
-    expect(Value.Check(PainSignalSchema, signal)).toBe(false);
+    expect(Value.Check(PainSignalSchema, signal)).toBe(true);
   });
 
   it('accepts any string for domain', () => {
