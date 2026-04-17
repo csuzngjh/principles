@@ -192,7 +192,7 @@ export function ensureCorePrinciples(stateDir: string, logger: PluginLogger): bo
     for (const model of CORE_THINKING_MODELS) {
       const state: PrincipleTrainingState = {
         principleId: model.id,
-        evaluability: 'deterministic',
+        evaluability: 'manual_only',
         applicableOpportunityCount: 0,
         observedViolationCount: 0,
         complianceRate: 0,
@@ -217,7 +217,7 @@ export function ensureCorePrinciples(stateDir: string, logger: PluginLogger): bo
         status: 'active',
         priority: 'P1',
         scope: 'general',
-        evaluability: 'deterministic',
+        evaluability: 'manual_only',
         valueScore: 0,
         adherenceRate: 0,
         painPreventedCount: 0,
