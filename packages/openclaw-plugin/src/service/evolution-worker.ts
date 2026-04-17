@@ -339,9 +339,9 @@ async function doEnqueuePainTask(
         score: v.score,
         timestamp: new Date().toISOString(),
         reason: v.reason,
-        sessionId: v.sessionId || '',
-        agentId: v.agentId || '',
-        traceId: v.traceId || '',
+        sessionId: v.sessionId ?? undefined,
+        agentId: v.agentId ?? undefined,
+        traceId: v.traceId ?? undefined,
         triggerTextPreview: v.preview,
     };
     const validation: PainSignalValidationResult = validatePainSignal(signalInput);

@@ -48,11 +48,11 @@ export const PainSignalSchema = Type.Object({
   /** Human-readable reason / error description */
   reason: Type.String({ minLength: 1 }),
   /** Session ID — identifies which conversation this happened in */
-  sessionId: Type.String({ minLength: 1 }),
+  sessionId: Type.Optional(Type.String()),
   /** Agent ID — identifies which agent (main, builder, diagnostician, etc.) */
-  agentId: Type.String({ minLength: 1 }),
+  agentId: Type.Optional(Type.String()),
   /** Correlation trace ID for linking events across the pipeline */
-  traceId: Type.String({ minLength: 1 }),
+  traceId: Type.Optional(Type.String()),
   /** Preview of the text that triggered this pain */
   triggerTextPreview: Type.String(),
   /** Domain context (e.g., 'coding', 'writing', 'analysis') */
@@ -111,6 +111,9 @@ export function validatePainSignal(input: unknown): PainSignalValidationResult {
   const hydrated = {
     ...raw,
     domain: raw.domain ?? 'coding',
+    sessionId: raw.sessionId ?? undefined,
+    agentId: raw.agentId ?? undefined,
+    traceId: raw.traceId ?? undefined,
     severity: raw.severity ?? deriveSeverity(
       typeof raw.score === 'number' ? raw.score : 0,
     ),
