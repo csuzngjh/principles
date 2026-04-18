@@ -5,6 +5,7 @@ import { listSessions } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { evaluatePhase3Inputs } from './phase3-input-filter.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
+import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
 import type { RuntimeTruth, AnalyticsTruth } from '../types/runtime-summary.js';
 
 export type RuntimeDataQuality = 'authoritative' | 'partial';
@@ -59,6 +60,19 @@ export interface RuntimeSummary {
       taskPreview: string | null;
     };
     dataQuality: RuntimeDataQuality;
+  };
+  // D: Heartbeat Diagnostician chain — separate from evolution/nocturnal chain
+  heartbeatDiagnosis: {
+    /** Tasks pending in diagnostician_tasks.json (not yet processed by heartbeat) */
+    pendingTasks: number;
+    /** Total diagnosis tasks written by evolution worker (today from event log) */
+    tasksWrittenToday: number;
+    /** Total diagnostician reports written (today from event log) */
+    reportsWrittenToday: number;
+    /** Total principle candidates created from heartbeat chain (today from event log) */
+    candidatesCreatedToday: number;
+    /** Heartbeats that injected diagnostician tasks (today from event log) */
+    heartbeatsInjectedToday: number;
   };
   phase3: {
     queueTruthReady: boolean;
@@ -177,6 +191,14 @@ export class RuntimeSummaryService {
       toolCalls?: number;
       painSignals?: number;
       evolutionTasks?: number;
+      evolution?: {
+        diagnosisTasksWritten?: number;
+        diagnosticianReportsWritten?: number;
+        principleCandidatesCreated?: number;
+        heartbeatsInjected?: number;
+        [key: string]: unknown;
+      };
+      [key: string]: unknown;
     }>>(
       path.join(wctx.stateDir, 'logs', 'daily-stats.json'),
       warnings,
@@ -232,6 +254,20 @@ export class RuntimeSummaryService {
     const lastPainSignal = this.findLastPainSignal(events, selectedSessionId);
     const gfiSources = this.buildGfiSources(events, selectedSessionId);
     const gateStats = this.buildGateStats(events, selectedSessionId, warnings);
+
+    // D: Heartbeat Diagnostician chain — separate from evolution/nocturnal chain
+    // Read pending tasks from the diagnostician task store
+    const pendingDiagTasks = getPendingDiagnosticianTasks(wctx.stateDir);
+    // Read heartbeat diagnosis stats from daily event log
+    const todayStr = generatedAt.slice(0, 10);
+    const diagDailyStats = dailyStats?.[todayStr]?.evolution;
+    const heartbeatDiagnosis = {
+      pendingTasks: pendingDiagTasks.length,
+      tasksWrittenToday: diagDailyStats?.diagnosisTasksWritten ?? 0,
+      reportsWrittenToday: diagDailyStats?.diagnosticianReportsWritten ?? 0,
+      candidatesCreatedToday: diagDailyStats?.principleCandidatesCreated ?? 0,
+      heartbeatsInjectedToday: diagDailyStats?.heartbeatsInjected ?? 0,
+    };
 
     // Read trajectory analytics data (historical data, NOT runtime truth)
     const trajectoryStats = this.readTrajectoryStats(workspaceDir, warnings);
@@ -310,6 +346,8 @@ export class RuntimeSummaryService {
         lastSignal: lastPainSignal,
       },
       gate: gateStats,
+      // D: Heartbeat Diagnostician chain — separate from evolution/nocturnal
+      heartbeatDiagnosis,
       metadata: {
         generatedAt,
         workspaceDir,

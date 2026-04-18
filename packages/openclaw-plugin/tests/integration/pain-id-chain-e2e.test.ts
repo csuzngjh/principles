@@ -5,8 +5,9 @@
  *   1. recordPainEvent() returns AUTOINCREMENT row ID as number
  *   2. createPrincipleFromDiagnosis(painId: String(painEventId))
  *   3. derivedFromPainIds stores the stringified numeric ID
- *   4. PrincipleCompiler.compileOne() succeeds (registers active implementation)
- *   5. RuleHost.evaluate(matching input) → block
+ *   4. PrincipleCompiler.compileOne() succeeds (registers candidate implementation)
+ *   5. Promote to active
+ *   6. RuleHost.evaluate(matching input) → block
  *   6. RuleHost.evaluate(non-matching input) → undefined (passthrough)
  *
  * Pain ID chain fixed in commits 4b0dce59 and 0146bbb7:
@@ -25,7 +26,9 @@ import { RuleHost } from '../../src/core/rule-host.js';
 import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
 import {
   loadLedger,
+  transitionImplementationState,
 } from '../../src/core/principle-tree-ledger.js';
+import { safeRmDir } from '../test-utils.js';
 import type { RuleHostInput } from '../../src/core/rule-host-types.js';
 
 // ---------------------------------------------------------------------------
@@ -52,7 +55,7 @@ function createTestWorkspace(): TestWorkspace {
 
 function disposeTestWorkspace(ws: TestWorkspace): void {
   ws.trajectory.dispose();
-  fs.rmSync(ws.workspaceDir, { recursive: true, force: true });
+  safeRmDir(ws.workspaceDir);
 }
 
 // ---------------------------------------------------------------------------
@@ -131,12 +134,15 @@ describe('Pain ID Chain E2E: pain event → principle → compile → RuleHost',
     expect(compileResult.ruleId).toBeDefined();
     expect(compileResult.implementationId).toBeDefined();
 
-    // Verify implementation is active
+    // Verify implementation is candidate (not active — must be promoted before enforcing)
     const updatedLedger = loadLedger(ws.stateDir);
     const impl = updatedLedger.tree.implementations[compileResult.implementationId!];
-    expect(impl.lifecycleState).toBe('active');
+    expect(impl.lifecycleState).toBe('candidate');
 
-    // ── Step 5: RuleHost.evaluate(matching input) → block ──
+    // ── Step 5: Promote to active so RuleHost will enforce ──
+    transitionImplementationState(ws.stateDir, compileResult.implementationId!, 'active');
+
+    // ── Step 6: RuleHost.evaluate(matching input) → block ──
     const host = new RuleHost(ws.stateDir, { warn: () => {} });
 
     const matchingInput: RuleHostInput = {

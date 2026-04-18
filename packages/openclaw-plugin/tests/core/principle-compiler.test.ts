@@ -127,12 +127,14 @@ describe('PrincipleCompiler', () => {
     const rule = ledger.tree.rules['R_P_066_auto'];
     expect(rule).toBeDefined();
     expect(rule.type).toBe('gate');
-    expect(rule.enforcement).toBe('block');
+    // FIX: Auto-generated rules default to 'warn' enforcement
+    expect(rule.enforcement).toBe('warn');
     expect(rule.status).toBe('proposed');
 
     const impl = ledger.tree.implementations['IMPL_P_066_auto'];
     expect(impl).toBeDefined();
-    expect(impl.lifecycleState).toBe('active');
+    // FIX: Auto-generated implementations start as 'candidate' (not 'active')
+    expect(impl.lifecycleState).toBe('candidate');
   });
 
   // -----------------------------------------------------------------------

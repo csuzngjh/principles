@@ -234,7 +234,13 @@ export class RuleHost {
         meta,
         evaluate: (input: RuleHostInput): RuleHostResult => {
           const frozenHelpers = createRuleHostHelpers(input);
-          return rawEvaluate(input, frozenHelpers);
+          const result = rawEvaluate(input, frozenHelpers);
+          // C: Enrich result with rule/principle IDs for observability
+          if (result.matched && (result.decision === 'block' || result.decision === 'requireApproval')) {
+            result.ruleId = impl.ruleId;
+            result.principleId = meta.ruleId ?? impl.ruleId;
+          }
+          return result;
         },
       };
     } catch (compileError: unknown) {

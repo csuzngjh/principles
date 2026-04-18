@@ -235,6 +235,20 @@ describe('bootstrap-rules', () => {
       // Act & Assert: Should throw
       expect(() => selectPrinciplesForBootstrap(stateDir, 3)).toThrow('No deterministic principles');
     });
+
+    // Regression test for Issue #356
+    it('T-01..T-10 as deterministic — no crash on fresh workspace', () => {
+      const trainingStates = [
+        { principleId: 'T-01', evaluability: 'deterministic', applicableOpportunityCount: 0, observedViolationCount: 0, complianceRate: 1, violationTrend: 0, generatedSampleCount: 0, approvedSampleCount: 0, includedTrainRunIds: [], deployedCheckpointIds: [], internalizationStatus: 'needs_training' },
+        { principleId: 'T-02', evaluability: 'deterministic', applicableOpportunityCount: 0, observedViolationCount: 0, complianceRate: 1, violationTrend: 0, generatedSampleCount: 0, approvedSampleCount: 0, includedTrainRunIds: [], deployedCheckpointIds: [], internalizationStatus: 'needs_training' },
+      ];
+      const principles = trainingStates.map((s) => createLedgerPrinciple(s.principleId, { evaluability: s.evaluability }));
+      setupLedger(trainingStates, principles);
+      const selected = selectPrinciplesForBootstrap(stateDir, 3);
+      expect(selected).toHaveLength(2);
+      expect(selected).toContain('T-01');
+      expect(selected).toContain('T-02');
+    });
   });
 
   describe('bootstrapRules', () => {

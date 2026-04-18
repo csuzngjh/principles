@@ -66,6 +66,10 @@ export interface RuleHostResult {
   matched: boolean;
   reason: string;
   diagnostics?: Record<string, unknown>;
+  /** C: Rule ID that produced this result (for observability events) */
+  ruleId?: string;
+  /** C: Principle ID that this rule implements (for observability events) */
+  principleId?: string;
 }
 
 // ---------------------------------------------------------------------------

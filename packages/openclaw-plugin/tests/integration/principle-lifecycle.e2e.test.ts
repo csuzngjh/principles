@@ -19,6 +19,7 @@ import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
 import { listEvaluablePrinciples, loadStore } from '../../src/core/principle-training-state.js';
 import { updateTrainingStore } from '../../src/core/principle-tree-ledger.js';
 import { PathResolver } from '../../src/core/path-resolver.js';
+import { safeRmDir } from '../test-utils.js';
 
 describe('Principle Lifecycle E2E', () => {
   let tempDir: string;
@@ -40,7 +41,7 @@ describe('Principle Lifecycle E2E', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    safeRmDir(tempDir);
   });
 
   describe('Training Store Integration (#204)', () => {
