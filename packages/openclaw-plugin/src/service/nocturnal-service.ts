@@ -104,6 +104,7 @@ import { registerSample } from '../core/nocturnal-dataset.js';
 import { getPrincipleState, setPrincipleState } from '../core/principle-training-state.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
+import { EventLogService } from '../core/event-log.js';
 
 
 // ---------------------------------------------------------------------------
@@ -522,8 +523,19 @@ function persistCodeCandidate(
     try {
       refreshPrincipleLifecycle(workspaceDir, stateDir);
     } catch (err) {
-       
       console.warn('[nocturnal-service] Lifecycle refresh failed after code candidate persistence:', err instanceof Error ? err.stack : err);
+    }
+    // PD-FUNNEL-2.3: Emit nocturnal_code_candidate_created event
+    try {
+      const eventLog = EventLogService.get(stateDir, undefined);
+      eventLog.recordNocturnalCodeCandidateCreated({
+        implementationId,
+        artifactId,
+        ruleId: parsedArtificer.ruleId,
+        persistedPath: assetRoot,
+      });
+    } catch (evErr) {
+      console.warn(`[nocturnal-service] Failed to record nocturnal_code_candidate_created: ${String(evErr)}`);
     }
     return {
       status: 'persisted_candidate',
@@ -1039,13 +1051,22 @@ export function executeNocturnalReflection(
     boundedAction: execResult.boundedAction,
   };
 
-   
-   
   let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);
     diagnostics.persisted = true;
     diagnostics.persistedPath = persistedPath;
+    // PD-FUNNEL-2.3: Emit nocturnal_artifact_persisted event
+    try {
+      const eventLog = EventLogService.get(stateDir, undefined);
+      eventLog.recordNocturnalArtifactPersisted({
+        artifactId: artifactWithBoundedAction.artifactId,
+        principleId: artifactWithBoundedAction.principleId,
+        persistedPath,
+      });
+    } catch (evErr) {
+      console.warn(`[nocturnal-service] Failed to record nocturnal_artifact_persisted: ${String(evErr)}`);
+    }
   } catch (err) {
     void recordRunEnd(stateDir, 'failed', { reason: `persistence error: ${String(err)}` }).catch((e) => {
       warn(`[nocturnal-service] Failed to record run end (persistence failed): ${String(e)}`);
