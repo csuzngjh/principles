@@ -26,7 +26,8 @@ export type TaskResolution =
     | 'late_marker_principle_created'
     | 'late_marker_no_principle'
     | 'stub_fallback'
-    | 'skipped_thin_violation';
+    | 'skipped_thin_violation'
+    | 'noise_classified';
 
 /**
  * Recent pain context for sleep_reflection tasks.
