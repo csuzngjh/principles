@@ -1121,14 +1121,16 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                 // C: Record diagnostician_report event for observability
                 if (eventLog) {
-                    // Map reportSuccess to three-state category:
-                    // - true: JSON exists and parsed successfully ('success')
-                    // - false: JSON exists but parse failed or principle missing ('incomplete_fields')
-                    // Note: 'missing_json' case (marker exists but JSON absent) is handled in the else branch above
+                    // Map to three-state category:
+                    // - reportSuccess=true → 'success' (JSON exists, parsed, principle found)
+                    // - reportSuccess=false, reportParsed=true → 'incomplete_fields' (JSON existed but principle missing)
+                    // - reportSuccess=false, reportParsed=false → 'missing_json' (JSON never existed)
+                    const reportCategory: 'success' | 'missing_json' | 'incomplete_fields' =
+                        reportSuccess ? 'success' : reportParsed ? 'incomplete_fields' : 'missing_json';
                     eventLog.recordDiagnosticianReport({
                         taskId: task.id,
                         reportPath,
-                        category: reportSuccess ? 'success' : 'incomplete_fields',
+                        category: reportCategory,
                     });
                 }
 
