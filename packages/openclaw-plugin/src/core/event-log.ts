@@ -18,6 +18,12 @@ import type {
   EvolutionTaskEventData,
   DeepReflectionEventData,
   EmpathyRollbackEventData,
+  // C: New event data types
+  DiagnosisTaskEventData,
+  HeartbeatDiagnosisEventData,
+  DiagnosticianReportEventData,
+  PrincipleCandidateEventData,
+  RuleEnforcedEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -180,9 +186,28 @@ export class EventLog {
   recordWarn(sessionId: string | undefined, message: string, context?: Record<string, unknown>): void {
     this.record('warn', 'failure', sessionId, { message, ...context });
   }
-  
-   
-   
+
+  // C: Diagnostician heartbeat chain event recorders
+  recordDiagnosisTask(data: DiagnosisTaskEventData): void {
+    this.record('diagnosis_task', 'written', undefined, data);
+  }
+
+  recordHeartbeatDiagnosis(data: HeartbeatDiagnosisEventData): void {
+    this.record('heartbeat_diagnosis', 'injected', undefined, data);
+  }
+
+  recordDiagnosticianReport(data: DiagnosticianReportEventData): void {
+    this.record('diagnostician_report', data.success ? 'completed' : 'failure', undefined, data);
+  }
+
+  recordPrincipleCandidate(data: PrincipleCandidateEventData): void {
+    this.record('principle_candidate', 'created', undefined, data);
+  }
+
+  recordRuleEnforced(data: RuleEnforcedEventData): void {
+    this.record('rule_enforced', 'matched', undefined, data);
+  }
+
   private record(
     type: EventType, 
     category: EventCategory, 
@@ -324,6 +349,20 @@ export class EventLog {
       } else if (entry.category === 'enqueued') {
         stats.evolution.tasksEnqueued++;
       }
+    }
+    // C: Diagnostician heartbeat chain event counters
+    else if (entry.type === 'diagnosis_task') {
+      stats.evolution.diagnosisTasksWritten++;
+    } else if (entry.type === 'heartbeat_diagnosis') {
+      stats.evolution.heartbeatsInjected++;
+    } else if (entry.type === 'diagnostician_report') {
+      if (entry.category === 'completed') {
+        stats.evolution.diagnosticianReportsWritten++;
+      }
+    } else if (entry.type === 'principle_candidate') {
+      stats.evolution.principleCandidatesCreated++;
+    } else if (entry.type === 'rule_enforced') {
+      stats.evolution.rulesEnforced++;
     }
   }
 

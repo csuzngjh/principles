@@ -106,7 +106,10 @@ describe('ledger-registrar', () => {
       expect(rule).toBeDefined();
       expect(rule.id).toBe('R_P_001_auto');
       expect(rule.type).toBe('gate');
-      expect(rule.enforcement).toBe('block');
+      // FIX: Auto-generated rules default to 'warn' enforcement (not 'block')
+      // to prevent false positives like P_001 mis-blocking normal edits.
+      // They also start as 'candidate' lifecycle until replay evaluation passes.
+      expect(rule.enforcement).toBe('warn');
       expect(rule.status).toBe('proposed');
       expect(rule.principleId).toBe('P_001');
       expect(rule.implementationIds).toContain('IMPL_P_001_auto');
@@ -118,7 +121,7 @@ describe('ledger-registrar', () => {
       expect(impl.ruleId).toBe('R_P_001_auto');
       expect(impl.type).toBe('code');
       expect(impl.coversCondition).toBe('file_write');
-      expect(impl.lifecycleState).toBe('active');
+      expect(impl.lifecycleState).toBe('candidate');
 
       // Verify principle linked to rule
       const principle = ledger.tree.principles['P_001'];

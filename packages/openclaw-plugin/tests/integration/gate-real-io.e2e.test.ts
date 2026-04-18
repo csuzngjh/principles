@@ -16,6 +16,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { TrajectoryDatabase } from '../../src/core/trajectory.js';
 import { EventLog } from '../../src/core/event-log.js';
+import { safeRmDir } from '../test-utils.js';
 
 // ─────────────────────────────────────────────────────────────────────
 // Helper functions
@@ -83,12 +84,8 @@ function createTestWorkspace(): TestWorkspace {
 
 function cleanupWorkspace(ws: TestWorkspace | null): void {
   if (!ws) return;
-  try {
-    ws.trajectory?.dispose();
-    fs.rmSync(ws.workspaceDir, { recursive: true, force: true });
-  } catch {
-    // ignore
-  }
+  ws.trajectory?.dispose();
+  safeRmDir(ws.workspaceDir);
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -237,8 +234,8 @@ describe('Gate: Resilience', () => {
 
   describe('RESILIENCE: Missing state directory', () => {
     it('EventLog MUST handle missing logs directory', () => {
-      // Remove state directory
-      fs.rmSync(ws!.stateDir, { recursive: true, force: true });
+      // Remove state directory (safeRmDir handles Windows EPERM from held handles)
+      safeRmDir(ws!.stateDir);
 
       // Attempt to create event log
       // Should recreate the directory

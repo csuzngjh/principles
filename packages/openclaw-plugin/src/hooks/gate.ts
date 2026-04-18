@@ -39,6 +39,7 @@ import {
 } from '../constants/tools.js';
 import { getSession, hasRecentThinking } from '../core/session-tracker.js';
 import { getEvolutionEngine } from '../core/evolution-engine.js';
+import { EventLogService } from '../core/event-log.js';
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
@@ -205,6 +206,20 @@ export function handleBeforeToolCall(
 
     const hostResult = ruleHost.evaluate(hostInput);
     if (hostResult?.decision === 'block' || hostResult?.decision === 'requireApproval') {
+      // C: Record rule_enforced event for matched rules
+      try {
+        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+        eventLog.recordRuleEnforced({
+          ruleId: hostResult.ruleId || 'unknown',
+          principleId: hostResult.principleId || 'unknown',
+          enforcement: hostResult.decision === 'requireApproval' ? 'requireApproval' : 'block',
+          toolName: event.toolName,
+          filePath: relPath,
+        });
+      } catch (evErr) {
+        logger?.warn?.(`[PD_GATE] Failed to record rule_enforced event: ${String(evErr)}`);
+      }
+
       const reason = hostResult.decision === 'requireApproval'
         ? `[Rule Host] Approval required: ${hostResult.reason}`
         : hostResult.reason;

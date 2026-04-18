@@ -262,8 +262,13 @@ const plugin = {
        
       (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
         try {
-          // Resolve workspace via official API, falling back to PathResolver
-          const workspaceDir = resolveWorkspaceDirFromApi(api, event.agentId) || '.';
+          // FIX (B): Never fall back to '.' — fail-fast with ERROR log if workspaceDir cannot be resolved.
+          // For subagent hooks, we use event.agentId as the target agent for workspace resolution.
+          const workspaceDir = resolveWorkspaceDirFromApi(api, event.agentId);
+          if (!workspaceDir) {
+            api.logger.error(`[PD] subagent_spawning: cannot resolve workspaceDir for agent "${event.agentId}" — skipping shadow routing`);
+            return { status: 'ok' };
+          }
           api.logger?.debug?.(`[PD] workspaceDir resolved for subagent_spawning: ${workspaceDir}`);
           const { agentId, childSessionKey } = event;
           // Only handle PD local worker profiles
@@ -301,8 +306,12 @@ const plugin = {
       'subagent_ended',
       (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
         try {
-          // Resolve workspace via official API, falling back to PathResolver
-          const workspaceDir = resolveWorkspaceDirFromApi(api, undefined) || '.';
+          // FIX (B): Never fall back to '.' — fail-fast with ERROR log if workspaceDir cannot be resolved.
+          const workspaceDir = resolveWorkspaceDirFromApi(api, undefined);
+          if (!workspaceDir) {
+            api.logger.error(`[PD] subagent_ended: cannot resolve workspaceDir — skipping shadow observation completion`);
+            return;
+          }
           api.logger?.debug?.(`[PD] workspaceDir resolved for subagent_ended: ${workspaceDir}`);
           // Complete any pending shadow observation for this subagent session
           const shadowObsId = pendingShadowObservations.get(event.targetSessionKey);
