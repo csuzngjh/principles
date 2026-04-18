@@ -1066,14 +1066,19 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         // Re-inject: keep task in queue (don't mark completed), update marker with incremented count
                         const newRetries = markerRetries + 1;
                         if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id}: marker found but report missing — re-queuing (retry ${newRetries}/${MAX_REPORT_MISSING_RETRIES})`);
-                        // Write updated marker with retry count (prevents next cycle from seeing stale marker)
-                        const updatedMarker = `diagnostic_completed: ${new Date().toISOString()}\noutcome: re-queued due to missing JSON report\nreport_missing_retries:${newRetries}\n`;
-                        fs.writeFileSync(completeMarker, updatedMarker, 'utf8');
+                        // CRITICAL FIX: Delete the marker so the next heartbeat sees no marker
+                        // and re-processes the task as a fresh diagnostician run.
+                        // Without this, the same marker would be found on every heartbeat,
+                        // causing an infinite retry loop (markerRetries would re-read the
+                        // SAME count on each cycle instead of incrementing properly).
+                        try {
+                            fs.unlinkSync(completeMarker);
+                        } catch { /* ignore if already deleted */ }
                         // Also update the task in the main queue to keep it alive
                         task.status = 'pending';
                         task.resolution = undefined;
                         queueChanged = true;
-                        // Skip the completion/unlink block below
+                        // Skip the completion/unlink block below — task is still pending
                         continue;
                     } else {
                         // Max retries reached — accept that no report was produced
