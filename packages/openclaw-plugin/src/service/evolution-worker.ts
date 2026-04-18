@@ -921,6 +921,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             if (fs.existsSync(completeMarker)) {
                 if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected`);
 
+                let principlesGenerated = 0;
                 // Create principle from the diagnostician's JSON report.
                 const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                 if (fs.existsSync(reportPath)) {
@@ -1021,6 +1022,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     });
                                     if (principleId) {
                                         logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
+                                        principlesGenerated = 1;
                                     } else {
                                         logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id} (may be duplicate or blacklisted)`);
                                     }
@@ -1065,6 +1067,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     taskId: task.id,
                     resolution: 'marker_detected',
                     durationMs,
+                    principlesGenerated,
                 });
 
                 // Record task completion in event stats
@@ -1085,7 +1088,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
                     taskId: task.id,
                     outcome: 'ok',
-                    summary: `Task ${task.id} completed - marker file detected.`
+                    summary: `Task ${task.id} completed — ${principlesGenerated} principle(s) generated.`
                 });
                 queueChanged = true;
                 continue;
