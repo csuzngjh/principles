@@ -470,7 +470,7 @@ export type EvolutionLoopEvent =
 
 // V2 Queue Types (moved from evolution-worker.ts for shared use)
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation' | 'success' | 'failure' | 'skipped';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation' | 'success' | 'failure' | 'skipped' | 'noise_classified';
 
 export interface EvolutionQueueItem {
   id: string;
