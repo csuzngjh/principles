@@ -23,7 +23,15 @@ export type EventType =
   | 'heartbeat_diagnosis'  // Heartbeat injected diagnostician tasks
   | 'diagnostician_report' // Diagnostician completed and wrote report
   | 'principle_candidate'  // Principle candidate created from report
-  | 'rule_enforced';       // Rule enforced (matched) during tool call
+  | 'rule_enforced'       // Rule enforced (matched) during tool call
+      // C: Nocturnal funnel stage events (PD-FUNNEL-2.3)
+      | 'nocturnal_dreamer_completed'
+      | 'nocturnal_artifact_persisted'
+      | 'nocturnal_code_candidate_created'
+      // C: RuleHost funnel events (PD-FUNNEL-2.4)
+      | 'rulehost_evaluated'
+      | 'rulehost_blocked'
+      | 'rulehost_requireApproval';
 
 export type EventCategory =
   | 'success'
@@ -42,7 +50,11 @@ export type EventCategory =
   | 'written'
   | 'injected'
   | 'created'
-  | 'matched';
+  | 'matched'
+      // C: New categories for RuleHost funnel (PD-FUNNEL-2.4) — completed/created already exist
+      | 'evaluated'   // Used by: rulehost_evaluated
+      | 'blocked'     // Used by: rulehost_blocked
+      | 'requireApproval';  // Used by: rulehost_requireApproval
 
 /**
  * Base event structure for JSONL logging.
@@ -235,6 +247,77 @@ export interface RuleEnforcedEventData {
   enforcement: 'warn' | 'block' | 'requireApproval';
   toolName: string;
   filePath: string;
+}
+
+// ============== Nocturnal Funnel Events (PD-FUNNEL-2.3) ==============
+
+/**
+ * nocturnal_dreamer_completed — Trinity Dreamer stage completed.
+ * Emitted from nocturnal-workflow-manager.ts after Trinity chain success.
+ */
+export interface NocturnalDreamerCompletedEventData {
+  workflowId: string;
+  principleId: string;
+  sessionId: string;
+  candidateCount: number;
+  chainMode: 'trinity' | 'single-reflector';
+}
+
+/**
+ * nocturnal_artifact_persisted — Artifact saved to .state/nocturnal/samples/.
+ * Emitted from nocturnal-service.ts persistArtifact() after atomicWriteFileSync.
+ */
+export interface NocturnalArtifactPersistedEventData {
+  artifactId: string;
+  principleId: string;
+  persistedPath: string;
+}
+
+/**
+ * nocturnal_code_candidate_created — Rule implementation candidate persisted.
+ * Emitted from nocturnal-service.ts persistCodeCandidate() after successful creation.
+ */
+export interface NocturnalCodeCandidateCreatedEventData {
+  implementationId: string;
+  artifactId: string;
+  ruleId: string;
+  persistedPath: string;
+}
+
+// ============== RuleHost Funnel Events (PD-FUNNEL-2.4) ==============
+
+/**
+ * rulehost_evaluated — RuleHost.evaluate() was called.
+ * Emitted from gate.ts for every evaluate() call (matched or not).
+ */
+export interface RuleHostEvaluatedEventData {
+  toolName: string;
+  filePath: string;
+  matched: boolean;
+  decision: 'allow' | 'block' | 'requireApproval';
+  ruleId?: string;
+}
+
+/**
+ * rulehost_blocked — Tool call was blocked by RuleHost.
+ * Emitted from gate.ts when hostResult.decision === 'block'.
+ */
+export interface RuleHostBlockedEventData {
+  toolName: string;
+  filePath: string;
+  reason: string;
+  ruleId?: string;
+}
+
+/**
+ * rulehost_requireApproval — Tool call requires approval by RuleHost.
+ * Emitted from gate.ts when hostResult.decision === 'requireApproval'.
+ */
+export interface RuleHostRequireApprovalEventData {
+  toolName: string;
+  filePath: string;
+  reason: string;
+  ruleId?: string;
 }
 
 // ============== Daily Statistics ==============
