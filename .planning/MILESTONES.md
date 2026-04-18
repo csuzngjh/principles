@@ -1,5 +1,18 @@
 # Milestones
 
+## v1.21 PD 工作流可观测化 (Shipped: 2026-04-19)
+
+**Phases completed:** 2 phases, 6 plans
+**Key accomplishments:**
+- diagnostician_report category 三态扩展（success/missing_json/incomplete_fields）
+- js-yaml + WorkflowFunnelLoader 类（YAML SSOT）
+- event-types.ts: 6 new EventType + 3 EventCategory + 6 EventData interfaces
+- event-log.ts: 6 recordXxx() methods + 7 new EvolutionStats fields
+- Nocturnal: 3 stage events (dreamer_completed, artifact_persisted, code_candidate_created)
+- RuleHost: 3 events (evaluated, blocked, requireApproval)
+
+---
+
 ## v1.20 v1.20 (Shipped: 2026-04-17)
 
 **Phases completed:** 4 phases, 11 plans, 9 tasks
