@@ -19,6 +19,15 @@ scripts/nocturnal/trainer/experiment-*.json
 # Graphify local python environment
 .graphify_python
 
+# Graphify temp/intermediate files (root level)
+.graphify_*.json
+.graphify_*.txt
+
+# Graphify output temp files
+graphify-out/.graphify_chunk_*.json
+graphify-out/.graphify_correction.json
+graphify-out/cache/
+
 # Node.js packages
 packages/*/node_modules/
 packages/*/dist/
