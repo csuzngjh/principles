@@ -197,7 +197,14 @@ export class EventLog {
   }
 
   recordDiagnosticianReport(data: DiagnosticianReportEventData): void {
-    this.record('diagnostician_report', data.success ? 'completed' : 'failure', undefined, data);
+    // Map three-state category to EventCategory
+    // Both missing_json and incomplete_fields map to 'failure' in EventCategory
+    const categoryMap: Record<DiagnosticianReportEventData['category'], EventCategory> = {
+      success: 'completed',
+      missing_json: 'failure',
+      incomplete_fields: 'failure',
+    };
+    this.record('diagnostician_report', categoryMap[data.category], undefined, data);
   }
 
   recordPrincipleCandidate(data: PrincipleCandidateEventData): void {
@@ -356,8 +363,19 @@ export class EventLog {
     } else if (entry.type === 'heartbeat_diagnosis') {
       stats.evolution.heartbeatsInjected++;
     } else if (entry.type === 'diagnostician_report') {
-      if (entry.category === 'completed') {
-        stats.evolution.diagnosticianReportsWritten++;
+      const data = entry.data as unknown as DiagnosticianReportEventData;
+      // Backward compat: handle old events with success:boolean and new events with category:string
+      if ('category' in data) {
+        // New format: category is 'success' | 'missing_json' | 'incomplete_fields'
+        if (data.category === 'success' || data.category === 'incomplete_fields') {
+          stats.evolution.diagnosticianReportsWritten++;
+        }
+        if (data.category === 'missing_json') {
+          stats.evolution.reportsMissingJson++;
+        }
+        if (data.category === 'incomplete_fields') {
+          stats.evolution.reportsIncompleteFields++;
+        }
       }
     } else if (entry.type === 'principle_candidate') {
       stats.evolution.principleCandidatesCreated++;
