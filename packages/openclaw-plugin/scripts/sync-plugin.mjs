@@ -17,7 +17,7 @@
  *   --help             Show help message
  */
 
-import { copyFileSync, cpSync, existsSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
+import { copyFileSync, cpSync, existsSync, lstatSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -611,6 +611,47 @@ function syncItem(item) {
 }
 
 /**
+ * Recursive directory copy (Windows-safe, no symlinks).
+ */
+function copyDir(src, dest) {
+    mkdirSync(dest, { recursive: true });
+    for (const entry of readdirSync(src)) {
+        const srcPath = join(src, entry);
+        const destPath = join(dest, entry);
+        if (lstatSync(srcPath).isDirectory()) {
+            copyDir(srcPath, destPath);
+        } else {
+            copyFileSync(srcPath, destPath);
+        }
+    }
+}
+
+/**
+ * Inject local workspace packages (monorepo) into node_modules before npm install.
+ * @principles/core is a workspace package, not published to npm — we must copy it
+ * from the monorepo's node_modules so npm install --production doesn't 404 it.
+ */
+function injectLocalWorkspacePackages() {
+    const monorepoModules = join(SOURCE_DIR, '..', '..', 'node_modules', '@principles', 'core');
+    const targetModules = join(INSTALL_DIR, 'node_modules', '@principles', 'core');
+
+    if (!existsSync(monorepoModules)) {
+        // Not in monorepo context (e.g., npm pack / CI tarball) — skip
+        return;
+    }
+
+    console.log('  📦 Injecting local workspace packages (@principles/core)...');
+    mkdirSync(dirname(targetModules), { recursive: true });
+    // cpSync creates symlinks on Windows for symlinked dirs — use cp -rL (dereference) via exec
+    try {
+        execSync(`cp -rL "${monorepoModules}" "${targetModules}"`, { stdio: 'ignore' });
+    } catch {
+        // Fallback: manual copy via node (Windows-compatible)
+        copyDir(monorepoModules, targetModules);
+    }
+}
+
+/**
  * Install production dependencies in target.
  */
 function installTargetDependencies() {
@@ -844,6 +885,7 @@ function main() {
     for (const item of SYNC_ITEMS) syncItem(item);
     syncSkills(args.lang);
 
+    injectLocalWorkspacePackages();
     installTargetDependencies();
 
     console.log('\n🔍 Verifying installed plugin can load native dependencies...');
