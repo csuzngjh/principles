@@ -16,6 +16,9 @@ tmp/
 scripts/nocturnal/trainer/.venv/
 scripts/nocturnal/trainer/experiment-*.json
 
+# Graphify local python environment
+.graphify_python
+
 # Node.js packages
 packages/*/node_modules/
 packages/*/dist/

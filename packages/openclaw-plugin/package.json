@@ -67,6 +67,7 @@
     }
   },
   "dependencies": {
+    "@principles/core": "^0.1.0",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.9.0",
     "lucide-react": "^1.7.0",

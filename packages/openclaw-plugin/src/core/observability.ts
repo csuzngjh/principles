@@ -235,7 +235,7 @@ function persistBaselines(stateDir: string, baselines: ObservabilityBaselines): 
       fs.mkdirSync(dir, { recursive: true });
     }
     atomicWriteFileSync(filePath, JSON.stringify(baselines, null, 2));
-  } catch (err) {
+  } catch {
     // Baselines persistence is best-effort — don't crash the caller
     // (the SystemLogger call above already logged the values)
   }

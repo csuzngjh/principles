@@ -1,0 +1,54 @@
+{
+  "name": "@principles/core",
+  "version": "0.1.0",
+  "description": "Universal Evolution SDK - framework-agnostic pain signal capture and principle injection",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./pain-signal": {
+      "types": "./dist/pain-signal.d.ts",
+      "default": "./dist/pain-signal.js"
+    },
+    "./pain-signal-adapter": {
+      "types": "./dist/pain-signal-adapter.d.ts",
+      "default": "./dist/pain-signal-adapter.js"
+    },
+    "./storage-adapter": {
+      "types": "./dist/storage-adapter.d.ts",
+      "default": "./dist/storage-adapter.js"
+    },
+    "./evolution-hook": {
+      "types": "./dist/evolution-hook.d.ts",
+      "default": "./dist/evolution-hook.js"
+    },
+    "./principle-injector": {
+      "types": "./dist/principle-injector.d.ts",
+      "default": "./dist/principle-injector.js"
+    },
+    "./telemetry-event": {
+      "types": "./dist/telemetry-event.d.ts",
+      "default": "./dist/telemetry-event.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:bench": "vitest bench",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.48"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.0"
+  },
+  "license": "MIT"
+}
