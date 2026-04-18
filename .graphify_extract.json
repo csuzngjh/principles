@@ -1,0 +1,1286 @@
+{
+  "nodes": [
+    {
+      "id": "pastedimage20250625110436_namespace_counter",
+      "label": "Jinja2 namespace counter pattern for total_issues",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110436.png",
+      "source_location": "lines 11-18 (partial view)",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "pastedimage20250625110436_conditional_block",
+      "label": "Jinja2 conditional block structure",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110436.png",
+      "source_location": "lines 15-17",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "ai_agent",
+      "label": "AI Agent",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "planning",
+      "label": "Planning",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rag",
+      "label": "Retrieval Augmented Generation (RAG)",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "vector_search",
+      "label": "Vector Search",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "web_search",
+      "label": "Web Search",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "knowledge_graph",
+      "label": "Knowledge Graph",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "api",
+      "label": "API",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "tool_use",
+      "label": "Tool Use",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "code_interpreter",
+      "label": "Code Interpreter",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "calculator",
+      "label": "Calculator",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "custom_tool",
+      "label": "Custom Tool",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "memory",
+      "label": "Memory",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "short_term_memory",
+      "label": "Short-Term Memory",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "long_term_memory",
+      "label": "Long-Term Memory",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "safety",
+      "label": "Safety",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "guardrails",
+      "label": "Guardrails",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "human_in_the_loop",
+      "label": "Human-in-the-loop",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "learning_adaptation",
+      "label": "Learning & Adaptation",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "environment",
+      "label": "Environment",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "observation",
+      "label": "Observation",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "knowledge",
+      "label": "Knowledge",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "reflection",
+      "label": "Reflection",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "thought",
+      "label": "Thought",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "action",
+      "label": "Action",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "reward",
+      "label": "Reward",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "learning_algorithm",
+      "label": "Learning Algorithm",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "machine_learning",
+      "label": "Machine Learning",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "reinforcement_learning",
+      "label": "Reinforcement Learning",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context7_mcp_server",
+      "label": "context7 MCP Server",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "gstack_skills",
+      "label": "gstack Skills",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "slash_command_discovery",
+      "label": "Slash Command Discovery",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context7_slash_command",
+      "label": "/context7 Slash Command",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "documentation_lookup_capability",
+      "label": "Documentation Lookup Capability",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "browse_skill",
+      "label": "/browse Skill",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "mcp_model_context_protocol",
+      "label": "Model Context Protocol (MCP)",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "pasted_image_20250716204007",
+      "label": "Pasted image 20250716204007",
+      "file_type": "image",
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250716204007.png",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2025-07-16T20:40:07",
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "pastedimage20250625110436_namespace_counter",
+      "target": "pastedimage20250625110436_conditional_block",
+      "relation": "shares_data_with",
+      "confidence": "INFERRED",
+      "confidence_score": 0.75,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110436.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai_agent",
+      "target": "planning",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planning",
+      "target": "rag",
+      "relation": "branches_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag",
+      "target": "vector_search",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag",
+      "target": "web_search",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag",
+      "target": "knowledge_graph",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag",
+      "target": "api",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planning",
+      "target": "tool_use",
+      "relation": "branches_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_use",
+      "target": "code_interpreter",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_use",
+      "target": "calculator",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_use",
+      "target": "custom_tool",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planning",
+      "target": "memory",
+      "relation": "branches_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "memory",
+      "target": "short_term_memory",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "memory",
+      "target": "long_term_memory",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planning",
+      "target": "safety",
+      "relation": "branches_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "safety",
+      "target": "guardrails",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "safety",
+      "target": "human_in_the_loop",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai_agent",
+      "target": "learning_adaptation",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "environment",
+      "target": "observation",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "observation",
+      "target": "knowledge",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "knowledge",
+      "target": "reflection",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "reflection",
+      "target": "thought",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "thought",
+      "target": "planning",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planning",
+      "target": "action",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "action",
+      "target": "environment",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "action",
+      "target": "reward",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "reward",
+      "target": "learning_algorithm",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "learning_algorithm",
+      "target": "machine_learning",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "learning_algorithm",
+      "target": "reinforcement_learning",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "short_term_memory",
+      "target": "long_term_memory",
+      "relation": "rationale_for",
+      "confidence": "INFERRED",
+      "confidence_score": 0.75,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 0.8
+    },
+    {
+      "source": "rag",
+      "target": "knowledge_graph_search",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 0.85
+    },
+    {
+      "source": "observation",
+      "target": "knowledge2",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 0.7
+    },
+    {
+      "source": "context7_mcp_server",
+      "target": "mcp_model_context_protocol",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context7_slash_command",
+      "target": "context7_mcp_server",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context7_slash_command",
+      "target": "documentation_lookup_capability",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 0.8
+    },
+    {
+      "source": "browse_skill",
+      "target": "gstack_skills",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "browse_skill",
+      "target": "documentation_lookup_capability",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 0.85
+    },
+    {
+      "source": "slash_command_discovery",
+      "target": "gstack_skills",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context7_mcp_server",
+      "target": "browse_skill",
+      "relation": "rationale_for",
+      "confidence": "AMBIGUOUS",
+      "confidence_score": 0.2,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 0.2
+    },
+    {
+      "source": "ai_agent",
+      "target": "planning",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planning",
+      "target": "rag",
+      "relation": "branches_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag",
+      "target": "vector_search",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag",
+      "target": "web_search",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag",
+      "target": "knowledge_graph",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "rag",
+      "target": "api",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planning",
+      "target": "tool_use",
+      "relation": "branches_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_use",
+      "target": "code_interpreter",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_use",
+      "target": "calculator",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "tool_use",
+      "target": "custom_tool",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planning",
+      "target": "memory",
+      "relation": "branches_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "memory",
+      "target": "short_term_memory",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "memory",
+      "target": "long_term_memory",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planning",
+      "target": "safety",
+      "relation": "branches_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "safety",
+      "target": "guardrails",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "safety",
+      "target": "human_in_the_loop",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai_agent",
+      "target": "learning_adaptation",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "environment",
+      "target": "observation",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "observation",
+      "target": "knowledge",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "knowledge",
+      "target": "reflection",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "reflection",
+      "target": "thought",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "thought",
+      "target": "planning",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "planning",
+      "target": "action",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "action",
+      "target": "environment",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "action",
+      "target": "reward",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "reward",
+      "target": "learning_algorithm",
+      "relation": "feeds_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "learning_algorithm",
+      "target": "machine_learning",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "learning_algorithm",
+      "target": "reinforcement_learning",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "short_term_memory",
+      "target": "long_term_memory",
+      "relation": "rationale_for",
+      "confidence": "INFERRED",
+      "confidence_score": 0.75,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 0.8
+    },
+    {
+      "source": "rag",
+      "target": "knowledge_graph_search",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 0.85
+    },
+    {
+      "source": "observation",
+      "target": "knowledge2",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png",
+      "source_location": null,
+      "weight": 0.7
+    },
+    {
+      "source": "context7_mcp_server",
+      "target": "mcp_model_context_protocol",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context7_slash_command",
+      "target": "context7_mcp_server",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context7_slash_command",
+      "target": "documentation_lookup_capability",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 0.8
+    },
+    {
+      "source": "browse_skill",
+      "target": "gstack_skills",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "browse_skill",
+      "target": "documentation_lookup_capability",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 0.85
+    },
+    {
+      "source": "slash_command_discovery",
+      "target": "gstack_skills",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context7_mcp_server",
+      "target": "browse_skill",
+      "relation": "rationale_for",
+      "confidence": "AMBIGUOUS",
+      "confidence_score": 0.2,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625111553.png",
+      "source_location": null,
+      "weight": 0.2
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "reactive_planning_loop",
+      "label": "Reactive Planning Loop",
+      "nodes": [
+        "environment",
+        "observation",
+        "knowledge",
+        "reflection",
+        "thought",
+        "planning",
+        "action"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png"
+    },
+    {
+      "id": "rag_components",
+      "label": "RAG Retrieval Methods",
+      "nodes": [
+        "vector_search",
+        "web_search",
+        "knowledge_graph",
+        "api"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png"
+    },
+    {
+      "id": "tool_types",
+      "label": "Tool Use Types",
+      "nodes": [
+        "code_interpreter",
+        "calculator",
+        "custom_tool"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png"
+    },
+    {
+      "id": "reactive_planning_loop",
+      "label": "Reactive Planning Loop",
+      "nodes": [
+        "environment",
+        "observation",
+        "knowledge",
+        "reflection",
+        "thought",
+        "planning",
+        "action"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png"
+    },
+    {
+      "id": "rag_components",
+      "label": "RAG Retrieval Methods",
+      "nodes": [
+        "vector_search",
+        "web_search",
+        "knowledge_graph",
+        "api"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png"
+    },
+    {
+      "id": "tool_types",
+      "label": "Tool Use Types",
+      "nodes": [
+        "code_interpreter",
+        "calculator",
+        "custom_tool"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/大语言模型/图片附件/Pasted image 20250625110448.png"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

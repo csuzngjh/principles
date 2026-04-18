@@ -1,0 +1,951 @@
+{
+  "nodes": [
+    {
+      "id": "llm-wiki-schema",
+      "label": "LLM Wiki Schema",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/CLAUDE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "ai-agent",
+      "label": "AI Agent",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context-engineering",
+      "label": "Context Engineering",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "source_url": "https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus",
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "kv-cache",
+      "label": "KV-cache",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "prompt-caching",
+      "label": "Prompt Caching",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "tool-masking",
+      "label": "Tool Masking via Logits",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "external-memory-filesystem",
+      "label": "External Memory via Filesystem",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "few-shot-trap",
+      "label": "Few-shot Trap",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent-ops",
+      "label": "AgentOps",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "multi-agent-system",
+      "label": "Multi-Agent System",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/多智能体系统：架构、实践与挑战.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "human-in-the-loop-hitl",
+      "label": "Human-in-the-Loop (HITL)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "react-framework",
+      "label": "ReAct Framework",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "rag-retrieval-augmented-generation",
+      "label": "RAG (Retrieval Augmented Generation)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "mcp-model-context-protocol",
+      "label": "MCP (Model Context Protocol)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "a2a-agent-to-agent-protocol",
+      "label": "A2A (Agent-to-Agent) Protocol",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langgraph",
+      "label": "LangGraph",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/LangGraph的设计理念、架构与实践原则.md",
+      "source_location": null,
+      "source_url": "https://blog.langchain.com/how-we-designed-langgraph-to-be-a-production-ready-agent-framework/",
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langchain",
+      "label": "LangChain",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体开发全流程指南与最佳实践.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "llm-as-judge",
+      "label": "LLM as Judge",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/多智能体系统：架构、实践与挑战.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "gees-genetic-evolutionary-prompt-strategy",
+      "label": "GEES (Genetic-Evolutionary Prompt Strategy)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/GEES - Agent提示进化算法开发者实现指南.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "seia-v2-self-evolving-agent",
+      "label": "SEIA-v2 (Self-Evolving Agent)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/SAEA.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "cognitive-state-machine",
+      "label": "Cognitive State Machine",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/SAEA.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "adlc-agent-development-life-cycle",
+      "label": "ADLC (Agent Development Life Cycle)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体开发全流程指南与最佳实践.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "guardrails",
+      "label": "Guardrails",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/构建生产级AI智能体：一份实践指南.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent-card",
+      "label": "Agent Card",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "prompt-injection",
+      "label": "Prompt Injection",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent-taxonomy-level-0-4",
+      "label": "Agent Taxonomy (Level 0-4)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agentic-cycle",
+      "label": "Agentic Cycle",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/构建生产级AI智能体：一份实践指南.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context-poisoning",
+      "label": "Context Poisoning",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/大模型上下文工程.md",
+      "source_location": null,
+      "source_url": "https://blog.langchain.com/context-engineering-for-agents/",
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context-distraction",
+      "label": "Context Distraction",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/大模型上下文工程.md",
+      "source_location": null,
+      "source_url": "https://blog.langchain.com/context-engineering-for-agents/",
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "agent-memory-design",
+      "label": "Agent Memory Design",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "multi-model-orchestration",
+      "label": "Multi-Model Orchestration",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "supervisor-pattern",
+      "label": "Supervisor Pattern (Multi-Agent)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/构建生产级AI智能体：一份实践指南.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "orchestrator-worker-pattern",
+      "label": "Orchestrator-Worker Pattern",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/多智能体系统：架构、实践与挑战.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "cot-chain-of-thought",
+      "label": "CoT (Chain of Thought)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "tot-tree-of-thoughts",
+      "label": "ToT (Tree of Thoughts)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "huawei-data-agent",
+      "label": "Huawei Data Agent Architecture",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "google-co-scientist",
+      "label": "Google Co-Scientist Agent",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "alphaevolve",
+      "label": "AlphaEvolve Agent",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "checkpointing",
+      "label": "Checkpointing (LangGraph)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/LangGraph的设计理念、架构与实践原则.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "six-step-agent-framework",
+      "label": "Six-Step Agent Framework",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/构建 AI Agent 的六步框架.md",
+      "source_location": null,
+      "source_url": "https://blog.langchain.com/how-to-build-an-agent/",
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "context-engineering-four-pillars",
+      "label": "Context Engineering Four Pillars",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程的崛起(The Rise of Context Engineering).md",
+      "source_location": null,
+      "source_url": "https://blog.langchain.com/the-rise-of-context-engineering/",
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "production-agent-pitfalls",
+      "label": "AI Agent Production Pitfalls (4 Pitfalls)",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "source_url": "https://www.motivenotes.ai/p/what-makes-5-of-ai-agents-actually",
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "langsmith",
+      "label": "LangSmith",
+      "file_type": "document",
+      "source_file": "D:/llm_dir/AI/智能体/大模型上下文工程.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": "2026-04-17",
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "ai-agent",
+      "target": "context-engineering",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "agent-ops",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "multi-agent-system",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "human-in-the-loop-hitl",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "agent-taxonomy-level-0-4",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "agent-card",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "prompt-injection",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "google-co-scientist",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "alphaevolve",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context-engineering",
+      "target": "kv-cache",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context-engineering",
+      "target": "prompt-caching",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context-engineering",
+      "target": "tool-masking",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context-engineering",
+      "target": "external-memory-filesystem",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context-engineering",
+      "target": "few-shot-trap",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程：构建AI智能体的核心实践.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "react-framework",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "rag-retrieval-augmented-generation",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "mcp-model-context-protocol",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "a2a-agent-to-agent-protocol",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "cot-chain-of-thought",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "tot-tree-of-thoughts",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "ai-agent",
+      "target": "huawei-data-agent",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "multi-agent-system",
+      "target": "orchestrator-worker-pattern",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/多智能体系统：架构、实践与挑战.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "multi-agent-system",
+      "target": "llm-as-judge",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/多智能体系统：架构、实践与挑战.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "langgraph",
+      "target": "checkpointing",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/LangGraph的设计理念、架构与实践原则.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "langgraph",
+      "target": "human-in-the-loop-hitl",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/LangGraph的设计理念、架构与实践原则.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "production-agent-pitfalls",
+      "target": "context-engineering",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "production-agent-pitfalls",
+      "target": "human-in-the-loop-hitl",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "production-agent-pitfalls",
+      "target": "agent-memory-design",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "production-agent-pitfalls",
+      "target": "multi-model-orchestration",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/AI 智能体生产环境落地的四大陷阱.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "agentic-cycle",
+      "target": "ai-agent",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/构建生产级AI智能体：一份实践指南.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "guardrails",
+      "target": "ai-agent",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/构建生产级AI智能体：一份实践指南.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "supervisor-pattern",
+      "target": "multi-agent-system",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/构建生产级AI智能体：一份实践指南.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context-engineering",
+      "target": "context-poisoning",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/大模型上下文工程.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context-engineering",
+      "target": "context-distraction",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/大模型上下文工程.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context-engineering",
+      "target": "langsmith",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/大模型上下文工程.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context-engineering",
+      "target": "langgraph",
+      "relation": "uses",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/大模型上下文工程.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "six-step-agent-framework",
+      "target": "ai-agent",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/构建 AI Agent 的六步框架.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "context-engineering-four-pillars",
+      "target": "context-engineering",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/上下文工程的崛起(The Rise of Context Engineering).md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "adlc-agent-development-life-cycle",
+      "target": "ai-agent",
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体开发全流程指南与最佳实践.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "adlc-agent-development-life-cycle",
+      "target": "rag-retrieval-augmented-generation",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体开发全流程指南与最佳实践.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "adlc-agent-development-life-cycle",
+      "target": "langchain",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体开发全流程指南与最佳实践.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "seia-v2-self-evolving-agent",
+      "target": "cognitive-state-machine",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/SAEA.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "gees-genetic-evolutionary-prompt-strategy",
+      "target": "ai-agent",
+      "relation": "optimizes",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/GEES - Agent提示进化算法开发者实现指南.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "llm-wiki-schema",
+      "target": "context-engineering",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.7,
+      "source_file": "D:/llm_dir/CLAUDE.md",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "agent_protocol_stack",
+      "label": "Agent Protocol Stack",
+      "nodes": [
+        "ai-agent",
+        "rag-retrieval-augmented-generation",
+        "mcp-model-context-protocol",
+        "a2a-agent-to-agent-protocol"
+      ],
+      "relation": "forms",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体技术和应用研究报告.md"
+    },
+    {
+      "id": "agent_core_components",
+      "label": "AI Agent Core Components",
+      "nodes": [
+        "ai-agent",
+        "context-engineering",
+        "guardrails",
+        "agentic-cycle"
+      ],
+      "relation": "forms",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:/llm_dir/AI/智能体/智能体（Agents）简介.md"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}
