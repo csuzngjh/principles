@@ -941,6 +941,32 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         // Report is valid JSON — mark as parsed
                         reportParsed = true;
 
+                        // FIX: Validate phase completeness before accepting the report
+                        // A report missing critical phases is considered failed (not silently accepted).
+                        // The diagnostician must produce all 4 diagnostic phases.
+                        const phases = reportData?.phases || reportData?.diagnosis_report?.phases || {};
+                        const requiredPhases = [
+                            'evidence_gathering',
+                            'causal_chain',
+                            'root_cause_classification',
+                            'principle_extraction',
+                        ];
+                        const presentPhases = requiredPhases.filter(p =>
+                            phases && Object.keys(phases).length > 0 && phases[p]
+                        );
+                        if (presentPhases.length < requiredPhases.length) {
+                            const missing = requiredPhases.filter(p => !phases[p]);
+                            if (logger) logger.warn(`[PD:EvolutionWorker] Report for task ${task.id} incomplete — missing phases: ${missing.join(', ')} (present: ${presentPhases.length}/${requiredPhases.length})`);
+                            // Treat as retryable failure: don't mark success, let retry logic kick in
+                            reportParsed = false;
+                            // Also delete the incomplete marker so next heartbeat re-runs the diagnostician
+                            try { fs.unlinkSync(completeMarker); } catch { /* ignore if already gone */ }
+                            task.status = 'pending';
+                            task.resolution = undefined;
+                            queueChanged = true;
+                            continue;
+                        }
+
                         // ── Step 3: Noise Classification Filter ──
                         // Skip principle creation for low-value noise categories that don't represent
                         // systemic failures or behavioral issues worth encoding as principles.
