@@ -4,6 +4,7 @@ import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 const TOOLS_TO_SCAN = [
   { name: 'rg', cmd: ['rg', '--version'] },
@@ -50,7 +51,7 @@ function scanEnvironment(wctx: WorkspaceContext): any {
 }
 
 export function handleBootstrapTools(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'capabilities');
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
 
   try {

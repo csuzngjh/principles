@@ -1,6 +1,7 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { resetFriction } from '../core/session-tracker.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 /**
  * Extended context interface that includes sessionId injected by the plugin framework.
@@ -18,7 +19,7 @@ interface SessionAwareCommandContext extends PluginCommandContext {
  *   /pd-rollback last        - Rollback the last empathy event in current session
  */
 export function handleRollbackCommand(ctx: PluginCommandContext): PluginCommandResult {
-    const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+    const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'rollback');
     
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
     const lang = (ctx.config?.language as string) || 'en';
