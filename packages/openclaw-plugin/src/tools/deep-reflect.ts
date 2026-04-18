@@ -148,10 +148,11 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
  * Resolve workspace directory for deep reflection tool.
  */
 function resolveReflectionWorkspace(api: OpenClawPluginApi): string {
-    const dir = (api.config?.workspaceDir as string)
-        || resolveWorkspaceDirFromApi(api);
+    // FIX (B): Only use resolveWorkspaceDirFromApi — do not chain through api.config?.workspaceDir
+    // which may be stale. Fail-fast if workspace cannot be resolved.
+    const dir = resolveWorkspaceDirFromApi(api);
     if (!dir) {
-        throw new WorkspaceNotFoundError('deep-reflect: workspace directory could not be resolved via API or config');
+        throw new WorkspaceNotFoundError('deep-reflect: workspace directory could not be resolved via API');
     }
     return dir;
 }

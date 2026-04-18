@@ -4,6 +4,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
 import { loadLedger } from '../../src/core/principle-tree-ledger.js';
+import { safeRmDir } from '../test-utils.js';
 
 const tempDirs: string[] = [];
 
@@ -29,7 +30,7 @@ function makeStateDir(workspace: string): string {
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    safeRmDir(dir);
   }
 });
 

@@ -21,6 +21,7 @@ import {
 } from '../../src/core/principle-training-state.js';
 import { isExpectedSubagentError } from '../../src/service/subagent-workflow/subagent-error-utils.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { safeRmDir } from '../test-utils.js';
 
 const tempDirs: string[] = [];
 
@@ -32,7 +33,7 @@ function makeTempDir(): string {
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    safeRmDir(dir);
   }
 });
 
