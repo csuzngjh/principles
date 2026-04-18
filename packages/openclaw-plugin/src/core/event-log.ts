@@ -51,6 +51,9 @@ export class EventLog {
   private currentEventsFile: string | undefined;
   private currentDate: string | undefined;
 
+  // Pain score sum per date (for avgScore calculation)
+  private readonly painScoreSums: Map<string, number> = new Map();
+
   constructor(stateDir: string, logger?: PluginLogger) {
     this.logsDir = path.join(stateDir, 'logs');
     if (!fs.existsSync(this.logsDir)) {
@@ -156,6 +159,10 @@ export class EventLog {
   recordEvolutionTask(data: EvolutionTaskEventData): void {
     this.record('evolution_task', 'enqueued', undefined, data);
   }
+
+  recordEvolutionTaskCompleted(data: EvolutionTaskEventData): void {
+    this.record('evolution_task', 'completed', undefined, data);
+  }
   
   recordDeepReflection(sessionId: string | undefined, data: DeepReflectionEventData): void {
     const category = data.passed ? 'passed' : data.timeout ? 'failure' : 'completed';
@@ -238,6 +245,18 @@ export class EventLog {
       stats.pain.signalsDetected++;
       stats.pain.maxScore = Math.max(stats.pain.maxScore, data.score);
 
+      // Track signals by source
+      if (data.source) {
+        stats.pain.signalsBySource[data.source] = (stats.pain.signalsBySource[data.source] || 0) + 1;
+      }
+
+      // Accumulate score for avg calculation
+      const currentSum = this.painScoreSums.get(entry.date) ?? 0;
+      this.painScoreSums.set(entry.date, currentSum + (data.score || 0));
+      stats.pain.avgScore = stats.pain.signalsDetected > 0
+        ? Math.round((currentSum + (data.score || 0)) / stats.pain.signalsDetected)
+        : 0;
+
       // Update empathy stats for user_empathy source
       if (data.source === 'user_empathy') {
         if (data.deduped) {
@@ -291,6 +310,20 @@ export class EventLog {
       const data = entry.data as unknown as EmpathyRollbackEventData;
       stats.empathy.rollbackCount++;
       stats.empathy.rolledBackScore += data.originalScore || 0;
+    } else if (entry.type === 'rule_match') {
+      const data = entry.data as unknown as RuleMatchEventData;
+      if (data.ruleId) {
+        stats.pain.rulesMatched[data.ruleId] = (stats.pain.rulesMatched[data.ruleId] || 0) + 1;
+      }
+    } else if (entry.type === 'rule_promotion') {
+      stats.pain.candidatesPromoted++;
+      stats.evolution.rulesPromoted++;
+    } else if (entry.type === 'evolution_task') {
+      if (entry.category === 'completed') {
+        stats.evolution.tasksCompleted++;
+      } else if (entry.category === 'enqueued') {
+        stats.evolution.tasksEnqueued++;
+      }
     }
   }
 

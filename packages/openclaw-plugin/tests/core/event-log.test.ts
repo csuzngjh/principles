@@ -179,4 +179,78 @@ describe('EventLog', () => {
       expect(stats.totalPenaltyScore).toBe(12);
     });
   });
+
+  describe('Evolution and rule stats', () => {
+    it('should count evolution_task enqueued events', () => {
+      eventLog.recordEvolutionTask({ taskId: 't1', taskType: 'pain_diagnosis', reason: 'test' });
+      eventLog.recordEvolutionTask({ taskId: 't2', taskType: 'pain_diagnosis', reason: 'test' });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const stats = eventLog.getDailyStats(today);
+
+      expect(stats.evolution.tasksEnqueued).toBe(2);
+      expect(stats.evolution.tasksCompleted).toBe(0);
+    });
+
+    it('should count evolution_task completed events', () => {
+      // First enqueue
+      eventLog.recordEvolutionTask({ taskId: 't1', taskType: 'pain_diagnosis', reason: 'test' });
+      // Then complete
+      eventLog.recordEvolutionTaskCompleted({ taskId: 't1', taskType: 'pain_diagnosis', reason: 'test' });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const stats = eventLog.getDailyStats(today);
+
+      expect(stats.evolution.tasksEnqueued).toBe(1);
+      expect(stats.evolution.tasksCompleted).toBe(1);
+    });
+
+    it('should track rule_match events in rulesMatched', () => {
+      eventLog.recordRuleMatch('s1', { ruleId: 'edit-exact-match', layer: 'L2', severity: 0.8, textPreview: 'test' });
+      eventLog.recordRuleMatch('s1', { ruleId: 'edit-exact-match', layer: 'L2', severity: 0.8, textPreview: 'test' });
+      eventLog.recordRuleMatch('s1', { ruleId: 'path-traversal', layer: 'L1', severity: 0.9, textPreview: 'test2' });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const stats = eventLog.getDailyStats(today);
+
+      expect(stats.pain.rulesMatched['edit-exact-match']).toBe(2);
+      expect(stats.pain.rulesMatched['path-traversal']).toBe(1);
+    });
+
+    it('should track rule_promotion events', () => {
+      eventLog.recordRulePromotion({ fingerprint: 'fp1', ruleId: 'r1', phrase: 'test', sampleCount: 5, avgSimilarity: 0.9 });
+      eventLog.recordRulePromotion({ fingerprint: 'fp2', ruleId: 'r2', phrase: 'test2', sampleCount: 3, avgSimilarity: 0.8 });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const stats = eventLog.getDailyStats(today);
+
+      expect(stats.pain.candidatesPromoted).toBe(2);
+      expect(stats.evolution.rulesPromoted).toBe(2);
+    });
+
+    it('should track pain signals by source', () => {
+      eventLog.recordPainSignal('s1', { source: 'tool_failure', score: 50, reason: 'edit failed' });
+      eventLog.recordPainSignal('s2', { source: 'tool_failure', score: 60, reason: 'read failed' });
+      eventLog.recordPainSignal('s3', { source: 'user_empathy', score: 10, reason: 'user frustrated' });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const stats = eventLog.getDailyStats(today);
+
+      expect(stats.pain.signalsBySource['tool_failure']).toBe(2);
+      expect(stats.pain.signalsBySource['user_empathy']).toBe(1);
+      expect(stats.pain.signalsDetected).toBe(3);
+    });
+
+    it('should calculate avgScore for pain signals', () => {
+      eventLog.recordPainSignal('s1', { source: 'tool_failure', score: 50, reason: 'test' });
+      eventLog.recordPainSignal('s2', { source: 'tool_failure', score: 70, reason: 'test' });
+      eventLog.recordPainSignal('s3', { source: 'tool_failure', score: 60, reason: 'test' });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const stats = eventLog.getDailyStats(today);
+
+      expect(stats.pain.avgScore).toBe(60); // (50+70+60)/3 = 60
+      expect(stats.pain.maxScore).toBe(70);
+    });
+  });
 });

@@ -109,7 +109,7 @@ let timeoutId: NodeJS.Timeout | null = null;
  * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation' | 'noise_classified';
 
 export interface EvolutionQueueItem {
     // Core identity
@@ -926,6 +926,21 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 if (fs.existsSync(reportPath)) {
                     try {
                         const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+
+                        // ── Step 3: Noise Classification Filter ──
+                        // Skip principle creation for low-value noise categories that don't represent
+                        // systemic failures or behavioral issues worth encoding as principles.
+                        const classification = reportData?.classification;
+                        const noiseCategories: Record<string, boolean> = {
+                            'development_transient': true, // CRLF drift, duplicate match, self-resolved dev issues
+                            'user_error': true,           // User mistakes, wrong file, bad input
+                        };
+                        if (classification?.category && noiseCategories[classification.category]) {
+                            if (logger) logger.info(`[PD:EvolutionWorker] Skipping principle for noise category "${classification.category}" — pain was ${classification.severity || 'low'} severity, not a systemic failure`);
+                            task.status = 'completed';
+                            task.completed_at = new Date().toISOString();
+                            task.resolution = 'noise_classified';
+                        } else {
                         // Check ALL known nesting paths — matches subagent.ts parseDiagnosticianReport
                         const principle = reportData?.principle
                             || reportData?.phases?.principle_extraction?.principle
@@ -1017,6 +1032,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         } else {
                             logger.warn(`[PD:EvolutionWorker] Diagnostician report for task ${task.id} missing principle fields — diagnostician did not produce a principle`);
                         }
+                        }
                     } catch (err) {
                         logger.warn(`[PD:EvolutionWorker] Failed to parse diagnostician report for task ${task.id}: ${String(err)}`);
                     }
@@ -1049,6 +1065,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     taskId: task.id,
                     resolution: 'marker_detected',
                     durationMs,
+                });
+
+                // Record task completion in event stats
+                eventLog.recordEvolutionTaskCompleted({
+                    taskId: task.id,
+                    taskType: task.source || 'unknown',
+                    reason: task.reason || '',
                 });
 
                 // Update evolution_tasks table
@@ -1137,6 +1160,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     taskId: task.id,
                     resolution: task.resolution,
                     durationMs: age,
+                });
+
+                // Record task completion in event stats (for timeout path too)
+                eventLog.recordEvolutionTaskCompleted({
+                    taskId: task.id,
+                    taskType: task.source || 'unknown',
+                    reason: task.reason || '',
                 });
 
                 // Update evolution_tasks table - use task.resolution, not hardcoded value
