@@ -644,11 +644,22 @@ function injectLocalWorkspacePackages() {
     console.log('  📦 Injecting local workspace packages (@principles/core)...');
     mkdirSync(dirname(targetModules), { recursive: true });
     // cpSync creates symlinks on Windows for symlinked dirs — use cp -rL (dereference) via exec
+    let injected = false;
     try {
         execSync(`cp -rL "${monorepoModules}" "${targetModules}"`, { stdio: 'ignore' });
+        injected = true;
     } catch {
         // Fallback: manual copy via node (Windows-compatible)
-        copyDir(monorepoModules, targetModules);
+        try {
+            copyDir(monorepoModules, targetModules);
+            injected = true;
+        } catch (copyErr) {
+            console.warn('  ⚠️ Failed to inject @principles/core from monorepo: ' + copyErr.message);
+            console.warn('  ⚠️ npm install --production may fail if @principles/core is not published');
+        }
+    }
+    if (injected && !existsSync(targetModules)) {
+        console.warn('  ⚠️ Injection reported success but target not found: ' + targetModules);
     }
 }
 
