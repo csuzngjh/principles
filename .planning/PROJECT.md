@@ -19,12 +19,11 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - v1.19 Tech Debt Remediation: God classes split, type safety improved, queue tests added.
 - Phase 0a: Universal PainSignal schema, StorageAdapter interface, FileStorageAdapter, hallucination detection, budget-aware injection, observability baselines.
 - Phase 0b: PainSignalAdapter, EvolutionHook, PrincipleInjector, TelemetryEvent interfaces — framework-agnostic adapter abstraction layer.
+- v1.21: PD 工作流可观测化 — diagnostician_report 三态扩展 + YAML 工作流漏斗框架（js-yaml, WorkflowFunnelLoader, 6 new EventType, 6 recordXxx methods）
 
 ## Active
 
-- SDK Core Implementation: Implement universal SDK core with reference adapters and benchmarks (Phase 1).
-- SDK Core Implementation: Implement universal SDK core with reference adapters and benchmarks (Phase 1).
-- Cross-Domain Universality: Validating the system against non-coding domains (Phase 1.5).
+- Next milestone TBD — run `/gsd-new-milestone` to start planning
 
 ## Out of Scope
 
@@ -47,16 +46,9 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Phase 1.5 Validation | N=2 (coding + 1) is not enough for "Universal" claim; need extreme case | Active |
 | Freeze Semver after Ph 1.5 | Ensure stability only after cross-domain stress testing | Active |
 
-## Current Milestone: v1.20 Universal SDK Foundation
+## Current Milestone: None — v1.21 shipped 2026-04-19
 
-**Goal:** Establish core interface contracts and functional hardening for the universal evolution engine.
-
-**Target features:**
-- Universal PainSignal & StorageAdapter interfaces
-- Hardening: malformed signal validation, LLM hallucination detection
-- Reference Adapters: Coding + 1 additional domain
-- Cross-Domain Validation: Extreme case testing (e.g. Creative Writing)
-- SDK Packaging: `@principles/core` with Semver
+Next milestone: run `/gsd-new-milestone` to start planning
 
 ## Evolution
 
@@ -75,4 +67,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-17 after Phase 0a completion*
+*Last updated: 2026-04-19 after v1.21 milestone*
