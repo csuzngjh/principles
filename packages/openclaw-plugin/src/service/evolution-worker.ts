@@ -1051,12 +1051,42 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     // C: Report was found and processed (try block succeeded or had non-fatal issues)
                     reportSuccess = true;
                 } else {
-                    logger.warn(`[PD:EvolutionWorker] No diagnostician report found for completed task ${task.id} (expected: .diagnostician_report_${task.id}.json)`);
+                    // ── #366: Marker exists but JSON report missing — retry logic ──
+                    // Do NOT mark completed yet. Re-inject the task for the next heartbeat cycle.
+                    // Read retry count from marker file content.
+                    const MAX_REPORT_MISSING_RETRIES = 3;
+                    let markerRetries = 0;
+                    try {
+                        const markerContent = fs.readFileSync(completeMarker, 'utf8');
+                        const match = markerContent.match(/report_missing_retries:(\d+)/);
+                        if (match) markerRetries = parseInt(match[1], 10);
+                    } catch { /* marker may not be readable, use 0 */ }
+
+                    if (markerRetries < MAX_REPORT_MISSING_RETRIES) {
+                        // Re-inject: keep task in queue (don't mark completed), update marker with incremented count
+                        const newRetries = markerRetries + 1;
+                        if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id}: marker found but report missing — re-queuing (retry ${newRetries}/${MAX_REPORT_MISSING_RETRIES})`);
+                        // Write updated marker with retry count (prevents next cycle from seeing stale marker)
+                        const updatedMarker = `diagnostic_completed: ${new Date().toISOString()}\noutcome: re-queued due to missing JSON report\nreport_missing_retries:${newRetries}\n`;
+                        fs.writeFileSync(completeMarker, updatedMarker, 'utf8');
+                        // Also update the task in the main queue to keep it alive
+                        task.status = 'pending';
+                        task.resolution = undefined;
+                        queueChanged = true;
+                        // Skip the completion/unlink block below
+                        continue;
+                    } else {
+                        // Max retries reached — accept that no report was produced
+                        if (logger) logger.warn(`[PD:EvolutionWorker] Task ${task.id}: max retries (${MAX_REPORT_MISSING_RETRIES}) reached — marking as failed_max_retries`);
+                        task.status = 'completed';
+                        task.completed_at = new Date().toISOString();
+                        task.resolution = 'failed_max_retries';
+                    }
                 }
 
-                task.status = 'completed';
-                task.completed_at = new Date().toISOString();
-                // resolution already set by each branch (noise_classified | marker_detected)
+                // Only reached if JSON existed or max retries reached:
+                task.status = task.status || 'completed';
+                task.completed_at = task.completed_at || new Date().toISOString();
                 if (!task.resolution) task.resolution = 'marker_detected';
                 try {
                     fs.unlinkSync(completeMarker);

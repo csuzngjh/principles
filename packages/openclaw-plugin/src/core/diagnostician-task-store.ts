@@ -37,6 +37,8 @@ export interface DiagnosticianTask {
   prompt: string;
   createdAt: string;
   status: 'pending' | 'completed';
+  /** Number of times task was retried due to marker exists but JSON report missing (#366) */
+  reportMissingRetries?: number;
 }
 
 export interface DiagnosticianTaskStore {
@@ -86,10 +88,12 @@ export async function addDiagnosticianTask(
      
      
     const store = readTaskStoreSync(filePath);
+    const existing = store.tasks[taskId];
     store.tasks[taskId] = {
       prompt,
-      createdAt: new Date().toISOString(),
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
       status: 'pending',
+      reportMissingRetries: existing?.reportMissingRetries ?? 0,
     };
     atomicWriteFileSync(filePath, JSON.stringify(store, null, 2));
   });
@@ -152,4 +156,37 @@ export function getPendingDiagnosticianTasks(
 export function hasPendingDiagnosticianTasks(stateDir: string): boolean {
   const store = readTaskStore(stateDir);
   return Object.values(store.tasks).some(t => t.status === 'pending');
+}
+
+/**
+ * Re-queue a diagnostician task with an incremented reportMissingRetries counter.
+ * Used when a task has a marker file but no JSON report — the worker re-injects
+ * the task for the LLM to retry (up to MAX_REPORT_MISSING_RETRIES times).
+ *
+ * Idempotent: if the task doesn't exist, does nothing.
+ */
+export async function requeueDiagnosticianTask(
+  stateDir: string,
+  taskId: string,
+  maxRetries = 3,
+): Promise<{ requeued: boolean; maxRetriesReached: boolean }> {
+  const filePath = resolveTasksPath(stateDir);
+  return withLockAsync(filePath, async () => {
+    const store = readTaskStoreSync(filePath);
+    const existing = store.tasks[taskId];
+    if (!existing) {
+      return { requeued: false, maxRetriesReached: false };
+    }
+    const retries = (existing.reportMissingRetries ?? 0) + 1;
+    if (retries > maxRetries) {
+      return { requeued: false, maxRetriesReached: true };
+    }
+    store.tasks[taskId] = {
+      ...existing,
+      status: 'pending',
+      reportMissingRetries: retries,
+    };
+    atomicWriteFileSync(filePath, JSON.stringify(store, null, 2));
+    return { requeued: true, maxRetriesReached: false };
+  });
 }
