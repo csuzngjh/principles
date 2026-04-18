@@ -1,6 +1,7 @@
 import { resetFriction, getSession } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import type { EmpathyEventStats } from '../types/event-types.js';
 
 /**
@@ -92,7 +93,7 @@ interface SessionAwareCommandContext extends PluginCommandContext {
  * Handles the /pd-status command
  */
 export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResult {
-    const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+    const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'pain');
     
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
     const lang = (ctx.config?.language as string) || 'en';

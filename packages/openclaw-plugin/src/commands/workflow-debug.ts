@@ -1,5 +1,6 @@
 import { WorkflowStore } from '../service/subagent-workflow/workflow-store.js';
 import type { PluginCommandContext } from '../openclaw-sdk.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 function formatTimestamp(ts: number | null | undefined): string {
     if (!ts) return '--';
@@ -85,7 +86,7 @@ function buildOutput(
 export function handleWorkflowDebugCommand(
     ctx: PluginCommandContext & { args?: string }
 ): { text: string } {
-    const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+    const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'workflow-debug');
     
     // Parse workflow ID from args
     const args = (ctx as { args?: string }).args?.trim() || '';

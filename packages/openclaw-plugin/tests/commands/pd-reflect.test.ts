@@ -20,7 +20,7 @@ describe('pd-reflect command', () => {
   it('requires an explicit resolved workspace directory', async () => {
     const result = await handlePdReflect.handler({} as any);
     expect(result.isError).toBe(true);
-    expect(result.text).toContain('Cannot determine workspace directory');
+    expect(result.text).toContain('workspaceDir is not set');
   });
 
   it('enqueues into the provided active workspace', async () => {

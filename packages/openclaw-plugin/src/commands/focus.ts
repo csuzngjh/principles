@@ -13,6 +13,7 @@ import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import {
   getHistoryDir,
   backupToHistory,
@@ -28,11 +29,7 @@ import {
  * 获取工作区目录
  */
 function getWorkspaceDir(ctx: PluginCommandContext): string {
-  const workspaceDir = ctx.config?.workspaceDir as string | undefined;
-  if (!workspaceDir) {
-    throw new Error('[PD:Focus] workspaceDir is required but not provided');
-  }
-  return workspaceDir;
+  return resolvePluginCommandWorkspaceDir(ctx, 'focus');
 }
 
 /**

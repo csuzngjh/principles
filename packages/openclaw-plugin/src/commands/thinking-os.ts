@@ -1,10 +1,11 @@
  
 import * as fs from 'fs';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 
 function getWorkspaceDir(ctx: PluginCommandContext): string {
-    return (ctx.config?.workspaceDir as string) || process.cwd();
+    return resolvePluginCommandWorkspaceDir(ctx, 'thinking-os');
 }
 
 function getModels(wctx: WorkspaceContext): Record<string, string> {
