@@ -69,6 +69,10 @@ export interface RuntimeSummary {
     tasksWrittenToday: number;
     /** Total diagnostician reports written (today from event log) */
     reportsWrittenToday: number;
+    /** Total diagnostician reports that were missing JSON (category=missing_json) */
+    reportsMissingJsonToday: number;
+    /** Total diagnostician reports with incomplete fields (category=incomplete_fields) */
+    reportsIncompleteFieldsToday: number;
     /** Total principle candidates created from heartbeat chain (today from event log) */
     candidatesCreatedToday: number;
     /** Heartbeats that injected diagnostician tasks (today from event log) */
@@ -265,6 +269,8 @@ export class RuntimeSummaryService {
       pendingTasks: pendingDiagTasks.length,
       tasksWrittenToday: diagDailyStats?.diagnosisTasksWritten ?? 0,
       reportsWrittenToday: diagDailyStats?.diagnosticianReportsWritten ?? 0,
+      reportsMissingJsonToday: diagDailyStats?.reportsMissingJson ?? 0,
+      reportsIncompleteFieldsToday: diagDailyStats?.reportsIncompleteFields ?? 0,
       candidatesCreatedToday: diagDailyStats?.principleCandidatesCreated ?? 0,
       heartbeatsInjectedToday: diagDailyStats?.heartbeatsInjected ?? 0,
     };
