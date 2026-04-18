@@ -1044,7 +1044,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                 task.status = 'completed';
                 task.completed_at = new Date().toISOString();
-                task.resolution = 'marker_detected';
+                // resolution already set by each branch (noise_classified | marker_detected)
+                if (!task.resolution) task.resolution = 'marker_detected';
                 try {
                     fs.unlinkSync(completeMarker);
                 } catch { /* marker may have been deleted already, not critical */ }
@@ -1065,7 +1066,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 evoLogger.logCompleted({
                     traceId: task.traceId || task.id,
                     taskId: task.id,
-                    resolution: 'marker_detected',
+                    resolution: task.resolution as 'marker_detected' | 'auto_completed_timeout' | 'manual' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'diagnostician_timeout',
                     durationMs,
                     principlesGenerated,
                 });
@@ -1081,14 +1082,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 wctx.trajectory?.updateEvolutionTask?.(task.id, {
                     status: 'completed',
                     completedAt: task.completed_at,
-                    resolution: 'marker_detected',
+                    resolution: task.resolution as 'marker_detected' | 'auto_completed_timeout' | 'manual' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'diagnostician_timeout',
                 });
 
                 wctx.trajectory?.recordTaskOutcome({
                     sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
                     taskId: task.id,
                     outcome: 'ok',
-                    summary: `Task ${task.id} completed — ${principlesGenerated} principle(s) generated.`
+                    summary: `Task ${task.id} completed — ${principlesGenerated} principle(s) generated (${task.resolution}).`
                 });
                 queueChanged = true;
                 continue;
