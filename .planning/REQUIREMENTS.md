@@ -1,87 +1,91 @@
-# v1.20 Universal SDK Foundation - Requirements
+# v1.21 PD 工作流可观测化 - Requirements
 
-Establish core interface contracts and functional hardening for the universal evolution engine.
+建立 PD 全链路漏斗可观测性，让 Pain→Principle 学习闭环的断点可发现、可量化。
 
-## SDK Core & Interfaces (SDK-CORE)
+## Phase 1: Issue #366 修复 — diagnostician_report 三态扩展（PD-FUNNEL-1）
 
-- **SDK-CORE-01**: Define universal PainSignal common schema (trigger, domain, severity, context, timestamp).
-- **SDK-CORE-02**: Define StorageAdapter interface contract for principle persistence.
-- **SDK-CORE-03**: Implement universal PainSignal interface logic.
+### Event Type 扩展（PD-FUNNEL-1.1）
 
-## Adapter Abstractions (SDK-ADP)
+- **PD-FUNNEL-1.1**: `DiagnosticianReportEventData.category` 从 `boolean` 改为三值 `success | missing_json | incomplete_fields`
+  - `success`: JSON 存在且有 principle 字段
+  - `missing_json`: marker 存在但 JSON 不存在（Issue #366）
+  - `incomplete_fields`: JSON 存在但缺 principle 字段
 
-- **SDK-ADP-01**: Design generic PainSignal structure to be framework-agnostic.
-- **SDK-ADP-02**: Implement `PainSignalAdapter.capture()` for framework signal translation.
-- **SDK-ADP-03**: Implement `PrincipleInjector.getRelevantPrinciples()` contract.
-- **SDK-ADP-04**: Implement `PrincipleInjector.formatForInjection()` contract.
-- **SDK-ADP-05**: Define `EvolutionHook` interface (onPainDetected, onPrincipleCreated, onPrinciplePromoted).
-- **SDK-ADP-06**: Define generic `StorageAdapter` save/load methods.
-- **SDK-ADP-07**: Implement Coding domain adapter (reference implementation).
-- **SDK-ADP-08**: Implement a second domain adapter to validate universality.
+### Stats 聚合扩展（PD-FUNNEL-1.2）
 
-## Hardening & Quality (SDK-QUAL)
+- **PD-FUNNEL-1.2**: `aggregateEventsIntoStats` 新增漏斗统计
+  - `reportsMissingJson++`: category === 'missing_json'
+  - `reportsIncompleteFields++`: category === 'incomplete_fields'
+  - 保留 `reportsJsonWritten` 但重命名为更准确的名称
 
-- **SDK-QUAL-01**: Implement malformed signal validation (prevent corruption).
-- **SDK-QUAL-02**: Implement LLM hallucination detection for principle extraction.
-- **SDK-QUAL-03**: Implement robust storage failure handling (fail-fast or safe-retry).
-- **SDK-QUAL-04**: Implement principle text overflow protection (context window management).
+### Evolution Worker Marker 检测逻辑（PD-FUNNEL-1.3）
 
-## Telemetry & Observability (SDK-OBS)
+- **PD-FUNNEL-1.3**: `evolution-worker.ts` marker 检测逻辑（line 921-1061）写入正确的 category 值
+  - JSON 不存在时 → `category = 'missing_json'`
+  - JSON 存在但 principle 字段缺失时 → `category = 'incomplete_fields'`
+  - 正常时 → `category = 'success'`
 
-- **SDK-OBS-01**: Baseline measurement: Principle stock (quantity).
-- **SDK-OBS-02**: Baseline measurement: Sub-principles (structure).
-- **SDK-OBS-03**: Baseline measurement: Association rate (pain -> principle).
-- **SDK-OBS-04**: Baseline measurement: Internalization rate (internalized vs candidate).
-- **SDK-OBS-05**: Define telemetry schema for in-process events.
+### Runtime Summary 漏斗展示（PD-FUNNEL-1.4）
 
-## Testing & Validation (SDK-TEST)
+- **PD-FUNNEL-1.4**: `runtime-summary-service.ts` heartbeatDiagnosis 字段扩展
 
-- **SDK-TEST-01**: Implement Storage adapter conformance test suite.
-- **SDK-TEST-02**: Implement full Adapter conformance test suite (Pain/Injection).
-- **SDK-TEST-03**: Execute and publish performance benchmarks (p99 targets).
+```typescript
+heartbeatDiagnosis: {
+  pendingTasks: number;
+  tasksWrittenToday: number;           // diagnosisTasksWritten
+  reportsWrittenToday: number;         // 改名自 diagnosticianReportsWritten，更准确
+  reportsMissingJsonToday: number;     // category = missing_json
+  reportsIncompleteFieldsToday: number; // category = incomplete_fields
+  candidatesCreatedToday: number;      // principleCandidatesCreated
+  heartbeatsInjectedToday: number;
+}
+```
 
-## Cross-Domain Validation (SDK-VAL)
+## Phase 2: YAML 工作流漏斗框架（PD-FUNNEL-2）
 
-- **SDK-VAL-01**: Select "extreme case" domain (e.g., Creative Writing/Customer Service).
-- **SDK-VAL-02**: Validate PainSignal schema against extreme case triggers.
-- **SDK-VAL-03**: Validate Principle injection patterns in non-coding domain.
+### 工作流注册机制（PD-FUNNEL-2.1）
 
-## Management (SDK-MGMT)
+- **PD-FUNNEL-2.1**: 建立 `WORKFLOW_FUNNELS` 定义表（纯内存数据）
+  - 支持多工作流注册，每工作流多 stage
+  - 每 stage 包含：name、eventType、eventCategory、statsField
+  - 新增工作流只需在表里注册，不改 event-log 写入逻辑
 
-- **SDK-MGMT-01**: Package SDK as `@principles/core` npm package.
-- **SDK-MGMT-02**: Establish Semver versioning and migration guides.
-- **SDK-MGMT-03**: Freeze API and Semver after Phase 1.5 validation.
+### workflows.yaml 加载机制（PD-FUNNEL-2.2）
+
+- **PD-FUNNEL-2.2**: 实现 `workflows.yaml` 加载逻辑
+  - 放在 `.state/` 目录
+  - 启动时加载，支持热更新
+  - YAML 定义漏斗结构，event-log 做原始记录，漏斗从 YAML + event 推导
+
+### Nocturnal 漏斗补充（PD-FUNNEL-2.3）
+
+- **PD-FUNNEL-2.3**: 补充缺失的 Nocturnal stage event
+  - `nocturnal_dreamer_completed`
+  - `nocturnal_artifact_persisted`
+  - `nocturnal_code_candidate_created`
+  - 关键 gap：ReplayEngine 仍是手动触发，无自动化漏斗
+
+### RuleHost 漏斗补充（PD-FUNNEL-2.4）
+
+- **PD-FUNNEL-2.4**: 补充 RuleHost 实时拦截 event
+  - `rulehost_evaluated` — 每次 evaluate() 调用
+  - `rulehost_blocked` — 返回 block 的次数
+  - `rulehost_allow` / `rulehost_requireApproval` 分布
+
+## 已知限制
+
+- Nocturnal ReplayEngine 目前是手动触发（`/pd-promote-impl eval`），不是自动化漏斗
+- PD 工作流仍在持续开发，调研结论可能不准，YAML 定义可以随时修正
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SDK-CORE-01 | Phase 0a | Pending |
-| SDK-CORE-02 | Phase 0a | Pending |
-| SDK-CORE-03 | Phase 1 | Pending |
-| SDK-ADP-01 | Phase 0b | Pending |
-| SDK-ADP-02 | Phase 0b | Pending |
-| SDK-ADP-03 | Phase 0b | Pending |
-| SDK-ADP-04 | Phase 0b | Pending |
-| SDK-ADP-05 | Phase 0b | Pending |
-| SDK-ADP-06 | Phase 0b | Pending |
-| SDK-ADP-07 | Phase 1 | Pending |
-| SDK-ADP-08 | Phase 1 | Pending |
-| SDK-QUAL-01 | Phase 0a | Pending |
-| SDK-QUAL-02 | Phase 0a | Pending |
-| SDK-QUAL-03 | Phase 0a | Pending |
-| SDK-QUAL-04 | Phase 0a | Pending |
-| SDK-OBS-01 | Phase 0a | Pending |
-| SDK-OBS-02 | Phase 0a | Pending |
-| SDK-OBS-03 | Phase 0a | Pending |
-| SDK-OBS-04 | Phase 0a | Pending |
-| SDK-OBS-05 | Phase 0b | Pending |
-| SDK-TEST-01 | Phase 0a | Pending |
-| SDK-TEST-02 | Phase 1 | Pending |
-| SDK-TEST-03 | Phase 1 | Pending |
-| SDK-VAL-01 | Phase 1.5 | Pending |
-| SDK-VAL-02 | Phase 1.5 | Pending |
-| SDK-VAL-03 | Phase 1.5 | Pending |
-| SDK-MGMT-01 | Phase 1 | Pending |
-| SDK-MGMT-02 | Phase 1 | Pending |
-| SDK-MGMT-03 | Phase 1.5 | Pending |
+| PD-FUNNEL-1.1 | Phase 1 | Complete |
+| PD-FUNNEL-1.2 | Phase 1 | Pending |
+| PD-FUNNEL-1.3 | Phase 1 | Pending |
+| PD-FUNNEL-1.4 | Phase 1 | Pending |
+| PD-FUNNEL-2.1 | Phase 2 | Pending |
+| PD-FUNNEL-2.2 | Phase 2 | Pending |
+| PD-FUNNEL-2.3 | Phase 2 | Pending |
+| PD-FUNNEL-2.4 | Phase 2 | Pending |

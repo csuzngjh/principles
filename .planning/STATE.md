@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.20
+milestone: v1.21
 milestone_name: milestone
-status: planning
-last_updated: "2026-04-18T11:07:50.891Z"
+status: Phase 1 complete
+last_updated: "2026-04-18T15:35:00.000Z"
 progress:
-  total_phases: 4
-  completed_phases: 3
-  total_plans: 11
-  completed_plans: 11
+  total_phases: 6
+  completed_phases: 4
+  total_plans: 15
+  completed_plans: 15
   percent: 100
 ---
 
@@ -18,56 +18,55 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** Phase 00b — adapter-abstraction
+**Current Focus:** v1.21 — PD 工作流可观测化
 
 ## Current Position
 
-Phase: 00b (adapter-abstraction) — EXECUTING
-Plan: 1 of 3
-**Phase:** 01
-**Plan:** Not started
-**Status:** Ready to plan
-**Progress:** [--------------------] 0%
+Milestone: v1.21 (PD 工作流可观测化) — **PHASE 1 COMPLETE**
+**Design doc:** `docs/superpowers/specs/2026-04-18-pd-workflow-funnel-design.md` ✓
+**PROJECT.md:** Updated ✓
+**STATE.md:** Reset ✓
+**Requirements:** `.planning/REQUIREMENTS.md` ✓
+**Roadmap:** `.planning/ROADMAP.md` ✓
+**Phase 1 Verification:** PASSED (4/4 must-haves, PD-FUNNEL-1.1 ✓ through PD-FUNNEL-1.4 ✓)
+**Progress:** [██████████] 100%
 
-## Performance Metrics
+## Planning Outputs
 
-- **Principle Stock:** TBD (Measuring in Phase 0a)
-- **Sub-principle Ratio:** TBD (Measuring in Phase 0a)
-- **Association Rate (Pain -> Principle):** TBD (Measuring in Phase 0a)
-- **Internalization Rate:** TBD (Measuring in Phase 0a)
-- **Pain Processing p99:** TBD (Target < 50ms)
-- **Principle Injection p99:** TBD (Target < 100ms)
+All planning artifacts are in `.planning/`:
 
-## Accumulated Context
+- `PROJECT.md` — v1.21 milestone definition
+- `STATE.md` — this file
+- `REQUIREMENTS.md` — PD-FUNNEL-1.x (Phase 1) + PD-FUNNEL-2.x (Phase 2)
+- `ROADMAP.md` — Phase 1 + Phase 2 structure
+- `HANDOFF.json` — machine-readable state
+- `docs/superpowers/specs/2026-04-18-pd-workflow-funnel-design.md` — architecture design
 
-### Decisions
+## Next: Phase 2
 
-- SDK is built "from zero" for framework-agnosticism.
-- `evolution-worker.ts` is preserved as the functional core, not split further.
-- Phase 1.5 added for extreme-case validation before Semver freeze.
+**Command:** `/gsd-discuss-phase 2` or `/gsd-plan-phase 2`
 
-### Todos
-
-- [ ] Measure baseline observability metrics (Phase 0a)
-- [ ] Define PainSignal and StorageAdapter interfaces (Phase 0a)
-- [ ] Implement malformed signal validation (Phase 0a)
-- [ ] Design generic adapter interfaces (Phase 0b)
-- [ ] Select extreme-case domain for Phase 1.5 validation (Phase 1)
-
-### Blockers
-
-- None.
+Phase 2 Goal: YAML workflows.yaml 工作流漏斗框架
+**Depends on:** Phase 1 (COMPLETE ✓)
 
 ## Session Continuity
 
 **Last Session:**
 
-2026-04-18T11:07:50.879Z
+2026-04-18T14:19:36.278Z
 
-- Initialized ROADMAP.md, STATE.md, and updated PROJECT.md.
-- Defined phases 0a, 0b, 1, and 1.5.
+- Initialized v1.21 milestone via /gsd-new-milestone
+- All planning artifacts written: DESIGN + PROJECT + STATE + REQUIREMENTS + ROADMAP
+
+**This Session:**
+
+2026-04-18T15:27-15:35
+
+- Executed Phase 1 via /gsd-execute-phase 1
+- All 4 plans completed + verified (PD-FUNNEL-1.1 through PD-FUNNEL-1.4)
+- Phase 1 verification: PASSED (4/4 must-haves)
 
 **Next Session:**
 
-- Start Phase 0a: Interface & Core.
-- Begin defining the universal PainSignal schema.
+- Discuss/Plan Phase 2: YAML workflows.yaml 工作流漏斗框架
+- Command: `/gsd-discuss-phase 2`
