@@ -1,8 +1,9 @@
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 
 export function handleInitStrategy(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'strategy');
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
 
   const okrDir = wctx.resolve('OKR_DIR').replace(workspaceDir, '').replace(/^\/+/, '');
@@ -20,7 +21,7 @@ export function handleInitStrategy(ctx: PluginCommandContext): PluginCommandResu
 }
 
 export function handleManageOkr(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'strategy');
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
 
   const focusPath = wctx.resolve('CURRENT_FOCUS').replace(workspaceDir, '').replace(/^\/+/, '');

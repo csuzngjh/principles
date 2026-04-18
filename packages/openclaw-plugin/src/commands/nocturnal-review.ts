@@ -34,6 +34,7 @@ import {
 } from '../core/nocturnal-dataset.js';
 import { getPrincipleState, setPrincipleState } from '../core/principle-training-state.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 function isZh(ctx: PluginCommandContext): boolean {
   return String(ctx.config?.language || 'en').startsWith('zh');
@@ -91,7 +92,7 @@ function statusLabel(status: NocturnalReviewStatus, zh: boolean): string {
 }
 
 export function handleNocturnalReviewCommand(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'nocturnal-review');
   const zh = isZh(ctx);
   const args = (ctx.args || '').trim();
   const parts = args.split(/\s+/).filter(Boolean);
