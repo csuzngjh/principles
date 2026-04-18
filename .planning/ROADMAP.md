@@ -2,7 +2,8 @@
 
 ## Milestones
 
-- [ ] **v1.20** - Universal SDK Foundation (Phases 0a-1.5)
+- [ ] **v1.21** - PD 工作流可观测化 (Phase 1-2)
+- [x] **v1.20** - Universal SDK Foundation (Phases 0a-1.5)
 - [x] **v1.19** - Tech Debt Remediation (Phases 42-46, shipped 2026-04-15)
 - [x] **v1.18** - Nocturnal State Safety & Recovery (shipped 2026-04-14)
 - [x] **v1.17** - Keyword Learning Engine (shipped 2026-04-14)
@@ -13,12 +14,35 @@
 
 ## Phases
 
+- [ ] **Phase 1: Issue #366 Fix** - diagnostician_report category 三态扩展
+- [ ] **Phase 2: YAML 工作流框架** - workflows.yaml 加载 + Nocturnal/RuleHost 漏斗补充
 - [x] **Phase 0a: Interface & Core** - Define foundational interfaces and harden core logic with observability baselines.
 - [ ] **Phase 0b: Adapter Abstraction** - Abstract framework-specific logic and design telemetry.
 - [ ] **Phase 1: SDK Core Implementation** - Implement universal SDK core with reference adapters and benchmarks.
 - [ ] **Phase 1.5: Cross-Domain Validation** - Stress test universality against an extreme domain before API freeze.
 
 ## Phase Details
+
+### Phase 1: Issue #366 Fix — diagnostician_report 三态扩展
+**Goal**: 修复 Issue #366，让 stats 能感知 JSON 缺失/不完整/成功三种情况
+**Depends on**: Nothing
+**Requirements**: PD-FUNNEL-1.1, PD-FUNNEL-1.2, PD-FUNNEL-1.3, PD-FUNNEL-1.4
+**Success Criteria** (what must be TRUE):
+  1. `DiagnosticianReportEventData.category` 是三值 `success | missing_json | incomplete_fields`
+  2. `aggregateEventsIntoStats` 正确统计三种 category 的次数
+  3. `runtime-summary-service.ts` 的 heartbeatDiagnosis 展示 reportsMissingJsonToday 和 reportsIncompleteFieldsToday
+  4. 手动触发 pain signal 后，daily-stats.json 中各漏斗级计数正确递增
+
+### Phase 2: YAML 工作流漏斗框架
+**Goal**: 建立可扩展的工作流漏斗登记机制，用 YAML 作为单一真相来源
+**Depends on**: Phase 1
+**Requirements**: PD-FUNNEL-2.1, PD-FUNNEL-2.2, PD-FUNNEL-2.3, PD-FUNNEL-2.4
+**Success Criteria** (what must be TRUE):
+  1. `WORKFLOW_FUNNELS` 定义表现在内存中，支持多工作流注册
+  2. `workflows.yaml` 加载逻辑可用，放在 `.state/` 目录
+  3. Nocturnal 漏斗补充了关键 stage event
+  4. RuleHost 漏斗补充了 evaluate/block/allow 分布统计
+  5. 新增工作流只需修改 YAML，不改代码
 
 ### Phase 0a: Interface & Core
 **Goal**: Define foundational interfaces and harden core logic with observability baselines.
@@ -81,12 +105,14 @@ Plans:
 
 ## Progress
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 0a: Interface & Core | 4/4 | Completed | 2026-04-17 |
-| 0b: Adapter Abstraction | 0/3 | Planning | - |
-| 1: SDK Core Implementation | 0/7 | Planning | - |
-| 1.5: Cross-Domain Validation | 0/2 | Not started | - |
+| Milestone/Phase | Status | Completed |
+|-----------------|--------|-----------|
+| v1.21 Phase 1: Issue #366 Fix | Planning | - |
+| v1.21 Phase 2: YAML Framework | Not started | - |
+| Phase 0a: Interface & Core | Completed | 2026-04-17 |
+| Phase 0b: Adapter Abstraction | Planning | - |
+| Phase 1: SDK Core Implementation | Planning | - |
+| Phase 1.5: Cross-Domain Validation | Not started | - |
 
 ---
-*Last updated: 2026-04-17 for Phase 1 planning*
+*Last updated: 2026-04-18 for v1.21 milestone*
