@@ -1051,6 +1051,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     durationMs,
                 });
 
+                // Record task completion in event stats
+                eventLog.recordEvolutionTaskCompleted({
+                    taskId: task.id,
+                    taskType: task.source || 'unknown',
+                    reason: task.reason || '',
+                });
+
                 // Update evolution_tasks table
                 wctx.trajectory?.updateEvolutionTask?.(task.id, {
                     status: 'completed',
@@ -1137,6 +1144,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     taskId: task.id,
                     resolution: task.resolution,
                     durationMs: age,
+                });
+
+                // Record task completion in event stats (for timeout path too)
+                eventLog.recordEvolutionTaskCompleted({
+                    taskId: task.id,
+                    taskType: task.source || 'unknown',
+                    reason: task.reason || '',
                 });
 
                 // Update evolution_tasks table - use task.resolution, not hardcoded value
