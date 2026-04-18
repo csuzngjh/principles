@@ -921,6 +921,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             if (fs.existsSync(completeMarker)) {
                 if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected`);
 
+                let principlesGenerated = 0;
                 // Create principle from the diagnostician's JSON report.
                 const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                 if (fs.existsSync(reportPath)) {
@@ -1021,6 +1022,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     });
                                     if (principleId) {
                                         logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
+                                        principlesGenerated = 1;
                                     } else {
                                         logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id} (may be duplicate or blacklisted)`);
                                     }
@@ -1042,7 +1044,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                 task.status = 'completed';
                 task.completed_at = new Date().toISOString();
-                task.resolution = 'marker_detected';
+                // resolution already set by each branch (noise_classified | marker_detected)
+                if (!task.resolution) task.resolution = 'marker_detected';
                 try {
                     fs.unlinkSync(completeMarker);
                 } catch { /* marker may have been deleted already, not critical */ }
@@ -1063,8 +1066,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 evoLogger.logCompleted({
                     traceId: task.traceId || task.id,
                     taskId: task.id,
-                    resolution: 'marker_detected',
+                    resolution: task.resolution as 'marker_detected' | 'auto_completed_timeout' | 'manual' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'diagnostician_timeout',
                     durationMs,
+                    principlesGenerated,
                 });
 
                 // Record task completion in event stats
@@ -1078,14 +1082,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 wctx.trajectory?.updateEvolutionTask?.(task.id, {
                     status: 'completed',
                     completedAt: task.completed_at,
-                    resolution: 'marker_detected',
+                    resolution: task.resolution as 'marker_detected' | 'auto_completed_timeout' | 'manual' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'diagnostician_timeout',
                 });
 
                 wctx.trajectory?.recordTaskOutcome({
                     sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
                     taskId: task.id,
                     outcome: 'ok',
-                    summary: `Task ${task.id} completed - marker file detected.`
+                    summary: `Task ${task.id} completed — ${principlesGenerated} principle(s) generated (${task.resolution}).`
                 });
                 queueChanged = true;
                 continue;
@@ -1098,9 +1102,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 const timeoutCompleteMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
                 const timeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
 
+                let principlesGenerated = 0;
+
+
                 if (fs.existsSync(timeoutCompleteMarker) && fs.existsSync(timeoutReportPath)) {
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} timed out but marker found — creating principle anyway`);
-                    let principleCreated = false;
                     try {
                         const reportData = JSON.parse(fs.readFileSync(timeoutReportPath, 'utf8'));
                         const principle = reportData?.principle
@@ -1126,7 +1132,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     });
                                 if (principleId) {
                                     logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from late marker for task ${task.id}`);
-                                    principleCreated = true;
+                                    principlesGenerated = 1;
                                 }
                             }
                         }
@@ -1139,7 +1145,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         const lateReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                         if (fs.existsSync(lateReportPath)) fs.unlinkSync(lateReportPath);
                     } catch { /* report may not exist, not critical */ }
-                    task.resolution = principleCreated ? 'late_marker_principle_created' : 'late_marker_no_principle';
+                    task.resolution = principlesGenerated > 0 ? 'late_marker_principle_created' : 'late_marker_no_principle';
                 } else {
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
                     // #190: Clean up diagnostician report file even on timeout (may have been written late)
@@ -1160,6 +1166,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     taskId: task.id,
                     resolution: task.resolution,
                     durationMs: age,
+                    principlesGenerated,
                 });
 
                 // Record task completion in event stats (for timeout path too)
@@ -1180,7 +1187,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
                     taskId: task.id,
                     outcome: 'timeout',
-                    summary: `Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout.`
+                    summary: `Task ${task.id} completed — ${principlesGenerated} principle(s) generated (${task.resolution}).`
                 });
                 queueChanged = true;
             }

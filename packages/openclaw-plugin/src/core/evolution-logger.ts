@@ -260,7 +260,7 @@ export class EvolutionLogger {
   logCompleted(params: {
     traceId: string;
     taskId: string;
-    resolution: 'marker_detected' | 'auto_completed_timeout' | 'manual' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'diagnostician_timeout';
+    resolution: 'marker_detected' | 'auto_completed_timeout' | 'manual' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'diagnostician_timeout' | 'noise_classified' | 'duplicate' | 'serverDuplicate';
     durationMs?: number;
     principlesGenerated?: number;
   }): void {
@@ -271,6 +271,8 @@ export class EvolutionLogger {
       summary = `任务 ${params.taskId} 完成，已生成 ${params.principlesGenerated || 0} 条原则`;
     } else if (params.resolution === 'auto_completed_timeout' || params.resolution === 'diagnostician_timeout' || params.resolution === 'late_marker_no_principle') {
       summary = `任务 ${params.taskId} 超时自动完成`;
+    } else if (params.resolution === 'noise_classified' || params.resolution === 'duplicate' || params.resolution === 'serverDuplicate') {
+      summary = `任务 ${params.taskId} 分类为噪音/重复，已过滤`;
     } else {
       summary = `任务 ${params.taskId} 已完成`;
     }
