@@ -24,6 +24,14 @@ import type {
   DiagnosticianReportEventData,
   PrincipleCandidateEventData,
   RuleEnforcedEventData,
+  // C: Nocturnal funnel events (PD-FUNNEL-2.3)
+  NocturnalDreamerCompletedEventData,
+  NocturnalArtifactPersistedEventData,
+  NocturnalCodeCandidateCreatedEventData,
+  // C: RuleHost funnel events (PD-FUNNEL-2.4)
+  RuleHostEvaluatedEventData,
+  RuleHostBlockedEventData,
+  RuleHostRequireApprovalEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -215,6 +223,32 @@ export class EventLog {
     this.record('rule_enforced', 'matched', undefined, data);
   }
 
+  // C: Nocturnal funnel event recorders (PD-FUNNEL-2.3)
+  recordNocturnalDreamerCompleted(data: NocturnalDreamerCompletedEventData): void {
+    this.record('nocturnal_dreamer_completed', 'completed', undefined, data);
+  }
+
+  recordNocturnalArtifactPersisted(data: NocturnalArtifactPersistedEventData): void {
+    this.record('nocturnal_artifact_persisted', 'completed', undefined, data);
+  }
+
+  recordNocturnalCodeCandidateCreated(data: NocturnalCodeCandidateCreatedEventData): void {
+    this.record('nocturnal_code_candidate_created', 'created', undefined, data);
+  }
+
+  // C: RuleHost funnel event recorders (PD-FUNNEL-2.4)
+  recordRuleHostEvaluated(data: RuleHostEvaluatedEventData): void {
+    this.record('rulehost_evaluated', 'evaluated', undefined, data);
+  }
+
+  recordRuleHostBlocked(data: RuleHostBlockedEventData): void {
+    this.record('rulehost_blocked', 'blocked', undefined, data);
+  }
+
+  recordRuleHostRequireApproval(data: RuleHostRequireApprovalEventData): void {
+    this.record('rulehost_requireApproval', 'requireApproval', undefined, data);
+  }
+
   private record(
     type: EventType, 
     category: EventCategory, 
@@ -381,6 +415,26 @@ export class EventLog {
       stats.evolution.principleCandidatesCreated++;
     } else if (entry.type === 'rule_enforced') {
       stats.evolution.rulesEnforced++;
+    }
+    // C: Nocturnal funnel event counters (PD-FUNNEL-2.3)
+    else if (entry.type === 'nocturnal_dreamer_completed') {
+      const data = entry.data as unknown as NocturnalDreamerCompletedEventData;
+      stats.evolution.nocturnalDreamerCompleted++;
+      if (data.chainMode === 'trinity') {
+        stats.evolution.nocturnalTrinityCompleted++;
+      }
+    } else if (entry.type === 'nocturnal_artifact_persisted') {
+      stats.evolution.nocturnalArtifactPersisted++;
+    } else if (entry.type === 'nocturnal_code_candidate_created') {
+      stats.evolution.nocturnalCodeCandidateCreated++;
+    }
+    // C: RuleHost funnel event counters (PD-FUNNEL-2.4)
+    else if (entry.type === 'rulehost_evaluated') {
+      stats.evolution.rulehostEvaluated++;
+    } else if (entry.type === 'rulehost_blocked') {
+      stats.evolution.rulehostBlocked++;
+    } else if (entry.type === 'rulehost_requireApproval') {
+      stats.evolution.rulehostRequireApproval++;
     }
   }
 

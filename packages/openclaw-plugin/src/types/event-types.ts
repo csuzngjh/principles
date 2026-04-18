@@ -418,6 +418,15 @@ export interface EvolutionStats {
   reportsIncompleteFields: number;
   principleCandidatesCreated: number;
   rulesEnforced: number;
+  // C: Nocturnal funnel counters (PD-FUNNEL-2.3)
+  nocturnalDreamerCompleted: number;
+  nocturnalTrinityCompleted: number;
+  nocturnalArtifactPersisted: number;
+  nocturnalCodeCandidateCreated: number;
+  // C: RuleHost funnel counters (PD-FUNNEL-2.4)
+  rulehostEvaluated: number;
+  rulehostBlocked: number;
+  rulehostRequireApproval: number;
 }
 
 export interface HookStats {
@@ -584,6 +593,15 @@ export function createEmptyDailyStats(date: string): DailyStats {
       reportsIncompleteFields: 0,
       principleCandidatesCreated: 0,
       rulesEnforced: 0,
+      // C: Nocturnal funnel counters (PD-FUNNEL-2.3)
+      nocturnalDreamerCompleted: 0,
+      nocturnalTrinityCompleted: 0,
+      nocturnalArtifactPersisted: 0,
+      nocturnalCodeCandidateCreated: 0,
+      // C: RuleHost funnel counters (PD-FUNNEL-2.4)
+      rulehostEvaluated: 0,
+      rulehostBlocked: 0,
+      rulehostRequireApproval: 0,
     },
     hooks: {
       total: 0,
