@@ -376,11 +376,6 @@ export class EventLog {
         if (data.category === 'incomplete_fields') {
           stats.evolution.reportsIncompleteFields++;
         }
-      } else if ('success' in data) {
-        // Old format: success: boolean
-        if (data.success) {
-          stats.evolution.diagnosticianReportsWritten++;
-        }
       }
     } else if (entry.type === 'principle_candidate') {
       stats.evolution.principleCandidatesCreated++;

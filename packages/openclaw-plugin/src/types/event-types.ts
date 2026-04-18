@@ -209,7 +209,12 @@ export interface DiagnosisTaskEventData {
 export interface DiagnosticianReportEventData {
   taskId: string;
   reportPath: string;
-  success: boolean;
+  /** Three-state category replacing boolean success field.
+   * - 'success': JSON exists and has principle field
+   * - 'missing_json': marker exists but JSON does not (Issue #366, LLM output truncation)
+   * - 'incomplete_fields': JSON exists but missing principle field
+   */
+  category: 'success' | 'missing_json' | 'incomplete_fields';
 }
 
 /**
@@ -326,6 +331,8 @@ export interface EvolutionStats {
   diagnosisTasksWritten: number;
   heartbeatsInjected: number;
   diagnosticianReportsWritten: number;
+  reportsMissingJson: number;
+  reportsIncompleteFields: number;
   principleCandidatesCreated: number;
   rulesEnforced: number;
 }
@@ -490,6 +497,8 @@ export function createEmptyDailyStats(date: string): DailyStats {
       diagnosisTasksWritten: 0,
       heartbeatsInjected: 0,
       diagnosticianReportsWritten: 0,
+      reportsMissingJson: 0,
+      reportsIncompleteFields: 0,
       principleCandidatesCreated: 0,
       rulesEnforced: 0,
     },

@@ -198,6 +198,8 @@ export class RuntimeSummaryService {
       evolution?: {
         diagnosisTasksWritten?: number;
         diagnosticianReportsWritten?: number;
+        reportsMissingJson?: number;
+        reportsIncompleteFields?: number;
         principleCandidatesCreated?: number;
         heartbeatsInjected?: number;
         [key: string]: unknown;
