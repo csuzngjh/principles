@@ -77,9 +77,10 @@ export const handlePdReflect: PluginCommandDefinition = {
       return {
         text: `Nocturnal reflection task enqueued: \`${taskId}\`\n\nIt will be processed in the next evolution worker cycle (~15s). Check .state/nocturnal/samples/ for results.`,
       };
-    } catch (error) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
-        text: `Failed to trigger reflection: ${String(error)}`,
+        text: `Failed to trigger reflection: ${message}`,
         isError: true,
       };
     }

@@ -12,11 +12,8 @@ import { loadContextInjectionConfig } from '../hooks/prompt.js';
  * Get workspace directory from context
  */
 function getWorkspaceDir(ctx: PluginCommandContext): string {
-    const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'context');
-    if (!workspaceDir) {
-        throw new Error('[PD:Context] workspaceDir is required but not provided');
-    }
-    return workspaceDir;
+    // resolvePluginCommandWorkspaceDir throws on failure — never returns falsy
+    return resolvePluginCommandWorkspaceDir(ctx, 'context');
 }
 
 /**
