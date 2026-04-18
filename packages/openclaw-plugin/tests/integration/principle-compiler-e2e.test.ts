@@ -4,9 +4,11 @@
  * Tests the full chain:
  *   1. Set up principle in ledger with derivedFromPainIds
  *   2. Record tool call (bash, failure) and pain event in trajectory DB
- *   3. Compile principle via PrincipleCompiler (registers as active + persists code)
- *   4. RuleHost.evaluate(matching input) → block
- *   5. RuleHost.evaluate(non-matching input) → undefined (passthrough)
+ *   3. Compile principle via PrincipleCompiler (registers as 'candidate' — NOT 'active')
+ *   4. RuleHost.evaluate(matching input) → NO block yet (candidate not loaded)
+ *   5. Promote implementation to 'active'
+ *   6. RuleHost.evaluate(matching input) → block
+ *   7. RuleHost.evaluate(non-matching input) → undefined (passthrough)
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -19,6 +21,7 @@ import { RuleHost } from '../../src/core/rule-host.js';
 import {
   loadLedger,
   saveLedger,
+  transitionImplementationState,
 } from '../../src/core/principle-tree-ledger.js';
 import type { RuleHostInput } from '../../src/core/rule-host-types.js';
 
@@ -132,15 +135,14 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
 
     const implId = result.implementationId!;
 
-    // Verify the implementation was registered as active (not candidate)
+    // Verify the implementation was registered as 'candidate' (not 'active')
+    // FIX: Auto-generated implementations start as 'candidate' until explicitly promoted
+    // after replay evaluation and human approval. This prevents false-positive blocks.
     const ledger = loadLedger(ws.stateDir);
     const impl = ledger.tree.implementations[implId];
-    expect(impl.lifecycleState).toBe('active');
+    expect(impl.lifecycleState).toBe('candidate');
 
-    // ── Step 4: Create RuleHost and evaluate with matching input ──
-    const host = new RuleHost(ws.stateDir, { warn: () => {} });
-
-    // Matching input: bash tool with a heartbeat command
+    // Define matching input for RuleHost evaluation (used in both Step 4 and Step 6)
     const matchingInput: RuleHostInput = {
       action: {
         toolName: 'bash',
@@ -166,6 +168,23 @@ describe('Principle Compiler E2E: compile → promote → RuleHost blocks', () =
       },
     };
 
+    // ── Step 4: RuleHost should NOT block yet (candidate not loaded) ──
+    const hostBeforePromote = new RuleHost(ws.stateDir, { warn: () => {} });
+    const noBlockResult = hostBeforePromote.evaluate(matchingInput);
+    expect(noBlockResult).toBeUndefined(); // candidate not loaded → no block
+
+    // ── Step 5: Promote to 'active' so RuleHost will enforce ──
+    transitionImplementationState(ws.stateDir, implId, 'active');
+
+    // Verify promotion
+    const ledgerAfterPromote = loadLedger(ws.stateDir);
+    const implAfterPromote = ledgerAfterPromote.tree.implementations[implId];
+    expect(implAfterPromote.lifecycleState).toBe('active');
+
+    // ── Step 6: Create RuleHost and evaluate with matching input ──
+    const host = new RuleHost(ws.stateDir, { warn: () => {} });
+
+    // Matching input: bash tool with a heartbeat command (defined in Step 4)
     const blockResult = host.evaluate(matchingInput);
 
     // Verify RuleHost blocks the matching input

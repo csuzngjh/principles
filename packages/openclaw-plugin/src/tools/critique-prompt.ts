@@ -29,11 +29,10 @@ export function buildCritiquePromptV2(
 ): string {
     const { context, depth = 2, workspaceDir, api } = params;
     
-    // 1. 确定工作区目录 (优先级：显式传入 > api.config > official API)
-    const effectiveWorkspaceDir = workspaceDir
-        || (api?.config?.workspaceDir as string)
-        || resolveWorkspaceDirFromApi(api);
-    
+    // FIX (B): Priority: explicitly passed workspaceDir > official API resolution
+    // Do NOT chain through api.config?.workspaceDir which may be stale.
+    const effectiveWorkspaceDir = workspaceDir || resolveWorkspaceDirFromApi(api);
+
     if (!effectiveWorkspaceDir) {
         throw new Error('Workspace directory is required for deep reflection.');
     }

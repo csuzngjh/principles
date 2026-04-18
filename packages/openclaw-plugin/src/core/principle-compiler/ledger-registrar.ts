@@ -52,6 +52,11 @@ export function registerCompiledRule(stateDir: string, input: RegisterInput): Re
   const now = new Date().toISOString();
 
   // Step 1: Create the rule
+  // FIX: Auto-generated rules default to 'warn' enforcement (not 'block') until:
+  // - replay evaluation passes
+  // - coverage confirmation
+  // - human approval
+  // This prevents P_001-style false positives from blocking normal edits.
   const rule: LedgerRule = {
     id: ruleId,
     version: 1,
@@ -59,7 +64,7 @@ export function registerCompiledRule(stateDir: string, input: RegisterInput): Re
     description: `Automatically compiled gate rule generated from principle ${principleId}`,
     type: 'gate',
     triggerCondition: coversCondition,
-    enforcement: 'block',
+    enforcement: 'warn',
     action: codeContent,
     principleId,
     status: 'proposed',
@@ -82,7 +87,11 @@ export function registerCompiledRule(stateDir: string, input: RegisterInput): Re
       version: '1',
       coversCondition,
       coveragePercentage: 100,
-      lifecycleState: 'active' as const,
+      // FIX: Start as 'candidate' instead of 'active'.
+      // RuleHost only loads lifecycleState='active' implementations.
+      // This means auto-generated rules will NOT block until explicitly
+      // promoted to 'active' after replay evaluation + human approval.
+      lifecycleState: 'candidate' as const,
       createdAt: now,
       updatedAt: now,
     };

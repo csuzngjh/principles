@@ -15,10 +15,15 @@ export type EventType =
   | 'plan_approval'
   | 'evolution_task'
   | 'deep_reflection'
-
   | 'empathy_rollback'
   | 'error'
-  | 'warn';
+  | 'warn'
+  // C: Diagnostician heartbeat chain events
+  | 'diagnosis_task'        // Diagnostician task written to task store
+  | 'heartbeat_diagnosis'  // Heartbeat injected diagnostician tasks
+  | 'diagnostician_report' // Diagnostician completed and wrote report
+  | 'principle_candidate'  // Principle candidate created from report
+  | 'rule_enforced';       // Rule enforced (matched) during tool call
 
 export type EventCategory =
   | 'success'
@@ -32,7 +37,12 @@ export type EventCategory =
   | 'promoted'
   | 'passed'
   | 'changed'
-  | 'rolled_back';
+  | 'rolled_back'
+  // C: New categories for diagnostician heartbeat chain
+  | 'written'
+  | 'injected'
+  | 'created'
+  | 'matched';
 
 /**
  * Base event structure for JSONL logging.
@@ -174,6 +184,54 @@ export interface EmpathyRollbackEventData {
   triggeredBy: 'user_command' | 'natural_language' | 'system';
 }
 
+/**
+ * C: New event data types for diagnostician heartbeat chain observability.
+ * Maps heartbeat_injected -> when prompt.ts injects diagnostician tasks into heartbeat
+ */
+export interface HeartbeatDiagnosisEventData {
+  taskCount: number;
+  taskIds: string[];
+  trigger: 'heartbeat' | 'immediate';
+}
+
+/**
+ * Maps diagnosis_task_written -> when evolution-worker writes to diagnostician_tasks.json
+ */
+export interface DiagnosisTaskEventData {
+  taskId: string;
+  painEventId?: string;
+  sessionId?: string;
+}
+
+/**
+ * Maps diagnostician_report_written -> when diagnostician completes and writes report
+ */
+export interface DiagnosticianReportEventData {
+  taskId: string;
+  reportPath: string;
+  success: boolean;
+}
+
+/**
+ * Maps principle_candidate_created -> when evolution-worker extracts principle from report
+ */
+export interface PrincipleCandidateEventData {
+  principleId: string;
+  taskId: string;
+  source: 'diagnostician' | 'nocturnal' | 'manual';
+}
+
+/**
+ * Maps rule_enforced -> when RuleHost evaluate() returns matched during tool call
+ */
+export interface RuleEnforcedEventData {
+  ruleId: string;
+  principleId: string;
+  enforcement: 'warn' | 'block' | 'requireApproval';
+  toolName: string;
+  filePath: string;
+}
+
 // ============== Daily Statistics ==============
 
 export interface ToolCallStats {
@@ -264,6 +322,12 @@ export interface EvolutionStats {
   tasksEnqueued: number;
   tasksCompleted: number;
   rulesPromoted: number;
+  // C: Diagnostician heartbeat chain counters
+  diagnosisTasksWritten: number;
+  heartbeatsInjected: number;
+  diagnosticianReportsWritten: number;
+  principleCandidatesCreated: number;
+  rulesEnforced: number;
 }
 
 export interface HookStats {
@@ -422,6 +486,12 @@ export function createEmptyDailyStats(date: string): DailyStats {
       tasksEnqueued: 0,
       tasksCompleted: 0,
       rulesPromoted: 0,
+      // C: Diagnostician heartbeat chain counters
+      diagnosisTasksWritten: 0,
+      heartbeatsInjected: 0,
+      diagnosticianReportsWritten: 0,
+      principleCandidatesCreated: 0,
+      rulesEnforced: 0,
     },
     hooks: {
       total: 0,

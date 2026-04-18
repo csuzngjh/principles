@@ -922,6 +922,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected`);
 
                 let principlesGenerated = 0;
+                // C: Track report success for event recording
+                let reportSuccess = false;
                 // Create principle from the diagnostician's JSON report.
                 const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                 if (fs.existsSync(reportPath)) {
@@ -1023,6 +1025,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     if (principleId) {
                                         logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
                                         principlesGenerated = 1;
+                                        // C: Record principle_candidate_created event for observability
+                                        if (eventLog) {
+                                            eventLog.recordPrincipleCandidate({
+                                                principleId,
+                                                taskId: task.id,
+                                                source: 'diagnostician',
+                                            });
+                                        }
                                     } else {
                                         logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id} (may be duplicate or blacklisted)`);
                                     }
@@ -1038,6 +1048,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     } catch (err) {
                         logger.warn(`[PD:EvolutionWorker] Failed to parse diagnostician report for task ${task.id}: ${String(err)}`);
                     }
+                    // C: Report was found and processed (try block succeeded or had non-fatal issues)
+                    reportSuccess = true;
                 } else {
                     logger.warn(`[PD:EvolutionWorker] No diagnostician report found for completed task ${task.id} (expected: .diagnostician_report_${task.id}.json)`);
                 }
@@ -1058,6 +1070,15 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                 // FIX (#187): Remove the task from the diagnostician task store
                 await completeDiagnosticianTask(wctx.stateDir, task.id);
+
+                // C: Record diagnostician_report event for observability
+                if (eventLog) {
+                    eventLog.recordDiagnosticianReport({
+                        taskId: task.id,
+                        reportPath,
+                        success: reportSuccess,
+                    });
+                }
 
                 // Log to EvolutionLogger
                 const durationMs = task.started_at
@@ -1348,6 +1369,15 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             try {
                 await addDiagnosticianTask(wctx.stateDir, highestScoreTask.id, heartbeatContent);
                 if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to diagnostician_tasks.json for task ${highestScoreTask.id}`);
+
+                // C: Record diagnosis_task_written event for observability
+                if (eventLog) {
+                    eventLog.recordDiagnosisTask({
+                        taskId: highestScoreTask.id,
+                        painEventId: highestScoreTask.painEventId !== undefined ? String(highestScoreTask.painEventId) : undefined,
+                        sessionId: highestScoreTask.session_id,
+                    });
+                }
 
                 // Task store write succeeded, now mark task as in_progress
                 highestScoreTask.task = taskDescription;

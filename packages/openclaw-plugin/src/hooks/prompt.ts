@@ -23,6 +23,7 @@ import {
 } from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
+import { EventLogService } from '../core/event-log.js';
 import type { PluginRuntimeSubagent } from '../service/subagent-workflow/runtime-direct-driver.js';
 
 /**
@@ -755,6 +756,18 @@ ${taskBlocks}${processingNote}
 </diagnostician_tasks>\n`;
 
         logger?.info?.(`[PD:Prompt] Injected ${Math.min(pendingCount, 3)}/${pendingCount} pending diagnostician task(s) into heartbeat prompt`);
+
+        // C: Record heartbeat_diagnosis event for observability
+        try {
+          const eventLog = EventLogService.get(wctx.stateDir, logger);
+          eventLog.recordHeartbeatDiagnosis({
+            taskCount: pendingCount,
+            taskIds: pendingTasks.slice(0, 3).map(t => t.id),
+            trigger: 'heartbeat',
+          });
+        } catch (evErr) {
+          logger?.warn?.(`[PD:Prompt] Failed to record heartbeat_diagnosis event: ${String(evErr)}`);
+        }
       }
     } catch (e) {
       logger?.warn?.(`[PD:Prompt] Failed to read diagnostician tasks: ${String(e)}`);
