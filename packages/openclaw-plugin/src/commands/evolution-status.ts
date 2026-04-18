@@ -4,6 +4,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { normalizeLanguage } from '../i18n/commands.js';
 import type { PluginCommandContext } from '../openclaw-sdk.js';
 import { RuntimeSummaryService } from '../service/runtime-summary-service.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 function formatNumber(value: number | null): string {
   if (value === null || Number.isNaN(value)) {
@@ -168,7 +169,7 @@ function buildChineseOutput(
 }
 
 export function handleEvolutionStatusCommand(ctx: PluginCommandContext): { text: string } {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'evolution-status');
   const sessionId = (ctx as { sessionId?: string | null }).sessionId ?? null;
   // #207/#210: Use WorkspaceContext to get evolutionReducer with stateDir
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
