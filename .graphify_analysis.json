@@ -1,0 +1,356 @@
+{
+  "communities": {
+    "0": [
+      "a2a-agent-to-agent-protocol",
+      "adlc-agent-development-life-cycle",
+      "agent-card",
+      "agent-ops",
+      "agent-taxonomy-level-0-4",
+      "agentic-cycle",
+      "ai-agent",
+      "alphaevolve",
+      "cot-chain-of-thought",
+      "gees-genetic-evolutionary-prompt-strategy",
+      "google-co-scientist",
+      "guardrails",
+      "huawei-data-agent",
+      "langchain",
+      "mcp-model-context-protocol",
+      "prompt-injection",
+      "rag-retrieval-augmented-generation",
+      "react-framework",
+      "six-step-agent-framework",
+      "tot-tree-of-thoughts"
+    ],
+    "1": [
+      "agent-memory-design",
+      "checkpointing",
+      "context-distraction",
+      "context-engineering",
+      "context-engineering-four-pillars",
+      "context-poisoning",
+      "external-memory-filesystem",
+      "few-shot-trap",
+      "human-in-the-loop-hitl",
+      "kv-cache",
+      "langgraph",
+      "langsmith",
+      "llm-wiki-schema",
+      "multi-model-orchestration",
+      "production-agent-pitfalls",
+      "prompt-caching",
+      "tool-masking"
+    ],
+    "2": [
+      "creative-thinking",
+      "dissatisfaction",
+      "generalization",
+      "intelligence-talent",
+      "inversion",
+      "motivation",
+      "nim-game",
+      "restating-problems",
+      "seeking-similar-problems",
+      "simplification",
+      "structural-analysis",
+      "training-experience"
+    ],
+    "3": [
+      "DINOv2",
+      "Dispersive_Loss",
+      "InfoNCE",
+      "REPA",
+      "REPA_E",
+      "end_to_end_LDM_training",
+      "latent_space_collapse",
+      "projection_head",
+      "push_only_contrastive",
+      "stop_gradient"
+    ],
+    "4": [
+      "DDO",
+      "Jensen_inequality",
+      "MMDiT",
+      "QK_normalization",
+      "Stable_Diffusion_3",
+      "implicit_discriminator",
+      "log_likelihood_ratio",
+      "logit_normal_sampling",
+      "rectified_flow",
+      "timestep_remapping"
+    ],
+    "5": [
+      "DDT",
+      "DiT",
+      "adaLN_Zero",
+      "condition_encoder",
+      "encoder_sharing",
+      "patchify",
+      "statistic_dynamic_programming",
+      "velocity_decoder"
+    ],
+    "6": [
+      "bell-labs",
+      "information-theory",
+      "shannon",
+      "shannon-award",
+      "theseus-mouse",
+      "turing",
+      "uranium-analogy"
+    ],
+    "7": [
+      "agentic_workflows",
+      "ai_enabled",
+      "ai_native",
+      "fine_tuning",
+      "genai_product_development",
+      "iconiq_2025_ai_playbook",
+      "rag"
+    ],
+    "8": [
+      "chain_of_thought",
+      "creative_thinking_shannon",
+      "creative_thinking_techniques",
+      "de_skilling",
+      "human_in_the_loop",
+      "ironies_of_automation",
+      "vigilance_decrement"
+    ],
+    "9": [
+      "bounded_sub_agent",
+      "coding_agent_harness_raschka",
+      "context_compression",
+      "prompt_caching",
+      "session_memory",
+      "workspace_context"
+    ],
+    "10": [
+      "FLUX1_Kontext",
+      "KontextBench",
+      "adversarial_diffusion_distillation",
+      "double_single_stream",
+      "generative_flow_matching"
+    ],
+    "11": [
+      "Gyroscope_protocol",
+      "governance_traceability",
+      "inference_accountability",
+      "information_variety",
+      "intelligence_integrity"
+    ],
+    "12": [
+      "context_reset",
+      "generator_evaluator_pattern",
+      "harness_design_anthropic",
+      "sprint_contract",
+      "three_agent_architecture"
+    ],
+    "13": [
+      "inductive_reasoning",
+      "parallel_patch_proposal",
+      "skill_creation",
+      "skill_deepening",
+      "trace2skill"
+    ],
+    "14": [
+      "llm-as-judge",
+      "multi-agent-system",
+      "orchestrator-worker-pattern",
+      "supervisor-pattern"
+    ],
+    "15": [
+      "FluxControlNetModel",
+      "Flux_ControlNet",
+      "control_residual",
+      "zero_initialization"
+    ],
+    "16": [
+      "better_harness_langchain",
+      "eval_driven_development",
+      "harness_engineering",
+      "production_traces"
+    ],
+    "17": [
+      "auto_harness_deepmind",
+      "code_as_harness",
+      "harness_as_action_verifier",
+      "harness_as_policy"
+    ],
+    "18": [
+      "4c_framework",
+      "mckinsey_genai_economic_report",
+      "skill_transformation",
+      "smart_ai_deployment"
+    ],
+    "19": [
+      "continual_personalization",
+      "hindsight_policy",
+      "sdpo_user_interactions",
+      "self_distillation"
+    ],
+    "20": [
+      "agentic_proposer",
+      "filesystem_feedback_channel",
+      "meta_harness",
+      "meta_harness_optimization"
+    ],
+    "21": [
+      "LLM_prompting_guide",
+      "PTCF_framework",
+      "metaprompting"
+    ],
+    "22": [
+      "AI_amplifier",
+      "AI_engineering_productivity",
+      "high_quality_prompts"
+    ],
+    "23": [
+      "cognitive-state-machine",
+      "seia-v2-self-evolving-agent"
+    ],
+    "24": [
+      "llm_wiki_pattern",
+      "persistent_wiki"
+    ],
+    "25": [
+      "newton"
+    ]
+  },
+  "cohesion": {
+    "0": 0.11,
+    "1": 0.12,
+    "2": 0.17,
+    "3": 0.2,
+    "4": 0.2,
+    "5": 0.29,
+    "6": 0.33,
+    "7": 0.33,
+    "8": 0.29,
+    "9": 0.33,
+    "10": 0.4,
+    "11": 0.4,
+    "12": 0.4,
+    "13": 0.4,
+    "14": 0.5,
+    "15": 0.5,
+    "16": 0.5,
+    "17": 0.5,
+    "18": 0.5,
+    "19": 0.5,
+    "20": 0.5,
+    "21": 0.67,
+    "22": 0.67,
+    "23": 1.0,
+    "24": 1.0,
+    "25": 1.0
+  },
+  "gods": [
+    {
+      "id": "ai-agent",
+      "label": "AI Agent",
+      "degree": 21
+    },
+    {
+      "id": "context-engineering",
+      "label": "Context Engineering",
+      "degree": 13
+    },
+    {
+      "id": "creative-thinking",
+      "label": "Creative Thinking",
+      "degree": 10
+    },
+    {
+      "id": "DDT",
+      "label": "DDT (Decoupled Diffusion Transformer)",
+      "degree": 7
+    },
+    {
+      "id": "Stable_Diffusion_3",
+      "label": "Stable Diffusion 3",
+      "degree": 6
+    },
+    {
+      "id": "shannon",
+      "label": "Claude Elwood Shannon",
+      "degree": 6
+    },
+    {
+      "id": "genai_product_development",
+      "label": "\u6784\u5efa\u521b\u6210\u5f0f AI \u4ea7\u54c1",
+      "degree": 6
+    },
+    {
+      "id": "REPA",
+      "label": "REPA (Representation Alignment)",
+      "degree": 5
+    },
+    {
+      "id": "coding_agent_harness_raschka",
+      "label": "Coding Agent Harness Design (Sebastian Raschka)",
+      "degree": 5
+    },
+    {
+      "id": "multi-agent-system",
+      "label": "Multi-Agent System",
+      "degree": 4
+    }
+  ],
+  "surprises": [
+    {
+      "source": "DDT (Decoupled Diffusion Transformer)",
+      "target": "REPA (Representation Alignment)",
+      "source_files": [
+        "D:\\llm_dir\\AI\\\u6269\u6563\u6a21\u578b\\DDT - Decoupled Diffusion Transformer.md",
+        "D:\\llm_dir\\AI\\\u6269\u6563\u6a21\u578b\\Representation Alignment (REPA).md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "leverages",
+      "why": "connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "DDT (Decoupled Diffusion Transformer)",
+      "target": "adaLN-Zero",
+      "source_files": [
+        "D:\\llm_dir\\AI\\\u6269\u6563\u6a21\u578b\\DDT - Decoupled Diffusion Transformer.md",
+        "D:\\llm_dir\\AI\\\u6269\u6563\u6a21\u578b\\DiT Scalable Diffusion Models with Transformers.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "uses",
+      "why": "connects across different repos/directories; peripheral node `adaLN-Zero` unexpectedly reaches hub `DDT (Decoupled Diffusion Transformer)`"
+    },
+    {
+      "source": "Stable Diffusion 3",
+      "target": "DiT (Diffusion Transformers)",
+      "source_files": [
+        "D:\\llm_dir\\AI\\\u6269\u6563\u6a21\u578b\\Stable Diffusion 3 - \u6280\u672f\u89e3\u6790\u4e0e\u5b9e\u8df5.md",
+        "D:\\llm_dir\\AI\\\u6269\u6563\u6a21\u578b\\DiT Scalable Diffusion Models with Transformers.md"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "builds_on",
+      "why": "connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "SMART\u7b56\u7565\u6a21\u578b",
+      "target": "\u6280\u80fd\u8f6c\u578b (Skill Transformation)",
+      "source_files": [
+        "D:\\llm_dir\\AI\\\u843d\u5730\u5b9e\u8df5\\\u4f20\u7edf\u4f01\u4e1a\u62e5\u62b1\u4eba\u5de5\u667a\u80fd\uff1a\u57fa\u4e8eSMART\u7b56\u7565\u6a21\u578b\u5b9e\u73b0\u9ad8\u6548\u90e8\u7f72\uff08\u6838\u5fc3\u6458\u8981\uff09.md",
+        "D:\\llm_dir\\AI\\\u843d\u5730\u5b9e\u8df5\\\u751f\u6210\u5f0fAI\u7684\u7ecf\u6d4e\u6f5c\u529b\u548c\u5b9e\u8df5\u6307\u5357 (\u9ea6\u80af\u9521\u62a5\u544a).md"
+      ],
+      "confidence": "INFERRED",
+      "relation": "relates_to",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories"
+    },
+    {
+      "source": "Creative Thinking (Shannon)",
+      "target": "\u53bb\u6280\u80fd\u5316 (De-skilling)",
+      "source_files": [
+        "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+        "D:\\llm_dir\\AI\\\u843d\u5730\u5b9e\u8df5\\\u81ea\u52a8\u5316\u7684\u8bbd\u523a\u4e0e AI \u65f6\u4ee3\u7684\u6280\u80fd\u5371\u673a.md"
+      ],
+      "confidence": "INFERRED",
+      "relation": "relates_to",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories"
+    }
+  ]
+}

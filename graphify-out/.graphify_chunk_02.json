@@ -1,0 +1,409 @@
+{
+  "nodes": [
+    {
+      "id": "shannon",
+      "label": "Claude Elwood Shannon",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": "Claude Elwood Shannon",
+      "contributor": "Amber Song"
+    },
+    {
+      "id": "creative-thinking",
+      "label": "Creative Thinking",
+      "file_type": "document",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "information-theory",
+      "label": "Information Theory",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "turing",
+      "label": "Alan Turing",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "uranium-analogy",
+      "label": "Uranium Analogy for Brain",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "newton",
+      "label": "Isaac Newton",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "training-experience",
+      "label": "Training and Experience",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "intelligence-talent",
+      "label": "Intelligence or Talent",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "motivation",
+      "label": "Motivation",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "dissatisfaction",
+      "label": "Constructive Dissatisfaction",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "simplification",
+      "label": "Simplification",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "seeking-similar-problems",
+      "label": "Seeking Similar Known Problems",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "restating-problems",
+      "label": "Restating Problems in Multiple Forms",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "generalization",
+      "label": "Generalization",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "structural-analysis",
+      "label": "Structural Analysis of Problems",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "inversion",
+      "label": "Inversion of Problems",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "bell-labs",
+      "label": "Bell Labs",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "nim-game",
+      "label": "Nim Game",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "shannon-award",
+      "label": "Shannon Award",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "theseus-mouse",
+      "label": "Theseus Mouse",
+      "file_type": "concept",
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "shannon",
+      "target": "information-theory",
+      "relation": "founder_of",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "shannon",
+      "target": "turing",
+      "relation": "contemporary_of",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "creative-thinking",
+      "target": "training-experience",
+      "relation": "requires",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "creative-thinking",
+      "target": "intelligence-talent",
+      "relation": "requires",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "creative-thinking",
+      "target": "motivation",
+      "relation": "requires",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "turing",
+      "target": "uranium-analogy",
+      "relation": "proposed",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "shannon",
+      "target": "uranium-analogy",
+      "relation": "cites",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "creative-thinking",
+      "target": "dissatisfaction",
+      "relation": "driven_by",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "creative-thinking",
+      "target": "simplification",
+      "relation": "technique_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "creative-thinking",
+      "target": "seeking-similar-problems",
+      "relation": "technique_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "creative-thinking",
+      "target": "restating-problems",
+      "relation": "technique_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "creative-thinking",
+      "target": "generalization",
+      "relation": "technique_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "creative-thinking",
+      "target": "structural-analysis",
+      "relation": "technique_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "creative-thinking",
+      "target": "inversion",
+      "relation": "technique_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "shannon",
+      "target": "theseus-mouse",
+      "relation": "invented",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "shannon",
+      "target": "bell-labs",
+      "relation": "worked_at",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "inversion",
+      "target": "nim-game",
+      "relation": "applied_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "shannon",
+      "target": "shannon-award",
+      "relation": "namesake_of",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "D:\\llm_dir\\Clippings\\What is creative thinking.md",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [],
+  "input_tokens": 0,
+  "output_tokens": 0
+}
