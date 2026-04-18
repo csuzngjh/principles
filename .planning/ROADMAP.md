@@ -43,6 +43,13 @@
   3. Nocturnal 漏斗补充了关键 stage event
   4. RuleHost 漏斗补充了 evaluate/block/allow 分布统计
   5. 新增工作流只需修改 YAML，不改代码
+**Plans**: 5 plans
+Plans:
+- [ ] 02-01-PLAN.md -- js-yaml dependency + WorkflowFunnelLoader class (Wave 0)
+- [ ] 02-02-PLAN.md -- event-types.ts: 6 new EventData + EventType + EventCategory (Wave 0)
+- [ ] 02-03-PLAN.md -- event-log.ts: 6 recordXxx() methods + 6 updateStats() branches (Wave 1)
+- [ ] 02-04-PLAN.md -- Nocturnal: emit 3 stage events from nocturnal-service/workflow-manager (Wave 1)
+- [ ] 02-05-PLAN.md -- RuleHost: emit 3 events from gate.ts (Wave 1)
 
 ### Phase 0a: Interface & Core
 **Goal**: Define foundational interfaces and harden core logic with observability baselines.
@@ -108,11 +115,11 @@ Plans:
 | Milestone/Phase | Status | Completed |
 |-----------------|--------|-----------|
 | v1.21 Phase 1: Issue #366 Fix | Complete | 2026-04-18 |
-| v1.21 Phase 2: YAML Framework | Not started | - |
+| v1.21 Phase 2: YAML Framework | Planned | - |
 | Phase 0a: Interface & Core | Completed | 2026-04-17 |
 | Phase 0b: Adapter Abstraction | Planning | - |
 | Phase 1: SDK Core Implementation | Planning | - |
 | Phase 1.5: Cross-Domain Validation | Not started | - |
 
 ---
-*Last updated: 2026-04-18 for v1.21 milestone*
+*Last updated: 2026-04-19 for Phase 2 planning*
