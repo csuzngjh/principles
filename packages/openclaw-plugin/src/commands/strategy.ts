@@ -21,7 +21,7 @@ export function handleInitStrategy(ctx: PluginCommandContext): PluginCommandResu
 }
 
 export function handleManageOkr(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'strategy');
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'strategy:manageOkr');
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
 
   const focusPath = wctx.resolve('CURRENT_FOCUS').replace(workspaceDir, '').replace(/^\/+/, '');

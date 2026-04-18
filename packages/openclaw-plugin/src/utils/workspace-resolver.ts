@@ -25,7 +25,10 @@ export function resolveCommandWorkspaceDir(
   if (ctx.workspaceDir) {
     const issue = validateWorkspaceDir(ctx.workspaceDir);
     if (!issue) return ctx.workspaceDir;
-    api.logger.error(`[PD:Command] ctx.workspaceDir="${ctx.workspaceDir}" is invalid: ${issue}`);
+    // Validation failed — fail immediately, do not silently fall back
+    const errorMsg = `[PD:Command] ctx.workspaceDir="${ctx.workspaceDir}" is invalid: ${issue}`;
+    api.logger.error(errorMsg);
+    throw new Error(errorMsg);
   }
 
   // 2. Official OpenClaw API → env vars → config file
@@ -34,7 +37,7 @@ export function resolveCommandWorkspaceDir(
 
   // CRITICAL FAILURE: Cannot determine workspace directory
   const errorMsg = `[PD:Command] CRITICAL: Cannot resolve workspace directory. ` +
-    `ctx.workspaceDir="${ctx.workspaceDir}" is invalid, and all fallbacks failed. ` +
+    `ctx.workspaceDir="${ctx.workspaceDir ?? ''}" is invalid, and all fallbacks failed. ` +
     `Commands will NOT execute to prevent data corruption.`;
   api.logger.error(errorMsg);
 
