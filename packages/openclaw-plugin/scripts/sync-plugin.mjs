@@ -80,7 +80,7 @@ function parseArgs() {
         skipBuild: false,
         skipDeps: false,
         force: false,
-        restart: false,
+        restart: true,
         dev: false,
         bump: false,
         help: false,
@@ -100,7 +100,8 @@ function parseArgs() {
                 args.skipDeps = true;
                 break;
             case '--restart':
-                args.restart = true;
+            case '--no-restart':
+                args.restart = !arg.startsWith('--no-');
                 break;
             case '--dev':
             case '-d':
@@ -145,7 +146,7 @@ Options:
   --lang <zh|en>     Language for skills (default: zh)
   --skip-build       Skip build step (use existing dist/)
   --skip-deps        Skip dependency installation
-  --restart          Automatically restart OpenClaw gateway after installation
+  --restart         Automatically restart OpenClaw gateway after installation (default: true, use --no-restart to skip)
   --dev, -d          Developer mode: --force + --restart + --bump + clean stale backups
   --bump, -b         Auto-bump patch version if there are uncommitted source changes
   --force, -f        Force overwrite without prompts
