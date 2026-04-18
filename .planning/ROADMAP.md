@@ -14,7 +14,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: Issue #366 Fix** - diagnostician_report category 三态扩展
+- [x] **Phase 1: Issue #366 Fix** - diagnostician_report category 三态扩展 (PD-FUNNEL-1.x ✓)
 - [ ] **Phase 2: YAML 工作流框架** - workflows.yaml 加载 + Nocturnal/RuleHost 漏斗补充
 - [x] **Phase 0a: Interface & Core** - Define foundational interfaces and harden core logic with observability baselines.
 - [ ] **Phase 0b: Adapter Abstraction** - Abstract framework-specific logic and design telemetry.
@@ -107,7 +107,7 @@ Plans:
 
 | Milestone/Phase | Status | Completed |
 |-----------------|--------|-----------|
-| v1.21 Phase 1: Issue #366 Fix | Planning | - |
+| v1.21 Phase 1: Issue #366 Fix | Complete | 2026-04-18 |
 | v1.21 Phase 2: YAML Framework | Not started | - |
 | Phase 0a: Interface & Core | Completed | 2026-04-17 |
 | Phase 0b: Adapter Abstraction | Planning | - |

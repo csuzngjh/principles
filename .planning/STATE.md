@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.21
 milestone_name: milestone
-status: Ready to execute
-last_updated: "2026-04-18T15:27:12.577Z"
+status: Phase 1 complete
+last_updated: "2026-04-18T15:35:00.000Z"
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 15
-  completed_plans: 14
-  percent: 93
+  completed_plans: 15
+  percent: 100
 ---
 
 # Project State: Principles
@@ -22,13 +22,14 @@ progress:
 
 ## Current Position
 
-Milestone: v1.21 (PD 工作流可观测化) — **PLANNING COMPLETE**
+Milestone: v1.21 (PD 工作流可观测化) — **PHASE 1 COMPLETE**
 **Design doc:** `docs/superpowers/specs/2026-04-18-pd-workflow-funnel-design.md` ✓
 **PROJECT.md:** Updated ✓
 **STATE.md:** Reset ✓
 **Requirements:** `.planning/REQUIREMENTS.md` ✓
 **Roadmap:** `.planning/ROADMAP.md` ✓
-**Progress:** [█████████░] 93%
+**Phase 1 Verification:** PASSED (4/4 must-haves, PD-FUNNEL-1.1 ✓ through PD-FUNNEL-1.4 ✓)
+**Progress:** [██████████] 100%
 
 ## Planning Outputs
 
@@ -41,18 +42,12 @@ All planning artifacts are in `.planning/`:
 - `HANDOFF.json` — machine-readable state
 - `docs/superpowers/specs/2026-04-18-pd-workflow-funnel-design.md` — architecture design
 
-## Next: Execute Phase 1
+## Next: Phase 2
 
-**Command:** `/gsd-plan-phase 1`
+**Command:** `/gsd-discuss-phase 2` or `/gsd-plan-phase 2`
 
-Phase 1 Goal: 修复 Issue #366 — diagnostician_report category 三态扩展
-
-Files to modify:
-
-- `src/types/event-types.ts` — category 从 boolean 改为三值
-- `src/core/event-log.ts` — aggregateEventsIntoStats 新增统计
-- `src/service/evolution-worker.ts` — marker 检测逻辑写入正确 category
-- `src/service/runtime-summary-service.ts` — heartbeatDiagnosis 字段扩展
+Phase 2 Goal: YAML workflows.yaml 工作流漏斗框架
+**Depends on:** Phase 1 (COMPLETE ✓)
 
 ## Session Continuity
 
@@ -63,7 +58,15 @@ Files to modify:
 - Initialized v1.21 milestone via /gsd-new-milestone
 - All planning artifacts written: DESIGN + PROJECT + STATE + REQUIREMENTS + ROADMAP
 
+**This Session:**
+
+2026-04-18T15:27-15:35
+
+- Executed Phase 1 via /gsd-execute-phase 1
+- All 4 plans completed + verified (PD-FUNNEL-1.1 through PD-FUNNEL-1.4)
+- Phase 1 verification: PASSED (4/4 must-haves)
+
 **Next Session:**
 
-- Execute: /gsd-plan-phase 1
-- Implement: PD-FUNNEL-1.1 through PD-FUNNEL-1.4
+- Discuss/Plan Phase 2: YAML workflows.yaml 工作流漏斗框架
+- Command: `/gsd-discuss-phase 2`
