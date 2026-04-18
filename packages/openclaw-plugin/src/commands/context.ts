@@ -2,6 +2,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
@@ -11,11 +12,8 @@ import { loadContextInjectionConfig } from '../hooks/prompt.js';
  * Get workspace directory from context
  */
 function getWorkspaceDir(ctx: PluginCommandContext): string {
-    const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-    if (!workspaceDir) {
-        throw new Error('[PD:Context] workspaceDir is required but not provided');
-    }
-    return workspaceDir;
+    // resolvePluginCommandWorkspaceDir throws on failure — never returns falsy
+    return resolvePluginCommandWorkspaceDir(ctx, 'context');
 }
 
 /**

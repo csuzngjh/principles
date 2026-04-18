@@ -1,5 +1,6 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import { exportORPOSamples, listExports } from '../core/nocturnal-export.js';
 
 function isZh(ctx: PluginCommandContext): boolean {
@@ -7,7 +8,7 @@ function isZh(ctx: PluginCommandContext): boolean {
 }
 
 export function handleExportCommand(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'export');
   const zh = isZh(ctx);
   const args = (ctx.args || '').trim();
   const parts = args.split(/\s+/).filter(Boolean);

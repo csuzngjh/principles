@@ -8,6 +8,7 @@
 import type { PluginCommandDefinition, PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { acquireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX } from '../service/evolution-worker.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -23,11 +24,7 @@ export const handlePdReflect: PluginCommandDefinition = {
   requireAuth: false,
   handler: async (ctx: PdReflectContext): Promise<PluginCommandResult> => {
     try {
-       
-      const workspaceDir = ctx.workspaceDir;
-      if (!workspaceDir) {
-        return { text: 'Cannot determine workspace directory. Ensure you are in an active workspace.', isError: true };
-      }
+      const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'pd-reflect');
 
       const stateDir = path.join(workspaceDir, '.state');
       const queuePath = path.join(stateDir, 'evolution_queue.json');
@@ -80,9 +77,10 @@ export const handlePdReflect: PluginCommandDefinition = {
       return {
         text: `Nocturnal reflection task enqueued: \`${taskId}\`\n\nIt will be processed in the next evolution worker cycle (~15s). Check .state/nocturnal/samples/ for results.`,
       };
-    } catch (error) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       return {
-        text: `Failed to trigger reflection: ${String(error)}`,
+        text: `Failed to trigger reflection: ${message}`,
         isError: true,
       };
     }

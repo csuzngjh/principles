@@ -1,12 +1,13 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 function isZh(ctx: PluginCommandContext): boolean {
   return String(ctx.config?.language || 'en').startsWith('zh');
 }
 
 export function handleSamplesCommand(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'samples');
   const zh = isZh(ctx);
   const args = (ctx.args || '').trim();
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });

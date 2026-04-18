@@ -21,6 +21,7 @@ import {
 } from '../core/principle-tree-ledger.js';
 import type { Implementation, ImplementationLifecycleState } from '../types/principle-tree-schema.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 /**
  * Get all implementations from the ledger.
@@ -133,7 +134,7 @@ function _handleDisableImpl(
  */
      
 export function handleDisableImplCommand(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'disable-impl');
   const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
