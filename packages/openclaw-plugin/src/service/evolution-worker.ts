@@ -12,7 +12,7 @@ import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
-import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
+import { addDiagnosticianTask, completeDiagnosticianTask, requeueDiagnosticianTask } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import type { PrincipleEvaluability } from '../types/principle-tree-schema.js';
@@ -923,12 +923,23 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                 let principlesGenerated = 0;
                 // C: Track report success for event recording
+                // FIX: Use reportParsed flag so reportSuccess=false when JSON is missing/garbled
                 let reportSuccess = false;
+                let reportParsed = false;
                 // Create principle from the diagnostician's JSON report.
                 const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                 if (fs.existsSync(reportPath)) {
                     try {
-                        const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+                        const raw = fs.readFileSync(reportPath, 'utf8');
+                        if (!raw || raw.trim().length === 0) {
+                            throw new Error('Report file is empty');
+                        }
+                        const reportData = JSON.parse(raw);
+                        if (!reportData) {
+                            throw new Error('JSON parsed but content is null/undefined');
+                        }
+                        // Report is valid JSON — mark as parsed
+                        reportParsed = true;
 
                         // ── Step 3: Noise Classification Filter ──
                         // Skip principle creation for low-value noise categories that don't represent
@@ -1048,8 +1059,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     } catch (err) {
                         logger.warn(`[PD:EvolutionWorker] Failed to parse diagnostician report for task ${task.id}: ${String(err)}`);
                     }
-                    // C: Report was found and processed (try block succeeded or had non-fatal issues)
-                    reportSuccess = true;
+                    // FIX: Only mark success if JSON was actually parsed and non-empty
+                    // If JSON was missing, garbled, or empty — reportSuccess stays false
+                    reportSuccess = reportParsed;
                 } else {
                     // ── #366: Marker exists but JSON report missing — retry logic ──
                     // Do NOT mark completed yet. Re-inject the task for the next heartbeat cycle.
@@ -1066,18 +1078,19 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         // Re-inject: keep task in queue (don't mark completed), update marker with incremented count
                         const newRetries = markerRetries + 1;
                         if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id}: marker found but report missing — re-queuing (retry ${newRetries}/${MAX_REPORT_MISSING_RETRIES})`);
-                        // CRITICAL FIX: Delete the marker so the next heartbeat sees no marker
-                        // and re-processes the task as a fresh diagnostician run.
-                        // Without this, the same marker would be found on every heartbeat,
-                        // causing an infinite retry loop (markerRetries would re-read the
-                        // SAME count on each cycle instead of incrementing properly).
-                        try {
-                            fs.unlinkSync(completeMarker);
-                        } catch { /* ignore if already deleted */ }
+                        // FIX: Update store's reportMissingRetries BEFORE deleting the marker.
+                        // This ensures the store's retry count is persisted even if the
+                        // diagnostician session crashes before re-adding the task.
+                        await requeueDiagnosticianTask(wctx.stateDir, task.id, MAX_REPORT_MISSING_RETRIES);
                         // Also update the task in the main queue to keep it alive
                         task.status = 'pending';
                         task.resolution = undefined;
                         queueChanged = true;
+                        // Delete the marker so the next heartbeat sees no marker
+                        // and re-processes the task as a fresh diagnostician run.
+                        try {
+                            fs.unlinkSync(completeMarker);
+                        } catch { /* ignore if already deleted */ }
                         // Skip the completion/unlink block below — task is still pending
                         continue;
                     } else {

@@ -347,7 +347,7 @@ The final report (written incrementally by each Phase) should look like:
         "action": "...",
         "abstracted_principle": "...",
         "duplicate": false,
-        "core_axis_id": "T-02"
+        "coreAxiomId": "T-02"
       }
     }
   }
