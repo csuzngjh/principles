@@ -115,11 +115,11 @@ Plans:
 | Milestone/Phase | Status | Completed |
 |-----------------|--------|-----------|
 | v1.21 Phase 1: Issue #366 Fix | Complete | 2026-04-18 |
-| v1.21 Phase 2: YAML Framework | Planned | - |
+| v1.21 Phase 2: YAML Framework | Complete | 2026-04-19 |
 | Phase 0a: Interface & Core | Completed | 2026-04-17 |
 | Phase 0b: Adapter Abstraction | Planning | - |
 | Phase 1: SDK Core Implementation | Planning | - |
 | Phase 1.5: Cross-Domain Validation | Not started | - |
 
 ---
-*Last updated: 2026-04-19 for Phase 2 planning*
+*Last updated: 2026-04-19 for Phase 2 complete*
