@@ -1,5 +1,23 @@
 # Milestones
 
+## v1.20 v1.20 (Shipped: 2026-04-17)
+
+**Phases completed:** 4 phases, 11 plans, 9 tasks
+
+**Key accomplishments:**
+
+- One-liner:
+- 1. [Rule 2 - Missing critical functionality] PainSeverity/TelemetryEventType duplicate identifier error
+- 1. [Rule 1 - Bug] DefaultPrincipleInjector P0 forced inclusion incorrect
+- 1. [Rule 1 - Bug] agentId and traceId empty strings fail PainSignalSchema validation
+- 1. [Rule 1 - Bug] traceId empty string fails PainSignalSchema validation
+- 1. [Rule 1 - Bug] WritingPainAdapter conformance fixture wrong
+- CodeReviewPainAdapter implemented with 3-signal scoring for code-review domain, validating PainSignalSchema universality against an extreme non-coding domain
+- Conformance and E2E validation for CodeReviewPainAdapter with full pain-to-injection pipeline
+- API freeze declared and Semver locked at 0.1.0 after cross-domain validation confirms PainSignalSchema universal across coding, writing, and code-review domains
+
+---
+
 ## v1.19 Tech Debt Remediation (Shipped: 2026-04-15)
 
 **Phases completed:** 4 phases, 9 plans, 0 tasks

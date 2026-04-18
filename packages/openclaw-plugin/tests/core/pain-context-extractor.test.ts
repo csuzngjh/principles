@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 
-const TEST_AGENTS_DIR = path.join('/tmp', 'pd-test-agents-' + Date.now());
+const TEST_AGENTS_DIR = path.join(os.tmpdir(), 'pd-test-agents-' + Date.now());
 
 // Set env before module load
 process.env.PD_TEST_AGENTS_DIR = TEST_AGENTS_DIR;
