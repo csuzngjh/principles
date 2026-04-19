@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventLogService, EventLog } from '../../src/core/event-log.js';
-import type { DailyStats, DeepReflectionEventData } from '../../src/types/event-types.js';
+import type { DailyStats, DeepReflectionEventData, DiagnosticianReportEventData } from '../../src/types/event-types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -251,6 +251,61 @@ describe('EventLog', () => {
 
       expect(stats.pain.avgScore).toBe(60); // (50+70+60)/3 = 60
       expect(stats.pain.maxScore).toBe(70);
+    });
+
+    // PD-FUNNEL-1.2: Legacy backward compat — old events with { success: boolean } shape
+    // Stats are loaded from daily-stats.json (not re-read from JSONL), so we
+    // populate the stats cache directly by writing to daily-stats.json and
+    // creating a new EventLog instance that loads it via loadStats().
+    it('should count legacy success:true events in diagnosticianReportsWritten', () => {
+      const today = new Date().toISOString().slice(0, 10);
+      // Build a legacy daily-stats.json entry: old format had no category on
+      // diagnostician_report, and success:true meant it counted as written.
+      // statsFile lives at {tempDir}/logs/daily-stats.json (see EventLog constructor).
+      const statsFile = path.join(tempDir, 'logs', 'daily-stats.json');
+      fs.mkdirSync(path.dirname(statsFile), { recursive: true });
+      const legacyDailyStats = JSON.stringify({
+        [today]: {
+          date: today,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          tools: { total: 0, success: 0, failure: 0 },
+          pain: { signalsDetected: 0, avgScore: 0, maxScore: 0, signalsBySource: {} },
+          empathy: { totalEvents: 0, dedupedCount: 0, dedupeHitRate: 0, rolledBackScore: 0, rollbackCount: 0, bySeverity: { mild: 0, moderate: 0, severe: 0 }, scoreBySeverity: { mild: 0, moderate: 0, severe: 0 }, byDetectionMode: { structured: 0, legacy_tag: 0 }, byOrigin: { assistant_self_report: 0, user_manual: 0, system_infer: 0 }, confidenceDistribution: { high: 0, medium: 0, low: 0 }, dailyTrend: [] },
+          hooks: { total: 0, success: 0, failure: 0, byType: {} },
+          evolution: {
+            diagnosisTasksWritten: 0, heartbeatsInjected: 0,
+            diagnosticianReportsWritten: 1,  // legacy success:true counted here
+            reportsMissingJson: 0, reportsIncompleteFields: 0,
+            principleCandidatesCreated: 0, rulesEnforced: 0,
+            nocturnalDreamerCompleted: 0, nocturnalArtifactPersisted: 0,
+            nocturnalCodeCandidateCreated: 0, rulehostEvaluated: 0,
+            rulehostBlocked: 0, rulehostRequireApproval: 0,
+          },
+        },
+      }, null, 2);
+      fs.writeFileSync(statsFile, legacyDailyStats, 'utf8');
+
+      // Create new EventLog instance so it loads the legacy stats via loadStats()
+      const reloaded = new EventLog(tempDir);
+      const stats = reloaded.getDailyStats(today);
+      expect(stats.evolution.diagnosticianReportsWritten).toBe(1);
+    });
+
+    it('should count incomplete_fields in both diagnosticianReportsWritten and reportsIncompleteFields', () => {
+      const today = new Date().toISOString().slice(0, 10);
+      eventLog.recordDiagnosticianReport({
+        taskId: 'task-incomplete',
+        reportPath: '/test/incomplete.json',
+        category: 'incomplete_fields',
+      });
+      eventLog.flush();
+
+      const stats = eventLog.getDailyStats(today);
+      expect(stats.evolution.diagnosticianReportsWritten).toBe(1);
+      expect(stats.evolution.reportsIncompleteFields).toBe(1);
+      // Other sub-counters should not be set
+      expect(stats.evolution.reportsMissingJson).toBe(0);
     });
   });
 });

@@ -41,6 +41,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { validateNocturnalSnapshotIngress } from '../../core/nocturnal-snapshot-contract.js';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
+import { EventLogService } from '../../core/event-log.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NocturnalResult Type Alias
@@ -290,6 +291,21 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         artifactId: result.diagnostics?.persistedPath,
                     });
                     this.completedWorkflows.set(workflowId, Date.now());
+                    // PD-FUNNEL-2.3: Emit nocturnal_dreamer_completed event
+                    const chainMode: 'trinity' | 'single-reflector' =
+                        result.trinityTelemetry ? 'trinity' : 'single-reflector';
+                    try {
+                        const eventLog = EventLogService.get(this.stateDir, this.logger as unknown as import('../../openclaw-sdk.js').PluginLogger);
+                        eventLog.recordNocturnalDreamerCompleted({
+                            workflowId,
+                            principleId: result.artifact?.principleId ?? 'unknown',
+                            sessionId: result.snapshot?.sessionId ?? 'unknown',
+                            candidateCount: result.trinityTelemetry?.candidateCount ?? 1,
+                            chainMode,
+                        });
+                    } catch (evErr) {
+                        this.logger.warn?.(`[PD:NocturnalWorkflow] Failed to record nocturnal_dreamer_completed: ${String(evErr)}`);
+                    }
                 } else {
                     const reason = result.noTargetSelected ? 'no_target_selected' : 'validation_failed';
                     const failuresSummary = result.validationFailures?.length > 0 

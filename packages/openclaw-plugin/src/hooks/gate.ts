@@ -205,24 +205,41 @@ export function handleBeforeToolCall(
     };
 
     const hostResult = ruleHost.evaluate(hostInput);
-    if (hostResult?.decision === 'block' || hostResult?.decision === 'requireApproval') {
+    // PD-FUNNEL-2.4: Always emit rulehost_evaluated on evaluate()
+    try {
+      const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+      eventLog.recordRuleHostEvaluated({
+        toolName: event.toolName,
+        filePath: relPath,
+        matched: hostResult?.matched ?? false,
+        decision: hostResult?.decision ?? 'allow',
+        ruleId: hostResult?.ruleId,
+      });
+    } catch (evErr) {
+      logger?.warn?.(`[PD_GATE] Failed to record rulehost_evaluated: ${String(evErr)}`);
+    }
+    if (hostResult?.decision === 'block') {
       // C: Record rule_enforced event for matched rules
       try {
         const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
         eventLog.recordRuleEnforced({
           ruleId: hostResult.ruleId || 'unknown',
           principleId: hostResult.principleId || 'unknown',
-          enforcement: hostResult.decision === 'requireApproval' ? 'requireApproval' : 'block',
+          enforcement: 'block',
           toolName: event.toolName,
           filePath: relPath,
         });
+        eventLog.recordRuleHostBlocked({
+          toolName: event.toolName,
+          filePath: relPath,
+          reason: hostResult.reason,
+          ruleId: hostResult.ruleId,
+        });
       } catch (evErr) {
-        logger?.warn?.(`[PD_GATE] Failed to record rule_enforced event: ${String(evErr)}`);
+        logger?.warn?.(`[PD_GATE] Failed to record rule_enforced/rulehost_blocked event: ${String(evErr)}`);
       }
 
-      const reason = hostResult.decision === 'requireApproval'
-        ? `[Rule Host] Approval required: ${hostResult.reason}`
-        : hostResult.reason;
+      const reason = hostResult.reason;
       return recordGateBlockAndReturn(wctx, {
         filePath: relPath,
         reason,
@@ -230,6 +247,26 @@ export function handleBeforeToolCall(
         sessionId: ctx.sessionId,
         blockSource: 'rule-host',
       }, logger);
+    }
+    if (hostResult?.decision === 'requireApproval') {
+      try {
+        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+        eventLog.recordRuleEnforced({
+          ruleId: hostResult.ruleId || 'unknown',
+          principleId: hostResult.principleId || 'unknown',
+          enforcement: 'requireApproval',
+          toolName: event.toolName,
+          filePath: relPath,
+        });
+        eventLog.recordRuleHostRequireApproval({
+          toolName: event.toolName,
+          filePath: relPath,
+          reason: hostResult.reason,
+          ruleId: hostResult.ruleId,
+        });
+      } catch (evErr) {
+        logger?.warn?.(`[PD_GATE] Failed to record rule_enforced/rulehost_requireApproval event: ${String(evErr)}`);
+      }
     }
   } catch (hostError: unknown) {
     // D-08: Conservative degradation — log and continue to Progressive Gate
