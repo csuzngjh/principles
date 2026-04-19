@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-The `WorkflowFunnelLoader` (defined in `src/core/workflow-funnel-loader.ts`) is fully implemented and serves as the SSOT for funnel stage definitions in `workflows.yaml`. However, it is not yet wired into `RuntimeSummaryService`, which currently derives funnel-related stats from hardcoded event type matching and `daily-stats.json` field paths. The integration task is: pass the loader's `Map<workflowId, WorkflowStage[]>` to `RuntimeSummaryService.getSummary()` so that YAML drives the stage-to-event mapping.
+The `WorkflowFunnelLoader` (defined in `src/core/workflow-funnel-loader.ts`) is fully implemented and serves as the YAML config loader for funnel stage definitions in `workflows.yaml`. However, it is not yet wired into `RuntimeSummaryService` — the funnels Map is loaded but not consumed; `RuntimeSummaryService` derives funnel-related stats from hardcoded event type matching. The integration task (deferred to v1.21.2): pass the loader's `Map<workflowId, WorkflowStage[]>` to `RuntimeSummaryService.getSummary()` so that YAML drives the stage-to-event mapping.
 
 The architecture is straightforward: one new instantiation (in `evolution-status.ts`), one method signature change (`getSummary()` gains an optional `funnels` parameter), and YAML-driven stage aggregation added to the service. No new files are required. The build order is strictly linear: Loader import -> RuntimeSummaryService signature update -> evolution-status.ts wiring.
 
@@ -38,7 +38,7 @@ evolution-status.ts (command)
 
 | Component | Responsibility | Current State |
 |-----------|----------------|---------------|
-| `WorkflowFunnelLoader` | Loads `workflows.yaml` as SSOT; provides `getAllFunnels()`, `getStages()`, `watch()`; preserves last-valid on parse failure | **Exists, not wired** |
+| `WorkflowFunnelLoader` | Loads `workflows.yaml` as YAML config; provides `getAllFunnels()`, `getStages()`, `watch()`; preserves last-valid on parse failure | **Exists, scaffold only — not wired to RuntimeSummaryService** |
 | `RuntimeSummaryService.getSummary()` | Aggregates runtime state from JSON files; builds `RuntimeSummary` object for display | Static method, no YAML dependency |
 | `evolution-status.ts` | Command entry point; calls `RuntimeSummaryService`; formats bilingual output | Works, calls RuntimeSummaryService only |
 

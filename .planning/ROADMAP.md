@@ -35,7 +35,6 @@
 
 ## Phase Details
 
-<<<<<<< HEAD
 ### v1.22 Phase 1: Gate Removal
 **Goal**: Remove all hardcoded gate modules from PD code, keeping only dynamic rule infrastructure
 **Depends on**: Nothing
@@ -77,7 +76,7 @@
 
 **Plans**: 2 plans
 - [x] 03-01: Fix workflow-funnel-loader bugs (re-entry guard, deep-clone, rename handling) + YAML-FUNNEL-03
-- [x] 03-02: RuntimeSummaryService funnels param + evolution-status.ts wiring
+- [x] 03-02: RuntimeSummaryService loaderWarnings param + evolution-status.ts wiring (funnels param deferred to v1.21.2)
 
 ### Phase 4: Testing & Validation
 **Goal**: Validate error handling, Windows compatibility, and integration behavior end-to-end
@@ -85,7 +84,7 @@
 **Requirements**: ERR-01, ERR-02, ERR-03, TEST-01, TEST-02, TEST-03, TEST-04
 **Success Criteria** (what must be TRUE):
 1. When workflows.yaml is missing or malformed, status output shows explicit "degraded" state with warning in metadata (funnel/stage counts still show hardcoded values; not yet YAML-driven)
-2. YAML parse warnings visible in RuntimeSummaryService.metadata.warnings via loaderWarnings plumbing
+2. YAML parse warnings visible in RuntimeSummaryService.metadata.warnings via loaderWarnings plumbing (funnel/stage counts still hardcoded; not yet YAML-driven)
 3. When YAML is replaced with invalid content, the loader preserves last-known-good funnel definitions
 4. A test suite runs that covers watch()/dispose() lifecycle with no FSWatcher leaks
 5. A test suite covers YAML invalid scenarios: degraded state, warnings surfaced, last-known-good retained
