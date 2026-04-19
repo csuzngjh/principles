@@ -7,7 +7,6 @@ import { evaluatePhase3Inputs } from './phase3-input-filter.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
 import type { RuntimeTruth, AnalyticsTruth } from '../types/runtime-summary.js';
-import type { WorkflowStage } from '../core/workflow-funnel-loader.js';
 
 export type RuntimeDataQuality = 'authoritative' | 'partial';
 export type RuntimeRewardPolicy =
