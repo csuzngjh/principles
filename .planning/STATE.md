@@ -1,74 +1,62 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.21
-milestone_name: milestone
-status: Milestone Complete
-last_updated: "2026-04-18T22:47:16.987Z"
+milestone: v1.22
+milestone_name: Dynamic Gate Migration
+status: planning
+last_updated: "2026-04-19"
 progress:
-  total_phases: 6
-  completed_phases: 4
-  total_plans: 20
-  completed_plans: 15
-  percent: 75
+  total_phases: 2
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 50
 ---
 
-# Project State: Principles
+# Project State: Principles (Worktree: cleanup/remove-gfi-gate)
 
 ## Project Reference
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** Phase 02 — workflow-watchdog
+**Current Focus:** Milestone v1.22 — Dynamic Gate Migration
 
 ## Current Position
 
-Phase: 02 (workflow-watchdog) — COMPLETE ✓
-Plan: 5 of 5 (all complete with summaries)
-Milestone: v1.21 (PD 工作流可观测化) — **PHASE 1 COMPLETE**
-**Design doc:** `docs/superpowers/specs/2026-04-18-pd-workflow-funnel-design.md` ✓
-**PROJECT.md:** Updated ✓
-**STATE.md:** Reset ✓
-**Requirements:** `.planning/REQUIREMENTS.md` ✓
-**Roadmap:** `.planning/ROADMAP.md` ✓
-**Phase 1 Verification:** PASSED (4/4 must-haves, PD-FUNNEL-1.1 ✓ through PD-FUNNEL-1.4 ✓)
-**Progress:** [██████████] 100%
+Phase: Phase 1 (Gate Removal) — Not started
+Plan: —
+Status: Planning complete
+Last activity: 2026-04-19 — Roadmap defined
 
-## Planning Outputs
+## Milestone Progress
 
-All planning artifacts are in `.planning/`:
+| Phase | Name | Requirements | Status |
+|-------|------|-------------|--------|
+| 1 | Gate Removal | 9 | Not started |
+| 2 | Pain Learning Verification | 6 | Not started |
 
-- `PROJECT.md` — v1.21 milestone definition
-- `STATE.md` — this file
-- `REQUIREMENTS.md` — PD-FUNNEL-1.x (Phase 1) + PD-FUNNEL-2.x (Phase 2)
-- `ROADMAP.md` — Phase 1 + Phase 2 structure
-- `HANDOFF.json` — machine-readable state
-- `docs/superpowers/specs/2026-04-18-pd-workflow-funnel-design.md` — architecture design
+## Context
 
-## Next: Phase 2
+**Goal:** Remove all hardcoded gate modules, keep only Rule Host as sole gate
 
-**Command:** `/gsd-discuss-phase 2` or `/gsd-plan-phase 2`
+**To Remove:**
+- `gfi-gate.ts` — GFI calculation remains in session-tracker
+- `progressive-trust-gate.ts`
+- `bash-risk.ts`
+- `thinking-checkpoint.ts`
+- `edit-verification.ts`
 
-Phase 2 Goal: YAML workflows.yaml 工作流漏斗框架
-**Depends on:** Phase 1 (COMPLETE ✓)
+**To Keep:**
+- Rule Host
+- Pain Context Extractor
+- Principle Compiler
+- Principle Tree Ledger
+- Event Log
+- Trajectory
 
-## Session Continuity
+## Next
 
-**Last Session:**
+**Command:** `/gsd-plan-phase 1`
 
-2026-04-18T14:19:36.278Z
+---
 
-- Initialized v1.21 milestone via /gsd-new-milestone
-- All planning artifacts written: DESIGN + PROJECT + STATE + REQUIREMENTS + ROADMAP
-
-**This Session:**
-
-2026-04-18T15:27-15:35
-
-- Executed Phase 1 via /gsd-execute-phase 1
-- All 4 plans completed + verified (PD-FUNNEL-1.1 through PD-FUNNEL-1.4)
-- Phase 1 verification: PASSED (4/4 must-haves)
-
-**Next Session:**
-
-- Discuss/Plan Phase 2: YAML workflows.yaml 工作流漏斗框架
-- Command: `/gsd-discuss-phase 2`
+*Last updated: 2026-04-19 after v1.22 milestone created*
