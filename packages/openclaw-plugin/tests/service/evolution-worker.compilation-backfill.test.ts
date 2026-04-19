@@ -70,7 +70,11 @@ const noopLogger: PluginLogger = {
 afterEach(() => {
   vi.restoreAllMocks();
   for (const dir of tempDirs.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // On Windows, temp dirs may be held open — ignore cleanup errors
+    }
   }
 });
 

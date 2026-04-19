@@ -11,7 +11,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { normalizePath } from '../utils/io.js';
+import { normalizePath, planStatus } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
@@ -179,7 +179,6 @@ function _extractParamsSummary(params: Record<string, unknown>): Record<string, 
 
 function _getPlanStatus(workspaceDir: string): 'NONE' | 'DRAFT' | 'READY' | 'UNKNOWN' {
   try {
-    const { planStatus } = require('../utils/io.js');
     const status = planStatus(workspaceDir);
     if (status === 'READY') return 'READY';
     if (status === 'DRAFT') return 'DRAFT';
