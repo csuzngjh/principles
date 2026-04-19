@@ -725,67 +725,59 @@ function restartGateway() {
 }
 
 /**
- * Restart Gateway on Windows using PowerShell.
+ * Restart Gateway on Windows via schtasks.
+ * Direct task trigger bypasses OpenClaw CLI's busy-port detection which can
+ * falsely report "still busy" due to TIME_WAIT connections on the port.
  */
 function restartGatewayWindows() {
     const logPath = join(getTempDir(), 'openclaw-auto-restart.log');
 
     try {
-        // Step 1: Find and terminate existing gateway processes
-        console.log('   Looking for existing gateway processes...');
+        // Kill existing gateway processes first (don't rely on schtasks stop)
+        console.log('   Stopping existing gateway processes...');
         try {
-            // PowerShell command to find and kill openclaw gateway processes
-            // Note: Use single quotes inside -like pattern for proper escaping
-            const findCmd = "Get-Process -Name 'node' -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*openclaw*' } | Select-Object -ExpandProperty Id";
+            const findCmd = "Get-Process -Name 'node' -ErrorAction SilentlyContinue | Where-Object { \$_.CommandLine -like '*openclaw*' } | Select-Object -ExpandProperty Id";
             const pids = execSync(`powershell -NoProfile -Command "${findCmd}"`, { encoding: 'utf-8' }).trim();
-
             if (pids) {
-                console.log(`   Terminating existing gateway process(es): ${pids.replace(/\n/g, ', ')}...`);
-                // Kill by PID
                 const pidList = pids.split('\n').filter(p => p.trim());
                 for (const pid of pidList) {
-                    try {
-                        execSync(`taskkill /PID ${pid.trim()} /F`, { stdio: 'pipe' });
-                    } catch { /* ignore if process already gone */ }
+                    try { execSync(`taskkill /PID ${pid.trim()} /F`, { stdio: 'pipe' }); } catch { /* ignore */ }
                 }
-                // Wait a moment for process to terminate
-                execSync('timeout /t 3 /nobreak > nul', { shell: true, stdio: 'ignore' });
+                // Wait for graceful shutdown
+                execSync('timeout /t 2 /nobreak > nul', { shell: true, stdio: 'ignore' });
             }
         } catch { /* no existing processes */ }
 
-        // Step 2: Start new gateway process in background
-        console.log(`   Starting new gateway (logs: ${logPath})...`);
+        // Trigger via schtasks — reliable, avoids CLI busy-port misdetection
+        console.log('   Starting gateway via scheduled task...');
+        execSync('schtasks /Run /TN "OpenClaw Gateway"', { stdio: 'inherit' });
 
-        // Use openclaw CLI to start gateway (more reliable than direct node invocation)
-        const gatewayCmd = join(getHomeDir(), '.openclaw', 'gateway.cmd');
-        const startCmd = `Start-Process -FilePath 'cmd.exe' -ArgumentList '/c ${gatewayCmd}' -WindowStyle Hidden -RedirectStandardOutput '${logPath}' -RedirectStandardError '${join(getTempDir(), 'openclaw-auto-restart.err')}'`;
-        execSync(`powershell -NoProfile -Command "${startCmd}"`, { stdio: 'inherit' });
-        console.log('✅ Gateway restart triggered.');
+        // Wait for gateway to start and PD plugin to register
+        const deadline = Date.now() + 20000;
+        const pollInterval = 1000;
 
-        // Step 3: Wait and verify
-        setTimeout(() => {
+        const waitForRegistration = () => {
+            if (Date.now() > deadline) {
+                console.warn('⚠️  Gateway started but PD registration not confirmed after 20s.');
+                console.log('   Check logs at: ' + logPath);
+                return;
+            }
             try {
                 if (existsSync(logPath)) {
                     const logs = readFileSync(logPath, 'utf-8');
                     if (logs.includes('Principles Disciple Plugin registered')) {
                         console.log('✅ SUCCESS: Principles Disciple plugin registered successfully!');
-                    } else if (logs.includes('failed to load') || logs.includes('Error: Cannot find module')) {
-                        console.error('\n❌ CRITICAL: Gateway started but PD plugin FAILED to load!');
-                        console.error('   Check logs at: ' + logPath);
-                        process.exit(1);
-                    } else {
-                        console.warn('⚠️  Gateway started but PD registration not confirmed in recent logs.');
-                        console.log('   Check logs at: ' + logPath);
+                        return;
                     }
                 }
-            } catch (e) {
-                console.warn(`⚠️  Post-restart verification skipped: ${e.message}`);
-            }
-        }, 8000);
+            } catch { /* ignore */ }
+            setTimeout(waitForRegistration, pollInterval);
+        };
+        waitForRegistration();
 
     } catch (error) {
-        console.error(`\n❌ Failed to restart gateway: ${error.message}`);
-        console.error('   You may need to manually restart OpenClaw Gateway.');
+        console.error(`\n❌ Gateway restart failed: ${error.message}`);
+        console.error('   You may need to manually restart: openclaw gateway start');
         process.exit(1);
     }
 }

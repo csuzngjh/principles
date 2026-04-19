@@ -1,0 +1,61 @@
+# ============================================================
+# workflows.yaml — WORKFLOW_FUNNELS Definition (SSOT)
+# ============================================================
+#
+# D-01: This file is the single source of truth (SSOT) for
+#       workflow funnel definitions. Do NOT hardcode in TypeScript.
+# D-02: Place this file at .state/workflows.yaml per workspace.
+# D-03: Developers manually maintain this file (no auto-registration).
+# D-04: Code only reads this file, never writes it.
+#
+# Schema:
+#   version: string (e.g., "1.0")
+#   funnels:
+#     - workflowId: string (unique identifier)
+#       stages:
+#         - name: string (stage name)
+#           eventType: string (matches EventType literal)
+#           eventCategory: string (matches EventCategory literal)
+#           statsField: string (dot-path to EvolutionStats field)
+#
+# Event types (defined in event-types.ts):
+#   Nocturnal: nocturnal_dreamer_completed, nocturnal_artifact_persisted, nocturnal_code_candidate_created
+#   RuleHost: rulehost_evaluated, rulehost_blocked, rulehost_requireApproval
+#
+# Event categories (defined in event-types.ts):
+#   Nocturnal: completed, created
+#   RuleHost: evaluated, blocked, requireApproval
+#
+# ============================================================
+
+version: "1.0"
+funnels:
+  - workflowId: nocturnal
+    stages:
+      - name: dreamer_completed
+        eventType: nocturnal_dreamer_completed
+        eventCategory: completed
+        statsField: evolution.nocturnalDreamerCompleted
+      - name: artifact_persisted
+        eventType: nocturnal_artifact_persisted
+        eventCategory: completed
+        statsField: evolution.nocturnalArtifactPersisted
+      - name: code_candidate_created
+        eventType: nocturnal_code_candidate_created
+        eventCategory: created
+        statsField: evolution.nocturnalCodeCandidateCreated
+
+  - workflowId: rulehost
+    stages:
+      - name: evaluated
+        eventType: rulehost_evaluated
+        eventCategory: evaluated
+        statsField: evolution.rulehostEvaluated
+      - name: blocked
+        eventType: rulehost_blocked
+        eventCategory: blocked
+        statsField: evolution.rulehostBlocked
+      - name: requireApproval
+        eventType: rulehost_requireApproval
+        eventCategory: requireApproval
+        statsField: evolution.rulehostRequireApproval

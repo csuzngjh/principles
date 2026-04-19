@@ -1,30 +1,33 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-15T13:32:24.179Z",
-  "phase": "46",
-  "phase_name": "God-Class-Split",
-  "phase_dir": ".planning/phases/46-God-Class-Split",
-  "plan": 4,
-  "task": 1,
-  "total_tasks": 4,
-  "status": "in_progress",
-  "completed_tasks": [],
-  "remaining_tasks": [
-    {"id": 1, "name": "Verify nocturnal-runtime.ts does not import from evolution-worker.ts", "status": "in_progress"},
-    {"id": 2, "name": "Create sleep-cycle.ts with runCycle orchestrator", "status": "not_started"},
-    {"id": 3, "name": "Create integration test for sleep-cycle.ts", "status": "not_started"},
-    {"id": 4, "name": "Update evolution-worker.ts to re-export from sleep-cycle.ts", "status": "not_started"}
+  "timestamp": "2026-04-18T14:19:36.278Z",
+  "phase": null,
+  "phase_name": null,
+  "phase_dir": null,
+  "plan": null,
+  "task": null,
+  "total_tasks": null,
+  "status": "completed",
+  "completed_tasks": [
+    {"id": 1, "name": "STATE.md reset for v1.21", "status": "completed"},
+    {"id": 2, "name": "Requirements 定义", "status": "completed"},
+    {"id": 3, "name": "Roadmap 创建", "status": "completed"}
   ],
+  "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [],
   "decisions": [
-    {"decision": "queue-io.ts is a FULL persistence layer (not thin I/O wrapper)", "rationale": "D-07 in 46-CONTEXT.md", "phase": "46"},
-    {"decision": "withQueueLock() RAII guard is part of queue-io.ts", "rationale": "D-09 in 46-CONTEXT.md", "phase": "46"},
-    {"decision": "Fix all three bugs (BUG-01, BUG-02, BUG-03) within Phase 46", "rationale": "D-03 in 46-CONTEXT.md", "phase": "46"},
-    {"decision": "Extraction order: queue-migration → workflow-watchdog → queue-io → sleep-cycle", "rationale": "D-10 in 46-CONTEXT.md", "phase": "46"},
-    {"decision": "sleep-cycle.ts imports enqueueSleepReflectionTask/enqueueKeywordOptimizationTask from evolution-worker.js facade", "rationale": "Plan 04 key_links fix during verification iteration 2", "phase": "46"}
+    {"decision": "YAML workflows.yaml 作为单一真相来源，工作流定义不硬编码", "rationale": "PD 工作流持续变化、调研结论可能不准，硬编码漏斗定义会成为技术债", "phase": "new-milestone-v1.21"},
+    {"decision": "event-log 只做原始 event 记录，漏斗由 YAML + event 数据推导", "rationale": "代码和漏斗定义解耦，两边可独立修正", "phase": "new-milestone-v1.21"},
+    {"decision": "Phase 1 先做 Issue #366 修复（diagnostician_report category 三态扩展）", "rationale": "Issue #366 是当前最紧迫的断点，YAML 框架后续迭代", "phase": "new-milestone-v1.21"}
   ],
-  "uncommitted_files": [],
-  "next_action": "Plan 46-04 executor is running in background (agent aa701569b8806f223). After it completes, execute plan 46-05 (facade finalization). Wave 5 is the last wave.",
-  "context_notes": "All 4 extraction modules have been successfully extracted: queue-migration.ts (Wave 1), workflow-watchdog.ts (Wave 2), queue-io.ts (Wave 3). Wave 4 is sleep-cycle.ts extraction. Wave 5 (plan 46-05) finalizes evolution-worker.ts as facade — all re-exports, backward compatibility check, BUG-03 post-split verification."
+  "uncommitted_files": [
+    "docs/superpowers/specs/2026-04-18-pd-workflow-funnel-design.md",
+    ".planning/PROJECT.md",
+    ".planning/STATE.md",
+    ".planning/REQUIREMENTS.md",
+    ".planning/ROADMAP.md"
+  ],
+  "next_action": "/gsd-new-milestone 工作流完成。v1.21 Planning 阶段完成：Design doc ✓ + PROJECT.md ✓ + STATE.md ✓ + REQUIREMENTS.md ✓ + ROADMAP.md ✓。下一步：/gsd-plan-phase 1 开始 Phase 1 实施（Issue #366 修复）",
+  "context_notes": "v1.21 new-milestone 完成。已完成：Design doc + PROJECT.md + STATE.md + REQUIREMENTS.md + ROADMAP.md。设计核心：YAML 工作流漏斗框架 + Issue #366 修复（diagnostician_report 三态）。下一步：Phase 1 实施。"
 }
