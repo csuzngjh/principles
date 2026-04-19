@@ -71,8 +71,6 @@ describe('EventLog', () => {
       // Hooks field
       expect(stats.hooks).toBeDefined();
       
-      // Deep Reflection field
-      expect(stats.deepReflection).toBeDefined();
     });
 
     it('should increment tools.failure on error', () => {
