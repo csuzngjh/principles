@@ -1,9 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.21.1
-milestone_name: Workflow Funnel Runtime Integration
-status: Planning complete
-last_updated: "2026-04-19"
+milestone_name: — Workflow Funnel Runtime Integration
+status: planning
+last_updated: "2026-04-19T02:06:00.056Z"
+last_activity: "2026-04-19 — Roadmap defined (2 phases: 3-4)"
+progress:
+  total_phases: 39
+  completed_phases: 31
+  total_plans: 72
+  completed_plans: 75
+  percent: 100
 ---
 
 # Project State: Principles
@@ -33,6 +40,7 @@ Last activity: 2026-04-19 — Roadmap defined (2 phases: 3-4)
 ## Context
 
 **YAML 边界:**
+
 - YAML = 漏斗定义真相源
 - event log = 发生事实真相源
 - runtime summary = 派生视图（YAML 定义 + event log 数据）
