@@ -7,6 +7,7 @@ import { evaluatePhase3Inputs } from './phase3-input-filter.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
 import type { RuntimeTruth, AnalyticsTruth } from '../types/runtime-summary.js';
+import type { WorkflowStage } from '../core/workflow-funnel-loader.js';
 
 export type RuntimeDataQuality = 'authoritative' | 'partial';
 export type RuntimeRewardPolicy =
@@ -170,7 +171,7 @@ function pushWarning(warnings: string[], message: string): void {
 export class RuntimeSummaryService {
   static getSummary(
     workspaceDir: string,
-    options?: { sessionId?: string | null }
+    options?: { sessionId?: string | null; funnels?: Map<string, WorkflowStage[]> }
   ): RuntimeSummary {
     const generatedAt = new Date().toISOString();
     const warnings: string[] = [];
