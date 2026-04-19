@@ -6,6 +6,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { evaluatePhase3Inputs } from './phase3-input-filter.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
+import type { WorkflowStage } from '../core/workflow-funnel-loader.js';
 import type { RuntimeTruth, AnalyticsTruth } from '../types/runtime-summary.js';
 
 export type RuntimeDataQuality = 'authoritative' | 'partial';
@@ -106,6 +107,8 @@ export interface RuntimeSummary {
     recentBypasses: number | null;
     dataQuality: RuntimeDataQuality;
   };
+  /** YAML-driven funnel counts — only present when funnels param is provided (YAML-SSOT-01) */
+  workflowFunnels?: WorkflowFunnelOutput[];
   metadata: {
     generatedAt: string;
     workspaceDir: string;
@@ -153,6 +156,23 @@ interface EventLogEntry {
   data?: Record<string, unknown>;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Workflow Funnel Types (YAML-SSOT-01 / YAML-SSOT-02)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface WorkflowFunnelStageOutput {
+  key: string;
+  label: string;
+  statsField: string;
+  count: number;
+}
+
+export interface WorkflowFunnelOutput {
+  funnelKey: string;
+  funnelLabel: string;
+  stages: WorkflowFunnelStageOutput[];
+}
+
 const MAX_SOURCE_EVENTS = 5;
 const GFI_PARTIAL_WARNING =
   'GFI source attribution remains partial in Phase 2b because only the empathy slice is source-attributed; most non-empathy friction still lacks full per-source attribution.';
@@ -167,10 +187,21 @@ function pushWarning(warnings: string[], message: string): void {
   }
 }
 
+/** YAML-SSOT-03: resolve a dot-path (e.g. 'evolution.nocturnalDreamerCompleted') from dailyStats */
+function resolveStatsField(stats: unknown, dotPath: string): number {
+  const parts = dotPath.split('.');
+  let current: unknown = stats;
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return 0;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return typeof current === 'number' ? current : 0;
+}
+
 export class RuntimeSummaryService {
   static getSummary(
     workspaceDir: string,
-    options?: { sessionId?: string | null; loaderWarnings?: string[] }
+    options?: { sessionId?: string | null; loaderWarnings?: string[]; funnels?: Map<string, WorkflowStage[]> }
   ): RuntimeSummary {
     const generatedAt = new Date().toISOString();
     const warnings: string[] = [];
@@ -214,6 +245,35 @@ export class RuntimeSummaryService {
       warnings,
       false
     );
+
+    // YAML-SSOT-02/03: build workflowFunnels from funnels Map if provided
+    let workflowFunnelsOutput: WorkflowFunnelOutput[] | undefined;
+    if (options?.funnels) {
+      workflowFunnelsOutput = [];
+      for (const [funnelKey, stages] of options.funnels) {
+        const stageOutputs: WorkflowFunnelStageOutput[] = stages.map(stage => {
+          const count = resolveStatsField(dailyStats?.[statsDate], stage.statsField);
+          return {
+            key: stage.name,
+            label: stage.name,
+            statsField: stage.statsField,
+            count,
+          };
+        });
+        workflowFunnelsOutput.push({ funnelKey, funnelLabel: funnelKey, stages: stageOutputs });
+      }
+    }
+
+    // YAML-SSOT-04: warn for any zero-count stages
+    if (workflowFunnelsOutput) {
+      for (const funnel of workflowFunnelsOutput) {
+        for (const stage of funnel.stages) {
+          if (stage.count === 0) {
+            pushWarning(warnings, `statsField not resolvable: ${stage.statsField}`);
+          }
+        }
+      }
+    }
 
     // Get most recent date from daily stats, fallback to today
     const today = generatedAt.slice(0, 10);
@@ -360,6 +420,7 @@ export class RuntimeSummaryService {
       gate: gateStats,
       // D: Heartbeat Diagnostician chain — separate from evolution/nocturnal
       heartbeatDiagnosis,
+      ...(workflowFunnelsOutput && { workflowFunnels: workflowFunnelsOutput }),
       metadata: {
         generatedAt,
         workspaceDir,

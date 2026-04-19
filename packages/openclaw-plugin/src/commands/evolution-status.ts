@@ -183,7 +183,11 @@ export function handleEvolutionStatusCommand(ctx: PluginCommandContext): { text:
   const loader = new WorkflowFunnelLoader(stateDir);
   loader.watch();
   try {
-    const summary = RuntimeSummaryService.getSummary(workspaceDir, { sessionId, loaderWarnings: loader.getWarnings() });
+    const summary = RuntimeSummaryService.getSummary(workspaceDir, {
+      sessionId,
+      loaderWarnings: loader.getWarnings(),
+      funnels: loader.getAllFunnels(),
+    });
     const recommendations = WorkspaceContext.fromHookContext({ workspaceDir })
       .principleLifecycle
       .recomputeAll()
