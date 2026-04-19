@@ -19,7 +19,7 @@
 
 ### v1.21.2 — YAML Funnel 完整 SSOT
 
-- [ ] **Phase 5: Runtime Wiring** - getSummary() accepts funnels Map, resolves statsField dot-paths, outputs workflowFunnels
+- [x] **Phase 5: Runtime Wiring** - getSummary() accepts funnels Map, resolves statsField dot-paths, outputs workflowFunnels
 - [ ] **Phase 6: Display Wiring** - evolution-status.ts wires to loader, uses YAML labels/stage order, graceful degraded mode
 - [ ] **Phase 7: Integration Testing** - End-to-end tests for YAML-driven flow and degraded scenarios
 
