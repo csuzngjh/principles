@@ -60,21 +60,21 @@ Deferred to future release.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| YAML-FUNNEL-01 | Phase 1 | Pending |
-| YAML-FUNNEL-02 | Phase 1 | Pending |
-| YAML-FUNNEL-03 | Phase 1 | Pending |
-| YAML-FUNNEL-04 | Phase 1 | Pending |
-| WATCHER-01 | Phase 1 | Pending |
-| WATCHER-02 | Phase 1 | Pending |
-| WATCHER-03 | Phase 1 | Pending |
-| ERR-01 | Phase 1 | Pending |
-| ERR-02 | Phase 1 | Pending |
-| ERR-03 | Phase 1 | Pending |
-| PLAT-01 | Phase 1 | Pending |
-| TEST-01 | Phase 1 | Pending |
-| TEST-02 | Phase 1 | Pending |
-| TEST-03 | Phase 1 | Pending |
-| TEST-04 | Phase 1 | Pending |
+| YAML-FUNNEL-01 | Phase 3 | Pending |
+| YAML-FUNNEL-02 | Phase 3 | Pending |
+| YAML-FUNNEL-03 | Phase 3 | Pending |
+| YAML-FUNNEL-04 | Phase 3 | Pending |
+| WATCHER-01 | Phase 3 | Pending |
+| WATCHER-02 | Phase 3 | Pending |
+| WATCHER-03 | Phase 3 | Pending |
+| ERR-01 | Phase 4 | Pending |
+| ERR-02 | Phase 4 | Pending |
+| ERR-03 | Phase 4 | Pending |
+| PLAT-01 | Phase 3 | Pending |
+| TEST-01 | Phase 4 | Pending |
+| TEST-02 | Phase 4 | Pending |
+| TEST-03 | Phase 4 | Pending |
+| TEST-04 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 15 total
@@ -83,4 +83,4 @@ Deferred to future release.
 
 ---
 *Requirements defined: 2026-04-19*
-*Last updated: 2026-04-19 after initial definition*
+*Last updated: 2026-04-19 after roadmap created*

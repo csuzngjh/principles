@@ -2,6 +2,7 @@
 
 ## Milestones
 
+- [x] **v1.21.1** - Workflow Funnel Runtime Integration (Phase 3-4)
 - [x] **v1.21** - PD 工作流可观测化 (Phase 1-2) — SHIPPED 2026-04-19
 - [x] **v1.20** - Universal SDK Foundation (Phases 0a-1.5) — SHIPPED 2026-04-17
 - [x] **v1.19** - Tech Debt Remediation (Phases 42-46, shipped 2026-04-15)
@@ -13,6 +14,11 @@
 - [x] **v1.13** - Boundary Contracts (shipped 2026-04-11)
 
 ## Phases
+
+### v1.21.1 — Workflow Funnel Runtime Integration
+
+- [ ] **Phase 3: Core Integration** - WORKFLOWS_YAML wiring + FSWatcher lifecycle
+- [ ] **Phase 4: Testing & Validation** - Error handling + integration tests
 
 ### v1.21 — PD 工作流可观测化
 
@@ -27,6 +33,34 @@
 - [x] **Phase 1.5: Cross-Domain Validation** - API freeze after cross-domain stress test
 
 ## Phase Details
+
+### v1.21.1 Phase 3: Core Integration
+**Goal**: Wire WorkflowFunnelLoader into the runtime so workflows.yaml drives funnel summary
+**Depends on**: Nothing
+**Requirements**: YAML-FUNNEL-01, YAML-FUNNEL-02, YAML-FUNNEL-03, YAML-FUNNEL-04, WATCHER-01, WATCHER-02, WATCHER-03, PLAT-01
+**Success Criteria** (what must be TRUE):
+1. `/pd-evolution-status` output shows funnel stages defined in workflows.yaml, not hardcoded mappings
+2. Editing `.state/workflows.yaml` hot-reloads into status output within 1 second (FSWatcher debounce)
+3. FSWatcher dispose() is called on plugin shutdown / workspace switch with no leaked handles
+4. Calling watch() twice on the same loader instance does not leak FSWatcher handles
+5. getAllFunnels() returns a deep-copy or immutable structure; consumer mutation has no effect on loader state
+
+**Plans**: TBD
+
+### v1.21.1 Phase 4: Testing & Validation
+**Goal**: Validate error handling, Windows compatibility, and integration behavior end-to-end
+**Depends on**: Phase 3
+**Requirements**: ERR-01, ERR-02, ERR-03, TEST-01, TEST-02, TEST-03, TEST-04
+**Success Criteria** (what must be TRUE):
+1. When workflows.yaml is missing or malformed, status output shows explicit "degraded" state with warning in metadata
+2. YAML parse warnings are visible in RuntimeSummaryService.metadata.warnings (not just console.warn)
+3. When YAML is replaced with invalid content, the loader preserves last-known-good funnel definitions
+4. A test suite runs that covers watch()/dispose() lifecycle with no FSWatcher leaks
+5. A test suite covers YAML invalid scenarios: degraded state, warnings surfaced, last-known-good retained
+6. A test suite covers Windows-style rename/rewrite event sequences on the watcher
+7. A test suite confirms consumer mutation of getAllFunnels() output does not corrupt loader state
+
+**Plans**: TBD
 
 ### v1.21 Phase 1: Issue #366 Fix — diagnostician_report 三态扩展
 **Goal**: 修复 Issue #366，让 stats 能感知 JSON 缺失/不完整/成功三种情况
@@ -93,4 +127,4 @@
 
 ---
 
-*Last updated: 2026-04-19 after v1.21 milestone*
+*Last updated: 2026-04-19 after v1.21.1 roadmap created*

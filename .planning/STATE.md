@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v1.21.1
 milestone_name: Workflow Funnel Runtime Integration
-status: Defining requirements
+status: Planning complete
 last_updated: "2026-04-19"
 ---
 
@@ -16,10 +16,19 @@ last_updated: "2026-04-19"
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Phase 3 (Core Integration) — Not started
 Plan: —
-Status: Defining requirements
-Last activity: 2026-04-19 — Milestone v1.21.1 started
+Status: Planning complete
+Last activity: 2026-04-19 — Roadmap defined (2 phases: 3-4)
+
+## Milestone Progress
+
+| Phase | Name | Requirements | Status |
+|-------|------|-------------|--------|
+| 3 | Core Integration | 8 | Not started |
+| 4 | Testing & Validation | 7 | Not started |
+
+**Coverage:** 15/15 requirements mapped ✓
 
 ## Context
 
@@ -33,10 +42,14 @@ Last activity: 2026-04-19 — Milestone v1.21.1 started
 ## Key Files
 
 - `src/core/workflow-funnel-loader.ts` — WorkflowFunnelLoader 类（已写好，待接入 runtime）
+- `src/core/paths.ts` — WORKFLOWS_YAML 需加入 PD_FILES
 - `src/service/runtime-summary-service.ts` — 需改造为 YAML 驱动
 - `src/commands/evolution-status.ts` — /pd-evolution-status 展示层
-- `.planning/phases/02-workflow-watchdog/workflows.yaml` — YAML SSOT
 
 ## Next
 
-**Command:** `/gsd-plan-phase 2` (since Phase 1 from v1.21 already covered the design doc)
+**Command:** `/gsd-plan-phase 3`
+
+---
+
+*Last updated: 2026-04-19 after roadmap created*
