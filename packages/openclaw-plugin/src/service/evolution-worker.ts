@@ -31,7 +31,6 @@ import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-r
 import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
-import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
 import {
     createNocturnalTrajectoryExtractor,
@@ -2441,18 +2440,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                             swept += await empathyMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS);
                         } finally {
                             empathyMgr.dispose();
-                        }
-
-                        const deepReflectMgr = new DeepReflectWorkflowManager({
-                            workspaceDir: wctx.workspaceDir,
-                            logger: api.logger,
-                            subagent: subagentRuntime,
-                            agentSession,
-                        });
-                        try {
-                            swept += await deepReflectMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS);
-                        } finally {
-                            deepReflectMgr.dispose();
                         }
 
                         // #183 + #188: Sweep Nocturnal workflows too (with gateway-safe fallback)

@@ -37,27 +37,6 @@
         "default": [],
         "description": "自定义高危目录（例如 .git/, prod_db/）。AI 试图修改这些目录前，将被强制拦截并要求出具安全计划。"
       },
-      "deep_reflection": {
-        "type": "object",
-        "additionalProperties": false,
-        "description": "当 AI 遇到复杂问题或连续报错时，是否允许它停下来进行深度自我反思？",
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": true,
-            "description": "开启 AI 深度反思功能"
-          },
-          "mode": {
-            "type": "string",
-            "enum": [
-              "auto",
-              "forced"
-            ],
-            "default": "auto",
-            "description": "auto: 遇到困难自动触发; forced: 每次回答前都强制反思 (极耗时间，不推荐)"
-          }
-        }
-      }
     }
   },
   "uiHints": {
@@ -70,9 +49,6 @@
     },
     "riskPaths": {
       "label": "⚠️ 绝对高危目录 (空表示不设限)"
-    },
-    "deep_reflection": {
-      "label": "💡 AI 深度反思功能"
     }
   },
   "buildFingerprint": {

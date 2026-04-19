@@ -44,15 +44,6 @@ All commands support **short aliases** for easier input:
 | `/nocturnal-rollout` | Nocturnal rollout and promotion |
 | `/pd-workflow-debug` | Debug workflow state |
 
-### Tools
-
-**`deep_reflect`** - Executes deep meta-cognitive reflection to analyze potential risks, logical gaps, or architectural improvements in the current task.
-
-Parameters:
-- `context` (required): Task context, code snippet, or current difficulty
-- `depth` (optional): Reflection depth 1-3 (default: 2)
-- `model_id` (optional): Force specific thinking model
-
 ### Configuration
 
 The plugin accepts the following configuration options:
@@ -62,8 +53,6 @@ The plugin accepts the following configuration options:
 | `language` | `zh` | Interaction language (`en` or `zh`) |
 | `auditLevel` | `medium` | Security guardrail level (`low`, `medium`, `high`) |
 | `riskPaths` | `[]` | High-risk directories requiring explicit authorization |
-| `deep_reflection.enabled` | `true` | Enable AI deep reflection |
-| `deep_reflection.mode` | `auto` | Reflection trigger mode (`auto` or `forced`) |
 
 ## Part of the principles monorepo
 
