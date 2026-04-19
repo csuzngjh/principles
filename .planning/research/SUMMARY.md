@@ -1,212 +1,128 @@
 # Project Research Summary
 
-**Project:** KeywordLearningEngine for Correction Cues (v1.14)
-**Domain:** Dynamic keyword learning for AI agent correction signal detection
-**Researched:** 2026-04-14
+**Project:** v1.21.1 Workflow Funnel Runtime
+**Domain:** YAML runtime integration (WorkflowFunnelLoader wiring into RuntimeSummaryService)
+**Researched:** 2026-04-19
 **Confidence:** HIGH
 
 ## Executive Summary
 
-The KeywordLearningEngine replaces 15 hardcoded static correction-cue keywords with a learnable store that tracks false positive rate (FPR) and uses an LLM optimizer for continuous improvement. The existing codebase already contains a production-validated pattern in `empathy-keyword-matcher.ts` -- the correction cue system reuses this exact architecture with different seed keywords and a separate store file. No new dependencies are required.
+v1.21.1 is a wiring-only release. `WorkflowFunnelLoader` is fully implemented, `js-yaml@^4.1.1` is already in deps, and `fs.watch()` with 100ms debounce is already working. The only substantive work is connecting these existing components: add `WORKFLOWS_YAML` to `PD_FILES`, wire `WorkflowFunnelLoader.getAllFunnels()` into `RuntimeSummaryService.getSummary()`, and add lifecycle management (`watch()`/`dispose()`) in `evolution-status.ts`.
 
-The core insight from research: the empathy keyword system proves the pattern works with existing infrastructure (Node.js fs, OpenClaw subagent workflows). The KeywordLearningEngine for correction cues simply mirrors this pattern. However, seven pitfall categories were identified -- most critically, FPR calculation assumes verified labels that the system does not currently collect, and the learning loop can reinforce false positives rather than reduce them if FPR verification is not built into Phase 1.
+The architecture is minimal: two files change (`evolution-status.ts`, `RuntimeSummaryService`), one file stays unchanged but is the core deliverable (`WorkflowFunnelLoader`). Backward compatibility is preserved because `RuntimeSummaryService` falls back to hardcoded behavior when the `funnels` parameter is not provided. No new patterns, no new dependencies, no new event types.
+
+The primary risks are operational: FSWatcher leaks from double-watch without guards, YAML parse warnings invisible to consumers, and cross-platform watcher behavior on Windows. All are preventable with targeted fixes before the watcher goes into production.
 
 ## Key Findings
 
-### From STACK.md: Technology Stack
+### Recommended Stack
 
-| Technology | Decision | Rationale |
-|------------|----------|-----------|
-| TypeScript ^6.0.2 | Use existing | Already in plugin, no change needed |
-| Node.js fs module | Use existing | empathy-keyword-matcher.ts already uses this pattern |
-| OpenClaw Subagent Workflow | Reuse existing | Same pattern as empathy optimizer |
-| JSON file storage | Use existing | `correction_keywords.json` parallel to `empathy_keywords.json` |
-| No new dependencies | Confirmed | Empathy pattern proves this works without new packages |
+No new dependencies required. The stack is fully in place:
 
-**Seed keywords** (15 terms migrated from detectCorrectionCue):
-- High-specificity: '搞错了', '理解错了', '你理解错了' (weight 0.7-0.8, FPR 0.1-0.15)
-- Medium-specificity: '不是这个', '不对', '错了', '重新来', 'you are wrong', 'redo' (weight 0.5-0.6, FPR 0.2-0.25)
-- High-genericity: 'again', 'not this' (weight 0.3-0.4, FPR 0.35-0.4)
+- **`js-yaml@^4.1.1`** — already in deps; safe `DEFAULT_SCHEMA` prevents code execution; industry standard
+- **`fs.watch()`** — Node.js built-in; 100ms debounce already implemented; sufficient for single-file watch
+- **`chokidar`** — not needed initially; add only if `fs.watch()` proves unreliable on Windows in testing
+- **`workflows.yaml`** — lives at `.state/workflows.yaml` per workspace; path must be registered in `PD_FILES`
 
-### From FEATURES.md: Feature Landscape
+**Missing integration step:** `WORKFLOWS_YAML` path must be added to `src/core/paths.ts` in `PD_FILES`. This is the first code change required.
 
-**Table stakes (must-have for v1):**
-- Static keyword store with seed keywords migrated from detectCorrectionCue
-- Basic keyword matching replacing detectCorrectionCue()
-- Correction store persistence to `correction_keywords.json`
-- In-memory cache parallel to `_empathyKeywordCache`
+### Expected Features
 
-**Differentiators (add after validation):**
-- Subagent optimization trigger (every 50 turns or 6 hours)
-- FPR feedback integration with trajectory recording
-- LLM-discovered new correction expressions
+This is a single-feature release. The entire deliverable is wiring the loader into the summary service.
 
-**Anti-features (avoid):**
-- Real-time FPR updates (too noisy; batch via subagent instead)
-- Fuzzy/approximate matching (increases false positives dramatically)
-- Keyword auto-removal (premature removal risk; LLM should decide)
-- Per-user keyword stores (complexity explosion; defer to v2)
+**Must have (table stakes):**
+- YAML-defined funnel stages visible in `/pd-evolution-status` output — core SSOT value proposition
+- Hot-reload: editing `workflows.yaml` reflects in status without restart — already works via `fs.watch`
+- Graceful degraded states — missing YAML yields empty funnel + warning; malformed YAML preserves last valid + warning
 
-**Priority:**
-- P1: Seed store + basic matching + persistence + cache
-- P2: Subagent optimization + FPR feedback + LLM discovery
+**Should have (differentiators):**
+- YAML-driven stage-to-event mapping — replaces hardcoded event type matching in `RuntimeSummaryService`
+- Warning propagation — YAML parse errors must surface in `RuntimeSummaryService.metadata.warnings` (currently only `console.warn`, invisible to consumers)
 
-### From ARCHITECTURE.md: System Design
+**Defer to v1.x:**
+- `statsField` dot-path resolution (P3) — inferred counts from event type matching work adequately
+- Per-workflowId event filtering (P2) — requires event data schema consistency across all event types
 
-**Location:** `packages/openclaw-plugin/src/core/` alongside existing empathy modules
+### Architecture Approach
 
-**Two-layer design:**
-```
-KeywordLearner (base)
-├── match(), load(), save(), shouldOptimize(), applyUpdates()
-└── CorrectionCueLearner (subclass)
-    ├── seed keywords (15 terms)
-    └── binary detection (no severity mapping)
-```
+Two files change, one is unchanged but is the product:
 
-**Proposed new files:**
-| File | Purpose |
-|------|---------|
-| `core/keyword-types.ts` | Generic types extractable from empathy-types.ts |
-| `core/keyword-learner.ts` | Base class ported from empathy pattern |
-| `core/correction-cue-matcher.ts` | Correction-specific learner with seed keywords |
+1. **`evolution-status.ts`** — instantiates `WorkflowFunnelLoader(stateDir)`, calls `watch()`, passes `getAllFunnels()` to `RuntimeSummaryService`, owns lifecycle (`dispose()` on plugin shutdown)
+2. **`RuntimeSummaryService.getSummary()`** — gains optional `funnels?: Map<string, WorkflowStage[]>` parameter; falls back to hardcoded behavior when absent
+3. **`WorkflowFunnelLoader`** — NO changes; fully implemented and correct
 
-**Integration:** In `prompt.ts`:
-- Replace `detectCorrectionCue()` with `CorrectionCueLearner.match()`
-- Module-level cache: `_correctionCueCache`
-- Trigger optimization via existing `EmpathyObserverWorkflowManager` pattern
+Build order is strictly linear: (1) add `WORKFLOWS_YAML` to `PD_FILES`, (2) update `RuntimeSummaryService` signature with fallback, (3) wire in `evolution-status.ts`.
 
-**Build order:** types -> base class -> subclass -> prompt.ts integration -> optimization trigger -> testing
+### Critical Pitfalls
 
-### From PITFALLS.md: Critical Risks
-
-**Top 5 pitfalls requiring prevention:**
-
-| Pitfall | Severity | Prevention |
-|---------|----------|------------|
-| FPR calculation assumes verified labels (never actually calculated from labeled data) | CRITICAL | Add explicit verification step; track truePositiveCount vs falsePositiveCount separately |
-| Learning loop reinforces false positives (hitCount conflates TP and FP) | CRITICAL | Distinguish hitCount from truePositiveCount; lower weight on confirmed FP |
-| Per-message keyword matching causes latency at scale (O(n) scan over all terms) | CRITICAL | Trie or Bloom filter; cap store at 200 terms |
-| State file corruption from unsafe writes (writeFileSync crash = JSON parse failure) | CRITICAL | Temp-file-then-rename atomic write pattern |
-| Module-level cache causes stale state across reloads (cache not invalidated on disk update) | CRITICAL | Invalidate cache after saveKeywordStore |
-
-**Phase mapping (critical items must be in Phase 1):**
-- Phase 1: FPR verification infrastructure, atomic writes, cache invalidation, store size limits, performance baseline
-- Phase 2: Feedback collection, throttle logic (depends on Phase 1 infrastructure)
+1. **FSWatcher leak on double-watch** — `watch()` has no guard against re-invocation; calling it twice leaks the first handle. Fix: add `if (this.watchHandle) return;` at top of `watch()`.
+2. **Silent fallback — loader never integrated** — `WorkflowFunnelLoader` is inert without the wiring. The loader loads correctly but produces no visible output. This is the core deliverable, not a nice-to-have.
+3. **YAML parse errors invisible to consumers** — `console.warn` inside the loader is invisible; `RuntimeSummaryService.metadata.warnings` has no mechanism to receive them. Need a callback or `getLastLoadWarnings()` method.
+4. **100ms debounce too short for editor save patterns** — VS Code and others write files in multiple rapid sub-writes; 100ms may fire on incomplete file. Fix: validate `version` field before committing new config.
+5. **Shared array references in `getAllFunnels()`** — returns `new Map(this.funnels)` but stage arrays are shared; consumer mutation corrupts loader state. Fix: deep-clone or freeze the arrays.
 
 ## Implications for Roadmap
 
-### Suggested Phase Structure
+### Phase 1: YAML Funnel Runtime Wiring
 
-**Phase 1: Foundation -- Seed Store and Safe Persistence**
-*Rationale:* Before any learning can work, the infrastructure must be correct. FPR tracking, atomic writes, cache invalidation, and store size limits are all prerequisite to learning. Cannot skip to optimization without this.
-
-**Delivers:**
-- `correction-keyword-matcher.ts` with seed keywords migrated from detectCorrectionCue
-- Atomic write (temp-file-then-rename) for correction_keywords.json
-- Cache invalidation after save
-- Store size limit (200 terms hard cap)
-- Performance baseline benchmark (matching latency with 50/100/200 terms)
-- Remove redundant detectCorrectionCue (ensure seed coverage of all 15 terms)
-
-**Avoids:** Pitfall 4 (state file corruption), Pitfall 7 (stale cache), Pitfall 5 (unbounded growth), Pitfall 3 (latency at scale)
-
-**Research flag:** None needed -- existing empathy-keyword-matcher.ts provides exact pattern to follow.
-
----
-
-**Phase 2: Learning Loop -- FPR Feedback and Optimization Trigger**
-*Rationale:* Once persistence infrastructure exists, implement the feedback loop. FPR must be calculated from verified labels, not LLM guesses. This phase requires Phase 1's atomic writes and cache invalidation.
+**Rationale:** This is the entire v1.21.1 release. All work is interconnected wiring of existing components. No phase splitting is meaningful.
 
 **Delivers:**
-- FPR verification infrastructure (truePositiveCount / falsePositiveCount tracking)
-- Subagent validation step (confirm when keyword match was actually a correction)
-- shouldTriggerOptimization() with time-based throttle (not turn-based)
-- Correction-specific optimization prompt builder
-- Optimization call throttling (max N per day)
+- `WORKFLOWS_YAML` added to `PD_FILES` (`src/core/paths.ts`)
+- `RuntimeSummaryService.getSummary()` accepts optional `funnels` parameter with fallback to hardcoded behavior
+- `evolution-status.ts` instantiates loader, calls `watch()`, passes funnels to summary service
+- `dispose()` wired into lifecycle hook (plugin shutdown / workspace switch)
+- FSWatcher double-watch guard added (`if (this.watchHandle) return;`)
+- YAML parse warnings propagated to `RuntimeSummaryService.metadata.warnings`
+- `version` field validation before committing new config (editor save pattern fix)
+- Deep-clone or freeze in `getAllFunnels()` to prevent shared reference mutation
+- `rename` event handling added alongside `change` for Windows compatibility
 
-**Avoids:** Pitfall 1 (FPR drift from unverified labels), Pitfall 2 (learning reinforces FP), Pitfall 6 (optimization cost abuse)
+**Avoids:** All 7 pitfalls from PITFALLS.md
 
-**Research flag:** Phase 2 needs validation of exact verification mechanism -- how does subagent confirm whether a keyword match was actually a correction vs a false positive?
-
----
-
-**Phase 3: LLM Discovery and Full Integration**
-*Rationale:* After feedback loop works, add LLM-based keyword discovery. The subagent analyzes recent messages and proposes add/update/remove actions. This completes the learning loop.
-
-**Delivers:**
-- buildCorrectionOptimizationPrompt() function
-- applyCorrectionUpdates() with add/update/remove rules
-- LLM-discovered keywords added to store
-- Integration test with trajectory recording (correctionDetected flag feeds back)
-
-**Avoids:** Remaining feature gaps from FEATURES.md differentiators
-
-**Research flag:** None needed -- empathyObserverWorkflowSpec pattern is well-established.
-
----
-
-**Phase 4: Testing and Validation**
-*Rationale:* Complete validation before v1.14 ships. Integration tests verify all pipeline components work together.
-
-**Delivers:**
-- Integration tests: matching + optimization + persistence cycle
-- FPR verification test: confirm FP match reduces keyword weight
-- Atomic write recovery test: kill process mid-save, verify recoverable
-- Store size limit test: attempt to exceed cap, verify enforcement
-
-**Research flag:** None.
+**Research Flags:** None — all patterns are verified from existing implementation. No external research needed.
 
 ### Phase Ordering Rationale
 
-1. **Phase 1 before Phase 2:** FPR verification infrastructure requires atomic writes and cache invalidation. Learning loop cannot work without safe persistence.
-2. **Phase 2 before Phase 3:** Optimization depends on feedback collection. LLM discovery without verified FPR values produces the same drift problem.
-3. **Phase 3 before Phase 4:** Full integration must exist before testing.
-4. **No separate dependency phase:** All technologies already exist in plugin. No new packages to resolve.
+- Single-phase because the entire deliverable is one wire-up task
+- All 7 pitfalls map to Phase 1 and can be resolved in one implementation pass
+- `WorkflowFunnelLoader` is already tested in isolation; integration tests cover the wiring
 
 ### Research Flags
 
-**Needs research during planning:**
-- **Phase 2:** Exact FPR verification mechanism -- how does the system confirm whether a match was a true positive or false positive? Current empathy system does not actually do this verification (stats.totalFalsePositives is always 0). This needs a product decision.
-
-**Phases with standard patterns (skip research):**
-- **Phase 1:** File persistence, cache invalidation, store size limits -- all follow existing empathy-keyword-matcher.ts patterns exactly.
-- **Phase 3:** LLM optimization workflow -- follows existing EmpathyObserverWorkflowManager pattern exactly.
-- **Phase 4:** Testing patterns -- existing test files in plugin.
+Phases with standard patterns (skip research-phase):
+- **Phase 1:** Well-documented existing implementation; all source is in-repo; no external research needed
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | No new dependencies; empathy-keyword-matcher.ts proves pattern works with existing infrastructure |
-| Features | HIGH | Based on existing empathy integration analysis and PROJECT.md v1.14 milestone |
-| Architecture | HIGH | Clear two-layer design; build order is logical and non-cyclic; existing pattern to follow |
-| Pitfalls | HIGH | Based on code analysis of empathy-keyword-matcher.ts, empathy-types.ts, prompt.ts |
+| Stack | HIGH | `js-yaml@^4.1.1` verified in package.json; `fs.watch()` verified in loader implementation |
+| Features | HIGH | Wiring-only; all features already implemented in existing components |
+| Architecture | HIGH | Two-file change verified from source; backward compat contract documented |
+| Pitfalls | MEDIUM-HIGH | Pitfalls derived from code inspection; some (Windows rename events, editor save patterns) need runtime validation |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-| Gap | Impact | Resolution |
-|-----|--------|------------|
-| FPR verification mechanism not implemented in empathy system | HIGH -- FPR values are currently LLM guesses, not calculated from data | Phase 2 must design and implement explicit verification step |
-| Keyword count discrepancy (15 in PROJECT.md vs 16 counted from code) | LOW -- minor seed keyword count issue | Verify exact seed list during Phase 1 implementation |
-| Per-user keyword adaptation deferred to v2 | MEDIUM -- some users may have different correction styles | Document as v2 feature; design should not preclude it |
+- **Windows `rename` event handling** — code inspection shows guard exists but has not been tested on Windows with VS Code atomic-save pattern; validate during implementation
+- **Editor debounce adequacy** — 100ms debounce may be too short for multi-write editor saves; needs empirical testing with target editors before declaring watcher production-ready
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `packages/openclaw-plugin/src/core/empathy-keyword-matcher.ts` -- existing learning pattern (335 lines)
-- `packages/openclaw-plugin/src/core/empathy-types.ts` -- data model template
-- `packages/openclaw-plugin/src/hooks/prompt.ts:87-111` -- current detectCorrectionCue with hardcoded keywords
-- `packages/openclaw-plugin/src/hooks/prompt.ts:461-604` -- empathy keyword integration pattern
-- `packages/openclaw-plugin/src/service/subagent-workflow/` -- optimization workflow
+- `packages/openclaw-plugin/src/core/workflow-funnel-loader.ts` — loader implementation (170 lines), FSWatcher, debounce, failure semantics
+- `packages/openclaw-plugin/src/core/paths.ts` — `PD_FILES` constant; `workflows.yaml` path not yet registered
+- `packages/openclaw-plugin/src/service/runtime-summary-service.ts` — current summary service (810 lines), target integration point
+- `packages/openclaw-plugin/src/commands/evolution-status.ts` — command entry point (211 lines), current wiring
+- `packages/openclaw-plugin/package.json` — verified `js-yaml@^4.1.1` in deps
 
-### Secondary (HIGH confidence)
-- `.planning/PROJECT.md` -- v1.14 milestone definition
-- `packages/openclaw-plugin/package.json` -- current dependencies and versions
+### Secondary (MEDIUM confidence)
+- `packages/openclaw-plugin/src/core/event-log.ts` — event types for stage aggregation
+- `packages/openclaw-plugin/src/types/event-types.ts` — event type definitions
 
 ---
 
-*Research completed: 2026-04-14*
+*Research completed: 2026-04-19*
 *Ready for roadmap: yes*
