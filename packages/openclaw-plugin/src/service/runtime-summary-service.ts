@@ -250,18 +250,17 @@ export class RuntimeSummaryService {
       false
     );
 
-    // YAML-SSOT-02/03: build workflowFunnels from funnels Map if provided
-    // Get most recent date from daily stats, fallback to today
-    const today = generatedAt.slice(0, 10);
-    const availableDates = Object.keys(dailyStats || {}).sort().reverse();
-    const statsDate = availableDates.length > 0 ? availableDates[0] : today;
+    // Unified date for all "today"-scope reads in this summary — ensures funnel counts,
+    // heartbeat stats, and dailyStats all agree on the same date and never contradict.
+    const todayStr = generatedAt.slice(0, 10);
 
+    // YAML-SSOT-02/03: build workflowFunnels from funnels Map if provided
     let workflowFunnelsOutput: WorkflowFunnelOutput[] | undefined;
     if (options?.funnels) {
       workflowFunnelsOutput = [];
       for (const [funnelKey, stages] of options.funnels) {
         const stageOutputs: WorkflowFunnelStageOutput[] = stages.map(stage => {
-          const { count, resolvable } = resolveStatsField(dailyStats?.[statsDate], stage.statsField);
+          const { count, resolvable } = resolveStatsField(dailyStats?.[todayStr], stage.statsField);
           return {
             key: stage.name,
             label: stage.name,
@@ -297,8 +296,8 @@ export class RuntimeSummaryService {
     const status: 'ok' | 'degraded' =
       (loaderWarnings.length > 0 || hasUnresolvableStage) ? 'degraded' : 'ok';
 
-    // Get most recent date from daily stats, fallback to today
-    const dailyGfiPeak = dailyStats?.[statsDate]?.gfi?.peak;
+    // GFI peak — use today's data (consistent with funnel/heartbeat)
+    const dailyGfiPeak = dailyStats?.[todayStr]?.gfi?.peak;
 
     const gfiCurrent =
       selectedSession.session && Number.isFinite(selectedSession.session.currentGfi)
@@ -348,7 +347,6 @@ export class RuntimeSummaryService {
     // Read pending tasks from the diagnostician task store
     const pendingDiagTasks = getPendingDiagnosticianTasks(wctx.stateDir);
     // Read heartbeat diagnosis stats from daily event log
-    const todayStr = generatedAt.slice(0, 10);
     const diagDailyStats = dailyStats?.[todayStr]?.evolution;
     const heartbeatDiagnosis = {
       pendingTasks: pendingDiagTasks.length,
@@ -389,10 +387,10 @@ export class RuntimeSummaryService {
         lastUpdated: trajectoryStats.lastIngestAt ?? generatedAt,
       },
       dailyStats: {
-        toolCalls: dailyStats?.[statsDate]?.toolCalls ?? 0,
-        painSignals: dailyStats?.[statsDate]?.painSignals ?? 0,
-        evolutionTasks: dailyStats?.[statsDate]?.evolutionTasks ?? 0,
-        lastUpdated: statsDate,
+        toolCalls: dailyStats?.[todayStr]?.toolCalls ?? 0,
+        painSignals: dailyStats?.[todayStr]?.painSignals ?? 0,
+        evolutionTasks: dailyStats?.[todayStr]?.evolutionTasks ?? 0,
+        lastUpdated: todayStr,
       },
       trends: {
         sevenDay: { successRateChange: 0, toolCallVolumeChange: 0, painSignalRateChange: 0 },

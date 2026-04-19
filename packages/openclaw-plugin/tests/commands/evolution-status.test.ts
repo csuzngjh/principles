@@ -364,7 +364,7 @@ funnels:
       - name: evaluated
         eventType: rulehost_evaluated
         eventCategory: evaluated
-        statsField: evolution.ruleHostEvaluated
+        statsField: evolution.rulehostEvaluated
 `;
     fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), workflowsYaml, 'utf8');
 
@@ -375,7 +375,7 @@ funnels:
         evolution: {
           nocturnalDreamerCompleted: 3,
           nocturnalArtifactPersisted: 2,
-          ruleHostEvaluated: 15,
+          rulehostEvaluated: 15,
         },
       },
     });
@@ -490,7 +490,7 @@ funnels:
       - name: evaluated
         eventType: rulehost_evaluated
         eventCategory: evaluated
-        statsField: evolution.ruleHostEvaluated
+        statsField: evolution.rulehostEvaluated
 `;
     fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), workflowsYaml, 'utf8');
     loader.load(); // reload after writing file
@@ -502,7 +502,7 @@ funnels:
         evolution: {
           nocturnalDreamerCompleted: 3,
           nocturnalArtifactPersisted: 2,
-          ruleHostEvaluated: 15,
+          rulehostEvaluated: 15,
         },
       },
     });
