@@ -401,7 +401,8 @@ export class EventLog {
       // Backward compat: handle old events with success:boolean and new events with category:string
       if ('category' in data) {
         // New format: category is 'success' | 'missing_json' | 'incomplete_fields'
-        if (data.category === 'success' || data.category === 'incomplete_fields') {
+        // All three categories mean diagnosis completed and attempted to produce a report
+        if (data.category === 'success' || data.category === 'missing_json' || data.category === 'incomplete_fields') {
           stats.evolution.diagnosticianReportsWritten++;
         }
         if (data.category === 'missing_json') {
