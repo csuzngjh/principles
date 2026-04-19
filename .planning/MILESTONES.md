@@ -5,7 +5,7 @@
 **Phases completed:** 2 phases, 6 plans
 **Key accomplishments:**
 - diagnostician_report category 三态扩展（success/missing_json/incomplete_fields）
-- js-yaml + WorkflowFunnelLoader 类（YAML SSOT）
+- js-yaml + WorkflowFunnelLoader 类（YAML 配置加载 scaffold; 运行时 SSOT deferred to v1.21.2）
 - event-types.ts: 6 new EventType + 3 EventCategory + 6 EventData interfaces
 - event-log.ts: 6 recordXxx() methods + 7 new EvolutionStats fields
 - Nocturnal: 3 stage events (dreamer_completed, artifact_persisted, code_candidate_created)
