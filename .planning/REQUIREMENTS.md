@@ -7,10 +7,10 @@
 
 ### Runtime Wiring
 
-- [ ] **YAML-FUNNEL-01**: RuntimeSummaryService 接受可选 funnel definitions；未提供时允许使用内置默认定义作为兼容路径
-- [ ] **YAML-FUNNEL-02**: workspace-scoped runtime owner 负责创建并持有 WorkflowFunnelLoader，并将当前 funnel definitions 传给 RuntimeSummaryService
+- [x] **YAML-FUNNEL-01**: RuntimeSummaryService 接受可选 funnel definitions；未提供时允许使用内置默认定义作为兼容路径
+- [x] **YAML-FUNNEL-02**: workspace-scoped runtime owner 负责创建并持有 WorkflowFunnelLoader，并将当前 funnel definitions 传给 RuntimeSummaryService
 - [ ] **YAML-FUNNEL-03**: WORKFLOWS_YAML 路径加入路径常量体系（PD_FILES / paths.ts）
-- [ ] **YAML-FUNNEL-04**: RuntimeSummaryService 用 funnel definitions 驱动 stage 聚合，而不是 hardcoded event type mapping
+- [x] **YAML-FUNNEL-04**: RuntimeSummaryService 用 funnel definitions 驱动 stage 聚合，而不是 hardcoded event type mapping
 
 ### FSWatcher Lifecycle
 
@@ -60,10 +60,10 @@ Deferred to future release.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| YAML-FUNNEL-01 | Phase 3 | Pending |
-| YAML-FUNNEL-02 | Phase 3 | Pending |
+| YAML-FUNNEL-01 | Phase 3 | Complete |
+| YAML-FUNNEL-02 | Phase 3 | Complete |
 | YAML-FUNNEL-03 | Phase 3 | Pending |
-| YAML-FUNNEL-04 | Phase 3 | Pending |
+| YAML-FUNNEL-04 | Phase 3 | Complete |
 | WATCHER-01 | Phase 3 | Pending |
 | WATCHER-02 | Phase 3 | Pending |
 | WATCHER-03 | Phase 3 | Pending |
