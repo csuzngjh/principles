@@ -63,7 +63,6 @@
 6. Pain learning pipeline handles the transition gracefully without prolonged "无拦截" gaps
 
 **Plans**: VERIFIED — Pain/principle-compiler/rule-host tests pass (105 tests)
-
 ### v1.21.1 Phase 3: Core Integration
 **Goal**: Scaffold WorkflowFunnelLoader, establish FSWatcher lifecycle, and plumb loaderWarnings into RuntimeSummaryService (YAML scaffolding only; full funnels Map consumption deferred to v1.21.2)
 **Depends on**: Nothing
