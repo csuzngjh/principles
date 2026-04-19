@@ -1,33 +1,26 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-18T14:19:36.278Z",
-  "phase": null,
-  "phase_name": null,
-  "phase_dir": null,
+  "timestamp": "2026-04-19T02:27:18.731Z",
+  "phase": "04",
+  "phase_name": "Testing & Validation",
+  "phase_dir": ".planning/phases/04-testing-validation",
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "completed",
-  "completed_tasks": [
-    {"id": 1, "name": "STATE.md reset for v1.21", "status": "completed"},
-    {"id": 2, "name": "Requirements 定义", "status": "completed"},
-    {"id": 3, "name": "Roadmap 创建", "status": "completed"}
+  "status": "paused_planning",
+  "completed_tasks": [],
+  "remaining_tasks": [
+    {"id": 1, "name": "Plan 04-01: ERR-01/02/03 + PLAT-01 implementation", "status": "not_started"},
+    {"id": 2, "name": "Plan 04-02: TEST-01/02/03/04 implementation", "status": "not_started"}
   ],
-  "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [],
   "decisions": [
-    {"decision": "YAML workflows.yaml 作为单一真相来源，工作流定义不硬编码", "rationale": "PD 工作流持续变化、调研结论可能不准，硬编码漏斗定义会成为技术债", "phase": "new-milestone-v1.21"},
-    {"decision": "event-log 只做原始 event 记录，漏斗由 YAML + event 数据推导", "rationale": "代码和漏斗定义解耦，两边可独立修正", "phase": "new-milestone-v1.21"},
-    {"decision": "Phase 1 先做 Issue #366 修复（diagnostician_report category 三态扩展）", "rationale": "Issue #366 是当前最紧迫的断点，YAML 框架后续迭代", "phase": "new-milestone-v1.21"}
+    {"decision": "Phase 4 context created: all 7 success criteria from ROADMAP.md are requirements", "rationale": "Phase 3 D-08/09/10/11 lock error handling and platform behavior; Phase 4 only needs to test them", "phase": "03"},
+    {"decision": "Test pattern: fs.mkdtempSync + os.tmpdir() + vi.spyOn (from event-log.test.ts)", "rationale": "Consistent with existing test patterns in codebase", "phase": "04"},
+    {"decision": "Tests go in tests/core/ directory", "rationale": "Consistent with existing workflow-funnel-loader.ts location", "phase": "04"}
   ],
-  "uncommitted_files": [
-    "docs/superpowers/specs/2026-04-18-pd-workflow-funnel-design.md",
-    ".planning/PROJECT.md",
-    ".planning/STATE.md",
-    ".planning/REQUIREMENTS.md",
-    ".planning/ROADMAP.md"
-  ],
-  "next_action": "/gsd-new-milestone 工作流完成。v1.21 Planning 阶段完成：Design doc ✓ + PROJECT.md ✓ + STATE.md ✓ + REQUIREMENTS.md ✓ + ROADMAP.md ✓。下一步：/gsd-plan-phase 1 开始 Phase 1 实施（Issue #366 修复）",
-  "context_notes": "v1.21 new-milestone 完成。已完成：Design doc + PROJECT.md + STATE.md + REQUIREMENTS.md + ROADMAP.md。设计核心：YAML 工作流漏斗框架 + Issue #366 修复（diagnostician_report 三态）。下一步：Phase 1 实施。"
+  "uncommitted_files": [],
+  "next_action": "Run /gsd-plan-phase 4 to continue planning — CONTEXT.md already exists, will skip to planner",
+  "context_notes": "Phase 3 just completed. Phase 4 is pure testing phase — 7 success criteria covering error handling (ERR-01/02/03), Windows compatibility (PLAT-01), and test coverage (TEST-01/02/03/04). Phase 3 context D-08/D-09/D-10/D-11 fully defines expected behavior. Planning was interrupted by context exhaustion."
 }

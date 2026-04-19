@@ -72,6 +72,9 @@ export class WorkflowFunnelLoader {
   /** fs.watch() handle for cleanup */
   private watchHandle?: fs.FSWatcher;
 
+  /** YAML parse warnings from last load() call */
+  private readonly warnings: string[] = [];
+
   constructor(stateDir: string) {
     // D-02: workflows.yaml in .state/ directory
     this.configPath = path.join(stateDir, 'workflows.yaml');
@@ -84,7 +87,9 @@ export class WorkflowFunnelLoader {
    * On missing file, clears to empty.
    */
   load(): void {
+    this.warnings.length = 0; // reset warnings on each load
     if (!fs.existsSync(this.configPath)) {
+      this.warnings.push('workflows.yaml file not found.');
       this.funnels.clear();
       return;
     }
@@ -96,7 +101,9 @@ export class WorkflowFunnelLoader {
 
       // Validate top-level structure
       if (!config || typeof config.version !== 'string' || !Array.isArray(config.funnels)) {
-        console.warn(`[WorkflowFunnelLoader] workflows.yaml validation failed: missing version or funnels array. Preserving last valid config.`);
+        const msg = 'workflows.yaml validation failed: missing version or funnels array. Preserving last valid config.';
+        console.warn(`[WorkflowFunnelLoader] ${msg}`);
+        this.warnings.push(msg);
         return;
       }
 
@@ -106,7 +113,9 @@ export class WorkflowFunnelLoader {
         if (funnel?.workflowId && typeof funnel.workflowId === 'string' && Array.isArray(funnel.stages)) {
           newFunnels.set(funnel.workflowId, funnel.stages);
         } else {
-          console.warn(`[WorkflowFunnelLoader] Skipping invalid funnel entry: missing workflowId or stages.`);
+          const msg = 'Skipping invalid funnel entry: missing workflowId or stages.';
+          console.warn(`[WorkflowFunnelLoader] ${msg}`);
+          this.warnings.push(msg);
         }
       }
 
@@ -117,19 +126,27 @@ export class WorkflowFunnelLoader {
       }
     } catch (err) {
       // Best-effort: preserve last known-good config on parse error
-      console.warn(`[WorkflowFunnelLoader] Failed to parse workflows.yaml: ${String(err)}. Preserving last valid config.`);
+      const msg = `Failed to parse workflows.yaml: ${String(err)}. Preserving last valid config.`;
+      console.warn(`[WorkflowFunnelLoader] ${msg}`);
+      this.warnings.push(msg);
     }
   }
 
   /**
    * Start watching workflows.yaml for changes.
    * Calls load() automatically when the file changes.
+   * No-op if the config file does not exist.
    */
   watch(): void {
+    // WATCHER-01: re-entry guard — prevent FSWatcher leak on double-watch
+    if (this.watchHandle) return;
+    // Guard: fs.watch fails with ENOENT if the path does not exist
+    if (!fs.existsSync(this.configPath)) return;
     // Debounce: only re-read after file write settles (100ms)
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
     this.watchHandle = fs.watch(this.configPath, (eventType) => {
-      if (eventType !== 'change') return;
+      // PLAT-01: handle both 'change' and 'rename' events for Windows compatibility
+      if (eventType !== 'change' && eventType !== 'rename') return;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         this.load();
@@ -156,9 +173,23 @@ export class WorkflowFunnelLoader {
 
   /**
    * Get the full WORKFLOW_FUNNELS table.
+   * Returns a deep clone — consumer mutations do not affect internal state.
    */
   getAllFunnels(): Map<string, WorkflowStage[]> {
-    return new Map(this.funnels);
+    const result = new Map<string, WorkflowStage[]>();
+    for (const [k, v] of this.funnels) {
+      // WATCHER-03: deep-clone arrays and stage objects
+      result.set(k, v.map(stage => ({ ...stage })));
+    }
+    return result;
+  }
+
+  /**
+   * Returns warnings from the last load() call.
+   * Callers can inspect these and propagate them to metadata.warnings.
+   */
+  getWarnings(): string[] {
+    return [...this.warnings];
   }
 
   /**
