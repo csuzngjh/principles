@@ -2,7 +2,7 @@
   "id": "principles-disciple",
   "name": "Principles Disciple",
   "description": "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
-  "version": "1.10.28",
+  "version": "1.10.37",
   "skills": [
     "./skills"
   ],
@@ -76,8 +76,8 @@
     }
   },
   "buildFingerprint": {
-    "gitSha": "b300ef0761c5",
-    "bundleMd5": "3c16a5198f3559b097d028b6e987cf5b",
-    "builtAt": "2026-04-18T11:02:10.525Z"
+    "gitSha": "0d6db62f8866",
+    "bundleMd5": "9cf803e170837b148578f78ff3c77dbd",
+    "builtAt": "2026-04-18T23:04:51.214Z"
   }
 }
