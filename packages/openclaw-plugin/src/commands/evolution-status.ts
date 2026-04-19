@@ -2,7 +2,7 @@ import * as path from 'path';
 import type { EvolutionReducerImpl } from '../core/evolution-reducer.js';
 import type { InternalizationRouteRecommendation } from '../core/principle-internalization/internalization-routing-policy.js';
 import { WorkflowFunnelLoader } from '../core/workflow-funnel-loader.js';
-import { WORKFLOWS_YAML, resolvePdPath } from '../core/paths.js';
+import { resolvePdPath } from '../core/paths.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { normalizeLanguage } from '../i18n/commands.js';
 import type { PluginCommandContext } from '../openclaw-sdk.js';
