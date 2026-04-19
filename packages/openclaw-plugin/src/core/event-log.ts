@@ -397,24 +397,27 @@ export class EventLog {
     } else if (entry.type === 'heartbeat_diagnosis') {
       stats.evolution.heartbeatsInjected++;
     } else if (entry.type === 'diagnostician_report') {
-      const data = entry.data as unknown as DiagnosticianReportEventData;
       // Backward compat: handle old events with success:boolean and new events with category:string
-      if ('category' in data) {
+      // Widen to Record<string, unknown> because DiagnosticianReportEventData requires
+      // category (new format) but legacy persisted events have { success: boolean }.
+      const raw = entry.data as unknown as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(raw, 'category')) {
         // New format: category is 'success' | 'missing_json' | 'incomplete_fields'
         // All three categories mean diagnosis completed and attempted to produce a report
-        if (data.category === 'success' || data.category === 'missing_json' || data.category === 'incomplete_fields') {
+        const cat = raw['category'] as string;
+        if (cat === 'success' || cat === 'missing_json' || cat === 'incomplete_fields') {
           stats.evolution.diagnosticianReportsWritten++;
         }
-        if (data.category === 'missing_json') {
+        if (cat === 'missing_json') {
           stats.evolution.reportsMissingJson++;
         }
-        if (data.category === 'incomplete_fields') {
+        if (cat === 'incomplete_fields') {
           stats.evolution.reportsIncompleteFields++;
         }
-      } else if ('success' in data) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, 'success')) {
         // Legacy format: { success: boolean }
         // Apply agreed default semantics: treat as 'success' if true, 'missing_json' if false
-        if (data.success) {
+        if (raw['success']) {
           stats.evolution.diagnosticianReportsWritten++;
         }
         // Note: legacy 'false' entries are not counted in any sub-counter since
