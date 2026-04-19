@@ -733,18 +733,21 @@ function restartGatewayWindows() {
     const logPath = join(getTempDir(), 'openclaw-auto-restart.log');
 
     try {
-        // Kill existing gateway processes first (don't rely on schtasks stop)
+        // Kill existing gateway processes first — taskkill fails across Windows sessions,
+        // use WMIC which can terminate processes regardless of session boundary.
         console.log('   Stopping existing gateway processes...');
         try {
-            const findCmd = "Get-Process -Name 'node' -ErrorAction SilentlyContinue | Where-Object { \$_.CommandLine -like '*openclaw*' } | Select-Object -ExpandProperty Id";
-            const pids = execSync(`powershell -NoProfile -Command "${findCmd}"`, { encoding: 'utf-8' }).trim();
+            const findPids = `Get-NetTCPConnection -LocalPort 18789 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique`;
+            const pids = execSync(`powershell -NoProfile -Command "${findPids}"`, { encoding: 'utf-8' }).trim();
             if (pids) {
-                const pidList = pids.split('\n').filter(p => p.trim());
+                const pidList = pids.split('\n').filter(p => p.trim() && p !== '0');
                 for (const pid of pidList) {
-                    try { execSync(`taskkill /PID ${pid.trim()} /F`, { stdio: 'pipe' }); } catch { /* ignore */ }
+                    const pidTrim = pid.trim();
+                    try {
+                        execSync(`wmic process where "ProcessId=${pidTrim}" call terminate`, { stdio: 'ignore' });
+                    } catch { /* ignore individual failures */ }
                 }
-                // Wait for graceful shutdown
-                execSync('timeout /t 2 /nobreak > nul', { shell: true, stdio: 'ignore' });
+                execSync('timeout /t 3 /nobreak > nul', { shell: true, stdio: 'ignore' });
             }
         } catch { /* no existing processes */ }
 
