@@ -126,10 +126,13 @@ export class WorkflowFunnelLoader {
    * Calls load() automatically when the file changes.
    */
   watch(): void {
+    // WATCHER-01: re-entry guard — prevent FSWatcher leak on double-watch
+    if (this.watchHandle) return;
     // Debounce: only re-read after file write settles (100ms)
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
     this.watchHandle = fs.watch(this.configPath, (eventType) => {
-      if (eventType !== 'change') return;
+      // PLAT-01: handle both 'change' and 'rename' events for Windows compatibility
+      if (eventType !== 'change' && eventType !== 'rename') return;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         this.load();
@@ -156,9 +159,15 @@ export class WorkflowFunnelLoader {
 
   /**
    * Get the full WORKFLOW_FUNNELS table.
+   * Returns a deep clone — consumer mutations do not affect internal state.
    */
   getAllFunnels(): Map<string, WorkflowStage[]> {
-    return new Map(this.funnels);
+    const result = new Map<string, WorkflowStage[]>();
+    for (const [k, v] of this.funnels) {
+      // WATCHER-03: deep-clone arrays and stage objects
+      result.set(k, v.map(stage => ({ ...stage })));
+    }
+    return result;
   }
 
   /**
