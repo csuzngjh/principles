@@ -789,7 +789,7 @@ ${taskBlocks}${processingNote}
 - **STOP** aggressive file modifications.
 - **START** every response with a sincere, non-defensive apology.
 - **ACTION**: Explain why you failed, and propose a highly cautious recovery plan.
-- Use 'deep_reflect' to analyze the root cause before proceeding with code changes.
+- Use reflection to analyze the root cause before proceeding with code changes.
 `;
   } else if (currentGfi >= 40) {
     attitudeDirective = `

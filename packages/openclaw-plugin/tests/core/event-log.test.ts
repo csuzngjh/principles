@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventLogService, EventLog } from '../../src/core/event-log.js';
-import type { DailyStats, DeepReflectionEventData, DiagnosticianReportEventData } from '../../src/types/event-types.js';
+import type { DailyStats, DiagnosticianReportEventData } from '../../src/types/event-types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -17,32 +17,6 @@ describe('EventLog', () => {
   afterEach(() => {
     eventLog.dispose();
     fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  describe('recordDeepReflection', () => {
-    it('should record deep reflection event', () => {
-      const data: DeepReflectionEventData = {
-        modelId: 'claude-sonnet-4',
-        modelSelectionMode: 'auto',
-        confidenceScore: 0.85,
-        insightsGenerated: 3,
-        durationMs: 1500,
-        passed: true
-      };
-
-      eventLog.recordDeepReflection('session-1', data);
-      eventLog.flush();
-
-      const today = new Date().toISOString().slice(0, 10);
-      const eventsFile = path.join(tempDir, 'logs', `events_${today}.jsonl`);
-      const content = fs.readFileSync(eventsFile, 'utf-8');
-      const event = JSON.parse(content.trim());
-
-      expect(event.type).toBe('deep_reflection');
-      expect(event.category).toBe('passed');
-      expect(event.data.modelId).toBe('claude-sonnet-4');
-      expect(event.data.modelSelectionMode).toBe('auto');
-    });
   });
 
   describe('DailyStats', () => {

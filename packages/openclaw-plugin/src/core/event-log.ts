@@ -16,7 +16,6 @@ import type {
   GateBypassEventData,
   PlanApprovalEventData,
   EvolutionTaskEventData,
-  DeepReflectionEventData,
   EmpathyRollbackEventData,
   // C: New event data types
   DiagnosisTaskEventData,
@@ -178,11 +177,6 @@ export class EventLog {
     this.record('evolution_task', 'completed', undefined, data);
   }
   
-  recordDeepReflection(sessionId: string | undefined, data: DeepReflectionEventData): void {
-    const category = data.passed ? 'passed' : data.timeout ? 'failure' : 'completed';
-    this.record('deep_reflection', category, sessionId, data);
-  }
-
   recordEmpathyRollback(sessionId: string | undefined, data: EmpathyRollbackEventData): void {
     this.record('empathy_rollback', 'rolled_back', sessionId, data);
   }

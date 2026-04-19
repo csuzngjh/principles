@@ -55,7 +55,6 @@ import { CentralSyncService } from './service/central-sync-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
-import { createDeepReflectTool } from './tools/deep-reflect.js';
 import { createWritePainFlagTool } from './tools/write-pain-flag.js';
 import { PathResolver } from './core/path-resolver.js';
 import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
@@ -750,7 +749,6 @@ const plugin = {
       }
     });
 
-    api.registerTool(createDeepReflectTool(api));
     api.registerTool(createWritePainFlagTool(api));
   }
 };

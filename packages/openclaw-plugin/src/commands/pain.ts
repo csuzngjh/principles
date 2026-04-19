@@ -168,8 +168,8 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
             suggestionText = `
 💡 **Suggestion (High friction detected)**:
    1. Run \`/pd-status reset\` to clear friction.
-   2. Ask the AI to use the \`deep_reflect\` tool.
-   4. Consider starting a new session with \`/clear\`.`;
+   2. Ask the AI to reflect deeply before continuing.
+   3. Consider starting a new session with \`/clear\`.`;
         }
         else if (gfi > 50) healthLabel = 'High Friction 🟡';
         else if (gfi > 20) healthLabel = 'Minor Issues 🟢';
