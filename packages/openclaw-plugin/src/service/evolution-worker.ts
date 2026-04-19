@@ -957,6 +957,16 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         if (presentPhases.length < requiredPhases.length) {
                             const missing = requiredPhases.filter(p => !phases[p]);
                             if (logger) logger.warn(`[PD:EvolutionWorker] Report for task ${task.id} incomplete — missing phases: ${missing.join(', ')} (present: ${presentPhases.length}/${requiredPhases.length})`);
+                            // PD-FUNNEL-1.1: Record incomplete_fields event BEFORE retry so funnel can see it.
+                            // The phase-completeness check requeues incomplete reports with continue; without
+                            // this record the funnel would have no signal for JSON-present-but-incomplete cases.
+                            if (eventLog) {
+                                eventLog.recordDiagnosticianReport({
+                                    taskId: task.id,
+                                    reportPath,
+                                    category: 'incomplete_fields',
+                                });
+                            }
                             // Treat as retryable failure: don't mark success, let retry logic kick in
                             reportParsed = false;
                             // Also delete the incomplete marker so next heartbeat re-runs the diagnostician

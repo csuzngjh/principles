@@ -411,6 +411,14 @@ export class EventLog {
         if (data.category === 'incomplete_fields') {
           stats.evolution.reportsIncompleteFields++;
         }
+      } else if ('success' in data) {
+        // Legacy format: { success: boolean }
+        // Apply agreed default semantics: treat as 'success' if true, 'missing_json' if false
+        if (data.success) {
+          stats.evolution.diagnosticianReportsWritten++;
+        }
+        // Note: legacy 'false' entries are not counted in any sub-counter since
+        // the old system had no such breakdown; they are invisible in sub-stats.
       }
     } else if (entry.type === 'principle_candidate') {
       stats.evolution.principleCandidatesCreated++;
