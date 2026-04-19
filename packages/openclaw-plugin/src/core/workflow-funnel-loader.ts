@@ -124,10 +124,13 @@ export class WorkflowFunnelLoader {
   /**
    * Start watching workflows.yaml for changes.
    * Calls load() automatically when the file changes.
+   * No-op if the config file does not exist.
    */
   watch(): void {
     // WATCHER-01: re-entry guard — prevent FSWatcher leak on double-watch
     if (this.watchHandle) return;
+    // Guard: fs.watch fails with ENOENT if the path does not exist
+    if (!fs.existsSync(this.configPath)) return;
     // Debounce: only re-read after file write settles (100ms)
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
     this.watchHandle = fs.watch(this.configPath, (eventType) => {
