@@ -171,10 +171,14 @@ function pushWarning(warnings: string[], message: string): void {
 export class RuntimeSummaryService {
   static getSummary(
     workspaceDir: string,
-    options?: { sessionId?: string | null; funnels?: Map<string, WorkflowStage[]> }
+    options?: { sessionId?: string | null; funnels?: Map<string, WorkflowStage[]>; loaderWarnings?: string[] }
   ): RuntimeSummary {
     const generatedAt = new Date().toISOString();
     const warnings: string[] = [];
+    // ERR-01: surface loader warnings (YAML parse failures) into metadata.warnings
+    if (options?.loaderWarnings) {
+      warnings.push(...options.loaderWarnings);
+    }
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
 
     const sessions = this.mergeSessionSnapshots(

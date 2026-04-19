@@ -41,14 +41,12 @@ funnels:
 
       const loader = new WorkflowFunnelLoader(tempDir);
 
-      // Get funnels from loader
+      // Get funnels and warnings from loader
       const funnels = loader.getAllFunnels();
+      const loaderWarnings = loader.getWarnings();
 
-      // Call getSummary with funnels — current impl ignores funnels param
-      const summary = RuntimeSummaryService.getSummary(tempDir, { funnels });
-
-      // ERR-01: getSummary should read funnels and surface warnings in metadata.warnings
-      // Current gap: getSummary accepts funnels but never processes it
+      // ERR-01: getSummary with loaderWarnings propagates YAML parse failures to metadata.warnings
+      const summary = RuntimeSummaryService.getSummary(tempDir, { funnels, loaderWarnings });
       expect(summary.metadata.warnings).toBeDefined();
       expect(Array.isArray(summary.metadata.warnings)).toBe(true);
       // The warning should mention the malformed YAML or config issue
