@@ -50,7 +50,7 @@ Last activity: 2026-04-19 — Phase 6 (Display Wiring) completed
 
 ## Next
 
-**Command:** `/gsd-plan-phase 1`（skip discuss，直接 planning）
+**Command:** `/gsd-plan-phase 7`（skip discuss，直接 planning）
 
 ---
 
