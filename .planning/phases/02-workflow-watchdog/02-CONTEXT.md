@@ -6,7 +6,7 @@
 <domain>
 ## Phase Boundary
 
-建立可扩展的 PD 工作流漏斗登记机制，以 `workflows.yaml` 作为单一真相来源（SSOT）。实现 `WORKFLOW_FUNNELS` 内存定义表从 YAML 动态加载，补充 Nocturnal 和 RuleHost 两条工作流的 stage event 记录。
+建立可扩展的 PD 工作流漏斗登记机制，`workflows.yaml` 作为可加载的配置来源（SSOT 目标，实际为 scaffold 阶段）。实现 `WORKFLOW_FUNNELS` 内存定义表从 YAML 动态加载，补充 Nocturnal 和 RuleHost 两条工作流的 stage event 记录。
 
 </domain>
 

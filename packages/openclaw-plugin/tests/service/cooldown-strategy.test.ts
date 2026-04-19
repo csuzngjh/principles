@@ -60,6 +60,7 @@ describe('cooldown-strategy', () => {
 
         it('independent state per task kind', async () => {
             await recordPersistentFailure(tmpDir, 'sleep_reflection');
+            await new Promise((r) => setTimeout(r, 10)); // ensure distinct timestamps
             await recordPersistentFailure(tmpDir, 'keyword_optimization');
             const state = await readState(tmpDir);
 
