@@ -181,20 +181,32 @@ export function handleEvolutionStatusCommand(ctx: PluginCommandContext): { text:
   // D-12 / YAML-FUNNEL-02: WorkflowFunnelLoader owns funnel lifecycle per workspace
   const stateDir = path.dirname(resolvePdPath(workspaceDir, 'WORKFLOWS_YAML'));
   const loader = new WorkflowFunnelLoader(stateDir);
-  const funnels = loader.getAllFunnels();
   loader.watch();
-  const summary = RuntimeSummaryService.getSummary(workspaceDir, { sessionId, funnels });
-  const recommendations = WorkspaceContext.fromHookContext({ workspaceDir })
-    .principleLifecycle
-    .recomputeAll()
-    .map((assessment) => assessment.routeRecommendation);
-  const rawLang = (ctx.config?.language as string) || 'en';
-  const lang = normalizeLanguage(rawLang);
-  const warnings = summary.metadata.warnings.slice(0, 12);
+  try {
+    const summary = RuntimeSummaryService.getSummary(workspaceDir, { sessionId, loaderWarnings: loader.getWarnings() });
+    const recommendations = WorkspaceContext.fromHookContext({ workspaceDir })
+      .principleLifecycle
+      .recomputeAll()
+      .map((assessment) => assessment.routeRecommendation);
+    const rawLang = (ctx.config?.language as string) || 'en';
+    const lang = normalizeLanguage(rawLang);
+    const warnings = summary.metadata.warnings.slice(0, 12);
 
-  if (lang === 'zh') {
+    if (lang === 'zh') {
+      return {
+        text: buildChineseOutput(
+          workspaceDir,
+          summary.metadata.sessionId,
+          warnings,
+          stats,
+          summary,
+          recommendations,
+        ),
+      };
+    }
+
     return {
-      text: buildChineseOutput(
+      text: buildEnglishOutput(
         workspaceDir,
         summary.metadata.sessionId,
         warnings,
@@ -203,16 +215,7 @@ export function handleEvolutionStatusCommand(ctx: PluginCommandContext): { text:
         recommendations,
       ),
     };
+  } finally {
+    loader.dispose(); // YAML-FUNNEL-02: guarantee cleanup on all exit paths
   }
-
-  return {
-    text: buildEnglishOutput(
-      workspaceDir,
-      summary.metadata.sessionId,
-      warnings,
-      stats,
-      summary,
-      recommendations,
-    ),
-  };
 }

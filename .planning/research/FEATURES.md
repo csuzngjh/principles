@@ -1,6 +1,6 @@
 # Feature Research: YAML-Driven Runtime Summary
 
-**Domain:** Workflow funnel observability (YAML-SSOT + event-log driven)
+**Domain:** Workflow funnel observability (YAML-driven + event-log driven; v1.21.1 is scaffold-only, full YAML-SSOT in v1.21.2)
 **Project:** Principles Disciple — v1.21.1 Workflow Funnel Runtime
 **Researched:** 2026/04/19
 **Confidence:** HIGH (code-based, no external research needed — wiring existing patterns)
@@ -92,7 +92,7 @@ event-log.ts ◄──────────── aggregateStats()
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| YAML-defined stages in status | HIGH — core value of SSOT approach | LOW — wiring existing code | P1 |
+| YAML-defined stages in status | HIGH — core value of SSOT approach | LOW — wiring existing code | P1 | (v1.21.1 scaffold: YAML loaded, warnings visible, but funnel counts still hardcoded — full wiring in v1.21.2) |
 | Hot-reload (no restart) | MEDIUM — nice to have | LOW — already implemented in loader | P1 |
 | Graceful degradation (missing/invalid YAML) | MEDIUM — prevents crashes | LOW — already implemented in loader | P1 |
 | Per-workflowId event filtering | LOW — most users have one workflow | MEDIUM — requires event data schema consistency | P2 |

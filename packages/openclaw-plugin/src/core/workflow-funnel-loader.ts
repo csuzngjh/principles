@@ -72,6 +72,9 @@ export class WorkflowFunnelLoader {
   /** fs.watch() handle for cleanup */
   private watchHandle?: fs.FSWatcher;
 
+  /** YAML parse warnings from last load() call */
+  private readonly warnings: string[] = [];
+
   constructor(stateDir: string) {
     // D-02: workflows.yaml in .state/ directory
     this.configPath = path.join(stateDir, 'workflows.yaml');
@@ -84,7 +87,9 @@ export class WorkflowFunnelLoader {
    * On missing file, clears to empty.
    */
   load(): void {
+    this.warnings.length = 0; // reset warnings on each load
     if (!fs.existsSync(this.configPath)) {
+      this.warnings.push('workflows.yaml file not found.');
       this.funnels.clear();
       return;
     }
@@ -96,7 +101,9 @@ export class WorkflowFunnelLoader {
 
       // Validate top-level structure
       if (!config || typeof config.version !== 'string' || !Array.isArray(config.funnels)) {
-        console.warn(`[WorkflowFunnelLoader] workflows.yaml validation failed: missing version or funnels array. Preserving last valid config.`);
+        const msg = 'workflows.yaml validation failed: missing version or funnels array. Preserving last valid config.';
+        console.warn(`[WorkflowFunnelLoader] ${msg}`);
+        this.warnings.push(msg);
         return;
       }
 
@@ -106,7 +113,9 @@ export class WorkflowFunnelLoader {
         if (funnel?.workflowId && typeof funnel.workflowId === 'string' && Array.isArray(funnel.stages)) {
           newFunnels.set(funnel.workflowId, funnel.stages);
         } else {
-          console.warn(`[WorkflowFunnelLoader] Skipping invalid funnel entry: missing workflowId or stages.`);
+          const msg = 'Skipping invalid funnel entry: missing workflowId or stages.';
+          console.warn(`[WorkflowFunnelLoader] ${msg}`);
+          this.warnings.push(msg);
         }
       }
 
@@ -117,7 +126,9 @@ export class WorkflowFunnelLoader {
       }
     } catch (err) {
       // Best-effort: preserve last known-good config on parse error
-      console.warn(`[WorkflowFunnelLoader] Failed to parse workflows.yaml: ${String(err)}. Preserving last valid config.`);
+      const msg = `Failed to parse workflows.yaml: ${String(err)}. Preserving last valid config.`;
+      console.warn(`[WorkflowFunnelLoader] ${msg}`);
+      this.warnings.push(msg);
     }
   }
 
@@ -171,6 +182,14 @@ export class WorkflowFunnelLoader {
       result.set(k, v.map(stage => ({ ...stage })));
     }
     return result;
+  }
+
+  /**
+   * Returns warnings from the last load() call.
+   * Callers can inspect these and propagate them to metadata.warnings.
+   */
+  getWarnings(): string[] {
+    return [...this.warnings];
   }
 
   /**

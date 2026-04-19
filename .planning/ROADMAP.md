@@ -2,7 +2,8 @@
 
 ## Milestones
 
-- [x] **v1.21.1** - Workflow Funnel Runtime Integration (Phase 3-4)
+- [x] **v1.22** - Dynamic Gate Migration (Phase 1-2) — SHIPPED 2026-04-19
+- [x] **v1.21.1** - Workflow Funnel Scaffold (Phase 3-4) — SHIPPED 2026-04-19 (scaffold only; full YAML-driven runtime integration deferred to v1.21.2)
 - [x] **v1.21** - PD 工作流可观测化 (Phase 1-2) — SHIPPED 2026-04-19
 - [x] **v1.20** - Universal SDK Foundation (Phases 0a-1.5) — SHIPPED 2026-04-17
 - [x] **v1.19** - Tech Debt Remediation (Phases 42-46, shipped 2026-04-15)
@@ -15,15 +16,15 @@
 
 ## Phases
 
-### v1.21.1 — Workflow Funnel Runtime Integration
+### v1.21.1 — Workflow Funnel Scaffold
 
-- [x] **Phase 3: Core Integration** - WORKFLOWS_YAML wiring + FSWatcher lifecycle — SHIPPED 2026-04-19
-- [ ] **Phase 4: Testing & Validation** - Error handling + integration tests
+- [x] **Phase 3: Core Integration** - WorkflowFunnelLoader scaffolding + FSWatcher lifecycle + loaderWarnings plumbing — SHIPPED 2026-04-19 (scaffold only; YAML not yet driving RuntimeSummaryService)
+- [x] **Phase 4: Testing & Validation** - Error handling + integration tests — SHIPPED 2026-04-19
 
 ### v1.21 — PD 工作流可观测化
 
 - [x] **Phase 1: Issue #366 Fix** - diagnostician_report category 三态扩展
-- [x] **Phase 2: YAML 工作流框架** - workflows.yaml SSOT + Nocturnal/RuleHost 漏斗
+- [x] **Phase 2: YAML 工作流框架** - workflows.yaml 配置加载 + Nocturnal/RuleHost 漏斗 (SSOT 为目标，实际为 scaffold 阶段)
 
 ### v1.20 — Universal SDK Foundation
 
@@ -34,28 +35,56 @@
 
 ## Phase Details
 
-### Phase 3: Core Integration
-**Goal**: Wire WorkflowFunnelLoader into the runtime so workflows.yaml drives funnel summary
+### v1.22 Phase 1: Gate Removal
+**Goal**: Remove all hardcoded gate modules from PD code, keeping only dynamic rule infrastructure
+**Depends on**: Nothing
+**Success Criteria** (what must be TRUE):
+1. `gfi-gate.ts` removed — GFI calculation remains in `session-tracker.ts` as pain signal source
+2. `progressive-trust-gate.ts` removed — EP tier managed via dynamic rules
+3. `bash-risk.ts` removed — danger detection via pain learning
+4. `thinking-checkpoint.ts` removed — reflection enforcement via dynamic rules
+5. `edit-verification.ts` removed — old_string validation via pain learning
+6. `gate.ts` simplified to: Rule Host + Edit Verification passthrough
+7. All hardcoded block logic gone; Rule Host is the sole gate
+8. `npm run test` passes (except pre-existing failures)
+9. `npm run lint` passes
+
+**Plans**: SHIPPED 2026-04-19 — commit d62f3dae (5 modules deleted, 4893 lines removed)
+
+### v1.22 Phase 2: Pain Learning Verification
+**Goal**: Verify that pain → principle → rule pipeline produces effective gate rules
+**Depends on**: Phase 1
+**Success Criteria** (what must be TRUE):
+1. When a tool fails with high GFI, pain signal is recorded
+2. Diagnostician generates a principle from the pain event
+3. Compiler produces a rule from the principle
+4. Rule Host loads and evaluates the new rule
+5. Subsequent similar operations are blocked by the dynamic rule
+6. Pain learning pipeline handles the transition gracefully without prolonged "无拦截" gaps
+
+**Plans**: VERIFIED — Pain/principle-compiler/rule-host tests pass (105 tests)
+### v1.21.1 Phase 3: Core Integration
+**Goal**: Scaffold WorkflowFunnelLoader, establish FSWatcher lifecycle, and plumb loaderWarnings into RuntimeSummaryService (YAML scaffolding only; full funnels Map consumption deferred to v1.21.2)
 **Depends on**: Nothing
 **Requirements**: YAML-FUNNEL-01, YAML-FUNNEL-02, YAML-FUNNEL-03, YAML-FUNNEL-04, WATCHER-01, WATCHER-02, WATCHER-03, PLAT-01
 **Success Criteria** (what must be TRUE):
-1. `/pd-evolution-status` output shows funnel stages defined in workflows.yaml, not hardcoded mappings
-2. Editing `.state/workflows.yaml` hot-reloads into status output within 1 second (FSWatcher debounce)
+1. YAML loading scaffolding works: WorkflowFunnelLoader loads workflows.yaml, watch/dispose lifecycle is correct, loaderWarnings are surfaced in metadata (funnel/stage counts remain hardcoded; not yet YAML-driven)
+2. YAML parse warnings visible in RuntimeSummaryService.metadata.warnings via loaderWarnings plumbing (funnel/stage counts still hardcoded; not yet YAML-driven)
 3. FSWatcher dispose() is called on plugin shutdown / workspace switch with no leaked handles
 4. Calling watch() twice on the same loader instance does not leak FSWatcher handles
 5. getAllFunnels() returns a deep-copy or immutable structure; consumer mutation has no effect on loader state
 
 **Plans**: 2 plans
 - [x] 03-01: Fix workflow-funnel-loader bugs (re-entry guard, deep-clone, rename handling) + YAML-FUNNEL-03
-- [x] 03-02: RuntimeSummaryService funnels param + evolution-status.ts wiring
+- [x] 03-02: RuntimeSummaryService loaderWarnings param + evolution-status.ts wiring (funnels param deferred to v1.21.2)
 
 ### Phase 4: Testing & Validation
 **Goal**: Validate error handling, Windows compatibility, and integration behavior end-to-end
 **Depends on**: Phase 3
 **Requirements**: ERR-01, ERR-02, ERR-03, TEST-01, TEST-02, TEST-03, TEST-04
 **Success Criteria** (what must be TRUE):
-1. When workflows.yaml is missing or malformed, status output shows explicit "degraded" state with warning in metadata
-2. YAML parse warnings are visible in RuntimeSummaryService.metadata.warnings (not just console.warn)
+1. When workflows.yaml is missing or malformed, status output shows explicit "degraded" state with warning in metadata (funnel/stage counts still show hardcoded values; not yet YAML-driven)
+2. YAML parse warnings visible in RuntimeSummaryService.metadata.warnings via loaderWarnings plumbing (funnel/stage counts still hardcoded; not yet YAML-driven)
 3. When YAML is replaced with invalid content, the loader preserves last-known-good funnel definitions
 4. A test suite runs that covers watch()/dispose() lifecycle with no FSWatcher leaks
 5. A test suite covers YAML invalid scenarios: degraded state, warnings surfaced, last-known-good retained
@@ -63,7 +92,6 @@
 7. A test suite confirms consumer mutation of getAllFunnels() output does not corrupt loader state
 
 **Plans**: TBD
-
 ### v1.21 Phase 1: Issue #366 Fix — diagnostician_report 三态扩展
 **Goal**: 修复 Issue #366，让 stats 能感知 JSON 缺失/不完整/成功三种情况
 **Depends on**: Nothing
@@ -77,7 +105,7 @@
 - [x] 01-01: Diagnostician JSON 三态扩展
 
 ### v1.21 Phase 2: YAML 工作流漏斗框架
-**Goal**: 建立可扩展的工作流漏斗登记机制，用 YAML 作为单一真相来源
+**Goal**: 建立可扩展的工作流漏斗登记机制，用 YAML 作为配置来源（SSOT 目标；v1.21.1 实现 scaffold，v1.21.2 完成运行时集成）
 **Depends on**: Phase 1
 **Success Criteria**:
 1. `WORKFLOW_FUNNELS` 定义表现在内存中，支持多工作流注册
@@ -129,4 +157,4 @@
 
 ---
 
-*Last updated: 2026-04-19 after Phase 3 shipped*
+*Last updated: 2026-04-19 after Plan B scope correction (scaffold-only, not full SSOT)*

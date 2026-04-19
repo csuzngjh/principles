@@ -1,47 +1,50 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.21.1
-milestone_name: — Workflow Funnel Runtime Integration
-status: planning
-last_updated: "2026-04-19T02:11:03.747Z"
-last_activity: "2026-04-19 — Roadmap defined (2 phases: 3-4)"
+milestone_name: Workflow Funnel Scaffold
+status: Planning complete
+last_updated: "2026-04-19"
 progress:
-  total_phases: 39
-  completed_phases: 31
-  total_plans: 72
-  completed_plans: 76
-  percent: 100
+  total_phases: 2
+  completed_phases: 0
+  total_plans: 2
+  completed_plans: 0
+  percent: 0
 ---
 
-# Project State: Principles
+# Project State: Principles (Worktree: fix/pd-pain-signal-mandatory-enforcement)
 
 ## Project Reference
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** Milestone v1.21.1 — Workflow Funnel Runtime Integration
+**Current Focus:** Milestone v1.21.1 — Workflow Funnel Scaffold (PR #370)
 
 ## Current Position
 
-Phase: Phase 3 (Core Integration) — Not started
+Phase: Phase 3 (Core Integration) — Planning complete
 Plan: —
 Status: Planning complete
-Last activity: 2026-04-19 — Roadmap defined (2 phases: 3-4)
+Last activity: 2026-04-19 — Plan B scope correction (scaffold-only)
 
 ## Milestone Progress
 
 | Phase | Name | Requirements | Status |
 |-------|------|-------------|--------|
-| 3 | Core Integration | 8 | Not started |
-| 4 | Testing & Validation | 7 | Not started |
+| 3 | Core Integration | 8 | Planning complete |
+| 4 | Testing & Validation | 7 | Planning complete |
 
 **Coverage:** 15/15 requirements mapped ✓
 
 ## Context
 
-**YAML 边界:**
+**PR #370 scope (Plan B — scaffold, not full SSOT):**
+- WorkflowFunnelLoader YAML 加载脚手架完成，warnings 已接入 metadata
+- RuntimeSummaryService funnels Map 未消费（hardcoded 状态）
+- 完整 SSOT 延期到 v1.21.2
 
-- YAML = 漏斗定义真相源
+**YAML 边界:**
+- YAML = 漏斗定义配置来源（SSOT 目标，实际为 scaffold）
 - event log = 发生事实真相源
 - runtime summary = 派生视图（YAML 定义 + event log 数据）
 
@@ -50,14 +53,14 @@ Last activity: 2026-04-19 — Roadmap defined (2 phases: 3-4)
 ## Key Files
 
 - `src/core/workflow-funnel-loader.ts` — WorkflowFunnelLoader 类（已写好，待接入 runtime）
-- `src/core/paths.ts` — WORKFLOWS_YAML 需加入 PD_FILES
-- `src/service/runtime-summary-service.ts` — 需改造为 YAML 驱动
+- `src/service/runtime-summary-service.ts` — 需改造为 YAML 驱动（v1.21.2）
 - `src/commands/evolution-status.ts` — /pd-evolution-status 展示层
+- `.planning/phases/02-workflow-watchdog/workflows.yaml` — YAML SSOT（目标）
 
 ## Next
 
-**Command:** `/gsd-plan-phase 3`
+**Command:** `/gsd-execute-phase 3`
 
 ---
 
-*Last updated: 2026-04-19 after roadmap created*
+*Last updated: 2026-04-19 after Plan B scope correction*

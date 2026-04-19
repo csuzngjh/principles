@@ -31,7 +31,7 @@ No new dependencies required. The stack is fully in place:
 This is a single-feature release. The entire deliverable is wiring the loader into the summary service.
 
 **Must have (table stakes):**
-- YAML-defined funnel stages visible in `/pd-evolution-status` output — core SSOT value proposition
+- YAML loading scaffolding in place; `loaderWarnings` visible in `/pd-evolution-status` metadata — partial SSOT value proposition (YAML is loaded and warnings surfaced, but the funnels Map is not yet consumed by RuntimeSummaryService)
 - Hot-reload: editing `workflows.yaml` reflects in status without restart — already works via `fs.watch`
 - Graceful degraded states — missing YAML yields empty funnel + warning; malformed YAML preserves last valid + warning
 
