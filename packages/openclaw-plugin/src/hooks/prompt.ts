@@ -838,18 +838,6 @@ ${taskBlocks}${processingNote}
     }
   }
 
-  // Reflection Log (configurable) - moved to appendSystemContext for WebUI UX
-  let reflectionLogContent = '';
-  if (contextConfig.reflectionLog) {
-    const reflectionLogPath = wctx.resolve('REFLECTION_LOG');
-    try {
-      const cached = cachedReadFile(reflectionLogPath);
-      if (cached) reflectionLogContent = cached.trim();
-    } catch (e) {
-      logger?.error(`[PD:Prompt] Failed to read REFLECTION_LOG: ${String(e)}`);
-    }
-  }
-
   // Project Context (configurable: full/summary/off) - moved to appendSystemContext for WebUI UX
   let projectContextContent = '';
   let workingMemoryContent = '';
@@ -987,17 +975,12 @@ ${empathySilenceConstraint}
     appendParts.push(workingMemoryContent);
   }
 
-  // 2. Reflection Log
-  if (reflectionLogContent) {
-    appendParts.push(`<reflection_log>\n${reflectionLogContent}\n</reflection_log>`);
-  }
-
-  // 3. Thinking OS (configurable)
+  // 2. Thinking OS (configurable)
   if (thinkingOsContent) {
     appendParts.push(`<thinking_os>\n${thinkingOsContent}\n</thinking_os>`);
   }
 
-  // 4. Evolution Loop principles (active/probation)
+  // 3. Evolution Loop principles (active/probation)
   if (evolutionPrinciplesContent) {
     appendParts.push(`<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`);
   }
@@ -1162,22 +1145,8 @@ ${attitudeDirective}
       }
     }
 
-    // 2. Truncate reflection_log if still over limit
+    // 2. Final check
     let newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
-    if (newSize > MAX_SIZE && reflectionLogContent && appendSystemContext.includes('<reflection_log>')) {
-      const lines = reflectionLogContent.split('\n');
-      if (lines.length > 30) {
-        const truncated = lines.slice(0, 30).join('\n') + '\n...[truncated]';
-        appendSystemContext = appendSystemContext.replace(
-          `<reflection_log>\n${reflectionLogContent}\n</reflection_log>`,
-          `<reflection_log>\n${truncated}\n</reflection_log>`
-        );
-        truncationLog.push('reflection_log');
-      }
-    }
-
-    // 3. Final check
-    newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
     if (newSize > MAX_SIZE) {
       // NOTE: We still return the content even if over limit, as truncating more
       // could lose critical context like principles or evolution directives.

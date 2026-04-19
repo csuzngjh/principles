@@ -31,9 +31,6 @@ export interface ContextInjectionConfig {
   /** Project context (CURRENT_FOCUS.md) mode */
   projectFocus: ProjectFocusMode;
   
-  /** Reflection log - can be toggled */
-  reflectionLog: boolean;
-
   /** Evolution task context injection settings */
   evolutionContext: EvolutionContextConfig;
 }
@@ -44,31 +41,13 @@ export interface ContextInjectionConfig {
  * - principles: always on (not configurable)
  * - thinkingOs: true (can be turned off)
  * - projectFocus: 'off' (default closed, user can enable)
- * - reflectionLog: true (default on)
  */
 export const defaultContextConfig: ContextInjectionConfig = {
   thinkingOs: true,
   projectFocus: 'off',
-  reflectionLog: true,
   evolutionContext: {
     enabled: true,
     maxMessages: 4,
     maxCharsPerMessage: 200,
   },
 };
-
-/**
- * Reflection log entry structure
- */
-export interface ReflectionLogEntry {
-  timestamp: string;
-  context: string;
-  insights: string;
-  modelId?: string;
-  depth?: number;
-}
-
-/**
- * Reflection log retention configuration
- */
-export const reflectionLogRetentionDays = 7;
