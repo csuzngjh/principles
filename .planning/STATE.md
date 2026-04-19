@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v1.21.1
 milestone_name: Workflow Funnel Scaffold
-status: planning
+status: Planning complete
 last_updated: "2026-04-19"
 progress:
   total_phases: 2
@@ -22,10 +22,19 @@ progress:
 
 ## Current Position
 
-Phase: Phase 3 (Core Integration) — In progress
-Plan: 03-01, 03-02
-Status: Planning
-Last activity: 2026-04-19 — Plan B execution; scaffold-only scope confirmed
+Phase: Phase 3 (Core Integration) — Planning complete
+Plan: —
+Status: Planning complete
+Last activity: 2026-04-19 — Plan B scope correction (scaffold-only)
+
+## Milestone Progress
+
+| Phase | Name | Requirements | Status |
+|-------|------|-------------|--------|
+| 3 | Core Integration | 8 | Planning complete |
+| 4 | Testing & Validation | 7 | Planning complete |
+
+**Coverage:** 15/15 requirements mapped ✓
 
 ## Context
 
@@ -50,7 +59,7 @@ Last activity: 2026-04-19 — Plan B execution; scaffold-only scope confirmed
 
 ## Next
 
-**Command:** `/gsd-execute-phase 3` (after Plan B docs complete)
+**Command:** `/gsd-execute-phase 3`
 
 ---
 
