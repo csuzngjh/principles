@@ -156,7 +156,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
             suggestionText = `
 💡 **建议 (系统检测到您当前遇到较大阻力)**:
    1. 执行 \`/pd-status reset\` 清零疲劳值。
-   2. 让 AI 调用 \`deep_reflect\` 工具进行深度反思。
+   2. 让 AI 进行深度反思。
    3. 如果当前上下文太乱，考虑使用 \`/clear\` 开启新会话。`;
         }
         else if (gfi > 50) healthLabel = '遇到阻力 🟡';
