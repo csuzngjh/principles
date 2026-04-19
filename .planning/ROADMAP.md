@@ -2,8 +2,7 @@
 
 ## Milestones
 
-- [ ] **v1.22** - Dynamic Gate Migration (Phase 1-2)
-- [x] **v1.21.1** - Workflow Funnel Runtime Integration (Phase 3-4) — SHIPPED 2026-04-19
+- [x] **v1.21.1** - Workflow Funnel Runtime Integration (Phase 3-4)
 - [x] **v1.21** - PD 工作流可观测化 (Phase 1-2) — SHIPPED 2026-04-19
 - [x] **v1.20** - Universal SDK Foundation (Phases 0a-1.5) — SHIPPED 2026-04-17
 - [x] **v1.19** - Tech Debt Remediation (Phases 42-46, shipped 2026-04-15)
@@ -34,35 +33,6 @@
 - [x] **Phase 1.5: Cross-Domain Validation** - API freeze after cross-domain stress test
 
 ## Phase Details
-
-### v1.22 Phase 1: Gate Removal
-**Goal**: Remove all hardcoded gate modules from PD code, keeping only dynamic rule infrastructure
-**Depends on**: Nothing
-**Success Criteria** (what must be TRUE):
-1. `gfi-gate.ts` removed — GFI calculation remains in `session-tracker.ts` as pain signal source
-2. `progressive-trust-gate.ts` removed — EP tier managed via dynamic rules
-3. `bash-risk.ts` removed — danger detection via pain learning
-4. `thinking-checkpoint.ts` removed — reflection enforcement via dynamic rules
-5. `edit-verification.ts` removed — old_string validation via pain learning
-6. `gate.ts` simplified to: Rule Host + Edit Verification passthrough
-7. All hardcoded block logic gone; Rule Host is the sole gate
-8. `npm run test` passes (except pre-existing failures)
-9. `npm run lint` passes
-
-**Plans**: TBD
-
-### v1.22 Phase 2: Pain Learning Verification
-**Goal**: Verify that pain → principle → rule pipeline produces effective gate rules
-**Depends on**: Phase 1
-**Success Criteria** (what must be TRUE):
-1. When a tool fails with high GFI, pain signal is recorded
-2. Diagnostician generates a principle from the pain event
-3. Compiler produces a rule from the principle
-4. Rule Host loads and evaluates the new rule
-5. Subsequent similar operations are blocked by the dynamic rule
-6. Pain learning pipeline handles the transition gracefully without prolonged "无拦截" gaps
-
-**Plans**: TBD
 
 ### v1.21.1 Phase 3: Core Integration
 **Goal**: Wire WorkflowFunnelLoader into the runtime so workflows.yaml drives funnel summary
@@ -157,4 +127,4 @@
 
 ---
 
-*Last updated: 2026-04-19 after v1.22 milestone created*
+*Last updated: 2026-04-19 after v1.21.1 roadmap created*
