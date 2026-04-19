@@ -24,6 +24,14 @@ import type {
   DiagnosticianReportEventData,
   PrincipleCandidateEventData,
   RuleEnforcedEventData,
+  // C: Nocturnal funnel events (PD-FUNNEL-2.3)
+  NocturnalDreamerCompletedEventData,
+  NocturnalArtifactPersistedEventData,
+  NocturnalCodeCandidateCreatedEventData,
+  // C: RuleHost funnel events (PD-FUNNEL-2.4)
+  RuleHostEvaluatedEventData,
+  RuleHostBlockedEventData,
+  RuleHostRequireApprovalEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -215,6 +223,32 @@ export class EventLog {
     this.record('rule_enforced', 'matched', undefined, data);
   }
 
+  // C: Nocturnal funnel event recorders (PD-FUNNEL-2.3)
+  recordNocturnalDreamerCompleted(data: NocturnalDreamerCompletedEventData): void {
+    this.record('nocturnal_dreamer_completed', 'completed', undefined, data);
+  }
+
+  recordNocturnalArtifactPersisted(data: NocturnalArtifactPersistedEventData): void {
+    this.record('nocturnal_artifact_persisted', 'completed', undefined, data);
+  }
+
+  recordNocturnalCodeCandidateCreated(data: NocturnalCodeCandidateCreatedEventData): void {
+    this.record('nocturnal_code_candidate_created', 'created', undefined, data);
+  }
+
+  // C: RuleHost funnel event recorders (PD-FUNNEL-2.4)
+  recordRuleHostEvaluated(data: RuleHostEvaluatedEventData): void {
+    this.record('rulehost_evaluated', 'evaluated', undefined, data);
+  }
+
+  recordRuleHostBlocked(data: RuleHostBlockedEventData): void {
+    this.record('rulehost_blocked', 'blocked', undefined, data);
+  }
+
+  recordRuleHostRequireApproval(data: RuleHostRequireApprovalEventData): void {
+    this.record('rulehost_requireApproval', 'requireApproval', undefined, data);
+  }
+
   private record(
     type: EventType, 
     category: EventCategory, 
@@ -363,24 +397,56 @@ export class EventLog {
     } else if (entry.type === 'heartbeat_diagnosis') {
       stats.evolution.heartbeatsInjected++;
     } else if (entry.type === 'diagnostician_report') {
-      const data = entry.data as unknown as DiagnosticianReportEventData;
       // Backward compat: handle old events with success:boolean and new events with category:string
-      if ('category' in data) {
+      // Widen to Record<string, unknown> because DiagnosticianReportEventData requires
+      // category (new format) but legacy persisted events have { success: boolean }.
+      const raw = entry.data as unknown as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(raw, 'category')) {
         // New format: category is 'success' | 'missing_json' | 'incomplete_fields'
-        if (data.category === 'success' || data.category === 'incomplete_fields') {
+        // All three categories mean diagnosis completed and attempted to produce a report
+        const cat = raw['category'] as string;
+        if (cat === 'success' || cat === 'missing_json' || cat === 'incomplete_fields') {
           stats.evolution.diagnosticianReportsWritten++;
         }
-        if (data.category === 'missing_json') {
+        if (cat === 'missing_json') {
           stats.evolution.reportsMissingJson++;
         }
-        if (data.category === 'incomplete_fields') {
+        if (cat === 'incomplete_fields') {
           stats.evolution.reportsIncompleteFields++;
         }
+      } else if (Object.prototype.hasOwnProperty.call(raw, 'success')) {
+        // Legacy format: { success: boolean }
+        // Apply agreed default semantics: treat as 'success' if true, 'missing_json' if false
+        if (raw['success']) {
+          stats.evolution.diagnosticianReportsWritten++;
+        }
+        // Note: legacy 'false' entries are not counted in any sub-counter since
+        // the old system had no such breakdown; they are invisible in sub-stats.
       }
     } else if (entry.type === 'principle_candidate') {
       stats.evolution.principleCandidatesCreated++;
     } else if (entry.type === 'rule_enforced') {
       stats.evolution.rulesEnforced++;
+    }
+    // C: Nocturnal funnel event counters (PD-FUNNEL-2.3)
+    else if (entry.type === 'nocturnal_dreamer_completed') {
+      const data = entry.data as unknown as NocturnalDreamerCompletedEventData;
+      stats.evolution.nocturnalDreamerCompleted++;
+      if (data.chainMode === 'trinity') {
+        stats.evolution.nocturnalTrinityCompleted++;
+      }
+    } else if (entry.type === 'nocturnal_artifact_persisted') {
+      stats.evolution.nocturnalArtifactPersisted++;
+    } else if (entry.type === 'nocturnal_code_candidate_created') {
+      stats.evolution.nocturnalCodeCandidateCreated++;
+    }
+    // C: RuleHost funnel event counters (PD-FUNNEL-2.4)
+    else if (entry.type === 'rulehost_evaluated') {
+      stats.evolution.rulehostEvaluated++;
+    } else if (entry.type === 'rulehost_blocked') {
+      stats.evolution.rulehostBlocked++;
+    } else if (entry.type === 'rulehost_requireApproval') {
+      stats.evolution.rulehostRequireApproval++;
     }
   }
 

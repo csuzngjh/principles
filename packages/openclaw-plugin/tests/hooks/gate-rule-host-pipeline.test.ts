@@ -62,7 +62,25 @@ vi.mock('../../src/core/principle-tree-ledger.js', () => ({
   listImplementationsByLifecycleState: vi.fn(() => []),
 }));
 
+// Shared mock instance — exposed as module-level so test assertions can reference it
+const _mockEventLogInstance = {
+  recordGateBlock: vi.fn(),
+  recordPlanApproval: vi.fn(),
+  recordGateBypass: vi.fn(),
+  recordRuleEnforced: vi.fn(),
+  recordRuleHostRequireApproval: vi.fn(),
+  recordRuleHostEvaluated: vi.fn(),
+  recordPainSignal: vi.fn(),
+};
+vi.mock('../../src/core/event-log.js', () => ({
+  EventLogService: { get: vi.fn(() => _mockEventLogInstance) },
+  EventLog: {},
+}));
+// Export so test assertions can use vi.mocked() on the instance
+export { _mockEventLogInstance };
+
 import { RuleHost } from '../../src/core/rule-host.js';
+import { EventLogService } from '../../src/core/event-log.js';
 import * as sessionTrackerModule from '../../src/core/session-tracker.js';
 import * as evolutionEngineModule from '../../src/core/evolution-engine.js';
 
@@ -96,6 +114,8 @@ describe('Gate Rule Host Pipeline Integration', () => {
     recordGateBlock: vi.fn(),
     recordPlanApproval: vi.fn(),
     recordGateBypass: vi.fn(),
+    recordRuleEnforced: vi.fn(),
+    recordRuleHostRequireApproval: vi.fn(),
   };
 
   const mockTrajectory = {
@@ -310,14 +330,14 @@ describe('Gate Rule Host Pipeline Integration', () => {
 
     const result = handleBeforeToolCall(makeWriteEvent() as any, { workspaceDir, sessionId } as any);
 
-    expect(result?.block).toBe(true);
-    expect(mockEventLog.recordGateBlock).toHaveBeenCalledWith(
-      sessionId,
-      expect.objectContaining({
-        blockSource: 'rule-host',
-        reason: expect.stringContaining('[Rule Host] Approval required'),
-      })
+    expect(result?.block).toBeUndefined();
+    // requireApproval records events but does not block — the operation proceeds
+    // to the Progressive Trust Gate for further evaluation.
+    // recordRuleEnforced takes a single object arg (no sessionId).
+    expect(_mockEventLogInstance.recordRuleEnforced).toHaveBeenCalledWith(
+      expect.objectContaining({ enforcement: 'requireApproval' })
     );
+    expect(_mockEventLogInstance.recordGateBlock).not.toHaveBeenCalled();
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
