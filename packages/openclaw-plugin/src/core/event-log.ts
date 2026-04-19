@@ -416,12 +416,10 @@ export class EventLog {
         }
       } else if (Object.prototype.hasOwnProperty.call(raw, 'success')) {
         // Legacy format: { success: boolean }
-        // Apply agreed default semantics: treat as 'success' if true, 'missing_json' if false
-        if (raw['success']) {
-          stats.evolution.diagnosticianReportsWritten++;
-        }
-        // Note: legacy 'false' entries are not counted in any sub-counter since
-        // the old system had no such breakdown; they are invisible in sub-stats.
+        // Agreed fix: count ALL legacy events in diagnosticianReportsWritten (+1 for both true and false).
+        // Sub-counters (reportsMissingJson/reportsIncompleteFields) stay untouched because
+        // legacy events lack enough information to distinguish sub-category — preserve total, don't fake breakdown.
+        stats.evolution.diagnosticianReportsWritten++;
       }
     } else if (entry.type === 'principle_candidate') {
       stats.evolution.principleCandidatesCreated++;
