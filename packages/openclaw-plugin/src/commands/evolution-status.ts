@@ -181,7 +181,6 @@ export function handleEvolutionStatusCommand(ctx: PluginCommandContext): { text:
   // D-12 / YAML-FUNNEL-02: WorkflowFunnelLoader owns funnel lifecycle per workspace
   const stateDir = path.dirname(resolvePdPath(workspaceDir, 'WORKFLOWS_YAML'));
   const loader = new WorkflowFunnelLoader(stateDir);
-  const funnels = loader.getAllFunnels();
   loader.watch();
   const summary = RuntimeSummaryService.getSummary(workspaceDir, { sessionId, loaderWarnings: loader.getWarnings() });
   loader.dispose(); // YAML-FUNNEL-02: workspace-scoped owner disposes loader on command completion
