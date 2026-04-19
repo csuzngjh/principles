@@ -1,33 +1,25 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-18T14:19:36.278Z",
+  "timestamp": "2026-04-19T01:01:50.470Z",
   "phase": null,
   "phase_name": null,
   "phase_dir": null,
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "completed",
-  "completed_tasks": [
-    {"id": 1, "name": "STATE.md reset for v1.21", "status": "completed"},
-    {"id": 2, "name": "Requirements 定义", "status": "completed"},
-    {"id": 3, "name": "Roadmap 创建", "status": "completed"}
-  ],
+  "status": "paused",
+  "completed_tasks": [],
   "remaining_tasks": [],
   "blockers": [],
   "human_actions_pending": [],
   "decisions": [
-    {"decision": "YAML workflows.yaml 作为单一真相来源，工作流定义不硬编码", "rationale": "PD 工作流持续变化、调研结论可能不准，硬编码漏斗定义会成为技术债", "phase": "new-milestone-v1.21"},
-    {"decision": "event-log 只做原始 event 记录，漏斗由 YAML + event 数据推导", "rationale": "代码和漏斗定义解耦，两边可独立修正", "phase": "new-milestone-v1.21"},
-    {"decision": "Phase 1 先做 Issue #366 修复（diagnostician_report category 三态扩展）", "rationale": "Issue #366 是当前最紧迫的断点，YAML 框架后续迭代", "phase": "new-milestone-v1.21"}
+    {
+      "decision": "v1.21.1 milestone goal: YAML workflows.yaml drives runtime summary/status/health",
+      "rationale": "v1.21 built WorkflowFunnelLoader but never wired it into runtime — YAML was design asset not runtime fact",
+      "phase": "milestone"
+    }
   ],
-  "uncommitted_files": [
-    "docs/superpowers/specs/2026-04-18-pd-workflow-funnel-design.md",
-    ".planning/PROJECT.md",
-    ".planning/STATE.md",
-    ".planning/REQUIREMENTS.md",
-    ".planning/ROADMAP.md"
-  ],
-  "next_action": "/gsd-new-milestone 工作流完成。v1.21 Planning 阶段完成：Design doc ✓ + PROJECT.md ✓ + STATE.md ✓ + REQUIREMENTS.md ✓ + ROADMAP.md ✓。下一步：/gsd-plan-phase 1 开始 Phase 1 实施（Issue #366 修复）",
-  "context_notes": "v1.21 new-milestone 完成。已完成：Design doc + PROJECT.md + STATE.md + REQUIREMENTS.md + ROADMAP.md。设计核心：YAML 工作流漏斗框架 + Issue #366 修复（diagnostician_report 三态）。下一步：Phase 1 实施。"
+  "uncommitted_files": [],
+  "next_action": "Continue /gsd-new-milestone v1.21.1 to complete requirements + roadmap phases",
+  "context_notes": "v1.21 milestone complete and merged (PR #369, 2026-04-19). v1.21.1 goal established: make YAML the runtime fact source for funnel stats. Memory files updated. /gsd-new-milestone workflow was started but not completed — still needs requirements + roadmap."
 }
