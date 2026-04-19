@@ -17,7 +17,7 @@
 
 ### v1.21.1 — Workflow Funnel Runtime Integration
 
-- [ ] **Phase 3: Core Integration** - WORKFLOWS_YAML wiring + FSWatcher lifecycle
+- [x] **Phase 3: Core Integration** - WORKFLOWS_YAML wiring + FSWatcher lifecycle — SHIPPED 2026-04-19
 - [ ] **Phase 4: Testing & Validation** - Error handling + integration tests
 
 ### v1.21 — PD 工作流可观测化
@@ -129,4 +129,4 @@
 
 ---
 
-*Last updated: 2026-04-19 after v1.21.1 roadmap created*
+*Last updated: 2026-04-19 after Phase 3 shipped*
