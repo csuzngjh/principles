@@ -1,4 +1,0 @@
-## Qwen Added Memories
-- PR #162 review: isValid refactoring in subagent.ts adds validation for trigger_pattern (>=3 chars) and action (>=10 chars) before creating principles, with fallback to raw text extraction. Logic is correct.
-- PR #162 Pain→Principle pipeline 已完成所有修复并通过 CI (tsc-plugin ✅, Lint ✅, Tests ✅, CodeRabbit ✅)。核心改动：1) 统一入队逻辑消除双代码路径 2) 精确 HEARTBEAT task ID 匹配 3) 安全 pain flag 清理 4) PRINCIPLES.md 4路径 JSON 解析 5) 共情混合匹配(关键词100% + 子代理采样5-10%) 6) 移除诊断者子代理路径(856行死代码) 7) 结构化 API 替代 PRINCIPLES.md 文件读取 8) 全面可观测性日志。类型修复：trackFriction 签名、evolution-reducer params 类型、NocturnalWorkflowManager snapshot null 检查、幂等 key 分隔符。冲突解决：合并 origin/main，.planning/ 和 run.mjs 冲突已解决，PR 状态 MERGEABLE。
-- 修复数据源问题时必须全局 grep 所有使用点，不能只改发现问题的地方。修改 event.messages→event.prompt 后，路由分类代码（prompt.ts L863）也需要同步使用已清洗的变量，否则会分析到系统 prompt。每次修复数据源问题后，必须追踪完整数据流，确认每个使用点。
