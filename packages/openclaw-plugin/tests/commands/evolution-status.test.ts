@@ -338,4 +338,123 @@ describe('evolution commands', () => {
 
     expect(result.text).toContain('internalization routes: P-001:skill@');
   });
+
+  it('renders workflowFunnel blocks when YAML-driven funnels are present', () => {
+    const workspace = makeTempDir();
+    const stateDir = path.join(workspace, '.state');
+
+    // Write workflows.yaml with two funnels matching actual schema
+    const workflowsYaml = `
+version: "1.0"
+funnels:
+  - workflowId: nocturnal
+    stages:
+      - name: dreamer_completed
+        eventType: nocturnal_dreamer_completed
+        eventCategory: completed
+        statsField: evolution.nocturnalDreamerCompleted
+      - name: artifact_persisted
+        eventType: nocturnal_artifact_persisted
+        eventCategory: completed
+        statsField: evolution.nocturnalArtifactPersisted
+  - workflowId: rulehost
+    stages:
+      - name: evaluated
+        eventType: rulehost_evaluated
+        eventCategory: evaluated
+        statsField: evolution.ruleHostEvaluated
+`;
+    fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), workflowsYaml, 'utf8');
+
+    // Write daily stats with matching event counts (must be in logs/ subdirectory)
+    const today = new Date().toISOString().slice(0, 10);
+    writeJson(path.join(stateDir, 'logs', 'daily-stats.json'), {
+      [today]: {
+        evolution: {
+          nocturnalDreamerCompleted: 3,
+          nocturnalArtifactPersisted: 2,
+          ruleHostEvaluated: 15,
+        },
+      },
+    });
+
+    const result = handleEvolutionStatusCommand({
+      config: { workspaceDir: workspace, language: 'en' },
+    } as any);
+
+    expect(result.text).toContain('Workflow Funnel: nocturnal');
+    expect(result.text).toMatch(/dreamer_completed: 3/);
+    expect(result.text).toMatch(/artifact_persisted: 2/);
+    expect(result.text).toContain('Workflow Funnel: rulehost');
+    expect(result.text).toMatch(/evaluated: 15/);
+  });
+
+  it('skips funnel block when workflowFunnels is empty array', () => {
+    const workspace = makeTempDir();
+
+    // Write empty funnels array — valid YAML but no funnels defined
+    const workflowsYaml = `version: "1.0"\nfunnels: []`;
+    fs.writeFileSync(path.join(workspace, '.state', 'workflows.yaml'), workflowsYaml, 'utf8');
+
+    const result = handleEvolutionStatusCommand({
+      config: { workspaceDir: workspace, language: 'en' },
+    } as any);
+
+    expect(result.text).not.toContain('Workflow Funnel:');
+  });
+
+  it('shows degraded status and warning when YAML load has warnings', () => {
+    const workspace = makeTempDir();
+    const stateDir = path.join(workspace, '.state');
+
+    // Write malformed YAML — loader emits a parse warning
+    const badYaml = `
+version: "1.0"
+funnels:
+  - workflowId: nocturnal
+    stages:
+      - name: "unclosed string
+`;
+    fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), badYaml, 'utf8');
+
+    const result = handleEvolutionStatusCommand({
+      config: { workspaceDir: workspace, language: 'en' },
+    } as any);
+
+    // Should still render — degraded but not crashed
+    expect(result.text).toContain('Evolution Status');
+    // Loader warning should appear in output
+    expect(result.text).toMatch(/YAML load warning|YAML parse error|workflows\.yaml/);
+  });
+
+  it('renders Chinese workflow funnel labels from YAML', () => {
+    const workspace = makeTempDir();
+    const stateDir = path.join(workspace, '.state');
+
+    const workflowsYaml = `
+version: "1.0"
+funnels:
+  - workflowId: nocturnal
+    stages:
+      - name: 做梦完成
+        eventType: nocturnal_dreamer_completed
+        eventCategory: completed
+        statsField: evolution.nocturnalDreamerCompleted
+`;
+    fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), workflowsYaml, 'utf8');
+
+    const today = new Date().toISOString().slice(0, 10);
+    writeJson(path.join(stateDir, 'logs', 'daily-stats.json'), {
+      [today]: {
+        evolution: { nocturnalDreamerCompleted: 7 },
+      },
+    });
+
+    const result = handleEvolutionStatusCommand({
+      config: { workspaceDir: workspace, language: 'zh' },
+    } as any);
+
+    expect(result.text).toContain('Workflow 漏斗: nocturnal');
+    expect(result.text).toMatch(/做梦完成: 7/);
+  });
 });

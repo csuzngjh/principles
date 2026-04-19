@@ -114,6 +114,8 @@ export interface RuntimeSummary {
     workspaceDir: string;
     sessionId: string | null;
     selectedSessionReason: 'explicit' | 'latest_active' | 'none';
+    /** 'degraded' when YAML load errors or unresolved statsField paths exist; 'ok' otherwise */
+    status: 'ok' | 'degraded';
     warnings: string[];
   };
 }
@@ -247,6 +249,11 @@ export class RuntimeSummaryService {
     );
 
     // YAML-SSOT-02/03: build workflowFunnels from funnels Map if provided
+    // Get most recent date from daily stats, fallback to today
+    const today = generatedAt.slice(0, 10);
+    const availableDates = Object.keys(dailyStats || {}).sort().reverse();
+    const statsDate = availableDates.length > 0 ? availableDates[0] : today;
+
     let workflowFunnelsOutput: WorkflowFunnelOutput[] | undefined;
     if (options?.funnels) {
       workflowFunnelsOutput = [];
@@ -265,20 +272,31 @@ export class RuntimeSummaryService {
     }
 
     // YAML-SSOT-04: warn for any zero-count stages
+    let hasZeroCountStage = false;
     if (workflowFunnelsOutput) {
       for (const funnel of workflowFunnelsOutput) {
         for (const stage of funnel.stages) {
           if (stage.count === 0) {
+            hasZeroCountStage = true;
             pushWarning(warnings, `statsField not resolvable: ${stage.statsField}`);
           }
         }
       }
     }
 
+    // DEGRADED-01: If YAML had load errors, status must be degraded
+    const loaderWarnings = options?.loaderWarnings ?? [];
+    if (loaderWarnings.length > 0) {
+      for (const w of loaderWarnings) {
+        pushWarning(warnings, `YAML load warning: ${w}`);
+      }
+    }
+
+    // DEGRADED-02: status is degraded when YAML load errors or unresolved statsField paths exist
+    const status: 'ok' | 'degraded' =
+      (loaderWarnings.length > 0 || hasZeroCountStage) ? 'degraded' : 'ok';
+
     // Get most recent date from daily stats, fallback to today
-    const today = generatedAt.slice(0, 10);
-    const availableDates = Object.keys(dailyStats || {}).sort().reverse();
-    const statsDate = availableDates.length > 0 ? availableDates[0] : today;
     const dailyGfiPeak = dailyStats?.[statsDate]?.gfi?.peak;
 
     const gfiCurrent =
@@ -426,6 +444,7 @@ export class RuntimeSummaryService {
         workspaceDir,
         sessionId: selectedSessionId,
         selectedSessionReason: selectedSession.reason,
+        status,
         warnings,
       },
     };
