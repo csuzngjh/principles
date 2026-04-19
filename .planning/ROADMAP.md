@@ -35,6 +35,7 @@
 
 ## Phase Details
 
+<<<<<<< HEAD
 ### v1.22 Phase 1: Gate Removal
 **Goal**: Remove all hardcoded gate modules from PD code, keeping only dynamic rule infrastructure
 **Depends on**: Nothing
@@ -74,9 +75,11 @@
 4. Calling watch() twice on the same loader instance does not leak FSWatcher handles
 5. getAllFunnels() returns a deep-copy or immutable structure; consumer mutation has no effect on loader state
 
-**Plans**: TBD
+**Plans**: 2 plans
+- [x] 03-01: Fix workflow-funnel-loader bugs (re-entry guard, deep-clone, rename handling) + YAML-FUNNEL-03
+- [x] 03-02: RuntimeSummaryService funnels param + evolution-status.ts wiring
 
-### v1.21.1 Phase 4: Testing & Validation
+### Phase 4: Testing & Validation
 **Goal**: Validate error handling, Windows compatibility, and integration behavior end-to-end
 **Depends on**: Phase 3
 **Requirements**: ERR-01, ERR-02, ERR-03, TEST-01, TEST-02, TEST-03, TEST-04
