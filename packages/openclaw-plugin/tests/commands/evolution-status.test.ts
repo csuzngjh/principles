@@ -8,6 +8,8 @@ import { appendCandidateArtifactLineageRecord } from '../../src/core/nocturnal-a
 import { getImplementationAssetRoot } from '../../src/core/code-implementation-storage.js';
 import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
 import { saveLedger } from '../../src/core/principle-tree-ledger.js';
+import { WorkflowFunnelLoader } from '../../src/core/workflow-funnel-loader.js';
+import { RuntimeSummaryService } from '../../src/service/runtime-summary-service.js';
 
 const tempDirs: string[] = [];
 
@@ -456,5 +458,164 @@ funnels:
 
     expect(result.text).toContain('Workflow 漏斗: nocturnal');
     expect(result.text).toMatch(/做梦完成: 7/);
+  });
+});
+
+describe('YAML funnel E2E integration tests', () => {
+  // TEST-01: Full YAML-driven flow with real WorkflowFunnelLoader
+  it('e2e_test_full_yaml_driven_flow', () => {
+    const workspace = makeTempDir();
+    const stateDir = path.join(workspace, '.state');
+
+    // Create real WorkflowFunnelLoader (not mocked)
+    const loader = new WorkflowFunnelLoader(stateDir);
+    loader.watch();
+
+    // Write valid workflows.yaml
+    const workflowsYaml = `
+version: "1.0"
+funnels:
+  - workflowId: nocturnal
+    stages:
+      - name: dreamer_completed
+        eventType: nocturnal_dreamer_completed
+        eventCategory: completed
+        statsField: evolution.nocturnalDreamerCompleted
+      - name: artifact_persisted
+        eventType: nocturnal_artifact_persisted
+        eventCategory: completed
+        statsField: evolution.nocturnalArtifactPersisted
+  - workflowId: rulehost
+    stages:
+      - name: evaluated
+        eventType: rulehost_evaluated
+        eventCategory: evaluated
+        statsField: evolution.ruleHostEvaluated
+`;
+    fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), workflowsYaml, 'utf8');
+    loader.load(); // reload after writing file
+
+    // Write daily-stats.json
+    const today = new Date().toISOString().slice(0, 10);
+    writeJson(path.join(stateDir, 'logs', 'daily-stats.json'), {
+      [today]: {
+        evolution: {
+          nocturnalDreamerCompleted: 3,
+          nocturnalArtifactPersisted: 2,
+          ruleHostEvaluated: 15,
+        },
+      },
+    });
+
+    // Call getSummary directly with real loader data
+    const summary = RuntimeSummaryService.getSummary(workspace, {
+      funnels: loader.getAllFunnels(),
+      loaderWarnings: loader.getWarnings(),
+    });
+
+    // Assert workflowFunnels structure
+    expect(summary.workflowFunnels).toBeDefined();
+    expect(summary.workflowFunnels!.length).toBe(2);
+    expect(summary.workflowFunnels![0].funnelKey).toBe('nocturnal');
+    expect(summary.workflowFunnels![0].stages[0].label).toBe('dreamer_completed');
+    expect(summary.workflowFunnels![0].stages[0].count).toBe(3);
+    expect(summary.workflowFunnels![0].stages[1].label).toBe('artifact_persisted');
+    expect(summary.workflowFunnels![0].stages[1].count).toBe(2);
+    expect(summary.workflowFunnels![1].funnelKey).toBe('rulehost');
+    expect(summary.workflowFunnels![1].stages[0].label).toBe('evaluated');
+    expect(summary.workflowFunnels![1].stages[0].count).toBe(15);
+
+    loader.dispose();
+  });
+
+  // TEST-02: Degraded fallback when YAML is missing
+  it('e2e_test_degraded_fallback_on_missing_yaml', () => {
+    const workspace = makeTempDir();
+    const stateDir = path.join(workspace, '.state');
+
+    // Create real loader pointing at stateDir with NO workflows.yaml
+    const loader = new WorkflowFunnelLoader(stateDir);
+    loader.watch();
+
+    // Write daily-stats.json (so the file exists, but no YAML)
+    const today = new Date().toISOString().slice(0, 10);
+    writeJson(path.join(stateDir, 'logs', 'daily-stats.json'), {
+      [today]: { evolution: {} },
+    });
+
+    // Call getSummary — should not crash
+    const summary = RuntimeSummaryService.getSummary(workspace, {
+      funnels: loader.getAllFunnels(),
+      loaderWarnings: loader.getWarnings(),
+    });
+
+    // Assert degraded status
+    expect(summary.metadata.status).toBe('degraded');
+    expect(loader.getWarnings()).toContain('workflows.yaml file not found.');
+    // workflowFunnels should be undefined or empty
+    expect(summary.workflowFunnels == null || summary.workflowFunnels.length === 0).toBe(true);
+
+    loader.dispose();
+  });
+
+  // TEST-03: Hot-reload — YAML changes reflected after loader.load()
+  it('e2e_test_hot_reload_reflects_yaml_changes', () => {
+    const workspace = makeTempDir();
+    const stateDir = path.join(workspace, '.state');
+
+    const loader = new WorkflowFunnelLoader(stateDir);
+    loader.watch();
+
+    // Write initial workflows.yaml with original_label
+    const workflowsYamlV1 = `
+version: "1.0"
+funnels:
+  - workflowId: nocturnal
+    stages:
+      - name: original_label
+        eventType: nocturnal_dreamer_completed
+        eventCategory: completed
+        statsField: evolution.nocturnalDreamerCompleted
+`;
+    const yamlPath = path.join(stateDir, 'workflows.yaml');
+    fs.writeFileSync(yamlPath, workflowsYamlV1, 'utf8');
+    loader.load();
+
+    const today = new Date().toISOString().slice(0, 10);
+    writeJson(path.join(stateDir, 'logs', 'daily-stats.json'), {
+      [today]: { evolution: { nocturnalDreamerCompleted: 5 } },
+    });
+
+    // First call — should show original_label
+    const summary1 = RuntimeSummaryService.getSummary(workspace, {
+      funnels: loader.getAllFunnels(),
+      loaderWarnings: loader.getWarnings(),
+    });
+    expect(summary1.workflowFunnels![0].stages[0].label).toBe('original_label');
+    expect(summary1.workflowFunnels![0].stages[0].count).toBe(5);
+
+    // Modify workflows.yaml to use modified_label
+    const workflowsYamlV2 = `
+version: "1.0"
+funnels:
+  - workflowId: nocturnal
+    stages:
+      - name: modified_label
+        eventType: nocturnal_dreamer_completed
+        eventCategory: completed
+        statsField: evolution.nocturnalDreamerCompleted
+`;
+    fs.writeFileSync(yamlPath, workflowsYamlV2, 'utf8');
+    loader.load(); // trigger hot-reload manually
+
+    // Second call — should show modified_label
+    const summary2 = RuntimeSummaryService.getSummary(workspace, {
+      funnels: loader.getAllFunnels(),
+      loaderWarnings: loader.getWarnings(),
+    });
+    expect(summary2.workflowFunnels![0].stages[0].label).toBe('modified_label');
+    expect(summary2.workflowFunnels![0].stages[0].count).toBe(5);
+
+    loader.dispose();
   });
 });
