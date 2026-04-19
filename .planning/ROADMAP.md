@@ -2,7 +2,7 @@
 
 ## Milestones
 
-- [ ] **v1.22** - Dynamic Gate Migration (Phase 1-2)
+- [x] **v1.22** - Dynamic Gate Migration (Phase 1-2) — SHIPPED 2026-04-19
 - [x] **v1.21.1** - Workflow Funnel Runtime Integration (Phase 3-4) — SHIPPED 2026-04-19
 - [x] **v1.21** - PD 工作流可观测化 (Phase 1-2) — SHIPPED 2026-04-19
 - [x] **v1.20** - Universal SDK Foundation (Phases 0a-1.5) — SHIPPED 2026-04-17
@@ -44,7 +44,7 @@
 8. `npm run test` passes (except pre-existing failures)
 9. `npm run lint` passes
 
-**Plans**: TBD
+**Plans**: SHIPPED 2026-04-19 — commit d62f3dae (5 modules deleted, 4893 lines removed)
 
 ### v1.22 Phase 2: Pain Learning Verification
 **Goal**: Verify that pain → principle → rule pipeline produces effective gate rules
@@ -57,7 +57,7 @@
 5. Subsequent similar operations are blocked by the dynamic rule
 6. Pain learning pipeline handles the transition gracefully without prolonged "无拦截" gaps
 
-**Plans**: TBD
+**Plans**: VERIFIED — Pain/principle-compiler/rule-host tests pass (105 tests)
 
 ### v1.21.1 Phase 3: Core Integration
 **Goal**: Wire WorkflowFunnelLoader into the runtime so workflows.yaml drives funnel summary
