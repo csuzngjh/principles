@@ -3,21 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { atomicWriteFileSync } from '../utils/io.js';
 
-export interface DeepReflectionSettings {
-    enabled: boolean;
-    mode: 'auto' | 'forced' | 'disabled';
-    force_checkpoint?: boolean;
-    checkpoint_message?: string;
-    auto_trigger_conditions?: {
-        min_tool_calls?: number;
-        error_rate_threshold?: number;
-        complexity_keywords?: string[];
-    };
-    default_model?: string;
-    default_depth?: number;
-    timeout_ms?: number;
-    modelsDir?: string;
-}
 
 export interface GfiGateSettings {
     enabled: boolean;
@@ -83,7 +68,6 @@ export interface PainSettings {
         initial_delay_ms: number;
         task_timeout_ms: number;
     };
-    deep_reflection?: DeepReflectionSettings;
     empathy_engine?: {
         enabled?: boolean;
         dedupe_window_ms?: number;
@@ -158,20 +142,6 @@ export const DEFAULT_SETTINGS: PainSettings = {
         worker_poll_ms: 15 * 60 * 1000,
         initial_delay_ms: 5000,
         task_timeout_ms: 60 * 60 * 1000  // 1 hour, matching evolution-worker.ts default
-    },
-    deep_reflection: {
-        enabled: true,
-        mode: 'auto',
-        force_checkpoint: true,
-        checkpoint_message: 'Before responding, quick self-check: 1. Task complexity (simple/medium/complex) 2. Information sufficiency (sufficient/need more) 3. If complex or insufficient info, call deep_reflect tool',
-        auto_trigger_conditions: {
-            min_tool_calls: 5,
-            error_rate_threshold: 0.3,
-            complexity_keywords: ['refactor', 'architecture', 'design', 'optimize', 'security', 'critical']
-        },
-        default_model: 'T-01',
-        default_depth: 2,
-        timeout_ms: 60000
     },
     empathy_engine: {
         enabled: true,

@@ -13,7 +13,6 @@ import type {
   GateBypassEventData,
   PlanApprovalEventData,
   EvolutionTaskEventData,
-  DeepReflectionEventData,
   EmpathyRollbackEventData,
   EventCategory,
 } from './event-types.js';
@@ -28,7 +27,6 @@ export type EventLogEntry =
   | { ts: string; date: string; type: 'gate_bypass'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: GateBypassEventData }
   | { ts: string; date: string; type: 'plan_approval'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: PlanApprovalEventData }
   | { ts: string; date: string; type: 'evolution_task'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: EvolutionTaskEventData }
-  | { ts: string; date: string; type: 'deep_reflection'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: DeepReflectionEventData }
   | { ts: string; date: string; type: 'empathy_rollback'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: EmpathyRollbackEventData }
   | { ts: string; date: string; type: 'error'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: Record<string, unknown> }
   | { ts: string; date: string; type: 'warn'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: Record<string, unknown> };
@@ -69,10 +67,6 @@ export function isPlanApprovalEventEntry(entry: EventLogEntry): entry is Extract
 
 export function isEvolutionTaskEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'evolution_task' }> {
   return entry.type === 'evolution_task';
-}
-
-export function isDeepReflectionEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'deep_reflection' }> {
-  return entry.type === 'deep_reflection';
 }
 
 export function isEmpathyRollbackEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'empathy_rollback' }> {

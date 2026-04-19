@@ -100,6 +100,17 @@ function buildEnglishOutput(
     `- generatedAt: ${summary.metadata.generatedAt}`,
   ];
 
+  // E: YAML-driven Workflow Funnels (Phase 6)
+  if (summary.workflowFunnels && summary.workflowFunnels.length > 0) {
+    lines.push('');
+    for (const funnel of summary.workflowFunnels) {
+      lines.push(`Workflow Funnel: ${funnel.funnelLabel}`);
+      for (const stage of funnel.stages) {
+        lines.push(`  - ${stage.label}: ${stage.count}`);
+      }
+    }
+  }
+
   if (warnings.length > 0) {
     lines.push('', 'Warnings');
     for (const warning of warnings) {
@@ -110,8 +121,8 @@ function buildEnglishOutput(
   return lines.join('\n');
 }
 
- 
-     
+
+
 function buildChineseOutput(
   workspaceDir: string,
   sessionId: string | null,
@@ -161,6 +172,17 @@ function buildChineseOutput(
     `- 生成时间: ${summary.metadata.generatedAt}`,
   ];
 
+  // E: YAML驱动的Workflow Funnels (Phase 6)
+  if (summary.workflowFunnels && summary.workflowFunnels.length > 0) {
+    lines.push('');
+    for (const funnel of summary.workflowFunnels) {
+      lines.push(`Workflow 漏斗: ${funnel.funnelLabel}`);
+      for (const stage of funnel.stages) {
+        lines.push(`  - ${stage.label}: ${stage.count}`);
+      }
+    }
+  }
+
   if (warnings.length > 0) {
     lines.push('', '警告');
     for (const warning of warnings) {
@@ -183,7 +205,11 @@ export function handleEvolutionStatusCommand(ctx: PluginCommandContext): { text:
   const loader = new WorkflowFunnelLoader(stateDir);
   loader.watch();
   try {
-    const summary = RuntimeSummaryService.getSummary(workspaceDir, { sessionId, loaderWarnings: loader.getWarnings() });
+    const summary = RuntimeSummaryService.getSummary(workspaceDir, {
+      sessionId,
+      loaderWarnings: loader.getWarnings(),
+      funnels: loader.getAllFunnels(),
+    });
     const recommendations = WorkspaceContext.fromHookContext({ workspaceDir })
       .principleLifecycle
       .recomputeAll()

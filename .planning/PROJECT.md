@@ -21,6 +21,7 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - Phase 0b: PainSignalAdapter, EvolutionHook, PrincipleInjector, TelemetryEvent interfaces — framework-agnostic adapter abstraction layer.
 - v1.21: PD 工作流可观测化 — diagnostician_report 三态扩展 + YAML 工作流漏斗框架（js-yaml, WorkflowFunnelLoader, 6 new EventType, 6 recordXxx methods）
 - v1.21.1: Workflow Funnel Runtime Integration — YAML workflows.yaml 驱动运行时 summary/status
+- v1.21.2: YAML Funnel SSOT — `workflows.yaml` 真正驱动 `/pd-evolution-status` 展示，getSummary() 消费 funnels Map
 
 ## Out of Scope
 
@@ -43,33 +44,11 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Phase 1.5 Validation | N=2 (coding + 1) is not enough for "Universal" claim; need extreme case | Active |
 | Freeze Semver after Ph 1.5 | Ensure stability only after cross-domain stress testing | Active |
 
-## Current Milestone: v1.21.1 Workflow Funnel Runtime Integration
+## Current Milestone: Planning next milestone
 
-**Goal:** 让 `workflows.yaml` 成为"漏斗定义"的运行时事实源，并驱动 summary/status 展示。
+**Previous:** v1.21.2 — YAML Funnel 完整 SSOT (Phase 5-7) — SHIPPED 2026-04-19
 
-**Target features:**
-- WorkflowFunnelLoader 接入 runtime
-- RuntimeSummaryService 基于 YAML 定义构建 funnel summary
-- /pd-evolution-status 基于 YAML 展示漏斗分层统计
-- YAML 缺失/非法时显式报 degraded，不允许静默 hardcoded fallback
-- FSWatcher 生命周期正确关闭，避免 watcher 泄漏
-
-**Out of scope:**
-- 事件生产端全面改成 YAML 驱动
-- 改写所有 event type 命名
-- 重做整个 observability 架构
-
-**Success criteria:**
-1. RuntimeSummaryService 不再硬编码 heartbeat/nocturnal/rulehost 漏斗结构
-2. /pd-evolution-status 展示来自 YAML 定义的漏斗 stages
-3. workflows.yaml 修改后可热更新到 summary/status
-4. YAML 无效时，status 明确显示配置错误，而不是悄悄 fallback
-5. WorkflowFunnelLoader.dispose() 和 watch() 有测试覆盖，确保不泄漏 watcher
-
-**YAML 边界:**
-- YAML = 漏斗定义真相源
-- event log = 发生事实真相源
-- runtime summary = 派生视图（YAML 定义 + event log 数据）
+See `.planning/milestones/v1.21.2-ROADMAP.md` for archived milestone details.
 
 ## Evolution
 
@@ -88,4 +67,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-19 after v1.21.1 milestone started*
+*Last updated: 2026-04-19 after v1.21.2 milestone shipped*
