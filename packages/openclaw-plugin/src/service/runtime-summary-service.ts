@@ -171,7 +171,7 @@ function pushWarning(warnings: string[], message: string): void {
 export class RuntimeSummaryService {
   static getSummary(
     workspaceDir: string,
-    options?: { sessionId?: string | null; funnels?: Map<string, WorkflowStage[]>; loaderWarnings?: string[] }
+    options?: { sessionId?: string | null; loaderWarnings?: string[] }
   ): RuntimeSummary {
     const generatedAt = new Date().toISOString();
     const warnings: string[] = [];

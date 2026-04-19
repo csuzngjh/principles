@@ -184,6 +184,7 @@ export function handleEvolutionStatusCommand(ctx: PluginCommandContext): { text:
   const funnels = loader.getAllFunnels();
   loader.watch();
   const summary = RuntimeSummaryService.getSummary(workspaceDir, { sessionId, funnels, loaderWarnings: loader.getWarnings() });
+  loader.dispose(); // YAML-FUNNEL-02: workspace-scoped owner disposes loader on command completion
   const recommendations = WorkspaceContext.fromHookContext({ workspaceDir })
     .principleLifecycle
     .recomputeAll()
