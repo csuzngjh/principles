@@ -2,56 +2,51 @@
 gsd_state_version: 1.0
 milestone: v1.21.2
 milestone_name: YAML Funnel 完整 SSOT
-status: Defining requirements
-last_updated: "2026-04-19T17:00:00.000Z"
-last_activity: 2026-04-19 — Milestone v1.21.2 started
+status: shipped
+last_updated: "2026-04-19T19:10:00.000Z"
+last_activity: 2026-04-19 — Milestone v1.21.2 shipped
 progress:
-  total_phases: 0
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_phases: 3
+  completed_phases: 3
+  total_plans: 3
+  completed_plans: 3
+  percent: 100
 ---
 
-# Project State: Principles (Worktree: fix/pd-pain-signal-mandatory-enforcement)
+# Project State: Principles
 
 ## Project Reference
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** Milestone v1.21.2 — YAML Funnel 完整 SSOT
+**Current Focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 6 completed, Phase 7 (Integration Testing) is next
-Plan: 06-01-PLAN.md (Phase 6)
-Status: Phase 6 complete, routing to Phase 7
-Last activity: 2026-04-19 — Phase 6 (Display Wiring) completed
+Milestone v1.21.2 (YAML Funnel SSOT) shipped 2026-04-19.
+All phases complete: Phase 5 (Runtime Wiring) + Phase 6 (Display Wiring) + Phase 7 (Integration Testing).
+
+**Next:** `/gsd-new-milestone` to start planning next milestone
 
 ## Context
 
-**v1.21.1 完成情况（PR #370 / PR #375）：**
-- WorkflowFunnelLoader scaffold 完成，warnings 已接入 metadata
-- diagnosticianReportsWritten legacy compat 修复（PR #375）
-- RuntimeSummaryService funnels Map 未消费（hardcoded 状态）→ v1.21.2 目标
+v1.21.2 shipped with:
+- `workflows.yaml` genuinely drives `/pd-evolution-status` funnel display
+- getSummary() consumes funnels Map, builds workflowFunnels from YAML stage definitions
+- Display layer YAML-driven (labels + stage order from YAML)
+- Graceful degraded mode for missing/invalid YAML
+- 3 E2E integration tests pass (13/13 total)
 
-**v1.21.2 scope：**
-- RuntimeSummaryService.getSummary() 接受 funnels Map，YAML funnel 定义构建 workflowFunnels 输出
-- evolution-status.ts 调用 loader.getAllFunnels()，不再 hardcoded nocturnal/rulehost 漏斗
-- statsField 缺失时 count=0 + warning 可见
-- YAML 缺失/非法时 degraded，不静默 fallback
+## Archived Milestones
 
-## Key Files
-
-- `src/core/workflow-funnel-loader.ts` — WorkflowFunnelLoader 类（已完成）
-- `src/service/runtime-summary-service.ts` — 需改造为 YAML 驱动
-- `src/commands/evolution-status.ts` — /pd-evolution-status 展示层
-- `.planning/phases/02-workflow-watchdog/workflows.yaml` — YAML SSOT
+- v1.21.2: `.planning/milestones/v1.21.2-ROADMAP.md`, `.planning/milestones/v1.21.2-REQUIREMENTS.md`
+- v1.21.1: Workflow Funnel Scaffold (Phase 3-4)
+- v1.21: PD 工作流可观测化 (Phase 1-2)
 
 ## Next
 
-**Command:** `/gsd-plan-phase 7`（skip discuss，直接 planning）
+**Command:** `/gsd-new-milestone`
 
 ---
 
-*Last updated: 2026-04-19 after v1.21.2 milestone started*
+*Last updated: 2026-04-19 after v1.21.2 milestone shipped*

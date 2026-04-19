@@ -21,6 +21,7 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - Phase 0b: PainSignalAdapter, EvolutionHook, PrincipleInjector, TelemetryEvent interfaces — framework-agnostic adapter abstraction layer.
 - v1.21: PD 工作流可观测化 — diagnostician_report 三态扩展 + YAML 工作流漏斗框架（js-yaml, WorkflowFunnelLoader, 6 new EventType, 6 recordXxx methods）
 - v1.21.1: Workflow Funnel Runtime Integration — YAML workflows.yaml 驱动运行时 summary/status
+- v1.21.2: YAML Funnel SSOT — `workflows.yaml` 真正驱动 `/pd-evolution-status` 展示，getSummary() 消费 funnels Map
 
 ## Out of Scope
 
@@ -43,27 +44,11 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Phase 1.5 Validation | N=2 (coding + 1) is not enough for "Universal" claim; need extreme case | Active |
 | Freeze Semver after Ph 1.5 | Ensure stability only after cross-domain stress testing | Active |
 
-## Current Milestone: v1.21.2 YAML Funnel 完整 SSOT
+## Current Milestone: Planning next milestone
 
-**Goal:** 让 `workflows.yaml` 真正驱动 `/pd-evolution-status` 展示（完整 wiring，而非 v1.21.1 scaffold）。
+**Previous:** v1.21.2 — YAML Funnel 完整 SSOT (Phase 5-7) — SHIPPED 2026-04-19
 
-**Target features:**
-- RuntimeSummaryService.getSummary() 接受 funnels Map，消费 YAML funnel 定义构建 workflowFunnels 输出
-- evolution-status.ts 调用 loader.getAllFunnels()，把 funnel 数据传给 getSummary()
-- 每个 stage 的 count 从 dailyStats 按 statsField 读取；statsField 缺失时 count=0 + warning 可见
-- YAML 缺失/非法时 status 显示 degraded，不静默 fallback
-
-**Out of scope:**
-- diagnostician 三态统计逻辑改动
-- nocturnal / rulehost 事件生产逻辑
-- Rule Host 架构本身
-- .planning 清理
-
-**Success criteria:**
-1. `workflows.yaml` 的 funnel/stage 定义真实影响 `/pd-evolution-status` 的展示内容和结构
-2. 删掉或修改 YAML，展示随之变化
-3. statsField 缺失时不崩溃，count=0 + warning 可见
-4. 展示层不再有 hardcoded nocturnal/rulehost 漏斗结构
+See `.planning/milestones/v1.21.2-ROADMAP.md` for archived milestone details.
 
 ## Evolution
 
@@ -82,4 +67,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-19 after v1.21.2 milestone started*
+*Last updated: 2026-04-19 after v1.21.2 milestone shipped*

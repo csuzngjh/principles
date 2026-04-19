@@ -1,5 +1,17 @@
 # Milestones
 
+## v1.21.2 YAML Funnel 完整 SSOT (Shipped: 2026-04-19)
+
+**Phases completed:** 3 phases, 3 plans
+**Key accomplishments:**
+- YAML SSOT wiring complete — `workflows.yaml` genuinely drives `/pd-evolution-status` funnel display
+- getSummary() consumes funnels Map — RuntimeSummaryService builds `workflowFunnels` from YAML stage definitions + dailyStats counts
+- Display layer YAML-driven — stage labels and order from YAML, not hardcoded
+- Graceful degraded mode — missing/invalid YAML → status=degraded + warnings, no crashes
+- E2E integration tests (3) using real WorkflowFunnelLoader confirm full pipeline works
+
+---
+
 ## v1.21 PD 工作流可观测化 (Shipped: 2026-04-19)
 
 **Phases completed:** 2 phases, 6 plans
