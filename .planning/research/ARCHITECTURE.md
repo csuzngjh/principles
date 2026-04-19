@@ -1,486 +1,285 @@
-# Architecture Research: God Class Refactoring for Nocturnal Pipeline
+# Architecture Research: YAML Runtime Integration
 
-**Project:** Tech Debt Remediation - Splitting God Classes (evolution-worker.ts, nocturnal-trinity.ts)
-**Researched:** 2026-04-15
-**Confidence:** HIGH (based on code analysis of evolution-worker.ts, nocturnal-trinity.ts, nocturnal-runtime.ts)
+**Domain:** Workflow funnel runtime integration -- WorkflowFunnelLoader to RuntimeSummaryService
+**Project:** v1.21.1 Workflow Funnel Runtime
+**Researched:** 2026-04-19
+**Confidence:** HIGH
 
 ---
 
 ## Executive Summary
 
-The nocturnal pipeline's `evolution-worker.ts` is a textbook god class -- a single ~2000+ line file handling queue management, workflow monitoring, sleep cycle coordination, deduplication, locking, and task dispatch. The suggested split into `queue-processor.ts`, `workflow-watchdog.ts`, and `sleep-cycle.ts` is the correct boundary decomposition. These three modules map cleanly to the three distinct responsibility axes in the file: **data persistence**, **health monitoring**, and **business logic orchestration**.
+The `WorkflowFunnelLoader` (defined in `src/core/workflow-funnel-loader.ts`) is fully implemented and serves as the SSOT for funnel stage definitions in `workflows.yaml`. However, it is not yet wired into `RuntimeSummaryService`, which currently derives funnel-related stats from hardcoded event type matching and `daily-stats.json` field paths. The integration task is: pass the loader's `Map<workflowId, WorkflowStage[]>` to `RuntimeSummaryService.getSummary()` so that YAML drives the stage-to-event mapping.
 
-The key architectural insight: the existing heartbeat cycle (in `nocturnal-runtime.ts`) calls into `evolution-worker.ts` only at specific well-defined points (`enqueueSleepReflectionTask`, `enqueueKeywordOptimizationTask`). This means the split can proceed module-by-module without touching the heartbeat cycle, as long as the exported function signatures remain identical.
-
----
-
-## 1. How God Classes Like evolution-worker.ts Are Typically Split
-
-### Current State (God Class)
-
-`evolution-worker.ts` conflates three orthogonal concerns:
-
-| Concern | Functions | Nature |
-|---------|-----------|--------|
-| Queue persistence, migration, deduplication | `loadEvolutionQueue`, `migrateToV2`, `findRecentDuplicateTask`, `purgeStaleFailedTasks`, `createEvolutionTaskId`, `acquireQueueLock` | Pure data + atomic file I/O |
-| Workflow health monitoring | `runWorkflowWatchdog` (~140 lines) | Observability + cleanup |
-| Sleep cycle orchestration | `enqueueSleepReflectionTask`, `enqueueKeywordOptimizationTask`, `shouldSkipForDedup` | Business logic + decision-making |
-| Shared infrastructure | `readRecentPainContext`, `buildFallbackNocturnalSnapshot` | Utility |
-
-### Recommended Module Boundaries
-
-#### `queue-processor.ts` -- Queue State Machine
-
-**Responsibility:** All queue CRUD, migration, deduplication, and atomic persistence. Zero business logic.
-
-**Public API:**
-```typescript
-// Queue lifecycle
-export function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[]
-export function saveEvolutionQueue(queue: EvolutionQueueItem[], queuePath: string): void  // atomic under lock
-
-// Migration
-export function migrateToV2(item: LegacyEvolutionQueueItem): EvolutionQueueItem
-export function migrateQueueToV2(queue: RawQueueItem[]): EvolutionQueueItem[]
-export function isLegacyQueueItem(item: RawQueueItem): boolean
-
-// Deduplication
-export function findRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): EvolutionQueueItem | undefined
-export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean
-
-// Maintenance
-export function purgeStaleFailedTasks(queue: EvolutionQueueItem[], logger: PluginLogger): { purged: number; remaining: number; byReason: Record<string, number> }
-
-// Identity
-export function createEvolutionTaskId(source: string, score: number, preview: string, reason: string, now: number): string
-
-// Locking infrastructure (shared with sleep-cycle)
-export async function acquireQueueLock(resourcePath: string, logger: PluginLogger | {...}, lockSuffix?: string): Promise<() => void>
-export const EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS
-
-// RAII-style lock guard (new -- eliminates manual release bugs)
-export async function withQueueLock<T>(queuePath: string, logger: PluginLogger, fn: () => Promise<T>): Promise<T>
-```
-
-**Internal types (not exported):**
-- `RawQueueItem`, `LegacyEvolutionQueueItem`
+The architecture is straightforward: one new instantiation (in `evolution-status.ts`), one method signature change (`getSummary()` gains an optional `funnels` parameter), and YAML-driven stage aggregation added to the service. No new files are required. The build order is strictly linear: Loader import -> RuntimeSummaryService signature update -> evolution-status.ts wiring.
 
 ---
 
-#### `workflow-watchdog.ts` -- Workflow Health Monitor
+## Current Architecture
 
-**Responsibility:** Scan workflow store, detect anomalies (stale/orphaned/invalid), emit structured `WatchdogResult`. Called every heartbeat cycle for observability.
-
-**Public API:**
-```typescript
-export interface WatchdogResult {
-  anomalies: number;
-  details: string[];
-}
-
-export async function runWorkflowWatchdog(
-  wctx: WorkspaceContext,
-  api: OpenClawPluginApi | null,
-  logger?: PluginLogger,
-): Promise<WatchdogResult>
-```
-
-**What it detects:**
-- Stale active workflows (active > 2x TTL, skipping expected subagent unavailability)
-- Terminal-error workflows pending cleanup
-- Nocturnal result validation (fallback snapshot detection, empty fallback stats)
-
-**Heartbeat cycle impact:** NONE. It is called purely for observability/logging. It never writes to the queue.
-
----
-
-#### `sleep-cycle.ts` -- Sleep Reflection Orchestrator
-
-**Responsibility:** Coordinate sleep reflection enqueueing, keyword optimization dispatch, cooldown checking, and pain context attachment. This is where business logic lives.
-
-**Public API:**
-```typescript
-// Task enqueueing (called by heartbeat)
-export async function enqueueSleepReflectionTask(wctx: WorkspaceContext, logger: PluginLogger): Promise<void>
-export async function enqueueKeywordOptimizationTask(wctx: WorkspaceContext, logger: PluginLogger): Promise<void>
-
-// Pain context (used by enqueueing logic)
-export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext
-export function buildPainSourceKey(painCtx: ReturnType<typeof readRecentPainContext>): string | null
-
-// Dedup and skip logic
-export function hasRecentSimilarReflection(queue: EvolutionQueueItem[], painSourceKey: string, now: number): EvolutionQueueItem | null
-export function hasPendingTask(queue: EvolutionQueueItem[], taskKind: TaskKind): boolean
-export function shouldSkipForDedup(queue: EvolutionQueueItem[], wctx: WorkspaceContext, logger: PluginLogger): boolean
-
-// Internal helpers (private to module, called by public functions)
-function enqueueNewSleepReflectionTask(queue: EvolutionQueueItem[], recentPainContext: ReturnType<typeof readRecentPainContext>, queuePath: string, logger: PluginLogger): void
-function normalizePainDedupKey(source: string, preview: string, reason?: string): string
-function buildFallbackNocturnalSnapshot(sleepTask: EvolutionQueueItem, extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor>, logger?: {...}): NocturnalSessionSnapshot | null
-```
-
-**Key architectural point:** This module does NOT call `atomicWriteFileSync` directly. It calls `enqueueNewSleepReflectionTask` (which lives in `queue-processor`) under lock. Queue writes are always encapsulated in `queue-processor`.
-
----
-
-### Backward-Compatible Facade (evolution-worker.ts During Transition)
-
-During the refactoring, `evolution-worker.ts` acts as a facade that re-exports everything under the original import paths:
-
-```typescript
-// evolution-worker.ts -- TEMPORARY FACADE
-// All existing callers import from here (no import path changes needed)
-
-export { loadEvolutionQueue, saveEvolutionQueue, migrateToV2, ... } from './queue-processor.js';
-export { runWorkflowWatchdog, type WatchdogResult } from './workflow-watchdog.js';
-export {
-  enqueueSleepReflectionTask,
-  enqueueKeywordOptimizationTask,
-  readRecentPainContext,
-  // ... all other sleep-cycle exports
-} from './sleep-cycle.js';
-export type {
-  EvolutionQueueItem,
-  RecentPainContext,
-  QueueStatus,
-  TaskResolution,
-  TaskKind,
-  TaskPriority,
-} from './sleep-cycle.js';
-```
-
-After all callers are migrated, this facade can be kept indefinitely as a stable import point, or removed if callers update their imports directly.
-
----
-
-## 2. Integrating New Modules Without Breaking the Heartbeat Cycle
-
-### Current Heartbeat Integration Points
-
-The heartbeat (in `nocturnal-runtime.ts`) calls into `evolution-worker.ts` at three points:
-
-| Caller | Function Called | Purpose |
-|--------|----------------|---------|
-| Idle detection path | `enqueueSleepReflectionTask(wctx, logger)` | Enqueue reflection when workspace idle |
-| Keyword optimization dispatch | `enqueueKeywordOptimizationTask(wctx, logger)` | Enqueue keyword optimization |
-| Every heartbeat cycle | `runWorkflowWatchdog(wctx, api, logger)` | Health monitoring |
-
-### Integration Strategy: Zero-Change Facade
+### System Overview
 
 ```
-Heartbeat (nocturnal-runtime.ts)
+evolution-status.ts (command)
     │
-    ├── import { enqueueSleepReflectionTask } from '../service/evolution-worker.js'  ← UNCHANGED
-    ├── import { enqueueKeywordOptimizationTask } from '../service/evolution-worker.js'  ← UNCHANGED
-    └── import { runWorkflowWatchdog } from '../service/evolution-worker.js'  ← UNCHANGED
-
-evolution-worker.js (facade)
-    ├── re-exports from queue-processor.js
-    ├── re-exports from workflow-watchdog.js
-    └── re-exports from sleep-cycle.js
+    └── RuntimeSummaryService.getSummary(workspaceDir, { sessionId })
+            │
+            ├── [reads] events.jsonl          (pain signals, gate events)
+            ├── [reads] daily-stats.json      (GFI peak, tool calls, evolution tasks)
+            ├── [reads] sessions/*.json       (session GFI snapshots)
+            ├── [reads] evolution-queue.json  (pending/in_progress/completed)
+            ├── [reads] evolution-directive.json (legacy compatibility artifact)
+            └── [reads] pain-flags.json        (active pain state)
+            │
+            [YAML stage definitions: NOT YET INTEGRATED]
 ```
 
-The facade pattern means the heartbeat sees zero change. The facade re-exports from the new module files. This is the critical enabler for incremental refactoring.
+### Component Responsibilities
 
-### Lock Sharing Between Modules
+| Component | Responsibility | Current State |
+|-----------|----------------|---------------|
+| `WorkflowFunnelLoader` | Loads `workflows.yaml` as SSOT; provides `getAllFunnels()`, `getStages()`, `watch()`; preserves last-valid on parse failure | **Exists, not wired** |
+| `RuntimeSummaryService.getSummary()` | Aggregates runtime state from JSON files; builds `RuntimeSummary` object for display | Static method, no YAML dependency |
+| `evolution-status.ts` | Command entry point; calls `RuntimeSummaryService`; formats bilingual output | Works, calls RuntimeSummaryService only |
 
-Both `queue-processor` and `sleep-cycle` need the queue lock. The lock acquisition lives in `queue-processor` (shared infrastructure):
+### The Integration Gap
 
-```typescript
-// queue-processor.ts
-export async function withQueueLock<T>(
-  queuePath: string,
-  logger: PluginLogger,
-  fn: () => Promise<T>
-): Promise<T> {
-  const release = await acquireQueueLock(queuePath, logger);
-  try {
-    return await fn();
-  } finally {
-    release();
-  }
-}
-
-// sleep-cycle.ts calls it internally:
-export async function enqueueSleepReflectionTask(wctx, logger) {
-  const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-  await withQueueLock(queuePath, logger, async () => {
-    const queue = loadEvolutionQueue(queuePath);
-    // ... business logic
-    saveEvolutionQueue(queue, queuePath);
-  });
-}
-```
-
-This eliminates the common bug pattern of lock leaks (forgetting to call `release()` in all code paths).
+`WorkflowFunnelLoader` is fully implemented and tested in isolation. It is **not consumed by any other component**. `RuntimeSummaryService` currently builds funnel-related stats from raw event log data without referencing the YAML-defined stage structure.
 
 ---
 
-## 3. Data Flow Changes When Splitting a Monolithic Worker
+## Target Architecture
 
-### Before Split (Monolithic Worker)
+### System Overview
 
 ```
-Heartbeat Cycle
+evolution-status.ts (command)
     │
-    ▼
-evolution-worker.ts
-    ├── readRecentPainContext()
-    ├── loadEvolutionQueue()  ──────────────────────────┐
-    ├── hasPendingTask()                              │
-    ├── shouldSkipForDedup() ─────────────────────────┤
-    │                                                 │ Queue I/O
-    ├── enqueueSleepReflectionTask() ◄────────────────┤
-    │    │
-    │    ├── createEvolutionTaskId()
-    │    ├── atomicWriteFileSync()  ──────────────────┼── Single write
-    │    └── [releases lock]
+    ├── WorkflowFunnelLoader (stateDir)   [NEW: instantiated here, passed down]
+    │       │
+    │       └── workflows.yaml (SSOT)
     │
-    └── runWorkflowWatchdog()
-         ├── WorkflowStore.listWorkflows()
-         ├── WorkflowStore.getEvents()
-         └── [session cleanup via api]
+    └── RuntimeSummaryService.getSummary(workspaceDir, {
+            sessionId,
+            funnels: Map<string, WorkflowStage[]>  [NEW param]
+        })
+              │
+              ├── [reads] events.jsonl          (raw event stream)
+              ├── [reads] daily-stats.json      (aggregated stats)
+              ├── [reads] sessions/*.json       (session snapshots)
+              ├── [reads] evolution-queue.json  (queue state)
+              ├── [reads] pain-flags.json        (pain state)
+              │
+              └── [uses] funnels: Map<string, WorkflowStage[]>
+                        │
+                        ├── Maps event type → stage definition
+                        ├── Resolves statsField dot-paths for aggregation
+                        └── Counts by eventCategory (completed/created/blocked)
+
+workflows.yaml (SSOT)
+    version: "1.0"
+    funnels:
+      - workflowId: "evolution"
+        stages:
+          - name: "nocturnal_dreamer_completed"
+            eventType: "nocturnal_dreamer_completed"
+            eventCategory: "completed"
+            statsField: "evolution.nocturnalDreamerCompleted"
 ```
 
-### After Split (Modular)
+### Data Flow: Funnel Stage Resolution
 
 ```
-Heartbeat Cycle
-    │
-    ▼
-evolution-worker.ts (facade -- thin re-export)
-    │
-    ├──────────────────────────────────────────────────────────┐
-    │                                                          │
-    ▼                                                          ▼
-sleep-cycle.ts                                         workflow-watchdog.ts
-    │                                                          │
-    ├── readRecentPainContext()                                ├── WorkflowStore.listWorkflows()
-    │                                                          ├── WorkflowStore.getEvents()
-    ▼                                                          └── [session cleanup via api]
-queue-processor.ts
-    │
-    ├── acquireQueueLock() ◄──────────────┐
-    ├── loadEvolutionQueue() ◄────────────┼── Queue I/O
-    │                                     │
-    ├── [dedup + business logic]          │
-    │                                     │
-    └── saveEvolutionQueue() ◄────────────┴── Single atomic write
+1. evolution-status.ts creates WorkflowFunnelLoader(stateDir)
+2. Loader reads workflows.yaml → builds Map<workflowId, WorkflowStage[]>
+3. evolution-status.ts passes funnels to RuntimeSummaryService.getSummary(workspaceDir, { sessionId, funnels })
+4. RuntimeSummaryService iterates stages:
+     a. Filter events.jsonl entries matching stage.eventType
+     b. Resolve stage.statsField dot-path into daily-stats.json
+     c. Count by stage.eventCategory (completed/created/blocked)
+5. Output: YAML-driven funnel display in evolution-status
 ```
-
-### Data Flow Invariants (Must Preserve)
-
-1. **Queue write is atomic**: `sleep-cycle` never calls `atomicWriteFileSync` directly. It calls `saveEvolutionQueue` (in `queue-processor`) which acquires the lock, writes, and releases.
-
-2. **Watchdog is read-only**: `runWorkflowWatchdog` reads the workflow store and API. It never acquires the queue lock or writes to any shared state.
-
-3. **Dedup is a pure function**: `findRecentDuplicateTask` takes the queue as an argument and returns a result. No side effects.
-
-4. **Lock lifetime is encapsulated**: Using the `withQueueLock` RAII pattern, the lock is held for the minimum necessary duration.
 
 ---
 
-## 4. Suggested Build Order for Incremental Refactoring
+## Integration Points
 
-### Phase 1: Extract Shared Types (Lowest Risk)
+### Boundary 1: evolution-status.ts → WorkflowFunnelLoader
 
-**Create `nocturnal-queue-types.ts` in `src/core/`**
-
-Extract all shared types:
+**Current (before):**
 ```typescript
-// nocturnal-queue-types.ts
-export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | ...;
-export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'keyword_optimization';
-export type TaskPriority = 'low' | 'medium' | 'high';
-
-export interface RecentPainContext {
-  mostRecent: { score: number; source: string; reason: string; timestamp: string; sessionId: string } | null;
-  recentPainCount: number;
-  recentMaxPainScore: number;
-}
-
-export interface EvolutionQueueItem {
-  id: string;
-  taskKind: TaskKind;
-  priority: TaskPriority;
-  source: string;
-  // ... all fields
-}
+// evolution-status.ts line 178
+const summary = RuntimeSummaryService.getSummary(workspaceDir, { sessionId });
 ```
 
-**Why first:** Types have no runtime dependencies. Validation: run `tsc --noEmit` after extraction. All importing files should see identical types.
-
----
-
-### Phase 2: Extract `workflow-watchdog.ts` (No Dependencies on New Modules)
-
-**Create `src/service/workflow-watchdog.ts`**
-
-Move `runWorkflowWatchdog` (~140 lines). Dependencies:
-- `WorkspaceContext` (core)
-- `OpenClawPluginApi` (SDK)
-- `PluginLogger` (SDK)
-- `WorkflowStore` (already in `subagent-workflow/`)
-- `WORKFLOW_TTL_MS` (config)
-- `isExpectedSubagentError` (subagent-workflow)
-
-**Update:** `evolution-worker.ts` imports from `./workflow-watchdog.js` and re-exports.
-
-**Verification:** Heartbeat calls `runWorkflowWatchdog` through the facade. Compare output before/after.
-
----
-
-### Phase 3: Extract `queue-processor.ts` (No Business Logic)
-
-**Create `src/service/queue-processor.ts`**
-
-Move all queue operations. This is the largest extraction.
-
-**Key new API addition:** `saveEvolutionQueue(queue, queuePath)` -- encapsulates the atomic write + lock release pattern. This becomes the ONLY way other modules write to the queue.
-
-**Update:** `evolution-worker.ts` imports from `./queue-processor.js` and re-exports.
-
-**Verification:**
+**After:**
 ```typescript
-// Unit test: verify atomic write is called exactly once per enqueue
-// Integration test: full sleep reflection enqueue flow still works
-// Check: no module other than queue-processor calls atomicWriteFileSync on the queue
-```
-
----
-
-### Phase 4: Extract `sleep-cycle.ts` (Orchestrator)
-
-**Create `src/service/sleep-cycle.ts`**
-
-Move business logic orchestration. This module imports from `queue-processor` but adds no new dependencies on the queue itself.
-
-**Update:** `evolution-worker.ts` imports from `./sleep-cycle.js` and re-exports.
-
-**Verification:**
-```typescript
-// Dedup logic: verify skip behavior with test queue state
-// Keyword optimization: verify throttle check still works
-// Pain context: verify attachment to sleep_reflection tasks
-// Full heartbeat cycle: idle detection -> sleep reflection enqueue -> queue state
-```
-
----
-
-### Phase 5: Thin the Facade (Optional)
-
-Once all callers are migrated:
-- Option A: Keep `evolution-worker.ts` as a permanent stable re-export facade (low cost, high compatibility)
-- Option B: Update all callers to import from new modules directly, delete `evolution-worker.ts`
-
-**Recommendation: Option A.** The facade provides a single stable import point for the heartbeat. Changing import paths in `nocturnal-runtime.ts` adds risk without benefit.
-
----
-
-## 5. Nocturnal-Trinity.ts Splitting (Parallel Track)
-
-`nocturnal-trinity.ts` (~2430 lines) has six distinct sections:
-
-| Section | Lines (est.) | New Module | Dependencies |
-|---------|-------------|------------|--------------|
-| Types and interfaces | ~400 | `trinity-types.ts` | None |
-| Prompt strings | ~300 | `trinity-prompts.ts` | None (static) |
-| formatReasoningContext | ~50 | `nocturnal-reasoning-deriver.ts` | Already in nocturnal-reasoning-deriver.js, just move here |
-| Stub implementations | ~350 | `trinity-stubs.ts` | Types, prompts |
-| TrinityRuntimeAdapter interface + OpenClawTrinityRuntimeAdapter | ~400 | `trinity-runtime-adapter.ts` | Types, prompts, stubs |
-| Chain execution (runTrinity, runTrinityAsync) | ~300 | `trinity-executor.ts` | All above |
-| Validation + draftToArtifact | ~100 | `trinity-validator.ts` | Types |
-
-**Why nocturnal-trinity is lower priority than evolution-worker:**
-- `nocturnal-trinity.ts` is well-structured (prompt strings, types, stubs, adapter, executor are already logically separated within the file)
-- The god class problem in `evolution-worker.ts` is more severe (heterogeneous concerns)
-- The heartbeat does not call `nocturnal-trinity.ts` directly -- `evolution-worker.ts` calls it internally
-
-**Split order for trinity:** Types -> Prompts -> Stubs -> Adapter -> Executor -> Validator
-
----
-
-## 6. Type Safety Improvements During Refactoring
-
-### Add Discriminated Unions for Queue Status
-
-Current `EvolutionQueueItem` uses optional fields for status transitions. A discriminated union makes illegal states unrepresentable:
-
-```typescript
-// nocturnal-queue-types.ts
-
-export type EvolutionQueueItem =
-  | { readonly status: 'pending'; id: string; taskKind: TaskKind; priority: TaskPriority; source: string; score: number; reason: string; timestamp: string; enqueued_at?: string; trigger_text_preview?: string; traceId?: string; retryCount: number; maxRetries: number; recentPainContext?: RecentPainContext; resultRef?: string; }
-  | { readonly status: 'in_progress'; id: string; started_at: string; assigned_session_key?: string; session_id?: string; agent_id?: string; /* ... common fields */ }
-  | { readonly status: 'completed'; id: string; completed_at: string; resolution: TaskResolution; resultRef: string; /* ... */ }
-  | { readonly status: 'failed'; id: string; lastError: string; retryCount: number; /* ... */ }
-  | { readonly status: 'canceled'; id: string; /* ... */ };
-```
-
-### RAII-Style Lock Guard
-
-Current pattern requires manual lock release in every code path:
-
-```typescript
-// CURRENT (bug-prone):
-const release = await acquireQueueLock(queuePath, logger);
-try {
-  // ... work
-} finally {
-  release();  // Easy to forget, especially in early returns
-}
-
-// RECOMMENDED (RAII-style):
-await withQueueLock(queuePath, logger, async () => {
-  // ... work
-  // lock automatically released when scope exits
+// evolution-status.ts
+const funnelLoader = new WorkflowFunnelLoader(wctx.stateDir);
+funnelLoader.watch(); // hot reload enabled
+const summary = RuntimeSummaryService.getSummary(workspaceDir, {
+  sessionId,
+  funnels: funnelLoader.getAllFunnels(),  // Map<string, WorkflowStage[]>
 });
 ```
 
+**Notes:**
+- `WorkflowFunnelLoader` is constructed with `stateDir` (same as `wctx.stateDir`)
+- `watch()` is called here so the loader survives for the lifetime of the process
+- `funnelLoader.dispose()` should be called on plugin shutdown (lifecycle hook)
+
+### Boundary 2: RuntimeSummaryService -- funnel stage mapping
+
+**Current (hardcoded):**
+```typescript
+// runtime-summary-service.ts -- Heartbeat Diagnostician section
+heartbeatDiagnosis: {
+  pendingTasks: pendingDiagTasks.length,
+  tasksWrittenToday: diagDailyStats?.diagnosisTasksWritten ?? 0,
+  reportsWrittenToday: diagDailyStats?.diagnosticianReportsWritten ?? 0,
+  ...
+}
+```
+Stages are derived from hardcoded field names in `daily-stats.json`.
+
+**After (YAML-driven):**
+```typescript
+// runtime-summary-service.ts
+interface FunnelStageStats {
+  completed: number;
+  created: number;
+  blocked: number;
+}
+
+function aggregateStageFromEvents(
+  events: EventLogEntry[],
+  stage: WorkflowStage
+): FunnelStageStats {
+  const matching = events.filter(e => e.type === stage.eventType);
+  return {
+    completed: matching.filter(e => e.category === 'completed').length,
+    created: matching.filter(e => e.category === 'created').length,
+    blocked: matching.filter(e => e.category === 'blocked').length,
+  };
+}
+```
+
+### Boundary 3: YAML invalid state propagation
+
+**Design principle (from workflow-funnel-loader.ts):**
+- Missing file: loader returns empty Map; RuntimeSummaryService falls back to empty/none
+- Malformed YAML: preserves last known-good config; warning logged
+- Schema-invalid: same as malformed YAML
+
+**Propagated warning mechanism:**
+```typescript
+// WorkflowFunnelLoader.load() logs:
+//   `[WorkflowFunnelLoader] workflows.yaml validation failed...`
+
+// RuntimeSummaryService carries YAML warnings in summary.metadata.warnings
+// evolution-status.ts displays up to 12 warnings in the output
+```
+
 ---
 
-## 7. Testing Strategy for Incremental Refactoring
+## Component Changes
 
-| Phase | Module | What to Test |
-|-------|--------|--------------|
-| 1 | nocturnal-queue-types | All types round-trip correctly |
-| 2 | workflow-watchdog | Stale detection, anomaly output, cleanup triggers |
-| 3 | queue-processor | Migration, dedup, atomic write, lock encapsulation |
-| 4 | sleep-cycle | Dedup skip, throttle enforcement, pain context attachment |
-| 5 | Facade | All re-exports work, import paths unchanged |
+### NEW: WorkflowFunnelLoader wiring in evolution-status.ts
 
-### Snapshot Tests for Watchdog Output
+| Item | Detail |
+|------|--------|
+| File | `packages/openclaw-plugin/src/commands/evolution-status.ts` |
+| Change | Import `WorkflowFunnelLoader`; instantiate with `wctx.stateDir`; call `watch()`; pass `getAllFunnels()` to `RuntimeSummaryService` |
+| Lifecycle | `dispose()` called on plugin shutdown via lifecycle hook |
 
-`WatchdogResult` is structured. Snapshots prevent regression in anomaly detection behavior across refactoring.
+### MODIFIED: RuntimeSummaryService
 
-### Integration Test: Full Heartbeat Cycle
+| Item | Detail |
+|------|--------|
+| File | `packages/openclaw-plugin/src/service/runtime-summary-service.ts` |
+| Change | `getSummary()` signature: add optional `funnels?: Map<string, WorkflowStage[]>` parameter; use YAML stages for event filtering when provided |
+| Backward compat | If `funnels` not provided, fall back to current hardcoded event type mapping |
 
-After each phase, run the existing nocturnal pipeline integration test. The facade ensures the import path never changes for callers.
+### NO CHANGE: WorkflowFunnelLoader
+
+The loader is already complete and correct. No modifications needed.
 
 ---
 
-## Confidence Assessment
+## Build Order
 
-| Area | Confidence | Notes |
-|------|------------|-------|
-| Module boundaries | HIGH | Clear responsibility separation identified in code |
-| Heartbeat integration | HIGH | Facade pattern ensures zero caller changes needed |
-| Data flow | HIGH | Lock sharing model well-understood from code |
-| Build order | HIGH | Phases are dependency-orderable |
-| Trinity split | MEDIUM | Lower priority; more modules may increase complexity if over-split |
-| Type safety improvements | MEDIUM | Recommendations, not blockers |
+```
+Step 1: WorkflowFunnelLoader import
+        └── Add import to evolution-status.ts
+            No other changes yet
+
+Step 2: RuntimeSummaryService signature update
+        └── Add funnels parameter to getSummary()
+            Add stage aggregation helpers
+            Keep fallback behavior when funnels absent
+
+Step 3: evolution-status.ts wiring
+        └── Instantiate loader, call watch(), pass funnels to getSummary()
+            Add dispose() call in lifecycle hook
+
+Step 4: YAML invalid state display test
+        └── Verify warnings propagate correctly to evolution-status output
+```
+
+---
+
+## Anti-Patterns to Avoid
+
+### Anti-Pattern: Making RuntimeSummaryService own the loader
+
+**Wrong:**
+```typescript
+// RuntimeSummaryService creates its own loader
+class RuntimeSummaryService {
+  private loader = new WorkflowFunnelLoader(stateDir);  // BAD: tight coupling
+}
+```
+
+**Why:** Lifecycle of the loader (watch/dispose) should belong to the component that owns the process boundary, not a static utility.
+
+**Correct:** Loader is instantiated at the call site (evolution-status.ts) and passed as data.
+
+### Anti-Pattern: Blocking on invalid YAML
+
+**Wrong:** Throw error on malformed YAML, crashing the summary.
+
+**Correct (already implemented in WorkflowFunnelLoader):** Preserve last-known-good config, log warning. RuntimeSummaryService proceeds with empty funnel map.
+
+### Anti-Pattern: Re-reading YAML on every summary call
+
+**Wrong:** `getSummary()` reads the file each time it is called.
+
+**Correct:** WorkflowFunnelLoader maintains an in-memory cache. Only `load()` re-reads from disk (on startup or FSWatcher trigger). `getSummary()` calls `getAllFunnels()` which returns the cached Map.
+
+---
+
+## Scalability Considerations
+
+| Scale | Impact | Approach |
+|-------|--------|----------|
+| 10s of funnel definitions | Memory: Map holds ~10 workflow IDs, each with a few stages | Negligible; Map is tiny |
+| 1000s of events per day | Event log scan iterates all events for stage matching | O(n) scan is acceptable for <10K events; consider indexing by type if >50K |
+| Hot reload frequency | FSWatcher debounces at 100ms | Sufficient; YAML changes are rare |
+
+---
 
 ## Sources
 
-- Code analysis: `packages/openclaw-plugin/src/service/evolution-worker.ts` (lines 1-800 reviewed; structure extrapolated to full file based on function signatures)
-- Code analysis: `packages/openclaw-plugin/src/core/nocturnal-trinity.ts` (full file reviewed, 2430 lines)
-- Code analysis: `packages/openclaw-plugin/src/service/nocturnal-runtime.ts` (lines 1-200 reviewed, heartbeat integration points confirmed)
-- Pattern: Facade for backward-compatible refactoring (standard practice, Martin Fowler)
-- Pattern: Discriminated unions for state machines (TypeScript best practice)
-- Pattern: RAII-style lock guards (common Node.js resource management pattern)
+### Primary (HIGH confidence)
+- `packages/openclaw-plugin/src/core/workflow-funnel-loader.ts` -- loader implementation (170 lines)
+- `packages/openclaw-plugin/src/service/runtime-summary-service.ts` -- current summary service (810 lines)
+- `packages/openclaw-plugin/src/commands/evolution-status.ts` -- command entry point (211 lines)
+
+### Templates
+- `~/.claude/get-shit-done/templates/research-project/ARCHITECTURE.md`
 
 ---
 
-*Architecture research for: God Class Refactoring - evolution-worker.ts and nocturnal-trinity.ts*
-*Researched: 2026-04-15*
+*Architecture research for: v1.21.1 YAML Runtime Integration*
+*Researched: 2026-04-19*
+*Confidence: HIGH*
