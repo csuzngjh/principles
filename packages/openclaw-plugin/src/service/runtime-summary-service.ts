@@ -6,6 +6,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { evaluatePhase3Inputs } from './phase3-input-filter.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
+import type { WorkflowStage } from '../core/workflow-funnel-loader.js';
 import type { RuntimeTruth, AnalyticsTruth } from '../types/runtime-summary.js';
 
 export type RuntimeDataQuality = 'authoritative' | 'partial';
@@ -106,11 +107,15 @@ export interface RuntimeSummary {
     recentBypasses: number | null;
     dataQuality: RuntimeDataQuality;
   };
+  /** YAML-driven funnel counts — only present when funnels param is provided (YAML-SSOT-01) */
+  workflowFunnels?: WorkflowFunnelOutput[];
   metadata: {
     generatedAt: string;
     workspaceDir: string;
     sessionId: string | null;
     selectedSessionReason: 'explicit' | 'latest_active' | 'none';
+    /** 'degraded' when YAML load errors or unresolved statsField paths exist; 'ok' otherwise */
+    status: 'ok' | 'degraded';
     warnings: string[];
   };
 }
@@ -153,6 +158,23 @@ interface EventLogEntry {
   data?: Record<string, unknown>;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Workflow Funnel Types (YAML-SSOT-01 / YAML-SSOT-02)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface WorkflowFunnelStageOutput {
+  key: string;
+  label: string;
+  statsField: string;
+  count: number;
+}
+
+export interface WorkflowFunnelOutput {
+  funnelKey: string;
+  funnelLabel: string;
+  stages: WorkflowFunnelStageOutput[];
+}
+
 const MAX_SOURCE_EVENTS = 5;
 const GFI_PARTIAL_WARNING =
   'GFI source attribution remains partial in Phase 2b because only the empathy slice is source-attributed; most non-empathy friction still lacks full per-source attribution.';
@@ -167,17 +189,30 @@ function pushWarning(warnings: string[], message: string): void {
   }
 }
 
+/**
+ * YAML-SSOT-03: resolve a dot-path (e.g. 'evolution.nocturnalDreamerCompleted') from dailyStats.
+ * Returns { count, resolvable } to distinguish "field not found / non-numeric" from "legitimate zero".
+ */
+function resolveStatsField(stats: unknown, dotPath: string): { count: number; resolvable: boolean } {
+  const parts = dotPath.split('.');
+  let current: unknown = stats;
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return { count: 0, resolvable: false };
+    current = (current as Record<string, unknown>)[part];
+  }
+  if (typeof current === 'number') {
+    return { count: current, resolvable: true };
+  }
+  return { count: 0, resolvable: false };
+}
+
 export class RuntimeSummaryService {
   static getSummary(
     workspaceDir: string,
-    options?: { sessionId?: string | null; loaderWarnings?: string[] }
+    options?: { sessionId?: string | null; loaderWarnings?: string[]; funnels?: Map<string, WorkflowStage[]> }
   ): RuntimeSummary {
     const generatedAt = new Date().toISOString();
     const warnings: string[] = [];
-    // ERR-01: surface loader warnings (YAML parse failures) into metadata.warnings
-    if (options?.loaderWarnings) {
-      warnings.push(...options.loaderWarnings);
-    }
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
 
     const sessions = this.mergeSessionSnapshots(
@@ -215,11 +250,54 @@ export class RuntimeSummaryService {
       false
     );
 
-    // Get most recent date from daily stats, fallback to today
-    const today = generatedAt.slice(0, 10);
-    const availableDates = Object.keys(dailyStats || {}).sort().reverse();
-    const statsDate = availableDates.length > 0 ? availableDates[0] : today;
-    const dailyGfiPeak = dailyStats?.[statsDate]?.gfi?.peak;
+    // Unified date for all "today"-scope reads in this summary — ensures funnel counts,
+    // heartbeat stats, and dailyStats all agree on the same date and never contradict.
+    const todayStr = generatedAt.slice(0, 10);
+
+    // YAML-SSOT-02/03: build workflowFunnels from funnels Map if provided
+    let workflowFunnelsOutput: WorkflowFunnelOutput[] | undefined;
+    if (options?.funnels) {
+      workflowFunnelsOutput = [];
+      for (const [funnelKey, stages] of options.funnels) {
+        const stageOutputs: WorkflowFunnelStageOutput[] = stages.map(stage => {
+          const { count, resolvable } = resolveStatsField(dailyStats?.[todayStr], stage.statsField);
+          return {
+            key: stage.name,
+            label: stage.name,
+            statsField: stage.statsField,
+            count,
+            _resolvable: resolvable, // internal tag for degraded detection
+          };
+        });
+        workflowFunnelsOutput.push({ funnelKey, funnelLabel: funnelKey, stages: stageOutputs });
+      }
+    }
+
+    // YAML-SSOT-04: warn for any unresolvable statsField paths
+    let hasUnresolvableStage = false;
+    if (workflowFunnelsOutput) {
+      for (const funnel of workflowFunnelsOutput) {
+        for (const stage of funnel.stages) {
+          if (!(stage as { _resolvable?: boolean })._resolvable) {
+            hasUnresolvableStage = true;
+            pushWarning(warnings, `statsField not resolvable: ${stage.statsField}`);
+          }
+        }
+      }
+    }
+
+    // DEGRADED-01/02: status is degraded when YAML load errors or unresolvable statsField paths exist
+    const loaderWarnings = options?.loaderWarnings ?? [];
+    if (loaderWarnings.length > 0) {
+      for (const w of loaderWarnings) {
+        pushWarning(warnings, `YAML load warning: ${w}`);
+      }
+    }
+    const status: 'ok' | 'degraded' =
+      (loaderWarnings.length > 0 || hasUnresolvableStage) ? 'degraded' : 'ok';
+
+    // GFI peak — use today's data (consistent with funnel/heartbeat)
+    const dailyGfiPeak = dailyStats?.[todayStr]?.gfi?.peak;
 
     const gfiCurrent =
       selectedSession.session && Number.isFinite(selectedSession.session.currentGfi)
@@ -269,7 +347,6 @@ export class RuntimeSummaryService {
     // Read pending tasks from the diagnostician task store
     const pendingDiagTasks = getPendingDiagnosticianTasks(wctx.stateDir);
     // Read heartbeat diagnosis stats from daily event log
-    const todayStr = generatedAt.slice(0, 10);
     const diagDailyStats = dailyStats?.[todayStr]?.evolution;
     const heartbeatDiagnosis = {
       pendingTasks: pendingDiagTasks.length,
@@ -310,10 +387,10 @@ export class RuntimeSummaryService {
         lastUpdated: trajectoryStats.lastIngestAt ?? generatedAt,
       },
       dailyStats: {
-        toolCalls: dailyStats?.[statsDate]?.toolCalls ?? 0,
-        painSignals: dailyStats?.[statsDate]?.painSignals ?? 0,
-        evolutionTasks: dailyStats?.[statsDate]?.evolutionTasks ?? 0,
-        lastUpdated: statsDate,
+        toolCalls: dailyStats?.[todayStr]?.toolCalls ?? 0,
+        painSignals: dailyStats?.[todayStr]?.painSignals ?? 0,
+        evolutionTasks: dailyStats?.[todayStr]?.evolutionTasks ?? 0,
+        lastUpdated: todayStr,
       },
       trends: {
         sevenDay: { successRateChange: 0, toolCallVolumeChange: 0, painSignalRateChange: 0 },
@@ -360,11 +437,13 @@ export class RuntimeSummaryService {
       gate: gateStats,
       // D: Heartbeat Diagnostician chain — separate from evolution/nocturnal
       heartbeatDiagnosis,
+      ...(workflowFunnelsOutput && { workflowFunnels: workflowFunnelsOutput }),
       metadata: {
         generatedAt,
         workspaceDir,
         sessionId: selectedSessionId,
         selectedSessionReason: selectedSession.reason,
+        status,
         warnings,
       },
     };

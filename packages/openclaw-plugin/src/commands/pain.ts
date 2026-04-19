@@ -156,8 +156,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
             suggestionText = `
 💡 **建议 (系统检测到您当前遇到较大阻力)**:
    1. 执行 \`/pd-status reset\` 清零疲劳值。
-   2. 让 AI 调用 \`deep_reflect\` 工具进行深度反思。
-   3. 如果当前上下文太乱，考虑使用 \`/clear\` 开启新会话。`;
+   2. 如果当前上下文太乱，考虑使用 \`/clear\` 开启新会话。`;
         }
         else if (gfi > 50) healthLabel = '遇到阻力 🟡';
         else if (gfi > 20) healthLabel = '轻微受挫 🟢';
@@ -168,8 +167,8 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
             suggestionText = `
 💡 **Suggestion (High friction detected)**:
    1. Run \`/pd-status reset\` to clear friction.
-   2. Ask the AI to use the \`deep_reflect\` tool.
-   4. Consider starting a new session with \`/clear\`.`;
+   2. Ask the AI to reflect deeply before continuing.
+   3. Consider starting a new session with \`/clear\`.`;
         }
         else if (gfi > 50) healthLabel = 'High Friction 🟡';
         else if (gfi > 20) healthLabel = 'Minor Issues 🟢';

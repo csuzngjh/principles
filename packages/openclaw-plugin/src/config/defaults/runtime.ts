@@ -115,8 +115,6 @@ export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 // ── Workflow TTL Settings ───────────────────────────────────────────────────────
 
-/** Deep-reflect workflow TTL (10 minutes) */
-export const DEEP_REFLECT_TTL_MS = 10 * ONE_MINUTE_MS;
 
 // ── Time Window Constants ───────────────────────────────────────────────────────
 

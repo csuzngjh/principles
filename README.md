@@ -177,27 +177,6 @@ Browser ←→ OpenClaw Gateway ←→ Plugin HTTP Routes ←→ Central Databas
 
 ---
 
-## 🔬 Deep Reflection
-
-Before complex tasks, the agent automatically analyzes:
-- Blind spots and missing information
-- Potential risks and failure modes
-- Alternative approaches with trade-offs
-
-Uses T-01 through T-10 mental models for structured thinking.
-
-**Configure in** `{stateDir}/pain_settings.json`:
-```json
-{
-  "deep_reflection": {
-    "enabled": true,
-    "mode": "auto",
-    "default_model": "T-01",
-    "default_depth": 2
-  }
-}
-```
-
 ---
 
 ## 🗺️ Roadmap

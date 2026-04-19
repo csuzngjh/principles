@@ -44,10 +44,6 @@
     *   `success_base` (默认: 1): 成功干完一个小任务，加 1 分。
     *   `streak_bonus` (默认: 5): 连续 5 次成功（连杀奖励），额外加 5 分。
 
-### 5. 元认知深度反思 (`deep_reflection`)
-*   `enabled`: 是否允许 AI 停下来深思熟虑。
-*   `auto_trigger_conditions.error_rate_threshold` (默认: 0.3): 当近期操作的错误率超过 30% 时，强制让 AI 停下手头的活，调用 `deep_reflect` 工具分析自己是不是大方向搞错了。
-
 ---
 
 ### ⚠️ 高风险操作警告！

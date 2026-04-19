@@ -6,7 +6,6 @@ import { extractAgentIdFromSessionKey } from '../utils/session-key.js';
 import { recordEvolutionSuccess } from '../core/evolution-engine.js';
 import { WorkflowStore } from '../service/subagent-workflow/workflow-store.js';
 import { EmpathyObserverWorkflowManager } from '../service/subagent-workflow/empathy-observer-workflow-manager.js';
-import { DeepReflectWorkflowManager } from '../service/subagent-workflow/deep-reflect-workflow-manager.js';
 import type { WorkflowManager } from '../service/subagent-workflow/types.js';
 
 /**
@@ -31,12 +30,6 @@ function createWorkflowManagerForType(
     switch (workflowType) {
         case 'empathy-observer':
             return new EmpathyObserverWorkflowManager({
-                workspaceDir,
-                logger: loggerAdapter,
-                subagent,
-            });
-        case 'deep-reflect':
-            return new DeepReflectWorkflowManager({
                 workspaceDir,
                 logger: loggerAdapter,
                 subagent,

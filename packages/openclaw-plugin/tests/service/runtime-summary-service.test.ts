@@ -678,7 +678,7 @@ describe('RuntimeSummaryService', () => {
         last_updated: '2026-03-20T10:00:00Z',
       });
       writeJson(path.join(workspace, '.state', 'logs', 'daily-stats.json'), {
-        '2026-03-20': {
+        [new Date().toISOString().slice(0, 10)]: {
           toolCalls: 120,
           painSignals: 15,
           evolutionTasks: 5,

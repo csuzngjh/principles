@@ -6,7 +6,6 @@ export const READ_ONLY_TOOL_NAMES = [
   'resolve-library-id', 'get-library-docs',
   'memory_recall', 'save_memory', 'todo_read', 'todo_write',
   'ask_user', 'ask_user_question',
-  'deep_reflect',
   'pd-status', 'report',
 ] as const;
 

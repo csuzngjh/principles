@@ -2,7 +2,7 @@
  * WorkflowManagerBase - Shared base class for polling-based workflow managers
  *
  * Extracts common lifecycle, state transitions, and store operations from
- * EmpathyObserverWorkflowManager and DeepReflectWorkflowManager.
+ * EmpathyObserverWorkflowManager.
  *
  * Both managers implement the same polling-based workflow lifecycle:
  *   startWorkflow → driver.run() → store.createWorkflow → scheduleWaitPollWithRetry
