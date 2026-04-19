@@ -3,7 +3,7 @@
  *
  * PURPOSE: Provide ONE authoritative implementation for gate block persistence.
  *
- * All gate modules (progressive-trust-gate, gfi-gate, etc.) must use this
+ * All gate sources (rule-host) must use this
  * helper to ensure consistent block tracking, event logging, and retry behavior.
  *
  * This eliminates the "multi-truth source" problem where different modules
