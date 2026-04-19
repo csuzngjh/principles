@@ -45,21 +45,21 @@ Deferred to future release.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| YAML-SSOT-01 | TBD | Pending |
-| YAML-SSOT-02 | TBD | Pending |
-| YAML-SSOT-03 | TBD | Pending |
-| YAML-SSOT-04 | TBD | Pending |
-| EVOL-STATUS-01 | TBD | Pending |
-| EVOL-STATUS-02 | TBD | Pending |
-| EVOL-STATUS-03 | TBD | Pending |
-| EVOL-STATUS-04 | TBD | Pending |
-| DEGRADED-01 | TBD | Pending |
-| DEGRADED-02 | TBD | Pending |
+| YAML-SSOT-01 | Phase 5 | Pending |
+| YAML-SSOT-02 | Phase 5 | Pending |
+| YAML-SSOT-03 | Phase 5 | Pending |
+| YAML-SSOT-04 | Phase 5 | Pending |
+| EVOL-STATUS-01 | Phase 6 | Pending |
+| EVOL-STATUS-02 | Phase 6 | Pending |
+| EVOL-STATUS-03 | Phase 6 | Pending |
+| EVOL-STATUS-04 | Phase 6 | Pending |
+| DEGRADED-01 | Phase 6 | Pending |
+| DEGRADED-02 | Phase 6 | Pending |
 
 **Coverage:**
 - v1 requirements: 10 total
-- Mapped to phases: 0
-- Unmapped: 10 (to be mapped by roadmapper)
+- Mapped to phases: 10
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-19*

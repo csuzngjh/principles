@@ -2,6 +2,7 @@
 
 ## Milestones
 
+- [ ] **v1.21.2** - YAML Funnel 完整 SSOT (Phase 5-7) — TARGET 2026-04-19
 - [x] **v1.22** - Dynamic Gate Migration (Phase 1-2) — SHIPPED 2026-04-19
 - [x] **v1.21.1** - Workflow Funnel Scaffold (Phase 3-4) — SHIPPED 2026-04-19 (scaffold only; full YAML-driven runtime integration deferred to v1.21.2)
 - [x] **v1.21** - PD 工作流可观测化 (Phase 1-2) — SHIPPED 2026-04-19
@@ -15,6 +16,12 @@
 - [x] **v1.13** - Boundary Contracts (shipped 2026-04-11)
 
 ## Phases
+
+### v1.21.2 — YAML Funnel 完整 SSOT
+
+- [ ] **Phase 5: Runtime Wiring** - getSummary() accepts funnels Map, resolves statsField dot-paths, outputs workflowFunnels
+- [ ] **Phase 6: Display Wiring** - evolution-status.ts wires to loader, uses YAML labels/stage order, graceful degraded mode
+- [ ] **Phase 7: Integration Testing** - End-to-end tests for YAML-driven flow and degraded scenarios
 
 ### v1.21.1 — Workflow Funnel Scaffold
 
@@ -34,6 +41,40 @@
 - [x] **Phase 1.5: Cross-Domain Validation** - API freeze after cross-domain stress test
 
 ## Phase Details
+
+### v1.21.2 Phase 5: Runtime Wiring
+**Goal**: RuntimeSummaryService.getSummary() accepts optional funnels Map, resolves each stage count via statsField dot-path from dailyStats, outputs workflowFunnels array with funnelKey/funnelLabel/stages
+**Depends on**: Nothing
+**Requirements**: YAML-SSOT-01, YAML-SSOT-02, YAML-SSOT-03, YAML-SSOT-04
+**Success Criteria** (what must be TRUE):
+1. getSummary() signature accepts optional `funnels: Map<string, WorkflowStage[]>` parameter
+2. When funnels is provided, returned summary includes `workflowFunnels: WorkflowFunnelOutput[]` with each entry having funnelKey, funnelLabel, and stages array
+3. Each stage count is resolved by traversing dailyStats using the statsField dot-path (e.g., `evolution.nocturnalDreamerCompleted`)
+4. When statsField dot-path is missing or unresolvable, stage count is 0 and metadata.warnings contains a visible warning
+5. When funnels is not provided (undefined), getSummary() returns without workflowFunnels field (backward compatible)
+**Plans**: TBD
+
+### v1.21.2 Phase 6: Display Wiring
+**Goal**: evolution-status.ts wires loader.getAllFunnels() into getSummary(), display uses YAML labels and stage order, YAML missing/invalid/empty gracefully degrades to stats-only format
+**Depends on**: Phase 5
+**Requirements**: EVOL-STATUS-01, EVOL-STATUS-02, EVOL-STATUS-03, EVOL-STATUS-04, DEGRADED-01, DEGRADED-02
+**Success Criteria** (what must be TRUE):
+1. evolution-status.ts calls loader.getAllFunnels() and passes funnels + loaderWarnings to getSummary()
+2. Display output uses YAML-defined stage labels (e.g., `dreamer_completed`, `artifact_persisted`) instead of hardcoded field names
+3. Stage order in display output matches the order defined in workflows.yaml, not any hardcoded sequence
+4. When workflows.yaml is missing or invalid, metadata.status='degraded' and metadata.warnings contains the specific error
+5. When funnels Map is empty (all zero counts or loader returned no funnels), no funnel block is rendered; output falls back to old stats-only format without crashing
+**Plans**: TBD
+
+### v1.21.2 Phase 7: Integration Testing
+**Goal**: Comprehensive integration tests validating full YAML-driven funnel flow end-to-end and degraded-state behavior
+**Depends on**: Phase 6
+**Requirements**: TEST-01, TEST-02, TEST-03
+**Success Criteria** (what must be TRUE):
+1. A test confirms that when workflows.yaml is present with valid funnel definitions, /pd-evolution-status output includes funnel blocks with correct YAML-driven labels and stage order
+2. A test confirms that when workflows.yaml is deleted or malformed, status output shows degraded status with warning AND falls back to stats-only format (no crash)
+3. A test confirms that modifying workflows.yaml stage labels causes /pd-evolution-status output to reflect the new labels on next invocation (hot-reload observable through watch cycle)
+**Plans**: TBD
 
 ### v1.22 Phase 1: Gate Removal
 **Goal**: Remove all hardcoded gate modules from PD code, keeping only dynamic rule infrastructure
@@ -157,4 +198,4 @@
 
 ---
 
-*Last updated: 2026-04-19 after Plan B scope correction (scaffold-only, not full SSOT)*
+*Last updated: 2026-04-19 after v1.21.2 milestone roadmap created*
