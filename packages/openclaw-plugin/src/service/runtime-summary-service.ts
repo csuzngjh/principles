@@ -189,15 +189,21 @@ function pushWarning(warnings: string[], message: string): void {
   }
 }
 
-/** YAML-SSOT-03: resolve a dot-path (e.g. 'evolution.nocturnalDreamerCompleted') from dailyStats */
-function resolveStatsField(stats: unknown, dotPath: string): number {
+/**
+ * YAML-SSOT-03: resolve a dot-path (e.g. 'evolution.nocturnalDreamerCompleted') from dailyStats.
+ * Returns { count, resolvable } to distinguish "field not found / non-numeric" from "legitimate zero".
+ */
+function resolveStatsField(stats: unknown, dotPath: string): { count: number; resolvable: boolean } {
   const parts = dotPath.split('.');
   let current: unknown = stats;
   for (const part of parts) {
-    if (current == null || typeof current !== 'object') return 0;
+    if (current == null || typeof current !== 'object') return { count: 0, resolvable: false };
     current = (current as Record<string, unknown>)[part];
   }
-  return typeof current === 'number' ? current : 0;
+  if (typeof current === 'number') {
+    return { count: current, resolvable: true };
+  }
+  return { count: 0, resolvable: false };
 }
 
 export class RuntimeSummaryService {
@@ -207,10 +213,6 @@ export class RuntimeSummaryService {
   ): RuntimeSummary {
     const generatedAt = new Date().toISOString();
     const warnings: string[] = [];
-    // ERR-01: surface loader warnings (YAML parse failures) into metadata.warnings
-    if (options?.loaderWarnings) {
-      warnings.push(...options.loaderWarnings);
-    }
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
 
     const sessions = this.mergeSessionSnapshots(
@@ -259,42 +261,41 @@ export class RuntimeSummaryService {
       workflowFunnelsOutput = [];
       for (const [funnelKey, stages] of options.funnels) {
         const stageOutputs: WorkflowFunnelStageOutput[] = stages.map(stage => {
-          const count = resolveStatsField(dailyStats?.[statsDate], stage.statsField);
+          const { count, resolvable } = resolveStatsField(dailyStats?.[statsDate], stage.statsField);
           return {
             key: stage.name,
             label: stage.name,
             statsField: stage.statsField,
             count,
+            _resolvable: resolvable, // internal tag for degraded detection
           };
         });
         workflowFunnelsOutput.push({ funnelKey, funnelLabel: funnelKey, stages: stageOutputs });
       }
     }
 
-    // YAML-SSOT-04: warn for any zero-count stages
-    let hasZeroCountStage = false;
+    // YAML-SSOT-04: warn for any unresolvable statsField paths
+    let hasUnresolvableStage = false;
     if (workflowFunnelsOutput) {
       for (const funnel of workflowFunnelsOutput) {
         for (const stage of funnel.stages) {
-          if (stage.count === 0) {
-            hasZeroCountStage = true;
+          if (!(stage as { _resolvable?: boolean })._resolvable) {
+            hasUnresolvableStage = true;
             pushWarning(warnings, `statsField not resolvable: ${stage.statsField}`);
           }
         }
       }
     }
 
-    // DEGRADED-01: If YAML had load errors, status must be degraded
+    // DEGRADED-01/02: status is degraded when YAML load errors or unresolvable statsField paths exist
     const loaderWarnings = options?.loaderWarnings ?? [];
     if (loaderWarnings.length > 0) {
       for (const w of loaderWarnings) {
         pushWarning(warnings, `YAML load warning: ${w}`);
       }
     }
-
-    // DEGRADED-02: status is degraded when YAML load errors or unresolved statsField paths exist
     const status: 'ok' | 'degraded' =
-      (loaderWarnings.length > 0 || hasZeroCountStage) ? 'degraded' : 'ok';
+      (loaderWarnings.length > 0 || hasUnresolvableStage) ? 'degraded' : 'ok';
 
     // Get most recent date from daily stats, fallback to today
     const dailyGfiPeak = dailyStats?.[statsDate]?.gfi?.peak;

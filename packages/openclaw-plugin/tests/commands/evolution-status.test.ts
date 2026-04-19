@@ -524,6 +524,13 @@ funnels:
     expect(summary.workflowFunnels![1].funnelKey).toBe('rulehost');
     expect(summary.workflowFunnels![1].stages[0].label).toBe('evaluated');
     expect(summary.workflowFunnels![1].stages[0].count).toBe(15);
+    expect(summary.workflowFunnels![0].funnelLabel).toBe('nocturnal');
+
+    // DEGRADED-01: valid YAML + valid stats → status ok, no funnel-related warnings
+    expect(summary.metadata.status).toBe('ok');
+    // Note: warnings array may contain non-funnel warnings (GFI/Daily stats defaults); funnel warnings are checked separately
+    const funnelWarnings = summary.metadata.warnings.filter(w => w.includes('statsField') || w.includes('YAML load'));
+    expect(funnelWarnings).toHaveLength(0);
 
     loader.dispose();
   });
@@ -551,8 +558,9 @@ funnels:
 
     // Assert degraded status
     expect(summary.metadata.status).toBe('degraded');
-    expect(loader.getWarnings()).toContain('workflows.yaml file not found.');
-    // workflowFunnels should be undefined or empty
+    // loaderWarnings are prefixed with "YAML load warning: " when propagated to metadata.warnings
+    expect(summary.metadata.warnings).toContain('YAML load warning: workflows.yaml file not found.');
+    // DEGRADED-02: funnels absent/empty when YAML missing — empty array is acceptable, just not rendered
     expect(summary.workflowFunnels == null || summary.workflowFunnels.length === 0).toBe(true);
 
     loader.dispose();
