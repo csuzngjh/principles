@@ -43,33 +43,27 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Phase 1.5 Validation | N=2 (coding + 1) is not enough for "Universal" claim; need extreme case | Active |
 | Freeze Semver after Ph 1.5 | Ensure stability only after cross-domain stress testing | Active |
 
-## Current Milestone: v1.21.1 Workflow Funnel Runtime Integration
+## Current Milestone: v1.21.2 YAML Funnel 完整 SSOT
 
-**Goal:** 让 `workflows.yaml` 成为"漏斗定义"的运行时事实源，并驱动 summary/status 展示。
+**Goal:** 让 `workflows.yaml` 真正驱动 `/pd-evolution-status` 展示（完整 wiring，而非 v1.21.1 scaffold）。
 
 **Target features:**
-- WorkflowFunnelLoader 接入 runtime
-- RuntimeSummaryService 基于 YAML 定义构建 funnel summary
-- /pd-evolution-status 基于 YAML 展示漏斗分层统计
-- YAML 缺失/非法时显式报 degraded，不允许静默 hardcoded fallback
-- FSWatcher 生命周期正确关闭，避免 watcher 泄漏
+- RuntimeSummaryService.getSummary() 接受 funnels Map，消费 YAML funnel 定义构建 workflowFunnels 输出
+- evolution-status.ts 调用 loader.getAllFunnels()，把 funnel 数据传给 getSummary()
+- 每个 stage 的 count 从 dailyStats 按 statsField 读取；statsField 缺失时 count=0 + warning 可见
+- YAML 缺失/非法时 status 显示 degraded，不静默 fallback
 
 **Out of scope:**
-- 事件生产端全面改成 YAML 驱动
-- 改写所有 event type 命名
-- 重做整个 observability 架构
+- diagnostician 三态统计逻辑改动
+- nocturnal / rulehost 事件生产逻辑
+- Rule Host 架构本身
+- .planning 清理
 
 **Success criteria:**
-1. RuntimeSummaryService 不再硬编码 heartbeat/nocturnal/rulehost 漏斗结构
-2. /pd-evolution-status 展示来自 YAML 定义的漏斗 stages
-3. workflows.yaml 修改后可热更新到 summary/status
-4. YAML 无效时，status 明确显示配置错误，而不是悄悄 fallback
-5. WorkflowFunnelLoader.dispose() 和 watch() 有测试覆盖，确保不泄漏 watcher
-
-**YAML 边界:**
-- YAML = 漏斗定义真相源
-- event log = 发生事实真相源
-- runtime summary = 派生视图（YAML 定义 + event log 数据）
+1. `workflows.yaml` 的 funnel/stage 定义真实影响 `/pd-evolution-status` 的展示内容和结构
+2. 删掉或修改 YAML，展示随之变化
+3. statsField 缺失时不崩溃，count=0 + warning 可见
+4. 展示层不再有 hardcoded nocturnal/rulehost 漏斗结构
 
 ## Evolution
 
@@ -88,4 +82,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-19 after v1.21.1 milestone started*
+*Last updated: 2026-04-19 after v1.21.2 milestone started*
