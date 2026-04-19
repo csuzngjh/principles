@@ -52,7 +52,8 @@
 3. Each stage count is resolved by traversing dailyStats using the statsField dot-path (e.g., `evolution.nocturnalDreamerCompleted`)
 4. When statsField dot-path is missing or unresolvable, stage count is 0 and metadata.warnings contains a visible warning
 5. When funnels is not provided (undefined), getSummary() returns without workflowFunnels field (backward compatible)
-**Plans**: TBD
+**Plans**: 1 plan
+- [ ] 07-01-PLAN.md — E2E integration tests: real WorkflowFunnelLoader full-flow, degraded fallback, hot-reload
 
 ### v1.21.2 Phase 6: Display Wiring
 **Goal**: evolution-status.ts wires loader.getAllFunnels() into getSummary(), display uses YAML labels and stage order, YAML missing/invalid/empty gracefully degrades to stats-only format
@@ -64,7 +65,8 @@
 3. Stage order in display output matches the order defined in workflows.yaml, not any hardcoded sequence
 4. When workflows.yaml is missing or invalid, metadata.status='degraded' and metadata.warnings contains the specific error
 5. When funnels Map is empty (all zero counts or loader returned no funnels), no funnel block is rendered; output falls back to old stats-only format without crashing
-**Plans**: TBD
+**Plans**: 1 plan
+- [ ] 07-01-PLAN.md — E2E integration tests: real WorkflowFunnelLoader full-flow, degraded fallback, hot-reload
 
 ### v1.21.2 Phase 7: Integration Testing
 **Goal**: Comprehensive integration tests validating full YAML-driven funnel flow end-to-end and degraded-state behavior
@@ -74,7 +76,8 @@
 1. A test confirms that when workflows.yaml is present with valid funnel definitions, /pd-evolution-status output includes funnel blocks with correct YAML-driven labels and stage order
 2. A test confirms that when workflows.yaml is deleted or malformed, status output shows degraded status with warning AND falls back to stats-only format (no crash)
 3. A test confirms that modifying workflows.yaml stage labels causes /pd-evolution-status output to reflect the new labels on next invocation (hot-reload observable through watch cycle)
-**Plans**: TBD
+**Plans**: 1 plan
+- [ ] 07-01-PLAN.md — E2E integration tests: real WorkflowFunnelLoader full-flow, degraded fallback, hot-reload
 
 ### v1.22 Phase 1: Gate Removal
 **Goal**: Remove all hardcoded gate modules from PD code, keeping only dynamic rule infrastructure
@@ -132,7 +135,8 @@
 6. A test suite covers Windows-style rename/rewrite event sequences on the watcher
 7. A test suite confirms consumer mutation of getAllFunnels() output does not corrupt loader state
 
-**Plans**: TBD
+**Plans**: 1 plan
+- [ ] 07-01-PLAN.md — E2E integration tests: real WorkflowFunnelLoader full-flow, degraded fallback, hot-reload
 ### v1.21 Phase 1: Issue #366 Fix — diagnostician_report 三态扩展
 **Goal**: 修复 Issue #366，让 stats 能感知 JSON 缺失/不完整/成功三种情况
 **Depends on**: Nothing
