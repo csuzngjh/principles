@@ -48,3 +48,7 @@ export type { PainSignalInput } from './pain-recorder.js';
 
 // PainFlagPathResolver — pure function for resolving pain flag paths (D-04)
 export { resolvePainFlagPath } from './pain-flag-resolver.js';
+
+// TrajectoryStore — correction sample primitives (SAMPLES-01, SAMPLES-02)
+export { listCorrectionSamples, reviewCorrectionSample } from './trajectory-store.js';
+export type { CorrectionSampleRecord, CorrectionSampleReviewStatus } from './trajectory-store.js';

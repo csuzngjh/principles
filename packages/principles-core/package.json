@@ -49,6 +49,10 @@
     "./workspace-resolver": {
       "types": "./dist/types/workspace-resolver.d.ts",
       "default": "./dist/types/workspace-resolver.js"
+    },
+    "./trajectory-store": {
+      "types": "./dist/trajectory-store.d.ts",
+      "default": "./dist/trajectory-store.js"
     }
   },
   "files": ["dist"],
@@ -59,7 +63,8 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.48"
+    "@sinclair/typebox": "^0.34.48",
+    "better-sqlite3": "^12.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
