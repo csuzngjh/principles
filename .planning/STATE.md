@@ -23,10 +23,10 @@ progress:
 
 ## Current Position
 
-Phase: 13 (next — Migration Safeguards)
+Phase: 8 (SDK Foundation — pending discuss+plan)
 Plan: Pending
-Status: Phase 13 context gathered — ready for planning
-Last activity: 2026-04-20 — Phase 13 context captured, discuss complete
+Status: Phase 8 context captured — ready for discuss
+Last activity: 2026-04-20 — Phase 13 shipped, v1.22 complete
 
 ## Phase Progress
 
@@ -58,7 +58,7 @@ Last activity: 2026-04-20 — Phase 13 context captured, discuss complete
 - atomicWriteFileSync not exported from SDK
 - Dual-write race during migration (use existing asyncLockQueues)
 
-**Next:** `/gsd-plan-phase 13` to start Phase 13 execution (Migration Safeguards)
+**Next:** `/gsd-discuss-phase 8` — Phase 8 SDK Foundation
 
 ---
 *Last updated: 2026-04-20 after Phase 12 shipped*
