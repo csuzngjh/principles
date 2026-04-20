@@ -9,9 +9,7 @@
 
 import { CentralDatabase } from '../../../openclaw-plugin/src/service/central-database.js';
 
-interface CentralSyncOptions {}
-
-export async function handleCentralSync(_opts: CentralSyncOptions): Promise<void> {
+export async function handleCentralSync(): Promise<void> {
   try {
     const centralDb = new CentralDatabase();
     const results = centralDb.syncAll();

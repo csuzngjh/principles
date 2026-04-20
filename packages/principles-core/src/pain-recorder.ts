@@ -110,7 +110,8 @@ export async function recordPainSignal(
     throw new Error(`Invalid PainSignal: ${result.errors.join(', ')}`);
   }
 
-  const signal = result.signal!;
+  const {signal} = result;
+  if (!signal) throw new Error('Unexpected: validated PainSignal is undefined');
 
   // Write to .pain_flag (KV format, atomic) — serialized via AsyncQueueLock
   const painFlagPath = resolvePainFlagPath(workspaceDir);

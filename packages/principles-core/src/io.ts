@@ -13,7 +13,7 @@ import * as fs from 'fs';
  * NOT a distributed lock — use for CLI-in-process concurrency only.
  */
 export class AsyncQueueLock {
-  private queues = new Map<string, Promise<void>>();
+  private readonly queues = new Map<string, Promise<void>>();
 
   /**
    * Execute a function while holding an exclusive lock on the given key.
@@ -25,7 +25,8 @@ export class AsyncQueueLock {
    */
   async withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const lockPath = key;
-    let resolveRelease: () => void;
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let resolveRelease: (() => void) | undefined;
     const releasePromise = new Promise<void>(r => { resolveRelease = r; });
     const previousQueue = this.queues.get(lockPath) || Promise.resolve();
     const currentQueue = previousQueue.then(() => releasePromise);
@@ -34,7 +35,7 @@ export class AsyncQueueLock {
       await previousQueue;
       return await fn();
     } finally {
-      resolveRelease!();
+      resolveRelease?.();
       if (this.queues.get(lockPath) === currentQueue) {
         this.queues.delete(lockPath);
       }
@@ -62,6 +63,7 @@ export function atomicWriteFileSync(filePath: string, data: string): void {
     const tmpPath = filePath + '.tmp';
     fs.writeFileSync(tmpPath, data, 'utf8');
 
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let lastError: Error | undefined;
     for (let attempt = 0; attempt < RENAME_MAX_RETRIES; attempt++) {
         try {
@@ -69,7 +71,7 @@ export function atomicWriteFileSync(filePath: string, data: string): void {
             return;
         } catch (err) {
             lastError = err as Error;
-            const code = (err as NodeJS.ErrnoException).code;
+            const { code } = /** @type {{ code?: string }} */ (err);
             // Only retry on Windows transient lock errors
             if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') {
                 if (attempt < RENAME_MAX_RETRIES - 1) {
@@ -77,7 +79,7 @@ export function atomicWriteFileSync(filePath: string, data: string): void {
                     // Synchronous sleep using a tight spin with accessSync yield
                     const waitUntil = Date.now() + delay;
                     while (Date.now() < waitUntil) {
-                        try { require('fs').accessSync?.(tmpPath); } catch { /* ignore */ }
+                        try { fs.accessSync?.(tmpPath); } catch { /* ignore */ }
                     }
                 }
                 continue;
@@ -89,5 +91,5 @@ export function atomicWriteFileSync(filePath: string, data: string): void {
 
     // Clean up temp file on failure
     try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
-    throw lastError;
+    throw lastError ?? new Error('atomicWriteFileSync: rename failed');
 }

@@ -63,6 +63,7 @@ export function listCorrectionSamples(
 ): CorrectionSampleRecord[] {
   const dbPath = getDbPath(workspaceDir);
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let db: Database.Database;
   try {
     db = new Database(dbPath, { readonly: true });
@@ -110,6 +111,7 @@ export function listCorrectionSamples(
  * @returns The updated CorrectionSampleRecord
  * @throws Error if the sample is not found
  */
+// eslint-disable-next-line @typescript-eslint/max-params
 export function reviewCorrectionSample(
   sampleId: string,
   decision: 'approved' | 'rejected',

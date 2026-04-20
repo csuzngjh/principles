@@ -93,7 +93,7 @@ program
   .command('health')
   .description('Show health diagnostics for all workspaces')
   .action(async () => {
-    await handleHealth({});
+    await handleHealth();
   });
 
 const centralCmd = program
@@ -104,7 +104,7 @@ centralCmd
   .command('sync')
   .description('Trigger a sync cycle and report results')
   .action(async () => {
-    await handleCentralSync({});
+    await handleCentralSync();
   });
 
 program.parse();

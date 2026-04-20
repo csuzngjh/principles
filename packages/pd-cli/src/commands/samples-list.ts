@@ -15,6 +15,7 @@ export async function handleSamplesList(opts: SamplesListOptions): Promise<void>
   const workspaceDir = resolveWorkspaceDir();
   const status = opts.status ?? 'pending';
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let samples;
   try {
     samples = listCorrectionSamples(workspaceDir, status);

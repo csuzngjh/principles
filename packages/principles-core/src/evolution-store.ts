@@ -73,6 +73,7 @@ export function listEvolutionTasks(
 ): EvolutionTaskRecord[] {
   const dbPath = getDbPath(workspaceDir);
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let db: Database.Database;
   try {
     db = new Database(dbPath, { readonly: true });
@@ -151,6 +152,7 @@ export function getEvolutionTask(
 ): EvolutionTaskRecord | null {
   const dbPath = getDbPath(workspaceDir);
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let db: Database.Database;
   try {
     db = new Database(dbPath, { readonly: true });

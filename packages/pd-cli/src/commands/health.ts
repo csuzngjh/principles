@@ -9,9 +9,7 @@
 
 import { CentralHealthService } from '../../../openclaw-plugin/src/service/central-health-service.js';
 
-interface HealthOptions {}
-
-export async function handleHealth(_opts: HealthOptions): Promise<void> {
+export async function handleHealth(): Promise<void> {
   const service = new CentralHealthService();
   const result = service.getAllWorkspaceHealth();
 
