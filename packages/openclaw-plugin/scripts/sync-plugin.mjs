@@ -400,6 +400,7 @@ function verifyBundleContents() {
         { name: 'checkPainFlag',          reason: 'pain flag detection' },
         { name: 'processEvolutionQueue',  reason: 'queue processing' },
         { name: 'acquireQueueLock',       reason: 'queue lock for pd-reflect and worker' },
+        { name: 'write_pain_flag',        reason: 'pain signal recording tool' },
     ];
 
     const missing = [];
@@ -524,6 +525,26 @@ function verifyInstalledFingerprint() {
 }
 
 /**
+ * Update the plugin version in openclaw.json after successful sync.
+ * This ensures the recorded version always matches the installed version.
+ */
+function updateInstalledPluginVersion(version) {
+    const configPath = join(OPENCLAW_DIR, 'openclaw.json');
+    try {
+        const raw = readFileSync(configPath, 'utf-8');
+        const config = JSON.parse(raw);
+        if (config?.plugins?.installs?.['principles-disciple']) {
+            config.plugins.installs['principles-disciple'].version = version;
+            config.plugins.installs['principles-disciple'].installedAt = new Date().toISOString();
+            writeFileAtomic(configPath, JSON.stringify(config, null, 2) + '\n');
+            console.log(`✅ openclaw.json updated: version=${version}`);
+        }
+    } catch (err) {
+        console.warn(`⚠️  Could not update openclaw.json: ${err.message}`);
+    }
+}
+
+/**
  * Remove existing installation directory with Windows-friendly retry logic.
  */
 function cleanTargetDir(force) {
@@ -583,16 +604,37 @@ function ensureInstallDir() {
 }
 
 /**
- * Sync skills.
+ * Sync skills directories based on the skills field in openclaw.plugin.json.
+ * Reads the manifest to find declared skill paths, resolves them relative to
+ * source root, then copies each to the install target.
  */
-function syncSkills(lang) {
-    const skillsSource = join(SOURCE_DIR, 'templates', 'langs', lang, 'skills');
-    const skillsTarget = join(INSTALL_DIR, 'skills');
-    if (!existsSync(skillsSource)) return false;
-    if (existsSync(skillsTarget)) rmSync(skillsTarget, { recursive: true, force: true });
-    cpSync(skillsSource, skillsTarget, { recursive: true });
-    console.log(`  📄 skills (from ${lang})`);
-    return true;
+function syncSkillDirs() {
+    const manifestPath = join(SOURCE_DIR, 'openclaw.plugin.json');
+    if (!existsSync(manifestPath)) return;
+
+    let skillsPaths;
+    try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        skillsPaths = manifest.skills;
+    } catch {
+        return;
+    }
+
+    if (!skillsPaths || !Array.isArray(skillsPaths)) return;
+
+    for (const sp of skillsPaths) {
+        if (typeof sp !== 'string') continue;
+        const source = join(SOURCE_DIR, sp);
+        const name = sp.split('/').pop();
+        const target = join(INSTALL_DIR, 'skills', name);
+        if (!existsSync(source)) {
+            console.warn(`  ⚠️  skills path not found: ${sp}`);
+            continue;
+        }
+        if (existsSync(target)) rmSync(target, { recursive: true, force: true });
+        cpSync(source, target, { recursive: true });
+        console.log(`  📄 skills/${name} (from ${sp})`);
+    }
 }
 
 /**
@@ -702,6 +744,23 @@ function isWindows() {
 }
 
 /**
+ * Check if a process is running by PID.
+ */
+function isProcessRunning(pid) {
+    try {
+        if (isWindows()) {
+            execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { stdio: 'ignore' });
+            return true;
+        } else {
+            process.kill(pid, 0);
+            return true;
+        }
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Get temporary directory path (cross-platform).
  */
 function getTempDir() {
@@ -751,32 +810,57 @@ function restartGatewayWindows() {
             }
         } catch { /* no existing processes */ }
 
+        // Clean stale lock files — prevents ghost gateway false positives
+        try {
+            const lockDir = join(getTempDir(), 'openclaw');
+            if (existsSync(lockDir)) {
+                const files = readdirSync(lockDir).filter(f => f.startsWith('gateway.') && f.endsWith('.lock'));
+                for (const file of files) {
+                    const lockPath = join(lockDir, file);
+                    try {
+                        const content = readFileSync(lockPath, 'utf-8');
+                        const pid = parseInt(content.trim());
+                        // Only remove if PID is not running
+                        if (!pid || !isProcessRunning(pid)) {
+                            rmSync(lockPath, { force: true });
+                            console.log(`   Removed stale lock: ${file}`);
+                        }
+                    } catch { /* ignore */ }
+                }
+            }
+        } catch { /* ignore lock cleanup failures */ }
+
         // Trigger via schtasks — reliable, avoids CLI busy-port misdetection
         console.log('   Starting gateway via scheduled task...');
         execSync('schtasks /Run /TN "OpenClaw Gateway"', { stdio: 'inherit' });
 
-        // Wait for gateway to start and PD plugin to register
-        const deadline = Date.now() + 20000;
+        // Wait for gateway to be listening on port (同步等待，不异步)
+        const port = 18789;
+        const deadline = Date.now() + 30000;
         const pollInterval = 1000;
+        let gatewayListening = false;
 
-        const waitForRegistration = () => {
-            if (Date.now() > deadline) {
-                console.warn('⚠️  Gateway started but PD registration not confirmed after 20s.');
-                console.log('   Check logs at: ' + logPath);
-                return;
-            }
+        while (Date.now() < deadline) {
             try {
-                if (existsSync(logPath)) {
-                    const logs = readFileSync(logPath, 'utf-8');
-                    if (logs.includes('Principles Disciple Plugin registered')) {
-                        console.log('✅ SUCCESS: Principles Disciple plugin registered successfully!');
-                        return;
-                    }
+                const result = execSync(
+                    `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Measure-Object -Line).Count"`,
+                    { encoding: 'utf-8', timeout: 5000 }
+                ).trim();
+                if (parseInt(result) > 0) {
+                    gatewayListening = true;
+                    break;
                 }
-            } catch { /* ignore */ }
-            setTimeout(waitForRegistration, pollInterval);
-        };
-        waitForRegistration();
+            } catch { /* port not listening yet */ }
+            execSync('timeout /t 1 /nobreak > nul', { shell: true, stdio: 'ignore' });
+        }
+
+        if (!gatewayListening) {
+            console.error('\n❌ Gateway did not start on port 18789 within 30s.');
+            console.error('   Please restart manually: openclaw gateway start');
+            process.exit(1);
+        }
+
+        console.log('   ✅ Gateway is listening on port 18789');
 
     } catch (error) {
         console.error(`\n❌ Gateway restart failed: ${error.message}`);
@@ -890,7 +974,7 @@ function main() {
 
     console.log('\n📦 Syncing files to OpenClaw...');
     for (const item of SYNC_ITEMS) syncItem(item);
-    syncSkills(args.lang);
+    syncSkillDirs();
 
     injectLocalWorkspacePackages();
     installTargetDependencies();
@@ -948,6 +1032,7 @@ function main() {
     }
 
     verifyInstalledFingerprint();
+    updateInstalledPluginVersion(sourceVersion);
     if (args.dev || args.restart) cleanStaleBackups();
 
     console.log('\n╔════════════════════════════════════════════════════════════╗');
