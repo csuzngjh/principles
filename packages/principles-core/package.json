@@ -33,6 +33,30 @@
     "./telemetry-event": {
       "types": "./dist/telemetry-event.d.ts",
       "default": "./dist/telemetry-event.js"
+    },
+    "./pain-recorder": {
+      "types": "./dist/pain-recorder.d.ts",
+      "default": "./dist/pain-recorder.js"
+    },
+    "./pain-flag-resolver": {
+      "types": "./dist/pain-flag-resolver.d.ts",
+      "default": "./dist/pain-flag-resolver.js"
+    },
+    "./io": {
+      "types": "./dist/io.d.ts",
+      "default": "./dist/io.js"
+    },
+    "./workspace-resolver": {
+      "types": "./dist/types/workspace-resolver.d.ts",
+      "default": "./dist/types/workspace-resolver.js"
+    },
+    "./trajectory-store": {
+      "types": "./dist/trajectory-store.d.ts",
+      "default": "./dist/trajectory-store.js"
+    },
+    "./evolution-store": {
+      "types": "./dist/evolution-store.d.ts",
+      "default": "./dist/evolution-store.js"
     }
   },
   "files": ["dist"],
@@ -43,7 +67,8 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.48"
+    "@sinclair/typebox": "^0.34.48",
+    "better-sqlite3": "^12.9.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

@@ -44,7 +44,22 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Phase 1.5 Validation | N=2 (coding + 1) is not enough for "Universal" claim; need extreme case | Active |
 | Freeze Semver after Ph 1.5 | Ensure stability only after cross-domain stress testing | Active |
 
-## Current Milestone: Planning next milestone
+## Current Milestone: v1.22 PD CLI Redesign
+
+**Goal:** 将 PD 核心功能封装为独立 CLI 工具，保留原有 openclaw 工具作为过渡
+
+**Target features:**
+- `pd pain record` — CLI 记录疼痛信号
+- `pd samples list/review` — CLI 样本管理
+- `pd evolution tasks` — CLI 进化任务
+- `pd health` — CLI 健康检查
+- `pd central sync` — CLI 中心同步
+
+**架构决策：**
+- 保留原有 `write_pain_flag` 等工具 + `/pd-xxx` 斜杠命令
+- 新增 PD CLI (`packages/pd-cli/`) 作为新路径
+- 渐进式迁移：先用 CLI，逐步让代理迁移到 CLI
+- 依赖 `@principles/core` SDK
 
 **Previous:** v1.21.2 — YAML Funnel 完整 SSOT (Phase 5-7) — SHIPPED 2026-04-19
 
@@ -67,4 +82,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-19 after v1.21.2 milestone shipped*
+*Last updated: 2026-04-20 after v1.22 milestone started*
