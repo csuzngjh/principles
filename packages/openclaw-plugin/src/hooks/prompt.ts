@@ -435,7 +435,7 @@ export async function handleBeforePromptBuild(
   const contextConfig = loadContextInjectionConfig(workspaceDir);
 
   // Minimal mode: heartbeat and subagents skip most context to reduce tokens
-  const isMinimalMode = trigger === "heartbeat" || sessionId?.includes(":subagent:") === true;
+  const isMinimalMode = trigger === "heartbeat" || trigger === "cron" || sessionId?.includes(":subagent:") === true;
 
   const session = sessionId ? getSession(sessionId) : undefined;
 
@@ -700,8 +700,8 @@ The empathy observer subagent handles pain detection independently.
     // }
   }
 
-  // ──── 4. Heartbeat-specific checklist ────
-  if (trigger === 'heartbeat') {
+  // ──── 4. Heartbeat-specific checklist (also fires for cron-triggered sessions) ────
+  if (trigger === 'heartbeat' || trigger === 'cron') {
     // ──── 4a. GFI Time-based Decay ────
     // Apply segmented exponential decay to GFI on each heartbeat
     if (sessionId) {
