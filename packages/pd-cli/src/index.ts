@@ -59,7 +59,7 @@ samplesCmd
       console.error('Error: decision must be "approve" or "reject"');
       process.exit(1);
     }
-    await handleSamplesReview({ sampleId, decision, note });
+    await handleSamplesReview({ sampleId, decision: decision === 'approve' ? 'approved' : 'rejected', note });
   });
 
 const evolutionCmd = program
@@ -85,7 +85,7 @@ tasksCmd
   .command('show')
   .description('Show full details for an evolution task')
   .argument('<id>', 'Task ID (numeric or string taskId)')
-  .action(async (id, opts) => {
+  .action(async (id, _opts) => {
     await handleEvolutionTasksShow({ id });
   });
 
