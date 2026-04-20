@@ -8,7 +8,7 @@
 ## Phase Summary
 
 - [ ] **Phase 8: SDK Foundation** — Extract interfaces, export primitives, add PainFlagPathResolver
-- [ ] **Phase 9: Pain Record CLI** — `pd pain record` command
+- [x] **Phase 9: Pain Record CLI** — `pd pain record` command — SHIPPED 2026-04-20
 - [ ] **Phase 10: Samples CLI** — `pd samples list` and `pd samples review`
 - [ ] **Phase 11: Evolution Tasks CLI** — `pd evolution tasks` command
 - [ ] **Phase 12: Health + Central Sync CLI** — `pd health` and `pd central sync` commands
