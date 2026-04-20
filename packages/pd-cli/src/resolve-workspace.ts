@@ -1,19 +1,10 @@
 /**
- * WorkspaceResolver — resolves the active workspace directory.
+ * Resolve the active workspace directory.
  *
- * This is a placeholder implementation that uses process.cwd().
- * In openclaw-plugin, this will be replaced with a concrete implementation
- * that respects plugin config, env vars, and workspace files.
+ * Placeholder: returns cwd if no override passed.
+ * In openclaw-plugin, this will resolve via plugin config/env vars.
  */
-
-import type { WorkspaceResolver } from '@principles/core/workspace-resolver';
-
 export function resolveWorkspaceDir(workspaceDir?: string): string {
   if (workspaceDir) return workspaceDir;
   return process.cwd();
 }
-
-// WorkspaceResolver interface impl (for future extension)
-export const workspaceResolver: WorkspaceResolver = {
-  resolve: resolveWorkspaceDir,
-};

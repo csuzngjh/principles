@@ -18,9 +18,14 @@ export async function handleSamplesList(opts: SamplesListOptions): Promise<void>
   let samples;
   try {
     samples = listCorrectionSamples(workspaceDir, status);
-  } catch {
-    // Graceful fallback: DB may not exist yet
-    console.log('No correction samples found.');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('ENOENT') || message.includes('SQLITE_CANTOPEN') || message.includes('SQLITE_NOTADB')) {
+      console.log('No correction samples found.');
+    } else {
+      console.error('Failed to list samples:', message);
+      throw err;
+    }
     return;
   }
 

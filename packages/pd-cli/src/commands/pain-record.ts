@@ -39,7 +39,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     const signal = await recordPainSignal(input, workspaceDir);
     const flagPath = resolvePainFlagPath(workspaceDir);
 
-    console.log('✅ Pain signal recorded');
+    console.log('[OK] Pain signal recorded');
     console.log(`   Reason: ${signal.reason}`);
     console.log(`   Score: ${signal.score} (${signal.severity})`);
     console.log(`   Source: ${signal.source}`);
