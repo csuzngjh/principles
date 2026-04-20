@@ -1,55 +1,102 @@
-# Roadmap: Principles Disciple
+# Roadmap: v1.22 PD CLI Redesign
 
 ## Milestones
 
 - [x] **v1.21.2** — YAML Funnel 完整 SSOT (Phase 5-7) — SHIPPED 2026-04-19
-- [x] **v1.22** - Dynamic Gate Migration (Phase 1-2) — SHIPPED 2026-04-19
-- [x] **v1.21.1** - Workflow Funnel Scaffold (Phase 3-4) — SHIPPED 2026-04-19
-- [x] **v1.21** - PD 工作流可观测化 (Phase 1-2) — SHIPPED 2026-04-19
-- [x] **v1.20** - Universal SDK Foundation (Phases 0a-1.5) — SHIPPED 2026-04-17
-- [x] **v1.19** - Tech Debt Remediation (Phases 42-46, shipped 2026-04-15)
-- [x] **v1.18** - Nocturnal State Safety & Recovery (shipped 2026-04-14)
-- [x] **v1.17** - Keyword Learning Engine (shipped 2026-04-14)
-- [x] **v1.16** - Trinity Training Quality (shipped 2026-04-13)
-- [x] **v1.15** - Runtime & Truth (shipped 2026-04-12)
-- [x] **v1.14** - Decomposition (shipped)
-- [x] **v1.13** - Boundary Contracts (shipped 2026-04-11)
+- [ ] **v1.22** - PD CLI Redesign (Phase 8-13)
 
-## Phase Details
+## Phase Summary
 
-<details>
-<summary>v1.21.2 — YAML Funnel 完整 SSOT (Phase 5-7) — SHIPPED 2026-04-19</summary>
-
-- [x] **Phase 5: Runtime Wiring** - getSummary() accepts funnels Map, resolves statsField dot-paths, outputs workflowFunnels — COMPLETED 2026-04-19
-- [x] **Phase 6: Display Wiring** - evolution-status.ts wires to loader, uses YAML labels/stage order, graceful degraded mode — COMPLETED 2026-04-19
-- [x] **Phase 7: Integration Testing** - End-to-end tests for YAML-driven flow and degraded scenarios — COMPLETED 2026-04-19
-
-**Key accomplishment:** `workflows.yaml` now genuinely drives `/pd-evolution-status` funnel display (not just scaffold).
-
-</details>
-
-### v1.22 — Dynamic Gate Migration
-
-- [x] **Phase 1: Gate Removal** - Remove hardcoded gate modules, keep only dynamic rule infrastructure — SHIPPED 2026-04-19
-- [x] **Phase 2: Pain Learning Verification** - Verify pain → principle → rule pipeline produces effective gate rules — VERIFIED 2026-04-19
-
-### v1.21.1 — Workflow Funnel Scaffold
-
-- [x] **Phase 3: Core Integration** - WorkflowFunnelLoader scaffolding + FSWatcher lifecycle + loaderWarnings plumbing — SHIPPED 2026-04-19
-- [x] **Phase 4: Testing & Validation** - Error handling + integration tests — SHIPPED 2026-04-19
-
-### v1.21 — PD 工作流可观测化
-
-- [x] **Phase 1: Issue #366 Fix** - diagnostician_report category 三态扩展 — SHIPPED 2026-04-19
-- [x] **Phase 2: YAML 工作流框架** - workflows.yaml 配置加载 + Nocturnal/RuleHost 漏斗 — SHIPPED 2026-04-19
-
-### v1.20 — Universal SDK Foundation
-
-- [x] **Phase 0a: Interface & Core** - PainSignal schema, StorageAdapter, hallucination detection
-- [x] **Phase 0b: Adapter Abstraction** - PainSignalAdapter, EvolutionHook, TelemetryEvent
-- [x] **Phase 1: SDK Core Implementation** - @principles/core with reference adapters
-- [x] **Phase 1.5: Cross-Domain Validation** - API freeze after cross-domain stress test
+- [ ] **Phase 8: SDK Foundation** — Extract interfaces, export primitives, add PainFlagPathResolver
+- [ ] **Phase 9: Pain Record CLI** — `pd pain record` command
+- [ ] **Phase 10: Samples CLI** — `pd samples list` and `pd samples review`
+- [ ] **Phase 11: Evolution Tasks CLI** — `pd evolution tasks` command
+- [ ] **Phase 12: Health + Central Sync CLI** — `pd health` and `pd central sync` commands
+- [ ] **Phase 13: Migration Safeguards** — Dual-write protection during migration
 
 ---
 
-*Last updated: 2026-04-19 after v1.21.2 milestone shipped*
+## Phase Details
+
+### Phase 8: SDK Foundation
+**Goal**: Core SDK interfaces and primitives needed by all CLI commands
+**Depends on**: Nothing
+**Requirements**: CLI-FOUNDATION-01, CLI-FOUNDATION-02, CLI-FOUNDATION-03, CLI-FOUNDATION-04
+**Success Criteria** (what must be TRUE):
+1. WorkspaceResolver interface is extracted and used in place of OpenClawPluginApi direct calls
+2. PainRecorder class exists independently of OpenClawPluginApi
+3. atomicWriteFileSync is exported from @principles/core
+4. PainFlagPathResolver is available in @principles/core SDK
+
+---
+
+### Phase 9: Pain Record CLI
+**Goal**: Users can record pain signals via `pd pain record` command
+**Depends on**: Phase 8
+**Requirements**: PAIN-RECORD-01
+**Success Criteria** (what must be TRUE):
+1. `pd pain record` command is registered and executable
+2. Command accepts pain signal input and writes to pain flag file
+3. Command provides feedback on successful recording
+
+---
+
+### Phase 10: Samples CLI
+**Goal**: Users can list and review samples via `pd samples` commands
+**Depends on**: Phase 8
+**Requirements**: SAMPLES-01, SAMPLES-02
+**Success Criteria** (what must be TRUE):
+1. `pd samples list` command displays available samples
+2. `pd samples review` command opens review flow for selected sample
+3. Both commands work against sample store without OpenClaw dependency
+
+---
+
+### Phase 11: Evolution Tasks CLI
+**Goal**: Users can view evolution tasks via `pd evolution tasks` command
+**Depends on**: Phase 8
+**Requirements**: EVOLUTION-01
+**Success Criteria** (what must be TRUE):
+1. `pd evolution tasks` command is registered and executable
+2. Command displays pending evolution tasks with status
+3. Output is human-readable and consistent with existing PD status formats
+
+---
+
+### Phase 12: Health + Central Sync CLI
+**Goal**: Users can run health checks and central sync via `pd health` and `pd central sync`
+**Depends on**: Phase 8
+**Requirements**: HEALTH-01, SYNC-01
+**Success Criteria** (what must be TRUE):
+1. `pd health` command runs diagnostics and reports system status
+2. `pd central sync` command synchronizes with central server
+3. Both commands handle errors gracefully with user-friendly messages
+
+---
+
+### Phase 13: Migration Safeguards
+**Goal**: Existing openclaw tools continue working while CLI is adopted; no dual-write data loss
+**Depends on**: Phases 9, 10, 11, 12
+**Requirements**: MIGRATE-01
+**Success Criteria** (what must be TRUE):
+1. Existing `write_pain_flag` tool still writes pain flags correctly
+2. CLI commands write to the same storage locations as existing tools
+3. No race conditions or data loss when both paths are active
+4. Migration path is documented for users
+
+---
+
+## Progress
+
+| Phase | Goal | Requirements | Status |
+|-------|------|--------------|--------|
+| 8. SDK Foundation | Core SDK interfaces | 4 reqs | Not started |
+| 9. Pain Record CLI | pd pain record | 1 req | Not started |
+| 10. Samples CLI | pd samples list/review | 2 reqs | Not started |
+| 11. Evolution Tasks CLI | pd evolution tasks | 1 req | Not started |
+| 12. Health + Central Sync CLI | pd health + central sync | 2 reqs | Not started |
+| 13. Migration Safeguards | Dual-write protection | 1 req | Not started |
+
+---
+
+*Created: 2026-04-20 for v1.22 PD CLI Redesign milestone*
