@@ -33,6 +33,22 @@
     "./telemetry-event": {
       "types": "./dist/telemetry-event.d.ts",
       "default": "./dist/telemetry-event.js"
+    },
+    "./pain-recorder": {
+      "types": "./dist/pain-recorder.d.ts",
+      "default": "./dist/pain-recorder.js"
+    },
+    "./pain-flag-resolver": {
+      "types": "./dist/pain-flag-resolver.d.ts",
+      "default": "./dist/pain-flag-resolver.js"
+    },
+    "./io": {
+      "types": "./dist/io.d.ts",
+      "default": "./dist/io.js"
+    },
+    "./workspace-resolver": {
+      "types": "./dist/types/workspace-resolver.d.ts",
+      "default": "./dist/types/workspace-resolver.js"
     }
   },
   "files": ["dist"],

@@ -16,19 +16,18 @@ program
   .description('PD CLI — Pain recording, sample management, and evolution tasks')
   .version('0.1.0');
 
-program
+const painCmd = program
   .command('pain')
-  .description('Pain signal management')
-  .argument('<action>', 'Subcommand: record')
-  .argument('[args...]', 'Arguments for the subcommand')
-  .action((action: string, args: string[]) => {
-    if (action === 'record') {
-      handlePainRecord(args);
-    } else {
-      console.error(`Unknown pain action: ${action}`);
-      console.error('Usage: pd pain record --reason <text> [--score N] [--source manual]');
-      process.exit(1);
-    }
+  .description('Pain signal management');
+
+painCmd
+  .command('record')
+  .description('Record a pain signal')
+  .option('-r, --reason <text>', 'Reason for the pain signal (required)')
+  .option('-s, --score <number>', 'Pain score 0-100', parseInt)
+  .option('-S, --source <text>', 'Source of the pain signal', 'manual')
+  .action(async (opts) => {
+    await handlePainRecord(opts);
   });
 
 program.parse();

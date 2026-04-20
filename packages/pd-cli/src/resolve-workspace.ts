@@ -6,7 +6,7 @@
  * that respects plugin config, env vars, and workspace files.
  */
 
-import type { WorkspaceResolver } from '../../principles-core/dist/types/workspace-resolver.js';
+import type { WorkspaceResolver } from '@principles/core/workspace-resolver';
 
 export function resolveWorkspaceDir(workspaceDir?: string): string {
   if (workspaceDir) return workspaceDir;

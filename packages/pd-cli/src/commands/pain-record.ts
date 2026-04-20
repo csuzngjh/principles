@@ -4,41 +4,25 @@
  * Usage: pd pain record --reason <text> [--score N] [--source manual]
  */
 
-import { recordPainSignal, resolvePainFlagPath } from '../../principles-core/dist/pain-recorder.js';
-import type { PainSignalInput } from '../../principles-core/dist/pain-signal.js';
+import { recordPainSignal } from '@principles/core/pain-recorder';
+import { resolvePainFlagPath } from '@principles/core/pain-flag-resolver';
+import type { PainSignalInput } from '@principles/core/pain-recorder';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
-interface RecordArgs {
+interface RecordOptions {
   reason?: string;
   score?: number;
   source?: string;
 }
 
-function parseArgs(args: string[]): RecordArgs {
-  const result: RecordArgs = {};
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === '--reason' || arg === '-r') {
-      result.reason = args[++i];
-    } else if (arg === '--score' || arg === '-s') {
-      result.score = parseInt(args[++i]!, 10);
-    } else if (arg === '--source' || arg === '-S') {
-      result.source = args[++i];
-    }
-  }
-  return result;
-}
-
-export async function handlePainRecord(args: string[]): Promise<void> {
-  const parsed = parseArgs(args);
-
-  if (!parsed.reason) {
+export async function handlePainRecord(opts: RecordOptions): Promise<void> {
+  if (!opts.reason) {
     console.error('Error: --reason <text> is required');
     console.error('Usage: pd pain record --reason <text> [--score N] [--source manual]');
     process.exit(1);
   }
 
-  if (parsed.score !== undefined && (isNaN(parsed.score) || parsed.score < 0 || parsed.score > 100)) {
+  if (opts.score !== undefined && (isNaN(opts.score) || opts.score < 0 || opts.score > 100)) {
     console.error('Error: --score must be a number between 0 and 100');
     process.exit(1);
   }
@@ -46,9 +30,9 @@ export async function handlePainRecord(args: string[]): Promise<void> {
   const workspaceDir = resolveWorkspaceDir();
 
   const input: PainSignalInput = {
-    reason: parsed.reason,
-    source: parsed.source ?? 'manual',
-    score: parsed.score,
+    reason: opts.reason,
+    source: opts.source ?? 'manual',
+    score: opts.score,
   };
 
   try {

@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.22
-milestone_name: PD CLI Redesign
+milestone_name: milestone
 status: planning
-last_updated: "2026-04-20T00:00:00.000Z"
-last_activity: 2026-04-20 — Roadmap defined, phases 8-13
+last_updated: "2026-04-20T09:50:23.503Z"
+last_activity: 2026-04-20 — Phase 8 context gathered
 progress:
   total_phases: 6
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 5
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State: Principles
@@ -23,16 +23,16 @@ progress:
 
 ## Current Position
 
-Phase: 8 (next to start)
-Plan: —
-Status: Roadmap defined, awaiting plan-phase
-Last activity: 2026-04-20 — Roadmap created for v1.22
+Phase: 8 (discuss complete)
+Plan: Pending
+Status: Context captured — ready for planning
+Last activity: 2026-04-20 — Phase 8 context gathered
 
 ## Phase Progress
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 8 | SDK Foundation | Not started |
+| 8 | SDK Foundation | Context captured |
 | 9 | Pain Record CLI | Not started |
 | 10 | Samples CLI | Not started |
 | 11 | Evolution Tasks CLI | Not started |
@@ -44,6 +44,7 @@ Last activity: 2026-04-20 — Roadmap created for v1.22
 **v1.22 Goal:** 将 PD 核心功能封装为独立 CLI 工具，保留原有 openclaw 工具作为过渡
 
 **Target features:**
+
 - `pd pain record` — CLI 记录疼痛信号
 - `pd samples list/review` — CLI 样本管理
 - `pd evolution tasks` — CLI 进化任务
@@ -51,6 +52,7 @@ Last activity: 2026-04-20 — Roadmap created for v1.22
 - `pd central sync` — CLI 中心同步
 
 **Research flags:**
+
 - OpenClawPluginApi tight coupling (extract WorkspaceResolver first)
 - TrajectoryRegistry singleton (needs TrajectoryStore interface)
 - atomicWriteFileSync not exported from SDK
