@@ -35,3 +35,6 @@ export { PrincipleInjector, DefaultPrincipleInjector, InjectionContext } from '.
 // Shared types
 export type { InjectablePrinciple } from './types.js';
 export type { HybridLedgerStore } from './types.js';
+
+// WorkspaceResolver interface (D-01: interface in core, impl in openclaw-plugin)
+export type { WorkspaceResolver } from './types/workspace-resolver.js';
