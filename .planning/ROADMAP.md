@@ -9,7 +9,7 @@
 
 - [ ] **Phase 8: SDK Foundation** — Extract interfaces, export primitives, add PainFlagPathResolver
 - [x] **Phase 9: Pain Record CLI** — `pd pain record` command — SHIPPED 2026-04-20
-- [ ] **Phase 10: Samples CLI** — `pd samples list` and `pd samples review`
+- [x] **Phase 10: Samples CLI** — `pd samples list` and `pd samples review` — SHIPPED 2026-04-20
 - [ ] **Phase 11: Evolution Tasks CLI** — `pd evolution tasks` command
 - [ ] **Phase 12: Health + Central Sync CLI** — `pd health` and `pd central sync` commands
 - [ ] **Phase 13: Migration Safeguards** — Dual-write protection during migration
@@ -92,7 +92,7 @@
 |-------|------|--------------|--------|
 | 8. SDK Foundation | Core SDK interfaces | 4 reqs | Not started |
 | 9. Pain Record CLI | pd pain record | 1 req | Not started |
-| 10. Samples CLI | pd samples list/review | 2 reqs | Not started |
+| 10. Samples CLI | pd samples list/review | 2 reqs | Complete |
 | 11. Evolution Tasks CLI | pd evolution tasks | 1 req | Not started |
 | 12. Health + Central Sync CLI | pd health + central sync | 2 reqs | Not started |
 | 13. Migration Safeguards | Dual-write protection | 1 req | Not started |
