@@ -7,7 +7,7 @@
 
 ## Phase Summary
 
-- [ ] **Phase 8: SDK Foundation** — Extract interfaces, export primitives, add PainFlagPathResolver
+- [x] **Phase 8: SDK Foundation** — Extract interfaces, export primitives, add PainFlagPathResolver — SHIPPED 2026-04-20
 - [x] **Phase 9: Pain Record CLI** — `pd pain record` command — SHIPPED 2026-04-20
 - [x] **Phase 10: Samples CLI** — `pd samples list` and `pd samples review` — SHIPPED 2026-04-20
 - [x] **Phase 11: Evolution Tasks CLI** — `pd evolution tasks` command — SHIPPED 2026-04-20
@@ -90,7 +90,7 @@
 
 | Phase | Goal | Requirements | Status |
 |-------|------|--------------|--------|
-| 8. SDK Foundation | Core SDK interfaces | 4 reqs | Context captured |
+| 8. SDK Foundation | Core SDK interfaces | 4 reqs | Complete |
 | 9. Pain Record CLI | pd pain record | 1 req | Complete |
 | 10. Samples CLI | pd samples list/review | 2 reqs | Complete |
 | 11. Evolution Tasks CLI | pd evolution tasks | 1 req | Complete |
