@@ -53,6 +53,10 @@
     "./trajectory-store": {
       "types": "./dist/trajectory-store.d.ts",
       "default": "./dist/trajectory-store.js"
+    },
+    "./evolution-store": {
+      "types": "./dist/evolution-store.d.ts",
+      "default": "./dist/evolution-store.js"
     }
   },
   "files": ["dist"],
