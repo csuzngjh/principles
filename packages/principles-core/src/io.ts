@@ -7,6 +7,36 @@
 
 import * as fs from 'fs';
 
+/**
+ * AsyncQueueLock — lightweight in-process async queue lock.
+ * Serializes async operations on the same key within a single Node.js process.
+ * NOT a distributed lock — use for CLI-in-process concurrency only.
+ */
+export class AsyncQueueLock {
+  private queues = new Map<string, Promise<void>>();
+
+  async withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const lockPath = key;
+    let resolveRelease: () => void;
+    const releasePromise = new Promise<void>(r => { resolveRelease = r; });
+    const previousQueue = this.queues.get(lockPath) || Promise.resolve();
+    const currentQueue = previousQueue.then(() => releasePromise);
+    this.queues.set(lockPath, currentQueue);
+    try {
+      await previousQueue;
+      return await fn();
+    } finally {
+      resolveRelease!();
+      if (this.queues.get(lockPath) === currentQueue) {
+        this.queues.delete(lockPath);
+      }
+    }
+  }
+}
+
+// Module-level singleton for recordPainSignal to use
+export const painFlagLock = new AsyncQueueLock();
+
 const RENAME_MAX_RETRIES = 3;
 const RENAME_BASE_DELAY_MS = 50;
 

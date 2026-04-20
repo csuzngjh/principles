@@ -13,7 +13,7 @@
 
 import { validatePainSignal, deriveSeverity } from './pain-signal.js';
 import type { PainSignal } from './pain-signal.js';
-import { atomicWriteFileSync } from './io.js';
+import { atomicWriteFileSync, painFlagLock } from './io.js';
 import { resolvePainFlagPath } from './pain-flag-resolver.js';
 
 /** Input shape for recordPainSignal. */
@@ -112,11 +112,13 @@ export async function recordPainSignal(
 
   const signal = result.signal!;
 
-  // Write to .pain_flag (KV format, atomic)
+  // Write to .pain_flag (KV format, atomic) — serialized via AsyncQueueLock
   const painFlagPath = resolvePainFlagPath(workspaceDir);
   const painFlagData = buildPainFlag(input, timestamp);
   const serialized = serializeKvLines(painFlagData);
-  atomicWriteFileSync(painFlagPath, serialized);
+  await painFlagLock.withLock(painFlagPath, async () => {
+    atomicWriteFileSync(painFlagPath, serialized);
+  });
 
   return signal;
 }
