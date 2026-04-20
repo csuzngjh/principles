@@ -35,3 +35,20 @@ export { PrincipleInjector, DefaultPrincipleInjector, InjectionContext } from '.
 // Shared types
 export type { InjectablePrinciple } from './types.js';
 export type { HybridLedgerStore } from './types.js';
+
+// WorkspaceResolver interface (D-01: interface in core, impl in openclaw-plugin)
+export type { WorkspaceResolver } from './types/workspace-resolver.js';
+
+// I/O utilities (D-03: atomicWriteFileSync for crash-safe writes)
+export { atomicWriteFileSync } from './io.js';
+
+// PainRecorder — pure function for pain signal recording (D-02)
+export { recordPainSignal } from './pain-recorder.js';
+export type { PainSignalInput } from './pain-recorder.js';
+
+// PainFlagPathResolver — pure function for resolving pain flag paths (D-04)
+export { resolvePainFlagPath } from './pain-flag-resolver.js';
+
+// TrajectoryStore — correction sample primitives (SAMPLES-01, SAMPLES-02)
+export { listCorrectionSamples, reviewCorrectionSample } from './trajectory-store.js';
+export type { CorrectionSampleRecord, CorrectionSampleReviewStatus } from './trajectory-store.js';

@@ -1,0 +1,22 @@
+{
+  "name": "@principles/pd-cli",
+  "version": "0.1.0",
+  "description": "PD CLI — Pain recording, sample management, and evolution tasks",
+  "type": "module",
+  "bin": {
+    "pd": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@principles/core": "^0.1.0",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}
