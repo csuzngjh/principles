@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.21.2
-milestone_name: YAML Funnel 完整 SSOT
-status: shipped
-last_updated: "2026-04-19T19:10:00.000Z"
-last_activity: 2026-04-19 — Milestone v1.21.2 shipped
+milestone: v1.22
+milestone_name: PD CLI Redesign
+status: planning
+last_updated: "2026-04-20T00:00:00.000Z"
+last_activity: 2026-04-20 — Milestone v1.22 started
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State: Principles
@@ -19,34 +19,27 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** Planning next milestone
+**Current Focus:** v1.22 PD CLI Redesign
 
 ## Current Position
 
-Milestone v1.21.2 (YAML Funnel SSOT) shipped 2026-04-19.
-All phases complete: Phase 5 (Runtime Wiring) + Phase 6 (Display Wiring) + Phase 7 (Integration Testing).
-
-**Next:** `/gsd-new-milestone` to start planning next milestone
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-20 — Milestone v1.22 started
 
 ## Context
 
-v1.21.2 shipped with:
-- `workflows.yaml` genuinely drives `/pd-evolution-status` funnel display
-- getSummary() consumes funnels Map, builds workflowFunnels from YAML stage definitions
-- Display layer YAML-driven (labels + stage order from YAML)
-- Graceful degraded mode for missing/invalid YAML
-- 3 E2E integration tests pass (13/13 total)
+v1.22 Goal: 将 PD 核心功能封装为独立 CLI 工具，保留原有 openclaw 工具作为过渡
 
-## Archived Milestones
+**Target features:**
+- `pd pain record` — CLI 记录疼痛信号
+- `pd samples list/review` — CLI 样本管理
+- `pd evolution tasks` — CLI 进化任务
+- `pd health` — CLI 健康检查
+- `pd central sync` — CLI 中心同步
 
-- v1.21.2: `.planning/milestones/v1.21.2-ROADMAP.md`, `.planning/milestones/v1.21.2-REQUIREMENTS.md`
-- v1.21.1: Workflow Funnel Scaffold (Phase 3-4)
-- v1.21: PD 工作流可观测化 (Phase 1-2)
-
-## Next
-
-**Command:** `/gsd-new-milestone`
+**Next:** `/gsd-plan-phase [N]` to start execution
 
 ---
-
-*Last updated: 2026-04-19 after v1.21.2 milestone shipped*
+*Last updated: 2026-04-20 after v1.22 milestone started*
