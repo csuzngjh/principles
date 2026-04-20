@@ -11,10 +11,10 @@
  *   );
  */
 
-import * as path from 'path';
 import { validatePainSignal, deriveSeverity } from './pain-signal.js';
 import type { PainSignal } from './pain-signal.js';
 import { atomicWriteFileSync } from './io.js';
+import { resolvePainFlagPath } from './pain-flag-resolver.js';
 
 /** Input shape for recordPainSignal. */
 export interface PainSignalInput {
@@ -34,14 +34,6 @@ interface PainFlagData {
   is_risky: string;
   time: string;
   pain_event_id?: string;
-}
-
-/**
- * Resolve the path to the .pain_flag file for a given workspace.
- * D-04: resolvePainFlagPath(workspaceDir: string): string
- */
-export function resolvePainFlagPath(workspaceDir: string): string {
-  return path.join(workspaceDir, '.state', '.pain_flag');
 }
 
 /**
