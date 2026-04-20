@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple",
-  "version": "1.10.37",
+  "version": "1.10.38",
   "description": "Native OpenClaw plugin for Principles Disciple",
   "type": "module",
   "main": "./dist/bundle.js",
@@ -38,6 +38,7 @@
     "lint": "eslint src/",
     "bootstrap-rules": "node scripts/bootstrap-rules.mjs",
     "compile-principles": "node scripts/compile-principles.mjs",
+    "validate": "node scripts/validate-manifest.mjs",
     "validate-live-path": "tsx scripts/validate-live-path.ts"
   },
   "devDependencies": {

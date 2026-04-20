@@ -187,6 +187,21 @@ function compareVersions(a, b) {
 }
 
 /**
+ * Check if a SKILL.md file has valid frontmatter (name + description).
+ */
+function validateSkillMd(skillMdPath) {
+    try {
+        const content = readFileSync(skillMdPath, 'utf-8');
+        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+        if (!fmMatch) return false;
+        const fm = fmMatch[1];
+        return /^\s*name\s*:/m.test(fm) && /^\s*description\s*:/m.test(fm);
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Main function
  */
 function checkPrerequisites() {
@@ -240,8 +255,71 @@ function checkPrerequisites() {
     // Check if we're in the plugin directory
     if (!existsSync(join(SOURCE_DIR, 'package.json'))) {
         console.error('❌ Not in plugin directory. package.json not found.');
-        console.error('   Run this script from packages/openclaw-plugin/');
+console.error('   Run this script from packages/openclaw-plugin/');
         process.exit(1);
+    }
+
+    // Validate openclaw.plugin.json — schema + skills path existence
+    const manifestPath = join(SOURCE_DIR, 'openclaw.plugin.json');
+    if (existsSync(manifestPath)) {
+        let raw;
+        try {
+            raw = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        } catch (e) {
+            console.error(`❌ openclaw.plugin.json JSON 语法错误: ${e.message}`);
+            process.exit(1);
+        }
+
+        // Schema: required fields + types
+        const schemaErrors = [];
+        if (!raw.id || typeof raw.id !== 'string' || !raw.id.trim()) {
+            schemaErrors.push('id: 必须是非空字符串');
+        }
+        if (!raw.name || typeof raw.name !== 'string' || !raw.name.trim()) {
+            schemaErrors.push('name: 必须是非空字符串');
+        }
+        if (!raw.version || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(raw.version)) {
+            schemaErrors.push('version: 必须符合 semver 格式 (如 1.0.0)');
+        }
+        if (!Array.isArray(raw.skills) || raw.skills.length === 0) {
+            schemaErrors.push('skills: 必须是非空数组');
+        }
+        if (schemaErrors.length > 0) {
+            console.error(`❌ openclaw.plugin.json 结构验证失败:`);
+            schemaErrors.forEach(e => console.error(`  - ${e}`));
+            process.exit(1);
+        }
+
+        // Semantic: manifest skills paths must map to actual source dirs used by syncSkillDirs().
+        // syncSkillDirs() always reads from templates/langs/zh/skills, regardless of what
+        // the manifest declares as the target path. So we validate the SOURCE, not the target.
+        const semanticErrors = [];
+        const sourceSkillsDir = join(SOURCE_DIR, 'templates', 'langs', 'zh', 'skills');
+        if (!existsSync(sourceSkillsDir)) {
+            semanticErrors.push(`源码 skills 目录不存在: ${sourceSkillsDir}`);
+        } else {
+            let hasValid = false;
+            try {
+                for (const entry of readdirSync(sourceSkillsDir)) {
+                    if (validateSkillMd(join(sourceSkillsDir, entry, 'SKILL.md'))) {
+                        hasValid = true;
+                        break;
+                    }
+                }
+            } catch { /* ignore */ }
+            if (!hasValid) {
+                semanticErrors.push(`源码 skills 目录存在但无有效 SKILL.md: ${sourceSkillsDir}`);
+            }
+        }
+        if (semanticErrors.length > 0) {
+            console.error('\n❌ openclaw.plugin.json skills 路径验证失败:');
+            semanticErrors.forEach(e => console.error(`  - ${e}`));
+            console.error('\n这会导致 sync 后 OpenClaw 找不到 skills，智能体无法使用 PD 技能。');
+            console.error('请检查 openclaw.plugin.json 中的 skills 字段是否正确。');
+            process.exit(1);
+        }
+
+        console.log('✅ openclaw.plugin.json 验证通过');
     }
 }
 
@@ -624,17 +702,104 @@ function syncSkillDirs() {
 
     for (const sp of skillsPaths) {
         if (typeof sp !== 'string') continue;
-        const source = join(SOURCE_DIR, sp);
-        const name = sp.split('/').pop();
-        const target = join(INSTALL_DIR, 'skills', name);
+        // Resolve target relative path, strip leading ./
+        const targetRel = sp.replace(/^\.\//, '');
+        // Use zh as default language source
+        const source = join(SOURCE_DIR, 'templates', 'langs', 'zh', 'skills');
+        const target = join(INSTALL_DIR, targetRel);
         if (!existsSync(source)) {
-            console.warn(`  ⚠️  skills path not found: ${sp}`);
+            console.warn(`  ⚠️  skills source not found: ${source}`);
             continue;
         }
-        if (existsSync(target)) rmSync(target, { recursive: true, force: true });
-        cpSync(source, target, { recursive: true });
-        console.log(`  📄 skills/${name} (from ${sp})`);
+        mkdirSync(dirname(target), { recursive: true });
+        // Copy skill directories (e.g. pd-pain-signal/) directly into target
+        for (const entry of readdirSync(source)) {
+            const srcPath = join(source, entry);
+            const tgtPath = join(target, entry);
+            if (lstatSync(srcPath).isDirectory()) {
+                if (existsSync(tgtPath)) rmSync(tgtPath, { recursive: true, force: true });
+                copyDir(srcPath, tgtPath);
+            } else {
+                if (existsSync(tgtPath)) rmSync(tgtPath, { force: true });
+                copyFileSync(srcPath, tgtPath);
+            }
+        }
+console.log(`  📄 ${targetRel} (from templates/langs/zh/skills)`);
     }
+}
+
+/**
+ * Verify that installed skill directories contain valid skills.
+ * This catches the case where skills are declared in the manifest but
+ * the directories are missing or contain no valid SKILL.md files.
+ * Detects the "skills installed but agent can't see them" silent failure.
+ */
+function verifyInstalledSkills() {
+    const manifestPath = join(INSTALL_DIR, 'openclaw.plugin.json');
+    if (!existsSync(manifestPath)) {
+        console.error('\n❌ Installed manifest not found.');
+        process.exit(1);
+    }
+
+    let skillsPaths;
+    try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        skillsPaths = manifest.skills;
+    } catch {
+        return;
+    }
+
+    if (!skillsPaths || !Array.isArray(skillsPaths) || skillsPaths.length === 0) {
+        console.log('✅ No skills declared in manifest — nothing to validate.');
+        return;
+    }
+
+    const failures = [];
+    for (const sp of skillsPaths) {
+        if (typeof sp !== 'string') continue;
+        const targetRel = sp.replace(/^\.\//, '');
+        const skillDir = join(INSTALL_DIR, targetRel);
+
+        if (!existsSync(skillDir)) {
+            failures.push(`  - "${sp}" → ${skillDir}: directory does not exist`);
+            continue;
+        }
+
+        // Check that at least one skill subdirectory has a valid SKILL.md
+        let foundValidSkill = false;
+        try {
+            const entries = readdirSync(skillDir);
+            for (const entry of entries) {
+                const skillPath = join(skillDir, entry, 'SKILL.md');
+                if (existsSync(skillPath)) {
+                    // Minimal frontmatter validation: name + description
+                    const content = readFileSync(skillPath, 'utf-8');
+                    const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+                    if (fmMatch && /^\s*name\s*:/m.test(fmMatch[1]) && /^\s*description\s*:/m.test(fmMatch[1])) {
+                        foundValidSkill = true;
+                        break;
+                    }
+                }
+            }
+        } catch { /* ignore read errors */ }
+
+        if (!foundValidSkill) {
+            failures.push(`  - "${sp}" → ${skillDir}: no valid skills found (missing or invalid SKILL.md)`);
+        }
+    }
+
+    if (failures.length > 0) {
+        console.error('\n❌ SKILLS VALIDATION FAILED — skills are installed but OpenClaw cannot load them:');
+        failures.forEach(f => console.error(f));
+        console.error('\nThis usually means:');
+        console.error('  1. The manifest skills path does not match where sync-plugin.mjs copied the files');
+        console.error('  2. The sync was interrupted and the skills directory is incomplete');
+console.error('  3. The SKILL.md files are missing required "name" or "description" fields');
+        console.error('\nPlease re-run: node scripts/sync-plugin.mjs --dev');
+        process.exit(1);
+    }
+
+    console.log(`✅ Skills validation passed — ${skillsPaths.length} skill directory/ies verified`);
 }
 
 /**
@@ -975,6 +1140,8 @@ function main() {
     console.log('\n📦 Syncing files to OpenClaw...');
     for (const item of SYNC_ITEMS) syncItem(item);
     syncSkillDirs();
+
+    verifyInstalledSkills();
 
     injectLocalWorkspacePackages();
     installTargetDependencies();

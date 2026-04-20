@@ -1,15 +1,14 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.21.2
-milestone_name: YAML Funnel 完整 SSOT
+milestone: v1.22
+milestone_name: — Dynamic Gate Migration
 status: shipped
-last_updated: "2026-04-19T19:10:00.000Z"
-last_activity: 2026-04-19 — Milestone v1.21.2 shipped
+last_updated: "2026-04-20T03:24:53.248Z"
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
+  total_phases: 42
+  completed_phases: 35
+  total_plans: 77
+  completed_plans: 81
   percent: 100
 ---
 
@@ -31,6 +30,7 @@ All phases complete: Phase 5 (Runtime Wiring) + Phase 6 (Display Wiring) + Phase
 ## Context
 
 v1.21.2 shipped with:
+
 - `workflows.yaml` genuinely drives `/pd-evolution-status` funnel display
 - getSummary() consumes funnels Map, builds workflowFunnels from YAML stage definitions
 - Display layer YAML-driven (labels + stage order from YAML)

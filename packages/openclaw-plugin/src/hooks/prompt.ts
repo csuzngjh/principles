@@ -435,7 +435,7 @@ export async function handleBeforePromptBuild(
   const contextConfig = loadContextInjectionConfig(workspaceDir);
 
   // Minimal mode: heartbeat and subagents skip most context to reduce tokens
-  const isMinimalMode = trigger === "heartbeat" || sessionId?.includes(":subagent:") === true;
+  const isMinimalMode = trigger === "heartbeat" || trigger === "cron" || sessionId?.includes(":subagent:") === true;
 
   const session = sessionId ? getSession(sessionId) : undefined;
 
@@ -701,7 +701,7 @@ The empathy observer subagent handles pain detection independently.
   }
 
   // ──── 4. Heartbeat-specific checklist ────
-  if (trigger === 'heartbeat') {
+  if (trigger === 'heartbeat' || trigger === 'cron') {
     // ──── 4a. GFI Time-based Decay ────
     // Apply segmented exponential decay to GFI on each heartbeat
     if (sessionId) {
@@ -760,6 +760,8 @@ ${taskBlocks}${processingNote}
         // C: Record heartbeat_diagnosis event for observability
         try {
           const eventLog = EventLogService.get(wctx.stateDir, logger);
+          // trigger field is for observability; 'heartbeat' is the canonical label
+          // even when the actual session type is 'cron' (OpenClaw uses 'cron' for cron-triggered sessions)
           eventLog.recordHeartbeatDiagnosis({
             taskCount: pendingCount,
             taskIds: pendingTasks.slice(0, 3).map(t => t.id),
