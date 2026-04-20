@@ -1,4 +1,4 @@
- 
+﻿ 
  
 import * as fs from 'fs';
 import * as path from 'path';
@@ -721,7 +721,7 @@ The empathy observer subagent handles pain detection independently.
         prependContext += `<heartbeat_checklist>
 ${heartbeatChecklist}
 
-ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
+// HEARTBEAT_OK removed - tasks must always be processed
 </heartbeat_checklist>\n`;
       } catch (e) {
         logger?.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
