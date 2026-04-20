@@ -3,7 +3,7 @@
 ## Milestones
 
 - [x] **v1.21.2** — YAML Funnel 完整 SSOT (Phase 5-7) — SHIPPED 2026-04-19
-- [ ] **v1.22** - PD CLI Redesign (Phase 8-13)
+- [x] **v1.22** - PD CLI Redesign (Phase 8-13) — SHIPPED 2026-04-20
 
 ## Phase Summary
 
@@ -12,7 +12,7 @@
 - [x] **Phase 10: Samples CLI** — `pd samples list` and `pd samples review` — SHIPPED 2026-04-20
 - [x] **Phase 11: Evolution Tasks CLI** — `pd evolution tasks` command — SHIPPED 2026-04-20
 - [x] **Phase 12: Health + Central Sync CLI** — `pd health` and `pd central sync` commands — SHIPPED 2026-04-20
-- [ ] **Phase 13: Migration Safeguards** — Dual-write protection during migration
+- [ ] **Phase 13: Migration Safeguards** — Dual-write protection during migration (Context gathered 2026-04-20)
 
 ---
 
@@ -90,12 +90,12 @@
 
 | Phase | Goal | Requirements | Status |
 |-------|------|--------------|--------|
-| 8. SDK Foundation | Core SDK interfaces | 4 reqs | Not started |
+| 8. SDK Foundation | Core SDK interfaces | 4 reqs | Context captured |
 | 9. Pain Record CLI | pd pain record | 1 req | Complete |
 | 10. Samples CLI | pd samples list/review | 2 reqs | Complete |
 | 11. Evolution Tasks CLI | pd evolution tasks | 1 req | Complete |
 | 12. Health + Central Sync CLI | pd health + central sync | 2 reqs | Complete |
-| 13. Migration Safeguards | Dual-write protection | 1 req | Not started |
+| 13. Migration Safeguards | Dual-write protection | 1 req | Complete |
 
 ---
 
