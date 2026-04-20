@@ -12,6 +12,8 @@ import { handleSamplesList } from './commands/samples-list.js';
 import { handleSamplesReview } from './commands/samples-review.js';
 import { handleEvolutionTasksList } from './commands/evolution-tasks-list.js';
 import { handleEvolutionTasksShow } from './commands/evolution-tasks-show.js';
+import { handleHealth } from './commands/health.js';
+import { handleCentralSync } from './commands/central-sync.js';
 
 const program = new Command();
 
@@ -85,6 +87,24 @@ tasksCmd
   .argument('<id>', 'Task ID (numeric or string taskId)')
   .action(async (id, opts) => {
     await handleEvolutionTasksShow({ id });
+  });
+
+program
+  .command('health')
+  .description('Show health diagnostics for all workspaces')
+  .action(async () => {
+    await handleHealth({});
+  });
+
+const centralCmd = program
+  .command('central')
+  .description('Central server management');
+
+centralCmd
+  .command('sync')
+  .description('Trigger a sync cycle and report results')
+  .action(async () => {
+    await handleCentralSync({});
   });
 
 program.parse();

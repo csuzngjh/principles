@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "@principles/core": "^0.1.0",
-    "commander": "^12.0.0"
+    "commander": "^12.0.0",
+    "principles-disciple": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
