@@ -41,3 +41,7 @@ export type { WorkspaceResolver } from './types/workspace-resolver.js';
 
 // I/O utilities (D-03: atomicWriteFileSync for crash-safe writes)
 export { atomicWriteFileSync } from './io.js';
+
+// PainRecorder — pure function for pain signal recording (D-02)
+export { recordPainSignal, resolvePainFlagPath } from './pain-recorder.js';
+export type { PainSignalInput } from './pain-recorder.js';
