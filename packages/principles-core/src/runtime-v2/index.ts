@@ -22,6 +22,9 @@ export { RUNTIME_V2_SCHEMA_VERSION, schemaRef } from './schema-version.js';
 export { PDErrorCategorySchema } from './error-categories.js';
 export { AgentCapabilityRequirementsSchema, AgentTimeoutPolicySchema, AgentRetryPolicySchema, AgentSpecSchema } from './agent-spec.js';
 export { SchemaVersionRefSchema, RuntimeV2SchemaVersionSchema } from './schema-version.js';
+export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunHandleSchema, RunExecutionStatusSchema, RunStatusSchema, ContextItemSchema, AgentSpecRefSchema, WorkflowRefSchema, TaskRefSchema, StartRunInputSchema, StructuredRunOutputSchema, RuntimeArtifactRefSchema } from './runtime-protocol.js';
+export { PDTaskStatusSchema, TaskRecordSchema, DiagnosticianTaskRecordSchema } from './task-status.js';
+export { RuntimeSelectionCriteriaSchema } from './runtime-selector.js';
 
 // Error categories
 export { PD_ERROR_CATEGORIES, PDRuntimeError } from './error-categories.js';
