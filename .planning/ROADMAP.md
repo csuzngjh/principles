@@ -1,88 +1,65 @@
-# Roadmap: v1.22 PD CLI Redesign
+# Roadmap: v2.0 PD Runtime v2 — M1 Foundation Contracts
 
 ## Milestones
 
-- [x] **v1.21.2** — YAML Funnel 完整 SSOT (Phase 5-7) — SHIPPED 2026-04-19
-- [x] **v1.22** - PD CLI Redesign (Phase 8-13) — SHIPPED 2026-04-20
+- [x] **v1.22** — PD CLI Redesign — SHIPPED 2026-04-20
+- [ ] **v2.0** — M1 Foundation Contracts (Phase 1-4) — IN PROGRESS
 
 ## Phase Summary
 
-- [x] **Phase 8: SDK Foundation** — Extract interfaces, export primitives, add PainFlagPathResolver — SHIPPED 2026-04-20
-- [x] **Phase 9: Pain Record CLI** — `pd pain record` command — SHIPPED 2026-04-20
-- [x] **Phase 10: Samples CLI** — `pd samples list` and `pd samples review` — SHIPPED 2026-04-20
-- [x] **Phase 11: Evolution Tasks CLI** — `pd evolution tasks` command — SHIPPED 2026-04-20
-- [x] **Phase 12: Health + Central Sync CLI** — `pd health` and `pd central sync` commands — SHIPPED 2026-04-20
-- [ ] **Phase 13: Migration Safeguards** — Dual-write protection during migration (Context gathered 2026-04-20)
+- [x] **Phase 1: Core Protocol + Agent + Error Contracts** — AgentSpec, PDRuntimeAdapter, PDErrorCategory, RuntimeSelector, PDTaskStatus — COMPLETE 2026-04-21
+- [ ] **Phase 2: Context + Diagnostician Contracts** — ContextPayload, HistoryQueryEntry, DiagnosticianOutputV1
+- [ ] **Phase 3: Package Infrastructure** — Re-exports, package.json exports, index.ts wiring
+- [ ] **Phase 4: Verification + Doc Sync** — Compile check, conflict table, deprecation markers
 
 ---
 
 ## Phase Details
 
-### Phase 8: SDK Foundation
-**Goal**: Core SDK interfaces and primitives needed by all CLI commands
+### Phase 1: Core Protocol + Agent + Error Contracts
+**Goal**: 定义 runtime-v2 最核心的 protocol、agent 和 error 类型
 **Depends on**: Nothing
-**Requirements**: CLI-FOUNDATION-01, CLI-FOUNDATION-02, CLI-FOUNDATION-03, CLI-FOUNDATION-04
-**Success Criteria** (what must be TRUE):
-1. WorkspaceResolver interface is extracted and used in place of OpenClawPluginApi direct calls
-2. PainRecorder class exists independently of OpenClawPluginApi
-3. atomicWriteFileSync is exported from @principles/core
-4. PainFlagPathResolver is available in @principles/core SDK
+**Requirements**: AGENT-01, AGENT-02, AGENT-03, ERR-01, ERR-02, ERR-03, RT-01, RT-02, RT-03, RT-04, RT-05, RT-06, SEL-01, TASK-01, TASK-02, TASK-03, SCH-01
+**Success Criteria**:
+1. `AgentSpec` interface 可从 `@principles/core/runtime-v2` 导入
+2. `PDRuntimeAdapter` interface 包含文档 Section 8 定义的全部方法
+3. `PDErrorCategory` 覆盖 Protocol Spec Section 19 + Diagnostician Section 20 + History Spec Section 14 的所有错误
+4. `PDTaskStatus` 的状态值与 Protocol Spec Section 12.2 一致
+5. `RuntimeSelector` interface 已定义（不要求实现）
 
 ---
 
-### Phase 9: Pain Record CLI
-**Goal**: Users can record pain signals via `pd pain record` command
-**Depends on**: Phase 8
-**Requirements**: PAIN-RECORD-01
-**Success Criteria** (what must be TRUE):
-1. `pd pain record` command is registered and executable
-2. Command accepts pain signal input and writes to pain flag file
-3. Command provides feedback on successful recording
+### Phase 2: Context + Diagnostician Contracts
+**Goal**: 定义上下文 payload 和诊断输出的 canonical schema
+**Depends on**: Phase 1
+**Requirements**: CTX-01, CTX-02, CTX-03, CTX-04, CTX-05, DIAG-01, DIAG-02
+**Success Criteria**:
+1. `ContextPayload` 与 History Spec Section 9.4 一致
+2. `DiagnosticianContextPayload` 与 Diagnostician v2 Design Section 9.4 一致
+3. `DiagnosticianOutputV1` 与 Diagnostician v2 Design Section 11.2 一致
+4. `TrajectoryLocateResult` 与 Protocol Spec Section 15.4 一致
 
 ---
 
-### Phase 10: Samples CLI
-**Goal**: Users can list and review samples via `pd samples` commands
-**Depends on**: Phase 8
-**Requirements**: SAMPLES-01, SAMPLES-02
-**Success Criteria** (what must be TRUE):
-1. `pd samples list` command displays available samples
-2. `pd samples review` command opens review flow for selected sample
-3. Both commands work against sample store without OpenClaw dependency
+### Phase 3: Package Infrastructure
+**Goal**: 将所有 contracts 正确暴露为包入口
+**Depends on**: Phase 1, Phase 2
+**Requirements**: INFRA-01, INFRA-02, INFRA-03
+**Success Criteria**:
+1. `import { AgentSpec } from '@principles/core/runtime-v2'` 可用
+2. `import { AgentSpec } from '@principles/core'` 也可用（向后兼容）
+3. `package.json` exports 包含 `./runtime-v2` 入口
 
 ---
 
-### Phase 11: Evolution Tasks CLI
-**Goal**: Users can view evolution tasks via `pd evolution tasks` command
-**Depends on**: Phase 8
-**Requirements**: EVOLUTION-01
-**Success Criteria** (what must be TRUE):
-1. `pd evolution tasks` command is registered and executable
-2. Command displays pending evolution tasks with status
-3. Output is human-readable and consistent with existing PD status formats
-
----
-
-### Phase 12: Health + Central Sync CLI
-**Goal**: Users can run health checks and central sync via `pd health` and `pd central sync`
-**Depends on**: Phase 8
-**Requirements**: HEALTH-01, SYNC-01
-**Success Criteria** (what must be TRUE):
-1. `pd health` command runs diagnostics and reports system status
-2. `pd central sync` command synchronizes with central server
-3. Both commands handle errors gracefully with user-friendly messages
-
----
-
-### Phase 13: Migration Safeguards
-**Goal**: Existing openclaw tools continue working while CLI is adopted; no dual-write data loss
-**Depends on**: Phases 9, 10, 11, 12
-**Requirements**: MIGRATE-01
-**Success Criteria** (what must be TRUE):
-1. Existing `write_pain_flag` tool still writes pain flags correctly
-2. CLI commands write to the same storage locations as existing tools
-3. No race conditions or data loss when both paths are active
-4. Migration path is documented for users
+### Phase 4: Verification + Doc Sync
+**Goal**: 验证编译通过，输出冲突表，标记旧定义为 deprecated
+**Depends on**: Phase 3
+**Requirements**: VER-01, VER-02, VER-03, DOC-01, DOC-02
+**Success Criteria**:
+1. `npx tsc --noEmit` 零新增错误（排除预存 io.ts）
+2. 冲突表已输出，标明每个重复定义的 canonical vs legacy 位置
+3. 旧 TrinityRuntimeFailureCode、QueueStatus (evolution-worker) 标记为 deprecated
 
 ---
 
@@ -90,13 +67,10 @@
 
 | Phase | Goal | Requirements | Status |
 |-------|------|--------------|--------|
-| 8. SDK Foundation | Core SDK interfaces | 4 reqs | Complete |
-| 9. Pain Record CLI | pd pain record | 1 req | Complete |
-| 10. Samples CLI | pd samples list/review | 2 reqs | Complete |
-| 11. Evolution Tasks CLI | pd evolution tasks | 1 req | Complete |
-| 12. Health + Central Sync CLI | pd health + central sync | 2 reqs | Complete |
-| 13. Migration Safeguards | Dual-write protection | 1 req | Complete |
+| 1. Core Protocol | AgentSpec, RuntimeAdapter, Errors, TaskStatus | 17 reqs | Complete (2026-04-21) |
+| 2. Context + Diag | ContextPayload, DiagnosticianOutput | 7 reqs | Pending |
+| 3. Infrastructure | Re-exports, package.json | 3 reqs | Pending |
+| 4. Verification | Compile, conflict table, deprecation | 5 reqs | Pending |
 
 ---
-
-*Created: 2026-04-20 for v1.22 PD CLI Redesign milestone*
+*Created: 2026-04-21 for v2.0 M1 Foundation Contracts milestone*
