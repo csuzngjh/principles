@@ -3,14 +3,14 @@
 ## Milestones
 
 - [x] **v1.22** — PD CLI Redesign — SHIPPED 2026-04-20
-- [ ] **v2.0** — M1 Foundation Contracts (Phase 1-4) — IN PROGRESS
+- [x] **v2.0** — M1 Foundation Contracts (Phase 1-4) — COMPLETE 2026-04-21
 
 ## Phase Summary
 
 - [x] **Phase 1: Core Protocol + Agent + Error Contracts** — AgentSpec, PDRuntimeAdapter, PDErrorCategory, RuntimeSelector, PDTaskStatus — COMPLETE 2026-04-21
 - [x] **Phase 2: Context + Diagnostician Contracts** — ContextPayload, HistoryQueryEntry, DiagnosticianOutputV1 — COMPLETE 2026-04-21
 - [x] **Phase 3: Package Infrastructure** — Re-exports, package.json exports, index.ts wiring — COMPLETE 2026-04-21
-- [ ] **Phase 4: Verification + Doc Sync** — Compile check, conflict table, deprecation markers
+- [x] **Phase 4: Verification + Doc Sync** — Compile check, conflict table, deprecation markers — COMPLETE 2026-04-21
 
 ---
 
@@ -64,6 +64,10 @@ Plans:
 **Goal**: 验证编译通过，输出冲突表，标记旧定义为 deprecated
 **Depends on**: Phase 3
 **Requirements**: VER-01, VER-02, VER-03, DOC-01, DOC-02
+**Plans:** 2 plans
+Plans:
+- [x] 04-01-PLAN.md — Compile verification, duplicate audit, conflict table
+- [x] 04-02-PLAN.md — @deprecated markers for TrinityRuntimeFailureCode and QueueStatus
 **Success Criteria**:
 1. `npx tsc --noEmit` 零新增错误（排除预存 io.ts）
 2. 冲突表已输出，标明每个重复定义的 canonical vs legacy 位置
@@ -78,7 +82,7 @@ Plans:
 | 1. Core Protocol | AgentSpec, RuntimeAdapter, Errors, TaskStatus | 17 reqs | Complete (2026-04-21) |
 | 2. Context + Diag | ContextPayload, DiagnosticianOutput | 7 reqs | Complete (2026-04-21) |
 | 3. Infrastructure | Re-exports, package.json | 3 reqs | Complete (2026-04-21) |
-| 4. Verification | Compile, conflict table, deprecation | 5 reqs | Pending |
+| 4. Verification | Compile, conflict table, deprecation | 5 reqs | Complete (2026-04-21) |
 
 ---
 *Created: 2026-04-21 for v2.0 M1 Foundation Contracts milestone*
