@@ -37,7 +37,6 @@ export const PDErrorCategorySchema = Type.Union([
   Type.Literal('workspace_invalid'),
   Type.Literal('query_invalid'),
 ]);
-// eslint-disable-next-line @typescript-eslint/no-redeclare
 export type PDErrorCategory = Static<typeof PDErrorCategorySchema>;
 
 /** All valid error category values. Useful for validation. */

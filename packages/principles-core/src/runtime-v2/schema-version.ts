@@ -17,11 +17,9 @@ export function schemaRef(kind: string, version: number): string {
 }
 
 /** TypeBox schema for versioned schema references (format: "kind-vN"). */
-export const SchemaVersionRefSchema = Type.TemplateLiteral('${string}-v${number}');
-// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const SchemaVersionRefSchema = Type.String();
 export type SchemaVersionRef = Static<typeof SchemaVersionRefSchema>;
 
 /** TypeBox literal schema for the current runtime-v2 schema version. */
 export const RuntimeV2SchemaVersionSchema = Type.Literal('1.0.0');
-// eslint-disable-next-line @typescript-eslint/no-redeclare
 export type RuntimeV2SchemaVersion = Static<typeof RuntimeV2SchemaVersionSchema>;

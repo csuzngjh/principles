@@ -15,7 +15,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 
 import { PDErrorCategorySchema } from './error-categories.js';
-import type { PDErrorCategory } from './error-categories.js';
 
 // ── Task Status ──
 
@@ -34,7 +33,6 @@ export const PDTaskStatusSchema = Type.Union([
   Type.Literal('retry_wait'),
   Type.Literal('failed'),
 ]);
-// eslint-disable-next-line @typescript-eslint/no-redeclare
 export type PDTaskStatus = Static<typeof PDTaskStatusSchema>;
 
 // ── Task Record ──
@@ -65,7 +63,6 @@ export const TaskRecordSchema = Type.Object({
   /** Reference to the task's result data. */
   resultRef: Type.Optional(Type.String()),
 });
-// eslint-disable-next-line @typescript-eslint/no-redeclare
 export type TaskRecord = Static<typeof TaskRecordSchema>;
 
 // ── Diagnostician-specific task record ──
@@ -91,5 +88,4 @@ export const DiagnosticianTaskRecordSchema = Type.Intersect([
     reasonSummary: Type.String(),
   }),
 ]);
-// eslint-disable-next-line @typescript-eslint/no-redeclare
 export type DiagnosticianTaskRecord = Static<typeof DiagnosticianTaskRecordSchema>;

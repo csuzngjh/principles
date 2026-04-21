@@ -744,7 +744,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         );
       }
 
-      // DEBUG: Log Dreamer's actual output
+      // Log extracted Dreamer output for traceability
       this.api.logger?.info(`[Trinity:Dreamer] Output preview: ${outputText.slice(0, 500)}`);
 
       return this.parseDreamerOutput(outputText);
@@ -789,7 +789,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         );
       }
 
-      // DEBUG: Log Philosopher's actual output
+      // Log extracted Philosopher output for traceability
       this.api.logger?.info(`[Trinity:Philosopher] Output preview: ${outputText.slice(0, 500)}`);
 
       return this.parsePhilosopherOutput(outputText);
@@ -843,7 +843,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           return null;
         }
 
-        // DEBUG: Log Scribe's actual output
+        // Log extracted Scribe output for traceability
         this.api.logger?.info(`[Trinity:Scribe] Output preview (attempt ${attempt}): ${outputText.slice(0, 800)}`);
 
         const artifact = this.parseScribeOutput(outputText, snapshot, principleId, telemetry);
