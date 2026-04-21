@@ -1042,6 +1042,16 @@ describe('RuntimeSummaryService', () => {
         },
       });
 
+      // Also create a valid daily event file so readEvents() does not emit
+      // "No event log file" warning that would pollute warnings[] and mask
+      // the stall detection logic we are actually testing.
+      fs.mkdirSync(path.join(workspace, '.state', 'logs'), { recursive: true });
+      fs.writeFileSync(
+        path.join(workspace, '.state', 'logs', `events_${today}.jsonl`),
+        JSON.stringify({ ts: `${today}T09:00:00Z`, type: 'heartbeat_diagnosis', category: 'task_injected', sessionId: 'test', data: {} }) + '\n',
+        'utf8'
+      );
+
       const summary = RuntimeSummaryService.getSummary(workspace);
 
       const warningText = summary.metadata.warnings.join('\n');

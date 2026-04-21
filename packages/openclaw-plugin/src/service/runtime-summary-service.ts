@@ -627,17 +627,17 @@ export class RuntimeSummaryService {
       if (fs.existsSync(todayFile)) {
         bestFile = todayFile;
       } else {
-        // Scan for the most recent available daily file
-        let newestMtime = 0;
+        // Fallback: pick the most recent file by date embedded in the filename
+        // (lexical comparison works for ISO dates YYYY-MM-DD).
+        let newestDate = '';
         try {
           for (const file of fs.readdirSync(dir)) {
             const m = file.match(/^events_(\d{4}-\d{2}-\d{2})\.jsonl$/);
             if (!m) continue;
-            const filePath = path.join(dir, file);
-            const mtime = fs.statSync(filePath).mtimeMs;
-            if (mtime > newestMtime) {
-              newestMtime = mtime;
-              bestFile = filePath;
+            const fileDate = m[1];
+            if (fileDate > newestDate) {
+              newestDate = fileDate;
+              bestFile = path.join(dir, file);
             }
           }
         } catch { /* ignore scan errors */ }

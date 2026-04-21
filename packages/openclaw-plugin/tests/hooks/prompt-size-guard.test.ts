@@ -244,10 +244,14 @@ describe('Size guard: fail-closed', () => {
     expect(totalSize).toBeLessThanOrEqual(9000);
   });
 
-  it('strips project_context and thinking_os when over limit in diagnostician mode', async () => {
+  it('strips project_context and strips thinking_os/evolution_principles when inDiagMode and over limit', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
 
-    mockGetPendingDiagnosticianTasks.mockReturnValueOnce([fakeTask()]);
+    // A long reason string in the task so prependContext itself is large
+    const longReason = 'x'.repeat(500);
+    mockGetPendingDiagnosticianTasks.mockReturnValueOnce([
+      fakeTask({ prompt: `Pain signal: reason=${longReason} source=tool_failure score=85` }),
+    ]);
 
     const ctx = {
       workspaceDir: '/fake/workspace',
@@ -262,14 +266,15 @@ describe('Size guard: fail-closed', () => {
 
     const result = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
 
-    const combined = (result?.prependContext ?? '') + (result?.appendSystemContext ?? '');
-
-    // In diagnostician mode, project_context should be stripped (replaced with placeholder)
-    // The actual stripping depends on size, but the size guard must never throw
+    // The size guard must never throw — result must be defined
     expect(result).toBeDefined();
-    // Combined output must be non-empty and finite
-    expect(combined.length).toBeGreaterThan(0);
-    expect(combined.length).toBeLessThan(50000);
+    const combined =
+      (result?.prependSystemContext?.length ?? 0) +
+      (result?.prependContext?.length ?? 0) +
+      (result?.appendSystemContext?.length ?? 0);
+
+    // Must stay within MAX_INJECTION_SIZE (9000)
+    expect(combined).toBeLessThanOrEqual(9000);
   });
 });
 

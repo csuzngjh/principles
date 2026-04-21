@@ -755,15 +755,18 @@ ${heartbeatChecklist}
               ?? task.prompt.slice(0, 200)
             ).slice(0, 200);
 
-            const markerFile = `.evolution_complete_${id}`;
-            const reportFile = `.diagnostician_report_${id}.json`;
+            const safeId = escapeXml(id);
+            const safeReason = escapeXml(reason);
+            const safeCreatedAt = escapeXml(task.createdAt);
+            const markerFile = `.evolution_complete_${safeId}`;
+            const reportFile = `.diagnostician_report_${safeId}.json`;
 
-            return `<diagnostician_task id="${id}">
-task_id: ${id}
-reason: ${reason}
+            return `<diagnostician_task id="${safeId}">
+task_id: ${safeId}
+reason: ${safeReason}
 marker: ${markerFile}
 report: ${reportFile}
-queued_at: ${task.createdAt}
+queued_at: ${safeCreatedAt}
 action: Analyze pain signal → identify violated principles → write ${markerFile} + ${reportFile}
 </diagnostician_task>`;
           })
@@ -776,7 +779,7 @@ action: Analyze pain signal → identify violated principles → write ${markerF
 
         prependContext += `<diagnostician_tasks pending="${pendingDiagTaskCount}">
 You are acting as a **Pain Diagnostician**. For each task:
-1. Read the full prompt from: ${wctx.stateDir}/diagnostician_tasks.json [task_id=${pendingTasks[0]?.id}]
+1. Read the full prompt from: ${escapeXml(wctx.stateDir)}/diagnostician_tasks.json [task_id=${escapeXml(pendingTasks[0]?.id ?? '')}]
 2. Analyze the pain signal and its context
 3. Identify the root cause and violated principles
 4. Write a completion marker: .evolution_complete_<TASK_ID>
@@ -1174,7 +1177,8 @@ ${attitudeDirective}
     // the task block and minimum behavioral constraints.
     const inDiagMode = pendingDiagTaskCount > 0;
 
-    // Step 1 — strip project_context (largest, lowest priority)
+    // Step 1 — strip project_context (largest, lowest priority) — always in diag mode,
+    // only strip in normal mode if we are already over limit
     if (projectContextContent && appendSystemContext.includes('<project_context>')) {
       appendSystemContext = appendSystemContext.replace(
         `<project_context>\n${projectContextContent}\n</project_context>`,
@@ -1183,43 +1187,52 @@ ${attitudeDirective}
       truncationLog.push('project_context');
     }
 
-    // Step 2 — strip thinking_os
-    if (thinkingOsContent && appendSystemContext.includes('<thinking_os>')) {
-      appendSystemContext = appendSystemContext.replace(
-        `<thinking_os>\n${thinkingOsContent}\n</thinking_os>`,
-        '<thinking_os>\n[stripped: thinking_os]\n</thinking_os>'
-      );
-      truncationLog.push('thinking_os');
-    }
+    // Steps 2-4: only strip in diagnostician priority mode (inDiagMode)
+    // In normal mode we stop after project_context to preserve context quality
+    if (inDiagMode) {
+      // Step 2 — strip thinking_os
+      if (thinkingOsContent && appendSystemContext.includes('<thinking_os>')) {
+        appendSystemContext = appendSystemContext.replace(
+          `<thinking_os>\n${thinkingOsContent}\n</thinking_os>`,
+          '<thinking_os>\n[stripped: thinking_os]\n</thinking_os>'
+        );
+        truncationLog.push('thinking_os');
+      }
 
-    // Step 3 — strip evolution_principles (keep core_principles only)
-    if (evolutionPrinciplesContent && appendSystemContext.includes('<evolution_principles>')) {
-      appendSystemContext = appendSystemContext.replace(
-        `<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`,
-        '<evolution_principles>\n[stripped: evolution_principles]\n</evolution_principles>'
-      );
-      truncationLog.push('evolution_principles');
-    }
+      // Step 3 — strip evolution_principles (keep core_principles only)
+      if (evolutionPrinciplesContent && appendSystemContext.includes('<evolution_principles>')) {
+        appendSystemContext = appendSystemContext.replace(
+          `<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`,
+          '<evolution_principles>\n[stripped: evolution_principles]\n</evolution_principles>'
+        );
+        truncationLog.push('evolution_principles');
+      }
 
-    // Step 4 — strip reflection_log if present
-    if (appendSystemContext.includes('<reflection_log>')) {
-      appendSystemContext = appendSystemContext.replace(
-        /<reflection_log>[\s\S]*?<\/reflection_log>/,
-        '<reflection_log>\n[stripped: reflection_log]\n</reflection_log>'
-      );
-      truncationLog.push('reflection_log');
+      // Step 4 — strip reflection_log if present
+      if (appendSystemContext.includes('<reflection_log>')) {
+        appendSystemContext = appendSystemContext.replace(
+          /<reflection_log>[\s\S]*?<\/reflection_log>/,
+          '<reflection_log>\n[stripped: reflection_log]\n</reflection_log>'
+        );
+        truncationLog.push('reflection_log');
+      }
     }
 
     // Step 5 — re-evaluate: check if still over limit
     let newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
     if (newSize > MAX_INJECTION_SIZE) {
-      // In diagnostician-priority mode also truncate the task reason as a last resort.
-      // This is safe because the full prompt is still available in
-      // diagnostician_tasks.json for the agent to read if needed.
-      prependContext = prependContext.replace(
-        /(reason["\s\S]{0,10})([^<]{200,})/,
-        (_, prefix, rest) => prefix + rest.slice(0, 120) + '...[truncated]'
-      );
+      // Truncate the injected reason field by finding the "reason:" line prefix
+      // and cutting to 120 chars.  This is safe because the full prompt is
+      // still available in diagnostician_tasks.json for the agent to read.
+      prependContext = prependContext
+        .split('\n')
+        .map((line) => {
+          if (line.startsWith('reason: ') && line.length > 129) {
+            return line.slice(0, 129) + '...[truncated]';
+          }
+          return line;
+        })
+        .join('\n');
       newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
       truncationLog.push('diagnostician_reason');
     }
