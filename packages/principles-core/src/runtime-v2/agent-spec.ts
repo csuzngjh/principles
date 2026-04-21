@@ -11,6 +11,8 @@
  */
 import { Type, type Static } from '@sinclair/typebox';
 
+import { RuntimeKindSchema } from './runtime-protocol.js';
+
 // ── Capability requirements that an agent declares it needs ──
 
 export const AgentCapabilityRequirementsSchema = Type.Object({
@@ -21,7 +23,7 @@ export const AgentCapabilityRequirementsSchema = Type.Object({
   /** Agent needs a specific working directory context. */
   workingDirectory: Type.Optional(Type.Boolean()),
 });
-// eslint-disable-next-line @typescript-eslint/no-redeclare
+ 
 export type AgentCapabilityRequirements = Static<typeof AgentCapabilityRequirementsSchema>;
 
 // ── Timeout policy ──
@@ -30,7 +32,7 @@ export const AgentTimeoutPolicySchema = Type.Object({
   /** Default timeout in milliseconds for a single execution attempt. */
   defaultTimeoutMs: Type.Number({ minimum: 0 }),
 });
-// eslint-disable-next-line @typescript-eslint/no-redeclare
+ 
 export type AgentTimeoutPolicy = Static<typeof AgentTimeoutPolicySchema>;
 
 // ── Retry policy ──
@@ -39,7 +41,7 @@ export const AgentRetryPolicySchema = Type.Object({
   /** Maximum number of execution attempts before marking the task as failed. */
   maxAttempts: Type.Integer({ minimum: 1 }),
 });
-// eslint-disable-next-line @typescript-eslint/no-redeclare
+ 
 export type AgentRetryPolicy = Static<typeof AgentRetryPolicySchema>;
 
 // ── AgentSpec: the canonical agent description ──
@@ -76,12 +78,12 @@ export const AgentSpecSchema = Type.Object({
   capabilitiesRequired: AgentCapabilityRequirementsSchema,
 
   /** Preferred runtime kinds, in order of preference. */
-  preferredRuntimeKinds: Type.Optional(Type.Array(Type.String())),
+  preferredRuntimeKinds: Type.Optional(Type.Array(RuntimeKindSchema)),
 
   /** Preferred model profile (e.g., "strong-reasoning", "fast-lightweight"). */
   preferredModelProfile: Type.Optional(Type.String()),
 });
-// eslint-disable-next-line @typescript-eslint/no-redeclare
+ 
 export type AgentSpec = Static<typeof AgentSpecSchema>;
 
 // ── Well-known agent IDs ──

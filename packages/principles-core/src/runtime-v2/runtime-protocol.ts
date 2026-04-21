@@ -13,12 +13,13 @@ import { Type, type Static } from '@sinclair/typebox';
 
 export const RuntimeKindSchema = Type.Union([
   Type.Literal('openclaw'),
+  Type.Literal('claude-cli'),
   Type.Literal('codex-cli'),
   Type.Literal('gemini-cli'),
   Type.Literal('local-worker'),
   Type.Literal('test-double'),
 ]);
-// eslint-disable-next-line @typescript-eslint/no-redeclare
+ 
 export type RuntimeKind = Static<typeof RuntimeKindSchema>;
 
 // ── Runtime Capabilities ──

@@ -13,31 +13,18 @@
 import { Type, type Static } from '@sinclair/typebox';
 
 import { RuntimeKindSchema } from './runtime-protocol.js';
-import type { AgentSpec } from './agent-spec.js';
+import { AgentSpecSchema } from './agent-spec.js';
 import type { PDRuntimeAdapter, RuntimeCapabilities, RuntimeHealth, RuntimeKind } from './runtime-protocol.js';
 
 export const RuntimeSelectionCriteriaSchema = Type.Object({
-  agentSpec: Type.Object({
-    agentId: Type.String(),
-    role: Type.String(),
-    schemaVersion: Type.String(),
-    inputSchemaRef: Type.String(),
-    outputSchemaRef: Type.String(),
-    timeoutPolicy: Type.Object({ defaultTimeoutMs: Type.Number() }),
-    retryPolicy: Type.Object({ maxAttempts: Type.Number() }),
-    capabilitiesRequired: Type.Object({
-      structuredJson: Type.Boolean(),
-      toolUse: Type.Optional(Type.Boolean()),
-      workingDirectory: Type.Optional(Type.Boolean()),
-    }),
-  }),
+  agentSpec: AgentSpecSchema,
   workspacePolicy: Type.Optional(Type.Object({
     allowedRuntimes: Type.Optional(Type.Array(RuntimeKindSchema)),
     blockedRuntimes: Type.Optional(Type.Array(RuntimeKindSchema)),
   })),
   fallbackEnabled: Type.Optional(Type.Boolean()),
 });
-// eslint-disable-next-line @typescript-eslint/no-redeclare
+ 
 export type RuntimeSelectionCriteria = Static<typeof RuntimeSelectionCriteriaSchema>;
 
 export interface RuntimeSelectionResult {
