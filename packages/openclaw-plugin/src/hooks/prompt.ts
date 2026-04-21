@@ -722,8 +722,6 @@ The empathy observer subagent handles pain detection independently.
         const heartbeatChecklist = fs.readFileSync(heartbeatPath, 'utf8');
         prependContext += `<heartbeat_checklist>
 ${heartbeatChecklist}
-
-// HEARTBEAT_OK removed - tasks must always be processed
 </heartbeat_checklist>\n`;
       } catch (e) {
         logger?.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);

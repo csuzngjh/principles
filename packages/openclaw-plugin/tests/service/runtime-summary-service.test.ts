@@ -1058,7 +1058,7 @@ describe('RuntimeSummaryService', () => {
       expect(warningText).toContain('Diagnostician appears stalled');
       expect(warningText).toContain('5'); // heartbeatsInjected
       expect(warningText).toContain('reports are being written'); // confirms it says "0"
-      expect(warningText).toContain('1'); // pending tasks
+      expect(warningText).toContain('1 task(s) remain pending');
     });
 
     it('does NOT raise the stalled warning when reports are being written', () => {

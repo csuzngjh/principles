@@ -222,7 +222,7 @@ export class RuntimeSummaryService {
     const selectedSession = this.selectSession(sessions, options?.sessionId ?? null);
     const selectedSessionId = selectedSession.session?.sessionId ?? null;
 
-    const persistedEvents = this.readEvents(path.join(wctx.stateDir, 'logs', 'events.jsonl'), warnings);
+    const persistedEvents = this.readEvents(path.join(wctx.stateDir, 'logs'), warnings);
     const hasBufferedEventAccess =
       typeof (wctx.eventLog as { getBufferedEvents?: () => EventLogEntry[] }).getBufferedEvents === 'function';
     const bufferedEvents = hasBufferedEventAccess
@@ -612,11 +612,11 @@ export class RuntimeSummaryService {
     };
   }
 
-  private static readEvents(eventsPath: string, warnings: string[]): EventLogEntry[] {
-    // The event log is stored as daily files: events_YYYY-MM-DD.jsonl (not a single
-    // events.jsonl).  Try today's file first, then fall back to the most recent
-    // available daily file so that gate/pain stats are still populated.
-    const dir = path.dirname(eventsPath);
+  private static readEvents(logsDir: string, warnings: string[]): EventLogEntry[] {
+    // The event log is stored as daily files: events_YYYY-MM-DD.jsonl.
+    // Prefer today's file; fall back to the most recent daily file so that
+    // gate/pain stats are still populated when the day rolled over.
+    const dir = logsDir;
 
     let bestFile: string | null = null;
 
@@ -645,7 +645,8 @@ export class RuntimeSummaryService {
     }
 
     if (!bestFile) {
-      warnings.push(
+      pushWarning(
+        warnings,
         'No event log file found; recent pain and gate summaries are partial. ' +
         'Expected format: events_YYYY-MM-DD.jsonl in the logs directory.'
       );
@@ -675,7 +676,8 @@ export class RuntimeSummaryService {
       }
       return entries;
     } catch {
-      warnings.push(
+      pushWarning(
+        warnings,
         `Failed to read ${path.basename(bestFile!)}; recent pain and gate summaries are partial.`
       );
       return [];

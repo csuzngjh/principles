@@ -15,7 +15,12 @@ import * as path from 'path';
 
 // ─── Mock dependencies ───────────────────────────────────────────────────────
 
-const mockGetPendingDiagnosticianTasks = vi.fn();
+const mockGetPendingDiagnosticianTasks = vi.fn<(stateDir: string) => unknown[]>();
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockGetPendingDiagnosticianTasks.mockReturnValue([]);
+});
 
 vi.mock('../../src/core/diagnostician-task-store.js', async () => ({
   getPendingDiagnosticianTasks: (...args: unknown[]) =>
