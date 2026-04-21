@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "build": "npm run build --workspace=@principles/core && npm run build --workspace=principles-disciple",
     "lint": "npm run build --workspace=@principles/core && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts",
     "lint:fix": "npm run build --workspace=@principles/core && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --fix",
     "pre-commit": "lint-staged",
