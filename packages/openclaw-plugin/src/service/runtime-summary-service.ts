@@ -358,6 +358,22 @@ export class RuntimeSummaryService {
       heartbeatsInjectedToday: diagDailyStats?.heartbeatsInjected ?? 0,
     };
 
+    // D: Stall detection — high-signal warning when the diagnostician loop appears broken.
+    // Conditions: tasks are being injected (heartbeats > 0) but no reports are being written.
+    if (
+      heartbeatDiagnosis.heartbeatsInjectedToday > 0 &&
+      heartbeatDiagnosis.reportsWrittenToday === 0 &&
+      heartbeatDiagnosis.pendingTasks > 0
+    ) {
+      pushWarning(
+        warnings,
+        'Diagnostician appears stalled: heartbeats are injecting tasks ' +
+        `(${heartbeatDiagnosis.heartbeatsInjectedToday}) but no reports are being written. ` +
+        `${heartbeatDiagnosis.pendingTasks} task(s) remain pending. ` +
+        'Check prompt injection size limits and diagnostician task processing.'
+      );
+    }
+
     // Read trajectory analytics data (historical data, NOT runtime truth)
     const trajectoryStats = this.readTrajectoryStats(workspaceDir, warnings);
 
@@ -597,13 +613,47 @@ export class RuntimeSummaryService {
   }
 
   private static readEvents(eventsPath: string, warnings: string[]): EventLogEntry[] {
-    if (!fs.existsSync(eventsPath)) {
-      warnings.push('No events.jsonl file exists yet; recent pain and gate summaries are partial.');
+    // The event log is stored as daily files: events_YYYY-MM-DD.jsonl (not a single
+    // events.jsonl).  Try today's file first, then fall back to the most recent
+    // available daily file so that gate/pain stats are still populated.
+    const dir = path.dirname(eventsPath);
+
+    let bestFile: string | null = null;
+
+    if (fs.existsSync(dir)) {
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      // Prefer exact match on today's file
+      const todayFile = path.join(dir, `events_${today}.jsonl`);
+      if (fs.existsSync(todayFile)) {
+        bestFile = todayFile;
+      } else {
+        // Scan for the most recent available daily file
+        let newestMtime = 0;
+        try {
+          for (const file of fs.readdirSync(dir)) {
+            const m = file.match(/^events_(\d{4}-\d{2}-\d{2})\.jsonl$/);
+            if (!m) continue;
+            const filePath = path.join(dir, file);
+            const mtime = fs.statSync(filePath).mtimeMs;
+            if (mtime > newestMtime) {
+              newestMtime = mtime;
+              bestFile = filePath;
+            }
+          }
+        } catch { /* ignore scan errors */ }
+      }
+    }
+
+    if (!bestFile) {
+      warnings.push(
+        'No event log file found; recent pain and gate summaries are partial. ' +
+        'Expected format: events_YYYY-MM-DD.jsonl in the logs directory.'
+      );
       return [];
     }
 
     try {
-      const raw = fs.readFileSync(eventsPath, 'utf8').trim();
+      const raw = fs.readFileSync(bestFile, 'utf8').trim();
       if (!raw) return [];
       let parseFailures = 0;
       const entries = raw
@@ -620,12 +670,14 @@ export class RuntimeSummaryService {
       if (parseFailures > 0) {
         pushWarning(
           warnings,
-          `Skipped ${parseFailures} malformed event line${parseFailures === 1 ? '' : 's'} while reading events.jsonl.`
+          `Skipped ${parseFailures} malformed event line${parseFailures === 1 ? '' : 's'} while reading ${path.basename(bestFile!)}.`
         );
       }
       return entries;
     } catch {
-      pushWarning(warnings, 'Failed to read events.jsonl; recent pain and gate summaries are partial.');
+      warnings.push(
+        `Failed to read ${path.basename(bestFile!)}; recent pain and gate summaries are partial.`
+      );
       return [];
     }
   }

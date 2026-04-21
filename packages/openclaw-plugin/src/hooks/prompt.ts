@@ -449,6 +449,8 @@ export async function handleBeforePromptBuild(
   let prependSystemContext: string;
   let prependContext = '';
   let appendSystemContext = '';
+  // Tracks pending diagnostician task count for diagnostician-priority mode in size guard
+  let pendingDiagTaskCount = 0;
 
   // ──── 0. Manual Pain Clearance ────
   if (trigger === 'user' && sessionId && session && session.currentGfi >= 100) {
@@ -728,41 +730,72 @@ ${heartbeatChecklist}
       }
     }
 
-    // ──── 4b. Inject pending diagnostician tasks ────
-    // FIX (#283): The evolution worker writes pain diagnosis tasks to
+    // ──── 4b. Inject pending diagnostician tasks (compact summary) ────
+    // FIX (#283/#380): The evolution worker writes pain diagnosis tasks to
     // diagnostician_tasks.json. The heartbeat prompt hook must read and inject
     // them so the LLM (acting as diagnostician) can process them.
+    //
+    // INJECTION FORMAT: Compact summary (not full prompt) to stay well within
+    // OpenClaw's ~10 000 char platform limit.  Full task.prompt can be 2–4 KB;
+    // the compact block is < 400 chars.  The agent is instructed to read the
+    // original from diagnostician_tasks.json if it needs the full context.
     try {
       const pendingTasks = getPendingDiagnosticianTasks(wctx.stateDir);
       if (pendingTasks.length > 0) {
+        pendingDiagTaskCount = pendingTasks.length;
+
+        // Build compact summary blocks — one per task (only first is processed per heartbeat)
         const taskBlocks = pendingTasks
-          .slice(0, 3)
-          .map(({ id, task }) => `<diagnostician_task id="${id}">\n${task.prompt}\n</diagnostician_task>`)
+          .slice(0, 1)
+          .map(({ id, task }) => {
+            // Extract summary fields; reason is truncated to 200 chars to keep
+            // the injected block small and stable.
+            const reason = (task.prompt
+              .match(/reason["\s:]+([^\n]{0,240})/i)?.[1]
+              ?? task.prompt.slice(0, 200)
+            ).slice(0, 200);
+
+            const markerFile = `.evolution_complete_${id}`;
+            const reportFile = `.diagnostician_report_${id}.json`;
+
+            return `<diagnostician_task id="${id}">
+task_id: ${id}
+reason: ${reason}
+marker: ${markerFile}
+report: ${reportFile}
+queued_at: ${task.createdAt}
+action: Analyze pain signal → identify violated principles → write ${markerFile} + ${reportFile}
+</diagnostician_task>`;
+          })
           .join('\n\n');
 
-        const pendingCount = pendingTasks.length;
-        const processingNote = pendingCount > 3
-          ? `\n\nNOTE: ${pendingCount - 3} more tasks are queued. Process these 3 first; remaining tasks will be handled on subsequent heartbeats.`
+        const processingNote = pendingDiagTaskCount > 1
+          ? `\n\nNOTE: ${pendingDiagTaskCount - 1} more task(s) are queued. ` +
+            `Process one at a time; remaining tasks are handled on subsequent heartbeats.`
           : '';
 
-        prependContext += `<diagnostician_tasks pending="${pendingCount}">
-You are acting as a **Pain Diagnostician**. Process the following task(s) by:
-1. Analyzing the pain signal and its context
-2. Identifying the root cause and violated principles
-3. Writing a completion marker file: .evolution_complete_<TASK_ID>
-4. Writing a diagnostic report: .diagnostician_report_<TASK_ID>.json
+        prependContext += `<diagnostician_tasks pending="${pendingDiagTaskCount}">
+You are acting as a **Pain Diagnostician**. For each task:
+1. Read the full prompt from: ${wctx.stateDir}/diagnostician_tasks.json [task_id=${pendingTasks[0]?.id}]
+2. Analyze the pain signal and its context
+3. Identify the root cause and violated principles
+4. Write a completion marker: .evolution_complete_<TASK_ID>
+5. Write a diagnostic report: .diagnostician_report_<TASK_ID>.json
 
 ${taskBlocks}${processingNote}
 </diagnostician_tasks>\n`;
 
-        logger?.info?.(`[PD:Prompt] Injected ${Math.min(pendingCount, 3)}/${pendingCount} pending diagnostician task(s) into heartbeat prompt`);
+        logger?.info?.(
+          `[PD:Prompt] Injected compact diagnostician task block ` +
+          `(task=${pendingTasks[0]?.id}, total_pending=${pendingDiagTaskCount})`
+        );
 
         // C: Record heartbeat_diagnosis event for observability
         try {
           const eventLog = EventLogService.get(wctx.stateDir, logger);
           eventLog.recordHeartbeatDiagnosis({
-            taskCount: pendingCount,
-            taskIds: pendingTasks.slice(0, 3).map(t => t.id),
+            taskCount: pendingDiagTaskCount,
+            taskIds: pendingTasks.slice(0, 1).map(t => t.id),
             trigger: 'heartbeat',
           });
         } catch (evErr) {
@@ -1124,36 +1157,102 @@ ${attitudeDirective}
   }
 
   // ──── 8. SIZE GUARD ────
-  // Truncation happens within appendSystemContext (not prependContext)
+  // Hard cap for OpenClaw prompt injection. OpenClaw's actual platform limit is
+  // approximately 10 000 characters. We use 9 000 here to leave ~1 000 chars of
+  // headroom for the user's message, tool call delimiters, and encoding overhead.
+  // IMPORTANT: PD must never treat the platform's upper bound as its own safe
+  // working limit. Always keep a margin.
   const totalSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
-  const MAX_SIZE = 10000;
+  const MAX_INJECTION_SIZE = 9000;
 
-  if (totalSize > MAX_SIZE) {
+  if (totalSize > MAX_INJECTION_SIZE) {
     const originalSize = totalSize;
     const truncationLog: string[] = [];
 
-    // 1. Truncate project_context in appendSystemContext
+    // Deterministically remove low-priority context blocks in priority order.
+    // In diagnostician-priority mode we aggressively strip everything except
+    // the task block and minimum behavioral constraints.
+    const inDiagMode = pendingDiagTaskCount > 0;
+
+    // Step 1 — strip project_context (largest, lowest priority)
     if (projectContextContent && appendSystemContext.includes('<project_context>')) {
-      const lines = projectContextContent.split('\n');
-      if (lines.length > 20) {
-        const truncated = lines.slice(0, 20).join('\n') + '\n...[truncated]';
-        appendSystemContext = appendSystemContext.replace(
-          `<project_context>\n${projectContextContent}\n</project_context>`,
-          `<project_context>\n${truncated}\n</project_context>`
-        );
-        truncationLog.push('project_context');
-      }
+      appendSystemContext = appendSystemContext.replace(
+        `<project_context>\n${projectContextContent}\n</project_context>`,
+        '<project_context>\n[stripped: project_context]\n</project_context>'
+      );
+      truncationLog.push('project_context');
     }
 
-    // 2. Final check
+    // Step 2 — strip thinking_os
+    if (thinkingOsContent && appendSystemContext.includes('<thinking_os>')) {
+      appendSystemContext = appendSystemContext.replace(
+        `<thinking_os>\n${thinkingOsContent}\n</thinking_os>`,
+        '<thinking_os>\n[stripped: thinking_os]\n</thinking_os>'
+      );
+      truncationLog.push('thinking_os');
+    }
+
+    // Step 3 — strip evolution_principles (keep core_principles only)
+    if (evolutionPrinciplesContent && appendSystemContext.includes('<evolution_principles>')) {
+      appendSystemContext = appendSystemContext.replace(
+        `<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`,
+        '<evolution_principles>\n[stripped: evolution_principles]\n</evolution_principles>'
+      );
+      truncationLog.push('evolution_principles');
+    }
+
+    // Step 4 — strip reflection_log if present
+    if (appendSystemContext.includes('<reflection_log>')) {
+      appendSystemContext = appendSystemContext.replace(
+        /<reflection_log>[\s\S]*?<\/reflection_log>/,
+        '<reflection_log>\n[stripped: reflection_log]\n</reflection_log>'
+      );
+      truncationLog.push('reflection_log');
+    }
+
+    // Step 5 — re-evaluate: check if still over limit
     let newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
-    if (newSize > MAX_SIZE) {
-      // NOTE: We still return the content even if over limit, as truncating more
-      // could lose critical context like principles or evolution directives.
-      logger?.error(`[PD:Prompt] Cannot reduce injection size below limit. Current: ${newSize}, Limit: ${MAX_SIZE}`);
+    if (newSize > MAX_INJECTION_SIZE) {
+      // In diagnostician-priority mode also truncate the task reason as a last resort.
+      // This is safe because the full prompt is still available in
+      // diagnostician_tasks.json for the agent to read if needed.
+      prependContext = prependContext.replace(
+        /(reason["\s\S]{0,10})([^<]{200,})/,
+        (_, prefix, rest) => prefix + rest.slice(0, 120) + '...[truncated]'
+      );
+      newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
+      truncationLog.push('diagnostician_reason');
     }
 
-    logger?.warn(`[PD:Prompt] Injection size exceeded: ${originalSize} chars (limit: ${MAX_SIZE}), truncated: ${truncationLog.join(', ') || 'none'}, new size: ${newSize} chars`);
+    // FAIL-CLOSED: if we are still over the limit after all deterministic
+    // removals, do NOT return a prompt that exceeds MAX_INJECTION_SIZE.
+    // Drop the entire appendSystemContext (keep only prependContext +
+    // prependSystemContext) and log a hard error.
+    if (newSize > MAX_INJECTION_SIZE) {
+      const fallbackContext = `
+## 【CONTEXT SECTIONS】
+
+[WARNING: Context sections stripped due to prompt size constraints.
+This is a diagnostician-priority session — see diagnostician_tasks.json for full task context.]
+
+${attitudeDirective}
+`.trim();
+
+      appendSystemContext = fallbackContext;
+      newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
+
+      logger?.error(
+        `[PD:Prompt] PROMPT OVER LIMIT AFTER ALL REDUCTIONS — using fallback. ` +
+        `Original: ${originalSize}, Current: ${newSize}, Limit: ${MAX_INJECTION_SIZE}. ` +
+        `Stripped: ${truncationLog.join(', ')}. Diagnostician mode: ${inDiagMode}.`
+      );
+    } else {
+      logger?.warn(
+        `[PD:Prompt] Injection size exceeded: ${originalSize} chars (limit: ${MAX_INJECTION_SIZE}), ` +
+        `truncated: ${truncationLog.join(', ') || 'none'}, new size: ${newSize} chars, ` +
+        `diagnostician mode: ${inDiagMode}`
+      );
+    }
   }
 
   return {
