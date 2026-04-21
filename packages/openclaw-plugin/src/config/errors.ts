@@ -1,6 +1,6 @@
 /**
  * Domain-Specific Errors for Principles Disciple
- * 
+ *
  * These errors provide semantic meaning to failure modes,
  * making it easier to distinguish between:
  * - Lock contention (resource busy)
@@ -9,18 +9,34 @@
  * - Configuration issues
  */
 
+import type { PDErrorCategory } from '@principles/core';
+
+/** Maps legacy PdError codes to canonical PDErrorCategory values. */
+const codeToCategory: Record<string, PDErrorCategory> = {
+  LOCK_UNAVAILABLE: 'lease_conflict',
+  PATH_RESOLUTION_ERROR: 'workspace_invalid',
+  WORKSPACE_NOT_FOUND: 'workspace_invalid',
+  SAMPLE_NOT_FOUND: 'storage_unavailable',
+  CONFIGURATION_ERROR: 'input_invalid',
+  DEPENDENCY_ERROR: 'runtime_unavailable',
+  EVOLUTION_PROCESSING_ERROR: 'execution_failed',
+  TRAJECTORY_ERROR: 'storage_unavailable',
+};
+
 /**
  * Base class for all Principles Disciple errors
  */
 export class PdError extends Error {
+  readonly category: PDErrorCategory;
+
   constructor(
     message: string,
-     
     public readonly code: string,
     options?: { cause?: unknown }
   ) {
     super(message, options);
     this.name = 'PdError';
+    this.category = codeToCategory[code] ?? 'execution_failed';
   }
 }
 
