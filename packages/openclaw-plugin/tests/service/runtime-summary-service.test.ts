@@ -31,7 +31,9 @@ function writeSession(workspace: string, sessionId: string, payload: Record<stri
 }
 
 function writeEvents(workspace: string, entries: unknown[]): void {
-  const filePath = path.join(workspace, '.state', 'logs', 'events.jsonl');
+  // Write to today's daily event file (events_YYYY-MM-DD.jsonl)
+  const today = new Date().toISOString().slice(0, 10);
+  const filePath = path.join(workspace, '.state', 'logs', `events_${today}.jsonl`);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const content = entries.map((entry) => JSON.stringify(entry)).join('\n');
   fs.writeFileSync(filePath, content ? `${content}\n` : '', 'utf8');
@@ -471,11 +473,12 @@ describe('RuntimeSummaryService', () => {
       trust_score: 59,
       last_updated: '2026-03-20T10:00:00Z',
     });
+    const today = new Date().toISOString().slice(0, 10);
     fs.writeFileSync(
-      path.join(workspace, '.state', 'logs', 'events.jsonl'),
+      path.join(workspace, '.state', 'logs', `events_${today}.jsonl`),
       [
         JSON.stringify({
-          ts: '2026-03-20T10:00:01Z',
+          ts: `${today}T10:00:01Z`,
           type: 'pain_signal',
           category: 'detected',
           sessionId: 's1',
@@ -914,6 +917,182 @@ describe('RuntimeSummaryService', () => {
       // The directiveStatus should indicate it's compatibility-only
       expect(summary.phase3.directiveStatus).toBe('compatibility-only');
       expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Phase A: Event log daily-file compatibility + stalled diagnostician warning
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  describe('Event log daily-file format (events_YYYY-MM-DD.jsonl)', () => {
+    it('reads today events_YYYY-MM-DD.jsonl and does NOT warn about missing events.jsonl', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 59,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      // Write daily file (today's date)
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const dailyFilePath = path.join(workspace, '.state', 'logs', `events_${today}.jsonl`);
+      fs.mkdirSync(path.dirname(dailyFilePath), { recursive: true });
+      fs.writeFileSync(
+        dailyFilePath,
+        JSON.stringify({
+          ts: `${today}T10:00:01Z`,
+          type: 'pain_signal',
+          category: 'detected',
+          sessionId: 's1',
+          data: { source: 'tool_failure', score: 10, reason: 'write failed' },
+        }) + '\n',
+        'utf8'
+      );
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Must have read the daily file successfully
+      expect(summary.pain.lastSignal?.source).toBe('tool_failure');
+      // Must NOT warn about "No events.jsonl file"
+      expect(summary.metadata.warnings.join('\n')).not.toContain('No events.jsonl file');
+      expect(summary.metadata.warnings.join('\n')).not.toContain('No event log file');
+    });
+
+    it('falls back to most recent daily file when today file does not exist', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 59,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      // Write only an older daily file
+      const oldDate = '2026-03-18';
+      const oldFilePath = path.join(workspace, '.state', 'logs', `events_${oldDate}.jsonl`);
+      fs.mkdirSync(path.dirname(oldFilePath), { recursive: true });
+      fs.writeFileSync(
+        oldFilePath,
+        JSON.stringify({
+          ts: `${oldDate}T10:00:01Z`,
+          type: 'gate_block',
+          category: 'risk',
+          sessionId: 's2',
+          data: { reason: 'old gate event' },
+        }) + '\n',
+        'utf8'
+      );
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Must have read the old file
+      expect(summary.gate.recentBlocks).toBeGreaterThan(0);
+      // Must NOT warn about "No event log file"
+      expect(summary.metadata.warnings.join('\n')).not.toContain('No event log file');
+    });
+
+    it('warns only when no daily event file exists at all', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 59,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      // Deliberately leave no event log files
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.metadata.warnings.join('\n')).toContain('No event log file');
+    });
+  });
+
+  describe('Stalled diagnostician warning', () => {
+    it('raises a high-signal warning when tasks are injected but no reports are written', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 59,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), []);
+
+      // Simulate: pending tasks exist, heartbeats are injecting, but no reports written.
+      // The pending task store is checked via getPendingDiagnosticianTasks which uses
+      // the real filesystem path. We need to write diagnostician_tasks.json directly.
+      const today = new Date().toISOString().slice(0, 10);
+      fs.mkdirSync(path.join(workspace, '.state'), { recursive: true });
+      fs.writeFileSync(
+        path.join(workspace, '.state', 'diagnostician_tasks.json'),
+        JSON.stringify({
+          tasks: {
+            'stalled-task-1': {
+              prompt: 'Diagnose: tool_failure score=80',
+              createdAt: `${today}T09:00:00Z`,
+              status: 'pending',
+            },
+          },
+        }),
+        'utf8'
+      );
+
+      // Write daily-stats.json with heartbeats > 0 but reportsWritten = 0
+      writeJson(path.join(workspace, '.state', 'logs', 'daily-stats.json'), {
+        [today]: {
+          evolution: {
+            diagnosisTasksWritten: 3,
+            diagnosticianReportsWritten: 0,
+            reportsMissingJson: 0,
+            reportsIncompleteFields: 0,
+            principleCandidatesCreated: 0,
+            heartbeatsInjected: 5,
+          },
+        },
+      });
+
+      // Also create a valid daily event file so readEvents() does not emit
+      // "No event log file" warning that would pollute warnings[] and mask
+      // the stall detection logic we are actually testing.
+      fs.mkdirSync(path.join(workspace, '.state', 'logs'), { recursive: true });
+      fs.writeFileSync(
+        path.join(workspace, '.state', 'logs', `events_${today}.jsonl`),
+        JSON.stringify({ ts: `${today}T09:00:00Z`, type: 'heartbeat_diagnosis', category: 'task_injected', sessionId: 'test', data: {} }) + '\n',
+        'utf8'
+      );
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      const warningText = summary.metadata.warnings.join('\n');
+      expect(warningText).toContain('Diagnostician appears stalled');
+      expect(warningText).toContain('5'); // heartbeatsInjected
+      expect(warningText).toContain('reports are being written'); // confirms it says "0"
+      expect(warningText).toContain('1 task(s) remain pending');
+    });
+
+    it('does NOT raise the stalled warning when reports are being written', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 59,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), []);
+
+      const today = new Date().toISOString().slice(0, 10);
+      fs.mkdirSync(path.join(workspace, '.state'), { recursive: true });
+      fs.writeFileSync(
+        path.join(workspace, '.state', 'diagnostician_tasks.json'),
+        JSON.stringify({ tasks: {} }), // No pending tasks
+        'utf8'
+      );
+
+      writeJson(path.join(workspace, '.state', 'logs', 'daily-stats.json'), {
+        [today]: {
+          evolution: {
+            diagnosisTasksWritten: 3,
+            diagnosticianReportsWritten: 3, // Reports ARE being written
+            reportsMissingJson: 0,
+            reportsIncompleteFields: 0,
+            principleCandidatesCreated: 1,
+            heartbeatsInjected: 5,
+          },
+        },
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.metadata.warnings.join('\n')).not.toContain('Diagnostician appears stalled');
     });
   });
 });
