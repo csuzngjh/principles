@@ -9,7 +9,7 @@
 
 - [x] **Phase 1: Core Protocol + Agent + Error Contracts** — AgentSpec, PDRuntimeAdapter, PDErrorCategory, RuntimeSelector, PDTaskStatus — COMPLETE 2026-04-21
 - [x] **Phase 2: Context + Diagnostician Contracts** — ContextPayload, HistoryQueryEntry, DiagnosticianOutputV1 — COMPLETE 2026-04-21
-- [ ] **Phase 3: Package Infrastructure** — Re-exports, package.json exports, index.ts wiring
+- [x] **Phase 3: Package Infrastructure** — Re-exports, package.json exports, index.ts wiring — COMPLETE 2026-04-21
 - [ ] **Phase 4: Verification + Doc Sync** — Compile check, conflict table, deprecation markers
 
 ---
@@ -77,7 +77,7 @@ Plans:
 |-------|------|--------------|--------|
 | 1. Core Protocol | AgentSpec, RuntimeAdapter, Errors, TaskStatus | 17 reqs | Complete (2026-04-21) |
 | 2. Context + Diag | ContextPayload, DiagnosticianOutput | 7 reqs | Complete (2026-04-21) |
-| 3. Infrastructure | Re-exports, package.json | 3 reqs | Pending |
+| 3. Infrastructure | Re-exports, package.json | 3 reqs | Complete (2026-04-21) |
 | 4. Verification | Compile, conflict table, deprecation | 5 reqs | Pending |
 
 ---
