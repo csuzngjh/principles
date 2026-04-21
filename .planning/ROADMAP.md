@@ -20,6 +20,11 @@
 **Goal**: 定义 runtime-v2 最核心的 protocol、agent 和 error 类型
 **Depends on**: Nothing
 **Requirements**: AGENT-01, AGENT-02, AGENT-03, ERR-01, ERR-02, ERR-03, RT-01, RT-02, RT-03, RT-04, RT-05, RT-06, SEL-01, TASK-01, TASK-02, TASK-03, SCH-01
+**Plans:** 3 plans
+Plans:
+- [x] 01-01-PLAN.md — Foundation TypeBox schemas (error-categories, agent-spec, schema-version)
+- [x] 01-02-PLAN.md — Runtime protocol TypeBox schemas (runtime-protocol, task-status, runtime-selector)
+- [x] 01-03-PLAN.md — PdError unification with PDErrorCategory
 **Success Criteria**:
 1. `AgentSpec` interface 可从 `@principles/core/runtime-v2` 导入
 2. `PDRuntimeAdapter` interface 包含文档 Section 8 定义的全部方法
@@ -33,6 +38,9 @@
 **Goal**: 定义上下文 payload 和诊断输出的 canonical schema
 **Depends on**: Phase 1
 **Requirements**: CTX-01, CTX-02, CTX-03, CTX-04, CTX-05, DIAG-01, DIAG-02
+**Plans:** 1 plan
+Plans:
+- [ ] 02-01-PLAN.md — Context payload + diagnostician output TypeBox schemas
 **Success Criteria**:
 1. `ContextPayload` 与 History Spec Section 9.4 一致
 2. `DiagnosticianContextPayload` 与 Diagnostician v2 Design Section 9.4 一致
@@ -68,7 +76,7 @@
 | Phase | Goal | Requirements | Status |
 |-------|------|--------------|--------|
 | 1. Core Protocol | AgentSpec, RuntimeAdapter, Errors, TaskStatus | 17 reqs | Complete (2026-04-21) |
-| 2. Context + Diag | ContextPayload, DiagnosticianOutput | 7 reqs | Pending |
+| 2. Context + Diag | ContextPayload, DiagnosticianOutput | 7 reqs | In Progress |
 | 3. Infrastructure | Re-exports, package.json | 3 reqs | Pending |
 | 4. Verification | Compile, conflict table, deprecation | 5 reqs | Pending |
 
