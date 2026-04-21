@@ -445,6 +445,7 @@ export interface TrinityRuntimeAdapter {
  * Uses api.runtime.agent.runEmbeddedPiAgent() which works in background contexts
  * (unlike api.runtime.subagent.* which requires gateway request scope).
  */
+/** @deprecated Use PDErrorCategory from '@principles/core/runtime-v2'. M2 migration will replace this. */
 export type TrinityRuntimeFailureCode =
   | 'runtime_unavailable'
   | 'invalid_runtime_request'
