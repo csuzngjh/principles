@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
-status: Phase 1 complete
-last_updated: "2026-04-21T21:30:00.000Z"
-last_activity: 2026-04-21 — Phase 1 complete (3/3 plans, verification passed)
+status: planning
+last_updated: "2026-04-21T22:00:00.000Z"
+last_activity: 2026-04-21 — Phase 2 complete (1/1 plan, 14 TypeBox schemas)
 progress:
-  total_phases: 4
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 25
+  total_phases: 7
+  completed_phases: 8
+  total_plans: 24
+  completed_plans: 26
+  percent: 100
 ---
 
 # Project State: Principles
@@ -19,19 +19,43 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.0 M1 Foundation Contracts — Phase 1 complete, ready for Phase 2
+**Current Focus:** v2.0 M1 Foundation Contracts — Phase 2 complete, ready for Phase 3
 
 ## Current Position
 
-Phase: 02-context-diagnostician-contracts (next)
-Status: Phase 1 complete, verification passed
-Last activity: 2026-04-21 — Phase 1 complete (3/3 plans, verification passed)
+Phase: 03-package-infrastructure (next)
+Status: Phase 2 complete (1/1 plan, 14 TypeBox schemas)
+Last activity: 2026-04-21 — Phase 2 complete (1/1 plan, 14 TypeBox schemas)
 
 ## Context
 
 **v2.0 M1 Goal:** 冻结 runtime-v2 的核心 contracts，避免后续 milestone 各自发明接口
 
 **Phase 1 Complete:**
+
+- PDErrorCategorySchema: 16 TypeBox literals + Value.Check guard
+- AgentSpecSchema: 10 fields + sub-schemas for capabilities/timeout/retry
+- RuntimeKindSchema: 5 runtime literals
+- RuntimeCapabilitiesSchema: 9 capability flags + dynamicCapabilities
+- PDTaskStatusSchema: 5 state literals
+- TaskRecordSchema + DiagnosticianTaskRecordSchema
+- RuntimeSelectionCriteriaSchema + RuntimeSelector interface
+- PdError unified with PDErrorCategory (8 legacy codes mapped)
+- io.ts pre-existing type error fixed
+
+**Phase 2 Complete:**
+
+- HistoryQueryEntrySchema: role as 4-literal union (user/assistant/tool/system)
+- TrajectoryLocateQuerySchema, TrajectoryCandidateSchema, TrajectoryLocateResultSchema
+- HistoryQueryResultSchema: sourceRef + entries + truncated
+- DiagnosisTargetSchema: 5 optional fields shared interface (D-03)
+- ContextPayloadSchema + DiagnosticianContextPayloadSchema
+- DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema
+- RecommendationKindSchema: 5-literal union
+- DiagnosticianRecommendationSchema, DiagnosticianOutputV1Schema
+- DiagnosticianInvocationInputSchema (hybrid: schema + interface for D-02)
+- index.ts: 14 new schema re-exports
+
 - PDErrorCategorySchema: 16 TypeBox literals + Value.Check guard
 - AgentSpecSchema: 10 fields + sub-schemas for capabilities/timeout/retry
 - RuntimeKindSchema: 5 runtime literals

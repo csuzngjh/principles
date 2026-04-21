@@ -8,7 +8,7 @@
 ## Phase Summary
 
 - [x] **Phase 1: Core Protocol + Agent + Error Contracts** — AgentSpec, PDRuntimeAdapter, PDErrorCategory, RuntimeSelector, PDTaskStatus — COMPLETE 2026-04-21
-- [ ] **Phase 2: Context + Diagnostician Contracts** — ContextPayload, HistoryQueryEntry, DiagnosticianOutputV1
+- [x] **Phase 2: Context + Diagnostician Contracts** — ContextPayload, HistoryQueryEntry, DiagnosticianOutputV1 — COMPLETE 2026-04-21
 - [ ] **Phase 3: Package Infrastructure** — Re-exports, package.json exports, index.ts wiring
 - [ ] **Phase 4: Verification + Doc Sync** — Compile check, conflict table, deprecation markers
 
@@ -40,7 +40,7 @@ Plans:
 **Requirements**: CTX-01, CTX-02, CTX-03, CTX-04, CTX-05, DIAG-01, DIAG-02
 **Plans:** 1 plan
 Plans:
-- [ ] 02-01-PLAN.md — Context payload + diagnostician output TypeBox schemas
+- [x] 02-01-PLAN.md — Context payload + diagnostician output TypeBox schemas
 **Success Criteria**:
 1. `ContextPayload` 与 History Spec Section 9.4 一致
 2. `DiagnosticianContextPayload` 与 Diagnostician v2 Design Section 9.4 一致
@@ -76,7 +76,7 @@ Plans:
 | Phase | Goal | Requirements | Status |
 |-------|------|--------------|--------|
 | 1. Core Protocol | AgentSpec, RuntimeAdapter, Errors, TaskStatus | 17 reqs | Complete (2026-04-21) |
-| 2. Context + Diag | ContextPayload, DiagnosticianOutput | 7 reqs | In Progress |
+| 2. Context + Diag | ContextPayload, DiagnosticianOutput | 7 reqs | Complete (2026-04-21) |
 | 3. Infrastructure | Re-exports, package.json | 3 reqs | Pending |
 | 4. Verification | Compile, conflict table, deprecation | 5 reqs | Pending |
 
