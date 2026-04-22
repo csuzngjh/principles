@@ -32,7 +32,7 @@ interface QueryParams {
   trajectoryRef: string;
   timeWindowStart: string;
   timeWindowEnd: string;
-  effectiveLimit: number;
+  runLimit: number;
 }
 
 /** Parameters for a cursor-based history SQL query. */
@@ -56,7 +56,7 @@ export class SqliteHistoryQuery implements HistoryQuery {
     cursor: string | undefined,
     options: HistoryQueryOptions | undefined,
   ): Promise<HistoryQueryResult> {
-    const effectiveLimit = Math.min(
+    const effectiveEntryLimit = Math.min(
       Math.max(1, options?.limit ?? DEFAULT_HISTORY_PAGE_SIZE),
       MAX_HISTORY_PAGE_SIZE,
     );
@@ -67,23 +67,33 @@ export class SqliteHistoryQuery implements HistoryQuery {
       options?.timeWindowStart ??
       new Date(now.getTime() - DEFAULT_TIME_WINDOW_MS).toISOString();
 
+    // Each run maps to 2 entries (system + assistant), so fetch enough runs
+    // to potentially fill the entry limit. Fetch one extra run to detect truncation.
+    const runLimit = Math.ceil(effectiveEntryLimit / 2) + 1;
+
     const queryParams: QueryParams = {
       trajectoryRef,
       timeWindowStart,
       timeWindowEnd,
-      effectiveLimit,
+      runLimit,
     };
 
     const rows = cursor
       ? this.queryWithCursor({ ...queryParams, cursor })
       : this.queryFirstPage(queryParams);
 
-    const hasMore = rows.length > effectiveLimit;
-    const resultRows = hasMore ? rows.slice(0, effectiveLimit) : rows;
-    const entries = resultRows.flatMap((row) => SqliteHistoryQuery.mapRunToEntries(row));
+    // Map all fetched runs to entries
+    const allEntries = rows.flatMap((row) => SqliteHistoryQuery.mapRunToEntries(row));
+
+    const hasMore = allEntries.length > effectiveEntryLimit;
+    const entries = hasMore ? allEntries.slice(0, effectiveEntryLimit) : allEntries;
+
+    // Find the last run row that contributed to the returned entries
+    const lastEntryRunCount = Math.ceil(entries.length / 2);
+    const lastRow = rows[lastEntryRunCount - 1];
 
     const nextCursor = hasMore
-      ? SqliteHistoryQuery.buildCursor(resultRows[resultRows.length - 1], trajectoryRef)
+      ? SqliteHistoryQuery.buildCursor(lastRow, trajectoryRef)
       : undefined;
 
     const result: HistoryQueryResult = {
@@ -118,7 +128,7 @@ export class SqliteHistoryQuery implements HistoryQuery {
         params.trajectoryRef,
         params.timeWindowStart,
         params.timeWindowEnd,
-        params.effectiveLimit + 1,
+        params.runLimit,
       ) as Record<string, unknown>[];
   }
 
@@ -151,7 +161,7 @@ export class SqliteHistoryQuery implements HistoryQuery {
         cursorStartedAt,
         cursorStartedAt,
         cursorData.lastRunId,
-        params.effectiveLimit + 1,
+        params.runLimit,
       ) as Record<string, unknown>[];
   }
 
