@@ -40,7 +40,7 @@ export class SqliteConnection {
   }
 
   private initSchema(): void {
-    const db = this.db!;
+    const db = this.db as Database.Database;
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
@@ -55,7 +55,8 @@ export class SqliteConnection {
         max_attempts INTEGER NOT NULL DEFAULT 3,
         last_error TEXT,
         input_ref TEXT,
-        result_ref TEXT
+        result_ref TEXT,
+        diagnostic_json TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);

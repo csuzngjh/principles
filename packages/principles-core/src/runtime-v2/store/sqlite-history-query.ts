@@ -92,7 +92,7 @@ export class SqliteHistoryQuery implements HistoryQuery {
     const lastEntryRunCount = Math.ceil(entries.length / 2);
     const lastRow = rows[lastEntryRunCount - 1];
 
-    const nextCursor = hasMore
+    const nextCursor = hasMore && lastRow
       ? SqliteHistoryQuery.buildCursor(lastRow, trajectoryRef)
       : undefined;
 

@@ -19,7 +19,7 @@ import {
   type DiagnosisTarget,
   DiagnosticianContextPayloadSchema,
 } from '../context-payload.js';
-import type { DiagnosticianTaskRecord } from '../task-status.js';
+import type { TaskRecord, DiagnosticianTaskRecord } from '../task-status.js';
 import { PDRuntimeError } from '../error-categories.js';
 
 export class SqliteContextAssembler implements ContextAssembler {
@@ -41,7 +41,8 @@ export class SqliteContextAssembler implements ContextAssembler {
         `Task ${taskId} is not a diagnostician task (kind: ${task.taskKind})`,
       );
     }
-    const dt = task as DiagnosticianTaskRecord;
+
+    const dt = SqliteContextAssembler.reconstructDiagnosticianRecord(task);
 
     const historyResult = await this.historyQuery.query(taskId);
 
@@ -108,5 +109,38 @@ export class SqliteContextAssembler implements ContextAssembler {
     }
 
     return notes.length > 0 ? notes : undefined;
+  }
+
+  /**
+   * Reconstruct a DiagnosticianTaskRecord from a base TaskRecord by decoding
+   * the diagnostic_json column (if present).
+   *
+   * The base TaskRecord from SqliteTaskStore carries diagnostic_json as an
+   * untyped string column. This method decodes it and overlays the fields
+   * onto the base record to produce a full DiagnosticianTaskRecord.
+   */
+  private static reconstructDiagnosticianRecord(task: TaskRecord): DiagnosticianTaskRecord {
+    const base = task as TaskRecord & { diagnosticJson?: string };
+    let extra: Partial<DiagnosticianTaskRecord> = {};
+
+    if (base.diagnosticJson) {
+      try {
+        extra = JSON.parse(base.diagnosticJson) as Partial<DiagnosticianTaskRecord>;
+      } catch {
+        // Malformed JSON — ignore, return base as plain record
+      }
+    }
+
+    return {
+      ...base,
+      taskKind: 'diagnostician',
+      workspaceDir: (extra).workspaceDir ?? '<unknown>',
+      reasonSummary: extra.reasonSummary ?? '',
+      source: extra.source,
+      severity: extra.severity,
+      sourcePainId: extra.sourcePainId,
+      sessionIdHint: extra.sessionIdHint,
+      agentIdHint: extra.agentIdHint,
+    };
   }
 }
