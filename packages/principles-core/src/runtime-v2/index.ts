@@ -104,6 +104,17 @@ export { SqliteTaskStore } from './store/sqlite-task-store.js';
 export { SqliteRunStore } from './store/sqlite-run-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
 export { SqliteTrajectoryLocator } from './store/sqlite-trajectory-locator.js';
+export { SqliteHistoryQuery } from './store/sqlite-history-query.js';
+export type {
+  HistoryQuery,
+  HistoryQueryCursorData,
+  HistoryQueryOptions,
+} from './store/history-query.js';
+export {
+  DEFAULT_HISTORY_PAGE_SIZE,
+  MAX_HISTORY_PAGE_SIZE,
+  DEFAULT_TIME_WINDOW_MS,
+} from './store/history-query.js';
 export type {
   TaskStore,
   TaskStoreFilter,
