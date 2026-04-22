@@ -105,11 +105,13 @@ export { SqliteRunStore } from './store/sqlite-run-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
 export { SqliteTrajectoryLocator } from './store/sqlite-trajectory-locator.js';
 export { SqliteHistoryQuery } from './store/sqlite-history-query.js';
+export { SqliteContextAssembler } from './store/sqlite-context-assembler.js';
 export type {
   HistoryQuery,
   HistoryQueryCursorData,
   HistoryQueryOptions,
 } from './store/history-query.js';
+export type { ContextAssembler } from './store/context-assembler.js';
 export {
   DEFAULT_HISTORY_PAGE_SIZE,
   MAX_HISTORY_PAGE_SIZE,
