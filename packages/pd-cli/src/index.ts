@@ -16,6 +16,9 @@ import { handleHealth } from './commands/health.js';
 import { handleCentralSync } from './commands/central-sync.js';
 import { handleTaskList, handleTaskShow } from './commands/task.js';
 import { handleRunList, handleRunShow } from './commands/run.js';
+import { handleTrajectoryLocate } from './commands/trajectory.js';
+import { handleHistoryQuery } from './commands/history.js';
+import { handleContextBuild } from './commands/context.js';
 
 const program = new Command();
 
@@ -148,6 +151,44 @@ rtRunCmd
   .description('Show detailed run information')
   .action(async (runId) => {
     await handleRunShow({ id: runId });
+  });
+
+// ── Runtime v2 retrieval commands (M3) ────────────────────────────────────────
+
+const trajectoryCmd = program
+  .command('trajectory')
+  .description('Trajectory location and retrieval');
+
+trajectoryCmd
+  .command('locate')
+  .description('Locate a trajectory by criteria')
+  .option('--task <taskId>', 'Locate by task ID')
+  .option('--run <runId>', 'Locate by run ID')
+  .option('--pain <painId>', 'Locate by pain ID')
+  .option('--from <date>', 'Time range start (ISO 8601)')
+  .option('--to <date>', 'Time range end (ISO 8601)')
+  .option('--status <status>', 'Locate by execution status')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    await handleTrajectoryLocate(opts);
+  });
+
+program
+  .command('history <taskId>')
+  .description('Query run history for a task')
+  .option('-l, --limit <number>', 'Maximum entries to return', parseInt)
+  .option('--cursor <cursor>', 'Pagination cursor from previous query')
+  .option('--json', 'Output as JSON')
+  .action(async (taskId, opts) => {
+    await handleHistoryQuery(taskId, opts);
+  });
+
+program
+  .command('context <taskId>')
+  .description('Build diagnostician context payload for a task')
+  .option('--json', 'Output as JSON')
+  .action(async (taskId, opts) => {
+    await handleContextBuild(taskId, opts);
   });
 
 program.parse();
