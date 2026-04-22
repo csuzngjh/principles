@@ -170,3 +170,7 @@ export type {
   DiagnosticianRecommendation,
   DiagnosticianInvocationInput,
 } from './runtime-v2/index.js';
+
+// Runtime integration layer
+export { RuntimeStateManager } from './runtime-v2/index.js';
+export type { RuntimeStateManagerOptions } from './runtime-v2/index.js';

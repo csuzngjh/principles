@@ -6,7 +6,7 @@
  */
 import { Value } from '@sinclair/typebox/value';
 import { RunRecordSchema, type RunRecord, type RunExecutionStatus } from '../runtime-protocol.js';
-import { PDRuntimeError } from '../error-categories.js';
+import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { SqliteConnection } from './sqlite-connection.js';
 import type { RunStore } from './run-store.js';
 
@@ -119,7 +119,7 @@ export class SqliteRunStore implements RunStore {
       // Use ?? undefined so null DB values become undefined (TypeBox validates undefined for optional fields)
       inputPayload: (row.input_payload as string | null) ?? undefined,
       outputPayload: (row.output_payload as string | null) ?? undefined,
-      errorCategory: (row.error_category as string | null) ?? undefined,
+      errorCategory: (row.error_category as PDErrorCategory | null) ?? undefined,
     };
 
     if (!Value.Check(RunRecordSchema, record)) {

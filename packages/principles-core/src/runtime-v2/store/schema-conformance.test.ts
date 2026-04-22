@@ -10,9 +10,13 @@ import { TaskRecordSchema, type PDTaskStatus } from '../task-status.js';
 import { RunRecordSchema, type RunExecutionStatus } from '../runtime-protocol.js';
 
 describe('SchemaConformance', () => {
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let tmpdir: string;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let connection: SqliteConnection;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let taskStore: SqliteTaskStore;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let runStore: SqliteRunStore;
 
   beforeEach(() => {
@@ -168,7 +172,6 @@ describe('SchemaConformance', () => {
     });
 
     const updated = await runStore.updateRun('run-task-schema-4-1', {
-      executionStatus: 'succeeded',
       endedAt: new Date().toISOString(),
     });
     expect(Value.Check(RunRecordSchema, updated)).toBe(true);

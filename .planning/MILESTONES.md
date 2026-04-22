@@ -1,5 +1,40 @@
 # Milestones
 
+## Current: PD Runtime v2 — M2 Task/Run State Core (Started: 2026-04-22)
+
+**Goal:**
+
+- Introduce explicit PD-owned task and run truth with lease semantics
+- Replace marker-file and heartbeat-based completion inference with deterministic state layer
+- Build store abstractions, lease lifecycle, retry metadata, and crash recovery
+
+**Exit criteria:**
+
+1. Diagnostician-like tasks can be leased and recovered without marker-file truth
+2. Run records exist independently of legacy heartbeat flow
+3. Concurrent lease acquisition is safe
+4. Crash recovery correctly re-enqueues expired lease tasks
+5. All new types align with M1 contracts
+6. Telemetry events emitted for all state transitions
+7. Test coverage >= 80%
+
+**Non-goals (M3-M9 scope):**
+
+- Context retrieval (M3)
+- Diagnostician runner (M4)
+- Commit flow (M5)
+- OpenClaw adapter demotion (M6)
+
+**GSD files:**
+
+- `.planning/milestones/pd-runtime-v2-m2/REQUIREMENTS.md`
+- `.planning/milestones/pd-runtime-v2-m2/ROADMAP.md`
+- `.planning/phases/m2-task-run-state-core/CONTEXT.md`
+
+**Canonical docs:** `docs/pd-runtime-v2/` (README, roadmap, governance, conflict-table)
+
+---
+
 ## v1.21.2 YAML Funnel 完整 SSOT (Shipped: 2026-04-19)
 
 **Phases completed:** 3 phases, 3 plans

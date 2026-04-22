@@ -107,10 +107,11 @@ export interface LeaseManagerOptions {
 export class DefaultLeaseManager implements LeaseManager {
   private readonly emitter: StoreEventEmitter;
 
+  // eslint-disable-next-line @typescript-eslint/max-params
   constructor(
-    private taskStore: TaskStore,
-    private runStore: RunStore,
-    private connection: SqliteConnection,
+    private readonly taskStore: TaskStore,
+    private readonly runStore: RunStore,
+    private readonly connection: SqliteConnection,
     options?: LeaseManagerOptions,
   ) {
     this.emitter = options?.emitter ?? storeEmitter;
@@ -165,6 +166,15 @@ export class DefaultLeaseManager implements LeaseManager {
     tx();
     const updated = await this.taskStore.getTask(taskId);
     if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after lease: ${taskId}`);
+
+    this.emitter.emitTelemetry({
+      eventType: 'lease_acquired',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: owner,
+      payload: { taskId, owner, durationMs, runtimeKind, attemptCount: updated.attemptCount },
+    });
+
     return updated;
   }
 
@@ -196,6 +206,15 @@ export class DefaultLeaseManager implements LeaseManager {
 
     const updated = await this.taskStore.getTask(taskId);
     if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after release: ${taskId}`);
+
+    this.emitter.emitTelemetry({
+      eventType: 'lease_released',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: owner,
+      payload: { taskId, owner, executionStatus: updated.status },
+    });
+
     return updated;
   }
 
@@ -233,19 +252,39 @@ export class DefaultLeaseManager implements LeaseManager {
 
     const updated = await this.taskStore.getTask(taskId);
     if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after renew: ${taskId}`);
+
+    this.emitter.emitTelemetry({
+      eventType: 'lease_renewed',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: owner,
+      payload: { taskId, owner, newExpiresAt: updated.leaseExpiresAt },
+    });
+
     return updated;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   isLeaseExpired(task: TaskRecord): boolean {
     if (task.status !== 'leased' || !task.leaseExpiresAt) return false;
     return new Date(task.leaseExpiresAt) < new Date();
   }
 
   async forceExpire(taskId: string): Promise<TaskRecord> {
-    return this.taskStore.updateTask(taskId, {
+    const updated = await this.taskStore.updateTask(taskId, {
       status: 'pending',
       leaseOwner: null,
       leaseExpiresAt: null,
     });
+
+    this.emitter.emitTelemetry({
+      eventType: 'lease_expired',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: 'system',
+      payload: { taskId, reason: 'force_expire' },
+    });
+
+    return updated;
   }
 }

@@ -16,7 +16,8 @@
 import type { TaskStore } from './task-store.js';
 import type { LeaseManager } from './lease-manager.js';
 import type { RetryPolicy } from './retry-policy.js';
-import type { TaskRecord, PDTaskStatus } from '../task-status.js';
+import type { PDTaskStatus } from '../task-status.js';
+import { storeEmitter, type StoreEventEmitter } from './event-emitter.js';
 
 export interface RecoveryResult {
   taskId: string;
@@ -33,11 +34,17 @@ export interface RecoverySweep {
 }
 
 export class DefaultRecoverySweep implements RecoverySweep {
+  private readonly emitter: StoreEventEmitter;
+
+  // eslint-disable-next-line @typescript-eslint/max-params
   constructor(
-    private taskStore: TaskStore,
-    private leaseManager: LeaseManager,
-    private retryPolicy: RetryPolicy,
-  ) {}
+    private readonly taskStore: TaskStore,
+    private readonly leaseManager: LeaseManager,
+    private readonly retryPolicy: RetryPolicy,
+    emitter?: StoreEventEmitter,
+  ) {
+    this.emitter = emitter ?? storeEmitter;
+  }
 
   /**
    * Detect all leased tasks whose lease has expired.
@@ -69,8 +76,8 @@ export class DefaultRecoverySweep implements RecoverySweep {
     const wasLeaseExpired = this.leaseManager.isLeaseExpired(task);
     if (!wasLeaseExpired) return null;
 
-    const previousStatus = task.status;
     let newStatus: PDTaskStatus;
+    const previousStatus = task.status;
 
     if (this.retryPolicy.shouldRetry(task)) {
       const backoffMs = this.retryPolicy.calculateBackoff(task.attemptCount + 1);
@@ -82,6 +89,20 @@ export class DefaultRecoverySweep implements RecoverySweep {
         lastError: 'lease_expired',
       });
       newStatus = 'retry_wait';
+
+      this.emitter.emitTelemetry({
+        eventType: 'task_retried',
+        traceId: taskId,
+        timestamp: new Date().toISOString(),
+        sessionId: 'system',
+        payload: {
+          taskId,
+          newStatus: 'retry_wait',
+          attemptCount: task.attemptCount,
+          backoffMs,
+          previousLeaseExpired: true,
+        },
+      });
     } else {
       await this.taskStore.updateTask(taskId, {
         status: 'failed',
@@ -90,15 +111,15 @@ export class DefaultRecoverySweep implements RecoverySweep {
         lastError: 'max_attempts_exceeded',
       });
       newStatus = 'failed';
-    }
 
-    this.emitTelemetryEvent({
-      eventType: 'lease_recovered',
-      traceId: taskId,
-      timestamp: new Date().toISOString(),
-      sessionId: 'system',
-      payload: { taskId, previousStatus, newStatus },
-    });
+      this.emitter.emitTelemetry({
+        eventType: 'task_failed',
+        traceId: taskId,
+        timestamp: new Date().toISOString(),
+        sessionId: 'system',
+        payload: { taskId, lastError: 'max_attempts_exceeded', attemptCount: task.attemptCount },
+      });
+    }
 
     return {
       taskId,
@@ -132,17 +153,5 @@ export class DefaultRecoverySweep implements RecoverySweep {
     }
 
     return { recovered, errors };
-  }
-
-  private emitTelemetryEvent(event: {
-    eventType: string;
-    traceId: string;
-    timestamp: string;
-    sessionId: string;
-    payload: Record<string, unknown>;
-  }): void {
-    // Emit via structured JSON for now — aligns with TelemetryEventSchema
-    // In production this would wire to the existing EvolutionLogger/TelemetryEvent system
-    console.log(JSON.stringify({ type: 'telemetry_event', event }));
   }
 }

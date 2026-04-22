@@ -121,5 +121,13 @@ export type { RetryPolicy, RetryPolicyConfig } from './store/retry-policy.js';
 export { DefaultRecoverySweep } from './store/recovery-sweep.js';
 export type { RecoverySweep, RecoveryResult } from './store/recovery-sweep.js';
 
+// Event emitter
+export { StoreEventEmitter, storeEmitter } from './store/event-emitter.js';
+export type { TelemetryEvent } from '../telemetry-event.js';
+
+// Runtime integration layer
+export { RuntimeStateManager } from './store/runtime-state-manager.js';
+export type { RuntimeStateManagerOptions } from './store/runtime-state-manager.js';
+
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
