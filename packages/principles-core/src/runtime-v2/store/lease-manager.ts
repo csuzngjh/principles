@@ -150,9 +150,9 @@ export class DefaultLeaseManager implements LeaseManager {
 
       db.prepare(`
         UPDATE tasks
-        SET status = 'leased', lease_owner = ?, lease_expires_at = ?, updated_at = ?
+        SET status = 'leased', lease_owner = ?, lease_expires_at = ?, updated_at = ?, attempt_count = ?
         WHERE task_id = ?
-      `).run(owner, expiresAt, nowIso, taskId);
+      `).run(owner, expiresAt, nowIso, attemptNumber, taskId);
 
       const runId = `run_${taskId}_${attemptNumber}`;
       db.prepare(`

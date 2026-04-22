@@ -40,7 +40,7 @@ export interface RunStore {
    */
   updateRun(
     runId: string,
-    patch: Partial<Pick<RunRecord, 'endedAt' | 'reason' | 'outputPayload' | 'errorCategory'>>,
+    patch: Partial<Pick<RunRecord, 'endedAt' | 'reason' | 'outputRef' | 'outputPayload' | 'errorCategory' | 'executionStatus'>>,
   ): Promise<RunRecord>;
 
   /** List all runs for a task, ordered by startedAt ascending. */

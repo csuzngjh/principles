@@ -172,6 +172,8 @@ export class RuntimeStateManager {
   /** Mark a task as succeeded and emit task_succeeded event. */
   async markTaskSucceeded(taskId: string, resultRef?: string): Promise<TaskRecord> {
     this.assertInitialized();
+    const now = new Date().toISOString();
+
     const updated = await this.taskStore.updateTask(taskId, {
       status: 'succeeded',
       leaseOwner: null,
@@ -179,10 +181,22 @@ export class RuntimeStateManager {
       resultRef: resultRef ?? null,
     });
 
+    // Update the latest run to terminal 'succeeded' state
+    const runs = await this.runStore.listRunsByTask(taskId);
+    const latestRun = runs[runs.length - 1];
+    if (latestRun) {
+      await this.runStore.updateRun(latestRun.runId, {
+        executionStatus: 'succeeded',
+        endedAt: now,
+        reason: 'task_completed',
+        outputRef: resultRef ?? undefined,
+      });
+    }
+
     this.emitter.emitTelemetry({
       eventType: 'task_succeeded',
       traceId: taskId,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       sessionId: updated.leaseOwner ?? 'system',
       payload: { taskId, resultRef: updated.resultRef },
     });
@@ -193,6 +207,8 @@ export class RuntimeStateManager {
   /** Mark a task as failed and emit task_failed event. */
   async markTaskFailed(taskId: string, lastError: PDErrorCategory): Promise<TaskRecord> {
     this.assertInitialized();
+    const now = new Date().toISOString();
+
     const updated = await this.taskStore.updateTask(taskId, {
       status: 'failed',
       leaseOwner: null,
@@ -200,10 +216,22 @@ export class RuntimeStateManager {
       lastError,
     });
 
+    // Update the latest run to terminal 'failed' state
+    const runs = await this.runStore.listRunsByTask(taskId);
+    const latestRun = runs[runs.length - 1];
+    if (latestRun) {
+      await this.runStore.updateRun(latestRun.runId, {
+        executionStatus: 'failed',
+        endedAt: now,
+        reason: 'task_failed',
+        errorCategory: lastError,
+      });
+    }
+
     this.emitter.emitTelemetry({
       eventType: 'task_failed',
       traceId: taskId,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       sessionId: updated.leaseOwner ?? 'system',
       payload: { taskId, lastError, attemptCount: updated.attemptCount },
     });
