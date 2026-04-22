@@ -53,9 +53,9 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     expect(leased.attemptCount).toBe(1);
     const runs = await mgr.getRunsByTask('task-attempt-1');
     expect(runs).toHaveLength(1);
-    expect(runs[0].attemptNumber).toBe(1);
-    expect(runs[0].executionStatus).toBe('running');
-    expect(runs[0].endedAt).toBeUndefined();
+    expect(runs[0]!.attemptNumber).toBe(1);
+    expect(runs[0]!.executionStatus).toBe('running');
+    expect(runs[0]!.endedAt).toBeUndefined();
   });
 
   it('second acquireLease (after expired lease) sets task.attemptCount=2 and run.attemptNumber=2', async () => {
@@ -72,9 +72,9 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     expect(second.attemptCount).toBe(2);
     const runs = await mgr.getRunsByTask('task-attempt-2');
     expect(runs).toHaveLength(2);
-    expect(runs[0].attemptNumber).toBe(1);
-    expect(runs[1].attemptNumber).toBe(2);
-    expect(runs[1].executionStatus).toBe('running');
+    expect(runs[0]!.attemptNumber).toBe(1);
+    expect(runs[1]!.attemptNumber).toBe(2);
+    expect(runs[1]!.executionStatus).toBe('running');
   });
 
   // ── markTaskSucceeded updates run to terminal state ──────────────────────────
@@ -85,10 +85,10 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     await mgr.markTaskSucceeded('task-succeeded', 'output-ref-abc');
     const runs = await mgr.getRunsByTask('task-succeeded');
     expect(runs).toHaveLength(1);
-    expect(runs[0].executionStatus).toBe('succeeded');
-    expect(runs[0].endedAt).toBeTruthy();
-    expect(runs[0].reason).toBe('task_completed');
-    expect(runs[0].outputRef).toBe('output-ref-abc');
+    expect(runs[0]!.executionStatus).toBe('succeeded');
+    expect(runs[0]!.endedAt).toBeTruthy();
+    expect(runs[0]!.reason).toBe('task_completed');
+    expect(runs[0]!.outputRef).toBe('output-ref-abc');
     const task = await mgr.getTask('task-succeeded');
     expect(task!.status).toBe('succeeded');
     expect(task!.resultRef).toBe('output-ref-abc');
@@ -102,10 +102,10 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     await mgr.markTaskFailed('task-failed', 'lease_conflict');
     const runs = await mgr.getRunsByTask('task-failed');
     expect(runs).toHaveLength(1);
-    expect(runs[0].executionStatus).toBe('failed');
-    expect(runs[0].endedAt).toBeTruthy();
-    expect(runs[0].reason).toBe('task_failed');
-    expect(runs[0].errorCategory).toBe('lease_conflict');
+    expect(runs[0]!.executionStatus).toBe('failed');
+    expect(runs[0]!.endedAt).toBeTruthy();
+    expect(runs[0]!.reason).toBe('task_failed');
+    expect(runs[0]!.errorCategory).toBe('lease_conflict');
     const task = await mgr.getTask('task-failed');
     expect(task!.status).toBe('failed');
     expect(task!.lastError).toBe('lease_conflict');
