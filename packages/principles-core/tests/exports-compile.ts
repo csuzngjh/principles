@@ -37,7 +37,7 @@ import type { TelemetryEvent, TelemetryEventValidationResult, TelemetryEventType
 const _telemetryEventSchema = TelemetryEventSchema;
 const _validateTelemetryEvent = validateTelemetryEvent;
 const _telemetryEvent: TelemetryEvent = {} as TelemetryEvent;
-const _telemetryEventType: TelemetryEventType = 'principle_created';
+const _telemetryEventType: TelemetryEventType = 'principle_candidate_created';
 
 // Verify storage-adapter exports
 import { StorageAdapter } from '../src/storage-adapter.js';

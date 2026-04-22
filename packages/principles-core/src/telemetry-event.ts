@@ -20,17 +20,32 @@ import { Value } from '@sinclair/typebox/value';
 // ---------------------------------------------------------------------------
 
 /**
- * The 3 core telemetry event types, aligned with EvolutionHook methods.
+ * The 11 telemetry event types: 3 core evolution events + 8 M2 state transition events.
  *
- * Mapping to existing EvolutionLogger stages:
+ * Core evolution events (aligned with EvolutionHook methods):
  * - pain_detected -> EvolutionStage 'pain_detected'
  * - principle_candidate_created -> EvolutionStage 'principle_generated'
  * - principle_promoted -> EvolutionStage 'completed'
+ *
+ * M2 state transition events (task/run lifecycle):
+ * - lease_acquired, lease_released, lease_renewed, lease_expired
+ * - task_retried, task_failed, task_succeeded
+ * - run_started, run_completed
  */
 export const TelemetryEventType = Type.Union([
   Type.Literal('pain_detected'),
   Type.Literal('principle_candidate_created'),
   Type.Literal('principle_promoted'),
+  // M2: Task/Run state transition events
+  Type.Literal('lease_acquired'),
+  Type.Literal('lease_released'),
+  Type.Literal('lease_renewed'),
+  Type.Literal('lease_expired'),
+  Type.Literal('task_retried'),
+  Type.Literal('task_failed'),
+  Type.Literal('task_succeeded'),
+  Type.Literal('run_started'),
+  Type.Literal('run_completed'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
