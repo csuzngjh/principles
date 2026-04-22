@@ -16,6 +16,7 @@ import type { TaskRecord } from '../task-status.js';
 import type { TaskStore } from './task-store.js';
 import type { RunStore } from './run-store.js';
 import type { SqliteConnection } from './sqlite-connection.js';
+import { storeEmitter, type StoreEventEmitter } from './event-emitter.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
@@ -96,12 +97,24 @@ export interface LeaseManager {
 
 // ── DefaultLeaseManager implementation ───────────────────────────────────────
 
+export interface LeaseManagerOptions {
+  taskStore: TaskStore;
+  runStore: RunStore;
+  connection: SqliteConnection;
+  emitter?: StoreEventEmitter;
+}
+
 export class DefaultLeaseManager implements LeaseManager {
+  private readonly emitter: StoreEventEmitter;
+
   constructor(
     private taskStore: TaskStore,
     private runStore: RunStore,
     private connection: SqliteConnection,
-  ) {}
+    options?: LeaseManagerOptions,
+  ) {
+    this.emitter = options?.emitter ?? storeEmitter;
+  }
 
   async acquireLease(options: AcquireLeaseOptions): Promise<TaskRecord> {
     const { taskId, owner, durationMs = 300_000, runtimeKind } = options;
