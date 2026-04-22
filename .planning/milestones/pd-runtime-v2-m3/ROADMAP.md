@@ -129,12 +129,12 @@ Plans:
 **Plans:** 1 plan (wave 1)
 
 Plans:
-- [ ] m3-05-01-PLAN.md -- Workspace scoping + CLI integration + E2E tests
+- [x] m3-05-01-PLAN.md -- CLI commands + workspace isolation tests (VERIFIED)
 
 **Success Criteria:**
-1. Workspace ID enforced on all store operations
-2. No cross-workspace data leakage in any query
-3. CLI commands for locate / query / build work end-to-end
+1. Workspace ID enforced on all store operations — DONE (architecture)
+2. No cross-workspace data leakage in any query — DONE (7 isolation tests)
+3. CLI commands for locate / query / build work end-to-end — DONE (3 commands)
 
 ---
 
@@ -152,6 +152,6 @@ Plans:
 | RET-08 | Sort runs by attemptNumber ASC | m3-03 | PARTIAL (DESC order, LOW finding) -- DONE |
 | RET-09 | Trajectory not found → safe fallback | m3-04 | Table stakes -- DONE |
 | RET-10 | Degradation emits warnings + telemetry | m3-04 | Table stakes -- DONE |
-| RET-11 | Workspace ID required for all operations | m3-05 | Table stakes |
-| RET-12 | No cross-workspace data leakage | m3-05 | Table stakes |
-| RET-13 | CLI commands for locate / query / build | m3-05 | Table stakes |
+| RET-11 | Workspace ID required for all operations | m3-05 | Table stakes -- DONE (architecture) |
+| RET-12 | No cross-workspace data leakage | m3-05 | Table stakes -- DONE (7 isolation tests) |
+| RET-13 | CLI commands for locate / query / build | m3-05 | Table stakes -- DONE |
