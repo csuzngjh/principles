@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.2
 milestone_name: M3 History Retrieval + Context Build
 status: in_progress
-last_updated: "2026-04-22T12:08:39Z"
-last_activity: 2026-04-22 — m3-02-01 BoundedHistoryQuery complete (3/3 tasks, 19 tests passing)
+last_updated: "2026-04-22T14:30:00Z"
+last_activity: 2026-04-22 — m3-03 context gathered (assumptions mode, 9 decisions locked)
 progress:
   total_phases: 5
   completed_phases: 2
@@ -23,9 +23,9 @@ progress:
 
 ## Current Position
 
-Phase: m3-02 BoundedHistoryQuery (complete)
-Status: m3-02-01 complete — 3 tasks, 3 commits, 19 tests passing
-Last activity: 2026-04-22 — HistoryQuery interface + SqliteHistoryQuery with cursor pagination + test suite
+Phase: m3-03 ContextAssembler (context gathered)
+Status: m3-03 context gathered — 9 decisions locked, ready for planning
+Last activity: 2026-04-22 — Context assembly decisions: DiagnosticianContextPayload only, UUIDv4+SHA-256, TaskStore+HistoryQuery injection
 
 ## Context
 
