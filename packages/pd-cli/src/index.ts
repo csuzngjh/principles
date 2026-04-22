@@ -14,6 +14,8 @@ import { handleEvolutionTasksList } from './commands/evolution-tasks-list.js';
 import { handleEvolutionTasksShow } from './commands/evolution-tasks-show.js';
 import { handleHealth } from './commands/health.js';
 import { handleCentralSync } from './commands/central-sync.js';
+import { handleTaskList, handleTaskShow } from './commands/task.js';
+import { handleRunList, handleRunShow } from './commands/run.js';
 
 const program = new Command();
 
@@ -105,6 +107,47 @@ centralCmd
   .description('Trigger a sync cycle and report results')
   .action(async () => {
     await handleCentralSync();
+  });
+
+// ── Runtime v2 task/run commands ──────────────────────────────────────────────
+
+const rtTaskCmd = program
+  .command('task')
+  .description('Runtime v2 task inspection');
+
+rtTaskCmd
+  .command('list')
+  .description('List runtime tasks')
+  .option('-s, --status <status>', 'Filter by status (pending, leased, retry_wait, succeeded, failed)')
+  .option('-k, --kind <kind>', 'Filter by task kind')
+  .option('-l, --limit <number>', 'Limit number of results', parseInt, 50)
+  .action(async (opts) => {
+    await handleTaskList(opts);
+  });
+
+rtTaskCmd
+  .command('show <taskId>')
+  .description('Show detailed task information')
+  .action(async (taskId) => {
+    await handleTaskShow({ id: taskId });
+  });
+
+const rtRunCmd = program
+  .command('run')
+  .description('Runtime v2 run inspection');
+
+rtRunCmd
+  .command('list <taskId>')
+  .description('List all runs for a task')
+  .action(async (taskId) => {
+    await handleRunList({ taskId });
+  });
+
+rtRunCmd
+  .command('show <runId>')
+  .description('Show detailed run information')
+  .action(async (runId) => {
+    await handleRunShow({ id: runId });
   });
 
 program.parse();

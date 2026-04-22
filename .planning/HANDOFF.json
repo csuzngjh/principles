@@ -1,26 +1,35 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-19T02:27:18.731Z",
-  "phase": "04",
-  "phase_name": "Testing & Validation",
-  "phase_dir": ".planning/phases/04-testing-validation",
-  "plan": null,
-  "task": null,
-  "total_tasks": null,
-  "status": "paused_planning",
-  "completed_tasks": [],
+  "timestamp": "2026-04-22T06:45:46Z",
+  "phase": "m2-07",
+  "phase_name": "Runtime Integration + Event Emission + CLI Inspection",
+  "phase_dir": ".planning/phases/m2-task-run-state-core",
+  "plan": "m2-07",
+  "task": 2,
+  "total_tasks": 6,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": 1, "name": "Extend TelemetryEvent schema with M2 events + create EventEmitter", "status": "done", "commit": null},
+    {"id": 2, "name": "Wire event emission into LeaseManager state transitions", "status": "in_progress", "progress": "LeaseManagerOptions interface added, emitter constructor param added, storeEmitter import added — emitTelemetry calls NOT yet inserted"}
+  ],
   "remaining_tasks": [
-    {"id": 1, "name": "Plan 04-01: ERR-01/02/03 + PLAT-01 implementation", "status": "not_started"},
-    {"id": 2, "name": "Plan 04-02: TEST-01/02/03/04 implementation", "status": "not_started"}
+    {"id": 3, "name": "Create RuntimeStateManager integration layer", "status": "not_started"},
+    {"id": 4, "name": "Add CLI inspection commands (pd task list/show, pd run list/show)", "status": "not_started"},
+    {"id": 5, "name": "Wire RecoverySweep event emission (task_retried)", "status": "not_started"},
+    {"id": 6, "name": "TypeScript check and verification", "status": "not_started"}
   ],
   "blockers": [],
   "human_actions_pending": [],
   "decisions": [
-    {"decision": "Phase 4 context created: all 7 success criteria from ROADMAP.md are requirements", "rationale": "Phase 3 D-08/09/10/11 lock error handling and platform behavior; Phase 4 only needs to test them", "phase": "03"},
-    {"decision": "Test pattern: fs.mkdtempSync + os.tmpdir() + vi.spyOn (from event-log.test.ts)", "rationale": "Consistent with existing test patterns in codebase", "phase": "04"},
-    {"decision": "Tests go in tests/core/ directory", "rationale": "Consistent with existing workflow-funnel-loader.ts location", "phase": "04"}
+    {"decision": "Added emitter?: StoreEventEmitter optional param to DefaultLeaseManager constructor, defaulting to storeEmitter singleton", "rationale": "Avoids breaking existing callers (m2-05 tests) while enabling event emission", "phase": "m2-07"},
+    {"decision": "Extended TelemetryEventType union from 3 to 11 types", "rationale": "M2 tasks need their own event types separate from core evolution events", "phase": "m2-07"}
   ],
-  "uncommitted_files": [],
-  "next_action": "Run /gsd-plan-phase 4 to continue planning — CONTEXT.md already exists, will skip to planner",
-  "context_notes": "Phase 3 just completed. Phase 4 is pure testing phase — 7 success criteria covering error handling (ERR-01/02/03), Windows compatibility (PLAT-01), and test coverage (TEST-01/02/03/04). Phase 3 context D-08/D-09/D-10/D-11 fully defines expected behavior. Planning was interrupted by context exhaustion."
+  "uncommitted_files": [
+    "packages/principles-core/src/telemetry-event.ts",
+    "packages/principles-core/src/runtime-v2/store/event-emitter.ts",
+    "packages/principles-core/src/runtime-v2/store/lease-manager.ts",
+    ".planning/ROADMAP.md"
+  ],
+  "next_action": "Add emitTelemetry calls in lease-manager.ts acquireLease/releaseLease/renewLease/forceExpire methods, then create RuntimeStateManager (Task 3), then CLI commands (Task 4), then RecoverySweep events (Task 5), then TS verification (Task 6)",
+  "context_notes": "m2-07 plan has 6 tasks. Tasks 1 done (TelemetryEventType=11, StoreEventEmitter created). Task 2 partially done (emitter param added to LeaseManager but emit calls not yet inserted). Worktree: feat/pd-runtime-v2-m1-foundation-contracts. 185 tests currently passing."
 }
