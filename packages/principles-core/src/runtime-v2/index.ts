@@ -103,6 +103,7 @@ export type {
 export { SqliteTaskStore } from './store/sqlite-task-store.js';
 export { SqliteRunStore } from './store/sqlite-run-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
+export { SqliteTrajectoryLocator } from './store/sqlite-trajectory-locator.js';
 export type {
   TaskStore,
   TaskStoreFilter,
@@ -112,6 +113,7 @@ export type {
   RunStore,
   RunRecord,
 } from './store/run-store.js';
+export type { TrajectoryLocator } from './store/trajectory-locator.js';
 
 // Lease & Recovery
 export { DefaultLeaseManager } from './store/lease-manager.js';
