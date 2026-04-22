@@ -44,26 +44,29 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Phase 1.5 Validation | N=2 (coding + 1) is not enough for "Universal" claim; need extreme case | Active |
 | Freeze Semver after Ph 1.5 | Ensure stability only after cross-domain stress testing | Active |
 
-## Current Milestone: v1.22 PD CLI Redesign
+## Current Milestone: v2.0 PD Runtime v2 — M1 Foundation Contracts
 
-**Goal:** 将 PD 核心功能封装为独立 CLI 工具，保留原有 openclaw 工具作为过渡
+**Goal:** 冻结 runtime-v2 核心类型与错误枚举，为 M2-M9 提供统一 contracts
 
 **Target features:**
-- `pd pain record` — CLI 记录疼痛信号
-- `pd samples list/review` — CLI 样本管理
-- `pd evolution tasks` — CLI 进化任务
-- `pd health` — CLI 健康检查
-- `pd central sync` — CLI 中心同步
+- Canonical `AgentSpec` 定义 + well-known agent IDs
+- Unified `PDErrorCategory` 错误枚举 + `PDRuntimeError`
+- `PDRuntimeAdapter` / `RuntimeKind` / `RuntimeCapabilities` / `RuntimeHealth` 完整协议
+- `RuntimeSelector` 最小接口（只定义，不实现）
+- `PDTaskStatus` + `TaskRecord` + `DiagnosticianTaskRecord` 任务状态模型
+- `ContextPayload` / `DiagnosticianContextPayload` / `HistoryQueryEntry` 上下文 payload
+- `DiagnosticianOutputV1` 诊断输出 schema
+- `SchemaVersion` 版本机制
 
-**架构决策：**
-- 保留原有 `write_pain_flag` 等工具 + `/pd-xxx` 斜杠命令
-- 新增 PD CLI (`packages/pd-cli/`) 作为新路径
-- 渐进式迁移：先用 CLI，逐步让代理迁移到 CLI
-- 依赖 `@principles/core` SDK
+**Canonical source:** `packages/principles-core/src/runtime-v2/`
 
-**Previous:** v1.21.2 — YAML Funnel 完整 SSOT (Phase 5-7) — SHIPPED 2026-04-19
+**架构约束:**
+- 8 份 canonical 文档为最高权威（见 docs/pd-runtime-v2/ 和 docs/spec/）
+- 所有 contracts 放在 `@principles/core` 中，不散落在 openclaw-plugin
+- M1 只定义 interface/type/enum，不含运行时代码
+- 不实现 M2+ 的 task store、retrieval、runner
 
-See `.planning/milestones/v1.21.2-ROADMAP.md` for archived milestone details.
+**Previous:** v1.22 — PD CLI Redesign — SHIPPED 2026-04-20
 
 ## Evolution
 

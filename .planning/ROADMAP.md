@@ -1,102 +1,30 @@
-# Roadmap: v1.22 PD CLI Redesign
+# Roadmap: Principles
 
 ## Milestones
 
-- [x] **v1.21.2** — YAML Funnel 完整 SSOT (Phase 5-7) — SHIPPED 2026-04-19
-- [x] **v1.22** - PD CLI Redesign (Phase 8-13) — SHIPPED 2026-04-20
+- ✅ **v2.0** — M1 Foundation Contracts — SHIPPED 2026-04-21
+- 📋 **v2.1** — M2 Migration (planned)
 
-## Phase Summary
+## Phases
 
-- [x] **Phase 8: SDK Foundation** — Extract interfaces, export primitives, add PainFlagPathResolver — SHIPPED 2026-04-20
-- [x] **Phase 9: Pain Record CLI** — `pd pain record` command — SHIPPED 2026-04-20
-- [x] **Phase 10: Samples CLI** — `pd samples list` and `pd samples review` — SHIPPED 2026-04-20
-- [x] **Phase 11: Evolution Tasks CLI** — `pd evolution tasks` command — SHIPPED 2026-04-20
-- [x] **Phase 12: Health + Central Sync CLI** — `pd health` and `pd central sync` commands — SHIPPED 2026-04-20
-- [ ] **Phase 13: Migration Safeguards** — Dual-write protection during migration (Context gathered 2026-04-20)
+<details>
+<summary>✅ v2.0 M1 Foundation Contracts (Phase 1-4) — SHIPPED 2026-04-21</summary>
 
----
+- [x] Phase 1: Core Protocol + Agent + Error Contracts (3/3 plans) — completed 2026-04-21
+- [x] Phase 2: Context + Diagnostician Contracts (1/1 plans) — completed 2026-04-21
+- [x] Phase 3: Package Infrastructure (1/1 plans) — completed 2026-04-21
+- [x] Phase 4: Verification + Doc Sync (2/2 plans) — completed 2026-04-21
 
-## Phase Details
-
-### Phase 8: SDK Foundation
-**Goal**: Core SDK interfaces and primitives needed by all CLI commands
-**Depends on**: Nothing
-**Requirements**: CLI-FOUNDATION-01, CLI-FOUNDATION-02, CLI-FOUNDATION-03, CLI-FOUNDATION-04
-**Success Criteria** (what must be TRUE):
-1. WorkspaceResolver interface is extracted and used in place of OpenClawPluginApi direct calls
-2. PainRecorder class exists independently of OpenClawPluginApi
-3. atomicWriteFileSync is exported from @principles/core
-4. PainFlagPathResolver is available in @principles/core SDK
-
----
-
-### Phase 9: Pain Record CLI
-**Goal**: Users can record pain signals via `pd pain record` command
-**Depends on**: Phase 8
-**Requirements**: PAIN-RECORD-01
-**Success Criteria** (what must be TRUE):
-1. `pd pain record` command is registered and executable
-2. Command accepts pain signal input and writes to pain flag file
-3. Command provides feedback on successful recording
-
----
-
-### Phase 10: Samples CLI
-**Goal**: Users can list and review samples via `pd samples` commands
-**Depends on**: Phase 8
-**Requirements**: SAMPLES-01, SAMPLES-02
-**Success Criteria** (what must be TRUE):
-1. `pd samples list` command displays available samples
-2. `pd samples review` command opens review flow for selected sample
-3. Both commands work against sample store without OpenClaw dependency
-
----
-
-### Phase 11: Evolution Tasks CLI
-**Goal**: Users can view evolution tasks via `pd evolution tasks` command
-**Depends on**: Phase 8
-**Requirements**: EVOLUTION-01
-**Success Criteria** (what must be TRUE):
-1. `pd evolution tasks` command is registered and executable
-2. Command displays pending evolution tasks with status
-3. Output is human-readable and consistent with existing PD status formats
-
----
-
-### Phase 12: Health + Central Sync CLI
-**Goal**: Users can run health checks and central sync via `pd health` and `pd central sync`
-**Depends on**: Phase 8
-**Requirements**: HEALTH-01, SYNC-01
-**Success Criteria** (what must be TRUE):
-1. `pd health` command runs diagnostics and reports system status
-2. `pd central sync` command synchronizes with central server
-3. Both commands handle errors gracefully with user-friendly messages
-
----
-
-### Phase 13: Migration Safeguards
-**Goal**: Existing openclaw tools continue working while CLI is adopted; no dual-write data loss
-**Depends on**: Phases 9, 10, 11, 12
-**Requirements**: MIGRATE-01
-**Success Criteria** (what must be TRUE):
-1. Existing `write_pain_flag` tool still writes pain flags correctly
-2. CLI commands write to the same storage locations as existing tools
-3. No race conditions or data loss when both paths are active
-4. Migration path is documented for users
-
----
+</details>
 
 ## Progress
 
-| Phase | Goal | Requirements | Status |
-|-------|------|--------------|--------|
-| 8. SDK Foundation | Core SDK interfaces | 4 reqs | Complete |
-| 9. Pain Record CLI | pd pain record | 1 req | Complete |
-| 10. Samples CLI | pd samples list/review | 2 reqs | Complete |
-| 11. Evolution Tasks CLI | pd evolution tasks | 1 req | Complete |
-| 12. Health + Central Sync CLI | pd health + central sync | 2 reqs | Complete |
-| 13. Migration Safeguards | Dual-write protection | 1 req | Complete |
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|---------------|--------|-----------|
+| 1. Core Protocol | v2.0 | 3/3 | Complete | 2026-04-21 |
+| 2. Context + Diag | v2.0 | 1/1 | Complete | 2026-04-21 |
+| 3. Infrastructure | v2.0 | 1/1 | Complete | 2026-04-21 |
+| 4. Verification | v2.0 | 2/2 | Complete | 2026-04-21 |
 
 ---
-
-*Created: 2026-04-20 for v1.22 PD CLI Redesign milestone*
+*Last updated: 2026-04-21*
