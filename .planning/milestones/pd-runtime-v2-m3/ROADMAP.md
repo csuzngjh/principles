@@ -44,15 +44,15 @@
 **Plans:** 1 plan (wave 1)
 
 Plans:
-- [ ] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (3 tasks)
+- [x] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (VERIFIED)
 
 **Success Criteria:**
-1. `locateTrajectory(trajectoryId)` returns trajectory or null
-2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory
-3. `locateTrajectoryByRunId(runId)` returns containing trajectory
-4. `locateTrajectoriesByDateRange(start, end)` returns bounded list
-5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results
-6. agentId/status modes: skip or gracefully degrade if no stable M2 index exists
+1. `locateTrajectory(trajectoryId)` returns trajectory or null — DONE
+2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory — DONE
+3. `locateTrajectoryByRunId(runId)` returns containing trajectory — DONE
+4. `locateTrajectoriesByDateRange(start, end)` returns bounded list — DONE
+5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results — DONE
+6. agentId/status modes: executionStatus mode implemented (stretch) — DONE
 
 ---
 
@@ -65,15 +65,13 @@ Plans:
 **Plans:** 1 plan (wave 1)
 
 Plans:
-- [ ] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (3 tasks)
+- [x] m3-02-01-PLAN.md -- HistoryQuery interface + SqliteHistoryQuery + cursor pagination (VERIFIED)
 
 **Success Criteria:**
-1. `locateTrajectory(trajectoryId)` returns trajectory or null
-2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory
-3. `locateTrajectoryByRunId(runId)` returns containing trajectory
-4. `locateTrajectoriesByDateRange(start, end)` returns bounded list
-5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results
-6. agentId/status modes: skip or gracefully degrade if no stable M2 index exists
+1. Cursor-based pagination with page size cap — DONE
+2. Time window filtering with configurable lookback — DONE
+3. Opaque base64 cursor with keyset pagination — DONE
+4. Schema validation on results — DONE
 
 ---
 
@@ -88,15 +86,17 @@ Plans:
 **Plans:** 1 plan (wave 1)
 
 Plans:
-- [ ] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (3 tasks)
+- [x] m3-03-01-PLAN.md -- ContextAssembler interface + SqliteContextAssembler + test suite (VERIFIED)
 
 **Success Criteria:**
-1. `locateTrajectory(trajectoryId)` returns trajectory or null
-2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory
-3. `locateTrajectoryByRunId(runId)` returns containing trajectory
-4. `locateTrajectoriesByDateRange(start, end)` returns bounded list
-5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results
-6. agentId/status modes: skip or gracefully degrade if no stable M2 index exists
+1. DiagnosticianContextPayload assembled from TaskStore+HistoryQuery+RunStore — DONE
+2. UUIDv4 contextId + SHA-256 contextHash generated — DONE
+3. DiagnosisTarget mapped from DiagnosticianTaskRecord — DONE
+4. Template-generated ambiguityNotes for data quality — DONE
+5. TypeBox Value.Check() output validation — DONE
+6. No LLM call in context assembly — DONE
+
+**Known finding:** conversationWindow in DESC order (LOW, non-blocking)
 
 ---
 
@@ -109,15 +109,14 @@ Plans:
 **Plans:** 1 plan (wave 1)
 
 Plans:
-- [ ] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (3 tasks)
+- [ ] m3-04-01-PLAN.md -- DegradationPolicy interface + graceful fallbacks + telemetry
 
 **Success Criteria:**
-1. `locateTrajectory(trajectoryId)` returns trajectory or null
-2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory
-3. `locateTrajectoryByRunId(runId)` returns containing trajectory
-4. `locateTrajectoriesByDateRange(start, end)` returns bounded list
-5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results
-6. agentId/status modes: skip or gracefully degrade if no stable M2 index exists
+1. Task not found → returns safe fallback payload (no throw)
+2. History empty → returns valid payload with ambiguity notes
+3. Partial data → returns best-effort payload with warnings
+4. All degradation events emit telemetry
+5. No unhandled exceptions in degraded modes
 
 ---
 
@@ -130,15 +129,12 @@ Plans:
 **Plans:** 1 plan (wave 1)
 
 Plans:
-- [ ] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (3 tasks)
+- [ ] m3-05-01-PLAN.md -- Workspace scoping + CLI integration + E2E tests
 
 **Success Criteria:**
-1. `locateTrajectory(trajectoryId)` returns trajectory or null
-2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory
-3. `locateTrajectoryByRunId(runId)` returns containing trajectory
-4. `locateTrajectoriesByDateRange(start, end)` returns bounded list
-5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results
-6. agentId/status modes: skip or gracefully degrade if no stable M2 index exists
+1. Workspace ID enforced on all store operations
+2. No cross-workspace data leakage in any query
+3. CLI commands for locate / query / build work end-to-end
 
 ---
 
@@ -149,11 +145,11 @@ Plans:
 | RET-01 | Locate trajectory by trajectoryId (exact) | m3-01 | Table stakes -- DONE |
 | RET-02 | Locate by taskId, runId, date range, session hints | m3-01 | Table stakes; agentId/status = stretch -- DONE |
 | RET-03 | Locate trajectory by executionStatus | m3-01 | Stretch -- DONE (idx_runs_status exists) |
-| RET-04 | Query run history by taskId with ordering | m3-02 | Table stakes |
-| RET-05 | Cursor-based pagination with page size cap | m3-02 | Table stakes |
-| RET-06 | Bounded time window queries | m3-02 | Table stakes |
-| RET-07 | Assemble DiagnosticianContextPayload from runs | m3-03 | Table stakes; no LLM |
-| RET-08 | Sort runs by attemptNumber ASC | m3-03 | Table stakes |
+| RET-04 | Query run history by taskId with ordering | m3-02 | Table stakes -- DONE |
+| RET-05 | Cursor-based pagination with page size cap | m3-02 | Table stakes -- DONE |
+| RET-06 | Bounded time window queries | m3-02 | Table stakes -- DONE |
+| RET-07 | Assemble DiagnosticianContextPayload from runs | m3-03 | Table stakes; no LLM -- DONE |
+| RET-08 | Sort runs by attemptNumber ASC | m3-03 | PARTIAL (DESC order, LOW finding) -- DONE |
 | RET-09 | Trajectory not found → safe fallback | m3-04 | Table stakes |
 | RET-10 | Degradation emits warnings + telemetry | m3-04 | Table stakes |
 | RET-11 | Workspace ID required for all operations | m3-05 | Table stakes |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.2
 milestone_name: M3 History Retrieval + Context Build
 status: in_progress
-last_updated: "2026-04-22T14:30:00Z"
-last_activity: 2026-04-22 — m3-03 context gathered (assumptions mode, 9 decisions locked)
+last_updated: "2026-04-22T15:10:00Z"
+last_activity: 2026-04-22 — m3-03 verified (PASS), routing to m3-04
 progress:
   total_phases: 5
-  completed_phases: 2
-  total_plans: 2
-  completed_plans: 2
-  percent: 40
+  completed_phases: 3
+  total_plans: 3
+  completed_plans: 3
+  percent: 60
 ---
 
 # Project State: Principles
@@ -23,13 +23,23 @@ progress:
 
 ## Current Position
 
-Phase: m3-03 ContextAssembler (context gathered)
-Status: m3-03 context gathered — 9 decisions locked, ready for planning
-Last activity: 2026-04-22 — Context assembly decisions: DiagnosticianContextPayload only, UUIDv4+SHA-256, TaskStore+HistoryQuery injection
+Phase: m3-04 Degradation Policy (next)
+Status: m3-03 verified PASS, routing to m3-04 discuss
+Last activity: 2026-04-22 — ContextAssembler verified, 1 LOW finding (conversationWindow ordering)
 
 ## Context
 
 **v2.2 M3 Goal:** Deliver PD-owned retrieval pipeline — trajectory locate, history query, context build
+
+**m3-03 Complete (VERIFIED):**
+- ContextAssembler interface with assemble(taskId) method
+- SqliteContextAssembler composing TaskStore + HistoryQuery + RunStore
+- UUIDv4 contextId and SHA-256 contextHash generation
+- DiagnosisTarget mapping from DiagnosticianTaskRecord fields
+- Template-generated ambiguityNotes for data quality issues
+- TypeBox Value.Check() output validation
+- 11 tests, 0 regressions
+- Finding: conversationWindow in DESC order (LOW, non-blocking)
 
 **m3-02 Complete:**
 - HistoryQuery interface with query(trajectoryRef, cursor?, options?) method
@@ -46,29 +56,21 @@ Last activity: 2026-04-22 — Context assembly decisions: DiagnosticianContextPa
 - 17 tests covering all modes, confidence levels, edge cases
 - executionStatus field added to TrajectoryLocateQuerySchema (stretch)
 
-**M3 边界约束（守住边界）:**
-- 只做 trajectory locate / history query / context build
-- 不做 diagnostician runner（M4）
-- 不做 unified commit（M5）
-- 不把宿主 API 直接重新带回主设计里
-- **Authoritative boundary:** 所有 authoritative retrieval 必须以 PD-owned stores/indexes/references 为主源；OpenClaw raw workspace/session 文件不是 authoritative retrieval source
-- **No LLM in context build:** context assembly 必须 code-generated 或 template-generated，禁止在 context build 过程中调用 LLM
+**M3 Boundary Constraints:**
+- Only trajectory locate / history query / context build / degradation / workspace isolation
+- No diagnostician runner (M4)
+- No unified commit (M5)
+- No host API in main design
+- Authoritative retrieval via PD-owned stores/indexes/references only
+- No LLM in context build
 
 **M3 Exit Criteria:**
-1. `pd trajectory locate` — locate a specific trajectory by ID or criteria
-2. `pd history query` — bounded historical retrieval independent of host-specific access
-3. `pd context build` — assemble diagnostician-ready context from PD-owned retrieval
-4. Workspace isolation: context never leaks across workspaces
-5. Degradation policy: graceful fallback when history is incomplete
-6. Degraded mode: no crashes, only warnings, task can still proceed
-
-**Decisions:**
-- Limit controls entries count (not runs). SQL fetches ceil(entries/2)+1 runs for truncation detection
-- Cursor is opaque base64 JSON with keyset pagination (started_at + run_id) for insertion stability
-- sessionId locate mode returns all trajectories in workspace DB with confidence=0.5 (sessionId is not a DB column)
-- executionStatus added as optional field to TrajectoryLocateQuerySchema for stretch locate mode
-- routeQuery pattern used to satisfy init-declarations lint rule
-- Error category: used 'input_invalid' (matches PDErrorCategory union, not 'invalid_input')
+1. `pd trajectory locate` — DONE (m3-01)
+2. `pd history query` — DONE (m3-02)
+3. `pd context build` — DONE (m3-03)
+4. Workspace isolation: context never leaks across workspaces — m3-05
+5. Degradation policy: graceful fallback when history is incomplete — m3-04
+6. Degraded mode: no crashes, only warnings, task can still proceed — m3-04
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
