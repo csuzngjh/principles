@@ -109,14 +109,14 @@ Plans:
 **Plans:** 1 plan (wave 1)
 
 Plans:
-- [ ] m3-04-01-PLAN.md -- DegradationPolicy interface + graceful fallbacks + telemetry
+- [x] m3-04-01-PLAN.md -- ResilientContextAssembler + ResilientHistoryQuery + telemetry (VERIFIED)
 
 **Success Criteria:**
-1. Task not found → returns safe fallback payload (no throw)
-2. History empty → returns valid payload with ambiguity notes
-3. Partial data → returns best-effort payload with warnings
-4. All degradation events emit telemetry
-5. No unhandled exceptions in degraded modes
+1. Task not found → returns safe fallback payload (no throw) — DONE
+2. History empty → returns valid payload with ambiguity notes — DONE
+3. Partial data → returns best-effort payload with warnings — DONE
+4. All degradation events emit telemetry — DONE
+5. No unhandled exceptions in degraded modes — DONE
 
 ---
 
@@ -150,8 +150,8 @@ Plans:
 | RET-06 | Bounded time window queries | m3-02 | Table stakes -- DONE |
 | RET-07 | Assemble DiagnosticianContextPayload from runs | m3-03 | Table stakes; no LLM -- DONE |
 | RET-08 | Sort runs by attemptNumber ASC | m3-03 | PARTIAL (DESC order, LOW finding) -- DONE |
-| RET-09 | Trajectory not found → safe fallback | m3-04 | Table stakes |
-| RET-10 | Degradation emits warnings + telemetry | m3-04 | Table stakes |
+| RET-09 | Trajectory not found → safe fallback | m3-04 | Table stakes -- DONE |
+| RET-10 | Degradation emits warnings + telemetry | m3-04 | Table stakes -- DONE |
 | RET-11 | Workspace ID required for all operations | m3-05 | Table stakes |
 | RET-12 | No cross-workspace data leakage | m3-05 | Table stakes |
 | RET-13 | CLI commands for locate / query / build | m3-05 | Table stakes |

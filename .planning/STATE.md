@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.2
 milestone_name: M3 History Retrieval + Context Build
 status: in_progress
-last_updated: "2026-04-22T15:10:00Z"
-last_activity: 2026-04-22 — m3-03 verified (PASS), routing to m3-04
+last_updated: "2026-04-22T15:45:00Z"
+last_activity: 2026-04-22 — m3-04 verified (PASS), routing to m3-05
 progress:
   total_phases: 5
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
-  percent: 60
+  completed_phases: 4
+  total_plans: 4
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State: Principles
@@ -23,13 +23,19 @@ progress:
 
 ## Current Position
 
-Phase: m3-04 Degradation Policy (next)
-Status: m3-03 verified PASS, routing to m3-04 discuss
-Last activity: 2026-04-22 — ContextAssembler verified, 1 LOW finding (conversationWindow ordering)
+Phase: m3-05 Workspace Isolation + Integration (next)
+Status: m3-04 verified PASS, routing to m3-05 discuss
+Last activity: 2026-04-22 — Degradation Policy verified, ResilientContextAssembler + ResilientHistoryQuery shipped
 
 ## Context
 
 **v2.2 M3 Goal:** Deliver PD-owned retrieval pipeline — trajectory locate, history query, context build
+
+**m3-04 Complete (VERIFIED):**
+- ResilientContextAssembler: never-throws wrapper returning degraded DiagnosticianContextPayload
+- ResilientHistoryQuery: cursor error fallback to first page
+- degradation_triggered telemetry event type added
+- 12 tests, 0 regressions
 
 **m3-03 Complete (VERIFIED):**
 - ContextAssembler interface with assemble(taskId) method
@@ -69,8 +75,8 @@ Last activity: 2026-04-22 — ContextAssembler verified, 1 LOW finding (conversa
 2. `pd history query` — DONE (m3-02)
 3. `pd context build` — DONE (m3-03)
 4. Workspace isolation: context never leaks across workspaces — m3-05
-5. Degradation policy: graceful fallback when history is incomplete — m3-04
-6. Degraded mode: no crashes, only warnings, task can still proceed — m3-04
+5. Degradation policy: graceful fallback when history is incomplete — DONE (m3-04)
+6. Degraded mode: no crashes, only warnings, task can still proceed — DONE (m3-04)
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
