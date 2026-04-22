@@ -57,6 +57,10 @@ export async function handleContextBuild(taskId: string, opts: ContextBuildOptio
       }
     }
     console.log('');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Error: ${message}`);
+    process.exit(1);
   } finally {
     connection.close();
   }

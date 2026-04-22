@@ -28,7 +28,11 @@ export class ResilientHistoryQuery implements HistoryQuery {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         this.emitDegradation(errorMessage);
-        return this.inner.query(trajectoryRef, undefined, options);
+        try {
+          return await this.inner.query(trajectoryRef, undefined, options);
+        } catch {
+          return { sourceRef: trajectoryRef, entries: [], truncated: false };
+        }
       }
     }
     return this.inner.query(trajectoryRef, undefined, options);

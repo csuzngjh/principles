@@ -33,7 +33,7 @@ export async function handleTrajectoryLocate(opts: TrajectoryLocateOptions): Pro
     if (opts.task) query = { taskId: opts.task };
     else if (opts.run) query = { runId: opts.run };
     else if (opts.pain) query = { painId: opts.pain };
-    else if (opts.from || opts.to) query = { timeRangeStart: opts.from, timeRangeEnd: opts.to };
+    else if (opts.from || opts.to) query = { timeRange: { start: opts.from ?? '', end: opts.to ?? '' } };
     else if (opts.status) query = { executionStatus: opts.status };
     else {
       console.error('Error: specify at least one search criterion (--task, --run, --pain, --from/--to, --status)');
@@ -54,13 +54,12 @@ export async function handleTrajectoryLocate(opts: TrajectoryLocateOptions): Pro
 
     console.log(`\nTrajectories (${result.candidates.length}):\n`);
     for (const candidate of result.candidates) {
-      const runCount = candidate.runIds.length;
+      const reasonsCount = candidate.reasons.length;
       console.log(
-        '  %s  confidence=%.1f  runs=%d  task=%s',
+        '  %s  confidence=%.1f  reasons=%d',
         candidate.trajectoryRef.substring(0, 36),
         candidate.confidence,
-        runCount,
-        candidate.taskId.substring(0, 22),
+        reasonsCount,
       );
     }
     console.log('');

@@ -43,6 +43,10 @@ export async function handleHistoryQuery(taskId: string, opts: HistoryQueryOptio
       console.log(`\n  nextCursor: ${result.nextCursor}`);
     }
     console.log('');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Error: ${message}`);
+    process.exit(1);
   } finally {
     connection.close();
   }
