@@ -57,6 +57,10 @@
     "./evolution-store": {
       "types": "./dist/evolution-store.d.ts",
       "default": "./dist/evolution-store.js"
+    },
+    "./runtime-v2": {
+      "types": "./dist/runtime-v2/index.d.ts",
+      "default": "./dist/runtime-v2/index.js"
     }
   },
   "files": ["dist"],
