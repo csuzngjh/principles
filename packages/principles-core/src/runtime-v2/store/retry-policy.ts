@@ -113,7 +113,7 @@ export class DefaultRetryPolicy implements RetryPolicy {
    */
   shouldRetry(task: TaskRecord): boolean {
     const max = task.maxAttempts;
-    if (typeof max !== 'number' || max <= 0) return true; // fail-safe: allow retry
+    if (typeof max !== 'number' || !Number.isFinite(max) || max <= 0) return true; // fail-safe: allow retry
     return task.attemptCount < max;
   }
 

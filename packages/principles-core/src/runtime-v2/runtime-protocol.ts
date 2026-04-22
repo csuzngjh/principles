@@ -8,6 +8,7 @@
  * All adapters must implement PDRuntimeAdapter.
  */
 import { Type, type Static } from '@sinclair/typebox';
+import { PDErrorCategorySchema } from './error-categories.js';
 
 // ── Runtime Kind ──
 
@@ -85,6 +86,28 @@ export const RunStatusSchema = Type.Object({
   reason: Type.Optional(Type.String()),
 });
 export type RunStatus = Static<typeof RunStatusSchema>;
+
+/**
+ * Full run record used by SqliteRunStore.
+ * Extends RunHandle with task linkage, attempt tracking, and payload fields.
+ */
+export const RunRecordSchema = Type.Object({
+  runId: Type.String({ minLength: 1 }),
+  runtimeKind: RuntimeKindSchema,
+  startedAt: Type.String(),
+  taskId: Type.String({ minLength: 1 }),
+  attemptNumber: Type.Integer({ minimum: 0 }),
+  executionStatus: RunExecutionStatusSchema,
+  endedAt: Type.Optional(Type.String()),
+  reason: Type.Optional(Type.String()),
+  outputRef: Type.Optional(Type.String()),
+  createdAt: Type.String(),
+  updatedAt: Type.String(),
+  inputPayload: Type.Optional(Type.String()),
+  outputPayload: Type.Optional(Type.String()),
+  errorCategory: Type.Optional(PDErrorCategorySchema),
+});
+export type RunRecord = Static<typeof RunRecordSchema>;
 
 // ── Context Item (for runtime context injection) ──
 

@@ -126,7 +126,13 @@ export class DefaultLeaseManager implements LeaseManager {
 
       const nowIso = new Date().toISOString();
       const expiresAt = new Date(Date.now() + durationMs).toISOString();
-      const attemptNumber = Number(row.attempt_count ?? 0) + 1;
+
+      // Determine next attempt number from existing runs (most reliable)
+      const lastRun = db.prepare(
+        'SELECT attempt_number FROM runs WHERE task_id = ? ORDER BY attempt_number DESC LIMIT 1',
+      ).get(taskId) as { attempt_number: number } | undefined;
+      const lastAttemptNumber = lastRun?.attempt_number ?? 0;
+      const attemptNumber = lastAttemptNumber + 1;
 
       db.prepare(`
         UPDATE tasks
@@ -144,7 +150,9 @@ export class DefaultLeaseManager implements LeaseManager {
     });
 
     tx();
-    return this.taskStore.getTask(taskId);
+    const updated = await this.taskStore.getTask(taskId);
+    if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after lease: ${taskId}`);
+    return updated;
   }
 
   async releaseLease(taskId: string, owner: string): Promise<TaskRecord> {
@@ -173,7 +181,9 @@ export class DefaultLeaseManager implements LeaseManager {
       `).run(nowIso, taskId);
     })();
 
-    return this.taskStore.getTask(taskId);
+    const updated = await this.taskStore.getTask(taskId);
+    if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after release: ${taskId}`);
+    return updated;
   }
 
   async renewLease(taskId: string, owner: string, durationMs = 300_000): Promise<TaskRecord> {
@@ -208,7 +218,9 @@ export class DefaultLeaseManager implements LeaseManager {
       `).run(expiresAt, nowIso, taskId);
     })();
 
-    return this.taskStore.getTask(taskId);
+    const updated = await this.taskStore.getTask(taskId);
+    if (!updated) throw new PDRuntimeError('storage_unavailable', `Task not found after renew: ${taskId}`);
+    return updated;
   }
 
   isLeaseExpired(task: TaskRecord): boolean {
@@ -219,8 +231,8 @@ export class DefaultLeaseManager implements LeaseManager {
   async forceExpire(taskId: string): Promise<TaskRecord> {
     return this.taskStore.updateTask(taskId, {
       status: 'pending',
-      leaseOwner: undefined,
-      leaseExpiresAt: undefined,
+      leaseOwner: null,
+      leaseExpiresAt: null,
     });
   }
 }

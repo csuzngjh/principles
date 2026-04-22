@@ -100,10 +100,18 @@ export type {
 } from './diagnostician-output.js';
 
 // Store
+export { SqliteTaskStore } from './store/sqlite-task-store.js';
+export { SqliteRunStore } from './store/sqlite-run-store.js';
+export { SqliteConnection } from './store/sqlite-connection.js';
 export type {
   TaskStore,
   TaskStoreFilter,
+  TaskStoreUpdatePatch,
 } from './store/task-store.js';
+export type {
+  RunStore,
+  RunRecord,
+} from './store/run-store.js';
 
 // Lease & Recovery
 export { DefaultLeaseManager } from './store/lease-manager.js';

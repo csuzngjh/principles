@@ -77,7 +77,7 @@ export class DefaultRecoverySweep implements RecoverySweep {
       const retryExpiresAt = new Date(Date.now() + backoffMs).toISOString();
       await this.taskStore.updateTask(taskId, {
         status: 'retry_wait',
-        leaseOwner: undefined,
+        leaseOwner: null,
         leaseExpiresAt: retryExpiresAt,
         lastError: 'lease_expired',
       });
@@ -85,8 +85,8 @@ export class DefaultRecoverySweep implements RecoverySweep {
     } else {
       await this.taskStore.updateTask(taskId, {
         status: 'failed',
-        leaseOwner: undefined,
-        leaseExpiresAt: undefined,
+        leaseOwner: null,
+        leaseExpiresAt: null,
         lastError: 'max_attempts_exceeded',
       });
       newStatus = 'failed';
