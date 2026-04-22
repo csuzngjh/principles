@@ -83,6 +83,7 @@ export class RuntimeStateManager {
       this.taskStore,
       this.leaseManager,
       this.retryPolicy,
+      this.connection,
       this.emitter,
     );
 

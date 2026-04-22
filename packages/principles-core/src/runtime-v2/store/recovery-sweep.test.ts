@@ -52,7 +52,7 @@ describe('DefaultRecoverySweep', () => {
       maxDelayMs: 60_000,
       multiplier: 2,
     });
-    recoverySweep = new DefaultRecoverySweep(taskStore, leaseManager, retryPolicy);
+    recoverySweep = new DefaultRecoverySweep(taskStore, leaseManager, retryPolicy, conn);
   });
 
   afterEach(() => {

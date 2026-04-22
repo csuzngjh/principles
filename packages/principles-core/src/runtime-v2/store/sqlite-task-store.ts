@@ -18,8 +18,8 @@ export class SqliteTaskStore implements TaskStore {
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, input_ref, result_ref)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_owner, lease_expires_at, last_error, input_ref, result_ref)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.taskKind,
@@ -28,6 +28,9 @@ export class SqliteTaskStore implements TaskStore {
       now,
       record.attemptCount,
       record.maxAttempts,
+      record.leaseOwner ?? null,
+      record.leaseExpiresAt ?? null,
+      record.lastError ?? null,
       record.inputRef ?? null,
       record.resultRef ?? null,
     );
@@ -80,6 +83,10 @@ export class SqliteTaskStore implements TaskStore {
 
     if (filter?.status) { conditions.push('status = ?'); values.push(filter.status); }
     if (filter?.taskKind) { conditions.push('task_kind = ?'); values.push(filter.taskKind); }
+    if (filter?.leaseExpiresAtBefore) {
+      conditions.push('lease_expires_at IS NOT NULL AND lease_expires_at < ?');
+      values.push(filter.leaseExpiresAtBefore);
+    }
     if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
     if (filter?.limit) { sql += ' LIMIT ?'; values.push(filter.limit); }
     if (filter?.offset) { sql += ' OFFSET ?'; values.push(filter.offset); }

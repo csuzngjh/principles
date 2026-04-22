@@ -10,6 +10,8 @@ import type { PDTaskStatus } from '../task-status.js';
 export interface TaskStoreFilter {
   status?: PDTaskStatus;
   taskKind?: string;
+  /** Filter tasks whose lease_expires_at is before this ISO timestamp. */
+  leaseExpiresAtBefore?: string;
   limit?: number;
   offset?: number;
 }

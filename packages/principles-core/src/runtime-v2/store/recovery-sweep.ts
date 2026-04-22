@@ -16,8 +16,11 @@
 import type { TaskStore } from './task-store.js';
 import type { LeaseManager } from './lease-manager.js';
 import type { RetryPolicy } from './retry-policy.js';
-import type { PDTaskStatus } from '../task-status.js';
+import type { PDTaskStatus, TaskRecord } from '../task-status.js';
+import type { SqliteConnection } from './sqlite-connection.js';
 import { storeEmitter, type StoreEventEmitter } from './event-emitter.js';
+ 
+import type { Database } from 'better-sqlite3';
 
 export interface RecoveryResult {
   taskId: string;
@@ -41,6 +44,7 @@ export class DefaultRecoverySweep implements RecoverySweep {
     private readonly taskStore: TaskStore,
     private readonly leaseManager: LeaseManager,
     private readonly retryPolicy: RetryPolicy,
+    private readonly connection: SqliteConnection,
     emitter?: StoreEventEmitter,
   ) {
     this.emitter = emitter ?? storeEmitter;
@@ -49,13 +53,64 @@ export class DefaultRecoverySweep implements RecoverySweep {
   /**
    * Detect all leased tasks whose lease has expired.
    *
-   * Returns task IDs of tasks in 'leased' state whose lease_expires_at < now.
+   * Uses the leaseExpiresAtBefore filter to push predicate to SQL
+   * (leverages idx_tasks_lease_expires_at index), avoiding an in-memory filter.
    */
   async detectExpiredLeases(): Promise<string[]> {
-    const taskIds = await this.taskStore.listTasks({ status: 'leased' });
-    return taskIds
-      .filter(task => this.leaseManager.isLeaseExpired(task))
-      .map(task => task.taskId);
+    const now = new Date().toISOString();
+    const tasks = await this.taskStore.listTasks({
+      status: 'leased',
+      leaseExpiresAtBefore: now,
+    });
+    return tasks.map(task => task.taskId);
+  }
+
+  /**
+   * Atomic read-check-write inside a db transaction.
+   * Returns null if nothing to recover; otherwise returns RecoveryResult plus
+   * internal telemetry fields.
+   */
+  private atomicRecover(
+    db: Database,
+    taskId: string,
+    now: string,
+  ): (RecoveryResult & { attemptCount: number; backoffMs?: number }) | null {
+    const row = db.prepare(
+      'SELECT task_id, status, attempt_count, max_attempts, lease_expires_at FROM tasks WHERE task_id = ?',
+    ).get(taskId) as Record<string, unknown> | undefined;
+
+    if (!row) return null;
+
+    const attemptCount = Number(row.attempt_count ?? 0);
+    const maxAttempts = Number(row.max_attempts ?? 3);
+    const leaseExpiresAt = row.lease_expires_at ? String(row.lease_expires_at) : undefined;
+    const status = String(row.status) as PDTaskStatus;
+
+    // Idempotency: not leased or not expired → nothing to do
+    if (status !== 'leased' || !leaseExpiresAt) return null;
+    if (new Date(leaseExpiresAt) >= new Date()) return null;
+
+    const previousStatus = status;
+
+    if (this.retryPolicy.shouldRetry({ taskId, status, attemptCount, maxAttempts } as TaskRecord)) {
+      const backoffMs = this.retryPolicy.calculateBackoff(attemptCount + 1);
+      const retryExpiresAt = new Date(Date.now() + backoffMs).toISOString();
+      db.prepare(`
+        UPDATE tasks
+        SET status = 'retry_wait', lease_owner = NULL, lease_expires_at = ?, last_error = ?, updated_at = ?
+        WHERE task_id = ?
+      `).run(retryExpiresAt, 'lease_expired', now, taskId);
+
+      return { taskId, recoveredAt: now, previousStatus, newStatus: 'retry_wait', wasLeaseExpired: true, attemptCount, backoffMs };
+    } else {
+      db.prepare(`
+        UPDATE tasks
+        SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL, last_error = ?, updated_at = ?
+        WHERE task_id = ?
+      `).run('max_attempts_exceeded', now, taskId);
+
+      return { taskId, recoveredAt: now, previousStatus, newStatus: 'failed', wasLeaseExpired: true, attemptCount };
+    }
   }
 
   /**
@@ -67,67 +122,39 @@ export class DefaultRecoverySweep implements RecoverySweep {
    *   - retry_wait (if attempts remain per shouldRetry check)
    *   - failed (if maxAttempts exceeded)
    *
-   * Clears leaseOwner and leaseExpiresAt. Sets lastError to the appropriate category.
+   * Uses a db.transaction() to atomically read the task, verify lease expiry,
+   * and apply the status update — avoiding TOCTOU race conditions when multiple
+   * recovery scans run concurrently.
    */
   async recoverTask(taskId: string): Promise<RecoveryResult | null> {
-    const task = await this.taskStore.getTask(taskId);
-    if (!task) return null;
+    const db = this.connection.getDb();
+    const now = new Date().toISOString();
 
-    const wasLeaseExpired = this.leaseManager.isLeaseExpired(task);
-    if (!wasLeaseExpired) return null;
+    // Atomic read-check-write inside a transaction
+    const result = db.transaction(() => this.atomicRecover(db, taskId, now))();
 
-    let newStatus: PDTaskStatus;
-    const previousStatus = task.status;
+    if (!result) return null;
 
-    if (this.retryPolicy.shouldRetry(task)) {
-      const backoffMs = this.retryPolicy.calculateBackoff(task.attemptCount + 1);
-      const retryExpiresAt = new Date(Date.now() + backoffMs).toISOString();
-      await this.taskStore.updateTask(taskId, {
-        status: 'retry_wait',
-        leaseOwner: null,
-        leaseExpiresAt: retryExpiresAt,
-        lastError: 'lease_expired',
-      });
-      newStatus = 'retry_wait';
-
+    // Emit telemetry after successful atomic update
+    if (result.newStatus === 'retry_wait') {
       this.emitter.emitTelemetry({
         eventType: 'task_retried',
-        traceId: taskId,
-        timestamp: new Date().toISOString(),
+        traceId: result.taskId,
+        timestamp: result.recoveredAt,
         sessionId: 'system',
-        payload: {
-          taskId,
-          newStatus: 'retry_wait',
-          attemptCount: task.attemptCount,
-          backoffMs,
-          previousLeaseExpired: true,
-        },
+        payload: { taskId: result.taskId, newStatus: 'retry_wait', attemptCount: result.attemptCount, backoffMs: result.backoffMs ?? 0, previousLeaseExpired: true },
       });
     } else {
-      await this.taskStore.updateTask(taskId, {
-        status: 'failed',
-        leaseOwner: null,
-        leaseExpiresAt: null,
-        lastError: 'max_attempts_exceeded',
-      });
-      newStatus = 'failed';
-
       this.emitter.emitTelemetry({
         eventType: 'task_failed',
-        traceId: taskId,
-        timestamp: new Date().toISOString(),
+        traceId: result.taskId,
+        timestamp: result.recoveredAt,
         sessionId: 'system',
-        payload: { taskId, lastError: 'max_attempts_exceeded', attemptCount: task.attemptCount },
+        payload: { taskId: result.taskId, lastError: 'max_attempts_exceeded', attemptCount: result.attemptCount },
       });
     }
 
-    return {
-      taskId,
-      recoveredAt: new Date().toISOString(),
-      previousStatus,
-      newStatus,
-      wasLeaseExpired,
-    };
+    return result;
   }
 
   /**
@@ -135,8 +162,6 @@ export class DefaultRecoverySweep implements RecoverySweep {
    *
    * Processes all expired leases sequentially, collecting errors without
    * stopping recovery of other tasks.
-   *
-   * @returns Number of successfully recovered tasks and any errors encountered
    */
   async recoverAll(): Promise<{ recovered: number; errors: string[] }> {
     const expiredIds = await this.detectExpiredLeases();

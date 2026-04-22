@@ -55,7 +55,7 @@ describe('IdempotentStateTransitions', () => {
 
     const sweep = new DefaultRecoverySweep(taskStore, {
       isLeaseExpired: () => false,
-    } as any, retryPolicy);
+    } as any, retryPolicy, connection);
 
     const result = await sweep.recoverTask('task-pending');
     expect(result).toBeNull();
@@ -66,7 +66,7 @@ describe('IdempotentStateTransitions', () => {
 
     const sweep = new DefaultRecoverySweep(taskStore, {
       isLeaseExpired: () => false,
-    } as any, retryPolicy);
+    } as any, retryPolicy, connection);
 
     const result = await sweep.recoverTask('task-not-expired');
     expect(result).toBeNull();
@@ -77,7 +77,7 @@ describe('IdempotentStateTransitions', () => {
 
     const sweep = new DefaultRecoverySweep(taskStore, {
       isLeaseExpired: (task: any) => task.taskId === 'task-expired',
-    } as any, retryPolicy);
+    } as any, retryPolicy, connection);
 
     const result = await sweep.recoverTask('task-expired');
     expect(result).not.toBeNull();
@@ -98,7 +98,7 @@ describe('IdempotentStateTransitions', () => {
 
     const sweep = new DefaultRecoverySweep(taskStore, {
       isLeaseExpired: (task: any) => true,
-    } as any, retryPolicy);
+    } as any, retryPolicy, connection);
 
     const result = await sweep.recoverTask('task-max-attempts');
     expect(result).not.toBeNull();
@@ -112,7 +112,7 @@ describe('IdempotentStateTransitions', () => {
     const sweep = new DefaultRecoverySweep(taskStore, {
       // Only expired for tasks in 'leased' status (matches real LeaseManager.isLeaseExpired)
       isLeaseExpired: (task: any) => task.status === 'leased' && task.taskId === 'task-idempotent',
-    } as any, retryPolicy);
+    } as any, retryPolicy, connection);
 
     // First call: transitions to retry_wait
     const first = await sweep.recoverTask('task-idempotent');
@@ -151,7 +151,7 @@ describe('IdempotentStateTransitions', () => {
 
     const sweep = new DefaultRecoverySweep(taskStore, {
       isLeaseExpired: (task: any) => true,
-    } as any, retryPolicy);
+    } as any, retryPolicy, connection);
 
     // First recoverAll: recovers both
     const firstRun = await sweep.recoverAll();

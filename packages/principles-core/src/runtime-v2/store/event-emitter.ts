@@ -8,16 +8,16 @@ import { validateTelemetryEvent, type TelemetryEvent } from '../../telemetry-eve
 export class StoreEventEmitter extends EventEmitter {
   /**
    * Emit a telemetry event after validating it conforms to TelemetryEventSchema.
-   * Returns true if the event was validated and emitted, false if validation failed.
+   * Throws if validation fails — callers must ensure event shape is correct.
    */
-  emitTelemetry(event: TelemetryEvent): boolean {
+  emitTelemetry(event: TelemetryEvent): true {
     const result = validateTelemetryEvent(event);
-    if (!result.valid) {
-      console.error('[StoreEventEmitter] Invalid telemetry event:', result.errors);
-      return false;
+    if (!result.valid || !result.event) {
+      throw new Error(`[StoreEventEmitter] Invalid telemetry event: ${JSON.stringify(result.errors)}`);
     }
-    this.emit('telemetry', result.event);
-    this.emit(result.event!.eventType, result.event!);
+    const validEvent = result.event;
+    this.emit('telemetry', validEvent);
+    this.emit(validEvent.eventType, validEvent);
     return true;
   }
 
