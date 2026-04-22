@@ -70,6 +70,7 @@ export const HistoryQueryResultSchema = Type.Object({
   sourceRef: Type.String({ minLength: 1 }),
   entries: Type.Array(HistoryQueryEntrySchema),
   truncated: Type.Boolean(),
+  nextCursor: Type.Optional(Type.String({ minLength: 1 })),
 });
  
 export type HistoryQueryResult = Static<typeof HistoryQueryResultSchema>;
