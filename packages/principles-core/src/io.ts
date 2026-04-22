@@ -71,7 +71,7 @@ export function atomicWriteFileSync(filePath: string, data: string): void {
             return;
         } catch (err) {
             lastError = err as Error;
-            const { code } = /** @type {{ code?: string }} */ (err);
+            const { code } = /** @type {{ code?: string }} */ (err as { code?: string });
             // Only retry on Windows transient lock errors
             if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') {
                 if (attempt < RENAME_MAX_RETRIES - 1) {

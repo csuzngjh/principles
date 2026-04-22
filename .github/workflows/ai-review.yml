@@ -21,8 +21,10 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        working-directory: packages/openclaw-plugin
         run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
 
       - name: TypeScript Check
         working-directory: packages/openclaw-plugin
