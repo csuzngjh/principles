@@ -34,7 +34,7 @@
 <details>
 <summary>🔄 v2.2 M3 History Retrieval + Context Build (Phase m3-01+) — IN PROGRESS</summary>
 
-- [ ] m3-01: Trajectory Locator — 1 plan (3 tasks, wave 1)
+- [x] m3-01: Trajectory Locator — 1/1 plans — completed 2026-04-22
 - [ ] m3-02: Bounded History Query — (planning)
 - [ ] m3-03: Context Assembler — (planning)
 - [ ] m3-04: Degradation Policy — (planning)
@@ -57,7 +57,7 @@
 | m2-05 RecoverySweep | v2.1 | 1/1 | Complete | 2026-04-22 |
 | m2-06 MigrationBridge | v2.1 | 1/1 | Complete | 2026-04-22 |
 | m2-07 RuntimeIntegration | v2.1 | 1/1 | Complete | 2026-04-22 |
-| m3-01 TrajectoryLocator | v2.2 | 0/1 | Planned | — |
+| m3-01 TrajectoryLocator | v2.2 | 1/1 | Complete | 2026-04-22 |
 | m3-02 HistoryQuery | v2.2 | 0/1 | Pending | — |
 | m3-03 ContextAssembler | v2.2 | 0/1 | Pending | — |
 | m3-04 DegradationPolicy | v2.2 | 0/1 | Pending | — |

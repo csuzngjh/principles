@@ -146,9 +146,9 @@ Plans:
 
 | REQ-ID | Requirement | Phase | Notes |
 |--------|-------------|-------|-------|
-| RET-01 | Locate trajectory by trajectoryId (exact) | m3-01 | Table stakes |
-| RET-02 | Locate by taskId, runId, date range, session hints | m3-01 | Table stakes; agentId/status = stretch |
-| RET-03 | Locate trajectory by executionStatus | m3-01 | Stretch — only if M2 has stable status index |
+| RET-01 | Locate trajectory by trajectoryId (exact) | m3-01 | Table stakes -- DONE |
+| RET-02 | Locate by taskId, runId, date range, session hints | m3-01 | Table stakes; agentId/status = stretch -- DONE |
+| RET-03 | Locate trajectory by executionStatus | m3-01 | Stretch -- DONE (idx_runs_status exists) |
 | RET-04 | Query run history by taskId with ordering | m3-02 | Table stakes |
 | RET-05 | Cursor-based pagination with page size cap | m3-02 | Table stakes |
 | RET-06 | Bounded time window queries | m3-02 | Table stakes |

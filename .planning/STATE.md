@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.2
 milestone_name: M3 History Retrieval + Context Build
 status: in_progress
-last_updated: "2026-04-22T16:00:00.000Z"
-last_activity: 2026-04-22 — Milestone v2.2 M3 started
+last_updated: "2026-04-22T10:48:18Z"
+last_activity: 2026-04-22 — m3-01-01 TrajectoryLocator complete (3/3 tasks, 17 tests passing)
 progress:
   total_phases: 5
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 20
 ---
 
 # Project State: Principles
@@ -23,13 +23,19 @@ progress:
 
 ## Current Position
 
-Phase: Not started (requirements definition)
-Status: Defining requirements
-Last activity: 2026-04-22 — Milestone v2.2 M3 started
+Phase: m3-01 TrajectoryLocator (complete)
+Status: m3-01-01 complete — 3 tasks, 3 commits, 17 tests passing
+Last activity: 2026-04-22 — TrajectoryLocator interface + SqliteTrajectoryLocator + test suite
 
 ## Context
 
 **v2.2 M3 Goal:** Deliver PD-owned retrieval pipeline — trajectory locate, history query, context build
+
+**m3-01 Complete:**
+- TrajectoryLocator interface with locate() method
+- SqliteTrajectoryLocator with 6 locate modes (painId, taskId, runId, timeRange, sessionId+workspace, executionStatus)
+- 17 tests covering all modes, confidence levels, edge cases
+- executionStatus field added to TrajectoryLocateQuerySchema (stretch)
 
 **M3 边界约束（守住边界）:**
 - 只做 trajectory locate / history query / context build
@@ -46,6 +52,11 @@ Last activity: 2026-04-22 — Milestone v2.2 M3 started
 4. Workspace isolation: context never leaks across workspaces
 5. Degradation policy: graceful fallback when history is incomplete
 6. Degraded mode: no crashes, only warnings, task can still proceed
+
+**Decisions:**
+- sessionId locate mode returns all trajectories in workspace DB with confidence=0.5 (sessionId is not a DB column)
+- executionStatus added as optional field to TrajectoryLocateQuerySchema for stretch locate mode
+- routeQuery pattern used to satisfy init-declarations lint rule
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
