@@ -98,3 +98,17 @@ export type {
   DiagnosticianRecommendation,
   DiagnosticianInvocationInput,
 } from './diagnostician-output.js';
+
+// Store
+export type {
+  TaskStore,
+  TaskStoreFilter,
+} from './store/task-store.js';
+
+// Lease & Recovery
+export { DefaultLeaseManager } from './store/lease-manager.js';
+export type { LeaseManager, AcquireLeaseOptions } from './store/lease-manager.js';
+export { DefaultRetryPolicy } from './store/retry-policy.js';
+export type { RetryPolicy, RetryPolicyConfig } from './store/retry-policy.js';
+export { DefaultRecoverySweep } from './store/recovery-sweep.js';
+export type { RecoverySweep, RecoveryResult } from './store/recovery-sweep.js';

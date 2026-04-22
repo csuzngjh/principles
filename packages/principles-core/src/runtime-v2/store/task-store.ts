@@ -6,7 +6,14 @@
  *
  * @see m2-01-PLAN.md Task 1 for full implementation
  */
-import type { TaskRecord } from '../task-status.js';
+import type { TaskRecord, PDTaskStatus } from '../task-status.js';
+
+export interface TaskStoreFilter {
+  status?: PDTaskStatus;
+  taskKind?: string;
+  limit?: number;
+  offset?: number;
+}
 
 export interface TaskStore {
   getTask(taskId: string): Promise<TaskRecord>;
@@ -14,4 +21,5 @@ export interface TaskStore {
     taskId: string,
     patch: Partial<Pick<TaskRecord, 'status' | 'leaseOwner' | 'leaseExpiresAt' | 'attemptCount' | 'lastError'>>,
   ): Promise<TaskRecord>;
+  listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]>;
 }
