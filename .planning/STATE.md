@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.2
 milestone_name: M3 History Retrieval + Context Build
 status: in_progress
-last_updated: "2026-04-22T10:48:18Z"
-last_activity: 2026-04-22 — m3-01-01 TrajectoryLocator complete (3/3 tasks, 17 tests passing)
+last_updated: "2026-04-22T12:08:39Z"
+last_activity: 2026-04-22 — m3-02-01 BoundedHistoryQuery complete (3/3 tasks, 19 tests passing)
 progress:
   total_phases: 5
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 20
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State: Principles
@@ -23,13 +23,22 @@ progress:
 
 ## Current Position
 
-Phase: m3-01 TrajectoryLocator (complete)
-Status: m3-01-01 complete — 3 tasks, 3 commits, 17 tests passing
-Last activity: 2026-04-22 — TrajectoryLocator interface + SqliteTrajectoryLocator + test suite
+Phase: m3-02 BoundedHistoryQuery (complete)
+Status: m3-02-01 complete — 3 tasks, 3 commits, 19 tests passing
+Last activity: 2026-04-22 — HistoryQuery interface + SqliteHistoryQuery with cursor pagination + test suite
 
 ## Context
 
 **v2.2 M3 Goal:** Deliver PD-owned retrieval pipeline — trajectory locate, history query, context build
+
+**m3-02 Complete:**
+- HistoryQuery interface with query(trajectoryRef, cursor?, options?) method
+- HistoryQueryCursorData for opaque cursor internal structure (base64 JSON)
+- HistoryQueryOptions for limit and time window customization
+- SqliteHistoryQuery with keyset cursor pagination (started_at + run_id)
+- Time window filter with default 24h lookback and custom overrides
+- Constants: DEFAULT_HISTORY_PAGE_SIZE=50, MAX_HISTORY_PAGE_SIZE=200, DEFAULT_TIME_WINDOW_MS=86400000
+- 19 tests covering cursor pagination, time windows, entry mapping, error cases
 
 **m3-01 Complete:**
 - TrajectoryLocator interface with locate() method
@@ -54,9 +63,12 @@ Last activity: 2026-04-22 — TrajectoryLocator interface + SqliteTrajectoryLoca
 6. Degraded mode: no crashes, only warnings, task can still proceed
 
 **Decisions:**
+- Limit controls entries count (not runs). SQL fetches ceil(entries/2)+1 runs for truncation detection
+- Cursor is opaque base64 JSON with keyset pagination (started_at + run_id) for insertion stability
 - sessionId locate mode returns all trajectories in workspace DB with confidence=0.5 (sessionId is not a DB column)
 - executionStatus added as optional field to TrajectoryLocateQuerySchema for stretch locate mode
 - routeQuery pattern used to satisfy init-declarations lint rule
+- Error category: used 'input_invalid' (matches PDErrorCategory union, not 'invalid_input')
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
