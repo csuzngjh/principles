@@ -8,8 +8,9 @@
     "packages/*"
   ],
   "scripts": {
-    "lint": "eslint 'packages/**/*.ts' --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts'",
-    "lint:fix": "eslint 'packages/**/*.ts' --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts' --fix",
+    "build": "npm run build --workspace=@principles/core && npm run build --workspace=principles-disciple",
+    "lint": "npm run build --workspace=@principles/core && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts",
+    "lint:fix": "npm run build --workspace=@principles/core && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --fix",
     "pre-commit": "lint-staged",
     "ai-sprint": "node packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs",
     "ai-sprint:test": "node --test packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/test/*.mjs",

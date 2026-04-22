@@ -239,6 +239,26 @@ Translate the runtime protocol into host-specific execution behavior.
 
 Expose stable user, automation, and operator control surfaces.
 
+### 6.5 PD Worker
+
+PD Worker is the long-running background execution process owned by PD.
+
+It is distinct from both:
+
+- PD Core, which defines domain logic and contracts
+- PD CLI, which is the command-line entrypoint into those services
+
+Its responsibilities include:
+
+- leasing tasks
+- assembling context
+- invoking runtime adapters
+- validating outputs
+- committing artifacts and task state
+- emitting telemetry
+
+This distinction prevents the CLI from being overloaded conceptually as both a transport and a scheduler process.
+
 ## 7. PD Core Domain Model
 
 PD v2 should formalize the following first-class entities.
@@ -481,6 +501,23 @@ No adapter is allowed to redefine:
 - agent role semantics
 - task states
 
+### 9.5 RuntimeSelector
+
+PD should introduce a `RuntimeSelector` component.
+
+Its job is to deterministically choose a runtime backend for a given agent execution request.
+
+The selector should consider:
+
+- `AgentSpec.preferredRuntimeKinds`
+- runtime capability probe results
+- runtime health state
+- workspace policy
+- fallback policy
+- optional cost or model policy
+
+This prevents execution backend choice from being implicit or ad hoc.
+
 ## 10. PD CLI as Main Control Plane
 
 The current repository already has plugin commands such as:
@@ -549,6 +586,12 @@ They become compatibility entrypoints, while a real `pd` CLI becomes primary.
 - `pd nocturnal run`
 - `pd nocturnal status`
 
+#### History / Trajectory
+
+- `pd history query`
+- `pd trajectory locate`
+- `pd context build`
+
 ### 10.3 CLI Output Rules
 
 PD CLI should support:
@@ -613,6 +656,184 @@ YAML declares contract and expectations.
 TypeScript code implements orchestration.
 
 This preserves explicitness without pushing core logic into configuration.
+
+## 11A. History and Trajectory Retrieval as a First-Class PD Tool
+
+PD should add a dedicated foundational CLI capability for retrieving user-agent historical trajectory data.
+
+This is not a convenience feature. It is a core prerequisite for:
+
+- diagnostician quality
+- replay quality
+- nocturnal reflection quality
+- principle extraction quality
+- root cause analysis quality
+
+### 11A.1 Problem Statement
+
+PD needs to perform deep reflection on prior interactions.
+
+In practice, accurately locating the relevant conversation trace is often the hardest part of the diagnosis task.
+
+Even when a pain signal records a `sessionId`, that identifier alone is not enough to guarantee correct trajectory retrieval because:
+
+- session identifiers may be partial, stale, or ambiguous
+- relevant evidence may span multiple files or indexes
+- useful context may be distributed across database rows, event logs, trajectory files, and workspace state
+- the true evidence window may require iterative confirmation rather than one direct lookup
+
+Therefore, historical trajectory retrieval must not be modeled as:
+
+- one SQL query
+- one fixed file path read
+- one fragile host-specific API call
+
+It should be modeled as a PD-native retrieval workflow.
+
+### 11A.2 Architectural Position
+
+PD should own historical trajectory lookup through stable CLI and tool interfaces.
+
+Agents should not be forced to directly improvise against raw storage such as:
+
+- SQLite tables
+- host session registries
+- ad hoc file naming conventions
+- transient runtime APIs
+
+Instead, PD should expose a controlled retrieval surface that encapsulates the lookup complexity.
+
+### 11A.3 Foundational CLI Commands
+
+The first version should include at least these commands:
+
+- `pd history query`
+- `pd trajectory locate`
+- `pd context build`
+
+#### `pd trajectory locate`
+
+Purpose:
+
+- locate the most likely relevant trajectory root for a pain signal, task, run, or session reference
+
+Possible inputs:
+
+- `--pain-id`
+- `--task-id`
+- `--run-id`
+- `--session-id`
+- `--time-range`
+- `--workspace`
+
+Expected behavior:
+
+- search across multiple evidence sources
+- rank likely matches
+- expose confidence and reason codes
+- return machine-readable structured output
+
+#### `pd history query`
+
+Purpose:
+
+- extract a bounded historical interaction slice once a candidate trajectory or session has been identified
+
+Possible capabilities:
+
+- filter by role
+- filter by time range
+- filter by trigger
+- include neighboring tool calls
+- include relevant event summaries
+- return plain text or JSON
+
+#### `pd context build`
+
+Purpose:
+
+- assemble a reflection-ready `ContextPayload` for diagnostician, replay, or nocturnal workflows
+
+The assembled payload may include:
+
+- conversation excerpts
+- task metadata
+- relevant tool failures
+- gate events
+- nearby file operations
+- recent principle/rule context
+- confidence notes about retrieval ambiguity
+
+### 11A.4 Retrieval Is a Workflow, Not a Query
+
+This is the key design rule.
+
+Trajectory retrieval should be treated as a controlled PD workflow with multiple steps:
+
+1. identify candidate references
+2. expand candidate evidence windows
+3. confirm or reject relevance
+4. assemble a bounded context payload
+
+This may involve:
+
+- SQL access
+- directory scanning
+- artifact correlation
+- event-log inspection
+- trajectory index lookup
+- file existence confirmation
+
+The agent may still use tools during this process, but it should do so through PD-owned interfaces and helper commands rather than by improvising directly against fragile raw storage.
+
+### 11A.5 Why This Must Be Owned by PD
+
+If historical lookup remains host-specific or ad hoc, then reflection quality will remain unstable.
+
+That instability propagates upward:
+
+- wrong trajectory chosen
+- wrong root cause inferred
+- wrong principle extracted
+- wrong rule synthesized
+- wrong internalization path selected
+
+This is a high-leverage foundation because better trajectory retrieval improves every downstream reflective workflow.
+
+### 11A.6 Relationship to Agent Capability
+
+This design also reduces dependency on frontier-scale models.
+
+If PD standardizes retrieval, then the runtime agent no longer needs to be excellent at:
+
+- discovering where evidence lives
+- remembering storage conventions
+- adapting to host-specific APIs
+- guessing how to reconstruct the right context
+
+Instead, the agent can focus on:
+
+- interpreting evidence
+- comparing hypotheses
+- producing structured reasoning
+
+That is a deliberate architectural move:
+
+**PD should turn retrieval and state lookup into standardized tools so that agents can spend more capability budget on reasoning instead of system archaeology.**
+
+### 11A.7 Design Constraint
+
+The historical trajectory toolchain must be:
+
+- runtime-agnostic
+- workspace-safe
+- schema-validated
+- bounded by explicit query and output contracts
+- resistant to raw storage drift
+
+In short:
+
+**history retrieval is a foundational PD system capability, not an implementation detail of OpenClaw, SQL, or a single session ID.**
 
 ## 12. Specialized PD Agents
 
@@ -895,6 +1116,58 @@ The migration should be staged, not all-at-once.
 
 - apply the same runtime protocol to diagnostician, nocturnal, replay, and rule generation chains
 
+## 18A. Migration Safety and Rollback
+
+Because this refactor touches core execution paths, rollback planning is part of the architecture, not an operational afterthought.
+
+### 18A.1 Dual-Track Requirement
+
+Early cutover phases should support dual-track execution:
+
+- legacy execution path remains behind a feature flag
+- new execution path runs on selected or mirrored workloads
+- telemetry compares both paths before full cutover
+
+### 18A.2 Rollback Requirement
+
+Each milestone should define:
+
+- rollback trigger criteria
+- rollback procedure
+- compatibility outputs preserved during rollback
+
+Typical rollback triggers include:
+
+- success rate drops below threshold
+- invalid output rate spikes
+- backlog growth exceeds threshold
+- runtime capability mismatch frequency spikes
+
+### 18A.3 Measurable Milestone Gates
+
+Milestones should be considered complete only when measurable gates are met.
+
+Examples:
+
+- diagnostician v2 success rate reaches target threshold
+- CLI coverage includes target operational flows
+- multiple runtime adapters pass integration validation
+
+## 18B. Observability Priority
+
+Observability must begin in Milestone 1.
+
+This refactor introduces new layers:
+
+- task lease logic
+- run records
+- context assembly
+- runtime selection
+- validation
+- commit transactions
+
+Without early telemetry in these layers, cutover failures will be difficult to diagnose.
+
 ## 19. Direct Reuse from Current Code
 
 ### 19.1 Keep and Elevate
@@ -944,3 +1217,239 @@ This draft should be followed by four deeper specs:
 4. `OpenClaw Adapter Migration Checklist`
 
 These documents should convert the current strategic draft into implementation-ready contracts.
+
+## 22. Design Refinements from Runtime Pain Review
+
+This section captures refinements derived from recent production pain and architectural review.
+
+These are not optional polish items. They are structural constraints intended to reduce system noise, remove non-deterministic failure points, and prevent bad runtime assumptions from cascading across the PD loop.
+
+### 22.1 Context Pre-assembly Service
+
+PD should introduce a shared `ContextAssembler` service.
+
+Its job is to gather deterministic context before any LLM reasoning begins.
+
+For diagnostician-like flows, this service should assemble a static `ContextPayload` that may include:
+
+- recent conversation history
+- relevant task metadata
+- relevant file diffs
+- relevant environment facts
+- recent pain or gate evidence
+- precomputed references to artifacts or trajectories
+
+The LLM should receive this payload directly.
+
+It should not be expected to reconstruct the payload by executing SOP steps such as:
+
+- querying sessions history
+- discovering relevant files dynamically
+- guessing which evidence sources to inspect
+
+#### Why this is required
+
+When retrieval is pushed into the LLM prompt protocol, the system becomes vulnerable to:
+
+- tool availability drift
+- latency spikes
+- output format drift
+- prompt expansion
+- higher branch complexity
+
+The architectural rule is:
+
+**context gathering is system work, not reasoning work**
+
+### 22.2 Lease-Based Task Processing
+
+All important PD background execution should move to explicit lease-based task processing.
+
+This replaces the current pattern where completion is inferred primarily from marker files or loosely correlated side effects.
+
+#### Required properties
+
+Every queued execution task should support:
+
+- explicit status
+- lease owner
+- lease expiry
+- retry count
+- terminal reason
+- crash recovery
+
+Minimum status model:
+
+- `pending`
+- `leased`
+- `succeeded`
+- `retry_wait`
+- `failed`
+
+#### Storage recommendation
+
+The architecture does not require SQLite in principle.
+
+However, given current repository patterns and the need for atomic updates, SQLite is the recommended first implementation target for run/task state.
+
+The key architectural requirement is not the specific backend.
+
+The key requirement is:
+
+**task execution state must have atomic transitions and lease semantics**
+
+### 22.3 Agent Identity Reification
+
+Agent roles must be upgraded from informal prompt identities into explicit `AgentSpec` entities.
+
+This is necessary because different PD tasks have materially different execution needs.
+
+Examples:
+
+- `diagnostician` needs strong reasoning and strict structured output
+- `heartbeat-checker` needs speed and low cost
+- `explorer` needs broader retrieval tolerance
+- `artificer` needs stronger code generation behavior
+- `replay-judge` needs strict schema conformance and scoring discipline
+
+Each `AgentSpec` should be able to specify:
+
+- preferred model profile
+- temperature or deterministic generation policy
+- input schema
+- output schema
+- timeout policy
+- retry policy
+- capability requirements
+- artifact contract
+
+The architectural rule is:
+
+**PD agents are first-class system entities, not prompt aliases**
+
+### 22.4 Command-as-Gateway
+
+The plugin layer should be reduced to event capture and forwarding wherever possible.
+
+In practice this means:
+
+- OpenClaw hooks detect signals
+- the OpenClaw adapter translates them
+- PD worker or PD CLI processes the heavy logic asynchronously
+
+The plugin should not remain the main execution surface for long-running or fragile workflows.
+
+#### Example target pattern
+
+When a pain signal is observed:
+
+1. adapter captures the signal
+2. adapter forwards it into PD runtime entrypoints
+3. PD task/run system schedules downstream processing
+4. diagnostician or follow-on workflow executes outside the hook's fragile lifecycle
+
+This design reduces host instability risk:
+
+- fewer long hook executions
+- lower editor latency risk
+- less coupling to host request scope
+- easier debugging outside the host process
+
+Important clarification:
+
+CLI is the preferred carrier for this gateway boundary, but CLI is still not the architecture itself.
+
+The real boundary is:
+
+- host hook layer
+- runtime adapter
+- PD runtime protocol
+- PD worker / control plane
+
+### 22.5 Unified Committer
+
+PD should introduce a shared `ResultCommitter` layer for all structured outputs produced by LLM-driven tasks.
+
+This committer should be responsible for:
+
+- output schema validation
+- empty-result rejection
+- artifact persistence
+- artifact registration
+- event emission
+- task status advancement
+- idempotent completion
+
+#### Example failure cases it must intercept
+
+- malformed JSON
+- empty JSON
+- missing required fields
+- inconsistent artifact and status writes
+- partial success that would poison downstream steps
+
+The architectural rule is:
+
+**unvalidated model output must never directly enter the next stage of the system**
+
+### 22.6 Runtime Capability Probe
+
+Each runtime adapter should expose a capability probe before PD schedules work onto it.
+
+This is an additional requirement beyond the earlier runtime protocol sketch because recent failures show that hidden capability assumptions are one of the main root causes of instability.
+
+Each runtime should be able to answer questions such as:
+
+- can it use tools
+- can it emit structured JSON reliably
+- can it write artifacts
+- can it run in a specified working directory
+- can it run long enough for the target workflow
+- can it be cancelled
+- can it choose models explicitly
+
+This should be surfaced via `RuntimeCapabilities` and consumed by workflow routing and agent scheduling.
+
+The architectural rule is:
+
+**PD must probe runtime capability instead of assuming runtime behavior**
+
+### 22.7 Priority of These Refinements
+
+Among the refinements in this section, the first implementation priorities should be:
+
+1. `ContextAssembler`
+2. lease-based task processing
+3. `ResultCommitter`
+4. `AgentSpec`
+5. command-as-gateway migration
+6. runtime capability probe
+
+This priority order is intentional.
+
+It moves the system from:
+
+- implicit prompt-side execution
+- weak state inference
+- dirty output propagation
+
+toward:
+
+- deterministic context assembly
+- explicit execution state
+- validated output flow
+
+### 22.8 Summary
+
+These refinements sharpen the architectural stance of v2:
+
+- code gathers context
+- LLM performs reasoning
+- runtime adapters isolate host complexity
+- committers guard state integrity
+- lease systems guard execution integrity
+- capability probes guard routing decisions
+
+In short:
+
+**PD should stop teaching the model how to operate the system, and instead let the system reliably feed the model the exact reasoning task it needs to solve.**

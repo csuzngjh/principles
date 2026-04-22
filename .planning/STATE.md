@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.22
+milestone: v2.0
 milestone_name: milestone
-status: complete
-last_updated: "2026-04-20T10:30:00.000Z"
-last_activity: 2026-04-20 — Phase 13 executed: AsyncQueueLock + migration README
+status: verifying
+last_updated: "2026-04-21T14:46:33.301Z"
+last_activity: 2026-04-21 — Phase 4 complete (2/2 plans, verification + deprecation)
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 47
+  completed_phases: 42
+  total_plans: 88
+  completed_plans: 99
   percent: 100
 ---
 
@@ -19,46 +19,58 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v1.22 PD CLI Redesign — Phase 8 (SDK Foundation)
+**Current Focus:** v2.0 M1 Foundation Contracts — Phase 4 complete, all M1 contracts verified and documented
 
 ## Current Position
 
-Phase: 8 (SDK Foundation — pending discuss+plan)
-Plan: Pending
-Status: Phase 8 context captured — ready for discuss
-Last activity: 2026-04-20 — Phase 13 shipped, v1.22 complete
-
-## Phase Progress
-
-| Phase | Name | Status |
-|-------|------|--------|
-| 8 | SDK Foundation | Context captured |
-| 9 | Pain Record CLI | Complete |
-| 10 | Samples CLI | Complete |
-| 11 | Evolution Tasks CLI | Complete |
-| 12 | Health + Central Sync CLI | Complete |
-| 13 | Migration Safeguards | Complete |
+Phase: 04-verification-doc-sync (complete)
+Status: Phase 4 complete (2/2 plans, verification + deprecation)
+Last activity: 2026-04-21 — Phase 4 complete (2/2 plans, verification + deprecation)
 
 ## Context
 
-**v1.22 Goal:** 将 PD 核心功能封装为独立 CLI 工具，保留原有 openclaw 工具作为过渡
+**v2.0 M1 Goal:** 冻结 runtime-v2 的核心 contracts，避免后续 milestone 各自发明接口
 
-**Target features:**
+**Phase 1 Complete:**
 
-- `pd pain record` — CLI 记录疼痛信号
-- `pd samples list/review` — CLI 样本管理
-- `pd evolution tasks` — CLI 进化任务
-- `pd health` — CLI 健康检查
-- `pd central sync` — CLI 中心同步
+- PDErrorCategorySchema: 16 TypeBox literals + Value.Check guard
+- AgentSpecSchema: 10 fields + sub-schemas for capabilities/timeout/retry
+- RuntimeKindSchema: 5 runtime literals
+- RuntimeCapabilitiesSchema: 9 capability flags + dynamicCapabilities
+- PDTaskStatusSchema: 5 state literals
+- TaskRecordSchema + DiagnosticianTaskRecordSchema
+- RuntimeSelectionCriteriaSchema + RuntimeSelector interface
+- PdError unified with PDErrorCategory (8 legacy codes mapped)
+- io.ts pre-existing type error fixed
 
-**Research flags:**
+**Phase 2 Complete:**
 
-- OpenClawPluginApi tight coupling (extract WorkspaceResolver first)
-- TrajectoryRegistry singleton (needs TrajectoryStore interface)
-- atomicWriteFileSync not exported from SDK
-- Dual-write race during migration (use existing asyncLockQueues)
+- HistoryQueryEntrySchema: role as 4-literal union (user/assistant/tool/system)
+- TrajectoryLocateQuerySchema, TrajectoryCandidateSchema, TrajectoryLocateResultSchema
+- HistoryQueryResultSchema: sourceRef + entries + truncated
+- DiagnosisTargetSchema: 5 optional fields shared interface (D-03)
+- ContextPayloadSchema + DiagnosticianContextPayloadSchema
+- DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema
+- RecommendationKindSchema: 5-literal union
+- DiagnosticianRecommendationSchema, DiagnosticianOutputV1Schema
+- DiagnosticianInvocationInputSchema (hybrid: schema + interface for D-02)
+- index.ts: 14 new schema re-exports
 
-**Next:** `/gsd-discuss-phase 8` — Phase 8 SDK Foundation
+- PDErrorCategorySchema: 16 TypeBox literals + Value.Check guard
+- AgentSpecSchema: 10 fields + sub-schemas for capabilities/timeout/retry
+- RuntimeKindSchema: 5 runtime literals
+- RuntimeCapabilitiesSchema: 9 capability flags + dynamicCapabilities
+- PDTaskStatusSchema: 5 state literals
+- TaskRecordSchema + DiagnosticianTaskRecordSchema
+- RuntimeSelectionCriteriaSchema + RuntimeSelector interface
+- PdError unified with PDErrorCategory (8 legacy codes mapped)
+- io.ts pre-existing type error fixed
 
----
-*Last updated: 2026-04-20 after Phase 12 shipped*
+**Canonical documents:**
+
+- docs/design/2026-04-21-pd-runtime-agnostic-architecture-v2.md
+- docs/spec/2026-04-21-pd-runtime-protocol-spec-v1.md
+- docs/spec/2026-04-21-diagnostician-v2-detailed-design.md
+- docs/pd-runtime-v2/*.md
+
+**Previous:** v1.22 PD CLI Redesign — SHIPPED 2026-04-20
