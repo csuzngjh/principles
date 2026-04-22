@@ -1,6 +1,46 @@
 # Milestones
 
-## Current: PD Runtime v2 — M2 Task/Run State Core (Started: 2026-04-22)
+## Current: PD Runtime v2 — M3 History Retrieval + Context Build (Started: 2026-04-22)
+
+**Goal:**
+
+- Deliver PD-owned retrieval pipeline: trajectory locate, history query, context build
+- Enforce workspace isolation, bounded history, degradation policy
+
+**Exit criteria:**
+
+1. `pd trajectory locate` — locate by trajectoryId, taskId, runId, date range, PD-managed hints
+2. `pd history query` — bounded history with cursor pagination + time windows
+3. `pd context build` — assemble DiagnosticianContextPayload from PD-owned retrieval
+4. Workspace isolation: all retrieval is workspace-scoped, no cross-workspace leakage
+5. Degradation policy: bounded fallback, warnings + telemetry, no silent failure, no crashes
+6. Degraded mode: status=degraded + warnings, task still proceeds
+
+**Non-goals (M4+ scope):**
+
+- Diagnostician runner v2 (M4)
+- Unified commit flow (M5)
+- OpenClaw adapter demotion (M6)
+- PD CLI control plane expansion (M7)
+
+**Authoritative boundary (M3 执行约束):**
+
+- All authoritative retrieval must use PD-owned stores/indexes/references as primary source
+- OpenClaw raw workspace/session files are NOT an authoritative retrieval source
+- External/host data may only be accessed through PD-managed references if already indexed by PD
+- Context build must be code-generated or template-generated; no LLM call inside context assembly
+
+**GSD files:**
+
+- `.planning/milestones/pd-runtime-v2-m3/REQUIREMENTS.md`
+- `.planning/milestones/pd-runtime-v2-m3/ROADMAP.md`
+- `.planning/phases/m3-*/`
+
+**Canonical docs:** `docs/pd-runtime-v2/`
+
+---
+
+## v2.1 M2 Task/Run State Core (Shipped: 2026-04-22)
 
 **Goal:**
 

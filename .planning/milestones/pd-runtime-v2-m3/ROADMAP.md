@@ -1,0 +1,161 @@
+# M3: History Retrieval + Context Build — Roadmap
+
+> Status: Active
+> Date: 2026-04-22
+> Milestone: v2.2
+> Phase numbering: m3-01 through m3-05 (continuing from M2)
+
+## Authoritative Boundary (执行约束)
+
+- All authoritative retrieval must use **PD-owned stores/indexes/references** as primary source
+- OpenClaw raw workspace/session files are **NOT** an authoritative retrieval source
+- External/host data may only be accessed through PD-managed references if already indexed by PD
+- **No LLM call inside context build** — context assembly must be code-generated or template-generated
+
+## Phases
+
+| # | Phase | Goal | Requirements | Success Criteria |
+|---|-------|------|--------------|------------------|
+| m3-01 | Trajectory Locator | Locate by trajectoryId, taskId, runId, date range, PD-managed hints (agentId/status: stretch if M2 index exists) | RET-01, RET-02, RET-03 | 5+ modes, agentId/status deferred if no stable M2 index |
+| m3-02 | Bounded History Query | Query run history with cursor pagination and time windows | RET-04, RET-05, RET-06 | Cursor pagination works, time window enforced |
+| m3-03 | Context Assembler | Assemble DiagnosticianContextPayload from retrieved runs (no LLM) | RET-07, RET-08 | Payload fields correct, ordering correct |
+| m3-04 | Degradation Policy | Graceful fallback on missing data, no throws, warnings emitted | RET-09, RET-10 | All error modes return safe fallbacks |
+| m3-05 | Workspace Isolation + Integration | Enforce workspace scoping, CLI integration, end-to-end tests | RET-11, RET-12, RET-13 | No cross-workspace leakage, CLI commands work |
+
+---
+
+## Phase m3-01: Trajectory Locator
+
+**Goal:** Provide trajectory locate functionality — by trajectoryId, taskId, runId, date range, PD-managed hints
+
+**Requirements:** RET-01, RET-02, RET-03
+
+**Table Stakes (有稳定索引才支持):**
+- `locateTrajectory(trajectoryId)` — exact match
+- `locateTrajectoryByTaskId(taskId)` — find associated trajectory
+- `locateTrajectoryByRunId(runId)` — find trajectory containing a specific run
+- `locateTrajectoriesByDateRange(start, end)` — bounded list
+- `locateTrajectoriesBySessionHint(hints)` — PD-managed hints (workspace, agent, time window)
+
+**Stretch (仅在 M2 store 有稳定索引时支持，否则 defer):**
+- `locateTrajectoriesByAgentId(agentId)` — requires agentId indexed on runs table
+- `locateTrajectoriesByStatus(status)` — requires executionStatus indexed
+
+**Plans:** 1 plan (wave 1)
+
+Plans:
+- [ ] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (3 tasks)
+
+**Success Criteria:**
+1. `locateTrajectory(trajectoryId)` returns trajectory or null
+2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory
+3. `locateTrajectoryByRunId(runId)` returns containing trajectory
+4. `locateTrajectoriesByDateRange(start, end)` returns bounded list
+5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results
+6. agentId/status modes: skip or gracefully degrade if no stable M2 index exists
+
+---
+
+## Phase m3-02: Bounded History Query
+
+**Goal:** Query run history with cursor pagination, time window limits, configurable page size
+
+**Requirements:** RET-04, RET-05, RET-06
+
+**Plans:** 1 plan (wave 1)
+
+Plans:
+- [ ] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (3 tasks)
+
+**Success Criteria:**
+1. `locateTrajectory(trajectoryId)` returns trajectory or null
+2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory
+3. `locateTrajectoryByRunId(runId)` returns containing trajectory
+4. `locateTrajectoriesByDateRange(start, end)` returns bounded list
+5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results
+6. agentId/status modes: skip or gracefully degrade if no stable M2 index exists
+
+---
+
+## Phase m3-03: Context Assembler
+
+**Goal:** Assemble DiagnosticianContextPayload from retrieved run history
+
+**Requirements:** RET-07, RET-08
+
+**Constraint: No LLM inside context assembly** — must be code-generated or template-generated
+
+**Plans:** 1 plan (wave 1)
+
+Plans:
+- [ ] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (3 tasks)
+
+**Success Criteria:**
+1. `locateTrajectory(trajectoryId)` returns trajectory or null
+2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory
+3. `locateTrajectoryByRunId(runId)` returns containing trajectory
+4. `locateTrajectoriesByDateRange(start, end)` returns bounded list
+5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results
+6. agentId/status modes: skip or gracefully degrade if no stable M2 index exists
+
+---
+
+## Phase m3-04: Degradation Policy
+
+**Goal:** Graceful degradation on all error modes — no throws, safe fallbacks, warnings + telemetry
+
+**Requirements:** RET-09, RET-10
+
+**Plans:** 1 plan (wave 1)
+
+Plans:
+- [ ] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (3 tasks)
+
+**Success Criteria:**
+1. `locateTrajectory(trajectoryId)` returns trajectory or null
+2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory
+3. `locateTrajectoryByRunId(runId)` returns containing trajectory
+4. `locateTrajectoriesByDateRange(start, end)` returns bounded list
+5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results
+6. agentId/status modes: skip or gracefully degrade if no stable M2 index exists
+
+---
+
+## Phase m3-05: Workspace Isolation + Integration
+
+**Goal:** Enforce workspace scoping on all operations, wire into CLI, end-to-end integration tests
+
+**Requirements:** RET-11, RET-12, RET-13
+
+**Plans:** 1 plan (wave 1)
+
+Plans:
+- [ ] m3-01-01-PLAN.md -- TrajectoryLocator interface + SqliteTrajectoryLocator implementation + test suite (3 tasks)
+
+**Success Criteria:**
+1. `locateTrajectory(trajectoryId)` returns trajectory or null
+2. `locateTrajectoryByTaskId(taskId)` returns associated trajectory
+3. `locateTrajectoryByRunId(runId)` returns containing trajectory
+4. `locateTrajectoriesByDateRange(start, end)` returns bounded list
+5. `locateTrajectoriesBySessionHint(hints)` returns PD-managed results
+6. agentId/status modes: skip or gracefully degrade if no stable M2 index exists
+
+---
+
+## Requirements Traceability
+
+| REQ-ID | Requirement | Phase | Notes |
+|--------|-------------|-------|-------|
+| RET-01 | Locate trajectory by trajectoryId (exact) | m3-01 | Table stakes |
+| RET-02 | Locate by taskId, runId, date range, session hints | m3-01 | Table stakes; agentId/status = stretch |
+| RET-03 | Locate trajectory by executionStatus | m3-01 | Stretch — only if M2 has stable status index |
+| RET-04 | Query run history by taskId with ordering | m3-02 | Table stakes |
+| RET-05 | Cursor-based pagination with page size cap | m3-02 | Table stakes |
+| RET-06 | Bounded time window queries | m3-02 | Table stakes |
+| RET-07 | Assemble DiagnosticianContextPayload from runs | m3-03 | Table stakes; no LLM |
+| RET-08 | Sort runs by attemptNumber ASC | m3-03 | Table stakes |
+| RET-09 | Trajectory not found → safe fallback | m3-04 | Table stakes |
+| RET-10 | Degradation emits warnings + telemetry | m3-04 | Table stakes |
+| RET-11 | Workspace ID required for all operations | m3-05 | Table stakes |
+| RET-12 | No cross-workspace data leakage | m3-05 | Table stakes |
+| RET-13 | CLI commands for locate / query / build | m3-05 | Table stakes |
