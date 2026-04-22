@@ -120,3 +120,6 @@ export { DefaultRetryPolicy } from './store/retry-policy.js';
 export type { RetryPolicy, RetryPolicyConfig } from './store/retry-policy.js';
 export { DefaultRecoverySweep } from './store/recovery-sweep.js';
 export type { RecoverySweep, RecoveryResult } from './store/recovery-sweep.js';
+
+// Migration bridge
+export { EvolutionQueueItemMigrator } from './store/task-migration.js';

@@ -46,7 +46,7 @@ export class SqliteRunStore implements RunStore {
       .prepare('SELECT * FROM runs WHERE run_id = ?')
       .get(runId) as Record<string, unknown> | undefined;
     if (!row) return null;
-    return this.rowToRecord(row);
+    return SqliteRunStore.rowToRecord(row);
   }
 
   async updateRun(
@@ -93,7 +93,7 @@ export class SqliteRunStore implements RunStore {
     const rows = db
       .prepare('SELECT * FROM runs WHERE task_id = ? ORDER BY started_at ASC')
       .all(taskId) as Record<string, unknown>[];
-    return rows.map((row) => this.rowToRecord(row));
+    return rows.map((row) => SqliteRunStore.rowToRecord(row));
   }
 
   async deleteRun(runId: string): Promise<boolean> {
@@ -102,7 +102,7 @@ export class SqliteRunStore implements RunStore {
     return result.changes > 0;
   }
 
-  private rowToRecord(row: Record<string, unknown>): RunRecord {
+  private static rowToRecord(row: Record<string, unknown>): RunRecord {
     const runId = String(row.run_id);
     const record: RunRecord = {
       runId,
@@ -116,11 +116,10 @@ export class SqliteRunStore implements RunStore {
       attemptNumber: Number(row.attempt_number ?? 0),
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
-      inputPayload: row.input_payload ? String(row.input_payload) : undefined,
-      outputPayload: row.output_payload ? String(row.output_payload) : undefined,
-      errorCategory: row.error_category
-        ? (String(row.error_category) as import('../error-categories.js').PDErrorCategory)
-        : undefined,
+      // Use ?? undefined so null DB values become undefined (TypeBox validates undefined for optional fields)
+      inputPayload: (row.input_payload as string | null) ?? undefined,
+      outputPayload: (row.output_payload as string | null) ?? undefined,
+      errorCategory: (row.error_category as string | null) ?? undefined,
     };
 
     if (!Value.Check(RunRecordSchema, record)) {
