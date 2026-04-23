@@ -17,6 +17,22 @@ export interface DiagnosticianValidationResult {
 }
 
 /**
+ * Options for DiagnosticianValidator.validate().
+ */
+export interface DiagnosticianValidateOptions {
+  /**
+   * When true, collect all errors before returning (verbose mode).
+   * When false/undefined, return immediately on first error (fail-fast).
+   */
+  readonly verbose?: boolean;
+  /**
+   * Valid sourceRef values from DiagnosticianContextPayload.sourceRefs.
+   * Used for evidence sourceRef existence check in verbose mode.
+   */
+  readonly sourceRefs?: readonly string[];
+}
+
+/**
  * Validator interface consumed by DiagnosticianRunner.
  *
  * m4-01 uses a pass-through implementation.
@@ -28,9 +44,14 @@ export interface DiagnosticianValidator {
    *
    * @param output - The raw diagnostician output to validate
    * @param taskId - Expected taskId for identity verification
+   * @param options - Optional options (verbose mode, sourceRefs for evidence back-check)
    * @returns Validation result with valid flag and any errors
    */
-  validate(output: DiagnosticianOutputV1, taskId: string): Promise<DiagnosticianValidationResult>;
+  validate(
+    output: DiagnosticianOutputV1,
+    taskId: string,
+    options?: DiagnosticianValidateOptions,
+  ): Promise<DiagnosticianValidationResult>;
 }
 
 /**
