@@ -3,9 +3,9 @@
 > **Audit trail only.** Do not use as input to planning, research, or execution agents.
 > Decisions are captured in CONTEXT.md — this log preserves the alternatives considered.
 
-**Date:** 2026-04-23
+**Date:** 2026-04-23 (updated)
 **Phase:** m4-03-Validator
-**Areas discussed:** Validation Strategy, Evidence Back-check Depth, Error Detail Format
+**Areas discussed:** Validation Strategy, Evidence Back-check Depth, Error Detail Format, Verbose API Design
 
 ---
 
@@ -28,8 +28,8 @@
 | 严格检查 sourceRef 存在性 | 验证 evidence.sourceRef 指向 context 中的真实记录 | ✓ (分层的一部分) |
 | Best-effort — 格式检查 | 只检查 sourceRef 格式（非空、合理的字符串） | ✓ (分层的一部分) |
 
-**User's choice:** 分层：标准模式严格检查，verbose 模式 best-effort
-**Notes:** 与验证策略的分层模式一致。
+**User's choice:** 分层：标准模式 best-effort，verbose 模式严格检查
+**Notes:** 修正了初始选择方向——标准模式快速路径只做格式检查，verbose 模式深入验证引用真实性。
 
 ---
 
@@ -42,6 +42,18 @@
 
 **User's choice:** 两者结合：摘要 + 详细共存
 **Notes:** errors[0] 是聚合摘要，后续 entries 是逐字段详情。
+
+---
+
+## Verbose API Design (第二轮更新)
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| 扩展 validate() 参数 | 添加 `options?: { verbose?: boolean }` 第三参数 | ✓ |
+| 独立 validateVerbose() 方法 | 新增方法，不修改现有签名 | |
+
+**User's choice:** 扩展 validate() 参数
+**Notes:** 向后兼容，options 可选，默认 undefined = 标准模式。D-01 已更新。
 
 ---
 

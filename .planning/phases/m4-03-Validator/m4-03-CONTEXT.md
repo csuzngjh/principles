@@ -29,16 +29,17 @@ Scope（REQUIREMENTS.md Section 2.3）：
 - **D-01:** 分层验证策略。
   标准模式（默认）：fail-fast，遇见第一个错误立即返回，errors 数组仅包含该错误。
   Verbose 模式：收集所有验证错误，errors 数组包含完整错误列表。
-  通过 `DiagnosticianValidator.validate()` 的 options 参数或构造函数控制模式。
+  通过 `DiagnosticianValidator.validate()` 的第三个参数 `options?: { verbose?: boolean }` 控制模式。
+  接口签名变更为 `validate(output, taskId, options?)`，向后兼容（options 可选，默认 undefined = 标准模式）。
   **Why:** fail-fast 适合快速路径，verbose 适合调试和详细诊断，两者在不同场景各有价值。
   **How to apply:** Validator 内部维护一个 errors[] 数组，fail-fast 模式下第一个错误就 resolve result；verbose 模式走完所有检查再 resolve。
 
 ### Evidence Back-check 深度（分层）
 
 - **D-02:** 分层 evidence 检查。
-  标准模式：严格检查 sourceRef 存在性（验证 evidence.sourceRef 指向 context 中的真实记录）。
-  Verbose 模式：best-effort 格式检查（验证 sourceRef 非空、格式合理，不验证引用有效性）。
-  **Why:** 严格检查可捕获假造 evidence，但依赖 context 数据完整性；best-effort 更宽松但更快。
+  标准模式：best-effort 格式检查（验证 evidence.sourceRef 非空、格式合理，不验证引用有效性）。
+  Verbose 模式：严格检查 sourceRef 存在性（验证 evidence.sourceRef 指向 context 中的真实记录）。
+  **Why:** 标准模式快速检查格式即可；verbose 模式深入验证引用真实性，适合调试和诊断。
   **How to apply:** evidence back-check 在 validate() 内部实现两层逻辑，根据 verbose 标志选择检查深度。
 
 ### 错误信息格式（两者共存）
