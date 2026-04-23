@@ -293,8 +293,10 @@ describe('DiagnosticianRunner telemetry emission', () => {
       'diagnostician_task_failed',
     ]);
     // Verify the task_failed event has max_attempts_exceeded
-    const lastCall = mocks._eventEmitter.emitTelemetry.mock.calls[mocks._eventEmitter.emitTelemetry.mock.calls.length - 1];
-    const lastEvent = lastCall[0] as { eventType: string; payload: { errorCategory: string } };
+    const calls = mocks._eventEmitter.emitTelemetry.mock.calls;
+    const lastCall = calls[calls.length - 1];
+    expect(lastCall).toBeDefined();
+    const lastEvent = lastCall![0] as { eventType: string; payload: { errorCategory: string } };
     expect(lastEvent.payload.errorCategory).toBe('max_attempts_exceeded');
   });
 
@@ -317,8 +319,10 @@ describe('DiagnosticianRunner telemetry emission', () => {
       'diagnostician_task_failed',
     ]);
     // Verify the task_failed event has workspace_invalid
-    const lastCall = mocks._eventEmitter.emitTelemetry.mock.calls[mocks._eventEmitter.emitTelemetry.mock.calls.length - 1];
-    const lastEvent = lastCall[0] as { eventType: string; payload: { errorCategory: string } };
+    const calls = mocks._eventEmitter.emitTelemetry.mock.calls;
+    const lastCall = calls[calls.length - 1];
+    expect(lastCall).toBeDefined();
+    const lastEvent = lastCall![0] as { eventType: string; payload: { errorCategory: string } };
     expect(lastEvent.payload.errorCategory).toBe('workspace_invalid');
   });
 });
