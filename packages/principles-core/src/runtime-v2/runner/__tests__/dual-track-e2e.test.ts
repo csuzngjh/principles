@@ -29,7 +29,6 @@ import type {
 } from '../diagnostician-validator.js';
 import { TestDoubleRuntimeAdapter } from '../../adapter/test-double-runtime-adapter.js';
 import type { TaskRecord } from '../../task-status.js';
-import type { PDErrorCategory } from '../../error-categories.js';
 
 // -- Test fixtures --
 
@@ -86,29 +85,29 @@ function makeDiagnosticianTaskInput(
 
 // -- AlwaysInvalidValidator for Scenario 3 --
 
-class AlwaysInvalidValidator implements DiagnosticianValidator {
-  async validate(
+const alwaysInvalidValidator: DiagnosticianValidator = {
+  validate(
     _output: Parameters<DiagnosticianValidator['validate']>[0],
     _taskId: string,
-  ): Promise<DiagnosticianValidationResult> {
+  ): DiagnosticianValidationResult {
     return {
       valid: false,
       errors: ['E2E test: always invalid'],
       errorCategory: 'output_invalid',
     };
-  }
-}
+  },
+};
 
 // -- Test setup --
 
 const TMP_ROOT = path.join(os.tmpdir(), `pd-dual-track-e2e-${process.pid}`);
 
 describe('DiagnosticianRunner Dual-Track E2E', () => {
-  let testDir: string;
-  let stateManager: RuntimeStateManager;
-  let contextAssembler: SqliteContextAssembler;
-  let historyQuery: SqliteHistoryQuery;
-  let eventEmitter: StoreEventEmitter;
+  let testDir = '';
+  let stateManager: RuntimeStateManager = undefined as unknown as RuntimeStateManager;
+  let contextAssembler: SqliteContextAssembler = undefined as unknown as SqliteContextAssembler;
+  let historyQuery: SqliteHistoryQuery = undefined as unknown as SqliteHistoryQuery;
+  let eventEmitter: StoreEventEmitter = undefined as unknown as StoreEventEmitter;
 
   beforeEach(async () => {
     testDir = path.join(TMP_ROOT, `e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -136,7 +135,7 @@ describe('DiagnosticianRunner Dual-Track E2E', () => {
   });
 
   function createRunner(
-    validator: DiagnosticianValidator = new PassThroughValidator(),
+    validator: DiagnosticianValidator,
     runtimeAdapter: TestDoubleRuntimeAdapter,
   ): DiagnosticianRunner {
     return new DiagnosticianRunner(
@@ -296,7 +295,7 @@ describe('DiagnosticianRunner Dual-Track E2E', () => {
       });
 
       // Use AlwaysInvalidValidator that always rejects output
-      const runner = createRunner(new AlwaysInvalidValidator(), runtimeAdapter);
+      const runner = createRunner(alwaysInvalidValidator, runtimeAdapter);
       const result = await runner.run(taskId);
 
       // Assertion 1: result.status === 'retried' (shouldRetry=true by default)
