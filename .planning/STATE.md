@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: milestone
-status: completed
-last_updated: "2026-04-23T06:33:02.797Z"
-last_activity: 2026-04-23 — m4-02 completed (1/1 plans, 18 new tests, 200 suite passing)
+milestone: v2.3
+milestone_name: M4 Diagnostician Runner v2
+status: active
+last_updated: "2026-04-23T07:30:00.000Z"
+last_activity: 2026-04-23 — m4-04 context gathered (retry_wait recovery + in-memory DB strategy)
 progress:
-  total_phases: 60
-  completed_phases: 49
-  total_plans: 103
-  completed_plans: 113
-  percent: 100
+  total_phases: 6
+  completed_phases: 3
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State: Principles
@@ -23,9 +23,9 @@ progress:
 
 ## Current Position
 
-Phase: m4-03: Validator (complete)
-Status: m4-03 complete (1/1 plans, 49 tests passing)
-Last activity: 2026-04-23 — m4-03 complete (DefaultDiagnosticianValidator + 49 tests)
+Phase: m4-04: RetryLeaseIntegration (planned)
+Status: m4-04 context gathered — ready for planning
+Last activity: 2026-04-23 — m4-04 context gathered (retry_wait recovery + in-memory DB strategy)
 
 ## Context
 
@@ -58,4 +58,4 @@ Last activity: 2026-04-23 — m4-03 complete (DefaultDiagnosticianValidator + 49
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
-**Previous:** v2.2 M3 History Retrieval + Context Build — SHIPPED 2026-04-23
+**Previous:** v2.3 M4 m4-03 Validator — SHIPPED 2026-04-23
