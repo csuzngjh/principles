@@ -98,3 +98,11 @@ gha-creds-*.json
 # Git worktrees
 .worktrees/
 .pd/
+
+# TypeScript generated sourcemaps in src/ (build output)
+packages/*/src/**/*.d.ts.map
+packages/*/src/**/*.js.map
+
+# TypeScript generated sourcemaps in src/
+packages/*/src/**/*.d.ts.map
+packages/*/src/**/*.js.map
