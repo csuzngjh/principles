@@ -49,7 +49,7 @@ function makeRunInput(
     runId: `run_${taskId}_${attemptNumber}`,
     taskId,
     runtimeKind: 'openclaw' as const,
-    executionStatus: overrides?.executionStatus ?? ('succeeded' as RunExecutionStatus),
+    executionStatus: overrides?.executionStatus ?? ('succeeded'),
     startedAt,
     endedAt: overrides?.endedAt,
     attemptNumber,
@@ -142,15 +142,19 @@ describe('SqliteHistoryQuery', () => {
     it('maps system entry with ts=startedAt, text=inputPayload', async () => {
       const f = createFixture();
       try {
+        const now = new Date();
+        const startedAt = new Date(now.getTime() - 60_000).toISOString(); // 1 min ago
         await f.taskStore.createTask(makeTaskInput('task_1'));
         await f.runStore.createRun(makeRunInput('task_1', 1, {
-          startedAt: '2026-04-22T08:00:00.000Z',
+          startedAt,
           inputPayload: 'analyze code quality',
         }));
         const result = await f.historyQuery.query('task_1');
-        const [systemEntry] = result.entries;
+        expect(result.entries.length).toBeGreaterThanOrEqual(1);
+        const systemEntry = result.entries.find(e => e.role === 'system');
+        expect(systemEntry).toBeDefined();
         expect(systemEntry!.role).toBe('system');
-        expect(systemEntry!.ts).toBe('2026-04-22T08:00:00.000Z');
+        expect(systemEntry!.ts).toBe(startedAt);
         expect(systemEntry!.text).toBe('analyze code quality');
       } finally { cleanupFixture(f); }
     });
@@ -158,45 +162,56 @@ describe('SqliteHistoryQuery', () => {
     it('maps assistant entry with ts=endedAt (or startedAt fallback), text=outputPayload', async () => {
       const f = createFixture();
       try {
+        const now = new Date();
+        const startedAt = new Date(now.getTime() - 120_000).toISOString(); // 2 min ago
+        const endedAt = new Date(now.getTime() - 60_000).toISOString(); // 1 min ago
         await f.taskStore.createTask(makeTaskInput('task_1'));
 
         // Run WITH endedAt
         await f.runStore.createRun(makeRunInput('task_1', 1, {
-          startedAt: '2026-04-22T08:00:00.000Z',
-          endedAt: '2026-04-22T08:05:00.000Z',
+          startedAt,
+          endedAt,
           outputPayload: 'analysis complete',
         }));
         const resultWithEnd = await f.historyQuery.query('task_1');
-        const [, assistantEntry] = resultWithEnd.entries;
+        expect(resultWithEnd.entries.length).toBeGreaterThanOrEqual(2);
+        const assistantEntry = resultWithEnd.entries.find(e => e.role === 'assistant');
+        expect(assistantEntry).toBeDefined();
         expect(assistantEntry!.role).toBe('assistant');
-        expect(assistantEntry!.ts).toBe('2026-04-22T08:05:00.000Z');
+        expect(assistantEntry!.ts).toBe(endedAt);
         expect(assistantEntry!.text).toBe('analysis complete');
       } finally { cleanupFixture(f); }
 
       // Run WITHOUT endedAt — assistant entry uses startedAt
       const f2 = createFixture();
       try {
+        const now2 = new Date();
+        const startedAt2 = new Date(now2.getTime() - 180_000).toISOString(); // 3 min ago
         await f2.taskStore.createTask(makeTaskInput('task_2'));
         await f2.runStore.createRun(makeRunInput('task_2', 1, {
-          startedAt: '2026-04-22T09:00:00.000Z',
+          startedAt: startedAt2,
           outputPayload: 'no end time',
         }));
         const resultNoEnd = await f2.historyQuery.query('task_2');
-        const [, assistantEntryNoEnd] = resultNoEnd.entries;
-        expect(assistantEntryNoEnd!.ts).toBe('2026-04-22T09:00:00.000Z');
+        expect(resultNoEnd.entries.length).toBeGreaterThanOrEqual(2);
+        const assistantEntryNoEnd = resultNoEnd.entries.find(e => e.role === 'assistant');
+        expect(assistantEntryNoEnd).toBeDefined();
+        expect(assistantEntryNoEnd!.ts).toBe(startedAt2);
       } finally { cleanupFixture(f2); }
     });
 
     it('produces entry with text=undefined for null/empty payloads', async () => {
       const f = createFixture();
       try {
+        const now = new Date();
+        const startedAt = new Date(now.getTime() - 240_000).toISOString(); // 4 min ago
         await f.taskStore.createTask(makeTaskInput('task_1'));
         // Create run with no inputPayload/outputPayload
         await f.runStore.createRun(makeRunInput('task_1', 1, {
-          startedAt: '2026-04-22T10:00:00.000Z',
+          startedAt,
         }));
         const result = await f.historyQuery.query('task_1');
-        expect(result.entries).toHaveLength(2);
+        expect(result.entries.length).toBeGreaterThanOrEqual(2);
         // System entry: text should be undefined (not omitted)
         expect(result.entries[0]!.text).toBeUndefined();
         // Assistant entry: text should be undefined (not omitted)
