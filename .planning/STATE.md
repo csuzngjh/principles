@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: milestone
 status: completed
 last_updated: "2026-04-23T09:55:23.039Z"
-last_activity: 2026-04-23 — m4-05 executed (8 telemetry events + CLI run/status, 8 tests passing)
+last_activity: 2026-04-23 — m4-06 executed (4 E2E scenarios, all passing); M4 Diagnostician Runner v2 SHIPPED
 progress:
   total_phases: 63
   completed_phases: 52
@@ -19,13 +19,13 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.3 M4 Diagnostician Runner v2 — Active
+**Current Focus:** v2.3 M4 Diagnostician Runner v2 — SHIPPED (2026-04-23)
 
 ## Current Position
 
-Phase: m4-06: DualTrackE2E (next)
-Status: m4-05 complete — ready for m4-06
-Last activity: 2026-04-23 — m4-05 executed (8 telemetry events + CLI run/status, 8 tests passing); m4-06 discuss-phase complete (4 decisions)
+Phase: m4-06: DualTrackE2E (complete)
+Status: m4-06 complete — M4 SHIPPED
+Last activity: 2026-04-23 — m4-06 executed (4 E2E scenarios, all passing); M4 Diagnostician Runner v2 SHIPPED
 
 ## Context
 

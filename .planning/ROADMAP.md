@@ -48,7 +48,7 @@
 </details>
 
 <details>
-<summary>🔵 v2.3 M4 Diagnostician Runner v2 (Phase m4-01 through m4-06) — Active</summary>
+<summary>✅ v2.3 M4 Diagnostician Runner v2 (Phase m4-01 through m4-06) — SHIPPED 2026-04-23</summary>
 
 - [x] m4-01: RunnerCore (3/3 plans) — completed 2026-04-23
   Plans:
@@ -61,7 +61,9 @@
 - [x] m4-03: Validator (1/1 plans) — completed 2026-04-23
 - [x] m4-04: RetryLeaseIntegration (1/1 plans) — completed 2026-04-23
 - [x] m4-05: TelemetryCLI (1/1 plans) — completed 2026-04-23
-- [ ] m4-06: DualTrackE2E — Pending
+- [x] m4-06: DualTrackE2E (1/1 plans) — completed 2026-04-23
+  Plans:
+  - [x] m4-06-01-PLAN.md — Dual-track E2E verification with TestDoubleRuntimeAdapter
 
 </details>
 
@@ -94,7 +96,7 @@
 | m4-03 Validator | v2.3 | 1/1 | Complete | 2026-04-23 |
 | m4-04 RetryLeaseIntegration | v2.3 | 1/1 | Complete | 2026-04-23 |
 | m4-05 TelemetryCLI | v2.3 | 1/1 | Complete | 2026-04-23 |
-| m4-06 DualTrackE2E | v2.3 | 0/? | Pending | — |
+| m4-06 DualTrackE2E | v2.3 | 1/1 | Complete | 2026-04-23 |
 
 ---
 *Last updated: 2026-04-23*

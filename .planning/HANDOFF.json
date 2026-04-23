@@ -7,7 +7,7 @@
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "paused",
+  "status": "ready_for_planning",
   "completed_tasks": [],
   "remaining_tasks": [
     {"id": 1, "name": "Discuss-phase to capture design decisions", "status": "not_started"},
