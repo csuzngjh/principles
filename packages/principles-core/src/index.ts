@@ -174,3 +174,45 @@ export type {
 // Runtime integration layer
 export { RuntimeStateManager } from './runtime-v2/index.js';
 export type { RuntimeStateManagerOptions } from './runtime-v2/index.js';
+
+// Store exports (for pd-cli and openclaw-plugin direct usage)
+export {
+  SqliteTaskStore,
+  SqliteRunStore,
+  SqliteConnection,
+  SqliteTrajectoryLocator,
+  SqliteHistoryQuery,
+  SqliteContextAssembler,
+  ResilientContextAssembler,
+  ResilientHistoryQuery,
+  DEFAULT_HISTORY_PAGE_SIZE,
+  MAX_HISTORY_PAGE_SIZE,
+  DEFAULT_TIME_WINDOW_MS,
+} from './runtime-v2/index.js';
+export type {
+  HistoryQuery,
+  HistoryQueryCursorData,
+  HistoryQueryOptions,
+} from './runtime-v2/index.js';
+export type { ContextAssembler } from './runtime-v2/store/context-assembler.js';
+export type {
+  TaskStore,
+  TaskStoreFilter,
+  TaskStoreUpdatePatch,
+} from './runtime-v2/store/task-store.js';
+export type {
+  RunStore,
+  RunRecord,
+} from './runtime-v2/store/run-store.js';
+export type { TrajectoryLocator } from './runtime-v2/store/trajectory-locator.js';
+
+// Lease & Recovery
+export { DefaultLeaseManager } from './runtime-v2/index.js';
+export type { LeaseManager, AcquireLeaseOptions } from './runtime-v2/index.js';
+export { DefaultRetryPolicy } from './runtime-v2/index.js';
+export type { RetryPolicy, RetryPolicyConfig } from './runtime-v2/index.js';
+export { DefaultRecoverySweep } from './runtime-v2/index.js';
+export type { RecoverySweep, RecoveryResult } from './runtime-v2/index.js';
+
+// Event emitter
+export { StoreEventEmitter, storeEmitter } from './runtime-v2/index.js';

@@ -20,7 +20,7 @@ import { Value } from '@sinclair/typebox/value';
 // ---------------------------------------------------------------------------
 
 /**
- * The 11 telemetry event types: 3 core evolution events + 8 M2 state transition events.
+ * The 12 telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation.
  *
  * Core evolution events (aligned with EvolutionHook methods):
  * - pain_detected -> EvolutionStage 'pain_detected'
@@ -31,6 +31,9 @@ import { Value } from '@sinclair/typebox/value';
  * - lease_acquired, lease_released, lease_renewed, lease_expired
  * - task_retried, task_failed, task_succeeded
  * - run_started, run_completed
+ *
+ * M3 degradation events:
+ * - degradation_triggered — graceful degradation fallback activated
  */
 export const TelemetryEventType = Type.Union([
   Type.Literal('pain_detected'),
@@ -46,6 +49,8 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('task_succeeded'),
   Type.Literal('run_started'),
   Type.Literal('run_completed'),
+  // M3: Degradation events
+  Type.Literal('degradation_triggered'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

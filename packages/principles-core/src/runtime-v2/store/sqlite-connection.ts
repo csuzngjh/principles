@@ -34,13 +34,14 @@ export class SqliteConnection {
     this.db = new Database(this.dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
+    this.db.pragma('foreign_keys = ON');
 
     this.initSchema();
     return this.db;
   }
 
   private initSchema(): void {
-    const db = this.db!;
+    const db = this.db as Database.Database;
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
@@ -55,13 +56,30 @@ export class SqliteConnection {
         max_attempts INTEGER NOT NULL DEFAULT 3,
         last_error TEXT,
         input_ref TEXT,
-        result_ref TEXT
+        result_ref TEXT,
+        diagnostic_json TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_task_kind ON tasks(task_kind);
       CREATE INDEX IF NOT EXISTS idx_tasks_lease_expires_at ON tasks(lease_expires_at);
+      CREATE INDEX IF NOT EXISTS idx_tasks_session_id_hint
+        ON tasks(json_extract(diagnostic_json, '$.sessionIdHint'));
     `);
+
+    // Migration: add diagnostic_json column to existing tasks table
+    // (CREATE TABLE IF NOT EXISTS only affects new DBs)
+    const taskColumns = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
+    if (!taskColumns.some((c) => c.name === 'diagnostic_json')) {
+      db.exec('ALTER TABLE tasks ADD COLUMN diagnostic_json TEXT');
+    }
+
+    // Migration: add sessionIdHint expression index (idempotent)
+    try {
+      db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_session_id_hint ON tasks(json_extract(diagnostic_json, '$.sessionIdHint'))");
+    } catch {
+      // Index may already exist — ignore
+    }
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS runs (
@@ -79,17 +97,48 @@ export class SqliteConnection {
         attempt_number INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        FOREIGN KEY (task_id) REFERENCES tasks(task_id)
+        FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
       CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(execution_status);
       CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);
     `);
+
+    // Migration: rewrite runs FK with ON DELETE CASCADE (SQLite doesn't support ALTER FK)
+    // Only needed for pre-existing runs tables that lack CASCADE
+    const fkInfo = db.prepare('PRAGMA foreign_key_list(runs)').all() as { id: number; seq: number; from: string; to: string; on_delete: string }[];
+    if (fkInfo.length > 0 && !fkInfo.some((fk) => fk.on_delete === 'CASCADE')) {
+      db.exec(`
+        ALTER TABLE runs RENAME TO runs_backup;
+        CREATE TABLE runs (
+          run_id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          runtime_kind TEXT NOT NULL,
+          execution_status TEXT NOT NULL DEFAULT 'queued',
+          started_at TEXT NOT NULL,
+          ended_at TEXT,
+          reason TEXT,
+          output_ref TEXT,
+          input_payload TEXT,
+          output_payload TEXT,
+          error_category TEXT,
+          attempt_number INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+        );
+        INSERT INTO runs SELECT * FROM runs_backup;
+        DROP TABLE runs_backup;
+      `);
+    }
   }
 
   /** Closes the underlying database connection. */
   close(): void {
     if (this.db) {
+      // Checkpoint WAL before closing so all data is flushed to the main DB file.
+      // TRUNCATE also shrinks the WAL file, preventing unbounded growth on Windows.
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
       this.db.close();
       this.db = null;
     }

@@ -13,7 +13,7 @@ import type { RunStore } from './run-store.js';
 export class SqliteRunStore implements RunStore {
   constructor(private readonly connection: SqliteConnection) {}
 
-  async createRun(record: Omit<RunRecord, never>): Promise<RunRecord> {
+  async createRun(record: Omit<RunRecord, 'createdAt' | 'updatedAt'>): Promise<RunRecord> {
     const db = this.connection.getDb();
     const now = new Date().toISOString();
 

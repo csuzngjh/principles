@@ -43,6 +43,7 @@ export const TrajectoryLocateQuerySchema = Type.Object({
     end: Type.String({ minLength: 1 }),
   })),
   workspace: Type.Optional(Type.String({ minLength: 1 })),
+  executionStatus: Type.Optional(Type.String({ minLength: 1 })),
 });
  
 export type TrajectoryLocateQuery = Static<typeof TrajectoryLocateQuerySchema>;
@@ -69,6 +70,7 @@ export const HistoryQueryResultSchema = Type.Object({
   sourceRef: Type.String({ minLength: 1 }),
   entries: Type.Array(HistoryQueryEntrySchema),
   truncated: Type.Boolean(),
+  nextCursor: Type.Optional(Type.String({ minLength: 1 })),
 });
  
 export type HistoryQueryResult = Static<typeof HistoryQueryResultSchema>;

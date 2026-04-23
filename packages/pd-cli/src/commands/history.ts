@@ -1,0 +1,63 @@
+/**
+ * pd history query — Query run history for a task with pagination.
+ *
+ * Usage:
+ *   pd history query <taskId> [--limit N] [--cursor <cursor>]
+ *   pd history query <taskId> --from <date> --to <date>
+ */
+import { SqliteConnection, SqliteHistoryQuery } from '@principles/core';
+import { resolveWorkspaceDir } from '../resolve-workspace.js';
+
+interface HistoryQueryOptions {
+  limit?: number;
+  cursor?: string;
+  from?: string;
+  to?: string;
+  json?: boolean;
+  workspace?: string;
+}
+
+export async function handleHistoryQuery(taskId: string, opts: HistoryQueryOptions): Promise<void> {
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const connection = new SqliteConnection(workspaceDir);
+
+  try {
+    const historyQuery = new SqliteHistoryQuery(connection);
+
+    const queryOpts = opts.limit || opts.from || opts.to
+      ? {
+          limit: opts.limit,
+          timeWindowStart: opts.from,
+          timeWindowEnd: opts.to,
+        }
+      : undefined;
+    const result = await historyQuery.query(taskId, opts.cursor, queryOpts);
+
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (result.entries.length === 0) {
+      console.log('No history entries found.');
+      return;
+    }
+
+    console.log(`\nHistory for ${taskId} (${result.entries.length} entries${result.truncated ? ', truncated' : ''}):\n`);
+    for (const entry of result.entries) {
+      const text = entry.text ? (entry.text.length > 60 ? entry.text.substring(0, 57) + '...' : entry.text) : '<empty>';
+      console.log('  [%s] %-8s %s', entry.ts.substring(11, 19), entry.role, text);
+    }
+
+    if (result.nextCursor) {
+      console.log(`\n  nextCursor: ${result.nextCursor}`);
+    }
+    console.log('');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Error: ${message}`);
+    process.exit(1);
+  } finally {
+    connection.close();
+  }
+}

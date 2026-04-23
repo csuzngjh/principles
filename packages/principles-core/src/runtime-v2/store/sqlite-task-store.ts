@@ -13,13 +13,13 @@ import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task-st
 export class SqliteTaskStore implements TaskStore {
   constructor(private readonly connection: SqliteConnection) {}
 
-  async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
+  async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'> & { diagnosticJson?: string }): Promise<TaskRecord> {
     const db = this.connection.getDb();
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_owner, lease_expires_at, last_error, input_ref, result_ref)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, lease_owner, lease_expires_at, last_error, input_ref, result_ref, diagnostic_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.taskKind,
@@ -33,6 +33,7 @@ export class SqliteTaskStore implements TaskStore {
       record.lastError ?? null,
       record.inputRef ?? null,
       record.resultRef ?? null,
+      (record as { diagnosticJson?: string }).diagnosticJson ?? null,
     );
 
     return (await this.getTask(record.taskId)) as TaskRecord;
@@ -61,6 +62,7 @@ export class SqliteTaskStore implements TaskStore {
     if (patch.lastError !== undefined) { sets.push('last_error = ?'); values.push(patch.lastError); }
     if (patch.inputRef !== undefined) { sets.push('input_ref = ?'); values.push(patch.inputRef); }
     if (patch.resultRef !== undefined) { sets.push('result_ref = ?'); values.push(patch.resultRef); }
+    if (patch.diagnosticJson !== undefined) { sets.push('diagnostic_json = ?'); values.push(patch.diagnosticJson); }
 
     values.push(taskId);
 
@@ -101,9 +103,10 @@ export class SqliteTaskStore implements TaskStore {
     return result.changes > 0;
   }
 
-  private rowToRecord(row: Record<string, unknown>): TaskRecord {
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private rowToRecord(this: SqliteTaskStore, row: Record<string, unknown>): TaskRecord {
     const taskId = String(row.task_id);
-    const record: TaskRecord = {
+    const record: TaskRecord & { diagnosticJson?: string } = {
       taskId,
       taskKind: String(row.task_kind),
       status: String(row.status) as PDTaskStatus,
@@ -117,6 +120,10 @@ export class SqliteTaskStore implements TaskStore {
       inputRef: row.input_ref ? String(row.input_ref) : undefined,
       resultRef: row.result_ref ? String(row.result_ref) : undefined,
     };
+
+    if (row.diagnostic_json && typeof row.diagnostic_json === 'string') {
+      record.diagnosticJson = row.diagnostic_json;
+    }
 
     if (!Value.Check(TaskRecordSchema, record)) {
       throw new PDRuntimeError(
