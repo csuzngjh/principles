@@ -101,6 +101,7 @@ interface MockStateful {
   markTaskRetryWait: ReturnType<typeof vi.fn>;
   updateRunOutput: ReturnType<typeof vi.fn>;
   getRetryPolicy: ReturnType<typeof vi.fn>;
+  getRunsByTask: ReturnType<typeof vi.fn>;
 }
 
 interface MockAdapter {
@@ -138,6 +139,7 @@ function createMocks() {
       calculateBackoff: vi.fn().mockReturnValue(30_000),
       shouldRetry: vi.fn().mockReturnValue(true),
     }),
+    getRunsByTask: vi.fn().mockResolvedValue([{ runId: RUN_ID, taskId: TASK_ID }]),
   };
 
   const mockContextAssembler: MockAssembler = {

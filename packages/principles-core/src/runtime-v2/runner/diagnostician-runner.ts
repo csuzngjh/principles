@@ -100,12 +100,16 @@ export class DiagnosticianRunner {
    */
   async run(taskId: string): Promise<RunnerResult> {
     try {
-      // 1. Acquire lease (atomically creates RunRecord)
+      // 1. Acquire lease (atomically creates RunRecord in the store)
       const leasedTask = await this.stateManager.acquireLease({
         taskId,
         owner: this.resolvedOptions.owner,
         runtimeKind: this.resolvedOptions.runtimeKind,
       });
+
+      // Look up the store's runId for this attempt (acquireLease creates it).
+      // The adapter's RunHandle.runId is separate from the store's runId.
+      const storeRunId = await this.resolveStoreRunId(taskId);
 
       // 2. Build context
       this.phase = RunnerPhase.BuildingContext;
@@ -138,8 +142,8 @@ export class DiagnosticianRunner {
         });
       }
 
-      // 8. Succeed task -- store output and mark succeeded
-      return await this.succeedTask({ taskId, runId: runHandle.runId, output, task: leasedTask, contextHash });
+      // 8. Succeed task -- store output and mark succeeded using store's runId
+      return await this.succeedTask({ taskId, runId: storeRunId, output, task: leasedTask, contextHash });
     } catch (error) {
       return await this.handleLeaseOrPhaseError(taskId, error);
     }
@@ -149,6 +153,21 @@ export class DiagnosticianRunner {
 
   private async buildContext(taskId: string): Promise<DiagnosticianContextPayload> {
     return this.contextAssembler.assemble(taskId);
+  }
+
+  /**
+   * Resolve the store's runId for the latest run of a task.
+   * acquireLease creates a RunRecord with a deterministic ID (run_{taskId}_{attempt}).
+   * The adapter's RunHandle.runId is separate -- we need the store's ID for
+   * updateRunOutput and other store operations.
+   */
+  private async resolveStoreRunId(taskId: string): Promise<string> {
+    const runs = await this.stateManager.getRunsByTask(taskId);
+    const latestRun = runs[runs.length - 1];
+    if (!latestRun) {
+      throw new PDRuntimeError('storage_unavailable', `No run record found for task ${taskId} after lease acquisition`);
+    }
+    return latestRun.runId;
   }
 
   private async invokeRuntime(context: DiagnosticianContextPayload, taskId: string): Promise<RunHandle> {
