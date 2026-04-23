@@ -42,12 +42,13 @@ function buildStartRunInput(
 /** Minimal DiagnosticianContextPayload for testing. */
 function makeTestContext(): DiagnosticianContextPayload {
   return {
-    taskId: 'test-task-001',
-    diagnosisTarget: { taskIds: ['test-task-001'], timeWindow: { start: '2026-01-01T00:00:00.000Z', end: '2026-01-02T00:00:00.000Z' } },
-    recentHistory: { entries: [], queryDurationMs: 0 },
-    trajectoryMatches: [],
+    contextId: 'ctx-test-001',
     contextHash: 'abc123',
-    assembledAt: '2026-01-01T12:00:00.000Z',
+    taskId: 'test-task-001',
+    workspaceDir: '/tmp/test',
+    sourceRefs: [],
+    diagnosisTarget: { reasonSummary: 'Test diagnosis target', severity: 'medium' },
+    conversationWindow: [],
   };
 }
 

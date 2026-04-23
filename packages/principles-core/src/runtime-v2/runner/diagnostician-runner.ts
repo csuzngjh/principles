@@ -118,6 +118,7 @@ export class DiagnosticianRunner {
    * Each invocation is independent.
    */
   async run(taskId: string): Promise<RunnerResult> {
+    this.phase = RunnerPhase.Idle;
     try {
       // 1. Acquire lease (atomically creates RunRecord in the store)
       const leasedTask = await this.stateManager.acquireLease({
@@ -239,8 +240,12 @@ export class DiagnosticianRunner {
       await this.sleep(this.resolvedOptions.pollIntervalMs);
     }
 
-    // Timeout -- cancel the run
-    await this.runtimeAdapter.cancelRun(runHandle.runId);
+    // Timeout -- cancel the run gracefully, preserving the timeout error
+    try {
+      await this.runtimeAdapter.cancelRun(runHandle.runId);
+    } catch {
+      // Cancellation failed but timeout error is the primary failure to report
+    }
     throw new PDRuntimeError('timeout', `Run ${runHandle.runId} timed out after ${this.resolvedOptions.timeoutMs}ms`);
   }
 
@@ -309,6 +314,13 @@ export class DiagnosticianRunner {
     error: unknown,
   ): Promise<RunnerResult> {
     const classified = this.classifyError(error);
+
+    // Emit: diagnostician_run_failed (for phase/lease errors before retry decision)
+    this.emitDiagnosticianEvent('diagnostician_run_failed', taskId, {
+      errorCategory: classified.category,
+      errorMessage: classified.message,
+    });
+
     // When acquireLease fails we don't have a TaskRecord yet.
     // Build a synthetic one for retry policy evaluation.
     const task: TaskRecord = {

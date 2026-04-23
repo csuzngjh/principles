@@ -293,10 +293,10 @@ describe('DiagnosticianRunner telemetry emission', () => {
       'diagnostician_task_failed',
     ]);
     // Verify the task_failed event has max_attempts_exceeded
-    const calls = mocks._eventEmitter.emitTelemetry.mock.calls;
+    const {calls} = mocks._eventEmitter.emitTelemetry.mock;
     const lastCall = calls[calls.length - 1];
     expect(lastCall).toBeDefined();
-    const lastEvent = lastCall![0] as { eventType: string; payload: { errorCategory: string } };
+    const lastEvent = (lastCall as unknown[])[0] as { eventType: string; payload: { errorCategory: string } };
     expect(lastEvent.payload.errorCategory).toBe('max_attempts_exceeded');
   });
 
@@ -316,13 +316,14 @@ describe('DiagnosticianRunner telemetry emission', () => {
     // Only lease event before context build fails (permanent error path skips context_built, run_started)
     expect(eventTypes).toEqual([
       'diagnostician_task_leased',
+      'diagnostician_run_failed',
       'diagnostician_task_failed',
     ]);
     // Verify the task_failed event has workspace_invalid
-    const calls = mocks._eventEmitter.emitTelemetry.mock.calls;
+    const {calls} = mocks._eventEmitter.emitTelemetry.mock;
     const lastCall = calls[calls.length - 1];
     expect(lastCall).toBeDefined();
-    const lastEvent = lastCall![0] as { eventType: string; payload: { errorCategory: string } };
+    const lastEvent = (lastCall as unknown[])[0] as { eventType: string; payload: { errorCategory: string } };
     expect(lastEvent.payload.errorCategory).toBe('workspace_invalid');
   });
 });
