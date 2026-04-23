@@ -20,7 +20,7 @@ import { Value } from '@sinclair/typebox/value';
 // ---------------------------------------------------------------------------
 
 /**
- * The 12 telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation.
+ * The 21 telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation + 8 M4 diagnostician.
  *
  * Core evolution events (aligned with EvolutionHook methods):
  * - pain_detected -> EvolutionStage 'pain_detected'
@@ -34,6 +34,16 @@ import { Value } from '@sinclair/typebox/value';
  *
  * M3 degradation events:
  * - degradation_triggered — graceful degradation fallback activated
+ *
+ * M4 diagnostician runner events:
+ * - diagnostician_task_leased — runner acquired lease on a task
+ * - diagnostician_context_built — context assembly completed
+ * - diagnostician_run_started — runtime invocation started
+ * - diagnostician_run_failed — runtime execution failed
+ * - diagnostician_output_invalid — output validation failed
+ * - diagnostician_task_succeeded — task marked succeeded
+ * - diagnostician_task_retried — task sent to retry_wait
+ * - diagnostician_task_failed — task permanently failed
  */
 export const TelemetryEventType = Type.Union([
   Type.Literal('pain_detected'),
@@ -49,8 +59,17 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('task_succeeded'),
   Type.Literal('run_started'),
   Type.Literal('run_completed'),
-  // M3: Degradation events
+// M3: Degradation events
   Type.Literal('degradation_triggered'),
+  // M4: Diagnostician runner events
+  Type.Literal('diagnostician_task_leased'),
+  Type.Literal('diagnostician_context_built'),
+  Type.Literal('diagnostician_run_started'),
+  Type.Literal('diagnostician_run_failed'),
+  Type.Literal('diagnostician_output_invalid'),
+  Type.Literal('diagnostician_task_succeeded'),
+  Type.Literal('diagnostician_task_retried'),
+  Type.Literal('diagnostician_task_failed'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
