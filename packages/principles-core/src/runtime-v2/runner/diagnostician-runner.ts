@@ -31,6 +31,7 @@ import type { PDErrorCategory } from '../error-categories.js';
 import type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './diagnostician-runner-options.js';
 import type { DiagnosticianValidator } from './diagnostician-validator.js';
 import type { RunnerResult } from './runner-result.js';
+import type { TelemetryEvent } from '../../telemetry-event.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { RunnerPhase } from './runner-phase.js';
 import { resolveRunnerOptions } from './diagnostician-runner-options.js';
@@ -93,6 +94,24 @@ export class DiagnosticianRunner {
   }
 
   /**
+   * Emit a diagnostician telemetry event via the store event emitter.
+   */
+  private emitDiagnosticianEvent(
+    eventType: string,
+    taskId: string,
+    payload: Record<string, unknown>,
+  ): void {
+    this.eventEmitter.emitTelemetry({
+      eventType: eventType as TelemetryEvent['eventType'],
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: this.resolvedOptions.owner,
+      agentId: 'diagnostician',
+      payload,
+    });
+  }
+
+  /**
    * Execute the full diagnostician lifecycle for a task.
    *
    * The runner does NOT hold mutable state between run() calls.
@@ -107,6 +126,12 @@ export class DiagnosticianRunner {
         runtimeKind: this.resolvedOptions.runtimeKind,
       });
 
+      // Emit: diagnostician_task_leased
+      this.emitDiagnosticianEvent('diagnostician_task_leased', taskId, {
+        taskKind: leasedTask.taskKind,
+        attemptCount: leasedTask.attemptCount,
+      });
+
       // Look up the store's runId for this attempt (acquireLease creates it).
       // The adapter's RunHandle.runId is separate from the store's runId.
       const storeRunId = await this.resolveStoreRunId(taskId);
@@ -116,9 +141,20 @@ export class DiagnosticianRunner {
       const context = await this.buildContext(taskId);
       const contextHash: string = context.contextHash;
 
+      // Emit: diagnostician_context_built
+      this.emitDiagnosticianEvent('diagnostician_context_built', taskId, {
+        contextHash,
+        sourceCount: context.sourceRefs.length,
+      });
+
       // 3. Invoke runtime (skip CreatingRun -- acquireLease already created it)
       this.phase = RunnerPhase.Invoking;
       const runHandle = await this.invokeRuntime(context, taskId);
+
+      // Emit: diagnostician_run_started
+      this.emitDiagnosticianEvent('diagnostician_run_started', taskId, {
+        runtimeKind: this.resolvedOptions.runtimeKind,
+      });
 
       // 4. Poll until terminal
       this.phase = RunnerPhase.Polling;
@@ -224,6 +260,12 @@ export class DiagnosticianRunner {
     const resultRef = `run://${ctx.runId}`;
     await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
 
+    // Emit: diagnostician_task_succeeded
+    this.emitDiagnosticianEvent('diagnostician_task_succeeded', ctx.taskId, {
+      attemptCount: ctx.task.attemptCount,
+      resultRef,
+    });
+
     this.phase = RunnerPhase.Completed;
     return {
       status: 'succeeded',
@@ -240,11 +282,25 @@ export class DiagnosticianRunner {
     runStatus: RunStatus,
   ): Promise<RunnerResult> {
     const errorCategory = this.mapRunStatusToErrorCategory(runStatus.status, runStatus.reason);
+
+    // Emit: diagnostician_run_failed
+    this.emitDiagnosticianEvent('diagnostician_run_failed', taskId, {
+      runStatus: runStatus.status,
+      errorCategory,
+    });
+
     return this.retryOrFail({ taskId, task, errorCategory, failureReason: `Runtime execution ended with status: ${runStatus.status}` });
   }
 
   private async handleValidationError(ctx: ValidationErrorContext): Promise<RunnerResult> {
     const category = ctx.errorCategory ?? 'output_invalid';
+
+    // Emit: diagnostician_output_invalid
+    this.emitDiagnosticianEvent('diagnostician_output_invalid', ctx.taskId, {
+      errorCount: ctx.errors.length,
+      errorCategory: category,
+    });
+
     return this.retryOrFail({ taskId: ctx.taskId, task: ctx.task, errorCategory: category, failureReason: `Validation failed: ${ctx.errors.join('; ')}` });
   }
 
@@ -271,6 +327,14 @@ export class DiagnosticianRunner {
     // Check if error is permanent (never retry)
     if (this.isPermanentError(ctx.errorCategory)) {
       await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory);
+
+      // Emit: diagnostician_task_failed (permanent)
+      this.emitDiagnosticianEvent('diagnostician_task_failed', ctx.taskId, {
+        errorCategory: ctx.errorCategory,
+        attemptCount: ctx.task.attemptCount,
+        failureReason: ctx.failureReason,
+      });
+
       this.phase = RunnerPhase.Failed;
       return { status: 'failed', taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: ctx.failureReason, attemptCount: ctx.task.attemptCount };
     }
@@ -279,12 +343,27 @@ export class DiagnosticianRunner {
     const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
     if (shouldRetry) {
       await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory);
+
+      // Emit: diagnostician_task_retried
+      this.emitDiagnosticianEvent('diagnostician_task_retried', ctx.taskId, {
+        errorCategory: ctx.errorCategory,
+        attemptCount: ctx.task.attemptCount,
+      });
+
       this.phase = RunnerPhase.Failed;
       return { status: 'retried', taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: ctx.failureReason, attemptCount: ctx.task.attemptCount };
     }
 
     // Max attempts exceeded
     await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded');
+
+    // Emit: diagnostician_task_failed (max_attempts_exceeded)
+    this.emitDiagnosticianEvent('diagnostician_task_failed', ctx.taskId, {
+      errorCategory: 'max_attempts_exceeded',
+      attemptCount: ctx.task.attemptCount,
+      failureReason: ctx.failureReason,
+    });
+
     this.phase = RunnerPhase.Failed;
     return {
       status: 'failed',
