@@ -16,6 +16,9 @@ import { handleHealth } from './commands/health.js';
 import { handleCentralSync } from './commands/central-sync.js';
 import { handleTaskList, handleTaskShow } from './commands/task.js';
 import { handleRunList, handleRunShow } from './commands/run.js';
+import { handleTrajectoryLocate } from './commands/trajectory.js';
+import { handleHistoryQuery } from './commands/history.js';
+import { handleContextBuild } from './commands/context.js';
 
 const program = new Command();
 
@@ -94,7 +97,8 @@ tasksCmd
 program
   .command('health')
   .description('Show health diagnostics for all workspaces')
-  .action(async () => {
+  .option('-w, --workspace <path>', 'Workspace directory (required for trajectory/history/context commands)')
+  .action(async (_opts) => {
     await handleHealth();
   });
 
@@ -148,6 +152,55 @@ rtRunCmd
   .description('Show detailed run information')
   .action(async (runId) => {
     await handleRunShow({ id: runId });
+  });
+
+// ── Runtime v2 trajectory/history/context commands ───────────────────────────
+
+const trajectoryCmd = program
+  .command('trajectory')
+  .description('Runtime v2 trajectory location');
+
+trajectoryCmd
+  .command('locate')
+  .description('Locate a trajectory by various criteria')
+  .option('-t, --task <taskId>', 'Locate by task ID')
+  .option('-r, --run <runId>', 'Locate by run ID')
+  .option('-p, --pain <painId>', 'Locate by pain ID')
+  .option('--from <date>', 'Start of time range (ISO string)')
+  .option('--to <date>', 'End of time range (ISO string)')
+  .option('-s, --status <status>', 'Filter by execution status')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleTrajectoryLocate(opts);
+  });
+
+const historyCmd = program
+  .command('history')
+  .description('Runtime v2 history query');
+
+historyCmd
+  .command('query <taskId>')
+  .description('Query run history for a task')
+  .option('-l, --limit <number>', 'Limit number of entries', parseInt)
+  .option('-c, --cursor <cursor>', 'Pagination cursor')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (taskId, opts) => {
+    await handleHistoryQuery(taskId, opts);
+  });
+
+const contextCmd = program
+  .command('context')
+  .description('Runtime v2 context assembly');
+
+contextCmd
+  .command('build <taskId>')
+  .description('Assemble diagnostician context for a task')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (taskId, opts) => {
+    await handleContextBuild(taskId, opts);
   });
 
 program.parse();

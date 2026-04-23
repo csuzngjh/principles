@@ -19,10 +19,11 @@ interface TrajectoryLocateOptions {
   to?: string;
   status?: string;
   json?: boolean;
+  workspace?: string;
 }
 
 export async function handleTrajectoryLocate(opts: TrajectoryLocateOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir();
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const connection = new SqliteConnection(workspaceDir);
 
   try {

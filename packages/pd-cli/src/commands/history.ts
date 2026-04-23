@@ -11,10 +11,11 @@ interface HistoryQueryOptions {
   limit?: number;
   cursor?: string;
   json?: boolean;
+  workspace?: string;
 }
 
 export async function handleHistoryQuery(taskId: string, opts: HistoryQueryOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir();
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const connection = new SqliteConnection(workspaceDir);
 
   try {

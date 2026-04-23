@@ -15,10 +15,11 @@ import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface ContextBuildOptions {
   json?: boolean;
+  workspace?: string;
 }
 
 export async function handleContextBuild(taskId: string, opts: ContextBuildOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir();
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const connection = new SqliteConnection(workspaceDir);
 
   try {
