@@ -384,7 +384,7 @@ describe('DiagnosticianRunner', () => {
   });
 
   // 9. Lease conflict
-  it('fails permanently on lease conflict', async () => {
+  it('returns non-mutating failure on lease conflict', async () => {
     const mocks = createMocks();
     mocks._stateManager.acquireLease.mockRejectedValue(
       new PDRuntimeError('lease_conflict', 'Task already leased'),
@@ -393,9 +393,12 @@ describe('DiagnosticianRunner', () => {
     const runner = createRunner(mocks);
     const result = await runner.run(TASK_ID);
 
-    // lease_conflict is in PERMANENT_ERROR_CATEGORIES, so it fails immediately
+    // lease_conflict means another runner owns the task; do not mutate task state.
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('lease_conflict');
+    expect(result.attemptCount).toBe(0);
+    expect(mocks._stateManager.markTaskFailed).not.toHaveBeenCalled();
+    expect(mocks._stateManager.markTaskRetryWait).not.toHaveBeenCalled();
   });
 
   // 10. Max attempts exceeded

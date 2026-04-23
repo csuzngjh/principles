@@ -119,14 +119,11 @@ export class DiagnosticianRunner {
    */
   async run(taskId: string): Promise<RunnerResult> {
     this.phase = RunnerPhase.Idle;
-    try {
-      // 1. Acquire lease (atomically creates RunRecord in the store)
-      const leasedTask = await this.stateManager.acquireLease({
-        taskId,
-        owner: this.resolvedOptions.owner,
-        runtimeKind: this.resolvedOptions.runtimeKind,
-      });
+    const leaseResult = await this.acquireTaskLease(taskId);
+    if (!leaseResult.ok) return leaseResult.result;
+    const leasedTask = leaseResult.task;
 
+    try {
       // Emit: diagnostician_task_leased
       this.emitDiagnosticianEvent('diagnostician_task_leased', taskId, {
         taskKind: leasedTask.taskKind,
@@ -182,11 +179,27 @@ export class DiagnosticianRunner {
       // 8. Succeed task -- store output and mark succeeded using store's runId
       return await this.succeedTask({ taskId, runId: storeRunId, output, task: leasedTask, contextHash });
     } catch (error) {
-      return await this.handleLeaseOrPhaseError(taskId, error);
+      return await this.handlePostLeasePhaseError(taskId, leasedTask, error);
     }
   }
 
   // -- Phase methods (each independently testable) --
+
+  private async acquireTaskLease(taskId: string): Promise<
+    | { ok: true; task: TaskRecord }
+    | { ok: false; result: RunnerResult }
+  > {
+    try {
+      const task = await this.stateManager.acquireLease({
+        taskId,
+        owner: this.resolvedOptions.owner,
+        runtimeKind: this.resolvedOptions.runtimeKind,
+      });
+      return { ok: true, task };
+    } catch (error) {
+      return { ok: false, result: await this.handleLeaseAcquisitionError(taskId, error) };
+    }
+  }
 
   private async buildContext(taskId: string): Promise<DiagnosticianContextPayload> {
     return this.contextAssembler.assemble(taskId);
@@ -309,7 +322,7 @@ export class DiagnosticianRunner {
     return this.retryOrFail({ taskId: ctx.taskId, task: ctx.task, errorCategory: category, failureReason: `Validation failed: ${ctx.errors.join('; ')}` });
   }
 
-  private async handleLeaseOrPhaseError(
+  private async handleLeaseAcquisitionError(
     taskId: string,
     error: unknown,
   ): Promise<RunnerResult> {
@@ -327,27 +340,37 @@ export class DiagnosticianRunner {
         taskId,
         errorCategory: 'lease_conflict',
         failureReason: classified.message,
-        attemptCount: 1,
+        attemptCount: 0,
       };
     }
 
-    // Emit: diagnostician_run_failed (for other phase/lease errors before retry decision)
+    // Lease acquisition failed before this runner owned the task. Do not mutate
+    // task state because no lease was acquired.
+    this.emitDiagnosticianEvent('diagnostician_run_failed', taskId, {
+      errorCategory: classified.category,
+      errorMessage: classified.message,
+    });
+    return {
+      status: 'failed',
+      taskId,
+      errorCategory: classified.category,
+      failureReason: classified.message,
+      attemptCount: 0,
+    };
+  }
+
+  private async handlePostLeasePhaseError(
+    taskId: string,
+    task: TaskRecord,
+    error: unknown,
+  ): Promise<RunnerResult> {
+    const classified = this.classifyError(error);
+
     this.emitDiagnosticianEvent('diagnostician_run_failed', taskId, {
       errorCategory: classified.category,
       errorMessage: classified.message,
     });
 
-    // When acquireLease fails we don't have a TaskRecord yet.
-    // Build a synthetic one for retry policy evaluation.
-    const task: TaskRecord = {
-      taskId,
-      taskKind: 'diagnostician',
-      status: 'leased',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      attemptCount: 1,
-      maxAttempts: 3,
-    };
     return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
   }
 
