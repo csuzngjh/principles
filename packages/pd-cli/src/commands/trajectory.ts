@@ -1,12 +1,10 @@
 /**
- * pd trajectory locate — Locate a trajectory by various criteria.
+ * pd trajectory locate — Locate a trajectory by task ID, run ID, or time range.
  *
  * Usage:
- *   pd trajectory locate --task <taskId>
- *   pd trajectory locate --run <runId>
- *   pd trajectory locate --pain <painId>
- *   pd trajectory locate --from <date> --to <date>
- *   pd trajectory locate --status <executionStatus>
+ *   pd trajectory locate --task <taskId> --workspace <path>
+ *   pd trajectory locate --run <runId> --workspace <path>
+ *   pd trajectory locate --from <date> --to <date> --workspace <path>
  */
 import { SqliteConnection, SqliteTrajectoryLocator } from '@principles/core';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -14,10 +12,8 @@ import { resolveWorkspaceDir } from '../resolve-workspace.js';
 interface TrajectoryLocateOptions {
   task?: string;
   run?: string;
-  pain?: string;
   from?: string;
   to?: string;
-  status?: string;
   json?: boolean;
   workspace?: string;
 }
@@ -33,11 +29,9 @@ export async function handleTrajectoryLocate(opts: TrajectoryLocateOptions): Pro
 
     if (opts.task) query = { taskId: opts.task };
     else if (opts.run) query = { runId: opts.run };
-    else if (opts.pain) query = { painId: opts.pain };
     else if (opts.from || opts.to) query = { timeRange: { start: opts.from ?? '', end: opts.to ?? '' } };
-    else if (opts.status) query = { executionStatus: opts.status };
     else {
-      console.error('Error: specify at least one search criterion (--task, --run, --pain, --from/--to, --status)');
+      console.error('Error: specify at least one search criterion (--task, --run, --from/--to)');
       process.exit(1);
     }
 

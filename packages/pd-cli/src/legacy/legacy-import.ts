@@ -1,12 +1,35 @@
 /**
- * OpenClaw Workspace Bridge
+ * Legacy Compatibility Import — OpenClaw → PD Runtime v2
  *
- * Syncs diagnostician task data from openclaw's JSON-based stores into the
- * PD Runtime v2 SQLite store, so that `pd context`, `pd trajectory locate`,
- * and `pd history` work against the real openclaw workspace data.
+ * ## Purpose
  *
- * Sync sources:
- *   - .state/diagnostician_tasks.json  →  tasks + runs tables
+ * This module is a **compatibility import path only**.
+ * It is NOT the authoritative retrieval path for M3 queries.
+ *
+ * It syncs diagnostician task data from OpenClaw's legacy JSON-based stores
+ * into the PD Runtime v2 SQLite store so that `pd trajectory`, `pd history`,
+ * and `pd context` commands have data to query against.
+ *
+ * **Authoritative path**: `workspace/.pd/state.db` (PD-owned SQLite)
+ * **This module's role**: migrate legacy `.state/diagnostician_tasks.json` →
+ * `workspace/.pd/state.db` (one-way sync, idempotent)
+ *
+ * ## Sync Sources
+ *
+ *   - `.state/diagnostician_tasks.json`  →  tasks + runs tables
+ *
+ * ## Non-Goals
+ *
+ * This module does NOT:
+ * - Query raw OpenClaw `.state/` files for primary retrieval
+ * - Serve as the main path for trajectory/history/context commands
+ * - Own any PD task semantics
+ *
+ * ## Usage
+ *
+ * Call `syncOpenClawWorkspace(workspaceDir, connection)` once to import,
+ * then use `pd trajectory locate`, `pd history query`, `pd context build`
+ * which read from `workspace/.pd/state.db` directly.
  *
  * Idempotent: safe to call multiple times. Re-syncs latest state on every call.
  */

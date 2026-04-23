@@ -162,13 +162,11 @@ const trajectoryCmd = program
 
 trajectoryCmd
   .command('locate')
-  .description('Locate a trajectory by various criteria')
+  .description('Locate a trajectory by task ID, run ID, or time range')
   .option('-t, --task <taskId>', 'Locate by task ID')
   .option('-r, --run <runId>', 'Locate by run ID')
-  .option('-p, --pain <painId>', 'Locate by pain ID')
   .option('--from <date>', 'Start of time range (ISO string)')
   .option('--to <date>', 'End of time range (ISO string)')
-  .option('-s, --status <status>', 'Filter by execution status')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
