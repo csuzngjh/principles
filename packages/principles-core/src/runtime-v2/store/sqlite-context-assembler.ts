@@ -44,10 +44,21 @@ export class SqliteContextAssembler implements ContextAssembler {
 
     const dt = SqliteContextAssembler.reconstructDiagnosticianRecord(task);
 
-    const historyResult = await this.historyQuery.query(taskId);
-
     const runs = await this.runStore.listRunsByTask(taskId);
     const runIds = runs.map((r) => r.runId);
+
+    // Use the earliest run's startedAt as time window start so that all runs,
+    // including imported openclaw-history runs that predate the task creation,
+    // are included in the conversation window. Without an explicit lower bound,
+    // the default 24-hour window would filter out all historical runs.
+    const firstRunStartedAt = runs[0]?.startedAt;
+    const earliestStart = firstRunStartedAt !== undefined
+      ? runs.reduce((earliest, r) => r.startedAt < earliest ? r.startedAt : earliest, firstRunStartedAt)
+      : task.createdAt;
+
+    const historyResult = await this.historyQuery.query(taskId, undefined, {
+      timeWindowStart: earliestStart,
+    });
 
     const contextId = randomUUID();
     const serialized = JSON.stringify(historyResult.entries);

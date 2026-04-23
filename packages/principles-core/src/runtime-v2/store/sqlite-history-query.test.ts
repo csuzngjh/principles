@@ -535,7 +535,7 @@ describe('SqliteHistoryQuery', () => {
           outputPayload: 'plain text response',
         }));
         const result = await f.historyQuery.query('task_json_payload');
-        const entries = result.entries;
+        const {entries} = result;
         // JSON input should be pretty-printed (2-space indent)
         expect(entries[0]!.text).toBe('{\n  "diagnosing": "pain-001",\n  "principleId": "P-42"\n}');
         // Plain string output should be unchanged

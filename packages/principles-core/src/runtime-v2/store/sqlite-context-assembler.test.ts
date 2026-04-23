@@ -90,6 +90,7 @@ function cleanupFixture(fixture: TestFixture): void {
 interface RunPayloadOptions {
   inputPayload?: string;
   outputPayload?: string;
+  runtimeKind?: RunRecord['runtimeKind'];
 }
 
 /** Create a base task row in SQLite for FK satisfaction, then create a run. */
@@ -116,7 +117,7 @@ async function createRunWithPayloads(
     attemptNumber: 1,
     executionStatus: 'succeeded' as RunExecutionStatus,
     startedAt: now,
-    runtimeKind: 'openclaw',
+    runtimeKind: options?.runtimeKind ?? 'openclaw',
     inputPayload: options?.inputPayload,
     outputPayload: options?.outputPayload,
   } satisfies Omit<RunRecord, 'createdAt' | 'updatedAt'>);
@@ -335,6 +336,82 @@ describe('SqliteContextAssembler', () => {
       // assemble() validates internally, so reaching here means it passed.
       // Double-check explicitly:
       expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('assembles context with openclaw-history runtime_kind runs (compatibility import)', async () => {
+    // This covers the m3-08 fix: imported runs from trajectory.db use runtimeKind='openclaw-history'
+    const task = makeDiagnosticianTask({ taskId: 'task_openclaw_history' });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      await createRunWithPayloads(f, task.taskId, {
+        runtimeKind: 'openclaw-history',
+        inputPayload: '{"type":"session_history","sessionId":"test-sess","userTurns":[],"toolCalls":[]}',
+        outputPayload: '{"type":"assistant_turns","sessionId":"test-sess","turns":[]}',
+      });
+
+      // Must not throw — openclaw-history must be accepted by RuntimeKindSchema
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.taskId).toBe('task_openclaw_history');
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('includes openclaw-history run entries in conversationWindow (time window fix)', async () => {
+    // m3-09: Without timeWindowStart=task.createdAt, historical runs outside the
+    // default 24-hour window would be filtered out and conversationWindow would be empty.
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const task = makeDiagnosticianTask({
+      taskId: 'task_old_history',
+      createdAt: thirtyDaysAgo,
+      updatedAt: thirtyDaysAgo,
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      await createRunWithPayloads(f, task.taskId, {
+        runtimeKind: 'openclaw-history',
+        inputPayload: '{"type":"session_history","sessionId":"old-sess","userTurns":[{"turnIndex":1,"text":"hello"}]}',
+        outputPayload: '{"type":"assistant_turns","sessionId":"old-sess","turns":[{"provider":"openai","model":"gpt-4","text":"hi"}]}',
+      });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+// conversationWindow must have entries from the historical run (not empty)
+      expect(payload.conversationWindow.length).toBeGreaterThan(0);
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('throws storage_unavailable for run with unrecognized runtime_kind', async () => {
+    // Regression: ensure only documented runtime kinds are accepted when read back
+    const task = makeDiagnosticianTask({ taskId: 'task_bad_runtime' });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      const existing = await f.sqliteTaskStore.getTask(task.taskId);
+      if (!existing) {
+        await f.sqliteTaskStore.createTask({
+          taskId: task.taskId,
+          taskKind: 'diagnostician',
+          status: 'pending',
+          attemptCount: 0,
+          maxAttempts: 3,
+        } satisfies Omit<TaskRecord, 'createdAt' | 'updatedAt'>);
+      }
+      const db = f.connection.getDb();
+      const now = new Date().toISOString();
+      // Insert with invalid runtime_kind directly (bypassing createRun validation at write time)
+      db.prepare(`
+        INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, ended_at,
+          attempt_number, created_at, updated_at, input_payload, output_payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('run_bad_kind', task.taskId, 'invalid-runtime', 'succeeded', now, now,
+        1, now, now, null, null);
+      // Validation happens on read — assemble() calls listRunsByTask which calls rowToRecord
+      await expect(f.assembler.assemble(task.taskId)).rejects.toThrow('[storage_unavailable]');
     } finally { cleanupFixture(f); }
   });
 });
