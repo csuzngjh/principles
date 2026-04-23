@@ -155,5 +155,9 @@ export type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js
 export type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './runner/diagnostician-runner-options.js';
 export type { DiagnosticianValidator, DiagnosticianValidationResult } from './runner/diagnostician-validator.js';
 
+// Runtime Adapter (M4)
+export { TestDoubleRuntimeAdapter } from './adapter/index.js';
+export type { TestDoubleBehaviorOverrides } from './adapter/test-double-runtime-adapter.js';
+
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
