@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.3
 milestone_name: M4 Diagnostician Runner v2
 status: active
-last_updated: "2026-04-23T08:30:00.000Z"
-last_activity: 2026-04-23 — m4-04 executed (3 integration test files, 9 tests passing)
+last_updated: "2026-04-23T18:00:00.000Z"
+last_activity: 2026-04-23 — m4-05 executed (8 telemetry events + CLI run/status, 8 tests passing)
 progress:
   total_phases: 6
-  completed_phases: 4
-  total_plans: 1
-  completed_plans: 1
-  percent: 66
+  completed_phases: 5
+  total_plans: 7
+  completed_plans: 7
+  percent: 83
 ---
 
 # Project State: Principles
@@ -23,9 +23,9 @@ progress:
 
 ## Current Position
 
-Phase: m4-05: TelemetryCLI (next)
-Status: m4-04 complete — ready for m4-05
-Last activity: 2026-04-23 — m4-04 executed (3 integration test files, 9 tests passing)
+Phase: m4-06: DualTrackE2E (next)
+Status: m4-05 complete — ready for m4-06
+Last activity: 2026-04-23 — m4-05 executed (8 telemetry events + CLI run/status, 8 tests passing)
 
 ## Context
 
@@ -58,4 +58,4 @@ Last activity: 2026-04-23 — m4-04 executed (3 integration test files, 9 tests 
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
-**Previous:** v2.3 M4 m4-03 Validator — SHIPPED 2026-04-23
+**Previous:** v2.3 M4 m4-05 TelemetryCLI — SHIPPED 2026-04-23

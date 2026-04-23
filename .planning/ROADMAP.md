@@ -60,7 +60,7 @@
   - [x] m4-02-01-PLAN.md — TestDoubleRuntimeAdapter implementation + StartRunInput validation
 - [x] m4-03: Validator (1/1 plans) — completed 2026-04-23
 - [x] m4-04: RetryLeaseIntegration (1/1 plans) — completed 2026-04-23
-- [ ] m4-05: TelemetryCLI — Pending
+- [x] m4-05: TelemetryCLI (1/1 plans) — completed 2026-04-23
 - [ ] m4-06: DualTrackE2E — Pending
 
 </details>
@@ -93,7 +93,7 @@
 | m4-02 RuntimeInvocation | v2.3 | 1/1 | Complete | 2026-04-23 |
 | m4-03 Validator | v2.3 | 1/1 | Complete | 2026-04-23 |
 | m4-04 RetryLeaseIntegration | v2.3 | 1/1 | Complete | 2026-04-23 |
-| m4-05 TelemetryCLI | v2.3 | 0/? | Pending | — |
+| m4-05 TelemetryCLI | v2.3 | 1/1 | Complete | 2026-04-23 |
 | m4-06 DualTrackE2E | v2.3 | 0/? | Pending | — |
 
 ---
