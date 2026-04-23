@@ -8,14 +8,61 @@ import { validateTelemetryEvent, type TelemetryEvent } from '../../telemetry-eve
 export class StoreEventEmitter extends EventEmitter {
   /**
    * Emit a telemetry event after validating it conforms to TelemetryEventSchema.
-   * Throws if validation fails — callers must ensure event shape is correct.
+   * Validation failures are caught internally and emit a fallback event instead.
+   * This method never throws — callers can rely on it completing.
    */
   emitTelemetry(event: TelemetryEvent): true {
-    const result = validateTelemetryEvent(event);
-    if (!result.valid || !result.event) {
-      throw new Error(`[StoreEventEmitter] Invalid telemetry event: ${JSON.stringify(result.errors)}`);
+    // Narrow try scope to validation only; emit calls must propagate errors
+    let validEvent: TelemetryEvent | undefined;
+    try {
+      const result = validateTelemetryEvent(event);
+      if (!result.valid || !result.event) {
+        validEvent = undefined;
+      } else {
+        validEvent = result.event;
+      }
+    } catch (validationError) {
+      // Validation failed — emit fallback event with error context
+      const fallbackEvent: TelemetryEvent = {
+        eventType: 'degradation_triggered',
+        traceId: event?.traceId ? `fallback-${event.traceId}` : `fallback-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        sessionId: event?.sessionId ?? '',
+        payload: {
+          component: 'StoreEventEmitter',
+          trigger: 'invalid_event',
+          fallback: 'dropped',
+          severity: 'warning',
+          errors: [String(validationError)],
+          originalEventType: event?.eventType ?? 'unknown',
+          originalTraceId: event?.traceId ?? 'unknown',
+        },
+      };
+      this.emit('telemetry', fallbackEvent);
+      this.emit(fallbackEvent.eventType, fallbackEvent);
+      return true;
     }
-    const validEvent = result.event;
+
+    if (!validEvent) {
+      // Validation result was invalid — emit fallback
+      const fallbackEvent: TelemetryEvent = {
+        eventType: 'degradation_triggered',
+        traceId: event?.traceId ? `fallback-${event.traceId}` : `fallback-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        sessionId: event?.sessionId ?? '',
+        payload: {
+          component: 'StoreEventEmitter',
+          trigger: 'invalid_event',
+          fallback: 'dropped',
+          severity: 'warning',
+        },
+      };
+      this.emit('telemetry', fallbackEvent);
+      this.emit(fallbackEvent.eventType, fallbackEvent);
+      return true;
+    }
+
+    // Emit valid event — listener errors now propagate (not caught here)
     this.emit('telemetry', validEvent);
     this.emit(validEvent.eventType, validEvent);
     return true;

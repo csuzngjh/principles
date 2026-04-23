@@ -29,7 +29,7 @@ export interface RunStore {
    * Create a new run record.
    * createdAt / updatedAt are set by the store implementation.
    */
-  createRun(record: Omit<RunRecord, never>): Promise<RunRecord>;
+  createRun(record: Omit<RunRecord, 'createdAt' | 'updatedAt'>): Promise<RunRecord>;
 
   /** Fetch a single run by ID. Returns null if not found. */
   getRun(runId: string): Promise<RunRecord | null>;

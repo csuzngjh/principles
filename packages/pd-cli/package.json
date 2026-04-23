@@ -4,7 +4,7 @@
   "description": "PD CLI — Pain recording, sample management, and evolution tasks",
   "type": "module",
   "bin": {
-    "pd": "./dist/index.js"
+    "pd": "./dist/pd-cli/src/index.js"
   },
   "scripts": {
     "build": "tsc",

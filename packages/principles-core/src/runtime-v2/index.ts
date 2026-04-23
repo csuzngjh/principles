@@ -103,6 +103,22 @@ export type {
 export { SqliteTaskStore } from './store/sqlite-task-store.js';
 export { SqliteRunStore } from './store/sqlite-run-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
+export { SqliteTrajectoryLocator } from './store/sqlite-trajectory-locator.js';
+export { SqliteHistoryQuery } from './store/sqlite-history-query.js';
+export { SqliteContextAssembler } from './store/sqlite-context-assembler.js';
+export { ResilientContextAssembler } from './store/resilient-context-assembler.js';
+export { ResilientHistoryQuery } from './store/resilient-history-query.js';
+export type {
+  HistoryQuery,
+  HistoryQueryCursorData,
+  HistoryQueryOptions,
+} from './store/history-query.js';
+export type { ContextAssembler } from './store/context-assembler.js';
+export {
+  DEFAULT_HISTORY_PAGE_SIZE,
+  MAX_HISTORY_PAGE_SIZE,
+  DEFAULT_TIME_WINDOW_MS,
+} from './store/history-query.js';
 export type {
   TaskStore,
   TaskStoreFilter,
@@ -112,6 +128,7 @@ export type {
   RunStore,
   RunRecord,
 } from './store/run-store.js';
+export type { TrajectoryLocator } from './store/trajectory-locator.js';
 
 // Lease & Recovery
 export { DefaultLeaseManager } from './store/lease-manager.js';

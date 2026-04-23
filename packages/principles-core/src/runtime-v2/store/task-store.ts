@@ -35,6 +35,7 @@ export type TaskStoreUpdatePatch = Partial<
   lastError?: TaskRecord['lastError'] | null;
   inputRef?: string | null;
   resultRef?: string | null;
+  diagnosticJson?: string | null;
 };
 
 export interface TaskStore {
@@ -42,7 +43,7 @@ export interface TaskStore {
    * Create a new task record.
    * createdAt / updatedAt are set by the store implementation.
    */
-  createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord>;
+  createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'> & { diagnosticJson?: string }): Promise<TaskRecord>;
 
   /** Fetch a single task by ID. Returns null if not found. */
   getTask(taskId: string): Promise<TaskRecord | null>;
