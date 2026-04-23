@@ -40,7 +40,7 @@ function readDiagnosticianStore(stateDir: string): OpenClawDiagnosticianStore {
   try {
     const raw = fs.readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.tasks === 'object') {
+    if (parsed && typeof parsed.tasks === 'object' && parsed.tasks !== null && !Array.isArray(parsed.tasks)) {
       return parsed as OpenClawDiagnosticianStore;
     }
     return { tasks: {} };
@@ -103,7 +103,8 @@ export async function syncOpenClawWorkspace(
     VALUES (@runId, @taskId, 'openclaw', @executionStatus, @startedAt, @endedAt, 1, @createdAt, @updatedAt)
     ON CONFLICT(run_id) DO UPDATE SET
       execution_status = @executionStatus,
-      ended_at = @endedAt
+      ended_at = @endedAt,
+      updated_at = @updatedAt
   `);
 
   const now = new Date().toISOString();
