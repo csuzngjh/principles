@@ -146,5 +146,22 @@ export type { TelemetryEvent } from '../telemetry-event.js';
 export { RuntimeStateManager } from './store/runtime-state-manager.js';
 export type { RuntimeStateManagerOptions } from './store/runtime-state-manager.js';
 
+// Runner (M4)
+export { DiagnosticianRunner } from './runner/diagnostician-runner.js';
+export { RunnerPhase } from './runner/runner-phase.js';
+export { PassThroughValidator } from './runner/diagnostician-validator.js';
+export { resolveRunnerOptions, DEFAULT_RUNNER_OPTIONS } from './runner/diagnostician-runner-options.js';
+export type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js';
+export type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './runner/diagnostician-runner-options.js';
+export type { DiagnosticianValidator, DiagnosticianValidationResult } from './runner/diagnostician-validator.js';
+
+// Runtime Adapter (M4)
+export { TestDoubleRuntimeAdapter } from './adapter/index.js';
+export type { TestDoubleBehaviorOverrides } from './adapter/test-double-runtime-adapter.js';
+
+// CLI surface (M4)
+export { run, status } from './cli/diagnose.js';
+export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult } from './cli/diagnose.js';
+
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';

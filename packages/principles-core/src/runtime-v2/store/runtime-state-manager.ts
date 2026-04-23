@@ -239,6 +239,67 @@ export class RuntimeStateManager {
     return updated;
   }
 
+  /** Mark a task as retry_wait and emit task_retried event. Per D-03: retry with backoff. */
+  async markTaskRetryWait(taskId: string, errorCategory: PDErrorCategory): Promise<TaskRecord> {
+    this.assertInitialized();
+    const now = new Date().toISOString();
+
+    const updated = await this.taskStore.updateTask(taskId, {
+      status: 'retry_wait',
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      lastError: errorCategory,
+    });
+
+    // Update the latest run to 'failed' state with error category
+    const runs = await this.runStore.listRunsByTask(taskId);
+    const latestRun = runs[runs.length - 1];
+    if (latestRun) {
+      await this.runStore.updateRun(latestRun.runId, {
+        executionStatus: 'failed',
+        endedAt: now,
+        reason: 'task_retry',
+        errorCategory,
+      });
+    }
+
+    this.emitter.emitTelemetry({
+      eventType: 'task_retried',
+      traceId: taskId,
+      timestamp: now,
+      sessionId: updated.leaseOwner ?? 'system',
+      payload: { taskId, errorCategory, attemptCount: updated.attemptCount },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Write output payload to a run record.
+   * Per D-04: DiagnosticianOutputV1 JSON serialized into RunRecord.outputPayload.
+   */
+  async updateRunOutput(runId: string, outputPayload: string): Promise<RunRecord> {
+    this.assertInitialized();
+    const now = new Date().toISOString();
+
+    const updated = await this.runStore.updateRun(runId, {
+      outputPayload,
+      executionStatus: 'succeeded',
+      endedAt: now,
+      reason: 'output_captured',
+    });
+
+    this.emitter.emitTelemetry({
+      eventType: 'run_completed',
+      traceId: updated.taskId,
+      timestamp: now,
+      sessionId: 'runner',
+      payload: { runId, taskId: updated.taskId, outputPayloadSize: outputPayload.length },
+    });
+
+    return updated;
+  }
+
   // ── Retry/Recovery operations ─────────────────────────────────────────────
 
   async runRecoverySweep(): Promise<{ recovered: number; errors: string[] }> {

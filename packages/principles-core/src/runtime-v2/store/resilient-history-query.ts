@@ -25,9 +25,8 @@ export class ResilientHistoryQuery implements HistoryQuery {
     if (cursor) {
       try {
         return await this.inner.query(trajectoryRef, cursor, options);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        this.emitDegradation(errorMessage);
+      } catch {
+        this.emitDegradation();
         try {
           return await this.inner.query(trajectoryRef, undefined, options);
         } catch {
@@ -38,7 +37,7 @@ export class ResilientHistoryQuery implements HistoryQuery {
     return this.inner.query(trajectoryRef, undefined, options);
   }
 
-  private emitDegradation(trigger: string): void {
+  private emitDegradation(): void {
     this.emitter.emitTelemetry({
       eventType: 'degradation_triggered',
       traceId: `degradation-${Date.now()}`,
@@ -46,7 +45,7 @@ export class ResilientHistoryQuery implements HistoryQuery {
       sessionId: '',
       payload: {
         component: 'HistoryQuery',
-        trigger,
+        reason: 'cursor_query_failed',
         fallback: 'first_page_fallback',
         severity: 'warning',
       },

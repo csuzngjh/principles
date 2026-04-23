@@ -1,35 +1,29 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-22T06:45:46Z",
-  "phase": "m2-07",
-  "phase_name": "Runtime Integration + Event Emission + CLI Inspection",
-  "phase_dir": ".planning/phases/m2-task-run-state-core",
-  "plan": "m2-07",
-  "task": 2,
-  "total_tasks": 6,
-  "status": "paused",
-  "completed_tasks": [
-    {"id": 1, "name": "Extend TelemetryEvent schema with M2 events + create EventEmitter", "status": "done", "commit": null},
-    {"id": 2, "name": "Wire event emission into LeaseManager state transitions", "status": "in_progress", "progress": "LeaseManagerOptions interface added, emitter constructor param added, storeEmitter import added — emitTelemetry calls NOT yet inserted"}
-  ],
+  "timestamp": "2026-04-23T09:56:17Z",
+  "phase": "m4-06",
+  "phase_name": "DualTrackE2E",
+  "phase_dir": ".planning/phases/m4-06-DualTrackE2E",
+  "plan": null,
+  "task": null,
+  "total_tasks": null,
+  "status": "ready_for_planning",
+  "completed_tasks": [],
   "remaining_tasks": [
-    {"id": 3, "name": "Create RuntimeStateManager integration layer", "status": "not_started"},
-    {"id": 4, "name": "Add CLI inspection commands (pd task list/show, pd run list/show)", "status": "not_started"},
-    {"id": 5, "name": "Wire RecoverySweep event emission (task_retried)", "status": "not_started"},
-    {"id": 6, "name": "TypeScript check and verification", "status": "not_started"}
+    {"id": 1, "name": "Discuss-phase to capture design decisions", "status": "not_started"},
+    {"id": 2, "name": "Plan-phase to create PLAN.md", "status": "not_started"},
+    {"id": 3, "name": "Execute-phase — dual-track E2E tests", "status": "not_started"}
   ],
   "blockers": [],
   "human_actions_pending": [],
   "decisions": [
-    {"decision": "Added emitter?: StoreEventEmitter optional param to DefaultLeaseManager constructor, defaulting to storeEmitter singleton", "rationale": "Avoids breaking existing callers (m2-05 tests) while enabling event emission", "phase": "m2-07"},
-    {"decision": "Extended TelemetryEventType union from 3 to 11 types", "rationale": "M2 tasks need their own event types separate from core evolution events", "phase": "m2-07"}
+    {
+      "decision": "m4-06 is final M4 phase — dual-track E2E verification",
+      "rationale": "Verify legacy heartbeat path works alongside new runner path; E2E test task→context→runner→validation→success",
+      "phase": "m4-06"
+    }
   ],
-  "uncommitted_files": [
-    "packages/principles-core/src/telemetry-event.ts",
-    "packages/principles-core/src/runtime-v2/store/event-emitter.ts",
-    "packages/principles-core/src/runtime-v2/store/lease-manager.ts",
-    ".planning/ROADMAP.md"
-  ],
-  "next_action": "Add emitTelemetry calls in lease-manager.ts acquireLease/releaseLease/renewLease/forceExpire methods, then create RuntimeStateManager (Task 3), then CLI commands (Task 4), then RecoverySweep events (Task 5), then TS verification (Task 6)",
-  "context_notes": "m2-07 plan has 6 tasks. Tasks 1 done (TelemetryEventType=11, StoreEventEmitter created). Task 2 partially done (emitter param added to LeaseManager but emit calls not yet inserted). Worktree: feat/pd-runtime-v2-m1-foundation-contracts. 185 tests currently passing."
+  "uncommitted_files": [],
+  "next_action": "Run /gsd-discuss-phase m4-06 to capture design decisions (CONTEXT.md), then /gsd-plan-phase m4-06, then /gsd-execute-phase m4-06",
+  "context_notes": "Context budget ~90% (25K tokens remaining) — paused during discuss-phase preparation for m4-06. m4-05 completed with 8 telemetry events + CLI run/status + 8 tests passing. m4-06 dir created at .planning/phases/m4-06-DualTrackE2E/ with no artifacts yet."
 }
