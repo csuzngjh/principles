@@ -72,3 +72,13 @@
 - quota 默认只有 3 次/天（已通过配置改为 20）
 - idle 检测依赖无活跃会话，开发中很难触发（已通过 periodic 模式绕过）
 - 所有 sleep_reflection 相关日志已从 debug 改为 info 级别
+
+## PD Runtime v2 Review Memory (2026-04-23)
+
+- M1/M2/M3 are treated as signed off after fixes. M3 final truth: OpenClaw raw state is import-only; authoritative retrieval is `workspace/.pd/state.db`; `pd legacy import openclaw`, `pd history query`, and `pd context build` were validated against `D:\.openclaw\workspace`.
+- M4 PR #395 is not signed off yet. The direction is correct: explicit `DiagnosticianRunner` replaces heartbeat prompt/marker execution and avoids M5 artifact/principle commit scope.
+- Current M4 P1 blocker: `DiagnosticianRunner.run()` still catches `acquireLease()` failures and post-lease failures in one top-level catch. `handleLeaseOrPhaseError()` fabricates a synthetic `TaskRecord` and calls `retryOrFail()`, so `lease_conflict` can still mutate another active runner's task into `retry_wait`/`failed`, and post-lease failures lose real `attemptCount/maxAttempts`.
+- Required M4 fix: split lease acquisition into its own try/catch. On `lease_conflict`, return a non-mutating RunnerResult and emit telemetry only. After lease succeeds, catch phase errors using the real `leasedTask` for retry/max-attempt decisions.
+- Current M4 P2 issue: `packages/pd-cli/src/commands/diagnose.ts` imports `../../../principles-core/src/runtime-v2/index.js`, causing TypeScript to copy private core source into `packages/pd-cli/dist/principles-core`. It must import through `@principles/core` or `@principles/core/runtime-v2`.
+- M4 already fixed two previous issues: `pd diagnose status/run` is wired in CLI, and generated `packages/pd-cli/.pd/state.db` is no longer tracked; `.gitignore` includes `.pd/`.
+- Verification already run after latest fix attempt: `@principles/core` build passed, `@principles/pd-cli` build passed, runner key tests 15/15 passed, and `pd diagnose --help` loads. Tests are insufficient because they still expect `lease_conflict` to retry, which is the wrong behavior.
