@@ -44,27 +44,26 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Phase 1.5 Validation | N=2 (coding + 1) is not enough for "Universal" claim; need extreme case | Active |
 | Freeze Semver after Ph 1.5 | Ensure stability only after cross-domain stress testing | Active |
 
-## Current Milestone: v2.0 PD Runtime v2 — M1 Foundation Contracts
+## Current Milestone: v2.2 PD Runtime v2 — M3 History Retrieval + Context Build
 
-**Goal:** 冻结 runtime-v2 核心类型与错误枚举，为 M2-M9 提供统一 contracts
+**Goal:** Deliver PD-owned retrieval pipeline — trajectory locate, history query, context build
 
 **Target features:**
-- Canonical `AgentSpec` 定义 + well-known agent IDs
-- Unified `PDErrorCategory` 错误枚举 + `PDRuntimeError`
-- `PDRuntimeAdapter` / `RuntimeKind` / `RuntimeCapabilities` / `RuntimeHealth` 完整协议
-- `RuntimeSelector` 最小接口（只定义，不实现）
-- `PDTaskStatus` + `TaskRecord` + `DiagnosticianTaskRecord` 任务状态模型
-- `ContextPayload` / `DiagnosticianContextPayload` / `HistoryQueryEntry` 上下文 payload
-- `DiagnosticianOutputV1` 诊断输出 schema
-- `SchemaVersion` 版本机制
+- `pd trajectory locate` — by trajectoryId, taskId, runId, date range, PD-managed hints
+- `pd history query` — bounded history with cursor pagination + time windows
+- `pd context build` — assemble DiagnosticianContextPayload from PD-owned retrieval results
+- Degradation policy — bounded fallback, warnings + telemetry, no silent failure
+- Workspace isolation — explicit workspace-scoped retrieval, no cross-workspace leakage
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
-**架构约束:**
-- 8 份 canonical 文档为最高权威（见 docs/pd-runtime-v2/ 和 docs/spec/）
-- 所有 contracts 放在 `@principles/core` 中，不散落在 openclaw-plugin
-- M1 只定义 interface/type/enum，不含运行时代码
-- 不实现 M2+ 的 task store、retrieval、runner
+**M3 边界约束（守住边界）:**
+- 只做 trajectory locate / history query / context build
+- 不做 diagnostician runner（M4）
+- 不做 unified commit（M5）
+- 不把宿主 API 直接重新带回主设计里
+- **Authoritative boundary:** 所有 authoritative retrieval 必须以 PD-owned stores/indexes/references 为主源；OpenClaw raw workspace/session 文件不是 authoritative retrieval source；外部/宿主数据仅在已由 PD 建立索引时方可经由 PD-managed references 访问
+- **No LLM in context build:** context assembly 必须 code-generated 或 template-generated，禁止在 context build 过程中调用 LLM
 
 **Previous:** v1.22 — PD CLI Redesign — SHIPPED 2026-04-20
 
@@ -85,4 +84,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-20 after v1.22 milestone started*
+*Last updated: 2026-04-22 after M2 shipped, M3 started*

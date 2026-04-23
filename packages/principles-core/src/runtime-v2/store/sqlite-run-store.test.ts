@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 /**
  * SqliteRunStore integration tests.
  *
@@ -22,7 +23,7 @@ function makeTaskInput(taskId: string) {
   };
 }
 
-function makeRunInput(taskId: string, attemptNumber = 1): Omit<RunRecord, never> {
+function makeRunInput(taskId: string, attemptNumber = 1): Omit<RunRecord, 'createdAt' | 'updatedAt'> {
   const now = new Date().toISOString();
   return {
     runId: `run_${taskId}_${attemptNumber}`,
@@ -31,8 +32,8 @@ function makeRunInput(taskId: string, attemptNumber = 1): Omit<RunRecord, never>
     executionStatus: 'queued' as RunExecutionStatus,
     startedAt: now,
     attemptNumber,
-    createdAt: now,
-    updatedAt: now,
+    
+    
   };
 }
 
