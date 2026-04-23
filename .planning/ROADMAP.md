@@ -55,9 +55,9 @@
   - [x] m4-01-01-PLAN.md — Runner type contracts + RuntimeStateManager extensions
   - [x] m4-01-02-PLAN.md — DiagnosticianRunner implementation + unit tests
   - [x] m4-01-03-PLAN.md — Integration tests + index.ts exports
-- [ ] m4-02: RuntimeInvocation (1/1 plans)
+- [x] m4-02: RuntimeInvocation (1/1 plans) — completed 2026-04-23
   Plans:
-  - [ ] m4-02-01-PLAN.md — TestDoubleRuntimeAdapter implementation + StartRunInput validation
+  - [x] m4-02-01-PLAN.md — TestDoubleRuntimeAdapter implementation + StartRunInput validation
 - [ ] m4-03: Validator — Pending
 - [ ] m4-04: RetryLeaseIntegration — Pending
 - [ ] m4-05: TelemetryCLI — Pending
@@ -90,7 +90,7 @@
 | m3-08 SchemaAlignment | v2.2 | — | Complete | 2026-04-23 |
 | m3-09 EntryMapping | v2.2 | — | Complete | 2026-04-23 |
 | m4-01 RunnerCore | v2.3 | 3/3 | Complete | 2026-04-23 |
-| m4-02 RuntimeInvocation | v2.3 | 0/1 | Pending | — |
+| m4-02 RuntimeInvocation | v2.3 | 1/1 | Complete | 2026-04-23 |
 | m4-03 Validator | v2.3 | 0/? | Pending | — |
 | m4-04 RetryLeaseIntegration | v2.3 | 0/? | Pending | — |
 | m4-05 TelemetryCLI | v2.3 | 0/? | Pending | — |
