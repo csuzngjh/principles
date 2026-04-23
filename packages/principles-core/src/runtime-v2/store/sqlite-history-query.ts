@@ -211,6 +211,26 @@ export class SqliteHistoryQuery implements HistoryQuery {
     return Buffer.from(JSON.stringify(cursorData), 'utf-8').toString('base64');
   }
 
+  /**
+   * Format a payload string for display.
+   *
+   * If the payload looks like a JSON object or array, pretty-print it
+   * so display consumers can render structured content. Plain strings
+   * are passed through unchanged.
+   */
+  private static formatPayload(payload: string | undefined): string | undefined {
+    if (payload === undefined) return undefined;
+    const trimmed = payload.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch {
+        // Not valid JSON — return as-is
+      }
+    }
+    return payload;
+  }
+
   private static mapRunToEntries(row: Record<string, unknown>): HistoryQueryEntry[] {
     const startedAt = String(row.started_at);
     const endedAt = row.ended_at ? String(row.ended_at) : startedAt;
@@ -222,13 +242,13 @@ export class SqliteHistoryQuery implements HistoryQuery {
       {
         ts: startedAt,
         role: 'system' as const,
-        text: inputPayload,
+        text: SqliteHistoryQuery.formatPayload(inputPayload),
       },
       // Entry 2: assistant role (output)
       {
         ts: endedAt,
         role: 'assistant' as const,
-        text: outputPayload,
+        text: SqliteHistoryQuery.formatPayload(outputPayload),
       },
     ];
   }

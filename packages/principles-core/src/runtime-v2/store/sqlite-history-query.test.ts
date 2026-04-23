@@ -525,5 +525,22 @@ describe('SqliteHistoryQuery', () => {
         expect(result.sourceRef).toBe('my_task_42');
       } finally { cleanupFixture(f); }
     });
+
+    it('pretty-prints JSON object payloads and passes plain strings through unchanged', async () => {
+      const f = createFixture();
+      try {
+        await f.taskStore.createTask(makeTaskInput('task_json_payload'));
+        await f.runStore.createRun(makeRunInput('task_json_payload', 1, {
+          inputPayload: '{"diagnosing":"pain-001","principleId":"P-42"}',
+          outputPayload: 'plain text response',
+        }));
+        const result = await f.historyQuery.query('task_json_payload');
+        const entries = result.entries;
+        // JSON input should be pretty-printed (2-space indent)
+        expect(entries[0]!.text).toBe('{\n  "diagnosing": "pain-001",\n  "principleId": "P-42"\n}');
+        // Plain string output should be unchanged
+        expect(entries[1]!.text).toBe('plain text response');
+      } finally { cleanupFixture(f); }
+    });
   });
 });

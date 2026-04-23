@@ -42,11 +42,11 @@ export class SqliteTrajectoryLocator implements TrajectoryLocator {
     if (query.runId) {
       return this.locateByRunId(query.runId, query);
     }
-    if (query.timeRange) {
-      return this.locateByTimeRange(query.timeRange, query);
-    }
     if (query.sessionId && query.workspace) {
       return this.locateBySessionHint(query);
+    }
+    if (query.timeRange) {
+      return this.locateByTimeRange(query.timeRange, query);
     }
     if (query.executionStatus) {
       return this.locateByExecutionStatus(query.executionStatus, query);
@@ -54,6 +54,16 @@ export class SqliteTrajectoryLocator implements TrajectoryLocator {
     return { query, candidates: [] };
   }
 
+  /**
+   * Locate trajectory by painId.
+   *
+   * NOTE: Despite the name, this implementation treats `painId` as a run_id
+   * alias and queries the runs table directly. This is a pragmatic choice —
+   * callers pass `run_id` values when they have no better reference.
+   *
+   * If a true pain-signal → task lookup is needed, the query should be
+   * against tasks.diagnostic_json (SQLite JSON path extraction) instead.
+   */
   private async locateByPainId(
     painId: string,
     query: TrajectoryLocateQuery,
@@ -69,8 +79,8 @@ export class SqliteTrajectoryLocator implements TrajectoryLocator {
 
     const candidate: TrajectoryCandidate = {
       trajectoryRef: row.task_id,
-      confidence: 1.0,
-      reasons: ['exact_match_on_run_id'],
+      confidence: 0.95, // Same query as locateByRunId → same confidence
+      reasons: ['pain_id_to_run_id_lookup'],
       sourceTypes: ['runs_table'],
     };
 
@@ -162,33 +172,55 @@ export class SqliteTrajectoryLocator implements TrajectoryLocator {
   ): Promise<TrajectoryLocateResult> {
     const db = this.connection.getDb();
 
-    // Workspace is already isolated by SqliteConnection path (each workspace
-    // has its own state.db). sessionId is NOT a column in runs or tasks tables,
-    // so we return all trajectories in the connected workspace DB.
-    let sql = 'SELECT DISTINCT task_id FROM runs';
-    const values: unknown[] = [];
+    // Case A: sessionId is provided — use JSON extraction on diagnostic_json
+    if (query.sessionId) {
+      const rows = db
+        .prepare(
+          `SELECT DISTINCT task_id FROM tasks
+           WHERE json_extract(diagnostic_json, '$.sessionIdHint') = ?`,
+        )
+        .all(query.sessionId) as { task_id: string }[];
 
+      // If sessionId is provided but no tasks match, return empty candidates
+      // (do NOT fall back to returning all tasks — that was the bug)
+      if (rows.length === 0) {
+        return { query, candidates: [] };
+      }
+
+      const candidates: TrajectoryCandidate[] = rows.map((row) => ({
+        trajectoryRef: row.task_id,
+        confidence: 0.8,
+        reasons: ['session_id_json_extract'],
+        sourceTypes: ['tasks_table'],
+      }));
+
+      return { query, candidates };
+    }
+
+    // Case B: sessionId absent, but timeRange is present — fall back to runs table
     if (query.timeRange) {
-      sql += ' WHERE started_at >= ? AND started_at <= ?';
-      values.push(query.timeRange.start, query.timeRange.end);
+      const rows = db
+        .prepare(
+          'SELECT DISTINCT task_id FROM runs WHERE started_at >= ? AND started_at <= ?',
+        )
+        .all(query.timeRange.start, query.timeRange.end) as { task_id: string }[];
+
+      if (rows.length === 0) {
+        return { query, candidates: [] };
+      }
+
+      const candidates: TrajectoryCandidate[] = rows.map((row) => ({
+        trajectoryRef: row.task_id,
+        confidence: 0.7,
+        reasons: ['date_range_match'],
+        sourceTypes: ['runs_table'],
+      }));
+
+      return { query, candidates };
     }
 
-    const rows = db
-      .prepare(sql)
-      .all(...values) as { task_id: string }[];
-
-    if (rows.length === 0) {
-      return { query, candidates: [] };
-    }
-
-    const candidates: TrajectoryCandidate[] = rows.map((row) => ({
-      trajectoryRef: row.task_id,
-      confidence: 0.5,
-      reasons: ['session_hint_workspace_scoped'],
-      sourceTypes: ['runs_table'],
-    }));
-
-    return { query, candidates };
+    // No sessionId and no timeRange — nothing to filter on
+    return { query, candidates: [] };
   }
 
   private async locateByExecutionStatus(

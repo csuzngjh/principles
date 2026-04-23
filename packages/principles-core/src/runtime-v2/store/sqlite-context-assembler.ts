@@ -120,7 +120,7 @@ export class SqliteContextAssembler implements ContextAssembler {
    * onto the base record to produce a full DiagnosticianTaskRecord.
    */
   private static reconstructDiagnosticianRecord(task: TaskRecord): DiagnosticianTaskRecord {
-    const base = task as TaskRecord & { diagnosticJson?: string };
+    const base = task as TaskRecord & { diagnosticJson?: string; workspaceDir?: string };
     let extra: Partial<DiagnosticianTaskRecord> = {};
 
     if (base.diagnosticJson) {
@@ -134,13 +134,15 @@ export class SqliteContextAssembler implements ContextAssembler {
     return {
       ...base,
       taskKind: 'diagnostician',
-      workspaceDir: (extra).workspaceDir ?? '<unknown>',
-      reasonSummary: extra.reasonSummary ?? '',
-      source: extra.source,
-      severity: extra.severity,
-      sourcePainId: extra.sourcePainId,
-      sessionIdHint: extra.sessionIdHint,
-      agentIdHint: extra.agentIdHint,
+      // Prefer base task's own workspaceDir (e.g. from mock or fully-hydrated record),
+      // then diagnosticJson overlay, then fallback.
+      workspaceDir: base.workspaceDir ?? (extra).workspaceDir ?? '<unknown>',
+      reasonSummary: extra.reasonSummary ?? (base as DiagnosticianTaskRecord).reasonSummary ?? '',
+      source: extra.source ?? (base as DiagnosticianTaskRecord).source,
+      severity: extra.severity ?? (base as DiagnosticianTaskRecord).severity,
+      sourcePainId: extra.sourcePainId ?? (base as DiagnosticianTaskRecord).sourcePainId,
+      sessionIdHint: extra.sessionIdHint ?? (base as DiagnosticianTaskRecord).sessionIdHint,
+      agentIdHint: extra.agentIdHint ?? (base as DiagnosticianTaskRecord).agentIdHint,
     };
   }
 }

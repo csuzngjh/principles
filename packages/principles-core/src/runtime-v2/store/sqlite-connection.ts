@@ -63,6 +63,8 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_task_kind ON tasks(task_kind);
       CREATE INDEX IF NOT EXISTS idx_tasks_lease_expires_at ON tasks(lease_expires_at);
+      CREATE INDEX IF NOT EXISTS idx_tasks_session_id_hint
+        ON tasks(json_extract(diagnostic_json, '$.sessionIdHint'));
     `);
 
     db.exec(`

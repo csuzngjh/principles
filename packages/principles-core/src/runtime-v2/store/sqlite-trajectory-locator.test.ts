@@ -105,8 +105,8 @@ describe('SqliteTrajectoryLocator', () => {
       expect(result.candidates.length).toBe(1);
       const candidate = firstCandidate(result);
       expect(candidate!.trajectoryRef).toBe('task-pain-1');
-      expect(candidate!.confidence).toBe(1.0);
-      expect(candidate!.reasons).toContain('exact_match_on_run_id');
+      expect(candidate!.confidence).toBe(0.95);
+      expect(candidate!.reasons).toContain('pain_id_to_run_id_lookup');
       expect(candidate!.sourceTypes).toContain('runs_table');
     });
 
@@ -225,7 +225,7 @@ describe('SqliteTrajectoryLocator', () => {
   });
 
   describe('locate by sessionId (workspace-scoped)', () => {
-    it('returns candidates with confidence 0.5', async () => {
+    it('returns empty candidates when sessionId is provided but no tasks have matching sessionIdHint', async () => {
       const { taskStore, runStore, locator } = createFixture();
       await taskStore.createTask(makeTaskInput('task-session-1'));
       await runStore.createRun(makeRunInput({ taskId: 'task-session-1', attemptNumber: 1 }));
@@ -233,17 +233,95 @@ describe('SqliteTrajectoryLocator', () => {
       await taskStore.createTask(makeTaskInput('task-session-2'));
       await runStore.createRun(makeRunInput({ taskId: 'task-session-2', attemptNumber: 1 }));
 
+      // Tasks have no diagnostic_json with sessionIdHint, so lookup returns empty
       const result = await locator.locate({
         sessionId: 'session-abc',
         workspace: '/path/to/workspace',
       });
 
-      expect(result.candidates.length).toBe(2);
-      // Both should have low confidence since sessionId is not a real column
-      for (const candidate of result.candidates) {
-        expect(candidate.confidence).toBe(0.5);
-        expect(candidate.reasons).toContain('session_hint_workspace_scoped');
-      }
+      expect(result.candidates).toEqual([]);
+    });
+
+    it('returns only tasks whose diagnostic_json contains matching sessionIdHint', async () => {
+      const { taskStore, runStore, locator } = createFixture();
+
+      // Task with matching sessionIdHint
+      await taskStore.createTask({
+        ...makeTaskInput('task-session-match'),
+        diagnosticJson: JSON.stringify({ sessionIdHint: 'session-abc' }),
+      });
+      await runStore.createRun(makeRunInput({ taskId: 'task-session-match', attemptNumber: 1 }));
+
+      // Task with different sessionIdHint
+      await taskStore.createTask({
+        ...makeTaskInput('task-session-other'),
+        diagnosticJson: JSON.stringify({ sessionIdHint: 'session-other' }),
+      });
+      await runStore.createRun(makeRunInput({ taskId: 'task-session-other', attemptNumber: 1 }));
+
+      const result = await locator.locate({
+        sessionId: 'session-abc',
+        workspace: '/path/to/workspace',
+      });
+
+      expect(result.candidates.length).toBe(1);
+      const candidate = firstCandidate(result);
+      expect(candidate!.trajectoryRef).toBe('task-session-match');
+      expect(candidate!.confidence).toBe(0.8);
+      expect(candidate!.reasons).toContain('session_id_json_extract');
+      expect(candidate!.sourceTypes).toContain('tasks_table');
+    });
+
+    it('falls back to runs table timeRange query when sessionId is absent but timeRange is present', async () => {
+      const { taskStore, runStore, locator } = createFixture();
+      const timeA = '2026-04-20T10:00:00.000Z';
+      const timeB = '2026-04-21T10:00:00.000Z';
+
+      await taskStore.createTask(makeTaskInput('task-time-fallback'));
+      await runStore.createRun(makeRunInput({ taskId: 'task-time-fallback', attemptNumber: 1, startedAt: timeA }));
+
+      const result = await locator.locate({
+        timeRange: { start: timeA, end: timeB },
+        // No sessionId — should use runs table fallback
+        workspace: '/path/to/workspace',
+      });
+
+      expect(result.candidates.length).toBe(1);
+      const candidate = firstCandidate(result);
+      expect(candidate!.trajectoryRef).toBe('task-time-fallback');
+      expect(candidate!.confidence).toBe(0.7);
+      expect(candidate!.reasons).toContain('date_range_match');
+      expect(candidate!.sourceTypes).toContain('runs_table');
+    });
+
+    it('uses sessionId filter when both sessionId and timeRange are present', async () => {
+      const { taskStore, runStore, locator } = createFixture();
+      const timeA = '2026-04-20T10:00:00.000Z';
+      const timeB = '2026-04-21T10:00:00.000Z';
+
+      // Task that matches both sessionId and timeRange
+      await taskStore.createTask({
+        ...makeTaskInput('task-both-match'),
+        diagnosticJson: JSON.stringify({ sessionIdHint: 'session-xyz' }),
+      });
+      await runStore.createRun(makeRunInput({ taskId: 'task-both-match', attemptNumber: 1, startedAt: timeA }));
+
+      // Another task that matches timeRange but NOT sessionId
+      await taskStore.createTask(makeTaskInput('task-only-time'));
+      await runStore.createRun(makeRunInput({ taskId: 'task-only-time', attemptNumber: 1, startedAt: timeA }));
+
+      const result = await locator.locate({
+        sessionId: 'session-xyz',
+        timeRange: { start: timeA, end: timeB },
+        workspace: '/path/to/workspace',
+      });
+
+      // Should only return the sessionId-matched task, not both
+      expect(result.candidates.length).toBe(1);
+      const candidate = firstCandidate(result);
+      expect(candidate!.trajectoryRef).toBe('task-both-match');
+      expect(candidate!.confidence).toBe(0.8);
+      expect(candidate!.reasons).toContain('session_id_json_extract');
     });
   });
 

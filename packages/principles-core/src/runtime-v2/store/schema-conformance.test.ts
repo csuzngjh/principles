@@ -39,6 +39,8 @@ describe('SchemaConformance', () => {
       status: 'pending' as PDTaskStatus,
       attemptCount: 0,
       maxAttempts: 3,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     expect(Value.Check(TaskRecordSchema, valid)).toBe(true);
   });
@@ -73,6 +75,8 @@ describe('SchemaConformance', () => {
       executionStatus: 'running' as RunExecutionStatus,
       startedAt: new Date().toISOString(),
       attemptNumber: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     expect(Value.Check(RunRecordSchema, valid)).toBe(true);
   });

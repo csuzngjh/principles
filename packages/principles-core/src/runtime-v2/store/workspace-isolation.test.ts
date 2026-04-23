@@ -6,6 +6,7 @@
  *
  * Tests RET-11 (workspace ID required) and RET-12 (no cross-workspace leakage).
  */
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -80,7 +81,6 @@ describe('Workspace Isolation', () => {
 
   afterEach(() => {
     cleanupWorkspace(wsA);
-    cleanupWorkspace(wsB);
     cleanupWorkspace(wsB);
   });
 
