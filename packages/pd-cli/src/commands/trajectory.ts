@@ -51,9 +51,9 @@ export async function handleTrajectoryLocate(opts: TrajectoryLocateOptions): Pro
     for (const candidate of result.candidates) {
       const reasonsCount = candidate.reasons.length;
       console.log(
-        '  %s  confidence=%.1f  reasons=%d',
+        '  %s  confidence=%s  reasons=%d',
         candidate.trajectoryRef.substring(0, 36),
-        candidate.confidence,
+        candidate.confidence.toFixed(1),
         reasonsCount,
       );
     }
