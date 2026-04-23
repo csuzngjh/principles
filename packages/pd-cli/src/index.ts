@@ -20,6 +20,7 @@ import { handleTrajectoryLocate } from './commands/trajectory.js';
 import { handleHistoryQuery } from './commands/history.js';
 import { handleContextBuild } from './commands/context.js';
 import { handleLegacyImportOpenClaw } from './commands/legacy-import.js';
+import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js';
 
 const program = new Command();
 
@@ -220,6 +221,32 @@ legacyCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleLegacyImportOpenClaw(opts);
+  });
+
+// ── Diagnostician run/status commands ─────────────────────────────────────
+
+const diagnoseCmd = program
+  .command('diagnose')
+  .description('Diagnostician execution and status inspection');
+
+diagnoseCmd
+  .command('status')
+  .description('Inspect diagnostician task status')
+  .requiredOption('-t, --task-id <taskId>', 'Task ID to inspect')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleDiagnoseStatus(opts);
+  });
+
+diagnoseCmd
+  .command('run')
+  .description('Execute diagnostician runner for a task')
+  .requiredOption('-t, --task-id <taskId>', 'Task ID to execute')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleDiagnoseRun(opts);
   });
 
 program.parse();
