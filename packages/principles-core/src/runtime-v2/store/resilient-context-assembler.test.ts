@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 /**
  * ResilientContextAssembler test suite.
  *
@@ -132,7 +133,7 @@ describe('ResilientContextAssembler', () => {
     await resilient.assemble('task-telem');
 
     expect(handler).toHaveBeenCalledTimes(1);
-    const event = handler.mock.calls[0][0];
+    const event = handler.mock.calls[0]![0]!;
     expect(event.eventType).toBe('degradation_triggered');
     expect(event.payload.component).toBe('ContextAssembler');
     expect(event.payload.fallback).toBe('degraded_payload');
@@ -149,7 +150,7 @@ describe('ResilientContextAssembler', () => {
 
     await resilient.assemble('task-sev');
 
-    const event = handler.mock.calls[0][0];
+    const event = handler.mock.calls[0]![0]!;
     expect(event.payload.severity).toBe('error');
   });
 });

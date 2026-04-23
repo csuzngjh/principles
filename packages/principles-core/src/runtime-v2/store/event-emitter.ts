@@ -8,7 +8,8 @@ import { validateTelemetryEvent, type TelemetryEvent } from '../../telemetry-eve
 export class StoreEventEmitter extends EventEmitter {
   /**
    * Emit a telemetry event after validating it conforms to TelemetryEventSchema.
-   * Throws if validation fails — callers must ensure event shape is correct.
+   * Validation failures are caught internally and emit a fallback event instead.
+   * This method never throws — callers can rely on it completing.
    */
   emitTelemetry(event: TelemetryEvent): true {
     try {

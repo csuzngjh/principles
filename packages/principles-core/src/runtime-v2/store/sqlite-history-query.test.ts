@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 /**
  * SqliteHistoryQuery comprehensive test suite.
  *
@@ -109,10 +110,10 @@ describe('SqliteHistoryQuery', () => {
         }));
         const result = await f.historyQuery.query('task_1');
         expect(result.entries).toHaveLength(2);
-        expect(result.entries[0].role).toBe('system');
-        expect(result.entries[0].text).toBe('diagnose pain-001');
-        expect(result.entries[1].role).toBe('assistant');
-        expect(result.entries[1].text).toBe('found issue in auth');
+        expect(result.entries[0]!.role).toBe('system');
+        expect(result.entries[0]!.text).toBe('diagnose pain-001');
+        expect(result.entries[1]!.role).toBe('assistant');
+        expect(result.entries[1]!.text).toBe('found issue in auth');
       } finally { cleanupFixture(f); }
     });
 
@@ -132,7 +133,7 @@ describe('SqliteHistoryQuery', () => {
         });
         // 4 entries total (2 per run), newest run's entries first
         expect(result.entries).toHaveLength(4);
-        expect(result.entries[0].ts).toBe('2026-04-22T10:00:00.000Z');
+        expect(result.entries[0]!.ts).toBe('2026-04-22T10:00:00.000Z');
       } finally { cleanupFixture(f); }
     });
   });
@@ -148,9 +149,9 @@ describe('SqliteHistoryQuery', () => {
         }));
         const result = await f.historyQuery.query('task_1');
         const [systemEntry] = result.entries;
-        expect(systemEntry.role).toBe('system');
-        expect(systemEntry.ts).toBe('2026-04-22T08:00:00.000Z');
-        expect(systemEntry.text).toBe('analyze code quality');
+        expect(systemEntry!.role).toBe('system');
+        expect(systemEntry!.ts).toBe('2026-04-22T08:00:00.000Z');
+        expect(systemEntry!.text).toBe('analyze code quality');
       } finally { cleanupFixture(f); }
     });
 
@@ -167,9 +168,9 @@ describe('SqliteHistoryQuery', () => {
         }));
         const resultWithEnd = await f.historyQuery.query('task_1');
         const [, assistantEntry] = resultWithEnd.entries;
-        expect(assistantEntry.role).toBe('assistant');
-        expect(assistantEntry.ts).toBe('2026-04-22T08:05:00.000Z');
-        expect(assistantEntry.text).toBe('analysis complete');
+        expect(assistantEntry!.role).toBe('assistant');
+        expect(assistantEntry!.ts).toBe('2026-04-22T08:05:00.000Z');
+        expect(assistantEntry!.text).toBe('analysis complete');
       } finally { cleanupFixture(f); }
 
       // Run WITHOUT endedAt — assistant entry uses startedAt
@@ -182,7 +183,7 @@ describe('SqliteHistoryQuery', () => {
         }));
         const resultNoEnd = await f2.historyQuery.query('task_2');
         const [, assistantEntryNoEnd] = resultNoEnd.entries;
-        expect(assistantEntryNoEnd.ts).toBe('2026-04-22T09:00:00.000Z');
+        expect(assistantEntryNoEnd!.ts).toBe('2026-04-22T09:00:00.000Z');
       } finally { cleanupFixture(f2); }
     });
 
@@ -197,9 +198,9 @@ describe('SqliteHistoryQuery', () => {
         const result = await f.historyQuery.query('task_1');
         expect(result.entries).toHaveLength(2);
         // System entry: text should be undefined (not omitted)
-        expect(result.entries[0].text).toBeUndefined();
+        expect(result.entries[0]!.text).toBeUndefined();
         // Assistant entry: text should be undefined (not omitted)
-        expect(result.entries[1].text).toBeUndefined();
+        expect(result.entries[1]!.text).toBeUndefined();
       } finally { cleanupFixture(f); }
     });
   });
@@ -296,7 +297,7 @@ describe('SqliteHistoryQuery', () => {
         });
         // Only the t-1h run should be within the 24h window
         expect(result.entries).toHaveLength(2); // 1 run = 2 entries
-        expect(result.entries[0].ts).toBe(oneHourAgo);
+        expect(result.entries[0]!.ts).toBe(oneHourAgo);
       } finally { cleanupFixture(f); }
     });
 
@@ -320,7 +321,7 @@ describe('SqliteHistoryQuery', () => {
           timeWindowEnd: '2026-04-21T23:59:59.999Z',
         });
         expect(result.entries).toHaveLength(2); // 1 run = 2 entries
-        expect(result.entries[0].ts).toBe('2026-04-21T10:00:00.000Z');
+        expect(result.entries[0]!.ts).toBe('2026-04-21T10:00:00.000Z');
       } finally { cleanupFixture(f); }
     });
   });
@@ -383,15 +384,15 @@ describe('SqliteHistoryQuery', () => {
         expect(page2.truncated).toBe(true);
 
         // No overlap: page1 entries should all be newer than page2 entries
-        const page1NewestTs = page1.entries[0].ts;
-        const page2OldestTs = page2.entries[page2.entries.length - 1].ts;
+        const page1NewestTs = page1.entries[0]!.ts;
+        const page2OldestTs = page2.entries[page2.entries.length - 1]!.ts;
         expect(page1NewestTs >= page2OldestTs).toBe(true);
 
         // The last entry of page1 should be different from first entry of page2
-        const page1LastTs = page1.entries[page1.entries.length - 1].ts;
-        const page1LastRole = page1.entries[page1.entries.length - 1].role;
-        const page2FirstTs = page2.entries[0].ts;
-        const page2FirstRole = page2.entries[0].role;
+        const page1LastTs = page1.entries[page1.entries.length - 1]!.ts;
+        const page1LastRole = page1.entries[page1.entries.length - 1]!.role;
+        const page2FirstTs = page2.entries[0]!.ts;
+        const page2FirstRole = page2.entries[0]!.role;
         // Different entries (either different timestamp or different role)
         const sameEntry = page1LastTs === page2FirstTs && page1LastRole === page2FirstRole;
         expect(sameEntry).toBe(false);

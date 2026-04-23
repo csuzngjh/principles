@@ -16,8 +16,8 @@ import { SqliteRunStore } from './sqlite-run-store.js';
 import { SqliteTrajectoryLocator } from './sqlite-trajectory-locator.js';
 import { SqliteHistoryQuery } from './sqlite-history-query.js';
 import { SqliteContextAssembler } from './sqlite-context-assembler.js';
-import type { DiagnosticianTaskRecord } from '../task-status.js';
-import type { TaskRecord, RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
+import type { TaskRecord, PDTaskStatus, DiagnosticianTaskRecord } from '../task-status.js';
+import type { RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
 
 interface WorkspaceFixture {
   tmpDir: string;
@@ -49,7 +49,7 @@ async function seedTaskAndRun(f: WorkspaceFixture, taskId: string): Promise<void
   await f.taskStore.createTask({
     taskId,
     taskKind: 'diagnostician',
-    status: 'pending',
+    status: 'pending' as PDTaskStatus,
     attemptCount: 0,
     maxAttempts: 3,
   } satisfies Omit<TaskRecord, 'createdAt' | 'updatedAt'>);
@@ -64,7 +64,7 @@ async function seedTaskAndRun(f: WorkspaceFixture, taskId: string): Promise<void
     runtimeKind: 'openclaw',
     inputPayload: `input for ${taskId}`,
     outputPayload: `output for ${taskId}`,
-  } satisfies Omit<RunRecord, never>);
+  } satisfies Omit<RunRecord, 'createdAt' | 'updatedAt'>);
 }
 
 describe('Workspace Isolation', () => {
@@ -91,7 +91,7 @@ describe('Workspace Isolation', () => {
     const tasksB = await wsB.taskStore.listTasks();
 
     expect(tasksA.length).toBe(1);
-    expect(tasksA[0].taskId).toBe('task-alpha');
+    expect(tasksA[0]!.taskId).toBe('task-alpha');
     expect(tasksB.length).toBe(0);
   });
 
@@ -138,7 +138,7 @@ describe('Workspace Isolation', () => {
     const diagTask: TaskRecord & Record<string, unknown> = {
       taskId: 'task-diag',
       taskKind: 'diagnostician',
-      status: 'pending',
+      status: 'pending' as PDTaskStatus,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       attemptCount: 0,

@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.2
-milestone_name: M3 History Retrieval + Context Build
-status: all_phases_complete
-last_updated: "2026-04-22T15:50:00Z"
-last_activity: 2026-04-22 — m3-05 verified PASS, M3 ALL PHASES COMPLETE
+milestone: v2.1
+milestone_name: M2 Task/Run State Core
+status: shipped
+last_updated: "2026-04-22T15:45:00.000Z"
+last_activity: 2026-04-22 — Phase m2-07 complete, Milestone v2.1 SHIPPED
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 5
-  completed_plans: 5
+  total_phases: 54
+  completed_phases: 49
+  total_plans: 95
+  completed_plans: 95
   percent: 100
 ---
 
@@ -19,73 +19,34 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.2 M3 — ALL PHASES COMPLETE
+**Current Focus:** v2.1 M2 Task/Run State Core — SHIPPED 2026-04-22
 
 ## Current Position
 
-**M3 ALL PHASES VERIFIED:**
-- m3-01 Trajectory Locator ✅ VERIFIED
-- m3-02 Bounded History Query ✅ VERIFIED
-- m3-03 Context Assembler ✅ VERIFIED
-- m3-04 Degradation Policy ✅ VERIFIED
-- m3-05 Workspace Isolation + Integration ✅ VERIFIED
+Phase: m2-07: Runtime Integration + Event Emission + CLI Inspection (complete)
+Status: Milestone v2.1 complete (7/7 plans)
+Last activity: 2026-04-22 — Phase m2-07 complete, all M2 task/run state components integrated and verified
 
 ## Context
 
-**v2.2 M3 Goal:** Deliver PD-owned retrieval pipeline — trajectory locate, history query, context build
+**v2.1 M2 Goal:** 实现可靠的 task/run 状态存储、租约机制与恢复逻辑
 
-**m3-05 Complete (VERIFIED):**
-- CLI commands: pd trajectory locate, pd history, pd context
-- Workspace isolation integration tests (7 tests)
-- RET-11/12: Workspace isolation enforced by SqliteConnection architecture
-- RET-13: CLI commands wired for all 3 retrieval operations
-- 7 isolation tests, 0 regressions
+**Phase m2-07 Complete:**
+- `RuntimeStateManager` integrated integration layer.
+- `StoreEventEmitter` with `TelemetryEvent` validation.
+- Telemetry expansion: 8 new task lifecycle events.
+- `LeaseManager` + `RecoverySweep` event emission wired.
+- `pd task list/show` and `pd run list/show` CLI commands implemented.
+- `isLeaseExpired` bug fixed in `DefaultLeaseManager`.
 
-**m3-04 Complete (VERIFIED):**
-- ResilientContextAssembler: never-throws wrapper returning degraded DiagnosticianContextPayload
-- ResilientHistoryQuery: cursor error fallback to first page
-- degradation_triggered telemetry event type added
-- 12 tests, 0 regressions
-
-**m3-03 Complete (VERIFIED):**
-- ContextAssembler interface with assemble(taskId) method
-- SqliteContextAssembler composing TaskStore + HistoryQuery + RunStore
-- UUIDv4 contextId and SHA-256 contextHash generation
-- DiagnosisTarget mapping from DiagnosticianTaskRecord fields
-- Template-generated ambiguityNotes for data quality issues
-- TypeBox Value.Check() output validation
-- 11 tests, 0 regressions
-- Finding: conversationWindow in DESC order (LOW, non-blocking)
-
-**m3-02 Complete:**
-- HistoryQuery interface with query(trajectoryRef, cursor?, options?) method
-- HistoryQueryCursorData for opaque cursor internal structure (base64 JSON)
-- HistoryQueryOptions for limit and time window customization
-- SqliteHistoryQuery with keyset cursor pagination (started_at + run_id)
-- Time window filter with default 24h lookback and custom overrides
-- 19 tests
-
-**m3-01 Complete:**
-- TrajectoryLocator interface with locate() method
-- SqliteTrajectoryLocator with 6 locate modes
-- 17 tests
-
-**M3 Boundary Constraints:**
-- Only trajectory locate / history query / context build / degradation / workspace isolation
-- No diagnostician runner (M4)
-- No unified commit (M5)
-- No host API in main design
-- Authoritative retrieval via PD-owned stores/indexes/references only
-- No LLM in context build
-
-**M3 Exit Criteria (ALL DONE):**
-1. `pd trajectory locate` — ✅ DONE (m3-01)
-2. `pd history query` — ✅ DONE (m3-02)
-3. `pd context build` — ✅ DONE (m3-03)
-4. Workspace isolation: context never leaks across workspaces — ✅ DONE (m3-05)
-5. Degradation policy: graceful fallback when history is incomplete — ✅ DONE (m3-04)
-6. Degraded mode: no crashes, only warnings, task can still proceed — ✅ DONE (m3-04)
+**Phase m2-01 to m2-06 Complete:**
+- `SqliteTaskStore` + `SqliteRunStore` (MIGRATED from M1 schemas).
+- `DefaultLeaseManager` (atomic acquire/release/renew).
+- `DefaultRetryPolicy` (exponential backoff + jitter).
+- `DefaultRecoverySweep` (stale lease detection and recovery).
+- `EvolutionQueueItemMigrator` (legacy -> v2 bridge).
+- Comprehensive integration tests (concurrent leases, idempotent transitions, schema conformance).
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
-**Previous:** v2.1 M2 Task/Run State Core — SHIPPED 2026-04-22
+**Previous:** v2.0 M1 Foundation Contracts — SHIPPED 2026-04-21

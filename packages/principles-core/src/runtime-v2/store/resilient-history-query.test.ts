@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 /**
  * ResilientHistoryQuery test suite.
  *
@@ -14,7 +15,8 @@ import { SqliteRunStore } from './sqlite-run-store.js';
 import { SqliteHistoryQuery } from './sqlite-history-query.js';
 import { ResilientHistoryQuery } from './resilient-history-query.js';
 import { StoreEventEmitter } from './event-emitter.js';
-import type { TaskRecord, RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
+import type { RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
+import type { TaskRecord, PDTaskStatus } from '../task-status.js';
 
 interface TestFixture {
   tmpDir: string;
@@ -46,7 +48,7 @@ async function seedTaskAndRuns(f: TestFixture, taskId: string, count: number): P
   await f.taskStore.createTask({
     taskId,
     taskKind: 'diagnostician',
-    status: 'pending',
+    status: 'pending' as PDTaskStatus,
     attemptCount: 0,
     maxAttempts: 3,
   } satisfies Omit<TaskRecord, 'createdAt' | 'updatedAt'>);
@@ -62,7 +64,7 @@ async function seedTaskAndRuns(f: TestFixture, taskId: string, count: number): P
       runtimeKind: 'openclaw',
       inputPayload: `input ${i}`,
       outputPayload: `output ${i}`,
-    } satisfies Omit<RunRecord, never>);
+    } satisfies Omit<RunRecord, 'createdAt' | 'updatedAt'>);
   }
 }
 
@@ -137,7 +139,7 @@ describe('ResilientHistoryQuery', () => {
       await f.resilientQuery.query('task-telem', badCursor);
 
       expect(handler).toHaveBeenCalledTimes(1);
-      const event = handler.mock.calls[0][0];
+      const event = handler.mock.calls[0]![0]!;
       expect(event.eventType).toBe('degradation_triggered');
       expect(event.payload.component).toBe('HistoryQuery');
       expect(event.payload.fallback).toBe('first_page_fallback');

@@ -37,8 +37,6 @@ describe('SchemaConformance', () => {
       taskId: 'task-1',
       taskKind: 'diagnostician',
       status: 'pending' as PDTaskStatus,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
       attemptCount: 0,
       maxAttempts: 3,
     };
@@ -50,8 +48,6 @@ describe('SchemaConformance', () => {
       taskId: 'task-1',
       taskKind: 'diagnostician',
       status: 'invalid_status' as PDTaskStatus,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
       attemptCount: 0,
       maxAttempts: 3,
     };
@@ -63,8 +59,6 @@ describe('SchemaConformance', () => {
       taskId: 'task-1',
       taskKind: 'diagnostician',
       status: 'pending' as PDTaskStatus,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
       attemptCount: -1,
       maxAttempts: 3,
     };
@@ -79,8 +73,6 @@ describe('SchemaConformance', () => {
       executionStatus: 'running' as RunExecutionStatus,
       startedAt: new Date().toISOString(),
       attemptNumber: 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     };
     expect(Value.Check(RunRecordSchema, valid)).toBe(true);
   });
@@ -93,8 +85,6 @@ describe('SchemaConformance', () => {
       executionStatus: 'invalid_status' as RunExecutionStatus,
       startedAt: new Date().toISOString(),
       attemptNumber: 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     };
     expect(Value.Check(RunRecordSchema, invalid)).toBe(false);
   });
@@ -103,7 +93,7 @@ describe('SchemaConformance', () => {
     await taskStore.createTask({
       taskId: 'task-schema-1',
       taskKind: 'test',
-      status: 'pending',
+      status: 'pending' as PDTaskStatus,
       attemptCount: 0,
       maxAttempts: 3,
     });
@@ -117,7 +107,7 @@ describe('SchemaConformance', () => {
     await taskStore.createTask({
       taskId: 'task-schema-2',
       taskKind: 'test',
-      status: 'pending',
+      status: 'pending' as PDTaskStatus,
       attemptCount: 0,
       maxAttempts: 3,
     });
@@ -130,7 +120,7 @@ describe('SchemaConformance', () => {
     await taskStore.createTask({
       taskId: 'task-schema-3',
       taskKind: 'test',
-      status: 'pending',
+      status: 'pending' as PDTaskStatus,
       attemptCount: 0,
       maxAttempts: 3,
     });
@@ -142,8 +132,6 @@ describe('SchemaConformance', () => {
       executionStatus: 'running',
       startedAt: new Date().toISOString(),
       attemptNumber: 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     });
 
     const record = await runStore.getRun('run-task-schema-3-1');
@@ -155,7 +143,7 @@ describe('SchemaConformance', () => {
     await taskStore.createTask({
       taskId: 'task-schema-4',
       taskKind: 'test',
-      status: 'pending',
+      status: 'pending' as PDTaskStatus,
       attemptCount: 0,
       maxAttempts: 3,
     });
@@ -167,8 +155,6 @@ describe('SchemaConformance', () => {
       executionStatus: 'running',
       startedAt: new Date().toISOString(),
       attemptNumber: 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     });
 
     const updated = await runStore.updateRun('run-task-schema-4-1', {
@@ -182,7 +168,7 @@ describe('SchemaConformance', () => {
       await taskStore.createTask({
         taskId: `task-list-${i}`,
         taskKind: 'test',
-        status: 'pending',
+        status: 'pending' as PDTaskStatus,
         attemptCount: 0,
         maxAttempts: 3,
       });
@@ -199,7 +185,7 @@ describe('SchemaConformance', () => {
     await taskStore.createTask({
       taskId: 'task-list-runs',
       taskKind: 'test',
-      status: 'pending',
+      status: 'pending' as PDTaskStatus,
       attemptCount: 0,
       maxAttempts: 3,
     });
@@ -212,8 +198,6 @@ describe('SchemaConformance', () => {
         executionStatus: 'running',
         startedAt: new Date().toISOString(),
         attemptNumber: i + 1,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
       });
     }
 

@@ -4,7 +4,6 @@
 
 - ✅ **v2.0** — M1 Foundation Contracts — SHIPPED 2026-04-21
 - ✅ **v2.1** — M2 Task/Run State Core — SHIPPED 2026-04-22
-- 🔄 **v2.2** — M3 History Retrieval + Context Build — IN PROGRESS
 
 ## Phases
 
@@ -31,17 +30,6 @@
 
 </details>
 
-<details>
-<summary>🔄 v2.2 M3 History Retrieval + Context Build (Phase m3-01+) — IN PROGRESS</summary>
-
-- [x] m3-01: Trajectory Locator — 1/1 plans — completed 2026-04-22
-- [x] m3-02: Bounded History Query — 1/1 plans — completed 2026-04-22
-- [ ] m3-03: Context Assembler — (planning)
-- [ ] m3-04: Degradation Policy — (planning)
-- [ ] m3-05: Workspace Isolation + Integration — (planning)
-
-</details>
-
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -57,11 +45,6 @@
 | m2-05 RecoverySweep | v2.1 | 1/1 | Complete | 2026-04-22 |
 | m2-06 MigrationBridge | v2.1 | 1/1 | Complete | 2026-04-22 |
 | m2-07 RuntimeIntegration | v2.1 | 1/1 | Complete | 2026-04-22 |
-| m3-01 TrajectoryLocator | v2.2 | 1/1 | Complete | 2026-04-22 |
-| m3-02 HistoryQuery | v2.2 | 1/1 | Complete | 2026-04-22 |
-| m3-03 ContextAssembler | v2.2 | 0/1 | Pending | — |
-| m3-04 DegradationPolicy | v2.2 | 0/1 | Pending | — |
-| m3-05 WorkspaceIsolation | v2.2 | 0/1 | Pending | — |
 
 ---
 *Last updated: 2026-04-22*

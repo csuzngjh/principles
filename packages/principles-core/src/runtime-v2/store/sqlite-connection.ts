@@ -34,6 +34,7 @@ export class SqliteConnection {
     this.db = new Database(this.dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
+    this.db.pragma('foreign_keys = ON');
 
     this.initSchema();
     return this.db;
@@ -91,6 +92,9 @@ export class SqliteConnection {
   /** Closes the underlying database connection. */
   close(): void {
     if (this.db) {
+      // Checkpoint WAL before closing so all data is flushed to the main DB file.
+      // TRUNCATE also shrinks the WAL file, preventing unbounded growth on Windows.
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
       this.db.close();
       this.db = null;
     }

@@ -119,7 +119,7 @@ async function createRunWithPayloads(
     runtimeKind: 'openclaw',
     inputPayload: options?.inputPayload,
     outputPayload: options?.outputPayload,
-  } satisfies Omit<RunRecord, never>);
+  } satisfies Omit<RunRecord, 'createdAt' | 'updatedAt'>);
 }
 
 /** Helper: check that ambiguityNotes includes a substring (safely). */

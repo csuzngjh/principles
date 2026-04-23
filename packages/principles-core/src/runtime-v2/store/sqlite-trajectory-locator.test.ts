@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 /**
  * SqliteTrajectoryLocator comprehensive test suite.
  *
@@ -33,7 +34,7 @@ interface RunInputOptions {
   status?: RunExecutionStatus;
 }
 
-function makeRunInput(options: RunInputOptions): Omit<RunRecord, never> {
+function makeRunInput(options: RunInputOptions): Omit<RunRecord, 'createdAt' | 'updatedAt'> {
   const now = options.startedAt ?? new Date().toISOString();
   const attempt = options.attemptNumber ?? 1;
   return {
@@ -43,8 +44,8 @@ function makeRunInput(options: RunInputOptions): Omit<RunRecord, never> {
     executionStatus: options.status ?? ('queued' as RunExecutionStatus),
     startedAt: now,
     attemptNumber: attempt,
-    createdAt: now,
-    updatedAt: now,
+    
+    
   };
 }
 
@@ -103,10 +104,10 @@ describe('SqliteTrajectoryLocator', () => {
 
       expect(result.candidates.length).toBe(1);
       const candidate = firstCandidate(result);
-      expect(candidate.trajectoryRef).toBe('task-pain-1');
-      expect(candidate.confidence).toBe(1.0);
-      expect(candidate.reasons).toContain('exact_match_on_run_id');
-      expect(candidate.sourceTypes).toContain('runs_table');
+      expect(candidate!.trajectoryRef).toBe('task-pain-1');
+      expect(candidate!.confidence).toBe(1.0);
+      expect(candidate!.reasons).toContain('exact_match_on_run_id');
+      expect(candidate!.sourceTypes).toContain('runs_table');
     });
 
     it('returns empty candidates when painId not found', async () => {
@@ -130,9 +131,9 @@ describe('SqliteTrajectoryLocator', () => {
 
       expect(result.candidates.length).toBe(1);
       const candidate = firstCandidate(result);
-      expect(candidate.trajectoryRef).toBe('task-direct-1');
-      expect(candidate.confidence).toBe(1.0);
-      expect(candidate.reasons).toContain('task_id_lookup');
+      expect(candidate!.trajectoryRef).toBe('task-direct-1');
+      expect(candidate!.confidence).toBe(1.0);
+      expect(candidate!.reasons).toContain('task_id_lookup');
     });
 
     it('returns empty candidates when taskId not found', async () => {
@@ -156,9 +157,9 @@ describe('SqliteTrajectoryLocator', () => {
 
       expect(result.candidates.length).toBe(1);
       const candidate = firstCandidate(result);
-      expect(candidate.trajectoryRef).toBe('task-runid-1');
-      expect(candidate.confidence).toBe(0.95);
-      expect(candidate.reasons).toContain('run_id_to_task_id');
+      expect(candidate!.trajectoryRef).toBe('task-runid-1');
+      expect(candidate!.confidence).toBe(0.95);
+      expect(candidate!.reasons).toContain('run_id_to_task_id');
     });
 
     it('returns empty candidates when runId not found', async () => {
@@ -189,9 +190,9 @@ describe('SqliteTrajectoryLocator', () => {
 
       expect(result.candidates.length).toBe(1);
       const candidate = firstCandidate(result);
-      expect(candidate.trajectoryRef).toBe('task-time-in');
-      expect(candidate.confidence).toBe(0.7);
-      expect(candidate.reasons).toContain('date_range_match');
+      expect(candidate!.trajectoryRef).toBe('task-time-in');
+      expect(candidate!.confidence).toBe(0.7);
+      expect(candidate!.reasons).toContain('date_range_match');
     });
 
     it('groups multiple runs for same task into single candidate', async () => {
@@ -207,7 +208,7 @@ describe('SqliteTrajectoryLocator', () => {
       // Same task, two runs -- single candidate
       expect(result.candidates.length).toBe(1);
       const candidate = firstCandidate(result);
-      expect(candidate.trajectoryRef).toBe('task-time-multi');
+      expect(candidate!.trajectoryRef).toBe('task-time-multi');
     });
 
     it('returns empty candidates when no runs in range', async () => {
@@ -259,9 +260,9 @@ describe('SqliteTrajectoryLocator', () => {
 
       expect(result.candidates.length).toBe(1);
       const candidate = firstCandidate(result);
-      expect(candidate.trajectoryRef).toBe('task-status-fail');
-      expect(candidate.confidence).toBe(0.8);
-      expect(candidate.reasons).toContain('status_filter');
+      expect(candidate!.trajectoryRef).toBe('task-status-fail');
+      expect(candidate!.confidence).toBe(0.8);
+      expect(candidate!.reasons).toContain('status_filter');
     });
 
     it('returns empty candidates when no runs match status', async () => {
@@ -332,7 +333,7 @@ describe('SqliteTrajectoryLocator', () => {
 
       expect(result.candidates.length).toBe(1);
       const candidate = firstCandidate(result);
-      expect(candidate.trajectoryRef).toBe('task-multi-ref');
+      expect(candidate!.trajectoryRef).toBe('task-multi-ref');
     });
   });
 });
