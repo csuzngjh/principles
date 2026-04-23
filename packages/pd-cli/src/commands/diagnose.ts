@@ -7,7 +7,7 @@
  */
 import type {
   SqliteTaskStore,
-  SqliteRunStore} from '../../../principles-core/src/runtime-v2/index.js';
+  SqliteRunStore} from '@principles/core/runtime-v2/index.js';
 import {
   RuntimeStateManager,
   SqliteHistoryQuery,
@@ -18,7 +18,7 @@ import {
   TestDoubleRuntimeAdapter,
   run as diagnoseRun,
   status as diagnoseStatus,
-} from '../../../principles-core/src/runtime-v2/index.js';
+} from '@principles/core/runtime-v2/index.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface DiagnoseStatusOptions {

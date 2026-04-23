@@ -384,7 +384,7 @@ describe('DiagnosticianRunner', () => {
   });
 
   // 9. Lease conflict
-  it('retries on lease conflict', async () => {
+  it('fails permanently on lease conflict', async () => {
     const mocks = createMocks();
     mocks._stateManager.acquireLease.mockRejectedValue(
       new PDRuntimeError('lease_conflict', 'Task already leased'),
@@ -393,9 +393,8 @@ describe('DiagnosticianRunner', () => {
     const runner = createRunner(mocks);
     const result = await runner.run(TASK_ID);
 
-    // lease_conflict is not in permanent set, so it goes through retryOrFail
-    // but lease_conflict should be retryable by default
-    expect(result.status).toBe('retried');
+    // lease_conflict is in PERMANENT_ERROR_CATEGORIES, so it fails immediately
+    expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('lease_conflict');
   });
 

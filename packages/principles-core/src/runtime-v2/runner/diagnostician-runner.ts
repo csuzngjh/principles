@@ -315,7 +315,23 @@ export class DiagnosticianRunner {
   ): Promise<RunnerResult> {
     const classified = this.classifyError(error);
 
-    // Emit: diagnostician_run_failed (for phase/lease errors before retry decision)
+    // lease_conflict is a concurrent-access conflict, not a state change.
+    // No mutation methods (markTaskFailed/markTaskRetryWait) are called.
+    if (classified.category === 'lease_conflict') {
+      this.emitDiagnosticianEvent('diagnostician_run_failed', taskId, {
+        errorCategory: 'lease_conflict',
+        errorMessage: classified.message,
+      });
+      return {
+        status: 'failed',
+        taskId,
+        errorCategory: 'lease_conflict',
+        failureReason: classified.message,
+        attemptCount: 1,
+      };
+    }
+
+    // Emit: diagnostician_run_failed (for other phase/lease errors before retry decision)
     this.emitDiagnosticianEvent('diagnostician_run_failed', taskId, {
       errorCategory: classified.category,
       errorMessage: classified.message,
