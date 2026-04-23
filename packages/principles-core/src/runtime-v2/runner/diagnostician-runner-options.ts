@@ -9,6 +9,8 @@ export interface DiagnosticianRunnerOptions {
   readonly pollIntervalMs?: number;
   /** Maximum runtime execution time in ms (default: 300000 = 5 minutes). */
   readonly timeoutMs?: number;
+  /** Default maxAttempts for synthetic TaskRecord in lease error path (default: 3). */
+  readonly defaultMaxAttempts?: number;
   /** Lease owner identifier for acquireLease. */
   readonly owner: string;
   /** RuntimeKind value for lease/run record creation. */
@@ -19,6 +21,7 @@ export interface DiagnosticianRunnerOptions {
 export interface ResolvedDiagnosticianRunnerOptions {
   readonly pollIntervalMs: number;
   readonly timeoutMs: number;
+  readonly defaultMaxAttempts: number;
   readonly owner: string;
   readonly runtimeKind: string;
 }
@@ -27,6 +30,7 @@ export interface ResolvedDiagnosticianRunnerOptions {
 export const DEFAULT_RUNNER_OPTIONS: Readonly<Omit<ResolvedDiagnosticianRunnerOptions, 'owner' | 'runtimeKind'>> = {
   pollIntervalMs: 5_000,
   timeoutMs: 300_000,
+  defaultMaxAttempts: 3,
 } as const;
 
 /** Resolve options by applying defaults. */
@@ -34,6 +38,7 @@ export function resolveRunnerOptions(options: DiagnosticianRunnerOptions): Resol
   return {
     pollIntervalMs: options.pollIntervalMs ?? DEFAULT_RUNNER_OPTIONS.pollIntervalMs,
     timeoutMs: options.timeoutMs ?? DEFAULT_RUNNER_OPTIONS.timeoutMs,
+    defaultMaxAttempts: options.defaultMaxAttempts ?? DEFAULT_RUNNER_OPTIONS.defaultMaxAttempts,
     owner: options.owner,
     runtimeKind: options.runtimeKind,
   };

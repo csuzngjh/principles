@@ -15,4 +15,5 @@ export enum RunnerPhase {
   Validating = 'validating',
   Completed = 'completed',
   Failed = 'failed',
+  RetryWaiting = 'retry_waiting',
 }

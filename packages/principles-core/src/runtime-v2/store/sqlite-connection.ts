@@ -63,8 +63,6 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
       CREATE INDEX IF NOT EXISTS idx_tasks_task_kind ON tasks(task_kind);
       CREATE INDEX IF NOT EXISTS idx_tasks_lease_expires_at ON tasks(lease_expires_at);
-      CREATE INDEX IF NOT EXISTS idx_tasks_session_id_hint
-        ON tasks(json_extract(diagnostic_json, '$.sessionIdHint'));
     `);
 
     // Migration: add diagnostic_json column to existing tasks table
@@ -75,6 +73,7 @@ export class SqliteConnection {
     }
 
     // Migration: add sessionIdHint expression index (idempotent)
+    // Runs after diagnostic_json column migration to avoid "no such column" error on existing DBs
     try {
       db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_session_id_hint ON tasks(json_extract(diagnostic_json, '$.sessionIdHint'))");
     } catch {

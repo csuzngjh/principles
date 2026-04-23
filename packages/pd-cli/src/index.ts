@@ -211,8 +211,9 @@ const legacyCmd = program
   .command('legacy')
   .description('Legacy data import (OpenClaw → PD Runtime v2)');
 
-legacyCmd
-  .command('import openclaw')
+const importCmd = legacyCmd.command('import');
+importCmd
+  .command('openclaw')
   .description(
     'Import OpenClaw legacy data into PD Runtime v2 SQLite. ' +
       'Run this once per workspace before using trajectory/history/context commands.',

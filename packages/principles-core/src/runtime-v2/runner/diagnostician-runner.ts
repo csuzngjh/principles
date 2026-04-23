@@ -330,7 +330,7 @@ export class DiagnosticianRunner {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       attemptCount: 1,
-      maxAttempts: 3,
+      maxAttempts: this.resolvedOptions.defaultMaxAttempts,
     };
     return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
   }
@@ -362,7 +362,7 @@ export class DiagnosticianRunner {
         attemptCount: ctx.task.attemptCount,
       });
 
-      this.phase = RunnerPhase.Failed;
+      this.phase = RunnerPhase.RetryWaiting;
       return { status: 'retried', taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: ctx.failureReason, attemptCount: ctx.task.attemptCount };
     }
 
