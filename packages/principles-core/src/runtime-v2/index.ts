@@ -159,5 +159,9 @@ export type { DiagnosticianValidator, DiagnosticianValidationResult } from './ru
 export { TestDoubleRuntimeAdapter } from './adapter/index.js';
 export type { TestDoubleBehaviorOverrides } from './adapter/test-double-runtime-adapter.js';
 
+// CLI surface (M4)
+export { run, status } from './cli/diagnose.js';
+export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult } from './cli/diagnose.js';
+
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
