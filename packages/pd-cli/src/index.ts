@@ -19,6 +19,7 @@ import { handleRunList, handleRunShow } from './commands/run.js';
 import { handleTrajectoryLocate } from './commands/trajectory.js';
 import { handleHistoryQuery } from './commands/history.js';
 import { handleContextBuild } from './commands/context.js';
+import { handleLegacyImportOpenClaw } from './commands/legacy-import.js';
 
 const program = new Command();
 
@@ -182,6 +183,8 @@ historyCmd
   .description('Query run history for a task')
   .option('-l, --limit <number>', 'Limit number of entries', parseInt)
   .option('-c, --cursor <cursor>', 'Pagination cursor')
+  .option('--from <date>', 'Start of time range (ISO string)')
+  .option('--to <date>', 'End of time range (ISO string)')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output raw JSON')
   .action(async (taskId, opts) => {
@@ -199,6 +202,24 @@ contextCmd
   .option('--json', 'Output raw JSON')
   .action(async (taskId, opts) => {
     await handleContextBuild(taskId, opts);
+  });
+
+// ── Legacy import command ───────────────────────────────────────────────────────
+
+const legacyCmd = program
+  .command('legacy')
+  .description('Legacy data import (OpenClaw → PD Runtime v2)');
+
+legacyCmd
+  .command('import openclaw')
+  .description(
+    'Import OpenClaw legacy data into PD Runtime v2 SQLite. ' +
+      'Run this once per workspace before using trajectory/history/context commands.',
+  )
+  .option('-w, --workspace <path>', 'Workspace directory (required)')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleLegacyImportOpenClaw(opts);
   });
 
 program.parse();

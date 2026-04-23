@@ -3,6 +3,7 @@
  *
  * Usage:
  *   pd history query <taskId> [--limit N] [--cursor <cursor>]
+ *   pd history query <taskId> --from <date> --to <date>
  */
 import { SqliteConnection, SqliteHistoryQuery } from '@principles/core';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -10,6 +11,8 @@ import { resolveWorkspaceDir } from '../resolve-workspace.js';
 interface HistoryQueryOptions {
   limit?: number;
   cursor?: string;
+  from?: string;
+  to?: string;
   json?: boolean;
   workspace?: string;
 }
@@ -21,7 +24,13 @@ export async function handleHistoryQuery(taskId: string, opts: HistoryQueryOptio
   try {
     const historyQuery = new SqliteHistoryQuery(connection);
 
-    const queryOpts = opts.limit ? { limit: opts.limit } : undefined;
+    const queryOpts = opts.limit || opts.from || opts.to
+      ? {
+          limit: opts.limit,
+          timeWindowStart: opts.from,
+          timeWindowEnd: opts.to,
+        }
+      : undefined;
     const result = await historyQuery.query(taskId, opts.cursor, queryOpts);
 
     if (opts.json) {
