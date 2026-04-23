@@ -20,8 +20,6 @@ import type { ContextAssembler } from '../../store/context-assembler.js';
 import type {
   PDRuntimeAdapter,
   RunHandle,
-  RunStatus,
-  StructuredRunOutput,
   StartRunInput,
 } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
@@ -96,49 +94,77 @@ function makeDiagnosticianOutput(overrides: Partial<DiagnosticianOutputV1> = {})
 
 // ── Mock factory ───────────────────────────────────────────────────────────────
 
+interface MockStateful {
+  acquireLease: ReturnType<typeof vi.fn>;
+  markTaskSucceeded: ReturnType<typeof vi.fn>;
+  markTaskFailed: ReturnType<typeof vi.fn>;
+  markTaskRetryWait: ReturnType<typeof vi.fn>;
+  updateRunOutput: ReturnType<typeof vi.fn>;
+  getRetryPolicy: ReturnType<typeof vi.fn>;
+}
+
+interface MockAdapter {
+  kind: ReturnType<typeof vi.fn>;
+  getCapabilities: ReturnType<typeof vi.fn>;
+  healthCheck: ReturnType<typeof vi.fn>;
+  startRun: ReturnType<typeof vi.fn>;
+  pollRun: ReturnType<typeof vi.fn>;
+  cancelRun: ReturnType<typeof vi.fn>;
+  fetchOutput: ReturnType<typeof vi.fn>;
+  fetchArtifacts: ReturnType<typeof vi.fn>;
+}
+
+interface MockAssembler {
+  assemble: ReturnType<typeof vi.fn>;
+}
+
+interface MockValidator {
+  validate: ReturnType<typeof vi.fn>;
+}
+
 function createMocks() {
   const taskRecord = makeTaskRecord();
   const runHandle = makeRunHandle();
   const contextPayload = makeContextPayload();
   const output = makeDiagnosticianOutput();
 
-  const mockStateManager = {
-    acquireLease: vi.fn<Promise<TaskRecord>, [unknown]>().mockResolvedValue(taskRecord),
-    markTaskSucceeded: vi.fn<Promise<TaskRecord>, [string, string?]>().mockResolvedValue(taskRecord),
-    markTaskFailed: vi.fn<Promise<TaskRecord>, [string, string]>().mockResolvedValue(taskRecord),
-    markTaskRetryWait: vi.fn<Promise<TaskRecord>, [string, string]>().mockResolvedValue(taskRecord),
-    updateRunOutput: vi.fn<Promise<unknown>, [string, string]>().mockResolvedValue({}),
+  const mockStateManager: MockStateful = {
+    acquireLease: vi.fn().mockResolvedValue(taskRecord),
+    markTaskSucceeded: vi.fn().mockResolvedValue(taskRecord),
+    markTaskFailed: vi.fn().mockResolvedValue(taskRecord),
+    markTaskRetryWait: vi.fn().mockResolvedValue(taskRecord),
+    updateRunOutput: vi.fn().mockResolvedValue({}),
     getRetryPolicy: vi.fn().mockReturnValue({
       calculateBackoff: vi.fn().mockReturnValue(30_000),
       shouldRetry: vi.fn().mockReturnValue(true),
     }),
   };
 
-  const mockContextAssembler = {
-    assemble: vi.fn<Promise<DiagnosticianContextPayload>, [string]>().mockResolvedValue(contextPayload),
+  const mockContextAssembler: MockAssembler = {
+    assemble: vi.fn().mockResolvedValue(contextPayload),
   };
 
-  const mockRuntimeAdapter = {
+  const mockRuntimeAdapter: MockAdapter = {
     kind: vi.fn().mockReturnValue(RUNTIME_KIND),
     getCapabilities: vi.fn(),
     healthCheck: vi.fn(),
-    startRun: vi.fn<Promise<RunHandle>, [StartRunInput]>().mockResolvedValue(runHandle),
-    pollRun: vi.fn<Promise<RunStatus>, [string]>().mockResolvedValue({
+    startRun: vi.fn().mockResolvedValue(runHandle),
+    pollRun: vi.fn().mockResolvedValue({
       runId: RUN_ID,
       status: 'succeeded',
     }),
-    cancelRun: vi.fn<Promise<void>, [string]>().mockResolvedValue(undefined),
-    fetchOutput: vi.fn<Promise<StructuredRunOutput | null>, [string]>().mockResolvedValue({
+    cancelRun: vi.fn().mockResolvedValue(undefined),
+    fetchOutput: vi.fn().mockResolvedValue({
       runId: RUN_ID,
       payload: output,
     }),
     fetchArtifacts: vi.fn(),
   };
 
-  const mockValidator = {
-    validate: vi.fn<Promise<{ valid: boolean; errors: readonly string[]; errorCategory?: string }>, [unknown, string]>().mockResolvedValue({
+  const mockValidator: MockValidator = {
+    validate: vi.fn().mockResolvedValue({
       valid: true,
-      errors: [],
+      errors: [] as readonly string[],
     }),
   };
 
@@ -158,7 +184,7 @@ function createMocks() {
     runHandle,
     contextPayload,
     output,
-    // Expose raw vi.fn() for assertions
+    // Expose typed mocks for assertions
     _stateManager: mockStateManager,
     _contextAssembler: mockContextAssembler,
     _runtimeAdapter: mockRuntimeAdapter,
@@ -169,11 +195,13 @@ function createMocks() {
 
 function createRunner(mocks: ReturnType<typeof createMocks>) {
   return new DiagnosticianRunner(
-    mocks.mockStateManager,
-    mocks.mockContextAssembler,
-    mocks.mockRuntimeAdapter,
-    mocks.mockEventEmitter,
-    mocks.mockValidator,
+    {
+      stateManager: mocks.mockStateManager,
+      contextAssembler: mocks.mockContextAssembler,
+      runtimeAdapter: mocks.mockRuntimeAdapter,
+      eventEmitter: mocks.mockEventEmitter,
+      validator: mocks.mockValidator,
+    },
     {
       owner: OWNER,
       runtimeKind: RUNTIME_KIND,
@@ -181,6 +209,12 @@ function createRunner(mocks: ReturnType<typeof createMocks>) {
       timeoutMs: 1000,
     },
   );
+}
+
+/** Type-safe helper to extract the first call argument from a mock. */
+function firstCallArg(mockFn: ReturnType<typeof vi.fn>): unknown {
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  return mockFn.mock.calls[0]![0];
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -329,7 +363,7 @@ describe('DiagnosticianRunner', () => {
 
     await runner.run(TASK_ID);
 
-    const startInput = mocks._runtimeAdapter.startRun.mock.calls[0][0] as StartRunInput;
+    const startInput = firstCallArg(mocks._runtimeAdapter.startRun) as StartRunInput;
     expect(startInput.agentSpec.agentId).toBe('diagnostician');
     expect(startInput.agentSpec.schemaVersion).toBe('v1');
     expect(startInput.taskRef?.taskId).toBe(TASK_ID);
@@ -343,11 +377,12 @@ describe('DiagnosticianRunner', () => {
 
     // contextItems should contain serialized context
     expect(startInput.contextItems).toHaveLength(1);
-    expect(startInput.contextItems[0].role).toBe('system');
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(startInput.contextItems[0]!.role).toBe('system');
   });
 
   // 9. Lease conflict
-  it('fails immediately on lease conflict', async () => {
+  it('retries on lease conflict', async () => {
     const mocks = createMocks();
     mocks._stateManager.acquireLease.mockRejectedValue(
       new PDRuntimeError('lease_conflict', 'Task already leased'),
@@ -407,14 +442,15 @@ describe('DiagnosticianRunner', () => {
     expect(result.status).toBe('succeeded');
 
     // startRun should have been called with the context serialized in inputPayload
-    const startInput = mocks._runtimeAdapter.startRun.mock.calls[0][0] as StartRunInput;
+    const startInput = firstCallArg(mocks._runtimeAdapter.startRun) as StartRunInput;
     const inputPayload = startInput.inputPayload as { context: DiagnosticianContextPayload };
     expect(inputPayload.context.conversationWindow).toHaveLength(3);
     expect(inputPayload.context.sourceRefs).toContain('openclaw-history-import-002');
 
     // contextItems should contain the serialized context
     const [contextItem] = startInput.contextItems;
-    const parsedContext = JSON.parse(contextItem.content);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const parsedContext = JSON.parse(contextItem!.content);
     expect(parsedContext.context.conversationWindow).toHaveLength(3);
   });
 });
