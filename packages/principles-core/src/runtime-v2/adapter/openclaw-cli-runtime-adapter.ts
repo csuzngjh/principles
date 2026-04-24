@@ -160,6 +160,21 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
 
     // DPB-08 (LOCKED): Pass workspaceDir as cwd for workspace boundary control
     // HG-02 (HARD GATE): Two distinct boundaries — cwd controls PD workspace
+    // TELE-02: runtime_invocation_started — CLI process about to spawn
+    this.eventEmitter.emitTelemetry({
+      eventType: 'runtime_invocation_started',
+      traceId: input.taskRef?.taskId ?? runId,
+      timestamp: new Date().toISOString(),
+      sessionId: 'openclaw-cli-adapter',
+      agentId: 'openclaw-cli-adapter',
+      payload: {
+        runId,
+        runtimeKind: 'openclaw-cli',
+        runtimeMode: this.runtimeMode,
+        timeoutMs: input.timeoutMs,
+      },
+    });
+
     const cliOutput = await runCliProcess({
       command: 'openclaw',
       args,
@@ -170,6 +185,38 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     // Store result in memory
     state.cliOutput = cliOutput;
     state.completed = true;
+
+    // TELE-03: runtime_invocation_succeeded/failed — CLI process completed
+    const endedAt = new Date().toISOString();
+    let errorCategory: string | undefined = undefined;
+    let telemetryEventType: 'runtime_invocation_succeeded' | 'runtime_invocation_failed' = 'runtime_invocation_succeeded';
+
+    if (cliOutput.exitCode === null && cliOutput.stderr.startsWith('ENOENT:')) {
+      telemetryEventType = 'runtime_invocation_failed';
+      errorCategory = 'runtime_unavailable';
+    } else if (cliOutput.timedOut) {
+      telemetryEventType = 'runtime_invocation_failed';
+      errorCategory = 'timeout';
+    } else if (cliOutput.exitCode !== null && cliOutput.exitCode !== 0) {
+      telemetryEventType = 'runtime_invocation_failed';
+      errorCategory = 'execution_failed';
+    }
+
+    this.eventEmitter.emitTelemetry({
+      eventType: telemetryEventType,
+      traceId: input.taskRef?.taskId ?? runId,
+      timestamp: endedAt,
+      sessionId: 'openclaw-cli-adapter',
+      agentId: 'openclaw-cli-adapter',
+      payload: {
+        runId,
+        runtimeKind: 'openclaw-cli',
+        runtimeMode: this.runtimeMode,
+        exitCode: cliOutput.exitCode,
+        timedOut: cliOutput.timedOut,
+        ...(errorCategory ? { errorCategory } : {}),
+      },
+    });
 
     return { runId, runtimeKind: 'openclaw-cli', startedAt };
   }
