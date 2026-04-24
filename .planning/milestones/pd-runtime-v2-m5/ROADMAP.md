@@ -98,8 +98,8 @@ Phases execute in numeric order: m5-01 -> m5-02 -> m5-03 -> m5-04 -> m5-05
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | m5-01. Artifact Registry Schema | 1/1 | Complete | 2026-04-24 |
-| m5-02. DiagnosticianCommitter Core | 0/? | Not started | - |
-| m5-03. Runner Integration | 0/? | Not started | - |
+| m5-02. DiagnosticianCommitter Core | 1/1 | Complete | 2026-04-24 |
+| m5-03. Runner Integration | 1/1 | Complete | 2026-04-24 |
 | m5-04. CLI + Telemetry | 0/? | Not started | - |
 | m5-05. E2E Verification | 0/? | Not started | - |
 
@@ -117,12 +117,12 @@ Phases execute in numeric order: m5-01 -> m5-02 -> m5-03 -> m5-04 -> m5-05
 | COMT-03 | Principle candidate extraction | m5-02 | Pending |
 | COMT-04 | Idempotent re-commit | m5-02 | Pending |
 | COMT-05 | Commit failure handling | m5-02 | Pending |
-| COMT-06 | CommitResult type with commitId | m5-02 | Pending |
-| RUNR-01 | Commit before succeed | m5-03 | Pending |
-| RUNR-02 | Committer injection via deps | m5-03 | Pending |
-| RUNR-03 | Commit failure path | m5-03 | Pending |
-| RUNR-04 | resultRef becomes commit:// | m5-03 | Pending |
-| RUNR-05 | Production path mandates committer | m5-03 | Pending |
+| COMT-06 | CommitResult type with commitId | m5-02 | Complete |
+| RUNR-01 | Commit before succeed | m5-03 | Complete |
+| RUNR-02 | Committer injection via deps | m5-03 | Complete |
+| RUNR-03 | Commit failure path | m5-03 | Complete |
+| RUNR-04 | resultRef becomes commit:// | m5-03 | Complete |
+| RUNR-05 | Production path mandates committer | m5-03 | Complete |
 | CLIV-01 | pd candidate list | m5-04 | Pending |
 | CLIV-02 | pd candidate show | m5-04 | Pending |
 | CLIV-03 | pd artifact show | m5-04 | Pending |
