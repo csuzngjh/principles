@@ -16,6 +16,7 @@ import {
   SqliteContextAssembler,
   SqliteDiagnosticianCommitter,
   StoreEventEmitter,
+  storeEmitter,
   DiagnosticianRunner,
   PassThroughValidator,
   TestDoubleRuntimeAdapter,
@@ -126,6 +127,19 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
         runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
         workspaceDir,
+      });
+
+      // TELE-01: runtime_adapter_selected — user explicitly chose openclaw-cli runtime
+      storeEmitter.emitTelemetry({
+        eventType: 'runtime_adapter_selected',
+        traceId: opts.taskId,
+        timestamp: new Date().toISOString(),
+        sessionId: 'pd-cli-diagnose',
+        agentId: 'openclaw-cli-adapter',
+        payload: {
+          runtimeKind: 'openclaw-cli',
+          runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
+        },
       });
     } else if (runtimeKind === 'test-double') {
       runtimeAdapter = new TestDoubleRuntimeAdapter({
