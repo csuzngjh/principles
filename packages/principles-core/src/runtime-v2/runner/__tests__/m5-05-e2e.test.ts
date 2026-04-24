@@ -33,6 +33,9 @@ import { PDRuntimeError } from '../../error-categories.js';
 import { candidateList } from '../../cli/diagnose.js';
 import type { CandidateRecord } from '../../store/runtime-state-manager.js';
 
+// Typed status constant for SQL query parameters (avoids magic strings)
+const PENDING_STATUS: CandidateRecord['status'] = 'pending';
+
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 
 /**
@@ -250,7 +253,7 @@ describe('E2E m5-05', () => {
       // Output has 2 kind='principle' recommendations → expect 2 candidate rows
       const candidateRows = db.prepare(
         'SELECT * FROM principle_candidates WHERE artifact_id = ? AND status = ?',
-      ).all(artifactId, 'pending') as { candidate_id: string; description: string }[];
+      ).all(artifactId, PENDING_STATUS) as { candidate_id: string; description: string }[];
       expect(candidateRows).toHaveLength(2);
       expect(candidateRows.every((c) => c.description.length > 0)).toBe(true);
 
@@ -484,7 +487,7 @@ describe('E2E m5-05', () => {
         'SELECT * FROM principle_candidates WHERE artifact_id = ?',
       ).all(artifactId) as { candidate_id: string; title: string; description: string; status: string }[];
       expect(candidateRows.length).toBeGreaterThanOrEqual(2);
-      expect(candidateRows.every((c) => c.status === 'pending')).toBe(true);
+      expect(candidateRows.every((c) => c.status === PENDING_STATUS)).toBe(true);
 
       // E2EV-04 Step 5: CLI visibility via candidateList function (D-17)
       const listResult = await candidateList({ taskId, stateManager });

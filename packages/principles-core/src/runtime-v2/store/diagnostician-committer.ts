@@ -109,6 +109,15 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
       for (let i = 0; i < principleRecommendations.length; i++) {
         const rec = principleRecommendations[i];
         if (!rec) continue;
+
+        // Application-layer guard against pathological inputs
+        if (rec.description.length > 10_000) {
+          throw new PDRuntimeError(
+            'input_invalid',
+            `Recommendation description exceeds 10,000 character limit (${rec.description.length})`,
+          );
+        }
+
         const candidateId = randomUUID();
         const candidateIdemKey = `${commitId}:${i}`;
 
@@ -149,7 +158,12 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
         return existingResult;
       }
 
-      // 4. Wrap SQL errors as PDRuntimeError
+      // 4. Preserve already-typed PDRuntimeErrors (e.g., input_invalid from guard)
+      if (err instanceof PDRuntimeError) {
+        throw err;
+      }
+
+      // 5. Wrap unknown SQL errors as PDRuntimeError
       const constraint = SqliteDiagnosticianCommitter.extractConstraint(err);
       throw new PDRuntimeError(
         'artifact_commit_failed',

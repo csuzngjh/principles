@@ -342,4 +342,24 @@ describe('SqliteDiagnosticianCommitter', () => {
     expect(candidate.title).toBe('Always prefer immutable data structures');
     expect(candidate.description).toBe('Always prefer immutable data structures');
   });
+
+  it('description exceeding 10000 chars throws input_invalid error', async () => {
+    await createTaskAndRun('task-desc-len-1', 'run-desc-len-1');
+
+    const longDescription = 'x'.repeat(10_001);
+    const input: CommitInput = {
+      runId: 'run-desc-len-1',
+      taskId: 'task-desc-len-1',
+      output: makeOutput({
+        recommendations: [
+          { kind: 'principle', description: longDescription },
+        ],
+      }),
+      idempotencyKey: 'ik-desc-len-1',
+    };
+
+    await expect(committer.commit(input)).rejects.toMatchObject({
+      category: 'input_invalid',
+    });
+  });
 });
