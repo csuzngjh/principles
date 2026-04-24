@@ -78,6 +78,9 @@ describe('cli/diagnose', () => {
       attemptCount: 3,
       maxAttempts: 5,
       lastError: 'execution_failed',
+      commitId: null,
+      artifactId: null,
+      candidateCount: null,
     });
     expect(getTaskMock).toHaveBeenCalledWith(TASK_ID);
   });
