@@ -388,7 +388,7 @@ describe('DiagnosticianRunner', () => {
   });
 
   // 9. Lease conflict
-  it('fails permanently on lease conflict', async () => {
+  it('lease_conflict returns non-mutating result without markTaskRetryWait/markTaskFailed', async () => {
     const mocks = createMocks();
     mocks._stateManager.acquireLease.mockRejectedValue(
       new PDRuntimeError('lease_conflict', 'Task already leased'),
@@ -397,9 +397,59 @@ describe('DiagnosticianRunner', () => {
     const runner = createRunner(mocks);
     const result = await runner.run(TASK_ID);
 
-    // lease_conflict is in PERMANENT_ERROR_CATEGORIES, so it fails immediately
+    // lease_conflict is handled as non-mutating — no state changes
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('lease_conflict');
+    // Mutation methods must NOT be called for lease_conflict
+    expect(mocks._stateManager.markTaskRetryWait).not.toHaveBeenCalled();
+    expect(mocks._stateManager.markTaskFailed).not.toHaveBeenCalled();
+  });
+
+  // 9b. Post-lease errors use real leasedTask (not synthetic)
+  it('post-lease error uses real attemptCount/maxAttempts from leasedTask', async () => {
+    const mocks = createMocks();
+    // leasedTask has attemptCount=2, maxAttempts=3 (not the default 1/3)
+    mocks._stateManager.acquireLease.mockResolvedValue(makeTaskRecord({ attemptCount: 2, maxAttempts: 3 }));
+
+    // Make context assembly fail to trigger post-lease error path
+    mocks._contextAssembler.assemble.mockRejectedValue(
+      new PDRuntimeError('runtime_unavailable', 'DB connection lost'),
+    );
+
+    const runner = createRunner(mocks);
+    const result = await runner.run(TASK_ID);
+
+    // Should retry (not fail permanently) because runtime_unavailable is not permanent
+    // and real leasedTask (attemptCount=2, maxAttempts=3) means shouldRetry returns true
+    expect(result.status).toBe('retried');
+    // Verify markTaskRetryWait was called with the real task's attemptCount
+    expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(TASK_ID, 'runtime_unavailable');
+  });
+
+  // 9c. Post-lease error with maxAttempts=1 triggers fail immediately
+  it('post-lease error with attemptCount=maxAttempts fails permanently', async () => {
+    const mocks = createMocks();
+    // leasedTask at last attempt (attemptCount=3, maxAttempts=3)
+    mocks._stateManager.acquireLease.mockResolvedValue(makeTaskRecord({ attemptCount: 3, maxAttempts: 3 }));
+    // Override shouldRetry to return false when attemptCount >= maxAttempts
+    mocks._stateManager.getRetryPolicy.mockReturnValue({
+      calculateBackoff: vi.fn().mockReturnValue(30_000),
+      shouldRetry: vi.fn().mockReturnValue(false),
+    });
+
+    // Make context assembly fail
+    mocks._contextAssembler.assemble.mockRejectedValue(
+      new PDRuntimeError('runtime_unavailable', 'DB connection lost'),
+    );
+
+    const runner = createRunner(mocks);
+    const result = await runner.run(TASK_ID);
+
+    // Should fail with max_attempts_exceeded (not runtime_unavailable)
+    // because shouldRetry=false means no more retries
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(TASK_ID, 'max_attempts_exceeded');
   });
 
   // 10. Max attempts exceeded
@@ -651,13 +701,17 @@ describe('DiagnosticianRunner', () => {
         (call) => call[0]?.eventType === 'principle_candidate_registered',
       );
       expect(candidateEvents).toHaveLength(2);
-      expect(candidateEvents[0]![0].payload).toMatchObject({
+      const [firstEvent, secondEvent] = candidateEvents;
+      if (!firstEvent || !secondEvent) {
+        throw new Error('Expected 2 candidate events but got fewer');
+      }
+      expect(firstEvent[0]?.payload).toMatchObject({
         commitId: 'commit-candidate-001',
         kind: 'principle',
         candidateIndex: 0,
         sourceRunId: RUN_ID,
       });
-      expect(candidateEvents[1]![0].payload).toMatchObject({
+      expect(secondEvent[0]?.payload).toMatchObject({
         commitId: 'commit-candidate-001',
         kind: 'principle',
         candidateIndex: 1,

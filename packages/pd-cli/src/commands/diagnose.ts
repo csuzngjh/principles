@@ -7,11 +7,14 @@
  */
 import type {
   SqliteTaskStore,
-  SqliteRunStore} from '@principles/core/runtime-v2/index.js';
+  SqliteRunStore,
+  SqliteConnection,
+} from '@principles/core/runtime-v2/index.js';
 import {
   RuntimeStateManager,
   SqliteHistoryQuery,
   SqliteContextAssembler,
+  SqliteDiagnosticianCommitter,
   StoreEventEmitter,
   DiagnosticianRunner,
   PassThroughValidator,
@@ -62,6 +65,13 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
     console.log(`\nDiagnostician Task: ${result.taskId}\n`);
     console.log(`  Status:       ${result.status}`);
     console.log(`  Attempts:     ${result.attemptCount} / ${result.maxAttempts}`);
+    if (result.resultRef) {
+      console.log(`  Result Ref:   ${result.resultRef}`);
+      // If resultRef is commit://, show commit details
+      if (result.resultRef.startsWith('commit://')) {
+        console.log(`  Commit ID:    ${result.resultRef.replace('commit://', '')}`);
+      }
+    }
     if (result.lastError) {
       console.log(`  Last Error:   ${result.lastError}`);
     }
@@ -85,13 +95,14 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     await stateManager.initialize();
 
     // Build context assembler from internal stores
-    const sqliteConn = (stateManager as unknown as { connection: unknown }).connection;
+    const sqliteConn = (stateManager as unknown as { connection: unknown }).connection as SqliteConnection;
     const taskStore = (stateManager as unknown as { taskStore: unknown }).taskStore as SqliteTaskStore;
     const runStore = (stateManager as unknown as { runStore: unknown }).runStore as SqliteRunStore;
     const historyQuery = new SqliteHistoryQuery(sqliteConn);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
 
     // Use TestDoubleRuntimeAdapter with success-on-first-poll behavior for CLI testing
+    // M5: output includes at least 1 kind='principle' recommendation to verify candidate generation
     const runtimeAdapter = new TestDoubleRuntimeAdapter({
       onPollRun: (_runId: string) => ({
         runId: _runId,
@@ -105,17 +116,22 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           valid: true,
           diagnosisId: `diag-cli-${Date.now()}`,
           taskId: opts.taskId,
-          summary: 'CLI test diagnosis',
-          rootCause: 'Test root cause',
+          summary: 'CLI test diagnosis — validate tool arguments before execution',
+          rootCause: 'Test root cause — missing argument validation',
           violatedPrinciples: [],
           evidence: [],
-          recommendations: [],
+          recommendations: [
+            { kind: 'principle', description: 'Always validate tool arguments before execution to prevent silent failures' },
+            { kind: 'rule', description: 'Use schema validation for external inputs' },
+          ],
           confidence: 0.9,
         },
       }),
     });
 
     const eventEmitter = new StoreEventEmitter();
+    // M5: Inject real SqliteDiagnosticianCommitter so artifact+candidates are persisted
+    const committer = new SqliteDiagnosticianCommitter(sqliteConn);
     const runner = new DiagnosticianRunner(
       {
         stateManager,
@@ -123,6 +139,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         runtimeAdapter,
         eventEmitter,
         validator: new PassThroughValidator(),
+        committer,
       },
       {
         owner: 'pd-cli-diagnose',
@@ -155,6 +172,12 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     if (result.output) {
       console.log(`  Diagnosis ID:   ${result.output.diagnosisId}`);
       console.log(`  Summary:        ${result.output.summary}`);
+      if (result.output.recommendations) {
+        const principleCount = result.output.recommendations.filter((r) => r.kind === 'principle').length;
+        if (principleCount > 0) {
+          console.log(`  Principles:     ${principleCount} candidate(s) generated`);
+        }
+      }
     }
     if (result.errorCategory) {
       console.log(`  Error Category: ${result.errorCategory}`);

@@ -123,20 +123,28 @@ export class DiagnosticianRunner {
    */
   async run(taskId: string): Promise<RunnerResult> {
     this.phase = RunnerPhase.Idle;
+
+    // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let leasedTask: TaskRecord;
     try {
-      // 1. Acquire lease (atomically creates RunRecord in the store)
-      const leasedTask = await this.stateManager.acquireLease({
+      leasedTask = await this.stateManager.acquireLease({
         taskId,
         owner: this.resolvedOptions.owner,
         runtimeKind: this.resolvedOptions.runtimeKind,
       });
+    } catch (error) {
+      return await this.handleLeaseOrPhaseError(taskId, error);
+    }
 
-      // Emit: diagnostician_task_leased
-      this.emitDiagnosticianEvent('diagnostician_task_leased', taskId, {
-        taskKind: leasedTask.taskKind,
-        attemptCount: leasedTask.attemptCount,
-      });
+    // Emit: diagnostician_task_leased (only on successful lease)
+    this.emitDiagnosticianEvent('diagnostician_task_leased', taskId, {
+      taskKind: leasedTask.taskKind,
+      attemptCount: leasedTask.attemptCount,
+    });
 
+    // All subsequent errors use the real leasedTask — no synthetic TaskRecord allowed
+    try {
       // Look up the store's runId for this attempt (acquireLease creates it).
       // The adapter's RunHandle.runId is separate from the store's runId.
       const storeRunId = await this.resolveStoreRunId(taskId);
@@ -186,8 +194,33 @@ export class DiagnosticianRunner {
       // 8. Succeed task -- store output and mark succeeded using store's runId
       return await this.succeedTask({ taskId, runId: storeRunId, output, task: leasedTask, contextHash });
     } catch (error) {
-      return await this.handleLeaseOrPhaseError(taskId, error);
+      // handleLeaseOrPhaseError is only used for lease errors (before lease).
+      // Post-lease errors use retryOrFail with the real leasedTask.
+      return await this.handlePostLeaseError(taskId, leasedTask, error);
     }
+  }
+
+  /**
+   * Handle errors that occur after a successful lease acquisition.
+   * Uses the real leasedTask (with actual attemptCount/maxAttempts) — never synthetic.
+   * lease_conflict is NOT handled here because it cannot occur after a successful lease.
+   */
+  private async handlePostLeaseError(
+    taskId: string,
+    task: TaskRecord,
+    error: unknown,
+  ): Promise<RunnerResult> {
+    const classified = this.classifyError(error);
+
+    // Emit: diagnostician_run_failed
+    this.emitDiagnosticianEvent('diagnostician_run_failed', taskId, {
+      errorCategory: classified.category,
+      errorMessage: classified.message,
+    });
+
+    // Post-lease errors always go through retryOrFail with the real task record.
+    // This ensures attemptCount/maxAttempts from the store are respected.
+    return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
   }
 
   // -- Phase methods (each independently testable) --
@@ -395,14 +428,13 @@ export class DiagnosticianRunner {
       };
     }
 
-    // Emit: diagnostician_run_failed (for other phase/lease errors before retry decision)
+    // Non-lease errors (e.g. storage_unavailable before lease) also must not
+    // use synthetic TaskRecord. Build one with real defaults from options.
     this.emitDiagnosticianEvent('diagnostician_run_failed', taskId, {
       errorCategory: classified.category,
       errorMessage: classified.message,
     });
 
-    // When acquireLease fails we don't have a TaskRecord yet.
-    // Build a synthetic one for retry policy evaluation.
     const task: TaskRecord = {
       taskId,
       taskKind: 'diagnostician',

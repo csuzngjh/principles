@@ -21,6 +21,8 @@ import { handleHistoryQuery } from './commands/history.js';
 import { handleContextBuild } from './commands/context.js';
 import { handleLegacyImportOpenClaw } from './commands/legacy-import.js';
 import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js';
+import { handleCandidateList, handleCandidateShow } from './commands/candidate.js';
+import { handleArtifactShow } from './commands/artifact.js';
 
 const program = new Command();
 
@@ -248,6 +250,46 @@ diagnoseCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleDiagnoseRun(opts);
+  });
+
+// ── Candidate inspection commands ───────────────────────────────────────────
+
+const candidateCmd = program
+  .command('candidate')
+  .description('Principle candidate inspection');
+
+candidateCmd
+  .command('list')
+  .description('List principle candidates for a task')
+  .requiredOption('-t, --task-id <taskId>', 'Task ID to query')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleCandidateList(opts);
+  });
+
+candidateCmd
+  .command('show <candidateId>')
+  .description('Show detail for a single principle candidate')
+  .requiredOption('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (candidateId, opts) => {
+    await handleCandidateShow({ candidateId, ...opts });
+  });
+
+// ── Artifact inspection commands ────────────────────────────────────────────
+
+const artifactCmd = program
+  .command('artifact')
+  .description('Artifact registry inspection');
+
+artifactCmd
+  .command('show <artifactId>')
+  .description('Show artifact content and its associated candidates')
+  .requiredOption('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (artifactId, opts) => {
+    await handleArtifactShow({ artifactId, ...opts });
   });
 
 program.parse();
