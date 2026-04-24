@@ -174,8 +174,8 @@ export { DiagnosticianPromptBuilder, summarizeConversationWindow } from './diagn
 export type { PromptInput, PromptBuildResult } from './diagnostician-prompt-builder.js';
 
 // CLI surface (M4)
-export { run, status, candidateList, candidateShow, artifactShow } from './cli/diagnose.js';
-export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult, CandidateListOptions, CandidateShowOptions, ArtifactShowOptions } from './cli/diagnose.js';
+export { run, status, candidateList, candidateShow, artifactShow, probeRuntime } from './cli/index.js';
+export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult, CandidateListOptions, CandidateShowOptions, ArtifactShowOptions, ProbeOptions, ProbeResult } from './cli/index.js';
 
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
