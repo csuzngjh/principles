@@ -1,0 +1,1 @@
+{"version":3,"file":"trajectory-locator.d.ts","sourceRoot":"","sources":["trajectory-locator.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;GAUG;AACH,OAAO,KAAK,EAAE,qBAAqB,EAAE,sBAAsB,EAAE,MAAM,uBAAuB,CAAC;AAE3F,MAAM,WAAW,iBAAiB;IAChC;;;;;;;;;;;;;OAaG;IACH,MAAM,CAAC,KAAK,EAAE,qBAAqB,GAAG,OAAO,CAAC,sBAAsB,CAAC,CAAC;CACvE"}
