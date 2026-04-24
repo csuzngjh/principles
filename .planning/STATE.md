@@ -1,16 +1,14 @@
 ---
 gsd_state_version: 1.0
 milestone: v2.5
-milestone_name: m6-openclaw-cli-adapter
-status: in_progress
-last_updated: "2026-04-24T21:27:00.000Z"
-last_activity: 2026-04-24 — m6-02 complete (OCRA-01~05)
+milestone_name: milestone
+status: m6-02 shipped on feature/pd-runtime-v2-m6
+last_updated: "2026-04-24T13:28:22.932Z"
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 0
   total_plans: 0
-  completed_plans: 3
-  percent: 17
+  completed_plans: 0
 ---
 
 # Project State: Principles
@@ -42,6 +40,7 @@ Status: m6-02 shipped on feature/pd-runtime-v2-m6
 ## Context
 
 **M5 Boundary Constraints (still valid for M6):**
+
 1. Atomic commit truth in SQLite .pd/state.db ONLY
 2. Runner only depends on Committer interface
 3. task succeeded MUST happen after commit success
@@ -50,6 +49,7 @@ Status: m6-02 shipped on feature/pd-runtime-v2-m6
 6. No principle promotion, no active injection, no multi-runtime, no plugin demotion
 
 **Baseline (Frozen):**
+
 - v2.0 M1: Foundation Contracts — SHIPPED 2026-04-21
 - v2.1 M2: Task/Run State Core — SHIPPED 2026-04-22
 - v2.2 M3: History Retrieval + Context Build — SHIPPED 2026-04-23
