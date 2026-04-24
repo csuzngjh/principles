@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: m5-unified-commit
-status: active
-last_updated: "2026-04-24T16:27:00.000Z"
-last_activity: 2026-04-24 — m5-05 COMPLETE (4/4 E2E scenarios pass), M5 ALL PHASES DONE
+status: shipped
+last_updated: "2026-04-24T16:45:00.000Z"
+last_activity: 2026-04-24 — v2.4 M5 SHIPPED, PR #398, tag v2.4 pushed
 progress:
   total_phases: 5
   completed_phases: 5
@@ -23,9 +23,9 @@ progress:
 
 ## Current Position
 
-Phase: m5-05: E2E Verification (COMPLETE)
-Status: 1/1 plans done, all 4 E2E scenarios pass
-Last activity: 2026-04-24 — m5-05 E2E tests written and passing, M5 milestone complete
+Phase: v2.4 M5 — SHIPPED
+Status: PR #398 open, tag v2.4 pushed, awaiting merge
+Last activity: 2026-04-24 — v2.4 M5 shipped, milestone archived
 
 ## Context
 
