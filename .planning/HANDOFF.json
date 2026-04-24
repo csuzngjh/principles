@@ -1,29 +1,31 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-23T09:56:17Z",
-  "phase": "m4-06",
-  "phase_name": "DualTrackE2E",
-  "phase_dir": ".planning/phases/m4-06-DualTrackE2E",
-  "plan": null,
-  "task": null,
-  "total_tasks": null,
-  "status": "ready_for_planning",
-  "completed_tasks": [],
+  "timestamp": "2026-04-24T15:32:07+0800",
+  "phase": "m5-04",
+  "phase_name": "CLI + Telemetry",
+  "phase_dir": ".planning/phases/m5-04-CLITelemetry",
+  "plan": "03",
+  "task": 1,
+  "total_tasks": 6,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": 1, "name": "Wave 1: RuntimeStateManager Query Methods (m5-04-01)", "status": "done", "commit": "82912a0c"},
+    {"id": 2, "name": "Wave 1: CLI Functions (m5-04-02)", "status": "done", "commit": "9f37b9a8"}
+  ],
   "remaining_tasks": [
-    {"id": 1, "name": "Discuss-phase to capture design decisions", "status": "not_started"},
-    {"id": 2, "name": "Plan-phase to create PLAN.md", "status": "not_started"},
-    {"id": 3, "name": "Execute-phase — dual-track E2E tests", "status": "not_started"}
+    {"id": 3, "name": "Wave 2: m5-04-03 Telemetry Events", "status": "not_started"}
   ],
   "blockers": [],
   "human_actions_pending": [],
   "decisions": [
-    {
-      "decision": "m4-06 is final M4 phase — dual-track E2E verification",
-      "rationale": "Verify legacy heartbeat path works alongside new runner path; E2E test task→context→runner→validation→success",
-      "phase": "m4-06"
-    }
+    {"decision": "CLI uses RuntimeStateManager interface (not direct store)", "rationale": "D-01 from m5-04-CONTEXT.md", "phase": "m5-04"},
+    {"decision": "DiagnoseStatusResult extended with nullable commitId/artifactId/candidateCount", "rationale": "D-02 from m5-04-CONTEXT.md", "phase": "m5-04"},
+    {"decision": "TELE events emitted from DiagnosticianRunner.succeedTask()", "rationale": "D-03 from m5-04-CONTEXT.md", "phase": "m5-04"},
+    {"decision": "Event names: diagnostician_artifact_committed, diagnostician_artifact_commit_failed, principle_candidate_registered", "rationale": "D-04 from m5-04-CONTEXT.md", "phase": "m5-04"},
+    {"decision": "candidate list joins through tasks→runs→commits→principle_candidates", "rationale": "D-05 from m5-04-CONTEXT.md", "phase": "m5-04"},
+    {"decision": "artifact show uses single query with JOIN", "rationale": "D-06 from m5-04-CONTEXT.md", "phase": "m5-04"}
   ],
   "uncommitted_files": [],
-  "next_action": "Run /gsd-discuss-phase m4-06 to capture design decisions (CONTEXT.md), then /gsd-plan-phase m4-06, then /gsd-execute-phase m4-06",
-  "context_notes": "Context budget ~90% (25K tokens remaining) — paused during discuss-phase preparation for m4-06. m4-05 completed with 8 telemetry events + CLI run/status + 8 tests passing. m4-06 dir created at .planning/phases/m4-06-DualTrackE2E/ with no artifacts yet."
+  "next_action": "Run /gsd-execute-phase m5-04 --wave 2 to execute m5-04-03 (Telemetry Events)",
+  "context_notes": "Context exhausted at 93%. Wave 1 (m5-04-01 + m5-04-02) completed successfully. Wave 2 (m5-04-03: telemetry events) remains."
 }
