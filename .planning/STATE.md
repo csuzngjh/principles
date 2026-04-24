@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.4
-milestone_name: m5-unified-commit
-status: shipped
-last_updated: "2026-04-24T16:45:00.000Z"
-last_activity: 2026-04-24 — v2.4 M5 SHIPPED, PR #398, tag v2.4 pushed
+milestone: v2.5
+milestone_name: m6-openclaw-cli-adapter
+status: in_progress
+last_updated: "2026-04-24T17:00:00.000Z"
+last_activity: 2026-04-24 — v2.5 M6 started
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 7
-  completed_plans: 7
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State: Principles
@@ -23,9 +23,10 @@ progress:
 
 ## Current Position
 
-Phase: v2.4 M5 — SHIPPED
-Status: PR #398 open, tag v2.4 pushed, awaiting merge
-Last activity: 2026-04-24 — v2.4 M5 shipped, milestone archived
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-24 — v2.5 M6 started
 
 ## Context
 
