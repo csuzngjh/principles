@@ -100,7 +100,7 @@ Phases execute in numeric order: m5-01 -> m5-02 -> m5-03 -> m5-04 -> m5-05
 | m5-01. Artifact Registry Schema | 1/1 | Complete | 2026-04-24 |
 | m5-02. DiagnosticianCommitter Core | 1/1 | Complete | 2026-04-24 |
 | m5-03. Runner Integration | 1/1 | Complete | 2026-04-24 |
-| m5-04. CLI + Telemetry | 3/3 | Planned | - |
+| m5-04. CLI + Telemetry | 3/3 | Complete | 2026-04-24 |
 | m5-05. E2E Verification | 0/? | Not started | - |
 
 ## Requirements Traceability
@@ -123,16 +123,16 @@ Phases execute in numeric order: m5-01 -> m5-02 -> m5-03 -> m5-04 -> m5-05
 | RUNR-03 | Commit failure path | m5-03 | Complete |
 | RUNR-04 | resultRef becomes commit:// | m5-03 | Complete |
 | RUNR-05 | Production path mandates committer | m5-03 | Complete |
-| CLIV-01 | pd candidate list | m5-04 | Pending |
-| CLIV-02 | pd candidate show | m5-04 | Pending |
-| CLIV-03 | pd artifact show | m5-04 | Pending |
-| CLIV-04 | pd diagnose status --json extended | m5-04 | Pending |
-| CLIV-05 | Plain TypeScript types | m5-04 | Pending |
-| TELE-01 | artifact_committed event | m5-04 | Pending |
-| TELE-02 | artifact_commit_failed event | m5-04 | Pending |
-| TELE-03 | candidate_registered event | m5-04 | Pending |
-| TELE-04 | Event infrastructure reuse | m5-04 | Pending |
-| TELE-05 | RunnerPhase.Committing | m5-04 | Pending |
+| CLIV-01 | pd candidate list | m5-04 | Complete |
+| CLIV-02 | pd candidate show | m5-04 | Complete |
+| CLIV-03 | pd artifact show | m5-04 | Complete |
+| CLIV-04 | pd diagnose status --json extended | m5-04 | Complete |
+| CLIV-05 | Plain TypeScript types | m5-04 | Complete |
+| TELE-01 | artifact_committed event | m5-04 | Complete |
+| TELE-02 | artifact_commit_failed event | m5-04 | Complete |
+| TELE-03 | candidate_registered event | m5-04 | Complete |
+| TELE-04 | Event infrastructure reuse | m5-04 | Complete |
+| TELE-05 | RunnerPhase.Committing | m5-04 | Complete |
 | E2EV-01 | Happy path E2E | m5-05 | Pending |
 | E2EV-02 | Idempotency E2E | m5-05 | Pending |
 | E2EV-03 | Commit failure E2E | m5-05 | Pending |
