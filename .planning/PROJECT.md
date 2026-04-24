@@ -19,9 +19,12 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - v1.19 Tech Debt Remediation: God classes split, type safety improved, queue tests added.
 - Phase 0a: Universal PainSignal schema, StorageAdapter interface, FileStorageAdapter, hallucination detection, budget-aware injection, observability baselines.
 - Phase 0b: PainSignalAdapter, EvolutionHook, PrincipleInjector, TelemetryEvent interfaces — framework-agnostic adapter abstraction layer.
-- v1.21: PD 工作流可观测化 — diagnostician_report 三态扩展 + YAML 工作流漏斗框架（js-yaml, WorkflowFunnelLoader, 6 new EventType, 6 recordXxx methods）
-- v1.21.1: Workflow Funnel Runtime Integration — YAML workflows.yaml 驱动运行时 summary/status
-- v1.21.2: YAML Funnel SSOT — `workflows.yaml` 真正驱动 `/pd-evolution-status` 展示，getSummary() 消费 funnels Map
+- v1.21: PD 工作流可观测化 — diagnostician_report 三态扩展 + YAML 工作流漏斗框架
+- v1.21.2: YAML Funnel SSOT — `workflows.yaml` 驱动 `/pd-evolution-status` 展示
+- v2.0 M1: Foundation Contracts — PDRuntimeAdapter, TaskRecord, RunRecord, TypeBox schemas — SHIPPED 2026-04-21
+- v2.1 M2: Task/Run State Core — SqliteTaskStore, SqliteRunStore, LeaseManager, RetryPolicy, RecoverySweep — SHIPPED 2026-04-22
+- v2.2 M3: History Retrieval + Context Build — trajectory locate, history query, context assembly — SHIPPED 2026-04-23
+- v2.3 M4: Diagnostician Runner v2 — explicit runner, runtime adapter, validator, telemetry, CLI — SHIPPED 2026-04-23
 
 ## Out of Scope
 
@@ -44,28 +47,30 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Phase 1.5 Validation | N=2 (coding + 1) is not enough for "Universal" claim; need extreme case | Active |
 | Freeze Semver after Ph 1.5 | Ensure stability only after cross-domain stress testing | Active |
 
-## Current Milestone: v2.2 PD Runtime v2 — M3 History Retrieval + Context Build
+## Current Milestone: v2.4 PD Runtime v2 — M5 Unified Commit + Principle Candidate Intake
 
-**Goal:** Deliver PD-owned retrieval pipeline — trajectory locate, history query, context build
+**Goal:** diagnostician output -> diagnosis artifact -> principle candidate -> task resultRef，全链路在 SQLite .pd/state.db 内原子完成
 
 **Target features:**
-- `pd trajectory locate` — by trajectoryId, taskId, runId, date range, PD-managed hints
-- `pd history query` — bounded history with cursor pagination + time windows
-- `pd context build` — assemble DiagnosticianContextPayload from PD-owned retrieval results
-- Degradation policy — bounded fallback, warnings + telemetry, no silent failure
-- Workspace isolation — explicit workspace-scoped retrieval, no cross-workspace leakage
+- DiagnosticianCommitter — 接口隔离，runner 只依赖 Committer，不直接操作 artifact/candidate 表
+- Artifact Registry — diagnosis_artifact + principle_candidate 表在 .pd/state.db
+- Principle Candidate Intake — 从 recommendations 提取 kind='principle'，写入 candidate 表
+- Transaction-safe commit — 同一 SQLite transaction：artifact → candidate → refs → task.resultRef
+- Runner integration — 正确顺序：output validated → commit → task succeeded；commit 失败 = artifact_commit_failed
+- CLI visibility — pd candidate list/show，JSON 输出可追溯
+- E2E 硬门槛 — task→run→output→artifact→candidate→resultRef 全链路可查
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
-**M3 边界约束（守住边界）:**
-- 只做 trajectory locate / history query / context build
-- 不做 diagnostician runner（M4）
-- 不做 unified commit（M5）
-- 不把宿主 API 直接重新带回主设计里
-- **Authoritative boundary:** 所有 authoritative retrieval 必须以 PD-owned stores/indexes/references 为主源；OpenClaw raw workspace/session 文件不是 authoritative retrieval source；外部/宿主数据仅在已由 PD 建立索引时方可经由 PD-managed references 访问
-- **No LLM in context build:** context assembly 必须 code-generated 或 template-generated，禁止在 context build 过程中调用 LLM
+**M5 边界约束（6 corrections）:**
+- 原子提交 truth 在 SQLite .pd/state.db，PrincipleTreeLedger 只做 adapter/bridge，不作为原子事务部分
+- Runner 不直接知道 artifact/candidate 表或 ledger 文件路径，只依赖 Committer 接口
+- task succeeded 必须在 commit 成功之后；commit 失败 = artifact_commit_failed
+- 不能产生"任务成功但 candidate 缺失"的状态
+- E2E 验证命令是硬门槛：task→run→output→artifact→candidate→resultRef 全链路可追溯
+- 不做 principle promotion、active injection、multi-runtime、plugin demotion
 
-**Previous:** v1.22 — PD CLI Redesign — SHIPPED 2026-04-20
+**Previous:** v2.3 — M4 Diagnostician Runner v2 — SHIPPED 2026-04-23
 
 ## Evolution
 
@@ -84,4 +89,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-22 after M2 shipped, M3 started*
+*Last updated: 2026-04-24 after M4 shipped, M5 started*
