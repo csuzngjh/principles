@@ -65,12 +65,11 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
     console.log(`\nDiagnostician Task: ${result.taskId}\n`);
     console.log(`  Status:       ${result.status}`);
     console.log(`  Attempts:     ${result.attemptCount} / ${result.maxAttempts}`);
-    if (result.resultRef) {
-      console.log(`  Result Ref:   ${result.resultRef}`);
-      // If resultRef is commit://, show commit details
-      if (result.resultRef.startsWith('commit://')) {
-        console.log(`  Commit ID:    ${result.resultRef.replace('commit://', '')}`);
-      }
+    if (result.commitId) {
+      console.log(`  Result Ref:   commit://${result.commitId}`);
+      console.log(`  Commit ID:    ${result.commitId}`);
+      console.log(`  Artifact ID:  ${result.artifactId ?? 'N/A'}`);
+      console.log(`  Candidates:   ${result.candidateCount ?? 0}`);
     }
     if (result.lastError) {
       console.log(`  Last Error:   ${result.lastError}`);
@@ -173,7 +172,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       console.log(`  Diagnosis ID:   ${result.output.diagnosisId}`);
       console.log(`  Summary:        ${result.output.summary}`);
       if (result.output.recommendations) {
-        const principleCount = result.output.recommendations.filter((r) => r.kind === 'principle').length;
+        const principleCount = result.output.recommendations.filter((r: { kind: string }) => r.kind === 'principle').length;
         if (principleCount > 0) {
           console.log(`  Principles:     ${principleCount} candidate(s) generated`);
         }

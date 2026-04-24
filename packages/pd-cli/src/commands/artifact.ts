@@ -59,7 +59,7 @@ export async function handleArtifactShow(opts: ArtifactShowOptions): Promise<voi
       console.log(`    summary:     ${parsed.summary ?? 'N/A'}`);
       if (parsed.recommendations) {
         console.log(`    recommendations: ${parsed.recommendations.length}`);
-        const principles = parsed.recommendations.filter((r) => r.kind === 'principle');
+        const principles = parsed.recommendations.filter((r: { kind: string }) => r.kind === 'principle');
         if (principles.length > 0) {
           console.log(`      (${principles.length} principle candidates)`);
         }
