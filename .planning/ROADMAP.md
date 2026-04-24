@@ -4,7 +4,7 @@
 
 - [ ] **Phase m6-01: CliProcessRunner + RuntimeKind Extension** — Foundation utility (process runner + schema)
 - [ ] **Phase m6-02: OpenClawCliRuntimeAdapter Core** — One-shot adapter, output parsing, error mapping
-- [ ] **Phase m6-03: DiagnosticianPromptBuilder + Workspace Boundary** — Prompt construction + workspace isolation
+- [x] **Phase m6-03: DiagnosticianPromptBuilder + Workspace Boundary** — Prompt construction + workspace isolation
 - [ ] **Phase m6-04: PD CLI Extension + Error Mapping** — CLI commands + error category mapping
 - [ ] **Phase m6-05: Telemetry Events** — runtime events emission
 - [ ] **Phase m6-06: E2E Verification** — Full pipeline integration + hard gates
@@ -51,7 +51,12 @@ Plans:
 5. One-shot run without session management complexity
 6. Adapter is registered in runtime registry
 
-**Plans**: TBD
+**Plans**: 3 plans (m6-02-01 through m6-02-03)
+
+Plans:
+- [x] m6-02-01-PLAN.md — OpenClawCliRuntimeAdapter implementation
+- [x] m6-02-02-PLAN.md — Unit tests for OpenClawCliRuntimeAdapter
+- [x] m6-02-03-PLAN.md — Adapter export from index.ts
 
 ---
 
@@ -73,7 +78,16 @@ Plans:
 7. PD workspace and OpenClaw agent workspace are distinct boundaries with explicit handoff
 8. `--openclaw-local`/`--openclaw-gateway` mode explicit; no silent fallback; both failure paths tested (OCRA-07, HG-3)
 
-**Plans**: TBD
+**Plans**: 7 plans (m6-03-01 through m6-03-07)
+
+Plans:
+- [ ] m6-03-01-PLAN.md — PromptInput type + DiagnosticianPromptBuilder skeleton
+- [ ] m6-03-02-PLAN.md — Unit tests for DiagnosticianPromptBuilder (DPB-01~05)
+- [ ] m6-03-03-PLAN.md — OpenClawCliRuntimeAdapter runtimeMode + workspaceDir (OCRA-06, OCRA-07)
+- [ ] m6-03-04-PLAN.md — buildPrompt() full implementation with DPB-04 field mapping
+- [ ] m6-03-05-PLAN.md — OCRA-06/07 unit tests for OpenClawCliRuntimeAdapter
+- [ ] m6-03-06-PLAN.md — DiagnosticianPromptBuilder exports from runtime-v2 index.ts
+- [ ] m6-03-07-PLAN.md — Integration tests: DiagnosticianPromptBuilder → OpenClawCliRuntimeAdapter pipeline
 
 ---
 
@@ -96,7 +110,12 @@ Plans:
 8. CliOutput.text JSON parse failed → `output_invalid` (ERR-04)
 9. CliOutput.text not valid DiagnosticianOutputV1 → `output_invalid` (ERR-05)
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] m6-04-01-PLAN.md — Adapter export + CLI routing + error output (CLI-01, CLI-02, CLI-04, ERR-01~ERR-05)
+- [ ] m6-04-02-PLAN.md — pd runtime probe command (CLI-03, HG-01 HARD GATE)
+- [ ] m6-04-03-PLAN.md — Regression tests (CLI-01 regression, CLI-03, CLI-04)
 
 ---
 
@@ -114,7 +133,12 @@ Plans:
 3. `runtime_invocation_succeeded` / `runtime_invocation_failed` event emitted on CLI completion (includes errorCategory)
 4. `output_validation_succeeded` / `output_validation_failed` event emitted during DiagnosticianOutputV1 validation
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] m6-04-01-PLAN.md — Adapter export + CLI routing + error output (CLI-01, CLI-02, CLI-04, ERR-01~ERR-05)
+- [ ] m6-04-02-PLAN.md — pd runtime probe command (CLI-03, HG-01 HARD GATE)
+- [ ] m6-04-03-PLAN.md — Regression tests (CLI-01 regression, CLI-03, CLI-04)
 
 ---
 
@@ -139,7 +163,12 @@ Plans:
 10. Real `D:\.openclaw\workspace` verified (HG-5)
 11. If real OpenClaw unavailable: blocked evidence recorded, no fake success
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] m6-04-01-PLAN.md — Adapter export + CLI routing + error output (CLI-01, CLI-02, CLI-04, ERR-01~ERR-05)
+- [ ] m6-04-02-PLAN.md — pd runtime probe command (CLI-03, HG-01 HARD GATE)
+- [ ] m6-04-03-PLAN.md — Regression tests (CLI-01 regression, CLI-03, CLI-04)
 
 ---
 
@@ -148,9 +177,9 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | m6-01: CliProcessRunner + RuntimeKind | 0/2 | Planning | — |
-| m6-02: OpenClawCliRuntimeAdapter Core | 0/6 | Not started | — |
-| m6-03: DiagnosticianPromptBuilder + Workspace | 0/7 | Not started | — |
-| m6-04: PD CLI Extension + Error Mapping | 0/9 | Not started | — |
+| m6-02: OpenClawCliRuntimeAdapter Core | 3/3 | Planning | — |
+| m6-03: DiagnosticianPromptBuilder + Workspace | 0/7 | Planning | — |
+| m6-04: PD CLI Extension + Error Mapping | 0/3 | Planning | — | — |
 | m6-05: Telemetry Events | 0/4 | Not started | — |
 | m6-06: E2E Verification | 0/11 | Not started | — |
 
@@ -169,4 +198,4 @@ Plans:
 
 ---
 
-_Last updated: 2026-04-24 after m6-01 planning_
+_Last updated: 2026-04-24 after m6-03 planning_
