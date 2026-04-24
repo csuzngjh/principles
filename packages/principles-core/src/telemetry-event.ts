@@ -20,7 +20,7 @@ import { Value } from '@sinclair/typebox/value';
 // ---------------------------------------------------------------------------
 
 /**
- * The 21 telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation + 8 M4 diagnostician.
+ * The 24 telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation + 8 M4 diagnostician + 3 M5 commit.
  *
  * Core evolution events (aligned with EvolutionHook methods):
  * - pain_detected -> EvolutionStage 'pain_detected'
@@ -44,6 +44,11 @@ import { Value } from '@sinclair/typebox/value';
  * - diagnostician_task_succeeded — task marked succeeded
  * - diagnostician_task_retried — task sent to retry_wait
  * - diagnostician_task_failed — task permanently failed
+ *
+ * M5: Artifact commit + candidate registration events:
+ * - diagnostician_artifact_committed — artifact + candidates committed successfully
+ * - diagnostician_artifact_commit_failed — commit attempt threw
+ * - principle_candidate_registered — individual candidate registered
  */
 export const TelemetryEventType = Type.Union([
   Type.Literal('pain_detected'),
@@ -70,6 +75,10 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diagnostician_task_succeeded'),
   Type.Literal('diagnostician_task_retried'),
   Type.Literal('diagnostician_task_failed'),
+  // M5: Artifact commit events
+  Type.Literal('diagnostician_artifact_committed'),
+  Type.Literal('diagnostician_artifact_commit_failed'),
+  Type.Literal('principle_candidate_registered'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
