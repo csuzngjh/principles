@@ -88,7 +88,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const sqliteConn = (stateManager as unknown as { connection: unknown }).connection;
     const taskStore = (stateManager as unknown as { taskStore: unknown }).taskStore as SqliteTaskStore;
     const runStore = (stateManager as unknown as { runStore: unknown }).runStore as SqliteRunStore;
-    const historyQuery = new SqliteHistoryQuery(sqliteConn as never);
+    const historyQuery = new SqliteHistoryQuery(sqliteConn);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
 
     // Use TestDoubleRuntimeAdapter with success-on-first-poll behavior for CLI testing
