@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.5
 milestone_name: m6-openclaw-cli-adapter
 status: in_progress
-last_updated: "2026-04-24T20:15:00.000Z"
-last_activity: 2026-04-24 — Roadmap defined (m6-01 through m6-06)
+last_updated: "2026-04-24T21:27:00.000Z"
+last_activity: 2026-04-24 — m6-02 complete (OCRA-01~05)
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_plans: 3
+  percent: 17
 ---
 
 # Project State: Principles
@@ -23,9 +23,10 @@ progress:
 
 ## Current Position
 
-Phase: m6-01 (next to start)
+Phase: m6-02 (complete)
+Phase: m6-03 (next to plan/execute)
 Plan: —
-Status: Roadmap defined, ready for planning
+Status: m6-02 shipped on feature/pd-runtime-v2-m6
 
 ## M6 Phase Structure
 
