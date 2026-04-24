@@ -13,6 +13,7 @@ export class StoreEventEmitter extends EventEmitter {
    */
   emitTelemetry(event: TelemetryEvent): true {
     // Narrow try scope to validation only; emit calls must propagate errors
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let validEvent: TelemetryEvent | undefined;
     try {
       const result = validateTelemetryEvent(event);
