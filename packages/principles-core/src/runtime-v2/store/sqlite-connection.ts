@@ -130,6 +130,64 @@ export class SqliteConnection {
         DROP TABLE runs_backup;
       `);
     }
+
+    // M5: artifacts table — committed diagnostician output
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS artifacts (
+        artifact_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        artifact_kind TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_artifacts_task_id ON artifacts(task_id);
+      CREATE INDEX IF NOT EXISTS idx_artifacts_run_id ON artifacts(run_id);
+      CREATE INDEX IF NOT EXISTS idx_artifacts_artifact_kind ON artifacts(artifact_kind);
+    `);
+
+    // M5: commits table — atomic commit records linking run to artifact
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS commits (
+        commit_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        run_id TEXT NOT NULL UNIQUE,
+        artifact_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'committed',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
+        FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+        FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_commits_task_id ON commits(task_id);
+      CREATE INDEX IF NOT EXISTS idx_commits_artifact_id ON commits(artifact_id);
+    `);
+
+    // M5: principle_candidates table — extracted principle recommendations
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS principle_candidates (
+        candidate_id TEXT PRIMARY KEY,
+        artifact_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        source_run_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        confidence REAL,
+        source_recommendation_json TEXT,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        consumed_at TEXT,
+        FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE,
+        FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
+        FOREIGN KEY (source_run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_candidates_status ON principle_candidates(status);
+      CREATE INDEX IF NOT EXISTS idx_candidates_source_run_id ON principle_candidates(source_run_id);
+      CREATE INDEX IF NOT EXISTS idx_candidates_task_id ON principle_candidates(task_id);
+    `);
   }
 
   /** Closes the underlying database connection. */
