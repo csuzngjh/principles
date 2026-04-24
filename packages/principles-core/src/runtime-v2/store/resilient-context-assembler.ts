@@ -16,7 +16,6 @@ import type { ContextAssembler } from './context-assembler.js';
 import type { StoreEventEmitter } from './event-emitter.js';
 import {
   type DiagnosticianContextPayload,
-  type DiagnosisTarget,
 } from '../context-payload.js';
 import type { PDErrorCategory } from '../error-categories.js';
 
@@ -80,7 +79,7 @@ export class ResilientContextAssembler implements ContextAssembler {
       taskId,
       workspaceDir: '<unknown>',
       sourceRefs: [taskId],
-      diagnosisTarget: {} as DiagnosisTarget,
+      diagnosisTarget: {},
       conversationWindow: [],
       ambiguityNotes: notes,
     };

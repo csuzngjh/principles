@@ -202,7 +202,7 @@ export async function importSessionHistory(
   return { sessionsProcessed, entriesImported };
 }
 
-function buildConversationEntries(
+function _buildConversationEntries(
   assistantTurns: AssistantTurn[],
   userTurns: UserTurn[],
   toolCalls: ToolCall[],
