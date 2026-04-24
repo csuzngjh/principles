@@ -27,7 +27,11 @@
 5. Unit tests cover success, non-zero exit, timeout, invalid JSON scenarios
 6. `RuntimeKindSchema` includes `openclaw-cli` literal; `TestDouble` retained as explicit test-only runtime
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] m6-01-01-PLAN.md — CliProcessRunner utility + unit tests
+- [ ] m6-01-02-PLAN.md — RuntimeKindSchema extension with openclaw-cli
 
 ---
 
@@ -128,7 +132,7 @@
 3. `TestDoubleRuntimeAdapter` path unaffected (E2EV-03 regression)
 4. `pd runtime probe --runtime openclaw-cli` succeeds and returns healthy status (HG-1 verified)
 5. `pd context build` produces valid `DiagnosticianContextPayload`
-6. `pd diagnose run --runtime openclaw-cli --agent <id>` real flow: task -> run -> openclaw agent -> DiagnosticianOutputV1 -> artifact -> candidates
+6. `pd diagnose run --runtime openclaw-cli --agent <id>` real flow: task → run → openclaw agent → DiagnosticianOutputV1 → artifact → candidates
 7. `pd candidate list` / `pd artifact show` show openclaw-cli produced artifacts and candidates
 8. Legacy import path (openclaw-history runtime) continues to work (E2EV-08)
 9. `--openclaw-local` / `--openclaw-gateway` mode works as explicit config (HG-3, OCRA-07)
@@ -143,7 +147,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| m6-01: CliProcessRunner + RuntimeKind | 0/6 | Not started | — |
+| m6-01: CliProcessRunner + RuntimeKind | 0/2 | Planning | — |
 | m6-02: OpenClawCliRuntimeAdapter Core | 0/6 | Not started | — |
 | m6-03: DiagnosticianPromptBuilder + Workspace | 0/7 | Not started | — |
 | m6-04: PD CLI Extension + Error Mapping | 0/9 | Not started | — |
@@ -165,4 +169,4 @@
 
 ---
 
-_Last updated: 2026-04-24 after roadmap creation_
+_Last updated: 2026-04-24 after m6-01 planning_
