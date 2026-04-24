@@ -102,7 +102,7 @@ Phases execute in numeric order: m5-01 -> m5-02 -> m5-03 -> m5-04 -> m5-05
 | m5-02. DiagnosticianCommitter Core | 1/1 | Complete | 2026-04-24 |
 | m5-03. Runner Integration | 1/1 | Complete | 2026-04-24 |
 | m5-04. CLI + Telemetry | 3/3 | Complete | 2026-04-24 |
-| m5-05. E2E Verification | 1/? | In progress | - |
+| m5-05. E2E Verification | 1/1 | Complete | 2026-04-24 |
 
 ## Requirements Traceability
 
@@ -134,7 +134,7 @@ Phases execute in numeric order: m5-01 -> m5-02 -> m5-03 -> m5-04 -> m5-05
 | TELE-03 | candidate_registered event | m5-04 | Complete |
 | TELE-04 | Event infrastructure reuse | m5-04 | Complete |
 | TELE-05 | RunnerPhase.Committing | m5-04 | Complete |
-| E2EV-01 | Happy path E2E | m5-05 | In progress |
-| E2EV-02 | Idempotency E2E | m5-05 | In progress |
-| E2EV-03 | Commit failure E2E | m5-05 | In progress |
-| E2EV-04 | Full traceability + CLI E2E | m5-05 | In progress |
+| E2EV-01 | Happy path E2E | m5-05 | Complete |
+| E2EV-02 | Idempotency E2E | m5-05 | Complete |
+| E2EV-03 | Commit failure E2E | m5-05 | Complete |
+| E2EV-04 | Full traceability + CLI E2E | m5-05 | Complete |
