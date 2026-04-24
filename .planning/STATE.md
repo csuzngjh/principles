@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.5
 milestone_name: milestone
 status: m6-02 shipped on feature/pd-runtime-v2-m6
-last_updated: "2026-04-24T13:28:22.932Z"
+last_updated: "2026-04-24T21:50:00.000Z"
 progress:
   total_phases: 6
   completed_phases: 0
