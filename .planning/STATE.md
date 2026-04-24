@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: m5-unified-commit
 status: active
-last_updated: "2026-04-24T13:00:00.000Z"
-last_activity: 2026-04-24 — m5-01 VERIFIED, advancing to m5-02
+last_updated: "2026-04-24T13:20:00.000Z"
+last_activity: 2026-04-24 — m5-02 COMMITTED, advancing to m5-03
 progress:
   total_phases: 5
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 20
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State: Principles
@@ -23,9 +23,9 @@ progress:
 
 ## Current Position
 
-Phase: m5-02: DiagnosticianCommitter Core (next)
-Status: m5-01 VERIFIED (10/10 must-haves, 23/23 tests)
-Last activity: 2026-04-24 — m5-01 Artifact Registry Schema complete, advancing to m5-02
+Phase: m5-03: Runner Integration (next)
+Status: m5-02 COMMITTED (10/10 tests, COMT-01 through COMT-06)
+Last activity: 2026-04-24 — m5-02 DiagnosticianCommitter Core complete, advancing to m5-03
 
 ## Context
 
