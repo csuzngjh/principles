@@ -191,6 +191,12 @@ export class DiagnosticianRunner {
         });
       }
 
+      // TELE-04: output_validation_succeeded — validator returned valid: true
+      this.emitDiagnosticianEvent('output_validation_succeeded', taskId, {
+        runtimeKind: this.resolvedOptions.runtimeKind,
+        outputValid: validationResult.valid,
+      });
+
       // 8. Succeed task -- store output and mark succeeded using store's runId
       return await this.succeedTask({ taskId, runId: storeRunId, output, task: leasedTask, contextHash });
     } catch (error) {
@@ -399,6 +405,12 @@ export class DiagnosticianRunner {
 
     // Emit: diagnostician_output_invalid
     this.emitDiagnosticianEvent('diagnostician_output_invalid', ctx.taskId, {
+      errorCount: ctx.errors.length,
+      errorCategory: category,
+    });
+
+    // TELE-04: output_validation_failed — validator returned valid: false
+    this.emitDiagnosticianEvent('output_validation_failed', ctx.taskId, {
       errorCount: ctx.errors.length,
       errorCategory: category,
     });
