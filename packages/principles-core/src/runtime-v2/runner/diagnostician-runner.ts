@@ -262,7 +262,6 @@ export class DiagnosticianRunner {
   }
 
   private async succeedTask(ctx: SucceedContext): Promise<RunnerResult> {
-    // Store output in run record
     await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));
 
     // Commit artifact + candidates before marking task succeeded
