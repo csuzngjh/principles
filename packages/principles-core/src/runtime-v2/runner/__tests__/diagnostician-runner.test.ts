@@ -564,4 +564,137 @@ describe('DiagnosticianRunner', () => {
       expect(runner.currentPhase).toBe(RunnerPhase.Completed);
     });
   });
+
+  // ── M5-04: Telemetry events ───────────────────────────────────────────────
+
+  describe('M5-04 Telemetry events', () => {
+    // TELE-01: diagnostician_artifact_committed emitted after successful commit
+    it('emits diagnostician_artifact_committed after successful commit', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockResolvedValue({
+        commitId: 'commit-artifact-001',
+        artifactId: 'artifact-001',
+        candidateCount: 2,
+      });
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      expect(mocks._eventEmitter.emitTelemetry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'diagnostician_artifact_committed',
+          traceId: TASK_ID,
+          payload: expect.objectContaining({
+            commitId: 'commit-artifact-001',
+            artifactId: 'artifact-001',
+            candidateCount: 2,
+            taskId: TASK_ID,
+            runId: RUN_ID,
+          }),
+        }),
+      );
+    });
+
+    // TELE-02: diagnostician_artifact_commit_failed emitted when commit throws
+    it('emits diagnostician_artifact_commit_failed when commit throws', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockRejectedValue(
+        new PDRuntimeError('artifact_commit_failed', 'Database constraint violation', {}),
+      );
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      expect(mocks._eventEmitter.emitTelemetry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'diagnostician_artifact_commit_failed',
+          traceId: TASK_ID,
+          payload: expect.objectContaining({
+            taskId: TASK_ID,
+            runId: RUN_ID,
+            errorCategory: 'artifact_commit_failed',
+          }),
+        }),
+      );
+    });
+
+    // TELE-03: principle_candidate_registered emitted per principle candidate
+    it('emits principle_candidate_registered for each principle recommendation', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockResolvedValue({
+        commitId: 'commit-candidate-001',
+        artifactId: 'artifact-001',
+        candidateCount: 2,
+      });
+
+      // Override output with 2 principle recommendations
+      const output = makeDiagnosticianOutput({
+        recommendations: [
+          { kind: 'principle', description: 'Use immutable data structures' },
+          { kind: 'principle', description: 'Prefer pure functions' },
+          { kind: 'rule', description: 'Follow existing naming conventions' },
+        ],
+      });
+      mocks._runtimeAdapter.fetchOutput = vi.fn().mockResolvedValue({
+        runId: RUN_ID,
+        payload: output,
+      });
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      // Should have 2 calls to principle_candidate_registered
+      const candidateEvents = (mocks._eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (call) => call[0]?.eventType === 'principle_candidate_registered',
+      );
+      expect(candidateEvents).toHaveLength(2);
+      expect(candidateEvents[0]![0].payload).toMatchObject({
+        commitId: 'commit-candidate-001',
+        kind: 'principle',
+        candidateIndex: 0,
+        sourceRunId: RUN_ID,
+      });
+      expect(candidateEvents[1]![0].payload).toMatchObject({
+        commitId: 'commit-candidate-001',
+        kind: 'principle',
+        candidateIndex: 1,
+        sourceRunId: RUN_ID,
+      });
+    });
+
+    // TELE-04: all events use emitTelemetry (StoreEventEmitter)
+    it('all new telemetry events use emitTelemetry, not console.log or side effects', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockResolvedValue({
+        commitId: 'commit-tele-004',
+        artifactId: 'artifact-004',
+        candidateCount: 1,
+      });
+
+      // Override output with 1 principle recommendation so the event fires
+      const output = makeDiagnosticianOutput({
+        recommendations: [
+          { kind: 'principle', description: 'Test principle' },
+        ],
+      });
+      mocks._runtimeAdapter.fetchOutput = vi.fn().mockResolvedValue({
+        runId: RUN_ID,
+        payload: output,
+      });
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      // All 3 new event types should go through emitTelemetry
+      const allEventTypes = (mocks._eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0]?.eventType,
+      );
+      expect(allEventTypes).toContain('diagnostician_artifact_committed');
+      expect(allEventTypes).toContain('principle_candidate_registered');
+    });
+  });
 });

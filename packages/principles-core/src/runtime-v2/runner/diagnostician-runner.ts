@@ -266,11 +266,45 @@ export class DiagnosticianRunner {
 
     // Commit artifact + candidates before marking task succeeded
     this.phase = RunnerPhase.Committing;
-    const commitResult = await this.committer.commit({
-      runId: ctx.runId,
+    let commitResult;
+    try {
+      commitResult = await this.committer.commit({
+        runId: ctx.runId,
+        taskId: ctx.taskId,
+        output: ctx.output,
+        idempotencyKey: `${ctx.taskId}:${ctx.runId}`,
+      });
+    } catch (commitErr) {
+      // Emit: diagnostician_artifact_commit_failed (TELE-02)
+      this.emitDiagnosticianEvent('diagnostician_artifact_commit_failed', ctx.taskId, {
+        taskId: ctx.taskId,
+        runId: ctx.runId,
+        errorCategory: commitErr instanceof PDRuntimeError ? commitErr.category : 'artifact_commit_failed',
+        errorMessage: commitErr instanceof Error ? commitErr.message : String(commitErr),
+      });
+      throw commitErr; // Re-throw so outer try/catch in run() handles it
+    }
+
+    // Emit: principle_candidate_registered per candidate (TELE-03)
+    const principleRecs = ctx.output.recommendations.filter((r) => r.kind === 'principle');
+    for (let i = 0; i < principleRecs.length; i++) {
+      const rec = principleRecs[i]!;
+      this.emitDiagnosticianEvent('principle_candidate_registered', ctx.taskId, {
+        candidateIndex: i,
+        commitId: commitResult.commitId,
+        kind: 'principle',
+        description: rec.description,
+        sourceRunId: ctx.runId,
+      });
+    }
+
+    // Emit: diagnostician_artifact_committed (TELE-01)
+    this.emitDiagnosticianEvent('diagnostician_artifact_committed', ctx.taskId, {
+      commitId: commitResult.commitId,
+      artifactId: commitResult.artifactId,
+      candidateCount: commitResult.candidateCount,
       taskId: ctx.taskId,
-      output: ctx.output,
-      idempotencyKey: `${ctx.taskId}:${ctx.runId}`,
+      runId: ctx.runId,
     });
 
     // Use commit URI as resultRef
