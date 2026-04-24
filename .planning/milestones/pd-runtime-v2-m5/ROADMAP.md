@@ -100,7 +100,7 @@ Phases execute in numeric order: m5-01 -> m5-02 -> m5-03 -> m5-04 -> m5-05
 | m5-01. Artifact Registry Schema | 1/1 | Complete | 2026-04-24 |
 | m5-02. DiagnosticianCommitter Core | 1/1 | Complete | 2026-04-24 |
 | m5-03. Runner Integration | 1/1 | Complete | 2026-04-24 |
-| m5-04. CLI + Telemetry | 0/? | Not started | - |
+| m5-04. CLI + Telemetry | 3/3 | Planned | - |
 | m5-05. E2E Verification | 0/? | Not started | - |
 
 ## Requirements Traceability
