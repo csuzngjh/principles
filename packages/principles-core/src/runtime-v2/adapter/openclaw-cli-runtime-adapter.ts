@@ -67,7 +67,7 @@ function extractJson(text: string): unknown | null {
   } catch { /* fall through */ }
 
   // Attempt 2: balanced-fragment extraction
-  const match = text.match(/\{[\s\S]*\}/);
+  const match = /\{[\s\S]*\}/.exec(text);
   if (match) {
     try {
       return JSON.parse(match[0]);
@@ -88,10 +88,12 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   }
 
   // OCRA-01: kind() returns RuntimeKind literal 'openclaw-cli'
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   kind(): RuntimeKind {
     return 'openclaw-cli';
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async getCapabilities(): Promise<RuntimeCapabilities> {
     return {
       supportsStructuredJsonOutput: true,
@@ -106,6 +108,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async healthCheck(): Promise<RuntimeHealth> {
     return {
       healthy: true,
@@ -228,6 +231,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     }
 
     // OCRA-03/OCRA-04: Parse JSON from stdout
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let parsed: unknown;
     try {
       parsed = JSON.parse(cliOutput.stdout);
@@ -257,6 +261,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async fetchArtifacts(_runId: string): Promise<RuntimeArtifactRef[]> {
     // No artifact refs produced by openclaw-cli adapter directly
     return [];

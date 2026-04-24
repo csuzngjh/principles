@@ -145,7 +145,7 @@ describe('DiagnosticianPromptBuilder → OpenClawCliRuntimeAdapter pipeline', ()
 
     expect(promptInput.context.workspaceDir).toBe('D:/work/.pd');
     // Verify workspaceDir is NOT at top level (reduces exposure)
-    expect((promptInput as Record<string, unknown>)).not.toHaveProperty('workspaceDir');
+    expect((promptInput as unknown as Record<string, unknown>)).not.toHaveProperty('workspaceDir');
   });
 
   // OCRA-07: runtimeMode='local' passes --local to CLI
@@ -163,7 +163,7 @@ describe('DiagnosticianPromptBuilder → OpenClawCliRuntimeAdapter pipeline', ()
       timeoutMs: 60000,
     });
 
-    const call = mockRunCliProcess.mock.calls[0]![0] as { command: string; args: string[]; cwd?: string };
+    const call = mockRunCliProcess.mock.calls[0]?.[0] as { command: string; args: string[]; cwd?: string };
     expect(call.args).toContain('--local');
     expect(call.args).toContain('--message');
     expect(call.cwd).toBe('D:/work/.pd');
@@ -184,7 +184,7 @@ describe('DiagnosticianPromptBuilder → OpenClawCliRuntimeAdapter pipeline', ()
       timeoutMs: 60000,
     });
 
-    const call = mockRunCliProcess.mock.calls[0]![0] as { command: string; args: string[]; cwd?: string };
+    const call = mockRunCliProcess.mock.calls[0]?.[0] as { command: string; args: string[]; cwd?: string };
     expect(call.args).not.toContain('--local');
     expect(call.cwd).toBe('D:/work/.pd'); // workspaceDir still passed as cwd
   });

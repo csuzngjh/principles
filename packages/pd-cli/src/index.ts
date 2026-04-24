@@ -247,6 +247,10 @@ diagnoseCmd
   .description('Execute diagnostician runner for a task')
   .requiredOption('-t, --task-id <taskId>', 'Task ID to execute')
   .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'test-double'")
+  .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
+  .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
+  .option('-a, --agent <agentId>', 'Agent ID to invoke')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleDiagnoseRun(opts);
