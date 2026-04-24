@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.4
 milestone_name: m5-unified-commit
 status: active
-last_updated: "2026-04-24T15:45:00.000Z"
-last_activity: 2026-04-24 — m5-04 VERIFIED (10/10 must-haves, 20/20 tests), advancing to m5-05
+last_updated: "2026-04-24T16:27:00.000Z"
+last_activity: 2026-04-24 — m5-05 COMPLETE (4/4 E2E scenarios pass), M5 ALL PHASES DONE
 progress:
   total_phases: 5
-  completed_phases: 4
-  total_plans: 6
-  completed_plans: 6
-  percent: 80
+  completed_phases: 5
+  total_plans: 7
+  completed_plans: 7
+  percent: 100
 ---
 
 # Project State: Principles
@@ -23,9 +23,9 @@ progress:
 
 ## Current Position
 
-Phase: m5-05: E2E Verification (next)
-Status: m5-04 VERIFIED (10/10 must-haves, 20 tests, 0 issues)
-Last activity: 2026-04-24 — m5-04 CLI + Telemetry complete, advancing to m5-05
+Phase: m5-05: E2E Verification (COMPLETE)
+Status: 1/1 plans done, all 4 E2E scenarios pass
+Last activity: 2026-04-24 — m5-05 E2E tests written and passing, M5 milestone complete
 
 ## Context
 
@@ -36,7 +36,7 @@ Last activity: 2026-04-24 — m5-04 CLI + Telemetry complete, advancing to m5-05
 - m5-02: DiagnosticianCommitter Core — interface, transaction commit, candidate extraction
 - m5-03: Runner Integration — commit before succeed, production path mandates committer
 - m5-04: CLI + Telemetry — fixed commands, telemetry events, RunnerPhase.Committing
-- m5-05: E2E Verification — hard gate: idempotency, failure, traceability, CLI visibility
+- [x] m5-05: E2E Verification — hard gate: idempotency, failure, traceability, CLI visibility (COMPLETE: 4/4 pass)
 
 **Boundary Constraints (6 corrections):**
 1. Atomic commit truth in SQLite .pd/state.db ONLY
