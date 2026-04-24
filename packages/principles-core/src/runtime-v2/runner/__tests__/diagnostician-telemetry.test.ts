@@ -219,6 +219,7 @@ describe('DiagnosticianRunner telemetry emission', () => {
       'diagnostician_task_leased',
       'diagnostician_context_built',
       'diagnostician_run_started',
+      'diagnostician_artifact_committed',
       'diagnostician_task_succeeded',
     ]);
   });
