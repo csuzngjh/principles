@@ -27,6 +27,28 @@ import type {
   RuntimeArtifactRef,
 } from '../runtime-protocol.js';
 
+/**
+ * OpenClawCliRuntimeAdapterOptions — constructor options for OpenClawCliRuntimeAdapter.
+ *
+ * Per DPB-09 (LOCKED): No silent fallback. Calling code must specify runtimeMode.
+ * Per HG-03 (HARD GATE): --openclaw-local/--openclaw-gateway must be explicit.
+ */
+export interface OpenClawCliRuntimeAdapterOptions {
+  /**
+   * Runtime mode — must be explicitly 'local' or 'gateway'.
+   * Per DPB-09 (LOCKED): No silent fallback. Calling code must specify.
+   * Per HG-03 (HARD GATE): --openclaw-local/--openclaw-gateway must be explicit.
+   */
+  runtimeMode: 'local' | 'gateway';
+  /**
+   * PD workspace directory — used as cwd for the CLI process.
+   * Per DPB-08 (LOCKED): Three-layer control includes cwd passed to CliProcessRunner.
+   * Per HG-02 (HARD GATE): Two distinct boundaries — PD workspace vs OpenClaw workspace.
+   * If undefined, runCliProcess uses process.cwd() as default.
+   */
+  workspaceDir?: string;
+}
+
 interface RunState {
   runId: string;
   startedAt: string;
@@ -57,6 +79,13 @@ function extractJson(text: string): unknown | null {
 
 export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   private readonly runStateMap = new Map<string, RunState>();
+  private readonly runtimeMode: 'local' | 'gateway';
+  private readonly workspaceDir?: string;
+
+  constructor(options: OpenClawCliRuntimeAdapterOptions) {
+    this.runtimeMode = options.runtimeMode;
+    this.workspaceDir = options.workspaceDir;
+  }
 
   // OCRA-01: kind() returns RuntimeKind literal 'openclaw-cli'
   kind(): RuntimeKind {
@@ -102,19 +131,27 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     const timeoutSeconds = Math.ceil((input.timeoutMs ?? 600000) / 1000);
     const agentId = input.agentSpec?.agentId ?? 'diagnostician';
 
+    // DPB-09 (LOCKED): --local only passed when runtimeMode === 'local'
+    // HG-03 (HARD GATE): No silent fallback — must be explicit
     const args = [
       'agent',
       '--agent', agentId,
       '--message', jsonPayload,
       '--json',
-      '--local',
-      '--timeout', String(timeoutSeconds),
     ];
 
-    // Spawn CLI — promise resolves when CLI exits (D-01: blocks until close)
+    if (this.runtimeMode === 'local') {
+      args.push('--local');
+    }
+
+    args.push('--timeout', String(timeoutSeconds));
+
+    // DPB-08 (LOCKED): Pass workspaceDir as cwd for workspace boundary control
+    // HG-02 (HARD GATE): Two distinct boundaries — cwd controls PD workspace
     const cliOutput = await runCliProcess({
       command: 'openclaw',
       args,
+      cwd: this.workspaceDir,
       timeoutMs: input.timeoutMs,
     });
 

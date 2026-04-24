@@ -163,7 +163,14 @@ export type { DiagnosticianValidator, DiagnosticianValidationResult } from './ru
 
 // Runtime Adapter (M4)
 export { TestDoubleRuntimeAdapter } from './adapter/index.js';
-export type { TestDoubleBehaviorOverrides } from './adapter/test-double-runtime-adapter.js';
+export type { TestDoubleBehaviorOverrides } from './adapter/index.js';
+
+// Diagnostician Prompt Builder (M6)
+export { DiagnosticianPromptBuilder, summarizeConversationWindow } from './diagnostician-prompt-builder.js';
+export type { PromptInput, PromptBuildResult } from './diagnostician-prompt-builder.js';
+
+// OpenClawCliRuntimeAdapter (M6)
+export type { OpenClawCliRuntimeAdapterOptions } from './adapter/openclaw-cli-runtime-adapter.js';
 
 // CLI surface (M4)
 export { run, status, candidateList, candidateShow, artifactShow } from './cli/diagnose.js';
