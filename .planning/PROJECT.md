@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Principles is a principle-evolution system for AI coding agents. It detects pain signals, proposes candidate principles, gates them through trust and scoring, and promotes validated principles into active use. The repo also contains `ai-sprint-orchestrator`, a long-running multi-stage task runner.
+Principles is a principle-evolution system for AI coding agents. It detects pain signals, proposes candidate principles, gates them through trust and scoring, and promotes validated principles into active use. The repo also contains `ai-sprint-orchestrator`, a long-running multi-stage task runner. Runtime v2 (`@principles/core`) provides a SQLite-backed task/run state machine with diagnostician-driven candidate principle extraction.
 
 ## Core Value
 
@@ -25,8 +25,15 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - v2.1 M2: Task/Run State Core — SqliteTaskStore, SqliteRunStore, LeaseManager, RetryPolicy, RecoverySweep — SHIPPED 2026-04-22
 - v2.2 M3: History Retrieval + Context Build — trajectory locate, history query, context assembly — SHIPPED 2026-04-23
 - v2.3 M4: Diagnostician Runner v2 — explicit runner, runtime adapter, validator, telemetry, CLI — SHIPPED 2026-04-23
+- v2.4 M5: Unified Commit + Principle Candidate Intake — DiagnosticianCommitter, artifact registry, transaction-safe commit, CLI visibility, E2E hard gate — SHIPPED 2026-04-24
 
-## Out of Scope
+## Current Milestone: v2.5 — Candidate Gating + Promotion (Planning)
+
+**Goal:** Principle candidate promotion via gating/scoring, active principle injection, ledger bridge filesystem sync
+
+**Canonical source:** `packages/principles-core/src/runtime-v2/`
+
+**Out of Scope:**
 
 - New UI/dashboard work
 - New feature surface areas (outside SDK scope)
@@ -89,4 +96,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-24 after M4 shipped, M5 started*
+*Last updated: 2026-04-24 after v2.4 M5 shipped, v2.5 planned*
