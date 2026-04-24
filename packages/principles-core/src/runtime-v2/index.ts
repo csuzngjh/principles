@@ -106,6 +106,7 @@ export { SqliteConnection } from './store/sqlite-connection.js';
 export { SqliteTrajectoryLocator } from './store/sqlite-trajectory-locator.js';
 export { SqliteHistoryQuery } from './store/sqlite-history-query.js';
 export { SqliteContextAssembler } from './store/sqlite-context-assembler.js';
+export { SqliteDiagnosticianCommitter } from './store/diagnostician-committer.js';
 export { ResilientContextAssembler } from './store/resilient-context-assembler.js';
 export { ResilientHistoryQuery } from './store/resilient-history-query.js';
 export type {
@@ -129,6 +130,11 @@ export type {
   RunRecord,
 } from './store/run-store.js';
 export type { TrajectoryLocator } from './store/trajectory-locator.js';
+export type {
+  DiagnosticianCommitter,
+  CommitInput,
+  CommitResult,
+} from './store/diagnostician-committer.js';
 
 // Lease & Recovery
 export { DefaultLeaseManager } from './store/lease-manager.js';
