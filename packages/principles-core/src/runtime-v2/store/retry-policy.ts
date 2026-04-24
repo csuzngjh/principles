@@ -111,12 +111,14 @@ export class DefaultRetryPolicy implements RetryPolicy {
    *
    * Fails safe: if maxAttempts is not set or is invalid, defaults to allowing retry.
    */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   shouldRetry(task: TaskRecord): boolean {
     const max = task.maxAttempts;
     if (typeof max !== 'number' || !Number.isFinite(max) || max <= 0) return true; // fail-safe: allow retry
     return task.attemptCount < max;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async markRetryWait(
     taskId: string,
     errorCategory: PDErrorCategory,
@@ -124,6 +126,7 @@ export class DefaultRetryPolicy implements RetryPolicy {
     return { taskId, errorCategory };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async markFailed(
     taskId: string,
     errorCategory: PDErrorCategory,

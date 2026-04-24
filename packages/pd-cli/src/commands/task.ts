@@ -25,8 +25,8 @@ export async function handleTaskList(opts: TaskListOptions): Promise<void> {
     if (opts.kind) filter.taskKind = opts.kind;
     if (opts.limit) filter.limit = opts.limit;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tasks = await stateManager.listTasks(Object.keys(filter).length > 0 ? (filter as any) : undefined);
+     
+    const tasks = await stateManager.listTasks(Object.keys(filter).length > 0 ? filter : undefined);
 
     if (tasks.length === 0) {
       console.log('No tasks found.');
