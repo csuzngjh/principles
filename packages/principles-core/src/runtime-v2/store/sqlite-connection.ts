@@ -104,8 +104,10 @@ export class SqliteConnection {
     `);
 
     // Migration: rewrite runs FK with ON DELETE CASCADE (SQLite doesn't support ALTER FK)
-    // Only needed for pre-existing runs tables that lack CASCADE
-    const fkInfo = db.prepare('PRAGMA foreign_key_list(runs)').all() as { id: number; seq: number; from: string; to: string; on_delete: string }[];
+    // Only needed for pre-existing runs tables that lack CASCADE.
+    // Check runs_backup (old table) to determine if migration is needed.
+    // fkInfo.length === 0 means no backup table exists yet (fresh DB).
+    const fkInfo = db.prepare('PRAGMA foreign_key_list(runs_backup)').all() as { id: number; seq: number; from: string; to: string; on_delete: string }[];
     if (fkInfo.length > 0 && !fkInfo.some((fk) => fk.on_delete === 'CASCADE')) {
       db.exec(`
         ALTER TABLE runs RENAME TO runs_backup;

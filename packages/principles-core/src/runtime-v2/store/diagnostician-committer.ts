@@ -121,8 +121,9 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
         const candidateId = randomUUID();
         const candidateIdemKey = `${commitId}:${i}`;
 
-        // Title defaults to description (DiagnosticianRecommendation has no title field)
-        const title = rec.description;
+        // Title defaults to first 200 chars of description (DiagnosticianRecommendation has no title field)
+        const MAX_TITLE_LENGTH = 200;
+        const title = rec.description.slice(0, MAX_TITLE_LENGTH);
 
         db.prepare(`
           INSERT INTO principle_candidates
@@ -152,15 +153,17 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
       const candidateCount = transaction();
       return { commitId, artifactId, candidateCount };
     } catch (err: unknown) {
-      // 3. Handle idempotency: re-commit returns existing result
+      // 3. Preserve already-typed PDRuntimeErrors (e.g., input_invalid from guard)
+      // Do this FIRST before checking existing commits — guard errors should not
+      // trigger idempotency lookup (which could return unrelated existing commits).
+      if (err instanceof PDRuntimeError) {
+        throw err;
+      }
+
+      // 4. Handle idempotency: re-commit returns existing result
       const existingResult = SqliteDiagnosticianCommitter.tryGetExistingCommit(db, input.runId, input.idempotencyKey);
       if (existingResult) {
         return existingResult;
-      }
-
-      // 4. Preserve already-typed PDRuntimeErrors (e.g., input_invalid from guard)
-      if (err instanceof PDRuntimeError) {
-        throw err;
       }
 
       // 5. Wrap unknown SQL errors as PDRuntimeError
