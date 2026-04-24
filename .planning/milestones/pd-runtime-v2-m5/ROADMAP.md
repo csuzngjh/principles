@@ -23,7 +23,7 @@
 - [x] **Phase m5-02: DiagnosticianCommitter Core** — Interface, commit logic, transaction safety, candidate extraction, failure handling
 - [x] **Phase m5-03: Runner Integration** — Runner calls committer, ordering guarantee, production path mandates committer, failure path
 - [x] **Phase m5-04: CLI + Telemetry** — Fixed CLI commands, commit/candidate events, RunnerPhase.Committing
-- [ ] **Phase m5-05: E2E Verification** — Hard gate: idempotency, failure path, traceability, candidate list visibility
+- [x] **Phase m5-05: E2E Verification** — Hard gate: idempotency, failure path, traceability, candidate list visibility
 
 ## Phase Details
 
