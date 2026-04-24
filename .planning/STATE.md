@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v2.5
 milestone_name: milestone
-status: m6-04 shipped, m6-05 context gathered
+status: m6-05 planned, ready to execute
 last_updated: "2026-04-24T22:30:00.000Z"
 progress:
   total_phases: 6
