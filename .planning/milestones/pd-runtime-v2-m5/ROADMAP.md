@@ -19,10 +19,10 @@
 
 ## Phases
 
-- [ ] **Phase m5-01: Artifact Registry Schema** — SQL schema, migration, tables, indexes, resultRef URI scheme
-- [ ] **Phase m5-02: DiagnosticianCommitter Core** — Interface, commit logic, transaction safety, candidate extraction, failure handling
-- [ ] **Phase m5-03: Runner Integration** — Runner calls committer, ordering guarantee, production path mandates committer, failure path
-- [ ] **Phase m5-04: CLI + Telemetry** — Fixed CLI commands, commit/candidate events, RunnerPhase.Committing
+- [x] **Phase m5-01: Artifact Registry Schema** — SQL schema, migration, tables, indexes, resultRef URI scheme
+- [x] **Phase m5-02: DiagnosticianCommitter Core** — Interface, commit logic, transaction safety, candidate extraction, failure handling
+- [x] **Phase m5-03: Runner Integration** — Runner calls committer, ordering guarantee, production path mandates committer, failure path
+- [x] **Phase m5-04: CLI + Telemetry** — Fixed CLI commands, commit/candidate events, RunnerPhase.Committing
 - [ ] **Phase m5-05: E2E Verification** — Hard gate: idempotency, failure path, traceability, candidate list visibility
 
 ## Phase Details
@@ -37,7 +37,7 @@
   3. All indexes queryable (artifacts.task_id, artifacts.run_id, artifacts.artifact_kind, candidates.status, candidates.source_run_id)
   4. Existing M2/M3 data (tasks, runs tables) unaffected by migration
   5. resultRef URI scheme defined: `commit://<commitId>` — commit record associates artifact + candidates
-**Plans**: TBD
+**Plans**: 1/1
 
 ### Phase m5-02: DiagnosticianCommitter Core
 **Goal**: Committer commits diagnostician output as artifact and extracts principle candidates atomically
@@ -49,7 +49,7 @@
   3. Re-commit same run_id returns existing commitId, no duplicate candidates (idempotency)
   4. Commit failure returns `CommitResult` with errorCategory, no orphaned rows
   5. `CommitResult` provides `{ commitId, artifactId, candidateCount }` on success
-**Plans**: TBD
+**Plans**: 1/1
 
 ### Phase m5-03: Runner Integration
 **Goal**: DiagnosticianRunner commits before succeed, production path mandates committer
@@ -60,7 +60,7 @@
   2. Commit failure prevents succeeded status — task lands in appropriate state with `artifact_commit_failed`
   3. Production M5 path requires committer in deps; no committer = explicit legacy/test mode with opt-in flag
   4. Committing phase observable via `RunnerPhase.Committing` between Validating and Completed
-**Plans**: TBD
+**Plans**: 1/1
 
 ### Phase m5-04: CLI + Telemetry
 **Goal**: Operators can inspect artifacts and candidates via fixed CLI commands, commit operations emit telemetry
@@ -77,7 +77,7 @@
   3. `pd diagnose status --task-id <id> --json` includes commitId, artifactId, candidateCount
   4. Telemetry events emitted at correct lifecycle points: `diagnostician_artifact_committed`, `diagnostician_artifact_commit_failed`, `principle_candidate_registered`
   5. All CLI returns are plain TypeScript types, no CLI framework dependency. JSON usable for E2E assertions.
-**Plans**: TBD
+**Plans**: 3/3
 
 ### Phase m5-05: E2E Verification
 **Goal**: Hard gate — full traceability chain verified with idempotency, failure, and CLI visibility
@@ -88,7 +88,8 @@
   2. **Idempotency**: same task/run committed twice → one artifact, no duplicate candidates, same commitId
   3. **Failure**: commit fails mid-transaction → task NOT succeeded, no candidates exist, error is `artifact_commit_failed`
   4. **CLI visibility**: `pd candidate list --task-id <id>` shows candidates; `task.resultRef` resolves to commit → artifact → candidates
-**Plans**: TBD
+**Plans**:
+- [ ] m5-05-01-PLAN.md — E2E tests for E2EV-01 through E2EV-04
 
 ## Progress
 
@@ -101,7 +102,7 @@ Phases execute in numeric order: m5-01 -> m5-02 -> m5-03 -> m5-04 -> m5-05
 | m5-02. DiagnosticianCommitter Core | 1/1 | Complete | 2026-04-24 |
 | m5-03. Runner Integration | 1/1 | Complete | 2026-04-24 |
 | m5-04. CLI + Telemetry | 3/3 | Complete | 2026-04-24 |
-| m5-05. E2E Verification | 0/? | Not started | - |
+| m5-05. E2E Verification | 1/? | In progress | - |
 
 ## Requirements Traceability
 
@@ -112,11 +113,11 @@ Phases execute in numeric order: m5-01 -> m5-02 -> m5-03 -> m5-04 -> m5-05
 | ARTF-03 | Foreign keys with CASCADE | m5-01 | Complete |
 | ARTF-04 | Indexes on artifacts and candidates | m5-01 | Complete |
 | ARTF-05 | resultRef URI scheme (commit://) | m5-01 | Complete |
-| COMT-01 | DiagnosticianCommitter interface | m5-02 | Pending |
-| COMT-02 | Transaction-wrapped commit | m5-02 | Pending |
-| COMT-03 | Principle candidate extraction | m5-02 | Pending |
-| COMT-04 | Idempotent re-commit | m5-02 | Pending |
-| COMT-05 | Commit failure handling | m5-02 | Pending |
+| COMT-01 | DiagnosticianCommitter interface | m5-02 | Complete |
+| COMT-02 | Transaction-wrapped commit | m5-02 | Complete |
+| COMT-03 | Principle candidate extraction | m5-02 | Complete |
+| COMT-04 | Idempotent re-commit | m5-02 | Complete |
+| COMT-05 | Commit failure handling | m5-02 | Complete |
 | COMT-06 | CommitResult type with commitId | m5-02 | Complete |
 | RUNR-01 | Commit before succeed | m5-03 | Complete |
 | RUNR-02 | Committer injection via deps | m5-03 | Complete |
@@ -133,7 +134,7 @@ Phases execute in numeric order: m5-01 -> m5-02 -> m5-03 -> m5-04 -> m5-05
 | TELE-03 | candidate_registered event | m5-04 | Complete |
 | TELE-04 | Event infrastructure reuse | m5-04 | Complete |
 | TELE-05 | RunnerPhase.Committing | m5-04 | Complete |
-| E2EV-01 | Happy path E2E | m5-05 | Pending |
-| E2EV-02 | Idempotency E2E | m5-05 | Pending |
-| E2EV-03 | Commit failure E2E | m5-05 | Pending |
-| E2EV-04 | Full traceability + CLI E2E | m5-05 | Pending |
+| E2EV-01 | Happy path E2E | m5-05 | In progress |
+| E2EV-02 | Idempotency E2E | m5-05 | In progress |
+| E2EV-03 | Commit failure E2E | m5-05 | In progress |
+| E2EV-04 | Full traceability + CLI E2E | m5-05 | In progress |
