@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v2.5
 milestone_name: m6-openclaw-cli-adapter
 status: in_progress
-last_updated: "2026-04-24T17:00:00.000Z"
-last_activity: 2026-04-24 — v2.5 M6 started
+last_updated: "2026-04-24T20:15:00.000Z"
+last_activity: 2026-04-24 — Roadmap defined (m6-01 through m6-06)
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -19,27 +19,28 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.4 M5 Unified Commit + Principle Candidate Intake
+**Current Focus:** v2.5 M6 Production Runtime Adapter: OpenClaw CLI Diagnostician
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: m6-01 (next to start)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-04-24 — v2.5 M6 started
+Status: Roadmap defined, ready for planning
+
+## M6 Phase Structure
+
+| Phase | Name | Requirements |
+|-------|------|--------------|
+| m6-01 | CliProcessRunner + RuntimeKind | RUNR-01~04, RUK-01~02 (6 req) |
+| m6-02 | OpenClawCliRuntimeAdapter Core | OCRA-01~05 (5 req) |
+| m6-03 | DiagnosticianPromptBuilder + Workspace | DPB-01~05, OCRA-06 (6 req) |
+| m6-04 | PD CLI Extension + Error Mapping | CLI-01~04, ERR-01~05 (8 req) |
+| m6-05 | Telemetry Events | TELE-01~04 (4 req) |
+| m6-06 | E2E Verification | E2EV-01~06 (6 req) |
 
 ## Context
 
-**v2.4 M5 Goal:** diagnostician output -> diagnosis artifact -> principle candidate -> task resultRef，全链路在 SQLite .pd/state.db 内原子完成
-
-**M5 Phases:**
-- m5-01: Artifact Registry Schema — tables, FK, indexes, resultRef URI scheme
-- m5-02: DiagnosticianCommitter Core — interface, transaction commit, candidate extraction
-- m5-03: Runner Integration — commit before succeed, production path mandates committer
-- m5-04: CLI + Telemetry — fixed commands, telemetry events, RunnerPhase.Committing
-- [x] m5-05: E2E Verification — hard gate: idempotency, failure, traceability, CLI visibility (COMPLETE: 4/4 pass)
-
-**Boundary Constraints (6 corrections):**
+**M5 Boundary Constraints (still valid for M6):**
 1. Atomic commit truth in SQLite .pd/state.db ONLY
 2. Runner only depends on Committer interface
 3. task succeeded MUST happen after commit success
@@ -52,5 +53,6 @@ Last activity: 2026-04-24 — v2.5 M6 started
 - v2.1 M2: Task/Run State Core — SHIPPED 2026-04-22
 - v2.2 M3: History Retrieval + Context Build — SHIPPED 2026-04-23
 - v2.3 M4: Diagnostician Runner v2 — SHIPPED 2026-04-23
+- v2.4 M5: Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
