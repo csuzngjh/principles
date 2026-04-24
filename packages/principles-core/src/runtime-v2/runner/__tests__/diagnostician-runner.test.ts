@@ -30,6 +30,7 @@ import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
 import type { TaskRecord } from '../../task-status.js';
 import { PDRuntimeError } from '../../error-categories.js';
 import { DiagnosticianRunner } from '../diagnostician-runner.js';
+import { RunnerPhase } from '../runner-phase.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 
@@ -456,5 +457,111 @@ describe('DiagnosticianRunner', () => {
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const parsedContext = JSON.parse(contextItem!.content);
     expect(parsedContext.context.conversationWindow).toHaveLength(3);
+  });
+
+  // ── Committer integration tests (m5-03 Task 5) ──────────────────────────────
+
+  describe('Committer integration', () => {
+    // 12. Commit before markTaskSucceeded (call order)
+    it('calls committer.commit before markTaskSucceeded', async () => {
+      const mocks = createMocks();
+      const callOrder: string[] = [];
+
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockImplementation(async () => {
+        callOrder.push('commit');
+        return { commitId: 'call-order-commit-id', artifactId: 'art-1', candidateCount: 1 };
+      });
+      mocks._stateManager.markTaskSucceeded.mockImplementation(async () => {
+        callOrder.push('markTaskSucceeded');
+        return mocks.taskRecord;
+      });
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      expect(callOrder).toEqual(['commit', 'markTaskSucceeded']);
+    });
+
+    // 13. resultRef uses commit:// scheme
+    it('resultRef uses commit:// scheme after commit', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockResolvedValue({
+        commitId: 'verify-commit-123',
+        artifactId: 'art-verify',
+        candidateCount: 3,
+      });
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      expect(mocks._stateManager.markTaskSucceeded).toHaveBeenCalledWith(
+        TASK_ID,
+        'commit://verify-commit-123',
+      );
+    });
+
+    // 14. Commit failure triggers retry with artifact_commit_failed
+    it('commit failure triggers retry with artifact_commit_failed', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockRejectedValue(
+        new PDRuntimeError('artifact_commit_failed', 'Commit failed', {}),
+      );
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('retried');
+      expect(result.errorCategory).toBe('artifact_commit_failed');
+      expect(mocks._stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+      expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(
+        TASK_ID,
+        'artifact_commit_failed',
+      );
+    });
+
+    // 15. Commit failure with max attempts marks task failed
+    it('commit failure with max attempts marks task failed', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockRejectedValue(
+        new PDRuntimeError('artifact_commit_failed', 'Commit failed', {}),
+      );
+      mocks._stateManager.getRetryPolicy.mockReturnValue({
+        calculateBackoff: vi.fn().mockReturnValue(30_000),
+        shouldRetry: vi.fn().mockReturnValue(false),
+      });
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('failed');
+      expect(result.errorCategory).toBe('max_attempts_exceeded');
+      expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(
+        TASK_ID,
+        'max_attempts_exceeded',
+      );
+    });
+
+    // 16. RunnerPhase transitions through Committing
+    it('RunnerPhase transitions through Committing during commit', async () => {
+      const mocks = createMocks();
+
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockResolvedValue({
+        commitId: 'phase-test-commit',
+        artifactId: 'art-phase',
+        candidateCount: 0,
+      });
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('succeeded');
+      expect(typedCommitter.commit).toHaveBeenCalledTimes(1);
+      expect(runner.currentPhase).toBe(RunnerPhase.Completed);
+    });
   });
 });
