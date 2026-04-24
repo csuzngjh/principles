@@ -31,6 +31,7 @@ import type { PDErrorCategory } from '../error-categories.js';
 import type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './diagnostician-runner-options.js';
 import type { DiagnosticianValidator } from './diagnostician-validator.js';
 import type { RunnerResult } from './runner-result.js';
+import type { DiagnosticianCommitter } from '../store/diagnostician-committer.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { RunnerPhase } from './runner-phase.js';
@@ -43,6 +44,7 @@ export interface DiagnosticianRunnerDeps {
   readonly runtimeAdapter: PDRuntimeAdapter;
   readonly eventEmitter: StoreEventEmitter;
   readonly validator: DiagnosticianValidator;
+  readonly committer: DiagnosticianCommitter;
 }
 
 /** Context for retry-or-fail decision. */
@@ -78,6 +80,7 @@ export class DiagnosticianRunner {
   private readonly runtimeAdapter: PDRuntimeAdapter;
   private readonly eventEmitter: StoreEventEmitter;
   private readonly validator: DiagnosticianValidator;
+  private readonly committer: DiagnosticianCommitter;
 
   constructor(deps: DiagnosticianRunnerDeps, options: DiagnosticianRunnerOptions) {
     this.stateManager = deps.stateManager;
@@ -85,6 +88,7 @@ export class DiagnosticianRunner {
     this.runtimeAdapter = deps.runtimeAdapter;
     this.eventEmitter = deps.eventEmitter;
     this.validator = deps.validator;
+    this.committer = deps.committer;
     this.resolvedOptions = resolveRunnerOptions(options);
   }
 
@@ -258,17 +262,28 @@ export class DiagnosticianRunner {
   }
 
   private async succeedTask(ctx: SucceedContext): Promise<RunnerResult> {
-    // Store output in run record (D-04)
+    // Store output in run record
     await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));
 
-    // Mark task succeeded
-    const resultRef = `run://${ctx.runId}`;
+    // Commit artifact + candidates before marking task succeeded
+    this.phase = RunnerPhase.Committing;
+    const commitResult = await this.committer.commit({
+      runId: ctx.runId,
+      taskId: ctx.taskId,
+      output: ctx.output,
+      idempotencyKey: `${ctx.taskId}:${ctx.runId}`,
+    });
+
+    // Use commit URI as resultRef
+    const resultRef = `commit://${commitResult.commitId}`;
     await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
 
     // Emit: diagnostician_task_succeeded
     this.emitDiagnosticianEvent('diagnostician_task_succeeded', ctx.taskId, {
       attemptCount: ctx.task.attemptCount,
       resultRef,
+      commitId: commitResult.commitId,
+      candidateCount: commitResult.candidateCount,
     });
 
     this.phase = RunnerPhase.Completed;
