@@ -1,0 +1,1 @@
+{"version":3,"file":"sqlite-connection.d.ts","sourceRoot":"","sources":["sqlite-connection.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;GAYG;AACH,OAAO,QAAQ,MAAM,gBAAgB,CAAC;AAItC,qBAAa,gBAAgB;IAC3B,OAAO,CAAC,EAAE,CAAkC;IAC5C,OAAO,CAAC,QAAQ,CAAC,MAAM,CAAS;gBAEpB,YAAY,EAAE,MAAM;IAQhC,+DAA+D;IAC/D,KAAK,IAAI,QAAQ,CAAC,QAAQ;IAY1B,OAAO,CAAC,UAAU;IA6FlB,iDAAiD;IACjD,KAAK,IAAI,IAAI;CASd"}
