@@ -15,6 +15,8 @@ import { Value } from '@sinclair/typebox/value';
 import { runCliProcess, type CliOutput } from '../utils/cli-process-runner.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
+import type { StoreEventEmitter} from '../store/event-emitter.js';
+import { storeEmitter } from '../store/event-emitter.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -47,6 +49,11 @@ export interface OpenClawCliRuntimeAdapterOptions {
    * If undefined, runCliProcess uses process.cwd() as default.
    */
   workspaceDir?: string;
+  /**
+   * Optional StoreEventEmitter for telemetry event emission.
+   * If not provided, falls back to the global storeEmitter singleton.
+   */
+  eventEmitter?: StoreEventEmitter;
 }
 
 interface RunState {
@@ -81,10 +88,12 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   private readonly runStateMap = new Map<string, RunState>();
   private readonly runtimeMode: 'local' | 'gateway';
   private readonly workspaceDir?: string;
+  private readonly eventEmitter: StoreEventEmitter;
 
   constructor(options: OpenClawCliRuntimeAdapterOptions) {
     this.runtimeMode = options.runtimeMode;
     this.workspaceDir = options.workspaceDir;
+    this.eventEmitter = options.eventEmitter ?? storeEmitter;
   }
 
   // OCRA-01: kind() returns RuntimeKind literal 'openclaw-cli'
