@@ -25,10 +25,11 @@
   - schema mismatch → output_invalid
 - [ ] **OCRA-05**: 不要求复杂异步 session 管理，第一版为 one-shot run
 - [ ] **OCRA-06**: 两类 workspace 边界必须显式控制（PD workspace vs OpenClaw agent workspace），通过 cwd/env/profile/agent config 控制
+- [ ] **OCRA-07**: OpenClaw invocation mode 必须显式：支持 `--openclaw-local` / config option；禁止静默 local/gateway fallback；必须测试 gateway 失败和 local 失败两种路径的 error mapping
 
 ### RuntimeKind 扩展
 
-- [ ] **RUK-01**: RuntimeKindSchema 新增 `openclaw-cli` 字面量
+- [ ] **RUK-01**: RuntimeKindSchema 新增 `openclaw-cli` 字面量（全文统一：schema/CLI参数/测试/文档只用 `openclaw-cli`，不出现 `openclaw`/`openclaw-agent`/`openclaw-cli-agent` 混用）
 - [ ] **RUK-02**: 不删除 TestDoubleRuntimeAdapter（仅作为显式测试 runtime，不做静默 fallback）
 
 ### DiagnosticianPromptBuilder
@@ -48,11 +49,11 @@
 
 ### Error Mapping
 
-- [ ] **ERR-01**: CliProcessRunner timeout → PDErrorCategory.timeout
-- [ ] **ERR-02**: openclaw command not found → PDErrorCategory.runtime_unavailable
-- [ ] **ERR-03**: non-zero exit → PDErrorCategory.execution_failed
-- [ ] **ERR-04**: invalid JSON from CLI → PDErrorCategory.output_invalid
-- [ ] **ERR-05**: schema mismatch (DiagnosticianOutputV1) → PDErrorCategory.output_invalid
+- [ ] **ERR-01**: openclaw CLI binary not found / ENOENT → `runtime_unavailable`
+- [ ] **ERR-02**: CliProcessRunner process timeout → `timeout`
+- [ ] **ERR-03**: non-zero CLI exit code (非 ENOENT) → `execution_failed`
+- [ ] **ERR-04**: CliOutput.text JSON parse failed → `output_invalid`
+- [ ] **ERR-05**: CliOutput.text parse 成功但不符合 DiagnosticianOutputV1 schema → `output_invalid`
 
 ### Telemetry
 
@@ -63,12 +64,21 @@
 
 ### E2E / Integration Verification
 
-- [ ] **E2EV-01**: `pd runtime probe --runtime openclaw-cli` 成功返回健康状态
-- [ ] **E2EV-02**: legacy import 路径（openclaw-history runtime）可正常工作
-- [ ] **E2EV-03**: `pd context build` 产生 DiagnosticianContextPayload
-- [ ] **E2EV-04**: `pd diagnose run --runtime openclaw-cli --agent <id>` 完整链路：task → run → OpenClaw CLI → DiagnosticianOutputV1 → artifact → candidates
-- [ ] **E2EV-05**: `pd candidate list` 可查到 openclaw-cli 产出的 candidates
-- [ ] **E2EV-06**: TestDoubleRuntimeAdapter 路径不受影响（E2E 回归测试）
+#### Fake OpenClaw (无真实 OpenClaw CLI / auth 依赖)
+- [ ] **E2EV-01**: CliProcessRunner mock/fake 进程 runner 验证 openclaw-cli adapter 路径（不依赖真实 openclaw binary）
+- [ ] **E2EV-02**: `pd diagnose run --runtime openclaw-cli --agent <id>` 完整链路（mock runner）：task → run → DiagnosticianOutputV1 mock → artifact → candidates
+- [ ] **E2EV-03**: TestDoubleRuntimeAdapter 路径不受影响（回归测试）
+
+#### Real OpenClaw (D:\.openclaw\workspace 可用时)
+- [ ] **E2EV-04**: `pd runtime probe --runtime openclaw-cli` 成功返回健康状态（HG-1 HARD GATE）
+- [ ] **E2EV-05**: `pd context build` 产生有效 DiagnosticianContextPayload
+- [ ] **E2EV-06**: `pd diagnose run --runtime openclaw-cli --agent <id>` 真实链路：task → run → openclaw agent → DiagnosticianOutputV1 → artifact → candidates
+- [ ] **E2EV-07**: `pd candidate list` / `pd artifact show` 可查到 openclaw-cli 产出的 artifact 和 candidates
+
+#### Legacy 回归
+- [ ] **E2EV-08**: legacy import 路径（openclaw-history runtime）可正常工作
+
+**注意**：如果真实 OpenClaw auth/agent 不可用，允许 M6 输出 `blocked evidence`（记录 blocked 原因和证据），但禁止伪造成功。
 
 ## Future Requirements (M7+)
 
@@ -108,48 +118,52 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RUNR-01 | — | Pending |
-| RUNR-02 | — | Pending |
-| RUNR-03 | — | Pending |
-| RUNR-04 | — | Pending |
-| OCRA-01 | — | Pending |
-| OCRA-02 | — | Pending |
-| OCRA-03 | — | Pending |
-| OCRA-04 | — | Pending |
-| OCRA-05 | — | Pending |
-| OCRA-06 | — | Pending |
-| RUK-01 | — | Pending |
-| RUK-02 | — | Pending |
-| DPB-01 | — | Pending |
-| DPB-02 | — | Pending |
-| DPB-03 | — | Pending |
-| DPB-04 | — | Pending |
-| DPB-05 | — | Pending |
-| CLI-01 | — | Pending |
-| CLI-02 | — | Pending |
-| CLI-03 | — | Pending |
-| CLI-04 | — | Pending |
-| ERR-01 | — | Pending |
-| ERR-02 | — | Pending |
-| ERR-03 | — | Pending |
-| ERR-04 | — | Pending |
-| ERR-05 | — | Pending |
-| TELE-01 | — | Pending |
-| TELE-02 | — | Pending |
-| TELE-03 | — | Pending |
-| TELE-04 | — | Pending |
-| E2EV-01 | — | Pending |
-| E2EV-02 | — | Pending |
-| E2EV-03 | — | Pending |
-| E2EV-04 | — | Pending |
-| E2EV-05 | — | Pending |
-| E2EV-06 | — | Pending |
+| RUNR-01 | m6-01 | Pending |
+| RUNR-02 | m6-01 | Pending |
+| RUNR-03 | m6-01 | Pending |
+| RUNR-04 | m6-01 | Pending |
+| OCRA-01 | m6-02 | Pending |
+| OCRA-02 | m6-02 | Pending |
+| OCRA-03 | m6-02 | Pending |
+| OCRA-04 | m6-02 | Pending |
+| OCRA-05 | m6-02 | Pending |
+| OCRA-06 | m6-03 | Pending |
+| OCRA-07 | m6-03 | Pending |
+| RUK-01 | m6-01 | Pending |
+| RUK-02 | m6-01 | Pending |
+| DPB-01 | m6-03 | Pending |
+| DPB-02 | m6-03 | Pending |
+| DPB-03 | m6-03 | Pending |
+| DPB-04 | m6-03 | Pending |
+| DPB-05 | m6-03 | Pending |
+| CLI-01 | m6-04 | Pending |
+| CLI-02 | m6-04 | Pending |
+| CLI-03 | m6-04 | Pending |
+| CLI-04 | m6-04 | Pending |
+| ERR-01 | m6-04 | Pending |
+| ERR-02 | m6-04 | Pending |
+| ERR-03 | m6-04 | Pending |
+| ERR-04 | m6-04 | Pending |
+| ERR-05 | m6-04 | Pending |
+| OCRA-07 | m6-03 | Pending |
+| TELE-01 | m6-05 | Pending |
+| TELE-02 | m6-05 | Pending |
+| TELE-03 | m6-05 | Pending |
+| TELE-04 | m6-05 | Pending |
+| E2EV-01 | m6-06 | Pending |
+| E2EV-02 | m6-06 | Pending |
+| E2EV-03 | m6-06 | Pending |
+| E2EV-04 | m6-06 | Pending |
+| E2EV-05 | m6-06 | Pending |
+| E2EV-06 | m6-06 | Pending |
+| E2EV-07 | m6-06 | Pending |
+| E2EV-08 | m6-06 | Pending |
 
 **Coverage:**
-- v2.5 requirements: 34 total
-- Mapped to phases: 0
-- Unmapped: 34 ⚠️
+- v2.5 requirements: 38 total (RUK-02 + OCRA-07 + E2EV split; ERR-01~05 renumbered but count unchanged)
+- Mapped to phases: 38
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-24*
-*Last updated: 2026-04-24 after initial definition*
+*Last updated: 2026-04-24 after roadmap creation*

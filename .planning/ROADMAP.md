@@ -1,106 +1,168 @@
-# Roadmap: Principles — AI Agent Principle Evolution System
+# Roadmap: v2.5 M6 — Production Runtime Adapter: OpenClaw CLI Diagnostician
 
-## Milestones
+## Phases
 
-- ✅ **v2.0 M1: Foundation Contracts** — Phases 1-4 (SHIPPED 2026-04-21)
-- ✅ **v2.1 M2: Task/Run State Core** — Phases m2-01 through m2-07 (SHIPPED 2026-04-22)
-- ✅ **v2.2 M3: History Retrieval + Context Build** — Phases m3-01 through m3-09 (SHIPPED 2026-04-23)
-- ✅ **v2.3 M4: Diagnostician Runner v2** — Phases m4-01 through m4-06 (SHIPPED 2026-04-23)
-- ✅ **v2.4 M5: Unified Commit + Principle Candidate Intake** — Phases m5-01 through m5-05 (SHIPPED 2026-04-24)
-- 📋 **v2.5: Candidate Gating + Promotion** — Phases m6-01+ (planned)
+- [ ] **Phase m6-01: CliProcessRunner + RuntimeKind Extension** — Foundation utility (process runner + schema)
+- [ ] **Phase m6-02: OpenClawCliRuntimeAdapter Core** — One-shot adapter, output parsing, error mapping
+- [ ] **Phase m6-03: DiagnosticianPromptBuilder + Workspace Boundary** — Prompt construction + workspace isolation
+- [ ] **Phase m6-04: PD CLI Extension + Error Mapping** — CLI commands + error category mapping
+- [ ] **Phase m6-05: Telemetry Events** — runtime events emission
+- [ ] **Phase m6-06: E2E Verification** — Full pipeline integration + hard gates
 
-## Phase Progress
+## Phase Details
 
-| Phase | Milestone | Plans | Status | Completed |
-|-------|-----------|-------|--------|-----------|
-| 1-4 | v2.0 | 7 | Complete | 2026-04-21 |
-| m2-01 through m2-07 | v2.1 | 7 | Complete | 2026-04-22 |
-| m3-01 through m3-09 | v2.2 | 9 | Complete | 2026-04-23 |
-| m4-01 through m4-06 | v2.3 | 7 | Complete | 2026-04-23 |
-| m5-01 | v2.4 | 1 | Complete | 2026-04-24 |
-| m5-02 | v2.4 | 1 | Complete | 2026-04-24 |
-| m5-03 | v2.4 | 1 | Complete | 2026-04-24 |
-| m5-04 | v2.4 | 3 | Complete | 2026-04-24 |
-| m5-05 | v2.4 | 1 | Complete | 2026-04-24 |
+### Phase m6-01: CliProcessRunner + RuntimeKind Extension
 
-## Details
+**Goal**: Generic process runner utility and RuntimeKind schema extension
 
-<details>
-<summary>✅ v2.4 M5: Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24</summary>
+**Depends on**: Nothing (first phase)
 
-- [x] Phase m5-01: Artifact Registry Schema (1/1 plan) — completed 2026-04-24
-- [x] Phase m5-02: DiagnosticianCommitter Core (1/1 plan) — completed 2026-04-24
-- [x] Phase m5-03: Runner Integration (1/1 plan) — completed 2026-04-24
-- [x] Phase m5-04: CLI + Telemetry (3/3 plans) — completed 2026-04-24
-- [x] Phase m5-05: E2E Verification (1/1 plan) — completed 2026-04-24
+**Requirements**: RUNR-01, RUNR-02, RUNR-03, RUNR-04, RUK-01, RUK-02
 
-**Summary:** diagnostician output -> diagnosis artifact -> principle candidate -> task resultRef，全链路在 SQLite .pd/state.db 内原子完成
+**Success Criteria** (what must be TRUE):
+1. `CliProcessRunner` accepts command, args, cwd, env, timeoutMs and spawns child process
+2. Runner captures stdout, stderr, exitCode, durationMs and returns structured result
+3. Runner kills child process on timeout and returns timeout error
+4. No shell injection (spawn/execFile uses array args, not string concatenation)
+5. Unit tests cover success, non-zero exit, timeout, invalid JSON scenarios
+6. `RuntimeKindSchema` includes `openclaw-cli` literal; `TestDouble` retained as explicit test-only runtime
 
-[Full archive: .planning/milestones/v2.4-ROADMAP.md]
-</details>
-
-<details>
-<summary>✅ v2.3 M4: Diagnostician Runner v2 — SHIPPED 2026-04-23</summary>
-
-- [x] m4-01: RunnerCore (3/3 plans) — completed 2026-04-23
-- [x] m4-02: RuntimeInvocation (1/1 plan) — completed 2026-04-23
-- [x] m4-03: Validator (1/1 plan) — completed 2026-04-23
-- [x] m4-04: RetryLeaseIntegration (1/1 plan) — completed 2026-04-23
-- [x] m4-05: TelemetryCLI (1/1 plan) — completed 2026-04-23
-- [x] m4-06: DualTrackE2E (1/1 plan) — completed 2026-04-23
-
-[Full archive: .planning/milestones/v2.3-ROADMAP.md]
-</details>
-
-<details>
-<summary>✅ v2.2 M3: History Retrieval + Context Build — SHIPPED 2026-04-23</summary>
-
-- [x] m3-01: TrajectoryLocator — completed 2026-04-22
-- [x] m3-02: BoundedHistoryQuery — completed 2026-04-22
-- [x] m3-03: ContextAssembler — completed 2026-04-22
-- [x] m3-04: DegradationPolicy — completed 2026-04-22
-- [x] m3-05: WorkspaceIsolation — completed 2026-04-22
-- [x] m3-06: CLI-Wiring — completed 2026-04-22
-- [x] m3-07: LegacyImportBoundary — completed 2026-04-23
-- [x] m3-08: SchemaAlignment — completed 2026-04-23
-- [x] m3-09: EntryMapping — completed 2026-04-23
-
-[Full archive: .planning/milestones/v2.2-ROADMAP.md]
-</details>
-
-<details>
-<summary>✅ v2.1 M2: Task/Run State Core — SHIPPED 2026-04-22</summary>
-
-- [x] m2-01: TaskStore Foundation — completed 2026-04-22
-- [x] m2-02: RunStore Foundation — completed 2026-04-22
-- [x] m2-03: LeaseManager — completed 2026-04-22
-- [x] m2-04: RetryPolicy — completed 2026-04-22
-- [x] m2-05: RecoverySweep + Integration Tests — completed 2026-04-22
-- [x] m2-06: MigrationBridge + Advanced Integration Tests — completed 2026-04-22
-- [x] m2-07: Runtime Integration + Event Emission + CLI Inspection — completed 2026-04-22
-
-[Full archive: .planning/milestones/v2.1-ROADMAP.md]
-</details>
-
-<details>
-<summary>✅ v2.0 M1: Foundation Contracts — SHIPPED 2026-04-21</summary>
-
-- [x] Phase 1: Core Protocol + Agent + Error Contracts (3/3 plans) — completed 2026-04-21
-- [x] Phase 2: Context + Diagnostician Contracts (1/1 plan) — completed 2026-04-21
-- [x] Phase 3: Package Infrastructure (1/1 plan) — completed 2026-04-21
-- [x] Phase 4: Verification + Doc Sync (2/2 plans) — completed 2026-04-21
-
-[Full archive: .planning/milestones/v2.0-ROADMAP.md]
-</details>
-
-## Next Milestone
-
-**v2.5: Candidate Gating + Promotion** — Phase m6-01 onwards
-
-- Principle candidate promotion via gating/scoring
-- Active principle injection into agent context
-- Ledger bridge filesystem sync (PrinciplesTreeLedger adapter)
+**Plans**: TBD
 
 ---
 
-_Last updated: 2026-04-24 after v2.4 M5 shipped_
+### Phase m6-02: OpenClawCliRuntimeAdapter Core
+
+**Goal**: PDRuntimeAdapter implementation for openclaw-cli with one-shot run
+
+**Depends on**: m6-01
+
+**Requirements**: OCRA-01, OCRA-02, OCRA-03, OCRA-04, OCRA-05
+
+**Success Criteria** (what must be TRUE):
+1. `OpenClawCliRuntimeAdapter` implements `PDRuntimeAdapter` with `RuntimeKind = 'openclaw-cli'`
+2. `startRun` synchronously invokes `openclaw agent --agent <id> --message <json> --json --local --timeout <ms>` and caches result
+3. `fetchOutput` parses `CliOutput.text` and returns `DiagnosticianOutputV1`
+4. CLI failures map to correct `PDErrorCategory`: ENOENT→runtime_unavailable, timeout→timeout, non-zero exit→execution_failed, invalid JSON→output_invalid, schema mismatch→output_invalid
+5. One-shot run without session management complexity
+6. Adapter is registered in runtime registry
+
+**Plans**: TBD
+
+---
+
+### Phase m6-03: DiagnosticianPromptBuilder + Workspace Boundary
+
+**Goal**: Prompt builder for OpenClaw agent + explicit workspace boundary control
+
+**Depends on**: m6-01, m6-02
+
+**Requirements**: DPB-01, DPB-02, DPB-03, DPB-04, DPB-05, OCRA-06, OCRA-07
+
+**Success Criteria** (what must be TRUE):
+1. `DiagnosticianPromptBuilder` transforms `DiagnosticianContextPayload` into JSON message for OpenClaw agent
+2. Prompt outputs only JSON (no markdown, file ops, tool calls)
+3. JSON conforms to `DiagnosticianOutputV1` schema
+4. Prompt includes contextHash, taskId, diagnosisTarget, conversationWindow summary, sourceRefs
+5. LLM only analyzes; code handles PD database commits (not LLM)
+6. Workspace boundary explicitly controlled via cwd/env/profile/agent config (HG-2)
+7. PD workspace and OpenClaw agent workspace are distinct boundaries with explicit handoff
+8. `--openclaw-local`/`--openclaw-gateway` mode explicit; no silent fallback; both failure paths tested (OCRA-07, HG-3)
+
+**Plans**: TBD
+
+---
+
+### Phase m6-04: PD CLI Extension + Error Mapping
+
+**Goal**: CLI commands routing to runtime adapter with error mapping
+
+**Depends on**: m6-01, m6-02, m6-03
+
+**Requirements**: CLI-01, CLI-02, CLI-03, CLI-04, ERR-01, ERR-02, ERR-03, ERR-04, ERR-05
+
+**Success Criteria** (what must be TRUE):
+1. `pd diagnose run --runtime test-double` continues to work (regression)
+2. `pd diagnose run --runtime openclaw-cli --agent <id> [--json]` routes to `OpenClawCliRuntimeAdapter`
+3. `pd runtime probe --runtime openclaw-cli` returns runtime health and capabilities (HG-1 HARD GATE)
+4. All CLI output supports `--json` format
+5. `openclaw` binary not found / ENOENT → `runtime_unavailable` (ERR-01)
+6. CliProcessRunner timeout → `timeout` (ERR-02)
+7. Non-zero CLI exit code → `execution_failed` (ERR-03)
+8. CliOutput.text JSON parse failed → `output_invalid` (ERR-04)
+9. CliOutput.text not valid DiagnosticianOutputV1 → `output_invalid` (ERR-05)
+
+**Plans**: TBD
+
+---
+
+### Phase m6-05: Telemetry Events
+
+**Goal**: Runtime telemetry events for observability
+
+**Depends on**: m6-02, m6-03, m6-04
+
+**Requirements**: TELE-01, TELE-02, TELE-03, TELE-04
+
+**Success Criteria** (what must be TRUE):
+1. `runtime_adapter_selected` event emitted when openclaw-cli runtime is selected
+2. `runtime_invocation_started` event emitted when CLI process starts
+3. `runtime_invocation_succeeded` / `runtime_invocation_failed` event emitted on CLI completion (includes errorCategory)
+4. `output_validation_succeeded` / `output_validation_failed` event emitted during DiagnosticianOutputV1 validation
+
+**Plans**: TBD
+
+---
+
+### Phase m6-06: E2E Verification
+
+**Goal**: Full pipeline integration with hard gates
+
+**Depends on**: m6-01, m6-02, m6-03, m6-04, m6-05
+
+**Requirements**: E2EV-01, E2EV-02, E2EV-03, E2EV-04, E2EV-05, E2EV-06, E2EV-07, E2EV-08
+
+**Success Criteria** (what must be TRUE):
+1. Fake CliProcessRunner proves openclaw-cli adapter path without real openclaw binary
+2. `pd diagnose run --runtime openclaw-cli --agent <id>` complete flow with mock runner (E2EV-02)
+3. `TestDoubleRuntimeAdapter` path unaffected (E2EV-03 regression)
+4. `pd runtime probe --runtime openclaw-cli` succeeds and returns healthy status (HG-1 verified)
+5. `pd context build` produces valid `DiagnosticianContextPayload`
+6. `pd diagnose run --runtime openclaw-cli --agent <id>` real flow: task -> run -> openclaw agent -> DiagnosticianOutputV1 -> artifact -> candidates
+7. `pd candidate list` / `pd artifact show` show openclaw-cli produced artifacts and candidates
+8. Legacy import path (openclaw-history runtime) continues to work (E2EV-08)
+9. `--openclaw-local` / `--openclaw-gateway` mode works as explicit config (HG-3, OCRA-07)
+10. Real `D:\.openclaw\workspace` verified (HG-5)
+11. If real OpenClaw unavailable: blocked evidence recorded, no fake success
+
+**Plans**: TBD
+
+---
+
+## Progress Table
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| m6-01: CliProcessRunner + RuntimeKind | 0/6 | Not started | — |
+| m6-02: OpenClawCliRuntimeAdapter Core | 0/6 | Not started | — |
+| m6-03: DiagnosticianPromptBuilder + Workspace | 0/7 | Not started | — |
+| m6-04: PD CLI Extension + Error Mapping | 0/9 | Not started | — |
+| m6-05: Telemetry Events | 0/4 | Not started | — |
+| m6-06: E2E Verification | 0/11 | Not started | — |
+
+---
+
+## Hard Gates (HG-1 ~ HG-6)
+
+| ID | Description | Phase |
+|----|-------------|-------|
+| HG-1 | `pd runtime probe --runtime openclaw-cli` must deliver | m6-04 |
+| HG-2 | OpenClaw CLI no `--workspace`; two workspace boundaries explicitly controlled | m6-03 |
+| HG-3 | `--openclaw-local`/`--openclaw-gateway` must be explicit; no silent fallback | m6-03 |
+| HG-4 | CliOutput.text -> DiagnosticianOutputV1 parse + validate | m6-02 |
+| HG-5 | Real `D:\.openclaw\workspace` verification | m6-06 |
+| HG-6 | Non-goals respected (no heartbeat/prompt hook/sessions_spawn/marker file/plugin API) | All |
+
+---
+
+_Last updated: 2026-04-24 after roadmap creation_
