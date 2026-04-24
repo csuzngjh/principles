@@ -1,65 +1,67 @@
 # Phase m5-01: Artifact Registry Schema - Research
 
 **Researched:** 2026-04-24
-**Domain:** SQLite schema extension, migration, foreign keys, indexes for artifact registry
+**Domain:** SQLite schema design for artifact/commit/principle_candidates tables in PD Runtime v2
 **Confidence:** HIGH
 
 ## Summary
 
-Phase m5-01 adds two new tables (`artifacts` and `principle_candidates`) to the existing `state.db` SQLite database managed by `SqliteConnection`. The current schema contains `tasks` and `runs` tables with well-established patterns for idempotent creation (`CREATE TABLE IF NOT EXISTS`), column migrations (`PRAGMA table_info` + `ALTER TABLE`), and FK CASCADE enforcement (table rebuild pattern). This phase follows those exact patterns but is simpler because both tables are entirely new -- no ALTER operations on existing tables are needed.
+Phase m5-01 adds three new SQLite tables (`artifacts`, `commits`, `principle_candidates`) to the existing `state.db` managed by `SqliteConnection`. The existing schema has two tables (`tasks`, `runs`) with a well-established pattern: idempotent `CREATE TABLE IF NOT EXISTS` inside `initSchema()`, `CREATE INDEX IF NOT EXISTS` for indexes, and `PRAGMA foreign_keys = ON` enabled at connection open. The new tables introduce FK relationships into the existing tables and add UNIQUE constraints for idempotency enforcement.
 
-The `artifacts` table stores committed diagnostician output linked to a run and task. The `principle_candidates` table stores extracted principle recommendations linked to an artifact. Foreign keys cascade deletes from `runs` to `artifacts` and from `artifacts` to `principle_candidates`, ensuring no orphaned records when a run or artifact is deleted. Five indexes provide efficient query access for the most common lookup patterns (by task_id, run_id, artifact_kind, status, source_run_id).
+The three tables form a linear FK dependency chain: `artifacts` references `runs`, `commits` references `tasks`+`runs`+`artifacts`, and `principle_candidates` references `artifacts`+`tasks`+`runs`. Creation order matters. All tables use TEXT primary keys (matching existing `task_id` / `run_id` patterns), ISO timestamp strings for temporal fields, and nullable TEXT columns for optional payloads.
 
-**Primary recommendation:** Extend `SqliteConnection.initSchema()` with two `CREATE TABLE IF NOT EXISTS` blocks and five `CREATE INDEX IF NOT EXISTS` statements, following the exact patterns already in the file. No new dependencies or architectural changes required.
+**Primary recommendation:** Extend `SqliteConnection.initSchema()` with three new `db.exec()` blocks following the exact same idempotent pattern already used for tasks and runs. No new dependencies required -- the project already uses better-sqlite3 v12.9.0, @sinclair/typebox for schema validation, and vitest for testing.
 
 <phase_requirements>
 ## Phase Requirements
 
 | ID | Description | Research Support |
 |----|-------------|------------------|
-| ARTF-01 | `artifacts` table in `state.db` with columns: artifact_id, run_id, task_id, artifact_kind, content_json, created_at. Idempotent migration via `CREATE TABLE IF NOT EXISTS`. | Existing `initSchema()` pattern (lines 46-104 of sqlite-connection.ts) -- same `db.exec(CREATE TABLE IF NOT EXISTS ...)` approach. Column types derived from domain: all TEXT. |
-| ARTF-02 | `principle_candidates` table in `state.db` with columns: candidate_id, artifact_id, kind, description, source_run_id, status (pending/consumed/expired), created_at, consumed_at. Idempotent migration. | Same `CREATE TABLE IF NOT EXISTS` pattern. Status uses TEXT with CHECK constraint matching existing pattern for `tasks.status`. |
-| ARTF-03 | Foreign keys: artifacts.run_id references runs.run_id, principle_candidates.artifact_id references artifacts.artifact_id. Both with `ON DELETE CASCADE`. | Existing FK pattern: `runs` table already has `FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE`. `PRAGMA foreign_keys = ON` is set in `getDb()` (line 37). |
-| ARTF-04 | Indexes on artifacts(task_id), artifacts(run_id), artifacts(artifact_kind), principle_candidates(status), principle_candidates(source_run_id). All idempotent. | Existing index pattern: `CREATE INDEX IF NOT EXISTS idx_<table>_<column>` (lines 62-65, 101-103). |
+| ARTF-01 | `artifacts` table: artifact_id, run_id, task_id, artifact_kind, content_json, created_at | See Schema Design section -- column types, FK to runs, idempotent CREATE TABLE |
+| ARTF-02 | `principle_candidates` table: candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, consumed_at | See Schema Design section -- extended columns, FK chain, nullable fields, status enum |
+| ARTF-03 | Foreign keys with ON DELETE CASCADE across all three tables | See FK Chain section -- linear dependency, SQLite CASCADE behavior verified |
+| ARTF-04 | Indexes on artifacts(task_id, run_id, artifact_kind), candidates(status, source_run_id, task_id), commits(task_id, artifact_id) | See Index Strategy section -- all idempotent via CREATE INDEX IF NOT EXISTS |
+| ARTF-05 | `commits` table: commit_id, task_id, run_id (UNIQUE), artifact_id, idempotency_key (UNIQUE), status, created_at | See Schema Design section -- UNIQUE constraints for 1:1 run-to-commit mapping |
+| ARTF-06 | Uniqueness constraints: commits.run_id UNIQUE, commits.idempotency_key UNIQUE, principle_candidates.idempotency_key UNIQUE | See Uniqueness section -- SQLite UNIQUE constraint enforcement, INSERT OR IGNORE pattern |
 </phase_requirements>
 
 ## Architectural Responsibility Map
 
 | Capability | Primary Tier | Secondary Tier | Rationale |
 |------------|-------------|----------------|-----------|
-| Schema DDL (table/index creation) | Database / Storage | -- | Tables live in SQLite state.db, managed by SqliteConnection |
-| Foreign key enforcement | Database / Storage | -- | SQLite handles FK enforcement via `PRAGMA foreign_keys = ON` |
-| Migration idempotency | Database / Storage | -- | `CREATE TABLE/INDEX IF NOT EXISTS` is a SQLite DDL feature |
-| Type definitions for artifacts/candidates | API / Backend | -- | TypeScript types defined in runtime-v2 module, consumed by committer/CLI |
+| Schema definition (DDL) | Database / Storage | -- | SQLite state.db owns all table definitions |
+| Idempotent migration | Database / Storage | -- | SqliteConnection.initSchema() owns creation logic |
+| FK constraint enforcement | Database / Storage | -- | SQLite engine enforces CASCADE at DB level |
+| TypeBox schema for row records | API / Backend | -- | @sinclair/typebox schemas for runtime validation |
+| Test infrastructure | Test layer | -- | vitest + in-memory SQLite for schema conformance |
 
 ## Standard Stack
 
 ### Core
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
-| better-sqlite3 | ^12.9.0 (latest: 12.9.0) | SQLite driver for state.db | Already in use for tasks/runs tables [VERIFIED: package.json] |
-| @sinclair/typebox | ^0.34.48 (latest: 0.34.49) | Schema validation for records | Already in use for TaskRecord, RunRecord validation [VERIFIED: package.json] |
-| vitest | ^4.1.0 (latest: 4.1.5) | Test framework | Project standard for all store/runner tests [VERIFIED: package.json] |
+| better-sqlite3 | ^12.9.0 (installed) | SQLite driver | Already in use throughout store layer [VERIFIED: package.json] |
+| @sinclair/typebox | ^0.34.48 (installed) | Schema validation | Used for all record validation (TaskRecordSchema, RunRecordSchema) [VERIFIED: package.json] |
+| vitest | ^4.1.0 (installed) | Test framework | Already configured for store tests [VERIFIED: package.json, vitest.config.ts] |
 
 ### Supporting
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
-| TypeScript | ^6.0.3 (latest: 6.0.3) | Type system | All source files |
+| TypeScript | project-wide | Type safety | All new code files |
 
 ### Alternatives Considered
 | Instead of | Could Use | Tradeoff |
 |------------|-----------|----------|
-| Direct DDL in initSchema() | Migration framework (e.g., knex migrations) | Overkill for 2 new tables; existing pattern is simpler and proven in this codebase |
+| Inline DDL in initSchema() | Migration framework (e.g., knex migrations) | Overkill for 3 new tables; existing pattern is inline DDL, changing it would break consistency |
 
 **Installation:**
-No new packages required. All dependencies are already installed.
+No new packages required. All dependencies already installed.
 
 **Version verification:**
 ```
-better-sqlite3: ^12.9.0 (installed: 12.9.0, latest: 12.9.0) [VERIFIED: npm registry]
-@sinclair/typebox: ^0.34.48 (installed: 0.34.49, latest: 0.34.49) [VERIFIED: npm registry]
-vitest: ^4.1.0 (installed: 4.1.0, latest: 4.1.5) [VERIFIED: npm registry]
-typescript: ^6.0.3 (installed: 6.0.3, latest: 6.0.3) [VERIFIED: npm registry]
+better-sqlite3: ^12.9.0 (installed, latest is 12.9.0) [VERIFIED: npm registry]
+@sinclair/typebox: ^0.34.48 (installed) [VERIFIED: package.json]
+vitest: ^4.1.0 (installed) [VERIFIED: package.json]
 ```
 
 ## Architecture Patterns
@@ -67,53 +69,42 @@ typescript: ^6.0.3 (installed: 6.0.3, latest: 6.0.3) [VERIFIED: npm registry]
 ### System Architecture Diagram
 
 ```
-                    SqliteConnection.getDb()
-                           |
-                    initSchema() called
-                           |
-              +------------+------------+
-              |                         |
-         tasks table               runs table
-         (existing)                (existing)
-              |                         |
-              +------- FK: CASCADE ----+
-                                       |
-                              +--------+--------+
-                              |                  |
-                        artifacts table    principle_candidates table
-                        (NEW - m5-01)     (NEW - m5-01)
-                              |                  |
-                              +--- FK: CASCADE --+
+tasks (existing)          runs (existing)
+    ^                         ^  ^
+    |                         |  |
+    |                    FK   |  | FK
+    |                         |  |
+    +------+        +---------+  +---------+
+           |        |                      |
+           |   artifacts (NEW)             |
+           |        ^                      |
+           |        | FK                   |
+           |        |                      |
+           +--- commits (NEW) -------------+
+           |        ^
+           |        |
+           +--------+
+           |
+   principle_candidates (NEW)
 
-Data Flow:
-  run completes --> artifact inserted (FK: runs.run_id)
-                  --> candidates extracted (FK: artifacts.artifact_id)
-  run deleted --> artifacts cascade deleted --> candidates cascade deleted
+Data flow: run completes -> artifact created -> commit recorded -> candidates extracted
+All writes happen in SqliteConnection.initSchema() (creation) and future committer (writes)
 ```
 
 ### Recommended Project Structure
-
-No new files needed for m5-01. The single file modified is:
-
 ```
-packages/principles-core/src/runtime-v2/
-  store/
-    sqlite-connection.ts     # EXTEND initSchema() with 2 tables + 5 indexes
-```
-
-Test file to create:
-
-```
-packages/principles-core/src/runtime-v2/store/
-    artifact-schema.test.ts  # NEW - schema creation, FK enforcement, index verification
+src/runtime-v2/store/
+  sqlite-connection.ts     # MODIFY: add 3 new table DDLs to initSchema()
+  schema-conformance.test.ts  # EXTEND: add validation tests for new table schemas
+  artifact-types.ts          # NEW (optional): TypeBox schemas for ArtifactRecord, CommitRecord, CandidateRecord
 ```
 
 ### Pattern 1: Idempotent Table Creation
-**What:** `CREATE TABLE IF NOT EXISTS` ensures the table is created on first run and silently succeeds on subsequent opens.
-**When to use:** Every table in state.db (tasks, runs, artifacts, principle_candidates).
+**What:** Tables and indexes created with `IF NOT EXISTS` guards
+**When to use:** Every new table added to state.db
 **Example:**
 ```typescript
-// Source: sqlite-connection.ts lines 46-66 (existing pattern)
+// Source: existing sqlite-connection.ts lines 46-66 [VERIFIED: codebase]
 db.exec(`
   CREATE TABLE IF NOT EXISTS artifacts (
     artifact_id TEXT PRIMARY KEY,
@@ -122,123 +113,105 @@ db.exec(`
     artifact_kind TEXT NOT NULL,
     content_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
   );
-`);
-```
-
-### Pattern 2: Foreign Key with CASCADE
-**What:** SQLite FK enforcement requires `PRAGMA foreign_keys = ON` (already set in `getDb()` line 37). CASCADE delete propagates deletions.
-**When to use:** All parent-child relationships in state.db.
-**Example:**
-```typescript
-// Source: sqlite-connection.ts lines 99-100 (existing pattern)
-// runs table already uses: FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
-// New tables follow same pattern:
-// artifacts: FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
-// principle_candidates: FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE
-```
-
-### Pattern 3: Idempotent Index Creation
-**What:** `CREATE INDEX IF NOT EXISTS` for efficient query access.
-**When to use:** Every frequently-queried column.
-**Example:**
-```typescript
-// Source: sqlite-connection.ts lines 62-65 (existing pattern)
-db.exec(`
   CREATE INDEX IF NOT EXISTS idx_artifacts_task_id ON artifacts(task_id);
   CREATE INDEX IF NOT EXISTS idx_artifacts_run_id ON artifacts(run_id);
-  CREATE INDEX IF NOT EXISTS idx_artifacts_artifact_kind ON artifacts(artifact_kind);
-  CREATE INDEX IF NOT EXISTS idx_candidates_status ON principle_candidates(status);
-  CREATE INDEX IF NOT EXISTS idx_candidates_source_run_id ON principle_candidates(source_run_id);
+  CREATE INDEX IF NOT EXISTS idx_artifacts_kind ON artifacts(artifact_kind);
 `);
 ```
 
-### Pattern 4: Store Test Setup (vitest + tmpdir)
-**What:** Each test suite creates a temp directory, constructs `SqliteConnection`, runs tests, then cleans up.
-**When to use:** All store-level tests.
+### Pattern 2: TypeBox Schema for Record Validation
+**What:** Every table row has a corresponding TypeBox schema for runtime validation on read
+**When to use:** New record types read from SQLite
 **Example:**
 ```typescript
-// Source: sqlite-task-store.test.ts (existing pattern)
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import { SqliteConnection } from './sqlite-connection.js';
+// Source: existing task-status.ts, runtime-protocol.ts [VERIFIED: codebase]
+export const ArtifactRecordSchema = Type.Object({
+  artifactId: Type.String({ minLength: 1 }),
+  runId: Type.String({ minLength: 1 }),
+  taskId: Type.String({ minLength: 1 }),
+  artifactKind: Type.String({ minLength: 1 }),
+  contentJson: Type.String(),
+  createdAt: Type.String(),
+});
+```
 
-describe('ArtifactSchema', () => {
-  let tmpdir: string;
-  let connection: SqliteConnection;
-
-  beforeEach(() => {
-    tmpdir = path.join(os.tmpdir(), `pd-test-${process.pid}-${Date.now()}`);
-    fs.mkdirSync(tmpdir, { recursive: true });
-    connection = new SqliteConnection(tmpdir);
-  });
-
-  afterEach(() => {
-    connection.close();
-    fs.rmSync(tmpdir, { force: true, recursive: true });
-  });
-
-  // ... tests
+### Pattern 3: Test Fixture Setup
+**What:** Tests create a temp directory, open SqliteConnection, verify schema, then clean up
+**When to use:** All schema conformance tests
+**Example:**
+```typescript
+// Source: existing schema-conformance.test.ts [VERIFIED: codebase]
+beforeEach(() => {
+  tmpdir = path.join(os.tmpdir(), `pd-test-${process.pid}-${Date.now()}`);
+  fs.mkdirSync(tmpdir, { recursive: true });
+  connection = new SqliteConnection(tmpdir);
+});
+afterEach(() => {
+  connection.close();
+  fs.rmSync(tmpdir, { force: true, recursive: true });
 });
 ```
 
 ### Anti-Patterns to Avoid
-- **ALTER TABLE for new tables:** This phase adds entirely new tables, not columns to existing ones. Use `CREATE TABLE IF NOT EXISTS`, never `ALTER TABLE`.
-- **Schema validation at DDL level:** Do not add CHECK constraints beyond what's necessary. TypeBox validation in the store layer handles type safety.
-- **Separate migration file:** The codebase uses a single `initSchema()` method. Do not create a separate migration runner.
-- **UNIQUE constraint on artifacts.run_id:** The requirements say idempotent re-commit returns the same artifact_id, but uniqueness enforcement belongs in the committer layer (m5-02), not in the schema DDL. A run could theoretically have multiple artifacts of different kinds.
+- **ALTER TABLE for new tables:** Never ALTER existing tables to add new tables. Use CREATE TABLE IF NOT EXISTS in initSchema(). [VERIFIED: existing pattern]
+- **Omitting IF NOT EXISTS:** Would cause errors on re-open. All DDL must be idempotent.
+- **Creating tables before their FK targets:** artifacts must be created before commits and principle_candidates because they reference it. Order: artifacts, then commits, then principle_candidates.
+- **Using INTEGER auto-increment PKs:** The existing convention is TEXT primary keys (UUIDs or structured IDs). Do not break this pattern.
+- **Forgetting PRAGMA foreign_keys = ON:** Already enabled in getDb(). New FK constraints will be enforced automatically. [VERIFIED: sqlite-connection.ts line 37]
 
 ## Don't Hand-Roll
 
 | Problem | Don't Build | Use Instead | Why |
 |---------|-------------|-------------|-----|
-| SQLite migration | Custom migration runner | `CREATE TABLE IF NOT EXISTS` in `initSchema()` | Proven pattern in this codebase; simpler for 2 tables |
-| FK enforcement | Application-level cascade | SQLite `ON DELETE CASCADE` with `PRAGMA foreign_keys = ON` | Already enabled (line 37), handles edge cases correctly |
-| Index creation | Manual index tracking | `CREATE INDEX IF NOT EXISTS` | Idempotent by design, no tracking needed |
-| Timestamp generation | Custom clock | `new Date().toISOString()` | Consistent with existing store pattern |
+| ID generation | Custom UUID generator | crypto.randomUUID() or structured IDs | Standard, collision-resistant, already used elsewhere |
+| JSON serialization | Custom serializer | JSON.stringify/parse | SQLite TEXT column + JSON.parse on read is the existing pattern |
+| Timestamp generation | Custom time format | new Date().toISOString() | Existing pattern throughout store layer |
+| Schema validation | Manual field checks | @sinclair/typebox Value.Check() | Existing pattern in all rowToRecord methods |
 
-**Key insight:** This phase is purely DDL. No TypeScript types, no store interfaces, no business logic. Those come in m5-02 (committer) and m5-04 (CLI). The only code change is extending `initSchema()` with DDL statements.
+**Key insight:** The store layer has a consistent, battle-tested pattern for every concern this phase needs. No new abstractions are required.
 
 ## Common Pitfalls
 
-### Pitfall 1: FK Enforcement Not Active
-**What goes wrong:** Foreign keys silently do nothing because `PRAGMA foreign_keys` is OFF by default in SQLite.
-**Why it happens:** SQLite defaults to FK enforcement OFF for backward compatibility.
-**How to avoid:** `SqliteConnection.getDb()` already sets `PRAGMA foreign_keys = ON` at line 37. No action needed -- verify in tests.
-**Warning signs:** INSERT with invalid FK succeeds without error.
+### Pitfall 1: FK Creation Order
+**What goes wrong:** Creating `commits` before `artifacts` causes FK creation to fail because the referenced table doesn't exist yet.
+**Why it happens:** SQLite validates FK references at CREATE TABLE time when `foreign_keys = ON`.
+**How to avoid:** Create tables in dependency order: (1) tasks/runs (existing), (2) artifacts, (3) commits, (4) principle_candidates.
+**Warning signs:** `SQLError: no such table: artifacts` during initSchema().
 
-### Pitfall 2: CREATE INDEX Inside CREATE TABLE Block
-**What goes wrong:** Mixing `CREATE TABLE` and `CREATE INDEX` in a single `db.exec()` call works in SQLite, but the codebase separates them for readability.
-**Why it happens:** Both are valid SQL statements.
-**How to avoid:** Follow existing pattern -- indexes as separate `db.exec()` calls after the table creation block, or in the same multi-statement string but clearly separated with semicolons.
-**Warning signs:** Code review catches non-standard DDL formatting.
+### Pitfall 2: UNIQUE Constraint Interaction with Transactions
+**What goes wrong:** INSERT OR IGNORE silently swallows duplicate inserts, but the committer needs to return the existing commit_id. If using raw INSERT, UNIQUE violation throws.
+**Why it happens:** UNIQUE constraint enforcement is immediate in SQLite.
+**How to avoid:** Phase m5-01 only defines the schema. The committer (m5-02) should use INSERT ... ON CONFLICT DO NOTHING / DO UPDATE or INSERT OR IGNORE + SELECT to handle idempotency. Schema just needs the UNIQUE constraint in place.
+**Warning signs:** Test inserting duplicate run_id into commits fails with CONSTRAINT_VIOLATION.
 
-### Pitfall 3: Incorrect Column Type for content_json
-**What goes wrong:** Using BLOB instead of TEXT for JSON content makes debugging harder and breaks `json_extract()` queries.
-**Why it happens:** JSON could theoretically be stored as BLOB.
-**How to avoid:** Use `TEXT NOT NULL` for `content_json`, consistent with `tasks.diagnostic_json` which is also `TEXT`.
-**Warning signs:** `json_extract()` returns null on BLOB-stored JSON.
+### Pitfall 3: Nullable Columns with UNIQUE
+**What goes wrong:** SQLite treats NULL values as distinct for UNIQUE constraints, meaning multiple rows with NULL in a UNIQUE column are allowed.
+**Why it happens:** SQL standard behavior -- NULL != NULL.
+**How to avoid:** Ensure nullable UNIQUE columns like `consumed_at` are NOT UNIQUE. Only `idempotency_key` should be UNIQUE, and it should be NOT NULL.
+**Warning signs:** Multiple candidates with NULL consumed_at don't violate UNIQUE (correct behavior, but worth noting).
 
-### Pitfall 4: Missing NOT NULL on Required Columns
-**What goes wrong:** Columns that should always have values allow NULL, leading to unexpected `null` values in application code.
-**Why it happens:** SQLite columns are nullable by default.
-**How to avoid:** Add `NOT NULL` to all columns except `consumed_at` in `principle_candidates` (which is genuinely nullable -- only set when status changes to 'consumed').
-**Warning signs:** Application code has to handle unexpected nulls.
+### Pitfall 4: Forgetting to Test CASCADE Deletion
+**What goes wrong:** FK declared with ON DELETE CASCADE but not verified -- if PRAGMA foreign_keys was off at connection time, CASCADE is silently ignored.
+**Why it happens:** SQLite FK enforcement requires PRAGMA foreign_keys = ON per-connection.
+**How to avoid:** Write explicit tests that delete a parent row and verify child rows are removed. The existing code already sets the pragma in getDb(). [VERIFIED: sqlite-connection.ts line 37]
+**Warning signs:** Deleting a run leaves orphaned artifacts.
 
-### Pitfall 5: Breaking Existing Schema on Re-Open
-**What goes wrong:** `initSchema()` fails on existing databases that already have data in tasks/runs tables.
-**Why it happens:** DDL changes to existing tables.
-**How to avoid:** Use only `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`. No ALTER on existing tables. This phase only adds new tables.
-**Warning signs:** Existing tests fail after schema changes.
+### Pitfall 5: Missing Index on FK Columns
+**What goes wrong:** FK columns without indexes cause full table scans on CASCADE delete.
+**Why it happens:** SQLite does not auto-create indexes on FK columns.
+**How to avoid:** ARTF-04 explicitly lists all required indexes. Ensure every FK column that will be used in lookups or CASCADE operations has an index.
+**Warning signs:** Slow DELETE operations as data grows.
 
 ## Code Examples
 
-### DDL for artifacts table
+### Complete DDL for All Three Tables
 ```typescript
-// Source: follows existing pattern in sqlite-connection.ts lines 83-104
+// Source: derived from REQUIREMENTS.md ARTF-01 through ARTF-06 and existing sqlite-connection.ts pattern
+
+// Table 1: artifacts (depends on: runs, tasks)
 db.exec(`
   CREATE TABLE IF NOT EXISTS artifacts (
     artifact_id TEXT PRIMARY KEY,
@@ -247,90 +220,106 @@ db.exec(`
     artifact_kind TEXT NOT NULL,
     content_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
   );
   CREATE INDEX IF NOT EXISTS idx_artifacts_task_id ON artifacts(task_id);
   CREATE INDEX IF NOT EXISTS idx_artifacts_run_id ON artifacts(run_id);
-  CREATE INDEX IF NOT EXISTS idx_artifacts_artifact_kind ON artifacts(artifact_kind);
+  CREATE INDEX IF NOT EXISTS idx_artifacts_kind ON artifacts(artifact_kind);
 `);
-```
 
-### DDL for principle_candidates table
-```typescript
+// Table 2: commits (depends on: tasks, runs, artifacts)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS commits (
+    commit_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    run_id TEXT NOT NULL UNIQUE,
+    artifact_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'committed',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
+    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+    FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_commits_task_id ON commits(task_id);
+  CREATE INDEX IF NOT EXISTS idx_commits_artifact_id ON commits(artifact_id);
+`);
+
+// Table 3: principle_candidates (depends on: artifacts, tasks, runs)
 db.exec(`
   CREATE TABLE IF NOT EXISTS principle_candidates (
     candidate_id TEXT PRIMARY KEY,
     artifact_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    description TEXT NOT NULL,
+    task_id TEXT NOT NULL,
     source_run_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    confidence REAL,
+    source_recommendation_json TEXT,
+    idempotency_key TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL,
     consumed_at TEXT,
-    FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE
+    FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE,
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
+    FOREIGN KEY (source_run_id) REFERENCES runs(run_id) ON DELETE CASCADE
   );
   CREATE INDEX IF NOT EXISTS idx_candidates_status ON principle_candidates(status);
   CREATE INDEX IF NOT EXISTS idx_candidates_source_run_id ON principle_candidates(source_run_id);
+  CREATE INDEX IF NOT EXISTS idx_candidates_task_id ON principle_candidates(task_id);
 `);
 ```
 
-### Test: Verify table creation and idempotency
+### Schema Conformance Test Pattern
 ```typescript
-// Source: follows pattern from schema-conformance.test.ts
-it('creates artifacts and principle_candidates tables on first open', () => {
+// Source: existing schema-conformance.test.ts [VERIFIED: codebase]
+it('artifacts table created idempotently', () => {
   const db = connection.getDb();
-  const tables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('artifacts', 'principle_candidates')")
-    .all() as { name: string }[];
-  expect(tables.map(t => t.name).sort()).toEqual(['artifacts', 'principle_candidates']);
-});
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='artifacts'").all();
+  expect(tables).toHaveLength(1);
 
-it('idempotent re-open does not fail', () => {
-  connection.getDb(); // First open creates tables
+  // Re-open should not throw
   connection.close();
-  // Re-open same database
   const conn2 = new SqliteConnection(tmpdir);
   expect(() => conn2.getDb()).not.toThrow();
   conn2.close();
 });
-```
 
-### Test: Verify FK CASCADE enforcement
-```typescript
-it('deleting a run cascades to artifacts and candidates', async () => {
+it('commits FK CASCADE deletes artifacts row when run deleted', () => {
   const db = connection.getDb();
-  // Insert task -> run -> artifact -> candidate chain
-  db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run('t1', 'diagnostician', 'pending', now, now, 0, 3);
-  db.prepare("INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, attempt_number, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .run('r1', 't1', 'test-double', 'succeeded', now, 1, now, now);
+  // Insert parent records
+  taskStore.createTask({ taskId: 't1', taskKind: 'test', status: 'pending', attemptCount: 0, maxAttempts: 3 });
+  runStore.createRun({ runId: 'r1', taskId: 't1', runtimeKind: 'test-double', executionStatus: 'succeeded', startedAt: new Date().toISOString(), attemptNumber: 1 });
   db.prepare("INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .run('a1', 'r1', 't1', 'diagnosis', '{}', now);
-  db.prepare("INSERT INTO principle_candidates (candidate_id, artifact_id, kind, description, source_run_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run('c1', 'a1', 'principle', 'test desc', 'r1', 'pending', now);
+    .run('a1', 'r1', 't1', 'diagnostician_output', '{}', new Date().toISOString());
+  db.prepare("INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run('c1', 't1', 'r1', 'a1', 'ik-r1', 'committed', new Date().toISOString());
 
   // Delete the run
-  db.prepare("DELETE FROM runs WHERE run_id = ?").run('r1');
+  db.prepare('DELETE FROM runs WHERE run_id = ?').run('r1');
 
-  // Verify cascade
-  expect(db.prepare("SELECT * FROM artifacts WHERE artifact_id = ?").get('a1')).toBeUndefined();
-  expect(db.prepare("SELECT * FROM principle_candidates WHERE candidate_id = ?").get('c1')).toBeUndefined();
+  // Verify CASCADE
+  const artifacts = db.prepare('SELECT * FROM artifacts WHERE artifact_id = ?').get('a1');
+  expect(artifacts).toBeUndefined();
+  const commits = db.prepare('SELECT * FROM commits WHERE commit_id = ?').get('c1');
+  expect(commits).toBeUndefined();
 });
-```
 
-### Test: Verify indexes exist
-```typescript
-it('creates all required indexes', () => {
+it('commits run_id UNIQUE prevents duplicate', () => {
   const db = connection.getDb();
-  const indexes = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name IN ('artifacts', 'principle_candidates')")
-    .all() as { name: string }[];
-  const indexNames = indexes.map(i => i.name).sort();
-  expect(indexNames).toContain('idx_artifacts_task_id');
-  expect(indexNames).toContain('idx_artifacts_run_id');
-  expect(indexNames).toContain('idx_artifacts_artifact_kind');
-  expect(indexNames).toContain('idx_candidates_status');
-  expect(indexNames).toContain('idx_candidates_source_run_id');
+  taskStore.createTask({ taskId: 't1', taskKind: 'test', status: 'pending', attemptCount: 0, maxAttempts: 3 });
+  runStore.createRun({ runId: 'r1', taskId: 't1', runtimeKind: 'test-double', executionStatus: 'succeeded', startedAt: new Date().toISOString(), attemptNumber: 1 });
+  db.prepare("INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .run('a1', 'r1', 't1', 'diagnostician_output', '{}', new Date().toISOString());
+  db.prepare("INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run('c1', 't1', 'r1', 'a1', 'ik-r1', 'committed', new Date().toISOString());
+
+  // Duplicate run_id should fail
+  expect(() => {
+    db.prepare("INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run('c2', 't1', 'r1', 'a1', 'ik-r1-dup', 'committed', new Date().toISOString());
+  }).toThrow(/UNIQUE constraint failed/);
 });
 ```
 
@@ -338,45 +327,50 @@ it('creates all required indexes', () => {
 
 | Old Approach | Current Approach | When Changed | Impact |
 |--------------|------------------|--------------|--------|
-| SQLite FK OFF by default | FK ON via PRAGMA | M2 (line 37 of sqlite-connection.ts) | No need to set it again; child tables inherit enforcement |
-| ALTER TABLE for column additions | `PRAGMA table_info` + conditional ALTER | M3 (diagnostic_json migration, lines 70-73) | Only needed for existing tables; new tables use CREATE TABLE |
+| Runs FK without CASCADE | Runs FK with ON DELETE CASCADE | M2 (migration in sqlite-connection.ts) | Existing pattern already handles FK CASCADE migration |
+| JSON in separate files | JSON in SQLite TEXT columns | M2 | content_json follows same pattern as diagnostic_json |
 
 **Deprecated/outdated:**
-- None in this scope. All current patterns are up to date.
+- Nothing in this phase. The existing store pattern is current and stable.
 
 ## Assumptions Log
 
-> No assumptions made in this research. All findings verified against source code.
-
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
+| A1 | `artifact_kind` values will always be short strings (e.g., "diagnostician_output") | Schema Design | Low -- column is TEXT with no length constraint |
+| A2 | `status` column in commits will only use 'committed' value for M5 scope | Schema Design | Low -- TEXT allows future statuses without migration |
+| A3 | `status` column in principle_candidates uses 'pending'/'consumed'/'expired' as TEXT enum | Schema Design | Low -- same TEXT enum pattern as PDTaskStatus |
+| A4 | No need for a separate migration file -- inline DDL in initSchema() is sufficient | Architecture | Low -- matches existing 2-table pattern |
 
-**This table is empty:** All claims in this research were verified or cited -- no user confirmation needed.
+**Note:** A1-A4 are low-risk assumptions because SQLite TEXT columns are unbounded and the inline DDL pattern is proven across M1-M4. No user confirmation needed.
 
 ## Open Questions
 
-1. **Should `principle_candidates.status` have a CHECK constraint?**
-   - What we know: The requirements say status is `pending/consumed/expired`. The existing `tasks.status` column has no CHECK constraint -- validation is done in application code.
-   - What's unclear: Whether a CHECK constraint adds value here.
-   - Recommendation: Follow existing pattern -- no CHECK constraint. Application-layer validation in the committer (m5-02) handles this. [ASSUMED based on existing pattern, but low risk]
+1. **Should TypeBox schemas be defined in m5-01 or deferred to m5-02?**
+   - What we know: TypeBox schemas are used for row validation on read (existing pattern). The committer (m5-02) will need them.
+   - What's unclear: Whether defining them now (with the schema) or later (with the committer) is more appropriate.
+   - Recommendation: Define them in m5-01 as part of the schema foundation. They cost nothing and make schema conformance tests cleaner.
 
-2. **Should `principle_candidates.kind` be TEXT or an enum-like CHECK?**
-   - What we know: `DiagnosticianOutputV1.recommendations[].kind` has values: `principle`, `rule`, `implementation`, `prompt`, `defer`. Only `kind === 'principle'` becomes a candidate.
-   - What's unclear: Whether the `kind` column in `principle_candidates` should match RecommendationKind or be a narrower type.
-   - Recommendation: Use TEXT NOT NULL without CHECK. The committer only inserts `kind = 'principle'` but the schema doesn't need to enforce this at DDL level.
+2. **Should `artifact_kind` be a constrained enum or free-form TEXT?**
+   - What we know: M5 only produces one kind: "diagnostician_output". Future milestones may add more.
+   - What's unclear: Whether a CHECK constraint is worth the rigidity.
+   - Recommendation: Leave as free-form TEXT. A CHECK constraint would need ALTER on every new kind. The TypeBox schema validates at read time instead.
 
 ## Environment Availability
 
-Step 2.6: SKIPPED (no external dependencies -- all tools already verified present in codebase)
-
 | Dependency | Required By | Available | Version | Fallback |
 |------------|------------|-----------|---------|----------|
-| better-sqlite3 | Schema DDL | ✓ | 12.9.0 | -- |
-| vitest | Tests | ✓ | 4.1.0 | -- |
-| TypeScript | Compilation | ✓ | 6.0.3 | -- |
+| better-sqlite3 | Schema DDL | Yes | ^12.9.0 | -- |
+| @sinclair/typebox | Schema validation | Yes | ^0.34.48 | -- |
+| vitest | Test runner | Yes | ^4.1.0 | -- |
+| TypeScript | Type checking | Yes | project-wide | -- |
+| Node.js | Runtime | Yes | -- | -- |
 
-**Missing dependencies with no fallback:** None
-**Missing dependencies with fallback:** None
+**Missing dependencies with no fallback:**
+None -- all dependencies already installed.
+
+**Missing dependencies with fallback:**
+None.
 
 ## Validation Architecture
 
@@ -385,25 +379,27 @@ Step 2.6: SKIPPED (no external dependencies -- all tools already verified presen
 |----------|-------|
 | Framework | vitest ^4.1.0 |
 | Config file | packages/principles-core/vitest.config.ts |
-| Quick run command | `cd packages/principles-core && npx vitest run src/runtime-v2/store/artifact-schema.test.ts` |
+| Quick run command | `cd packages/principles-core && npx vitest run src/runtime-v2/store/schema-conformance.test.ts` |
 | Full suite command | `cd packages/principles-core && npx vitest run` |
 
 ### Phase Requirements -> Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| ARTF-01 | artifacts table created idempotently | unit | `vitest run src/runtime-v2/store/artifact-schema.test.ts` | ❌ Wave 0 |
-| ARTF-02 | principle_candidates table created idempotently | unit | `vitest run src/runtime-v2/store/artifact-schema.test.ts` | ❌ Wave 0 |
-| ARTF-03 | FK CASCADE enforced (run->artifacts->candidates) | integration | `vitest run src/runtime-v2/store/artifact-schema.test.ts` | ❌ Wave 0 |
-| ARTF-04 | All five indexes exist and are queryable | unit | `vitest run src/runtime-v2/store/artifact-schema.test.ts` | ❌ Wave 0 |
+| ARTF-01 | artifacts table created idempotently with correct columns | unit | `npx vitest run src/runtime-v2/store/schema-conformance.test.ts -t "artifacts"` | No -- Wave 0 |
+| ARTF-02 | principle_candidates table created idempotently with all columns including nullable confidence, consumed_at | unit | `npx vitest run src/runtime-v2/store/schema-conformance.test.ts -t "principle_candidates"` | No -- Wave 0 |
+| ARTF-03 | FK CASCADE enforced: deleting run cascades to artifacts, commits, candidates | unit | `npx vitest run src/runtime-v2/store/schema-conformance.test.ts -t "CASCADE"` | No -- Wave 0 |
+| ARTF-04 | All required indexes exist and are queryable | unit | `npx vitest run src/runtime-v2/store/schema-conformance.test.ts -t "index"` | No -- Wave 0 |
+| ARTF-05 | commits table created idempotently with UNIQUE run_id and idempotency_key | unit | `npx vitest run src/runtime-v2/store/schema-conformance.test.ts -t "commits"` | No -- Wave 0 |
+| ARTF-06 | UNIQUE constraints enforced on commits.run_id, commits.idempotency_key, candidates.idempotency_key | unit | `npx vitest run src/runtime-v2/store/schema-conformance.test.ts -t "UNIQUE"` | No -- Wave 0 |
 
 ### Sampling Rate
-- **Per task commit:** `cd packages/principles-core && npx vitest run src/runtime-v2/store/artifact-schema.test.ts`
+- **Per task commit:** `cd packages/principles-core && npx vitest run src/runtime-v2/store/schema-conformance.test.ts`
 - **Per wave merge:** `cd packages/principles-core && npx vitest run`
-- **Phase gate:** Full suite green before `/gsd-verify-work`
+- **Phase gate:** Full suite green, plus manual verification that existing tests still pass.
 
 ### Wave 0 Gaps
-- [ ] `src/runtime-v2/store/artifact-schema.test.ts` -- covers ARTF-01 through ARTF-04 (table creation, idempotency, FK CASCADE, indexes)
-- [ ] Existing `schema-conformance.test.ts` should NOT need updating (it validates TaskRecord/RunRecord schemas, not DDL)
+- [ ] `src/runtime-v2/store/schema-conformance.test.ts` -- extend with artifacts/commits/candidates tests (file already exists, needs new test cases)
+- [ ] No new framework install needed -- vitest already configured and running
 
 ## Security Domain
 
@@ -411,48 +407,42 @@ Step 2.6: SKIPPED (no external dependencies -- all tools already verified presen
 
 | ASVS Category | Applies | Standard Control |
 |---------------|---------|-----------------|
-| V2 Authentication | no | N/A -- local SQLite file |
-| V3 Session Management | no | N/A |
-| V4 Access Control | no | N/A -- single-user CLI tool |
-| V5 Input Validation | yes | TypeBox Value.Check() in store layer (m5-02) |
-| V6 Cryptography | no | N/A |
+| V2 Authentication | No | No auth in scope |
+| V3 Session Management | No | No sessions in scope |
+| V4 Access Control | No | No access control in scope |
+| V5 Input Validation | Yes | TypeBox Value.Check() on all records read from DB |
+| V6 Cryptography | No | No crypto in scope |
 
-### Known Threat Patterns for SQLite Schema Extension
+### Known Threat Patterns for SQLite Schema
 
 | Pattern | STRIDE | Standard Mitigation |
 |---------|--------|---------------------|
-| SQL injection via artifact content | Tampering | Parameterized queries (existing pattern in all stores) |
-| Path traversal in DB path | Tampering | SqliteConnection validates workspace dir (existing) |
-
-Note: This phase is pure DDL with no user-facing inputs. Security concerns are minimal.
+| SQL injection via artifact content | Tampering | Parameterized queries (better-sqlite3 .prepare().run()) [VERIFIED: existing pattern] |
+| Schema corruption | Tampering | Idempotent IF NOT EXISTS guards; no ALTER on existing tables |
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `packages/principles-core/src/runtime-v2/store/sqlite-connection.ts` -- existing DDL pattern, migration pattern, FK enforcement
-- `packages/principles-core/src/runtime-v2/store/sqlite-task-store.ts` -- store implementation pattern
-- `packages/principles-core/src/runtime-v2/store/sqlite-run-store.ts` -- store implementation pattern
-- `packages/principles-core/src/runtime-v2/diagnostician-output.ts` -- DiagnosticianOutputV1 schema with recommendations[]
-- `packages/principles-core/src/runtime-v2/error-categories.ts` -- PDErrorCategory including artifact_commit_failed
-- `packages/principles-core/src/runtime-v2/runner/runner-phase.ts` -- RunnerPhase enum
-- `packages/principles-core/vitest.config.ts` -- test configuration
-- `packages/principles-core/package.json` -- dependencies and versions
+- Codebase: `packages/principles-core/src/runtime-v2/store/sqlite-connection.ts` -- existing initSchema() pattern, FK CASCADE migration
+- Codebase: `packages/principles-core/src/runtime-v2/store/schema-conformance.test.ts` -- test pattern reference
+- Codebase: `packages/principles-core/src/runtime-v2/store/sqlite-task-store.ts` -- rowToRecord validation pattern
+- Codebase: `packages/principles-core/src/runtime-v2/store/sqlite-run-store.ts` -- rowToRecord validation pattern
+- Codebase: `packages/principles-core/package.json` -- dependency versions
+- `.planning/milestones/pd-runtime-v2-m5/REQUIREMENTS.md` -- ARTF-01 through ARTF-06 specifications
+- `.planning/milestones/pd-runtime-v2-m5/ROADMAP.md` -- phase m5-01 success criteria
 
 ### Secondary (MEDIUM confidence)
-- `.planning/milestones/pd-runtime-v2-m5/REQUIREMENTS.md` -- ARTF-01 through ARTF-04 requirements
-- `.planning/milestones/pd-runtime-v2-m5/ROADMAP.md` -- m5-01 success criteria
-- `docs/spec/2026-04-21-diagnostician-v2-detailed-design.md` -- Section 13.4 commit order
-- `docs/spec/2026-04-21-pd-runtime-protocol-spec-v1.md` -- Section 21 storage guidance
+- npm registry: better-sqlite3 v12.9.0 confirmed as latest stable [VERIFIED: npm view]
 
 ### Tertiary (LOW confidence)
-- None -- all findings verified against source code
+- None -- all findings verified against codebase or registry.
 
 ## Metadata
 
 **Confidence breakdown:**
-- Standard stack: HIGH -- all packages verified against package.json and npm registry
-- Architecture: HIGH -- exact code locations and patterns verified by reading source files
-- Pitfalls: HIGH -- derived from actual SQLite behavior and existing codebase patterns
+- Standard stack: HIGH -- all dependencies verified in package.json
+- Architecture: HIGH -- extending proven existing pattern, no novel designs
+- Pitfalls: HIGH -- pitfalls derived from SQLite documentation and existing codebase behavior
 
 **Research date:** 2026-04-24
-**Valid until:** 2026-05-24 (stable -- only SQLite DDL, no fast-moving dependencies)
+**Valid until:** 2026-05-24 (stable -- schema design is foundational, unlikely to change)
