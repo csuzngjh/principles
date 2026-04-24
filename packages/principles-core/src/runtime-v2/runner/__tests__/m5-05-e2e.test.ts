@@ -61,7 +61,7 @@ function makeDiagnosticianOutputWithCandidates(taskId: string): DiagnosticianOut
 }
 
 /** Standard output without principle candidates (for failure injection scenarios). */
-function makeDiagnosticianOutput(taskId: string): DiagnosticianOutputV1 {
+function _makeDiagnosticianOutput(taskId: string): DiagnosticianOutputV1 {
   return {
     valid: true,
     diagnosisId: `diag-m5e2e-std-${Date.now()}`,
@@ -90,6 +90,7 @@ interface TaskCreationOptions {
 
 function makeDiagnosticianTaskInput(
   options: TaskCreationOptions,
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 ): Omit<import('../../task-status.js').TaskRecord, 'createdAt' | 'updatedAt'> & { diagnosticJson?: string } {
   const { taskId, workspaceDir, diagnostic } = options;
   const diagnosticJson = JSON.stringify({
@@ -235,8 +236,18 @@ describe('E2E m5-05', () => {
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(task!.status).toBe('succeeded');
 
-      // E2EV-01 assertion 4: artifact row exists in DB (D-06)
+      // E2EV-01 assertion 3b: run's output_payload matches committed output (updateRunOutput was called)
       const db = sqliteConn.getDb();
+      const runsForTask = db.prepare('SELECT run_id, output_payload FROM runs WHERE task_id = ?').all(taskId) as Record<string, unknown>[];
+      expect(runsForTask.length).toBeGreaterThan(0);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const latestRun = runsForTask[runsForTask.length - 1]!;
+      expect(latestRun.output_payload).not.toBeNull();
+      const parsedOutput = JSON.parse(latestRun.output_payload as string);
+      expect(parsedOutput.diagnosisId).toBe(output.diagnosisId);
+      expect(parsedOutput.summary).toBe(output.summary);
+
+      // E2EV-01 assertion 4: artifact row exists in DB (D-06)
       const artifactRow = db.prepare('SELECT * FROM artifacts WHERE task_id = ?').get(taskId) as {
         artifact_id: string;
         run_id: string;
@@ -245,8 +256,11 @@ describe('E2E m5-05', () => {
         content_json: string;
       } | undefined;
       expect(artifactRow).toBeDefined();
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(artifactRow!.artifact_kind).toBe('diagnostician_output');
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(artifactRow!.task_id).toBe(taskId);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       const artifactId = artifactRow!.artifact_id;
 
       // E2EV-01 assertion 5: candidates exist in DB (D-07)
@@ -265,8 +279,11 @@ describe('E2E m5-05', () => {
         status: string;
       } | undefined;
       expect(commitRow).toBeDefined();
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(commitRow!.artifact_id).toBe(artifactId);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(commitRow!.task_id).toBe(taskId);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(commitRow!.status).toBe('committed');
     });
   });
@@ -467,7 +484,11 @@ describe('E2E m5-05', () => {
         status: string;
       } | undefined;
       expect(commitRow).toBeDefined();
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      expect(commitRow!.commit_id).toBe(commitId); // commitId in DB matches resultRef
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(commitRow!.status).toBe('committed');
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       const artifactId = commitRow!.artifact_id;
 
       // E2EV-04 Step 3: Direct SQL — artifact row (D-15)
@@ -479,7 +500,9 @@ describe('E2E m5-05', () => {
         content_json: string;
       } | undefined;
       expect(artifactRow).toBeDefined();
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(artifactRow!.artifact_kind).toBe('diagnostician_output');
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       expect(artifactRow!.task_id).toBe(taskId);
 
       // E2EV-04 Step 4: Direct SQL — candidates (D-16)

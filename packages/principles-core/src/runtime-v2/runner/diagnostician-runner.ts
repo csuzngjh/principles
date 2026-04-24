@@ -31,7 +31,7 @@ import type { PDErrorCategory } from '../error-categories.js';
 import type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './diagnostician-runner-options.js';
 import type { DiagnosticianValidator } from './diagnostician-validator.js';
 import type { RunnerResult } from './runner-result.js';
-import type { DiagnosticianCommitter } from '../store/diagnostician-committer.js';
+import type { DiagnosticianCommitter, CommitResult } from '../store/diagnostician-committer.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { RunnerPhase } from './runner-phase.js';
@@ -247,8 +247,12 @@ export class DiagnosticianRunner {
     // Timeout -- cancel the run gracefully, preserving the timeout error
     try {
       await this.runtimeAdapter.cancelRun(runHandle.runId);
-    } catch {
-      // Cancellation failed but timeout error is the primary failure to report
+    } catch (cancelErr) {
+      // Log but do not throw — timeout error is the primary failure to report
+      this.emitDiagnosticianEvent('diagnostician_cancel_run_failed', 'timeout-task', {
+        runId: runHandle.runId,
+        errorMessage: cancelErr instanceof Error ? cancelErr.message : String(cancelErr),
+      });
     }
     throw new PDRuntimeError('timeout', `Run ${runHandle.runId} timed out after ${this.resolvedOptions.timeoutMs}ms`);
   }
@@ -266,7 +270,8 @@ export class DiagnosticianRunner {
 
     // Commit artifact + candidates before marking task succeeded
     this.phase = RunnerPhase.Committing;
-    let commitResult;
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let commitResult: CommitResult | undefined;
     try {
       commitResult = await this.committer.commit({
         runId: ctx.runId,
@@ -288,7 +293,7 @@ export class DiagnosticianRunner {
     // Emit: principle_candidate_registered per candidate (TELE-03)
     const principleRecs = ctx.output.recommendations.filter((r) => r.kind === 'principle');
     for (let i = 0; i < principleRecs.length; i++) {
-      const rec = principleRecs[i]!;
+      const rec = principleRecs[i]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion
       this.emitDiagnosticianEvent('principle_candidate_registered', ctx.taskId, {
         candidateIndex: i,
         commitId: commitResult.commitId,
@@ -309,7 +314,18 @@ export class DiagnosticianRunner {
 
     // Use commit URI as resultRef
     const resultRef = `commit://${commitResult.commitId}`;
-    await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
+    try {
+      await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
+    } catch (stateErr) {
+      // markTaskSucceeded failed after commit succeeded — emit error event so this is observable
+      this.emitDiagnosticianEvent('diagnostician_mark_succeeded_failed', ctx.taskId, {
+        taskId: ctx.taskId,
+        runId: ctx.runId,
+        commitId: commitResult.commitId,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      throw stateErr;
+    }
 
     // Emit: diagnostician_task_succeeded
     this.emitDiagnosticianEvent('diagnostician_task_succeeded', ctx.taskId, {
@@ -452,11 +468,9 @@ export class DiagnosticianRunner {
 
   // -- Error classification --
 
-  private readonly PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set([
-    'storage_unavailable',
-    'workspace_invalid',
-    'capability_missing',
-  ]);
+  private readonly PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set(
+    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing'] as const),
+  );
 
   private isPermanentError(category: PDErrorCategory): boolean {
     return this.PERMANENT_ERROR_CATEGORIES.has(category);
