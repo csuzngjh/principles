@@ -13,6 +13,7 @@ interface RuntimeProbeOptions {
   runtime: string;
   openclawLocal?: boolean;
   openclawGateway?: boolean;
+  agent?: string;
   json?: boolean;
 }
 
@@ -56,6 +57,7 @@ export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<voi
     const result = await probeRuntime({
       runtimeKind: 'openclaw-cli',
       runtimeMode,
+      agentId: opts.agent,
     });
 
     if (opts.json) {

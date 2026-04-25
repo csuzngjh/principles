@@ -39,6 +39,8 @@ import type {
  * Per DPB-06: Explicit top-level fields make LLM's job clearer and easier to validate.
  * The DiagnosticianContextPayload is nested under `context` for backward compatibility.
  * The diagnosticInstruction field carries the 5-phase protocol so the LLM follows it.
+ *
+ * @see DEFAULT_LIMITS for size constraints applied during buildPrompt()
  */
 export interface PromptInput {
   /** Task being diagnosed */
@@ -48,7 +50,7 @@ export interface PromptInput {
   /** What to diagnose (pain event, failure mode, etc.) */
   diagnosisTarget: DiagnosisTarget;
   /**
-   * Conversation window summary.
+   * Conversation window summary (may be truncated if too large).
    * Full HistoryQueryEntry[] is available in context.conversationWindow;
    * this field may contain a condensed version for the LLM prompt.
    */
@@ -64,7 +66,25 @@ export interface PromptInput {
    * and to output DiagnosticianOutputV1 JSON.
    */
   diagnosticInstruction: string;
+  /** Warnings added during truncation (e.g., conversationWindow entries removed) */
+  truncationWarnings?: string[];
 }
+
+/** Size limits for buildPrompt() to prevent token overflow. */
+export interface PromptBuilderLimits {
+  /** Maximum number of conversation entries (default: 30) */
+  maxConversationEntries: number;
+  /** Maximum characters per entry text (default: 2000) */
+  maxEntryTextChars: number;
+  /** Maximum total message characters (default: 80000) */
+  maxMessageChars: number;
+}
+
+export const DEFAULT_PROMPT_BUILDER_LIMITS: PromptBuilderLimits = {
+  maxConversationEntries: 30,
+  maxEntryTextChars: 2000,
+  maxMessageChars: 80_000,
+} as const;
 
 /**
  * Build result — the JSON string to pass as --message argument.
@@ -82,18 +102,24 @@ export interface PromptBuildResult {
 /**
  * 5-phase diagnostic protocol instruction for the LLM.
  *
- * Source: templates/langs/en/skills/pd-diagnostician/SKILL.md
- * Copied here so the instruction is embedded directly in the prompt payload,
- * ensuring the LLM follows the 5 Whys / root cause methodology regardless of
- * whether OpenClaw automatically loads SKILL.md as the agent system prompt.
+ * Per DPB-02 (LOCKED): Output is ONLY JSON — no markdown, no file ops, no tool calls.
+ * Per DPB-04: LLM can only analyze the context provided in the prompt; it must NOT
+ *   read files, call tools, or write to databases. All evidence must be drawn from
+ *   the context payload (sourceRefs, conversationWindow, eventSummaries).
+ *
+ * The 5-phase protocol is embedded directly in the prompt so the LLM follows it
+ * regardless of whether OpenClaw loads SKILL.md as the agent system prompt.
  */
 export const DIAGNOSTIC_PROTOCOL_INSTRUCTION = `You are a root cause analysis expert. Follow this protocol:
 
-PHASE 1 — Evidence Gathering:
-Read .state/.pain_flag and .state/logs/events.jsonl for context. Search codebase for related error patterns. Record all evidence with file:line references.
+PHASE 1 — Evidence Review:
+Review the provided sourceRefs, conversationWindow entries, and eventSummaries
+from the context payload. Do NOT read any files or call any tools.
+Record all evidence by referencing the sourceRef identifiers and conversation
+entries already present in the context. Each evidence item must cite its source.
 
 PHASE 2 — Causal Chain (5 Whys):
-Build a Why-1 through Why-5 causal chain. Each Why MUST have evidence.
+Build a Why-1 through Why-5 causal chain. Each Why MUST have evidence from Phase 1.
 - Why 1: Surface phenomenon (visible error)
 - Why 2: Direct cause (nearest trigger)
 - Why 3: Process gap (missing check/gate)
@@ -113,7 +139,6 @@ Extract ONE highly abstracted principle (max 40 chars, cross-scenario).
 - trigger_pattern: regex/keywords for when this applies
 - action: what to do differently
 - abstracted_principle: one sentence, max 40 chars
-Deduplicate against existing principles before adding new.
 
 OUTPUT FORMAT (pure JSON, no markdown):
 {
@@ -123,16 +148,27 @@ OUTPUT FORMAT (pure JSON, no markdown):
   "summary": "<one line root cause summary>",
   "rootCause": "<Design|People|Assumption|Tooling>: <specific root cause>",
   "violatedPrinciples": [{"rationale": "<why this principle was violated>"}],
-  "evidence": [{"sourceRef": "file:line or log", "note": "<what this shows>"}],
-  "recommendations": [{"kind": "principle|rule|implementation|defer", "description": "<specific action>"}],
+  "evidence": [{"sourceRef": "<sourceRef from context or conversationWindow entry>", "note": "<what this shows>"}],
+  "recommendations": [
+    {
+      "kind": "principle",
+      "description": "<specific action>",
+      "triggerPattern": "<regex/keywords>",
+      "action": "<what to do differently>",
+      "abstractedPrinciple": "<one sentence, max 40 chars>"
+    },
+    {"kind": "rule|implementation|defer", "description": "<specific action>"}
+  ],
   "confidence": 0.0-1.0,
   "ambiguityNotes": ["<optional: anything uncertain>"]
 }
 
 CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text)
+- Do NOT read files, call tools, or write to any database
 - rootCause MUST include category prefix: "Design: ..." or "People: ..." etc.
 - confidence is a number 0.0-1.0
+- All evidence must reference sourceRef identifiers or conversationWindow entries from the context payload
 `;
 
 /**
@@ -154,6 +190,7 @@ export class DiagnosticianPromptBuilder {
    * then serialize to JSON for the --message argument.
    *
    * @param payload — DiagnosticianContextPayload from context assembly (DPB-01)
+   * @param limits — Size limits to prevent token overflow (default: DEFAULT_PROMPT_BUILDER_LIMITS)
    * @returns PromptBuildResult with JSON string + PromptInput object (DPB-02, DPB-03, DPB-04, DPB-06)
    *
    * Per DPB-05: This method only builds the prompt; it does NOT commit to PD database.
@@ -162,21 +199,70 @@ export class DiagnosticianPromptBuilder {
    * Per DPB-07: NO extraSystemPrompt is added — agent profile is the source of truth.
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  buildPrompt(payload: DiagnosticianContextPayload): PromptBuildResult {
+  buildPrompt(
+    payload: DiagnosticianContextPayload,
+    limits: PromptBuilderLimits = DEFAULT_PROMPT_BUILDER_LIMITS,
+  ): PromptBuildResult {
+    const truncationWarnings: string[] = [];
+
+    // DPB-04: Apply truncation to conversationWindow to prevent token overflow
+    const rawWindow = summarizeConversationWindow(payload.conversationWindow);
+    const windowEntries = rawWindow.slice(0, limits.maxConversationEntries);
+    if (rawWindow.length > limits.maxConversationEntries) {
+      truncationWarnings.push(
+        `conversationWindow truncated from ${rawWindow.length} to ${limits.maxConversationEntries} entries`,
+      );
+    }
+
+    // Truncate individual entry text
+    const conversationWindow = windowEntries.map((entry) => {
+      if (entry.text && entry.text.length > limits.maxEntryTextChars) {
+        return {
+          ...entry,
+          text: entry.text.slice(0, limits.maxEntryTextChars) + '...[truncated]',
+        };
+      }
+      return entry;
+    });
+
+    // Build compact context — replace conversationWindow with truncated version
+    // to avoid duplicating full content at top-level AND in context
+    const compactContext: DiagnosticianContextPayload = {
+      ...payload,
+      conversationWindow,
+    };
+
     // DPB-04: Explicit top-level fields at the prompt level
     const promptInput: PromptInput = {
       taskId: payload.taskId,
       contextHash: payload.contextHash,
       diagnosisTarget: payload.diagnosisTarget,
-      conversationWindow: summarizeConversationWindow(payload.conversationWindow),
+      conversationWindow,
       sourceRefs: payload.sourceRefs,
-      context: payload,
+      context: compactContext,
       diagnosticInstruction: DIAGNOSTIC_PROTOCOL_INSTRUCTION,
+      ...(truncationWarnings.length > 0 ? { truncationWarnings } : {}),
     };
 
     // DPB-02: Output is ONLY JSON — no markdown, no file ops, no tool calls
     // DPB-03: JSON must conform to what DiagnosticianOutputV1 expects (caller validates)
-    const message = JSON.stringify(promptInput);
+    let message = JSON.stringify(promptInput);
+
+    // If message exceeds maxMessageChars, truncate the diagnostic instruction
+    if (message.length > limits.maxMessageChars) {
+      const surplus = message.length - limits.maxMessageChars;
+      const instruction = DIAGNOSTIC_PROTOCOL_INSTRUCTION;
+      // Keep at least the first 200 chars of the instruction + a note
+      const keepLength = Math.max(200, instruction.length - surplus - 100);
+      const truncatedInstruction = instruction.slice(0, keepLength) +
+        '\n\n[OUTPUT FORMAT section is REQUIRED; other sections may be summarized if needed]';
+      promptInput.diagnosticInstruction = truncatedInstruction;
+      promptInput.truncationWarnings = [
+        ...truncationWarnings,
+        `diagnosticInstruction truncated due to size (${message.length} > ${limits.maxMessageChars})`,
+      ];
+      message = JSON.stringify(promptInput);
+    }
 
     return { message, promptInput };
   }

@@ -256,7 +256,7 @@ export class DiagnosticianRunner {
     const { message } = builder.buildPrompt(context);
 
     const startInput: StartRunInput = {
-      agentSpec: { agentId: 'diagnostician', schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
       inputPayload: message,
       contextItems: [],

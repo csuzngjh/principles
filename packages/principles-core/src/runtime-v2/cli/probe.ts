@@ -6,6 +6,7 @@
  * @param options.runtimeKind - Runtime kind to probe (only 'openclaw-cli' supported for now)
  * @param options.runtimeMode - 'local' or 'gateway' (required for openclaw-cli)
  * @param options.workspaceDir - PD workspace directory (optional, passed to adapter)
+ * @param options.agentId - Optional agent ID to verify (default: 'diagnostician')
  * @returns { health: RuntimeHealth, capabilities: RuntimeCapabilities }
  *
  * @throws Error if runtimeKind is unsupported
@@ -18,6 +19,8 @@ export interface ProbeOptions {
   /** 'local' or 'gateway' — required, no silent fallback (HG-03, DPB-09) */
   runtimeMode: 'local' | 'gateway';
   workspaceDir?: string;
+  /** Agent ID to verify availability (default: 'diagnostician') */
+  agentId?: string;
 }
 
 export interface ProbeResult {

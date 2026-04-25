@@ -5,9 +5,6 @@
  *   pd diagnose status --task-id <taskId> --workspace <path>
  *   pd diagnose run --task-id <taskId> --workspace <path>
  */
-import type {
-  SqliteConnection,
-} from '@principles/core/runtime-v2/index.js';
 import {
   RuntimeStateManager,
   SqliteHistoryQuery,
@@ -114,8 +111,8 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
 
     // Build context assembler from internal stores
     const sqliteConn = stateManager.connection;
-    const taskStore = stateManager.taskStore;
-    const runStore = stateManager.runStore;
+    const {taskStore} = stateManager;
+    const {runStore} = stateManager;
     const historyQuery = new SqliteHistoryQuery(sqliteConn);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
 
@@ -187,6 +184,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         runtimeKind,
         pollIntervalMs: 100,
         timeoutMs: 30000,
+        agentId: opts.agent,
       },
     );
 

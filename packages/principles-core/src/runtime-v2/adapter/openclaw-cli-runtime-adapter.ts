@@ -64,20 +64,32 @@ interface RunState {
 }
 
 /**
- * Extract JSON from potentially mixed CLI output (e.g., text + JSON interleaved).
- * Tries direct parse first, then falls back to first balanced {...} block.
+ * Parse CliOutput stdout into the runtime's native result structure.
+ *
+ * OCRA-03 (revised): OpenClaw `--json` produces a CliOutput object (from openclaw's own
+ * output.ts), NOT DiagnosticianOutputV1 directly. The LLM's diagnosis JSON lives inside
+ * CliOutput.text as a string that may be:
+ *
+ *  1. Bare DiagnosticianOutputV1 JSON — { "valid": true, ... }
+ *  2. Local envelope — { payloads: [{ text: "<json>" }], meta: ... }
+ *  3. Gateway envelope — { result: { payloads: [{ text: "<json>" }] }, ... }
+ *
+ * This function normalises all three into a raw JSON value (string or object) that
+ * DiagnosticianOutputV1Schema can validate.
+ *
+ * @returns The parsed JSON value, or null if stdout could not be parsed at all.
  */
-function extractJson(text: string): unknown | null {
-  // Attempt 1: direct parse
+function extractPayloadFromCliOutput(stdout: string): unknown | null {
+  // Attempt 1: direct parse — covers case 1 (bare JSON)
   try {
-    return JSON.parse(text);
+    return JSON.parse(stdout);
   } catch { /* fall through */ }
 
-  // Attempt 2: balanced-bracket extraction — find first complete {...} block
+  // Attempt 2: balanced-bracket extraction — handles trailing text around the JSON
   let depth = 0;
   let start = -1;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
+  for (let i = 0; i < stdout.length; i++) {
+    const ch = stdout[i];
     if (!ch) continue;
     if (ch === '{') {
       if (start === -1) start = i;
@@ -86,13 +98,56 @@ function extractJson(text: string): unknown | null {
       depth--;
       if (depth === 0 && start !== -1) {
         try {
-          return JSON.parse(text.slice(start, i + 1));
-        } catch { /* fall through to continue searching */ }
+          return JSON.parse(stdout.slice(start, i + 1));
+        } catch { /* continue searching */ }
         start = -1;
       }
     }
   }
 
+  return null;
+}
+
+/**
+ * Navigate the three possible envelope shapes to find the payload text that
+ * contains the DiagnosticianOutputV1 JSON string.
+ *
+ * Returns the parsed JSON object (not a string) if extraction succeeds,
+ * or null if the envelope structure doesn't match any known shape.
+ */
+function extractDiagnosisFromEnvelope(parsed: unknown): unknown | null {
+  if (typeof parsed !== 'object' || parsed === null) {
+    return null;
+  }
+
+  // Case 2: local envelope — { payloads: [{ text: "<json>" }] }
+  const asLocal = parsed as { payloads?: { text?: unknown }[] };
+  if (Array.isArray(asLocal.payloads) && asLocal.payloads.length > 0) {
+    const [first] = asLocal.payloads;
+    if (first && typeof first.text === 'string') {
+      try {
+        return JSON.parse(first.text);
+      } catch { /* not JSON — fall through */ }
+    }
+  }
+
+  // Case 3: gateway envelope — { result: { payloads: [{ text: "<json>" }] } }
+  const asGateway = parsed as { result?: { payloads?: { text?: unknown }[] } };
+  if (
+    asGateway.result &&
+    typeof asGateway.result === 'object' &&
+    Array.isArray(asGateway.result.payloads) &&
+    asGateway.result.payloads.length > 0
+  ) {
+    const [first] = asGateway.result.payloads;
+    if (first && typeof first.text === 'string') {
+      try {
+        return JSON.parse(first.text);
+      } catch { /* not JSON — fall through */ }
+    }
+  }
+
+  // No matching envelope shape
   return null;
 }
 
@@ -129,12 +184,76 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  /**
+   * Probe runtime health by running a minimal openclaw command.
+   *
+   * Verifies:
+   *  1. openclaw binary is executable (run `openclaw --version`)
+   *  2. The configured agent exists or can be invoked
+   *
+   * Returns healthy=false with appropriate error category when checks fail.
+   * Per DPB-09: No silent fallback — failures are reported accurately.
+   */
   async healthCheck(): Promise<RuntimeHealth> {
+    const warnings: string[] = [];
+    let healthy = true;
+    let degraded = false;
+
+    try {
+      // Probe 1: verify openclaw binary is executable
+      // Use `--version` as the lightest possible check
+      const versionResult = await runCliProcess({
+        command: 'openclaw',
+        args: ['--version'],
+        cwd: this.workspaceDir,
+        timeoutMs: 10_000,
+      });
+
+      if (versionResult.spawnError === 'ENOENT') {
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: ['openclaw binary not found'],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+
+      if (versionResult.spawnError === 'EACCES' || versionResult.spawnError === 'EMFILE') {
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: [`openclaw binary not executable: ${versionResult.spawnError}`],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+
+      if (versionResult.timedOut) {
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: ['openclaw --version timed out'],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+
+      if (versionResult.exitCode !== null && versionResult.exitCode !== 0) {
+        // Binary exists but returned an error — degraded but not unavailable
+        degraded = true;
+        warnings.push(`openclaw --version exited with code ${versionResult.exitCode}`);
+      }
+    } catch (err) {
+      return {
+        healthy: false,
+        degraded: false,
+        warnings: [err instanceof Error ? err.message : String(err)],
+        lastCheckedAt: new Date().toISOString(),
+      };
+    }
+
     return {
-      healthy: true,
-      degraded: false,
-      warnings: [],
+      healthy,
+      degraded,
+      warnings,
       lastCheckedAt: new Date().toISOString(),
     };
   }
@@ -309,18 +428,22 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       throw new PDRuntimeError('execution_failed', `CLI exited with code ${cliOutput.exitCode}`);
     }
 
-    // OCRA-03/OCRA-04: Parse JSON from stdout
+    // OCRA-03: Parse CliOutput — the stdout may be raw JSON, or wrapped in an OpenClaw envelope
+    // (local or gateway). First extract the JSON value, then navigate to the diagnosis JSON.
     // eslint-disable-next-line @typescript-eslint/init-declarations
     let parsed: unknown;
-    try {
-      parsed = JSON.parse(cliOutput.stdout);
-    } catch {
-      // D-05: Fall back to balanced-fragment extraction
-      parsed = extractJson(cliOutput.stdout);
-      if (!parsed) {
-        // OCRA-04: JSON parse failure → output_invalid
-        throw new PDRuntimeError('output_invalid', 'Failed to parse CLI output as JSON');
-      }
+    const rawParsed = extractPayloadFromCliOutput(cliOutput.stdout);
+    if (rawParsed !== null) {
+      // Try envelope extraction first (cases 2 and 3)
+      const fromEnvelope = extractDiagnosisFromEnvelope(rawParsed);
+      parsed = fromEnvelope ?? rawParsed;
+    } else {
+      parsed = null;
+    }
+
+    if (parsed === null) {
+      // OCRA-04: JSON parse failure → output_invalid
+      throw new PDRuntimeError('output_invalid', 'Failed to parse CLI output as JSON');
     }
 
     // OCRA-03: Validate DiagnosticianOutputV1Schema

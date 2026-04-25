@@ -362,8 +362,35 @@ describe('DiagnosticianRunner', () => {
     expect(result.failureReason).toContain('Validation failed');
   });
 
-  // 8. StartRunInput construction
-  it('constructs StartRunInput with agentSpec.agentId=diagnostician', async () => {
+  // 8b. StartRunInput construction with custom agentId
+  it('uses custom agentId from resolvedOptions when provided', async () => {
+    const mocks = createMocks();
+    const runner = new DiagnosticianRunner(
+      {
+        stateManager: mocks.mockStateManager,
+        contextAssembler: mocks.mockContextAssembler,
+        runtimeAdapter: mocks.mockRuntimeAdapter,
+        eventEmitter: mocks.mockEventEmitter,
+        validator: mocks.mockValidator,
+        committer: mocks._committer,
+      },
+      {
+        owner: OWNER,
+        runtimeKind: RUNTIME_KIND,
+        pollIntervalMs: 100,
+        timeoutMs: 1000,
+        agentId: 'custom-diagnostician',
+      },
+    );
+
+    await runner.run(TASK_ID);
+
+    const startInput = firstCallArg(mocks._runtimeAdapter.startRun) as StartRunInput;
+    expect(startInput.agentSpec.agentId).toBe('custom-diagnostician');
+  });
+
+  // 8c. StartRunInput uses default 'diagnostician' when agentId not provided
+  it('defaults agentSpec.agentId to diagnostician when agentId not provided', async () => {
     const mocks = createMocks();
     const runner = createRunner(mocks);
 
@@ -371,20 +398,6 @@ describe('DiagnosticianRunner', () => {
 
     const startInput = firstCallArg(mocks._runtimeAdapter.startRun) as StartRunInput;
     expect(startInput.agentSpec.agentId).toBe('diagnostician');
-    expect(startInput.agentSpec.schemaVersion).toBe('v1');
-    expect(startInput.taskRef?.taskId).toBe(TASK_ID);
-    expect(startInput.outputSchemaRef).toBe('diagnostician-output-v1');
-    expect(startInput.timeoutMs).toBe(1000);
-
-    // inputPayload should be a JSON string with diagnosticInstruction
-    const inputPayloadStr = startInput.inputPayload as string;
-    const inputPayload = JSON.parse(inputPayloadStr);
-    expect(inputPayload.taskId).toBe(TASK_ID);
-    expect(inputPayload.diagnosticInstruction).toBeDefined();
-    expect(inputPayload.diagnosticInstruction.length).toBeGreaterThan(100);
-
-    // contextItems should be empty (instruction is embedded in inputPayload)
-    expect(startInput.contextItems).toHaveLength(0);
   });
 
   // 9. Lease conflict

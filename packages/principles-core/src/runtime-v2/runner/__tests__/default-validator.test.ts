@@ -283,7 +283,7 @@ describe('recommendations shape', () => {
 
   it('all valid RecommendationKind values pass', async () => {
     const validator = new DefaultDiagnosticianValidator();
-    const kinds = ['principle', 'rule', 'implementation', 'prompt', 'defer'] as const;
+    const kinds = ['rule', 'implementation', 'prompt', 'defer'] as const;
     for (const kind of kinds) {
       const result = await validator.validate(
         makeValidOutput({
@@ -293,6 +293,20 @@ describe('recommendations shape', () => {
       );
       assertValid(result);
     }
+    // principle kind requires triggerPattern/action/abstractedPrinciple
+    const principleResult = await validator.validate(
+      makeValidOutput({
+        recommendations: [{
+          kind: 'principle',
+          description: 'Validate tool arguments before execution',
+          triggerPattern: 'tool.*argument',
+          action: 'Use schema validation',
+          abstractedPrinciple: 'Validate inputs before execution',
+        }],
+      }),
+      'task-001',
+    );
+    assertValid(principleResult);
   });
 });
 
