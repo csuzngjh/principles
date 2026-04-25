@@ -122,8 +122,8 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
 
     // Select runtime adapter based on --runtime flag (CLI-02)
-     
-    let runtimeAdapter: PDRuntimeAdapter = null as PDRuntimeAdapter;
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let runtimeAdapter: PDRuntimeAdapter;
     if (runtimeKind === 'openclaw-cli') {
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
         runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
