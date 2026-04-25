@@ -296,13 +296,15 @@ describe('E2E m6-06 — OpenClawCliRuntimeAdapter + FakeCliProcessRunner', () =>
       expect(vi.mocked(runCliProcess)).toHaveBeenCalled();
 
       // E2EV-01 CRITICAL: command was 'openclaw'
-      // mock.calls[0] is the first call's argument list — runCliProcess takes one options object
+      const rawCalls = vi.mocked(runCliProcess).mock.calls;
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      const firstCall = vi.mocked(runCliProcess).mock.calls[0]![0] as unknown as { command: string; args: string[] };
-      expect(firstCall.command).toBe('openclaw');
+      const firstArg = rawCalls[0]![0] as unknown as Record<string, unknown>;
+       
+      expect(firstArg.command).toBe('openclaw');
 
       // E2EV-01 CRITICAL: args include '--local' when runtimeMode is 'local'
-      expect(firstCall.args).toContain('--local');
+       
+      expect(firstArg.args).toContain('--local');
     });
   });
 
@@ -343,10 +345,9 @@ describe('E2E m6-06 — OpenClawCliRuntimeAdapter + FakeCliProcessRunner', () =>
       expect(localResult.status).toBe('succeeded');
 
       // HG-3 CRITICAL: args include '--local'
-      const localCalls = vi.mocked(runCliProcess).mock.calls;
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      const localCall = localCalls[localCalls.length - 1]![0] as unknown as { command: string; args: string[] };
-      expect(localCall.args).toContain('--local');
+      const rawLocal = vi.mocked(runCliProcess).mock.calls[0]![0] as unknown as Record<string, unknown>;
+       
+      expect(rawLocal.args).toContain('--local');
 
       // ── Sub-case: gateway mode ──────────────────────────────────────────────
       const taskIdGateway = randomUUID();
@@ -379,10 +380,9 @@ describe('E2E m6-06 — OpenClawCliRuntimeAdapter + FakeCliProcessRunner', () =>
       expect(gatewayResult.status).toBe('succeeded');
 
       // HG-3 CRITICAL: args do NOT include '--local'
-      const gatewayCalls = vi.mocked(runCliProcess).mock.calls;
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      const gatewayCall = gatewayCalls[gatewayCalls.length - 1]![0] as unknown as { command: string; args: string[] };
-      expect(gatewayCall.args).not.toContain('--local');
+      const rawGateway = vi.mocked(runCliProcess).mock.calls[0]![0] as unknown as Record<string, unknown>;
+       
+      expect(rawGateway.args).not.toContain('--local');
     });
   });
 

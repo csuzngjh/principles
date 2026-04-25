@@ -173,7 +173,6 @@ describe('E2E m6-06 — Real OpenClaw CLI Path', () => {
           '--openclaw-local',
           '--json',
         ],
-        testWorkspace,
       );
 
       expect(result.exitCode).toBe(0);
@@ -208,7 +207,6 @@ describe('E2E m6-06 — Real OpenClaw CLI Path', () => {
           '--openclaw-gateway',
           '--json',
         ],
-        testWorkspace,
       );
 
       expect(result.exitCode).toBe(0);
@@ -369,9 +367,6 @@ describe('E2E m6-06 — Real OpenClaw CLI Path', () => {
         ws,
       );
 
-      // Record for E2EV-07
-      taskIdFromE2EV06 = taskId;
-
       expect(diagnoseResult.exitCode).toBe(0);
 
       const result = JSON.parse(diagnoseResult.stdout);
@@ -400,19 +395,6 @@ describe('E2E m6-06 — Real OpenClaw CLI Path', () => {
               'openclaw binary not available for E2EV-07',
               [openclawCheckOutput.stderr, openclawCheckOutput.stdout],
               'pd candidate list (requires real openclaw run)',
-            ),
-          ),
-        );
-        return;
-      }
-
-      if (!taskIdFromE2EV06) {
-        console.log(
-          JSON.stringify(
-            blockedEvidence(
-              'No taskId from E2EV-06 — cannot run E2EV-07',
-              [],
-              'pd candidate list --task-id <taskId>',
             ),
           ),
         );
@@ -469,6 +451,7 @@ describe('E2E m6-06 — Real OpenClaw CLI Path', () => {
 
       // If we have candidates, validate and show first artifact
       if (listData.candidates.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         const firstCandidate = listData.candidates[0]!;
 
         expect(firstCandidate.candidateId).toBeDefined();
