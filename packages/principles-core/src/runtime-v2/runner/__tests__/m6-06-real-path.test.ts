@@ -227,6 +227,8 @@ describe('E2E m6-06 — Real OpenClaw CLI Path', () => {
   describe('E2EV-05: pd context build', () => {
     it('E2EV-05: context build produces valid DiagnosticianContextPayload', async () => {
       if (!openclawAvailable) {
+        // Early return with blocked evidence — intentionally passes when openclaw unavailable.
+        // These are CI integration tests: they only run meaningfully when openclaw binary is present.
         console.log(
           JSON.stringify(
             blockedEvidence(
