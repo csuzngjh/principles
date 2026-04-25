@@ -219,6 +219,7 @@ describe('DiagnosticianRunner telemetry emission', () => {
       'diagnostician_task_leased',
       'diagnostician_context_built',
       'diagnostician_run_started',
+      'output_validation_succeeded',
       'diagnostician_artifact_committed',
       'diagnostician_task_succeeded',
     ]);
@@ -266,6 +267,7 @@ describe('DiagnosticianRunner telemetry emission', () => {
       'diagnostician_context_built',
       'diagnostician_run_started',
       'diagnostician_output_invalid',
+      'output_validation_failed',
       'diagnostician_task_retried',
     ]);
   });
