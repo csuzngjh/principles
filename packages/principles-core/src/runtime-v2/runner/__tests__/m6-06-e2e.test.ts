@@ -296,7 +296,8 @@ describe('E2E m6-06 — OpenClawCliRuntimeAdapter + FakeCliProcessRunner', () =>
       expect(vi.mocked(runCliProcess)).toHaveBeenCalled();
 
       // E2EV-01 CRITICAL: command was 'openclaw'
-      const [[firstCall]] = vi.mocked(runCliProcess).mock.calls;
+      const {calls} = vi.mocked(runCliProcess).mock;
+      const firstCall = calls[0] as unknown as { command: string; args: string[] };
       expect(firstCall.command).toBe('openclaw');
 
       // E2EV-01 CRITICAL: args include '--local' when runtimeMode is 'local'
@@ -341,7 +342,8 @@ describe('E2E m6-06 — OpenClawCliRuntimeAdapter + FakeCliProcessRunner', () =>
       expect(localResult.status).toBe('succeeded');
 
       // HG-3 CRITICAL: args include '--local'
-      const [[localCall]] = vi.mocked(runCliProcess).mock.calls;
+      const localCalls = vi.mocked(runCliProcess).mock.calls;
+      const localCall = localCalls[localCalls.length - 1] as unknown as { command: string; args: string[] };
       expect(localCall.args).toContain('--local');
 
       // ── Sub-case: gateway mode ──────────────────────────────────────────────
@@ -375,7 +377,8 @@ describe('E2E m6-06 — OpenClawCliRuntimeAdapter + FakeCliProcessRunner', () =>
       expect(gatewayResult.status).toBe('succeeded');
 
       // HG-3 CRITICAL: args do NOT include '--local'
-      const [[gatewayCall]] = vi.mocked(runCliProcess).mock.calls;
+      const gatewayCalls = vi.mocked(runCliProcess).mock.calls;
+      const gatewayCall = gatewayCalls[gatewayCalls.length - 1] as unknown as { command: string; args: string[] };
       expect(gatewayCall.args).not.toContain('--local');
     });
   });
