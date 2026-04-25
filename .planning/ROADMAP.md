@@ -133,12 +133,11 @@ Plans:
 3. `runtime_invocation_succeeded` / `runtime_invocation_failed` event emitted on CLI completion (includes errorCategory)
 4. `output_validation_succeeded` / `output_validation_failed` event emitted during DiagnosticianOutputV1 validation
 
-**Plans**: 3 plans
+**Plans**: 2 plans
 
 Plans:
-- [ ] m6-04-01-PLAN.md — Adapter export + CLI routing + error output (CLI-01, CLI-02, CLI-04, ERR-01~ERR-05)
-- [ ] m6-04-02-PLAN.md — pd runtime probe command (CLI-03, HG-01 HARD GATE)
-- [ ] m6-04-03-PLAN.md — Regression tests (CLI-01 regression, CLI-03, CLI-04)
+- [ ] m6-05-01-PLAN.md — Telemetry event emission in adapter and runner
+- [ ] m6-05-02-PLAN.md — Telemetry event verification
 
 ---
 
@@ -166,9 +165,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] m6-04-01-PLAN.md — Adapter export + CLI routing + error output (CLI-01, CLI-02, CLI-04, ERR-01~ERR-05)
-- [ ] m6-04-02-PLAN.md — pd runtime probe command (CLI-03, HG-01 HARD GATE)
-- [ ] m6-04-03-PLAN.md — Regression tests (CLI-01 regression, CLI-03, CLI-04)
+- [x] m6-06-01-PLAN.md — FakeCliProcessRunner E2E (E2EV-01, E2EV-02, E2EV-03, HG-3)
+- [ ] m6-06-02-PLAN.md — Real OpenClaw CLI path + hard gates (E2EV-04, E2EV-05, E2EV-06, E2EV-07, HG-1, HG-5)
+- [ ] m6-06-03-PLAN.md — Legacy openclaw-history import regression (E2EV-08)
 
 ---
 
@@ -179,9 +178,9 @@ Plans:
 | m6-01: CliProcessRunner + RuntimeKind | 0/2 | Planning | — |
 | m6-02: OpenClawCliRuntimeAdapter Core | 3/3 | Planning | — |
 | m6-03: DiagnosticianPromptBuilder + Workspace | 0/7 | Planning | — |
-| m6-04: PD CLI Extension + Error Mapping | 0/3 | Planning | — | — |
-| m6-05: Telemetry Events | 0/4 | Not started | — |
-| m6-06: E2E Verification | 0/11 | Not started | — |
+| m6-04: PD CLI Extension + Error Mapping | 0/3 | Planning | — |
+| m6-05: Telemetry Events | 0/2 | Planning | — |
+| m6-06: E2E Verification | 1/3 | Planning | — |
 
 ---
 
@@ -198,4 +197,4 @@ Plans:
 
 ---
 
-_Last updated: 2026-04-24 after m6-03 planning_
+_Last updated: 2026-04-25 after m6-06 planning_
