@@ -100,8 +100,6 @@ const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-m6-06-real-${process.pid}`);
 
 let openclawAvailable = false;
 let openclawCheckOutput: { stdout: string; stderr: string; exitCode: number } = { stdout: '', stderr: '', exitCode: 1 };
-let testWorkspace = '';
-let taskIdFromE2EV06: string | null = null;
 
 // ── Pre-condition check ────────────────────────────────────────────────────────
 
@@ -469,29 +467,27 @@ describe('E2E m6-06 — Real OpenClaw CLI Path', () => {
       expect(listData.candidates).toBeDefined();
       expect(Array.isArray(listData.candidates)).toBe(true);
 
-      // 0 candidates is valid (no principles recommended)
-      for (const candidate of listData.candidates) {
-        expect(candidate.candidateId).toBeDefined();
-        expect(typeof candidate.candidateId).toBe('string');
-        expect(candidate.candidateId.length).toBeGreaterThan(0);
-
-        expect(candidate.description).toBeDefined();
-        expect(typeof candidate.description).toBe('string');
-        expect(candidate.description.length).toBeGreaterThan(0);
-      }
-
-      // If we have candidates, try to show the first artifact
+      // If we have candidates, validate and show first artifact
       if (listData.candidates.length > 0) {
-        const firstArtifactId = listData.candidates[0].artifactId;
+        const firstCandidate = listData.candidates[0]!;
+
+        expect(firstCandidate.candidateId).toBeDefined();
+        expect(typeof firstCandidate.candidateId).toBe('string');
+        expect(firstCandidate.candidateId.length).toBeGreaterThan(0);
+
+        expect(firstCandidate.description).toBeDefined();
+        expect(typeof firstCandidate.description).toBe('string');
+        expect(firstCandidate.description.length).toBeGreaterThan(0);
+
         const showResult = await runPdCli(
-          ['artifact', 'show', firstArtifactId, '--workspace', ws, '--json'],
+          ['artifact', 'show', firstCandidate.artifactId, '--workspace', ws, '--json'],
           ws,
         );
 
         expect(showResult.exitCode).toBe(0);
 
         const artifactData = JSON.parse(showResult.stdout);
-        expect(artifactData.artifactId).toBe(firstArtifactId);
+        expect(artifactData.artifactId).toBe(firstCandidate.artifactId);
         expect(artifactData.artifactKind).toBe('diagnostician_output');
       }
     });

@@ -11,8 +11,9 @@ findings:
   critical: 0
   warning: 2
   info: 1
+  resolved: 3
   total: 3
-status: issues_found
+status: resolved
 ---
 
 # Phase m6-06: Code Review Report
@@ -79,6 +80,8 @@ if (listData.candidates.length > 0) {
 }
 ```
 
+**Resolution:** Fixed — merged the for-of loop into the same `if (listData.candidates.length > 0)` guard block, eliminating the separate loop and guard structure. commit `975eb1ac`.
+
 ---
 
 ## Info
@@ -90,6 +93,8 @@ if (listData.candidates.length > 0) {
 **Issue:** At line 103, `testWorkspace` is declared as an empty string module-level variable. It is never assigned a non-empty value. All `runPdCli` calls in the test file either pass `ws` directly (the temporary workspace created per-test) or pass `testWorkspace` (which is always `''`). This is not causing incorrect behavior, but the variable is dead code and suggests an incomplete refactoring.
 
 **Fix:** Either remove the variable, or if future tests need a shared persistent workspace, implement the intended assignment in `beforeAll` after checking openclaw availability.
+
+**Resolution:** Fixed — removed dead `testWorkspace` and `taskIdFromE2EV06` declarations. commit `975eb1ac`.
 
 ---
 
