@@ -246,7 +246,7 @@ export class DiagnosticianRunner {
     const runs = await this.stateManager.getRunsByTask(taskId);
     const latestRun = runs[runs.length - 1];
     if (!latestRun) {
-      throw new PDRuntimeError('storage_unavailable', `No run record found for task ${taskId} after lease acquisition`);
+      throw new PDRuntimeError('execution_failed', `No run record found for task ${taskId} after lease acquisition`);
     }
     return latestRun.runId;
   }
@@ -301,7 +301,16 @@ export class DiagnosticianRunner {
   }
 
   private async succeedTask(ctx: SucceedContext): Promise<RunnerResult> {
-    await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));
+    // Store output before commit so run record reflects output on disk
+    try {
+      await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));
+    } catch (updateErr) {
+      this.emitDiagnosticianEvent('diagnostician_update_output_failed', ctx.taskId, {
+        runId: ctx.runId,
+        errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
+      });
+      throw updateErr;
+    }
 
     // Commit artifact + candidates before marking task succeeded
     this.phase = RunnerPhase.Committing;
@@ -459,14 +468,11 @@ export class DiagnosticianRunner {
     // Check if error is permanent (never retry)
     if (this.isPermanentError(ctx.errorCategory)) {
       await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory);
-
-      // Emit: diagnostician_task_failed (permanent)
       this.emitDiagnosticianEvent('diagnostician_task_failed', ctx.taskId, {
         errorCategory: ctx.errorCategory,
         attemptCount: ctx.task.attemptCount,
         failureReason: ctx.failureReason,
       });
-
       this.phase = RunnerPhase.Failed;
       return { status: 'failed', taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: ctx.failureReason, attemptCount: ctx.task.attemptCount };
     }
@@ -475,27 +481,21 @@ export class DiagnosticianRunner {
     const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
     if (shouldRetry) {
       await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory);
-
-      // Emit: diagnostician_task_retried
       this.emitDiagnosticianEvent('diagnostician_task_retried', ctx.taskId, {
         errorCategory: ctx.errorCategory,
         attemptCount: ctx.task.attemptCount,
       });
-
       this.phase = RunnerPhase.RetryWaiting;
       return { status: 'retried', taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: ctx.failureReason, attemptCount: ctx.task.attemptCount };
     }
 
     // Max attempts exceeded
     await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded');
-
-    // Emit: diagnostician_task_failed (max_attempts_exceeded)
     this.emitDiagnosticianEvent('diagnostician_task_failed', ctx.taskId, {
       errorCategory: 'max_attempts_exceeded',
       attemptCount: ctx.task.attemptCount,
-      failureReason: ctx.failureReason,
+      failureReason: `Max attempts exceeded: ${ctx.failureReason}`,
     });
-
     this.phase = RunnerPhase.Failed;
     return {
       status: 'failed',
