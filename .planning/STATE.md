@@ -3,12 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.5
 milestone_name: milestone
 status: m6-06-01 shipped on feature/pd-runtime-v2-m6
-last_updated: "2026-04-25T00:59:00Z"
+last_updated: "2026-04-25T00:59:30Z"
+current_plan: "m6-06-03"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 3
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State: Principles
