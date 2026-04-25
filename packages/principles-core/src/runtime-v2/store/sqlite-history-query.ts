@@ -61,11 +61,11 @@ export class SqliteHistoryQuery implements HistoryQuery {
       MAX_HISTORY_PAGE_SIZE,
     );
 
+    // Only apply time window filtering when explicitly requested
+    const hasTimeWindow = options?.timeWindowStart !== undefined || options?.timeWindowEnd !== undefined;
     const now = new Date();
-    const timeWindowEnd = options?.timeWindowEnd ?? now.toISOString();
-    const timeWindowStart =
-      options?.timeWindowStart ??
-      new Date(now.getTime() - DEFAULT_TIME_WINDOW_MS).toISOString();
+    const timeWindowEnd = options?.timeWindowEnd ?? (hasTimeWindow ? now.toISOString() : undefined);
+    const timeWindowStart = options?.timeWindowStart ?? (hasTimeWindow ? new Date(now.getTime() - DEFAULT_TIME_WINDOW_MS).toISOString() : undefined);
 
     // Each run maps to 2 entries (system + assistant), so fetch enough runs
     // to potentially fill the entry limit. Fetch one extra run to detect truncation.
@@ -73,8 +73,8 @@ export class SqliteHistoryQuery implements HistoryQuery {
 
     const queryParams: QueryParams = {
       trajectoryRef,
-      timeWindowStart,
-      timeWindowEnd,
+      timeWindowStart: timeWindowStart ?? '1970-01-01T00:00:00.000Z',
+      timeWindowEnd: timeWindowEnd ?? now.toISOString(),
       runLimit,
     };
 
