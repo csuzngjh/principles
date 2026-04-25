@@ -15,7 +15,8 @@ import type { RuntimeHealth, RuntimeCapabilities } from '../runtime-protocol.js'
 
 export interface ProbeOptions {
   runtimeKind: 'openclaw-cli';
-  runtimeMode?: 'local' | 'gateway';
+  /** 'local' or 'gateway' — required, no silent fallback (HG-03, DPB-09) */
+  runtimeMode: 'local' | 'gateway';
   workspaceDir?: string;
 }
 
@@ -30,10 +31,10 @@ export async function probeRuntime(options: ProbeOptions): Promise<ProbeResult> 
     throw new Error(`probeRuntime only supports 'openclaw-cli' runtime kind (got '${options.runtimeKind}')`);
   }
 
-  // runtimeMode is required by CLI layer before calling probeRuntime
-  // Here we accept undefined and default to 'local' for safety
+  // HG-03 (HARD GATE): runtimeMode is always explicitly provided by CLI layer.
+  // probeRuntime itself requires runtimeMode to be set (no silent fallback).
   const adapter = new OpenClawCliRuntimeAdapter({
-    runtimeMode: options.runtimeMode ?? 'local',
+    runtimeMode: options.runtimeMode,
     workspaceDir: options.workspaceDir,
   });
 

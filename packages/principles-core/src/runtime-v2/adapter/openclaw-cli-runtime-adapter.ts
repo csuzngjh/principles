@@ -65,7 +65,7 @@ interface RunState {
 
 /**
  * Extract JSON from potentially mixed CLI output (e.g., text + JSON interleaved).
- * Tries direct parse first, then falls back to extracting first balanced {...} block.
+ * Tries direct parse first, then falls back to first balanced {...} block.
  */
 function extractJson(text: string): unknown | null {
   // Attempt 1: direct parse
@@ -73,12 +73,23 @@ function extractJson(text: string): unknown | null {
     return JSON.parse(text);
   } catch { /* fall through */ }
 
-  // Attempt 2: balanced-fragment extraction
-  const match = /\{[\s\S]*\}/.exec(text);
-  if (match) {
-    try {
-      return JSON.parse(match[0]);
-    } catch { /* fall through */ }
+  // Attempt 2: balanced-bracket extraction — find first complete {...} block
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === '{') {
+      if (start === -1) start = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        try {
+          return JSON.parse(text.slice(start, i + 1));
+        } catch { /* fall through to continue searching */ }
+        start = -1;
+      }
+    }
   }
 
   return null;
@@ -271,8 +282,8 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     const { cliOutput } = state;
 
     // OCRA-04: Map ENOENT (binary not found) to runtime_unavailable
-    // runCliProcess sets stderr = 'ENOENT: <code>' on ENOENT error
-    if (cliOutput.exitCode === null && cliOutput.stderr.startsWith('ENOENT:')) {
+    // spawnError is set explicitly by runCliProcess when spawn fails
+    if (cliOutput.spawnError === 'ENOENT') {
       throw new PDRuntimeError('runtime_unavailable', 'openclaw binary not found');
     }
 

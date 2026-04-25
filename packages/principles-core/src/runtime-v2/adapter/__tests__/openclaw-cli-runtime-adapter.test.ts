@@ -175,7 +175,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
   describe('fetchOutput() error mapping', () => {
     it('throws PDRuntimeError("runtime_unavailable") when ENOENT (binary not found)', async () => {
       const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
-      const mockOutput = makeCliOutput({ stdout: '', stderr: 'ENOENT: ENOENT', exitCode: null });
+      const mockOutput = makeCliOutput({ stdout: '', stderr: 'ENOENT: ENOENT', exitCode: null, spawnError: 'ENOENT' });
       mockRunCliProcess.mockResolvedValue(mockOutput);
 
       const handle = await adapter.startRun({

@@ -17,12 +17,20 @@ export interface CliProcessRunnerOptions {
   killGracePeriodMs?: number;
 }
 
+export type SpawnErrorCode = 'ENOENT' | 'EACCES' | 'EMFILE' | 'UNKNOWN';
+
 export interface CliOutput {
   stdout: string;
   stderr: string;
   exitCode: number | null;
   timedOut: boolean;
   durationMs: number;
+  /**
+   * Explicit spawn error type. Set when proc.on('error') is called with
+   * ENOENT (binary not found), EACCES (permission denied), EMFILE (too many open files),
+   * or other errors. Use this instead of parsing stderr for error detection.
+   */
+  spawnError?: SpawnErrorCode;
 }
 
 /**
@@ -157,15 +165,28 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
     });
 
     proc.on('error', (err: Error) => {
-      // ENOENT, EACCES, etc. — resolve with null exit code and empty output
+      // ENOENT, EACCES, EMFILE, etc. — resolve with null exit code and empty output
       // so callers can handle "command not found" gracefully
       const durationMs = Date.now() - startedAt;
+      const errWithCode = err as Error & { code?: string };
+      // Map common spawn error codes to explicit spawnError field
+      let spawnError: SpawnErrorCode | undefined;
+      if (errWithCode.code === 'ENOENT') {
+        spawnError = 'ENOENT';
+      } else if (errWithCode.code === 'EACCES') {
+        spawnError = 'EACCES';
+      } else if (errWithCode.code === 'EMFILE') {
+        spawnError = 'EMFILE';
+      } else if (errWithCode.code) {
+        spawnError = 'UNKNOWN';
+      }
       resolveOnce({
         stdout: '',
-        stderr: (err as Error & { code?: string }).code ? `ENOENT: ${(err as Error & { code?: string }).code}` : err.message,
+        stderr: errWithCode.code ? `ENOENT: ${errWithCode.code}` : err.message,
         exitCode: null,
         timedOut,
         durationMs,
+        spawnError,
       });
     });
   });
