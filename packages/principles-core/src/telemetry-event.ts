@@ -83,6 +83,8 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('diagnostician_task_succeeded'),
   Type.Literal('diagnostician_task_retried'),
   Type.Literal('diagnostician_task_failed'),
+  Type.Literal('diagnostician_cancel_run_failed'),
+  Type.Literal('diagnostician_mark_succeeded_failed'),
   // M5: Artifact commit events
   Type.Literal('diagnostician_artifact_committed'),
   Type.Literal('diagnostician_artifact_commit_failed'),
