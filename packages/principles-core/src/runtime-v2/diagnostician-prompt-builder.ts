@@ -90,6 +90,7 @@ export class DiagnosticianPromptBuilder {
    *
    * Per DPB-07: NO extraSystemPrompt is added — agent profile is the source of truth.
    */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   buildPrompt(payload: DiagnosticianContextPayload): PromptBuildResult {
     // DPB-04: Explicit top-level fields at the prompt level
     const promptInput: PromptInput = {
