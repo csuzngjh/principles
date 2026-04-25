@@ -269,6 +269,7 @@ runtimeCmd
   .requiredOption('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli'")
   .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
   .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
+  .option('-a, --agent <agentId>', 'Agent ID to probe')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeProbe(opts);

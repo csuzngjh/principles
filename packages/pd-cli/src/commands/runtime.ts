@@ -6,8 +6,8 @@
  *
  * HG-01 HARD GATE: This command must deliver.
  */
-import { probeRuntime } from '@principles/core/runtime-v2/index.js';
-import { PDRuntimeError } from '@principles/core/runtime-v2/index.js';
+import { probeRuntime } from '@principles/core/runtime-v2';
+import { PDRuntimeError } from '@principles/core/runtime-v2';
 
 interface RuntimeProbeOptions {
   runtime: string;

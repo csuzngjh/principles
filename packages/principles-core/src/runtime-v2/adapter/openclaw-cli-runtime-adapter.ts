@@ -50,6 +50,11 @@ export interface OpenClawCliRuntimeAdapterOptions {
    */
   workspaceDir?: string;
   /**
+   * Agent ID to invoke when running the diagnostician (default: 'diagnostician').
+   * Used in healthCheck to verify the agent is available.
+   */
+  agentId?: string;
+  /**
    * Optional StoreEventEmitter for telemetry event emission.
    * If not provided, falls back to the global storeEmitter singleton.
    */
@@ -155,11 +160,13 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   private readonly runStateMap = new Map<string, RunState>();
   private readonly runtimeMode: 'local' | 'gateway';
   private readonly workspaceDir?: string;
+  private readonly agentId: string;
   private readonly eventEmitter: StoreEventEmitter;
 
   constructor(options: OpenClawCliRuntimeAdapterOptions) {
     this.runtimeMode = options.runtimeMode;
     this.workspaceDir = options.workspaceDir;
+    this.agentId = options.agentId ?? 'diagnostician';
     this.eventEmitter = options.eventEmitter ?? storeEmitter;
   }
 
@@ -189,19 +196,19 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
    *
    * Verifies:
    *  1. openclaw binary is executable (run `openclaw --version`)
-   *  2. The configured agent exists or can be invoked
+   *  2. The configured agent is available (run `openclaw agent --agent <id> --version`)
    *
    * Returns healthy=false with appropriate error category when checks fail.
    * Per DPB-09: No silent fallback — failures are reported accurately.
+   * Per P1 #4: Binary-only check is insufficient for hard gate; agent must be verified.
    */
   async healthCheck(): Promise<RuntimeHealth> {
     const warnings: string[] = [];
     let healthy = true;
     let degraded = false;
 
+    // Probe 1: verify openclaw binary is executable
     try {
-      // Probe 1: verify openclaw binary is executable
-      // Use `--version` as the lightest possible check
       const versionResult = await runCliProcess({
         command: 'openclaw',
         args: ['--version'],
@@ -237,11 +244,63 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       }
 
       if (versionResult.exitCode !== null && versionResult.exitCode !== 0) {
-        // Binary exists but returned an error — degraded but not unavailable
         degraded = true;
         warnings.push(`openclaw --version exited with code ${versionResult.exitCode}`);
       }
     } catch (err) {
+      return {
+        healthy: false,
+        degraded: false,
+        warnings: [err instanceof Error ? err.message : String(err)],
+        lastCheckedAt: new Date().toISOString(),
+      };
+    }
+
+    // Probe 2: verify the configured agent is available
+    // P1 #4 fix: Must verify agent exists, not just the binary
+    try {
+      const agentArgs = ['agent', '--agent', this.agentId, '--version'];
+      if (this.runtimeMode === 'local') {
+        agentArgs.push('--local');
+      }
+
+      const agentResult = await runCliProcess({
+        command: 'openclaw',
+        args: agentArgs,
+        cwd: this.workspaceDir,
+        timeoutMs: 15_000,
+      });
+
+      if (agentResult.spawnError === 'ENOENT') {
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: ['openclaw binary not found'],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+
+      if (agentResult.spawnError === 'EACCES' || agentResult.spawnError === 'EMFILE') {
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: [`openclaw binary not executable: ${agentResult.spawnError}`],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+
+      if (agentResult.timedOut) {
+        // Timeout here means the agent command started but didn't complete
+        // This is a degraded state (binary + agent exist, but agent is slow/unresponsive)
+        degraded = true;
+        warnings.push(`openclaw agent --agent ${this.agentId} timed out`);
+      } else if (agentResult.exitCode !== null && agentResult.exitCode !== 0) {
+        // Non-zero exit means the agent is not available or not configured
+        healthy = false;
+        warnings.push(`openclaw agent '${this.agentId}' not available (exit code ${agentResult.exitCode})`);
+      }
+    } catch (err) {
+      // Any error in the agent probe is a hard failure
       return {
         healthy: false,
         degraded: false,

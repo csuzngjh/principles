@@ -36,9 +36,11 @@ export async function probeRuntime(options: ProbeOptions): Promise<ProbeResult> 
 
   // HG-03 (HARD GATE): runtimeMode is always explicitly provided by CLI layer.
   // probeRuntime itself requires runtimeMode to be set (no silent fallback).
+  // P1 #3 fix: Pass agentId so healthCheck can verify the specific agent is available.
   const adapter = new OpenClawCliRuntimeAdapter({
     runtimeMode: options.runtimeMode,
     workspaceDir: options.workspaceDir,
+    agentId: options.agentId,
   });
 
   const [health, capabilities] = await Promise.all([

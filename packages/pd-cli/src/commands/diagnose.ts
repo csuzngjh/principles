@@ -19,8 +19,8 @@ import {
   PDRuntimeError,
   run as diagnoseRun,
   status as diagnoseStatus,
-} from '@principles/core/runtime-v2/index.js';
-import type { PDRuntimeAdapter } from '@principles/core/runtime-v2/index.js';
+} from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface DiagnoseStatusOptions {
