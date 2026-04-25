@@ -51,7 +51,11 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
   }
 
   const {command} = opts;
-  const args = opts.args ?? [];
+  const rawArgs = opts.args ?? [];
+  if (!Array.isArray(rawArgs) || rawArgs.some((a) => typeof a !== 'string')) {
+    throw new TypeError('opts.args must be an array of strings');
+  }
+  const args = rawArgs;
   const {cwd} = opts;
   const {timeoutMs} = opts;
   const killGracePeriodMs = opts.killGracePeriodMs ?? 3000;
@@ -94,7 +98,11 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
 
     if (process.platform === 'win32') {
       // Windows: use taskkill with /T (kill process tree) and /F (force)
-      spawn('taskkill', ['/PID', String(pid), '/T', '/F']);
+      // taskkill /F is SIGKILL equivalent — force kill without grace period
+      const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F']);
+      killer.on('error', () => {
+        // Process may have already exited — taskkill itself failed
+      });
     } else {
       // Unix: send SIGTERM to the process group (negative pid = whole group)
       try {
@@ -169,8 +177,7 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
       // so callers can handle "command not found" gracefully
       const durationMs = Date.now() - startedAt;
       const errWithCode = err as Error & { code?: string };
-      // Map common spawn error codes to explicit spawnError field
-      let spawnError: SpawnErrorCode | undefined;
+      let spawnError: SpawnErrorCode | undefined = undefined;
       if (errWithCode.code === 'ENOENT') {
         spawnError = 'ENOENT';
       } else if (errWithCode.code === 'EACCES') {

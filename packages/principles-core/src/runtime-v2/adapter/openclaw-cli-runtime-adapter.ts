@@ -77,7 +77,8 @@ function extractJson(text: string): unknown | null {
   let depth = 0;
   let start = -1;
   for (let i = 0; i < text.length; i++) {
-    const ch = text[i]!;
+    const ch = text[i];
+    if (!ch) continue;
     if (ch === '{') {
       if (start === -1) start = i;
       depth++;
@@ -136,6 +137,29 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       warnings: [],
       lastCheckedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Map CLI output to telemetry event type and error category.
+   */
+  private static mapCliResultToTelemetry(cliOutput: CliOutput): {
+    telemetryEventType: 'runtime_invocation_succeeded' | 'runtime_invocation_failed';
+    errorCategory: string | undefined;
+  } {
+    // spawnError is set by runCliProcess on ENOENT/EACCES/EMFILE — use it
+    if (cliOutput.spawnError === 'ENOENT') {
+      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'runtime_unavailable' };
+    }
+    if (cliOutput.spawnError === 'EACCES' || cliOutput.spawnError === 'EMFILE') {
+      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'execution_failed' };
+    }
+    if (cliOutput.timedOut) {
+      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'timeout' };
+    }
+    if (cliOutput.exitCode !== null && cliOutput.exitCode !== 0) {
+      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'execution_failed' };
+    }
+    return { telemetryEventType: 'runtime_invocation_succeeded', errorCategory: undefined };
   }
 
   // OCRA-02: startRun synchronously invokes openclaw agent with correct CLI args
@@ -199,19 +223,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
 
     // TELE-03: runtime_invocation_succeeded/failed — CLI process completed
     const endedAt = new Date().toISOString();
-    let errorCategory: string | undefined = undefined;
-    let telemetryEventType: 'runtime_invocation_succeeded' | 'runtime_invocation_failed' = 'runtime_invocation_succeeded';
-
-    if (cliOutput.exitCode === null && cliOutput.stderr.startsWith('ENOENT:')) {
-      telemetryEventType = 'runtime_invocation_failed';
-      errorCategory = 'runtime_unavailable';
-    } else if (cliOutput.timedOut) {
-      telemetryEventType = 'runtime_invocation_failed';
-      errorCategory = 'timeout';
-    } else if (cliOutput.exitCode !== null && cliOutput.exitCode !== 0) {
-      telemetryEventType = 'runtime_invocation_failed';
-      errorCategory = 'execution_failed';
-    }
+    const { telemetryEventType, errorCategory } = OpenClawCliRuntimeAdapter.mapCliResultToTelemetry(cliOutput);
 
     this.eventEmitter.emitTelemetry({
       eventType: telemetryEventType,
