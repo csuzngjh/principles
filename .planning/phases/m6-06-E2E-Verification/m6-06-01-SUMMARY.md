@@ -39,7 +39,7 @@ key-decisions:
 
 patterns-established:
   - "FakeCliProcessRunner pattern: vi.mock + mockResolvedValue for controlled CLI output in tests"
-  - "Runtime mode argument verification: destructured mock.calls[0][0] to inspect command/args"
+  - "Runtime mode argument verification: mock.calls[0]![0] indexed access to inspect command/args (not array-destructured)"
 
 requirements-completed: [E2EV-01, E2EV-02, E2EV-03, HG-3]
 
@@ -88,6 +88,7 @@ None - plan executed exactly as written.
 - **Lint error (import type annotation):** `import()` type annotations forbidden by @typescript-eslint/consistent-type-imports on line 44. Fix: removed explicit type generic from vi.fn(), let TypeScript infer the type.
 - **Lint error (array destructuring):** @typescript-eslint/prefer-destructuring required using `const [[firstCall]]` instead of `const firstCall = mock.calls[0]![0]`. Fix: applied array destructuring pattern.
 - **vi.mock path resolution:** Mock path `'../utils/cli-process-runner.js'` resolved incorrectly from `__tests__/` directory. Fix: changed to `'../../utils/cli-process-runner.js'` (two levels up to reach src/runtime-v2/utils/).
+- **Test failures (mock.calls type mismatch):** `vi.mocked(runCliProcess).mock.calls[0]` typed as `unknown[]` — casting through `as unknown as { command: string; args: string[] }` was rejected by vitest's mock call type. Fix: used indexed access `mock.calls[0]![0]` with double-assertion pattern: `as unknown as` on the inner call argument object.
 
 ## Next Phase Readiness
 - m6-06-e2e.test.ts ready for m6-06 subsequent plan execution
