@@ -124,6 +124,21 @@ describe('DiagnosticianPromptBuilder', () => {
       expect(parsed).toHaveProperty('context');
     });
 
+    // DPB-08: diagnosticInstruction contains the 5-phase protocol
+    it('diagnosticInstruction is present and contains the 5-phase protocol keywords', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+
+      expect(result.promptInput.diagnosticInstruction).toBeDefined();
+      expect(result.promptInput.diagnosticInstruction.length).toBeGreaterThan(100);
+      expect(result.promptInput.diagnosticInstruction).toContain('PHASE');
+      expect(result.promptInput.diagnosticInstruction).toContain('5 Whys');
+      expect(result.promptInput.diagnosticInstruction).toContain('rootCause');
+      expect(result.promptInput.diagnosticInstruction).toContain('confidence');
+      expect(result.promptInput.diagnosticInstruction).toContain('Design');
+      expect(result.promptInput.diagnosticInstruction).toContain('People');
+    });
+
     // DPB-05: buildPrompt() is pure — no DB calls
     it('buildPrompt() is a pure function — same input produces same output', () => {
       const builder = new DiagnosticianPromptBuilder();

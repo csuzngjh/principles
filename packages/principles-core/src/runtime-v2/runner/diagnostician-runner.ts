@@ -25,7 +25,8 @@ import type {
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DiagnosticianContextPayload } from '../context-payload.js';
-import type { DiagnosticianOutputV1, DiagnosticianInvocationInput } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import { DiagnosticianPromptBuilder } from '../diagnostician-prompt-builder.js';
 import type { TaskRecord } from '../task-status.js';
 import type { PDErrorCategory } from '../error-categories.js';
 import type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './diagnostician-runner-options.js';
@@ -251,19 +252,14 @@ export class DiagnosticianRunner {
   }
 
   private async invokeRuntime(context: DiagnosticianContextPayload, taskId: string): Promise<RunHandle> {
-    const invocationInput: DiagnosticianInvocationInput = {
-      agentId: 'diagnostician',
-      taskId,
-      context,
-      outputSchemaRef: 'diagnostician-output-v1',
-      timeoutMs: this.resolvedOptions.timeoutMs,
-    };
+    const builder = new DiagnosticianPromptBuilder();
+    const { message } = builder.buildPrompt(context);
 
     const startInput: StartRunInput = {
       agentSpec: { agentId: 'diagnostician', schemaVersion: 'v1' },
       taskRef: { taskId },
-      inputPayload: invocationInput,
-      contextItems: [{ role: 'system', content: JSON.stringify(invocationInput) }],
+      inputPayload: message,
+      contextItems: [],
       outputSchemaRef: 'diagnostician-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
     };
