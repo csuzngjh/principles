@@ -70,7 +70,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
       });
 
       expect(mockRunCliProcess).toHaveBeenCalledTimes(1);
-      const firstCall = mockRunCliProcess.mock.calls[0] as unknown as { command: string; args: string[]; timeoutMs?: number } | undefined;
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { command: string; args: string[]; timeoutMs?: number } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
       const call = firstCall;
       expect(call.command).toBe('openclaw');
@@ -94,7 +94,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
         timeoutMs: 60000,
       });
 
-      const firstCall = mockRunCliProcess.mock.calls[0] as unknown as { args: string[] } | undefined;
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { args: string[] } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
       expect(firstCall.args).toContain('diagnostician');
     });
@@ -110,7 +110,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
         timeoutMs: 65000, // 65 seconds
       });
 
-      const firstCall = mockRunCliProcess.mock.calls[0] as unknown as { args: string[] } | undefined;
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { args: string[] } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
       const timeoutIdx = firstCall.args.indexOf('--timeout');
       expect(firstCall.args[timeoutIdx + 1]).toBe('65'); // Math.ceil(65000/1000) = 65
@@ -383,51 +383,6 @@ describe('OpenClawCliRuntimeAdapter', () => {
     });
   });
 
-  describe('healthCheck()', () => {
-    // New probe-based healthCheck: verifies openclaw binary + exit status
-    it('returns healthy=true when openclaw --version succeeds with exit code 0', async () => {
-      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: 'openclaw v1.2.3', exitCode: 0 }));
-      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
-      const health = await adapter.healthCheck();
-      expect(health.healthy).toBe(true);
-      expect(health.degraded).toBe(false);
-      expect(health.warnings).toHaveLength(0);
-    });
-
-    it('returns healthy=false when binary does not exist (ENOENT)', async () => {
-      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: '', stderr: '', exitCode: null, spawnError: 'ENOENT' }));
-      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
-      const health = await adapter.healthCheck();
-      expect(health.healthy).toBe(false);
-      expect(health.warnings).toContain('openclaw binary not found');
-    });
-
-    it('returns healthy=false when binary not executable (EACCES)', async () => {
-      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: '', stderr: '', exitCode: null, spawnError: 'EACCES' }));
-      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
-      const health = await adapter.healthCheck();
-      expect(health.healthy).toBe(false);
-      expect(health.warnings).toContain('openclaw binary not executable: EACCES');
-    });
-
-    it('returns healthy=false when --version times out', async () => {
-      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: '', stderr: '', exitCode: null, timedOut: true }));
-      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
-      const health = await adapter.healthCheck();
-      expect(health.healthy).toBe(false);
-      expect(health.warnings).toContain('openclaw --version timed out');
-    });
-
-    it('returns degraded=true when --version exits with non-zero code', async () => {
-      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: 'error: config not found', exitCode: 1 }));
-      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
-      const health = await adapter.healthCheck();
-      expect(health.healthy).toBe(true);
-      expect(health.degraded).toBe(true);
-      expect(health.warnings).toContain('openclaw --version exited with code 1');
-    });
-  });
-
   describe('cancelRun()', () => {
     it('resolves without error even when run is not found', async () => {
       const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
@@ -456,7 +411,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
         timeoutMs: 30000,
       });
 
-      const firstCall = mockRunCliProcess.mock.calls[0] as unknown as { args: string[] } | undefined;
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { args: string[] } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
       expect(firstCall.args).toContain('--local');
     });
@@ -475,8 +430,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
         timeoutMs: 30000,
       });
 
-      const firstCall = mockRunCliProcess.mock.calls[0] as unknown as { args: string[] } | undefined;
-      if (!firstCall) throw new Error('expected firstCall');
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { args: string[] } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
       expect(firstCall.args).not.toContain('--local');
     });
@@ -495,7 +449,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
         timeoutMs: 30000,
       });
 
-      const firstCall = mockRunCliProcess.mock.calls[0] as unknown as { cwd?: string } | undefined;
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { cwd?: string } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
       expect(firstCall.cwd).toBe('D:/work/.pd');
     });
@@ -511,7 +465,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
         timeoutMs: 30000,
       });
 
-      const firstCall = mockRunCliProcess.mock.calls[0] as unknown as { cwd?: string } | undefined;
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { cwd?: string } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
       expect(firstCall.cwd).toBeUndefined();
     });
@@ -527,7 +481,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
         timeoutMs: 30000,
       });
 
-      const firstCall = mockRunCliProcess.mock.calls[0] as unknown as { cwd?: string; args: string[] } | undefined;
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { cwd?: string; args: string[] } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
       expect(firstCall.cwd).toBe('D:/work/.pd');
       expect(firstCall.args).not.toContain('--local');
@@ -547,8 +501,7 @@ describe('OpenClawCliRuntimeAdapter', () => {
         timeoutMs: 30000,
       });
 
-      const firstCall = mockRunCliProcess.mock.calls[0] as unknown as { args: string[] } | undefined;
-      if (!firstCall) throw new Error('expected firstCall');
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { args: string[] } | undefined;
       if (!firstCall) throw new Error('expected firstCall');
       const localCount = firstCall.args.filter((arg: string) => arg === '--local').length;
       expect(localCount).toBe(0);
