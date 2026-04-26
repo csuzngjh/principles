@@ -84,28 +84,31 @@ interface RunState {
  *
  * @returns The parsed JSON value, or null if stdout could not be parsed at all.
  */
-function extractPayloadFromCliOutput(stdout: string): unknown | null {
-  // Attempt 1: direct parse — covers case 1 (bare JSON)
-  try {
-    return JSON.parse(stdout);
-  } catch { /* fall through */ }
+function extractPayloadFromCliOutput(stdout: string, stderr?: string): unknown | null {
+  for (const source of [stdout, stderr ?? '']) {
+    if (!source) continue;
+    // Attempt 1: direct parse — covers case 1 (bare JSON)
+    try {
+      return JSON.parse(source);
+    } catch { /* fall through */ }
 
-  // Attempt 2: balanced-bracket extraction — handles trailing text around the JSON
-  let depth = 0;
-  let start = -1;
-  for (let i = 0; i < stdout.length; i++) {
-    const ch = stdout[i];
-    if (!ch) continue;
-    if (ch === '{') {
-      if (start === -1) start = i;
-      depth++;
-    } else if (ch === '}') {
-      depth--;
-      if (depth === 0 && start !== -1) {
-        try {
-          return JSON.parse(stdout.slice(start, i + 1));
-        } catch { /* continue searching */ }
-        start = -1;
+    // Attempt 2: balanced-bracket extraction — handles trailing text around the JSON
+    let depth = 0;
+    let start = -1;
+    for (let i = 0; i < source.length; i++) {
+      const ch = source[i];
+      if (!ch) continue;
+      if (ch === '{') {
+        if (start === -1) start = i;
+        depth++;
+      } else if (ch === '}') {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          try {
+            return JSON.parse(source.slice(start, i + 1));
+          } catch { /* continue searching */ }
+          start = -1;
+        }
       }
     }
   }
@@ -349,7 +352,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
         command: 'openclaw',
         args: probeArgs,
         cwd: this.workspaceDir,
-        timeoutMs: 30_000,
+        timeoutMs: 300_000,
       });
 
       if (probeResult.spawnError === 'ENOENT') {
@@ -392,7 +395,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       }
 
       // exit code 0 — verify the output is parseable JSON
-      const excerpt = extractPayloadFromCliOutput(probeResult.stdout);
+      const excerpt = extractPayloadFromCliOutput(probeResult.stdout, probeResult.stderr);
       if (excerpt === null) {
         return {
           healthy: false,
@@ -607,7 +610,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     // (local or gateway). First extract the JSON value, then navigate to the diagnosis JSON.
     // eslint-disable-next-line @typescript-eslint/init-declarations
     let parsed: unknown;
-    const rawParsed = extractPayloadFromCliOutput(cliOutput.stdout);
+    const rawParsed = extractPayloadFromCliOutput(cliOutput.stdout, cliOutput.stderr);
     if (rawParsed !== null) {
       // Try envelope extraction first (cases 2 and 3)
       const fromEnvelope = extractDiagnosisFromEnvelope(rawParsed);
