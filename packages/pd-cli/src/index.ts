@@ -21,6 +21,7 @@ import { handleHistoryQuery } from './commands/history.js';
 import { handleContextBuild } from './commands/context.js';
 import { handleLegacyImportOpenClaw } from './commands/legacy-import.js';
 import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js';
+import { handleRuntimeProbe } from './commands/runtime.js';
 import { handleCandidateList, handleCandidateShow } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
@@ -247,9 +248,31 @@ diagnoseCmd
   .description('Execute diagnostician runner for a task')
   .requiredOption('-t, --task-id <taskId>', 'Task ID to execute')
   .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'test-double'")
+  .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
+  .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
+  .option('-a, --agent <agentId>', 'Agent ID to invoke')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleDiagnoseRun(opts);
+  });
+
+// ── Runtime probe command (HG-01 HARD GATE) ─────────────────────────────────
+
+const runtimeCmd = program
+  .command('runtime')
+  .description('Runtime inspection and health checks');
+
+runtimeCmd
+  .command('probe')
+  .description('Probe runtime health and capabilities (HG-01 HARD GATE)')
+  .requiredOption('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli'")
+  .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
+  .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
+  .option('-a, --agent <agentId>', 'Agent ID to probe')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeProbe(opts);
   });
 
 // ── Candidate inspection commands ───────────────────────────────────────────

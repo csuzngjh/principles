@@ -123,8 +123,9 @@ export async function status(options: DiagnoseStatusOptions): Promise<DiagnoseSt
   if (task.status === 'succeeded') {
     const commit = await options.stateManager.getCommitByTaskId(options.taskId);
     if (commit) {
-      commitId = commit.commitId;
-      artifactId = commit.artifactId;
+      const { commitId: cid, artifactId: aid } = commit;
+      commitId = cid;
+      artifactId = aid;
       const candidates = await options.stateManager.getCandidatesByTaskId(options.taskId);
       candidateCount = candidates.length;
     }
