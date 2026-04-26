@@ -6,7 +6,7 @@
  * Runs arbitrary CLI commands, captures stdout/stderr, and handles timeouts with
  * graceful tree kill (SIGTERM → grace period → SIGKILL).
  */
-import { spawn, type SpawnOptions } from 'child_process';
+import { spawn, execSync, type SpawnOptions } from 'child_process';
 
 export interface CliProcessRunnerOptions {
   command: string;
@@ -31,6 +31,55 @@ export interface CliOutput {
    * or other errors. Use this instead of parsing stderr for error detection.
    */
   spawnError?: SpawnErrorCode;
+}
+
+/**
+ * Resolve a command on Windows when it may be a npm shim (.cmd/.bat/.exe).
+ *
+ * On Windows, `spawn('openclaw', [], {shell:false})` fails with ENOENT because
+ * Node's spawn() with shell:false does not consult the PATHEXT associations that
+ * cmd.exe uses. `where.exe` (equivalent to `which` on Unix) resolves the actual
+ * executable path including .cmd/.bat shims created by npm.
+ *
+ * Note: `where.exe` returns ALL matches, including Unix shell scripts (openclaw)
+ * before Windows batch files (openclaw.cmd). We must scan all results and prefer
+ * Windows-native executables (.cmd, .bat, .exe) over Unix scripts.
+ *
+ * @returns The resolved command path, or the original if not Windows or already absolute.
+ */
+function resolveCommandForWindows(command: string): string {
+  if (process.platform !== 'win32') {
+    return command;
+  }
+  // If the command already contains a path separator, it is already resolved
+  if (command.includes('/') || command.includes('\\')) {
+    return command;
+  }
+
+  try {
+    // Use where.exe to resolve the command — works for .cmd, .bat, .exe shims
+    const result = execSync(`where.exe ${command}`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+    // where.exe returns all matches, one per line
+    const lines = result.split('\n').map((l: string) => l.trim()).filter(Boolean);
+
+    // Prefer Windows-native executables (.cmd, .bat, .exe) over Unix scripts
+    const windowsNative = lines.find((l: string) => /\.(cmd|bat|exe)$/i.test(l));
+    if (windowsNative) {
+      return windowsNative;
+    }
+    // Fall back to first result if no Windows-native executable found
+    if (lines.length > 0) {
+      return lines[0] ?? command;
+    }
+  } catch {
+    // where.exe failed — fall through to original command
+  }
+
+  return command;
 }
 
 /**
@@ -67,12 +116,23 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
   let stdout = '';
   let stderr = '';
 
+  // ── Resolve command on Windows (npm shim resolution) ─────────────────────
+  const resolved = resolveCommandForWindows(command);
+
+  // On Windows, .cmd/.bat files cannot be spawned directly with shell:false.
+  // They must be invoked via cmd.exe /d /s /c. Normalize path to forward slashes
+  // to avoid Windows path interpretation issues with backslashes.
+  const isWindowsBatch = /\.bat$/i.test(resolved) || /\.cmd$/i.test(resolved);
+  const spawnCommand = isWindowsBatch ? 'cmd.exe' : resolved;
+  // Use forward slashes for cmd.exe /c to avoid backslash interpretation issues
+  const normalizedPath = resolved.replace(/\\/g, '/');
+  const spawnArgs = isWindowsBatch ? ['/d', '/s', '/c', normalizedPath, ...args] : args;
+
   // ── Spawn ─────────────────────────────────────────────────────────────────
-  const proc = spawn(command, args, {
+  const proc = spawn(spawnCommand, spawnArgs, {
     cwd,
     env,
     shell: false,
-    detached: true,
   } satisfies SpawnOptions);
 
   // Attach data handlers BEFORE spawning so we don't miss any output
@@ -149,11 +209,11 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
 
   // ── Completion promise ─────────────────────────────────────────────────────
   return new Promise<CliOutput>((resolve) => {
-    let resolved = false;
+    let settled = false;
 
     function resolveOnce(output: CliOutput): void {
-      if (!resolved) {
-        resolved = true;
+      if (!settled) {
+        settled = true;
         cancelTimers();
         resolve(output);
       }

@@ -1,29 +1,92 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handleDiagnoseRun, type DiagnoseRunOptions } from '../../src/commands/diagnose.js';
-import { RuntimeStateManager } from '@principles/core/runtime-v2/index.js';
 
-// Mock RuntimeStateManager at module level
-vi.mock('@principles/core/runtime-v2/index.js', async () => {
-  const actual = await vi.importActual('@principles/core/runtime-v2/index.js');
+// Use vi.hoisted for all mock factories that reference each other
+const { MockRuntimeStateManager } = vi.hoisted(() => {
+  class MockRuntimeStateManager {
+    initialize = vi.fn().mockResolvedValue(undefined);
+    close = vi.fn().mockResolvedValue(undefined);
+    getTask = vi.fn().mockResolvedValue({
+      taskId: 'test-task-1',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      lastError: null,
+    });
+    connection = {} as Record<string, unknown>;
+    taskStore = {};
+    runStore = {};
+  }
+  return { MockRuntimeStateManager };
+}, { validateType: true });
+
+// Mock resolveWorkspaceDir FIRST before any other imports
+vi.mock('../../src/resolve-workspace.js', () => ({
+  resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/fake-workspace'),
+}));
+
+// Mock @principles/core/runtime-v2
+vi.mock('@principles/core/runtime-v2', () => {
   return {
-    ...actual as object,
-    RuntimeStateManager: vi.fn().mockImplementation(() => ({
-      initialize: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-      getTask: vi.fn().mockResolvedValue({
+    RuntimeStateManager: vi.fn().mockImplementation(function () {
+      return new MockRuntimeStateManager();
+    }),
+    SqliteHistoryQuery: vi.fn().mockImplementation(function () { return {}; }),
+    SqliteContextAssembler: vi.fn().mockImplementation(function () { return {}; }),
+    SqliteDiagnosticianCommitter: vi.fn().mockImplementation(function () { return {}; }),
+    StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
+    storeEmitter: { emitTelemetry: vi.fn() },
+    DiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
+    PassThroughValidator: vi.fn().mockImplementation(function () { return {}; }),
+    TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
+    OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
+    PDRuntimeError: class PDRuntimeError extends Error {
+      constructor(public category: string, message: string) {
+        super(message);
+        this.name = 'PDRuntimeError';
+      }
+    },
+    run: vi.fn().mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'test-task-1',
+      output: {
+        valid: true,
+        diagnosisId: 'diag-123',
         taskId: 'test-task-1',
-        status: 'pending',
-        attemptCount: 0,
-        maxAttempts: 3,
-        lastError: null,
-      }),
-    })),
+        summary: 'Test diagnosis summary',
+        rootCause: 'Test: test root cause',
+        violatedPrinciples: [],
+        evidence: [],
+        recommendations: [],
+        confidence: 0.9,
+      },
+    }),
+    status: vi.fn(),
   };
 });
 
+// Import the command handler AFTER mocks are set up
+import { handleDiagnoseRun, type DiagnoseRunOptions } from '../../src/commands/diagnose.js';
+
 describe('pd diagnose run --runtime routing', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    // Re-setup run mock for each test
+    const { run } = await import('@principles/core/runtime-v2');
+    vi.mocked(run).mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'test-task-1',
+      output: {
+        valid: true,
+        diagnosisId: 'diag-123',
+        taskId: 'test-task-1',
+        summary: 'Test diagnosis summary',
+        rootCause: 'Test: test root cause',
+        violatedPrinciples: [],
+        evidence: [],
+        recommendations: [],
+        confidence: 0.9,
+      },
+    });
   });
 
   it('CLI-01: --runtime test-double routes to TestDoubleRuntimeAdapter (regression)', async () => {
@@ -32,14 +95,12 @@ describe('pd diagnose run --runtime routing', () => {
 
     await handleDiagnoseRun({
       taskId: 'test-task-1',
-      workspace: undefined,
+      workspace: '/tmp/fake-workspace',
       runtime: 'test-double',
       json: false,
     } as DiagnoseRunOptions);
 
-    // Should have logged output (diagnose run succeeded with test-double)
     expect(consoleSpy).toHaveBeenCalled();
-    // Should not have called process.exit with error
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     consoleSpy.mockRestore();
@@ -52,7 +113,7 @@ describe('pd diagnose run --runtime routing', () => {
 
     await handleDiagnoseRun({
       taskId: 'test-task-1',
-      workspace: undefined,
+      workspace: '/tmp/fake-workspace',
       runtime: 'openclaw-cli',
       json: false,
     } as DiagnoseRunOptions);
@@ -72,7 +133,7 @@ describe('pd diagnose run --runtime routing', () => {
 
     await handleDiagnoseRun({
       taskId: 'test-task-1',
-      workspace: undefined,
+      workspace: '/tmp/fake-workspace',
       runtime: 'openclaw-cli',
       openclawLocal: true,
       openclawGateway: true,
@@ -88,31 +149,21 @@ describe('pd diagnose run --runtime routing', () => {
     exitSpy.mockRestore();
   });
 
-  it('CLI-04: unknown runtime kind exits with error in JSON format', async () => {
-    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('CLI-04: unknown runtime kind exits with error and exit code 1', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleDiagnoseRun({
       taskId: 'test-task-1',
-      workspace: undefined,
+      workspace: '/tmp/fake-workspace',
       runtime: 'invalid-runtime',
       json: true,
     } as DiagnoseRunOptions);
 
-    // Should have printed JSON error
-    const jsonOutput = consoleLogSpy.mock.calls.find(call => {
-      try {
-        const parsed = JSON.parse(call[0] as string);
-        return parsed.status === 'failed' && parsed.errorCategory;
-      } catch { return false; }
-    });
-    expect(jsonOutput).toBeDefined();
-    const parsed = JSON.parse((jsonOutput as [string])[0]);
-    expect(parsed.status).toBe('failed');
-    expect(parsed.errorCategory).toBeDefined();
-    expect(parsed.runtimeKind).toBe('invalid-runtime');
+    expect(consoleErrorSpy).toHaveBeenCalledWith("error: unknown runtime kind 'invalid-runtime'");
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
-    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
   });
 });

@@ -256,22 +256,23 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       };
     }
 
-    // Probe 2: verify the configured agent is available
+    // Probe 2: verify the configured agent is available via agents list
     // P1 #4 fix: Must verify agent exists, not just the binary
+    // Using `openclaw agents list --json` to check if agentId is registered
     try {
-      const agentArgs = ['agent', '--agent', this.agentId, '--version'];
+      const listArgs = ['agents', 'list', '--json'];
       if (this.runtimeMode === 'local') {
-        agentArgs.push('--local');
+        listArgs.push('--local');
       }
 
-      const agentResult = await runCliProcess({
+      const listResult = await runCliProcess({
         command: 'openclaw',
-        args: agentArgs,
+        args: listArgs,
         cwd: this.workspaceDir,
         timeoutMs: 15_000,
       });
 
-      if (agentResult.spawnError === 'ENOENT') {
+      if (listResult.spawnError === 'ENOENT') {
         return {
           healthy: false,
           degraded: false,
@@ -280,24 +281,40 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
         };
       }
 
-      if (agentResult.spawnError === 'EACCES' || agentResult.spawnError === 'EMFILE') {
+      if (listResult.spawnError === 'EACCES' || listResult.spawnError === 'EMFILE') {
         return {
           healthy: false,
           degraded: false,
-          warnings: [`openclaw binary not executable: ${agentResult.spawnError}`],
+          warnings: [`openclaw binary not executable: ${listResult.spawnError}`],
           lastCheckedAt: new Date().toISOString(),
         };
       }
 
-      if (agentResult.timedOut) {
-        // Timeout here means the agent command started but didn't complete
-        // This is a degraded state (binary + agent exist, but agent is slow/unresponsive)
+      if (listResult.timedOut) {
         degraded = true;
-        warnings.push(`openclaw agent --agent ${this.agentId} timed out`);
-      } else if (agentResult.exitCode !== null && agentResult.exitCode !== 0) {
-        // Non-zero exit means the agent is not available or not configured
-        healthy = false;
-        warnings.push(`openclaw agent '${this.agentId}' not available (exit code ${agentResult.exitCode})`);
+        warnings.push(`openclaw agents list timed out`);
+      } else if (listResult.exitCode !== null && listResult.exitCode !== 0) {
+        // agents list failed — degraded state
+        degraded = true;
+        warnings.push(`openclaw agents list exited with code ${listResult.exitCode}`);
+      } else {
+        // Parse agent list and check if target agent exists
+        try {
+          const parsed = JSON.parse(listResult.stdout);
+          // agents list returns an array of agent objects (each with an `id` field)
+          const agentIds: string[] = Array.isArray(parsed)
+            ? parsed.map((a) => typeof a === 'string' ? a : (a as { id?: string }).id)
+            : (parsed.agents ?? parsed.items ?? []).map((a: unknown) => typeof a === 'string' ? a : (a as { id?: string }).id);
+
+          if (!agentIds.includes(this.agentId)) {
+            healthy = false;
+            warnings.push(`agent '${this.agentId}' not found in agents list`);
+          }
+        } catch {
+          // JSON parse failed — cannot verify agent, treat as degraded
+          degraded = true;
+          warnings.push(`failed to parse agents list output`);
+        }
       }
     } catch (err) {
       // Any error in the agent probe is a hard failure

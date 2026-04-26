@@ -68,6 +68,45 @@ describe('runCliProcess', () => {
     });
   });
 
+  describe.skip('Windows command resolution', () => {
+    it('on Windows, resolves openclaw to openclaw.cmd via where.exe', async () => {
+      if (process.platform !== 'win32') {
+        return;
+      }
+      const result = await runCliProcess({
+        command: 'openclaw',
+        args: ['--version'],
+      });
+      // Should succeed (not ENOENT) if Windows resolution works
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('OpenClaw');
+    });
+
+    it('on Windows, spawn uses resolved command path', async () => {
+      if (process.platform !== 'win32') {
+        return;
+      }
+      const result = await runCliProcess({
+        command: 'node',
+        args: ['--version'],
+      });
+      expect(result.exitCode).toBe(0);
+    });
+
+    it('on non-Windows, command is passed through unchanged', async () => {
+      if (process.platform === 'win32') {
+        return;
+      }
+      // On Unix, 'node' should work directly without where.exe resolution
+      const result = await runCliProcess({
+        command: 'node',
+        args: ['--version'],
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('v');
+    });
+  });
+
   describe('validation', () => {
     it('throws TypeError when command is an empty string', async () => {
       await expect(

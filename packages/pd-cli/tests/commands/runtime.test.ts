@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleRuntimeProbe, type RuntimeProbeOptions } from '../../src/commands/runtime.js';
 
 // Mock probeRuntime
-vi.mock('@principles/core/runtime-v2/index.js', () => ({
+vi.mock('@principles/core/runtime-v2', () => ({
   probeRuntime: vi.fn().mockResolvedValue({
     runtimeKind: 'openclaw-cli',
     health: {
@@ -95,6 +95,100 @@ describe('pd runtime probe', () => {
     expect(parsed.runtimeKind).toBe('openclaw-cli');
     expect(parsed.health).toBeDefined();
     expect(parsed.capabilities).toBeDefined();
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('CLI-03: --json with healthy=false outputs status=failed and exits 1', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    const { probeRuntime } = await import('@principles/core/runtime-v2');
+    vi.mocked(probeRuntime).mockResolvedValueOnce({
+      runtimeKind: 'openclaw-cli',
+      health: {
+        healthy: false,
+        degraded: false,
+        warnings: ['openclaw binary not found'],
+        lastCheckedAt: '2026-04-24T00:00:00.000Z',
+      },
+      capabilities: {
+        supportsStructuredJsonOutput: true,
+        supportsToolUse: false,
+        supportsWorkingDirectory: false,
+        supportsModelSelection: false,
+        supportsLongRunningSessions: false,
+        supportsCancellation: true,
+        supportsArtifactWriteBack: false,
+        supportsConcurrentRuns: false,
+        supportsStreaming: false,
+      },
+    });
+
+    await handleRuntimeProbe({
+      runtime: 'openclaw-cli',
+      openclawLocal: true,
+      json: true,
+    } as RuntimeProbeOptions);
+
+    const jsonOutput = consoleSpy.mock.calls.find(call => {
+      try {
+        const p = JSON.parse(call[0] as string);
+        return p.status !== undefined;
+      } catch { return false; }
+    });
+    expect(jsonOutput).toBeDefined();
+    const parsed = JSON.parse((jsonOutput as [string])[0]);
+    expect(parsed.status).toBe('failed');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('CLI-03: --json with healthy=true degraded=true outputs status=degraded', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    const { probeRuntime } = await import('@principles/core/runtime-v2');
+    vi.mocked(probeRuntime).mockResolvedValueOnce({
+      runtimeKind: 'openclaw-cli',
+      health: {
+        healthy: true,
+        degraded: true,
+        warnings: ['openclaw version is outdated'],
+        lastCheckedAt: '2026-04-24T00:00:00.000Z',
+      },
+      capabilities: {
+        supportsStructuredJsonOutput: true,
+        supportsToolUse: false,
+        supportsWorkingDirectory: false,
+        supportsModelSelection: false,
+        supportsLongRunningSessions: false,
+        supportsCancellation: true,
+        supportsArtifactWriteBack: false,
+        supportsConcurrentRuns: false,
+        supportsStreaming: false,
+      },
+    });
+
+    await handleRuntimeProbe({
+      runtime: 'openclaw-cli',
+      openclawLocal: true,
+      json: true,
+    } as RuntimeProbeOptions);
+
+    const jsonOutput = consoleSpy.mock.calls.find(call => {
+      try {
+        const p = JSON.parse(call[0] as string);
+        return p.status !== undefined;
+      } catch { return false; }
+    });
+    expect(jsonOutput).toBeDefined();
+    const parsed = JSON.parse((jsonOutput as [string])[0]);
+    expect(parsed.status).toBe('degraded');
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     consoleSpy.mockRestore();

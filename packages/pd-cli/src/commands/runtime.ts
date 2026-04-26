@@ -60,19 +60,33 @@ export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<voi
       agentId: opts.agent,
     });
 
+    // Per finding #2: status must reflect actual health
+    // healthy=false → status=failed, exit 1
+    // healthy=true + degraded=true → status=degraded
+    // healthy=true + degraded=false → status=succeeded
+    let exitCode = 0;
+    const status = !result.health.healthy ? 'failed'
+      : result.health.degraded ? 'degraded'
+      : 'succeeded';
+    if (!result.health.healthy) exitCode = 1;
+
     if (opts.json) {
       console.log(JSON.stringify({
-        status: 'succeeded',
+        status,
         runtimeKind: result.runtimeKind,
         health: result.health,
         capabilities: result.capabilities,
       }, null, 2));
+      if (exitCode !== 0) {
+        process.exit(exitCode);
+      }
       return;
     }
 
     // Human-readable output
     console.log(`\nRuntime: ${result.runtimeKind}`);
     console.log(`Mode:    ${runtimeMode}`);
+    console.log(`Status:  ${status}`);
     console.log('');
     console.log('Health:');
     console.log(`  healthy:       ${result.health.healthy ? 'yes' : 'no'}`);
@@ -88,6 +102,10 @@ export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<voi
     console.log('Capabilities:');
     console.log(formatCapabilitiesTable(result.capabilities as Record<string, unknown>));
     console.log('');
+
+    if (exitCode !== 0) {
+      process.exit(exitCode);
+    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     let errorCategory = 'execution_failed';
