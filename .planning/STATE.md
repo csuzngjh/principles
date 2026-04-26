@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
 milestone: v2.6
-milestone_name: M7 Principle Candidate Intake
-status: m7-01 context gathered — ready for planning
-last_updated: "2026-04-26T12:00:00.000Z"
+milestone_name: milestone
+status: m7-02 ready — Candidate Intake Contract SHIPPED
+last_updated: "2026-04-26T12:17:00.000Z"
 progress:
   total_phases: 5
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  completed_phases: 1
+  total_plans: 2
+  completed_plans: 2
 ---
 
 # Project State: Principles
@@ -21,15 +21,15 @@ progress:
 
 ## Current Position
 
-Phase: m7-01 (context gathered — ready for planning)
-Session stopped at: Phase m7-01 context gathered
-Resume from: .planning/phases/m7-01-Candidate-Intake-Contract/m7-01-CONTEXT.md
+Phase: m7-02 (Candidate Intake Contract SHIPPED — next: PrincipleTreeLedger Adapter)
+Session stopped at: Phase m7-01 complete — all 2 plans done, 27/27 tests passing
+Resume from: .planning/phases/m7-02-PrincipleTreeLedger-Adapter/
 
 ## M7 Phase Structure
 
 | Phase | Name | Requirements |
 |-------|------|--------------|
-| m7-01 | Candidate Intake Contract | INTAKE-01~04, LEDGER-01 (5 req) |
+| m7-01 | Candidate Intake Contract | INTAKE-01~04, LEDGER-01 (5 req) ✅ SHIPPED |
 | m7-02 | PrincipleTreeLedger Adapter | LEDGER-01~03 (3 req) |
 | m7-03 | Intake Service + Idempotency | INTAKE-05~07 (3 req) |
 | m7-04 | CLI: pd candidate intake | CLI-INTAKE-01~03 (3 req) |
