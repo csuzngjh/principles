@@ -21,6 +21,7 @@ import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { DiagnosticianRunner } from '../diagnostician-runner.js';
 import { PassThroughValidator } from '../diagnostician-validator.js';
 import type { DiagnosticianValidator, DiagnosticianValidationResult } from '../diagnostician-validator.js';
+import type { DiagnosticianCommitter } from '../../store/diagnostician-committer.js';
 import type {
   PDRuntimeAdapter,
   RuntimeCapabilities,
@@ -257,7 +258,8 @@ describe('DiagnosticianRunner Integration', () => {
    * Helper: create runner with given validator.
    * Uses short poll interval and timeout for fast integration tests.
    */
-  function createRunner(validator: DiagnosticianValidator = new PassThroughValidator()): DiagnosticianRunner {
+  function createRunner(validator: DiagnosticianValidator = new PassThroughValidator(),
+    committer: DiagnosticianCommitter = { commit: async () => ({ commitId: "mock-commit-id", artifactId: "mock-artifact-id", candidateCount: 0 }) }): DiagnosticianRunner {
     return new DiagnosticianRunner(
       {
         stateManager,
@@ -265,6 +267,7 @@ describe('DiagnosticianRunner Integration', () => {
         runtimeAdapter,
         eventEmitter,
         validator,
+      committer,
       },
       {
         owner: 'integration-test-runner',

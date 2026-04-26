@@ -108,7 +108,7 @@ export const BUILTIN_PD_TASKS: PDTaskSpec[] = [
     name: 'PD Empathy Optimizer',
     description:
       'Analyzes recent user messages to discover new frustration expressions and optimize keyword weights.',
-    enabled: true,
+    enabled: false, // LEGACY: disabled by default. PD diagnosis now uses `pd diagnose run` via runtime-v2. Set to true to re-enable.
     version: '1.0.1', // Bumped to force cron job settings update
     schedule: {
       kind: 'every',

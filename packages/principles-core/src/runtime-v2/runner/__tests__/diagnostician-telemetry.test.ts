@@ -15,6 +15,7 @@ import type { ContextAssembler } from '../../store/context-assembler.js';
 import type { PDRuntimeAdapter, RunHandle } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { DiagnosticianValidator } from '../diagnostician-validator.js';
+import type { DiagnosticianCommitter } from '../../store/diagnostician-committer.js';
 import type { DiagnosticianContextPayload } from '../../context-payload.js';
 import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
 import type { TaskRecord } from '../../task-status.js';
@@ -162,6 +163,7 @@ function createMocks() {
     _contextAssembler: mockContextAssembler,
     _runtimeAdapter: mockRuntimeAdapter,
     _validator: mockValidator,
+    _committer: { commit: vi.fn().mockResolvedValue({ commitId: "mock-commit-id", artifactId: "mock-artifact-id", candidateCount: 0 }) } as unknown as DiagnosticianCommitter,
     _eventEmitter: mockEventEmitter,
   };
 }
@@ -174,6 +176,7 @@ function createRunner(mocks: ReturnType<typeof createMocks>) {
       runtimeAdapter: mocks.mockRuntimeAdapter,
       eventEmitter: mocks.mockEventEmitter,
       validator: mocks.mockValidator,
+      committer: mocks._committer,
     },
     {
       owner: OWNER,
@@ -216,6 +219,8 @@ describe('DiagnosticianRunner telemetry emission', () => {
       'diagnostician_task_leased',
       'diagnostician_context_built',
       'diagnostician_run_started',
+      'output_validation_succeeded',
+      'diagnostician_artifact_committed',
       'diagnostician_task_succeeded',
     ]);
   });
@@ -262,6 +267,7 @@ describe('DiagnosticianRunner telemetry emission', () => {
       'diagnostician_context_built',
       'diagnostician_run_started',
       'diagnostician_output_invalid',
+      'output_validation_failed',
       'diagnostician_task_retried',
     ]);
   });

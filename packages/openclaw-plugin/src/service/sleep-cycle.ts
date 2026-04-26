@@ -110,7 +110,9 @@ export async function runCycle(options: CycleOptions): Promise<WorkerStatusRepor
         // keyword_optimization: Independent periodic trigger (CORR-07).
         // Fires every kwOptConfig.period_heartbeats regardless of trigger_mode.
         // Has its own dedicated config (default 24 heartbeats = 6 hours).
-        if (kwOptConfig.enabled && heartbeatCounterRef.value > 0 && heartbeatCounterRef.value % kwOptConfig.period_heartbeats === 0) {
+        // LEGACY PATH GUARD: disabled by default. Set PD_LEGACY_KEYWORD_OPT_ENABLED=true to re-enable.
+        const legacyKeywordOptEnabled = process.env.PD_LEGACY_KEYWORD_OPT_ENABLED === 'true';
+        if (kwOptConfig.enabled && legacyKeywordOptEnabled && heartbeatCounterRef.value > 0 && heartbeatCounterRef.value % kwOptConfig.period_heartbeats === 0) {
             logger?.info?.(`[PD:EvolutionWorker] keyword_optimization trigger at heartbeat ${heartbeatCounterRef.value} (trigger_mode=${sleepConfig.trigger_mode})`);
             enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
                 logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
@@ -128,7 +130,13 @@ export async function runCycle(options: CycleOptions): Promise<WorkerStatusRepor
             }
         }
 
-        if (shouldTrySleepReflection) {
+        // LEGACY PATH GUARD: sleep_reflection disabled by default.
+        // Set PD_LEGACY_SLEEP_REFLECTION_ENABLED=true to re-enable.
+        const legacySleepReflectionEnabled = process.env.PD_LEGACY_SLEEP_REFLECTION_ENABLED === 'true';
+        if (!legacySleepReflectionEnabled) {
+            logger?.info?.('[PD:EvolutionWorker] Legacy sleep_reflection DISABLED (PD_LEGACY_SLEEP_REFLECTION_ENABLED != true)');
+        }
+        if (shouldTrySleepReflection && legacySleepReflectionEnabled) {
             const cooldown = checkCooldown(wctx.stateDir, undefined, {
                 globalCooldownMs: sleepConfig.cooldown_ms,
                 maxRunsPerWindow: sleepConfig.max_runs_per_day,

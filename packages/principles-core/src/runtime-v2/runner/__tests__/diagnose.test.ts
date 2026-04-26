@@ -68,7 +68,7 @@ describe('cli/diagnose', () => {
     const getTaskMock = vi.fn<() => Promise<TaskRecord | null>>().mockResolvedValue(taskRecord);
     const mockStateManager = { getTask: getTaskMock } as unknown as RuntimeStateManager;
 
-    const mockRunner = {} as unknown as DiagnosticianRunner;
+    const _mockRunner = {} as unknown as DiagnosticianRunner;
 
     const result = await status({ taskId: TASK_ID, stateManager: mockStateManager });
 
@@ -78,6 +78,9 @@ describe('cli/diagnose', () => {
       attemptCount: 3,
       maxAttempts: 5,
       lastError: 'execution_failed',
+      commitId: null,
+      artifactId: null,
+      candidateCount: null,
     });
     expect(getTaskMock).toHaveBeenCalledWith(TASK_ID);
   });
@@ -89,7 +92,7 @@ describe('cli/diagnose', () => {
     const getTaskMock = vi.fn<() => Promise<TaskRecord | null>>().mockResolvedValue(null);
     const mockStateManager = { getTask: getTaskMock } as unknown as RuntimeStateManager;
 
-    const mockRunner = {} as unknown as DiagnosticianRunner;
+    const _mockRunner = {} as unknown as DiagnosticianRunner;
 
     const result = await status({ taskId: TASK_ID, stateManager: mockStateManager });
 

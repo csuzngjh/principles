@@ -5,20 +5,22 @@
  *   pd diagnose status --task-id <taskId> --workspace <path>
  *   pd diagnose run --task-id <taskId> --workspace <path>
  */
-import type {
-  SqliteTaskStore,
-  SqliteRunStore} from '@principles/core/runtime-v2/index.js';
 import {
   RuntimeStateManager,
   SqliteHistoryQuery,
   SqliteContextAssembler,
+  SqliteDiagnosticianCommitter,
   StoreEventEmitter,
+  storeEmitter,
   DiagnosticianRunner,
-  PassThroughValidator,
+  DefaultDiagnosticianValidator,
   TestDoubleRuntimeAdapter,
+  OpenClawCliRuntimeAdapter,
+  PDRuntimeError,
   run as diagnoseRun,
   status as diagnoseStatus,
-} from '@principles/core/runtime-v2/index.js';
+} from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface DiagnoseStatusOptions {
@@ -31,6 +33,10 @@ interface DiagnoseRunOptions {
   taskId: string;
   workspace?: string;
   json?: boolean;
+  runtime?: string;
+  openclawLocal?: boolean;
+  openclawGateway?: boolean;
+  agent?: string;
 }
 
 /**
@@ -62,6 +68,12 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
     console.log(`\nDiagnostician Task: ${result.taskId}\n`);
     console.log(`  Status:       ${result.status}`);
     console.log(`  Attempts:     ${result.attemptCount} / ${result.maxAttempts}`);
+    if (result.commitId) {
+      console.log(`  Result Ref:   commit://${result.commitId}`);
+      console.log(`  Commit ID:    ${result.commitId}`);
+      console.log(`  Artifact ID:  ${result.artifactId ?? 'N/A'}`);
+      console.log(`  Candidates:   ${result.candidateCount ?? 0}`);
+    }
     if (result.lastError) {
       console.log(`  Last Error:   ${result.lastError}`);
     }
@@ -75,60 +87,105 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
  * pd diagnose run --task-id <taskId> [--workspace <path>] [--json]
  *
  * Executes the diagnostician runner for a task.
- * Uses TestDoubleRuntimeAdapter (no real LLM) — M5 scope adds real adapter.
  */
 export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
+
+  // Validate mutually exclusive flags (HG-03)
+  if (opts.openclawLocal && opts.openclawGateway) {
+    console.error('error: --openclaw-local and --openclaw-gateway are mutually exclusive');
+    process.exit(1);
+  }
+
+  // Require explicit runtime mode for openclaw-cli (HG-03, DPB-09)
+  const runtimeKind = opts.runtime ?? 'test-double';
+  if (runtimeKind === 'openclaw-cli' && !opts.openclawLocal && !opts.openclawGateway) {
+    console.error('error: --openclaw-local or --openclaw-gateway is required when using --runtime openclaw-cli');
+    process.exit(1);
+  }
+
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
     await stateManager.initialize();
 
     // Build context assembler from internal stores
-    const sqliteConn = (stateManager as unknown as { connection: unknown }).connection;
-    const taskStore = (stateManager as unknown as { taskStore: unknown }).taskStore as SqliteTaskStore;
-    const runStore = (stateManager as unknown as { runStore: unknown }).runStore as SqliteRunStore;
+    const sqliteConn = stateManager.connection;
+    const {taskStore} = stateManager;
+    const {runStore} = stateManager;
     const historyQuery = new SqliteHistoryQuery(sqliteConn);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
 
-    // Use TestDoubleRuntimeAdapter with success-on-first-poll behavior for CLI testing
-    const runtimeAdapter = new TestDoubleRuntimeAdapter({
-      onPollRun: (_runId: string) => ({
-        runId: _runId,
-        status: 'succeeded',
-        startedAt: new Date().toISOString(),
-        endedAt: new Date().toISOString(),
-      }),
-      onFetchOutput: (_runId: string) => ({
-        runId: _runId,
+    // Select runtime adapter based on --runtime flag (CLI-02)
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let runtimeAdapter: PDRuntimeAdapter;
+    if (runtimeKind === 'openclaw-cli') {
+      runtimeAdapter = new OpenClawCliRuntimeAdapter({
+        runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
+        workspaceDir,
+        agentId: opts.agent ?? 'diagnostician',
+      });
+
+      // TELE-01: runtime_adapter_selected — user explicitly chose openclaw-cli runtime
+      storeEmitter.emitTelemetry({
+        eventType: 'runtime_adapter_selected',
+        traceId: opts.taskId,
+        timestamp: new Date().toISOString(),
+        sessionId: 'pd-cli-diagnose',
+        agentId: 'openclaw-cli-adapter',
         payload: {
-          valid: true,
-          diagnosisId: `diag-cli-${Date.now()}`,
-          taskId: opts.taskId,
-          summary: 'CLI test diagnosis',
-          rootCause: 'Test root cause',
-          violatedPrinciples: [],
-          evidence: [],
-          recommendations: [],
-          confidence: 0.9,
+          runtimeKind: 'openclaw-cli',
+          runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
         },
-      }),
-    });
+      });
+    } else if (runtimeKind === 'test-double') {
+      runtimeAdapter = new TestDoubleRuntimeAdapter({
+        onPollRun: (_runId: string) => ({
+          runId: _runId,
+          status: 'succeeded',
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+        }),
+        onFetchOutput: (_runId: string) => ({
+          runId: _runId,
+          payload: {
+            valid: true,
+            diagnosisId: `diag-cli-${Date.now()}`,
+            taskId: opts.taskId,
+            summary: 'CLI test diagnosis — validate tool arguments before execution',
+            rootCause: 'Test root cause — missing argument validation',
+            violatedPrinciples: [],
+            evidence: [],
+            recommendations: [
+              { kind: 'principle', description: 'Always validate tool arguments before execution to prevent silent failures' },
+              { kind: 'rule', description: 'Use schema validation for external inputs' },
+            ],
+            confidence: 0.9,
+          },
+        }),
+      });
+    } else {
+      console.error(`error: unknown runtime kind '${runtimeKind}'`);
+      process.exit(1);
+    }
 
     const eventEmitter = new StoreEventEmitter();
+    const committer = new SqliteDiagnosticianCommitter(sqliteConn);
     const runner = new DiagnosticianRunner(
       {
         stateManager,
         contextAssembler,
         runtimeAdapter,
         eventEmitter,
-        validator: new PassThroughValidator(),
+        validator: new DefaultDiagnosticianValidator(),
+        committer,
       },
       {
         owner: 'pd-cli-diagnose',
-        runtimeKind: 'test-double',
+        runtimeKind,
         pollIntervalMs: 100,
-        timeoutMs: 30000,
+        timeoutMs: 300_000, // 5 min — same as probe timeout for real LLM calls
+        agentId: opts.agent,
       },
     );
 
@@ -143,6 +200,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
 
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
+      if (result.status !== 'succeeded') {
+        process.exit(1);
+      }
       return;
     }
 
@@ -155,6 +215,12 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     if (result.output) {
       console.log(`  Diagnosis ID:   ${result.output.diagnosisId}`);
       console.log(`  Summary:        ${result.output.summary}`);
+      if (result.output.recommendations) {
+        const principleCount = result.output.recommendations.filter((r: { kind: string }) => r.kind === 'principle').length;
+        if (principleCount > 0) {
+          console.log(`  Principles:     ${principleCount} candidate(s) generated`);
+        }
+      }
     }
     if (result.errorCategory) {
       console.log(`  Error Category: ${result.errorCategory}`);
@@ -164,6 +230,27 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     }
     console.log(`  Attempt Count:  ${result.attemptCount}`);
     console.log('');
+
+    if (result.status !== 'succeeded') {
+      process.exit(1);
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    let errorCategory = 'execution_failed';
+    if (error instanceof PDRuntimeError) {
+      errorCategory = error.category;
+    }
+    if (opts.json) {
+      console.log(JSON.stringify({
+        status: 'failed',
+        errorCategory,
+        message,
+        runtimeKind,
+      }, null, 2));
+    } else {
+      console.error(`error: ${message} (${errorCategory})`);
+    }
+    process.exit(1);
   } finally {
     await stateManager.close();
   }
