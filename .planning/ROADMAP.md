@@ -80,8 +80,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] m7-02-01-PLAN.md -- PrincipleTreeLedgerAdapter class: constructor, writeProbationEntry, existsForCandidate, field expansion, idempotency
-- [ ] m7-02-02-PLAN.md -- Comprehensive tests: happy path, idempotency, field expansion defaults, provenance exclusion, error handling, instance isolation
+- [x] m7-02-01-PLAN.md -- PrincipleTreeLedgerAdapter class: constructor, writeProbationEntry, existsForCandidate, field expansion, idempotency
+- [x] m7-02-02-PLAN.md -- Comprehensive tests: happy path, idempotency, field expansion defaults, provenance exclusion, error handling, instance isolation
 
 ---
 
@@ -163,9 +163,9 @@ Plans:
 | m6-05: Telemetry Events | 3/3 | Complete | 2026-04-25 |
 | m6-06: E2E Verification | 2/3 | Complete | 2026-04-25 |
 | m7-01: Candidate Intake Contract | 2/2 | SHIPPED | 2026-04-26 |
-| m7-02: PrincipleTreeLedger Adapter | 0/2 | Planned | -- |
-| m7-03: Intake Service + Idempotency | 0/2 | Planning | -- |
-| m7-04: CLI: pd candidate intake | 0/2 | Planning | -- |
+| m7-02: PrincipleTreeLedger Adapter | 2/2 | SHIPPED | 2026-04-26 |
+| m7-03: Intake Service + Idempotency | 2/2 | SHIPPED | 2026-04-26 |
+| m7-04: CLI: pd candidate intake | 0/2 | Context Gathered | -- |
 | m7-05: E2E: candidate -> ledger entry | 0/1 | Planning | -- |
 
 ---
