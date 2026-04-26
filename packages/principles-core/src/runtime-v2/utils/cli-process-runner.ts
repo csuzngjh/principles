@@ -82,6 +82,16 @@ function resolveCommandForWindows(command: string): string {
   return command;
 }
 
+function quoteWindowsCmdArg(arg: string): string {
+  if (arg === '') return '""';
+  if (!/[\s"&|<>^()]/.test(arg)) return arg;
+
+  // This path is only used for Windows .cmd/.bat shims. Keep quoting narrow:
+  // wrap the token and escape cmd metacharacters so argv boundaries survive
+  // without turning arbitrary args into shell syntax.
+  return `"${arg.replace(/(["&|<>^])/g, '^$1')}"`;
+}
+
 /**
  * Run a CLI process with timeout, graceful tree kill, and env merge.
  *
@@ -119,20 +129,35 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
   // ── Resolve command on Windows (npm shim resolution) ─────────────────────
   const resolved = resolveCommandForWindows(command);
 
-  // On Windows, .cmd/.bat files cannot be spawned directly with shell:false.
-  // They must be invoked via cmd.exe /d /s /c. Normalize path to forward slashes
-  // to avoid Windows path interpretation issues with backslashes.
-  const isWindowsBatch = /\.bat$/i.test(resolved) || /\.cmd$/i.test(resolved);
-  const spawnCommand = isWindowsBatch ? 'cmd.exe' : resolved;
-  // Use forward slashes for cmd.exe /c to avoid backslash interpretation issues
-  const normalizedPath = resolved.replace(/\\/g, '/');
-  const spawnArgs = isWindowsBatch ? ['/d', '/s', '/c', normalizedPath, ...args] : args;
+  // ── Windows: detect if resolved command is a .cmd/.bat shim ─────────────
+  const isWindowsCmdShim = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
+
+  // ── Spawn configuration ──────────────────────────────────────────────────
+  const spawnConfig: { command: string; args: string[]; shell: boolean } = (() => {
+    if (process.platform !== 'win32') {
+      return { command: resolved, args, shell: false };
+    }
+
+    if (isWindowsCmdShim) {
+      // Windows batch files (.cmd/.bat) via npm shims require command-string mode.
+      // The working pattern (confirmed by experiment) is:
+      //   spawn('cmd.exe /c "path/to/file.cmd args..."', [], {shell:true})
+      // NOT spawn('cmd.exe', ['/c', 'path/to/file.cmd args...'], {shell:true})
+      const normalizedPath = resolved.replace(/\\/g, '/');
+      const allArgsStr = [quoteWindowsCmdArg(normalizedPath), ...args.map(quoteWindowsCmdArg)].join(' ');
+      return { command: `cmd.exe /c ${allArgsStr}`, args: [], shell: true };
+    }
+
+    // Non-batch Windows executables can be spawned directly. Keeping shell=false
+    // preserves argv boundaries and keeps ENOENT handling deterministic.
+    return { command: resolved, args, shell: false };
+  })();
 
   // ── Spawn ─────────────────────────────────────────────────────────────────
-  const proc = spawn(spawnCommand, spawnArgs, {
+  const proc = spawn(spawnConfig.command, spawnConfig.args, {
     cwd,
     env,
-    shell: false,
+    shell: spawnConfig.shell,
   } satisfies SpawnOptions);
 
   // Attach data handlers BEFORE spawning so we don't miss any output

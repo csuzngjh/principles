@@ -12,6 +12,9 @@
  *   DiagnosticianOutputV1Schema validation failure → output_invalid
  */
 import { Value } from '@sinclair/typebox/value';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runCliProcess, type CliOutput } from '../utils/cli-process-runner.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
@@ -66,6 +69,26 @@ interface RunState {
   startedAt: string;
   cliOutput: CliOutput | null; // null until CLI completes
   completed: boolean;
+}
+
+interface MessageFileRef {
+  arg: string;
+  dir: string;
+}
+
+async function writeMessageFile(message: string): Promise<MessageFileRef> {
+  const dir = await mkdtemp(join(tmpdir(), 'pd-openclaw-message-'));
+  const filePath = join(dir, 'message.json');
+  await writeFile(filePath, message, 'utf8');
+
+  // OpenClaw supports --message @file. Forward slashes avoid cmd.exe treating
+  // backslashes inside the @file token as escaping/quoting boundaries.
+  return { arg: `@${filePath.replace(/\\/g, '/')}`, dir };
+}
+
+async function cleanupMessageFile(ref: MessageFileRef | undefined): Promise<void> {
+  if (!ref) return;
+  await rm(ref.dir, { recursive: true, force: true });
 }
 
 /**
@@ -428,11 +451,16 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     // Probe 3: One-shot minimal agent invocation (P1 hard gate)
     // Verifies the agent can actually respond, not just that it exists in the list.
     // This catches plugin loading failures, permission issues, etc.
+    let probeMessageRef: MessageFileRef | undefined = undefined;
     try {
+      // Unique session ID for probe to avoid lock conflicts with concurrent runs
+      const probeSessionId = `pd-runtime-probe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      probeMessageRef = await writeMessageFile(JSON.stringify({ probe: 'pd-runtime-v2', instruction: 'reply with {"ok":true} only' }));
       const probeArgs = [
         'agent',
         '--agent', this.agentId,
-        '--message', JSON.stringify({ probe: 'pd-runtime-v2', instruction: 'reply with {"ok":true} only' }),
+        '--message', probeMessageRef.arg,
+        '--session-id', probeSessionId,
         '--json',
       ];
       if (this.runtimeMode === 'local') {
@@ -524,6 +552,8 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
         warnings: [err instanceof Error ? err.message : String(err)],
         lastCheckedAt: new Date().toISOString(),
       };
+    } finally {
+      await cleanupMessageFile(probeMessageRef);
     }
 
     return {
@@ -573,13 +603,18 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       : JSON.stringify(input.inputPayload);
     const timeoutSeconds = Math.ceil((input.timeoutMs ?? 600000) / 1000);
     const agentId = input.agentSpec?.agentId ?? 'diagnostician';
+    const messageRef = await writeMessageFile(jsonPayload);
 
     // DPB-09 (LOCKED): --local only passed when runtimeMode === 'local'
     // HG-03 (HARD GATE): No silent fallback — must be explicit
+    // Unique session ID per run — avoids session lock conflicts and context pollution
+    // between concurrent or sequential PD diagnostician runs on the same agent.
+    const sessionId = `pd-runtime-${runId}`;
     const args = [
       'agent',
       '--agent', agentId,
-      '--message', jsonPayload,
+      '--message', messageRef.arg,
+      '--session-id', sessionId,
       '--json',
     ];
 
@@ -606,12 +641,18 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       },
     });
 
-    const cliOutput = await runCliProcess({
-      command: 'openclaw',
-      args,
-      cwd: this.workspaceDir,
-      timeoutMs: input.timeoutMs,
-    });
+    const cliOutput: CliOutput = await (async () => {
+      try {
+        return await runCliProcess({
+          command: 'openclaw',
+          args,
+          cwd: this.workspaceDir,
+          timeoutMs: input.timeoutMs,
+        });
+      } finally {
+        await cleanupMessageFile(messageRef);
+      }
+    })();
 
     // Store result in memory
     state.cliOutput = cliOutput;

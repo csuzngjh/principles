@@ -77,6 +77,8 @@ describe('OpenClawCliRuntimeAdapter', () => {
       expect(call.args).toContain('--agent');
       expect(call.args).toContain('my-agent');
       expect(call.args).toContain('--message');
+      const messageIdx = call.args.indexOf('--message');
+      expect(call.args[messageIdx + 1]).toMatch(/^@/);
       expect(call.args).toContain('--json');
       expect(call.args).toContain('--local');
       expect(call.args).toContain('--timeout');

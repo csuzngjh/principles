@@ -123,6 +123,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
         runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
         workspaceDir,
+        agentId: opts.agent ?? 'diagnostician',
       });
 
       // TELE-01: runtime_adapter_selected — user explicitly chose openclaw-cli runtime
@@ -183,7 +184,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         owner: 'pd-cli-diagnose',
         runtimeKind,
         pollIntervalMs: 100,
-        timeoutMs: 30000,
+        timeoutMs: 300_000, // 5 min — same as probe timeout for real LLM calls
         agentId: opts.agent,
       },
     );
