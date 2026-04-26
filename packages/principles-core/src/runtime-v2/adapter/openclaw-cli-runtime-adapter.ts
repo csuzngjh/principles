@@ -196,11 +196,12 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
    *
    * Verifies:
    *  1. openclaw binary is executable (run `openclaw --version`)
-   *  2. The configured agent is available (run `openclaw agent --agent <id> --version`)
+   *  2. The configured agent is available (run `openclaw agents list --json`)
+   *  3. The agent can actually respond (one-shot minimal probe with --agent)
    *
    * Returns healthy=false with appropriate error category when checks fail.
    * Per DPB-09: No silent fallback — failures are reported accurately.
-   * Per P1 #4: Binary-only check is insufficient for hard gate; agent must be verified.
+   * Per P1 hard gate: Binary-only check is insufficient; must verify real invocation.
    */
   async healthCheck(): Promise<RuntimeHealth> {
     const warnings: string[] = [];
@@ -257,7 +258,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     }
 
     // Probe 2: verify the configured agent is available via agents list
-    // P1 #4 fix: Must verify agent exists, not just the binary
+    // P1 fix: Must verify agent exists, not just the binary
     // Using `openclaw agents list --json` to check if agentId is registered
     try {
       const listArgs = ['agents', 'list', '--json'];
@@ -330,6 +331,85 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       };
     }
 
+    // Probe 3: One-shot minimal agent invocation (P1 hard gate)
+    // Verifies the agent can actually respond, not just that it exists in the list.
+    // This catches plugin loading failures, permission issues, etc.
+    try {
+      const probeArgs = [
+        'agent',
+        '--agent', this.agentId,
+        '--message', JSON.stringify({ probe: 'pd-runtime-v2', instruction: 'reply with {"ok":true} only' }),
+        '--json',
+      ];
+      if (this.runtimeMode === 'local') {
+        probeArgs.push('--local');
+      }
+
+      const probeResult = await runCliProcess({
+        command: 'openclaw',
+        args: probeArgs,
+        cwd: this.workspaceDir,
+        timeoutMs: 30_000,
+      });
+
+      if (probeResult.spawnError === 'ENOENT') {
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: ['openclaw binary not found'],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+
+      if (probeResult.spawnError === 'EACCES' || probeResult.spawnError === 'EMFILE') {
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: [`openclaw binary not executable: ${probeResult.spawnError}`],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+
+      if (probeResult.timedOut) {
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: ['openclaw agent probe timed out'],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+
+      if (probeResult.exitCode !== null && probeResult.exitCode !== 0) {
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: [
+            `openclaw agent '${this.agentId}' probe failed with exit code ${probeResult.exitCode}`,
+            ...(probeResult.stderr ? [`stderr: ${probeResult.stderr.substring(0, 2000)}`] : []),
+          ],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+
+      // exit code 0 — verify the output is parseable JSON
+      const excerpt = extractPayloadFromCliOutput(probeResult.stdout);
+      if (excerpt === null) {
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: ['openclaw agent probe produced unparseable output'],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+    } catch (err) {
+      return {
+        healthy: false,
+        degraded: false,
+        warnings: [err instanceof Error ? err.message : String(err)],
+        lastCheckedAt: new Date().toISOString(),
+      };
+    }
+
     return {
       healthy,
       degraded,
@@ -344,21 +424,22 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   private static mapCliResultToTelemetry(cliOutput: CliOutput): {
     telemetryEventType: 'runtime_invocation_succeeded' | 'runtime_invocation_failed';
     errorCategory: string | undefined;
+    stderrExcerpt: string | undefined;
   } {
     // spawnError is set by runCliProcess on ENOENT/EACCES/EMFILE — use it
     if (cliOutput.spawnError === 'ENOENT') {
-      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'runtime_unavailable' };
+      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'runtime_unavailable', stderrExcerpt: cliOutput.stderr };
     }
     if (cliOutput.spawnError === 'EACCES' || cliOutput.spawnError === 'EMFILE') {
-      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'execution_failed' };
+      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'execution_failed', stderrExcerpt: cliOutput.stderr };
     }
     if (cliOutput.timedOut) {
-      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'timeout' };
+      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'timeout', stderrExcerpt: cliOutput.stderr };
     }
     if (cliOutput.exitCode !== null && cliOutput.exitCode !== 0) {
-      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'execution_failed' };
+      return { telemetryEventType: 'runtime_invocation_failed', errorCategory: 'execution_failed', stderrExcerpt: cliOutput.stderr };
     }
-    return { telemetryEventType: 'runtime_invocation_succeeded', errorCategory: undefined };
+    return { telemetryEventType: 'runtime_invocation_succeeded', errorCategory: undefined, stderrExcerpt: undefined };
   }
 
   // OCRA-02: startRun synchronously invokes openclaw agent with correct CLI args
@@ -422,7 +503,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
 
     // TELE-03: runtime_invocation_succeeded/failed — CLI process completed
     const endedAt = new Date().toISOString();
-    const { telemetryEventType, errorCategory } = OpenClawCliRuntimeAdapter.mapCliResultToTelemetry(cliOutput);
+    const { telemetryEventType, errorCategory, stderrExcerpt } = OpenClawCliRuntimeAdapter.mapCliResultToTelemetry(cliOutput);
 
     this.eventEmitter.emitTelemetry({
       eventType: telemetryEventType,
@@ -437,6 +518,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
         exitCode: cliOutput.exitCode,
         timedOut: cliOutput.timedOut,
         ...(errorCategory ? { errorCategory } : {}),
+        ...(stderrExcerpt ? { stderrExcerpt } : {}),
       },
     });
 
@@ -466,12 +548,17 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     }
 
     if (cliOutput.exitCode !== null && cliOutput.exitCode !== 0) {
+      const stderrExcerpt = cliOutput.stderr
+        ? cliOutput.stderr.substring(0, 2000)
+        : undefined;
       return {
         runId,
         status: 'failed',
         startedAt: state.startedAt,
         endedAt: new Date().toISOString(),
-        reason: `CLI exited with code ${cliOutput.exitCode}`,
+        reason: stderrExcerpt
+          ? `CLI exited with code ${cliOutput.exitCode}. stderr: ${stderrExcerpt}`
+          : `CLI exited with code ${cliOutput.exitCode}`,
       };
     }
 
@@ -505,7 +592,15 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
 
     // OCRA-04: Map non-zero exit to execution_failed
     if (cliOutput.exitCode !== null && cliOutput.exitCode !== 0) {
-      throw new PDRuntimeError('execution_failed', `CLI exited with code ${cliOutput.exitCode}`);
+      const stderrExcerpt = cliOutput.stderr
+        ? cliOutput.stderr.substring(0, 2000)
+        : undefined;
+      throw new PDRuntimeError(
+        'execution_failed',
+        stderrExcerpt
+          ? `CLI exited with code ${cliOutput.exitCode}. stderr: ${stderrExcerpt}`
+          : `CLI exited with code ${cliOutput.exitCode}`,
+      );
     }
 
     // OCRA-03: Parse CliOutput — the stdout may be raw JSON, or wrapped in an OpenClaw envelope

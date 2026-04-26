@@ -286,6 +286,30 @@ describe('OpenClawCliRuntimeAdapter', () => {
       });
     });
 
+    it('throws PDRuntimeError("execution_failed") with stderr excerpt on non-zero exit', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const mockOutput = makeCliOutput({ stdout: '', stderr: 'PluginLoadFailureError: cannot load plugin', exitCode: 1 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toMatchObject({
+        category: 'execution_failed',
+      });
+      // Verify the error message contains stderr excerpt
+      try {
+        await adapter.fetchOutput(handle.runId);
+      } catch (err) {
+        expect(err).toBeInstanceOf(PDRuntimeError);
+        expect((err as PDRuntimeError).message).toContain('PluginLoadFailureError');
+      }
+    });
+
     it('throws PDRuntimeError("output_invalid") when JSON parse fails', async () => {
       const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
       const mockOutput = makeCliOutput({ stdout: 'this is not JSON at all!!!', stderr: '', exitCode: 0 });
@@ -369,6 +393,41 @@ describe('OpenClawCliRuntimeAdapter', () => {
 
       const status = await adapter.pollRun(handle.runId);
       expect(status.status).toBe('timed_out');
+    });
+
+    it('includes stderr excerpt in reason when CLI exits non-zero', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const longStderr = 'PluginLoadFailureError: plugin principles-disciple failed to load';
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: '', exitCode: 1, stderr: longStderr }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const status = await adapter.pollRun(handle.runId);
+      expect(status.status).toBe('failed');
+      expect(status.reason).toContain('PluginLoadFailureError');
+      expect(status.reason).toContain('CLI exited with code 1');
+    });
+
+    it('truncates stderr excerpt at 2000 characters in reason', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const longStderr = 'A'.repeat(3000);
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: '', exitCode: 1, stderr: longStderr }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const status = await adapter.pollRun(handle.runId);
+      expect(status.status).toBe('failed');
+      expect(status.reason?.length ?? 0).toBeLessThanOrEqual(2000 + 100); // 2000 + prefix overhead
     });
   });
 

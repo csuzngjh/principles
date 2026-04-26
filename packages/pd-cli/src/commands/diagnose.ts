@@ -199,6 +199,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
 
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
+      if (result.status !== 'succeeded') {
+        process.exit(1);
+      }
       return;
     }
 
@@ -226,6 +229,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     }
     console.log(`  Attempt Count:  ${result.attemptCount}`);
     console.log('');
+
+    if (result.status !== 'succeeded') {
+      process.exit(1);
+    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     let errorCategory = 'execution_failed';
