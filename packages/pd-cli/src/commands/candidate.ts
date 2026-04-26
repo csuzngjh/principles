@@ -251,7 +251,10 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
     }
   } catch (err) {
     // Error handling (CLI-04)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (err instanceof CandidateIntakeError || (err as any).name === 'CandidateIntakeError') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      console.error(`Intake failed [${(err as any).code}]: ${(err as any).message}`);
       console.error(`Intake failed [${(err as any).code}]: ${(err as any).message}`);
     } else {
       console.error(`Intake failed: ${String(err)}`);

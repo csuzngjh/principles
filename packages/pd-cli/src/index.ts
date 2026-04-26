@@ -22,7 +22,7 @@ import { handleContextBuild } from './commands/context.js';
 import { handleLegacyImportOpenClaw } from './commands/legacy-import.js';
 import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js';
 import { handleRuntimeProbe } from './commands/runtime.js';
-import { handleCandidateList, handleCandidateShow } from './commands/candidate.js';
+import { handleCandidateList, handleCandidateShow, handleCandidateIntake } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
 const program = new Command();
@@ -298,6 +298,17 @@ candidateCmd
   .option('--json', 'Output raw JSON')
   .action(async (candidateId, opts) => {
     await handleCandidateShow({ candidateId, ...opts });
+  });
+
+candidateCmd
+  .command('intake')
+  .description('Intake a principle candidate into the ledger')
+  .requiredOption('--candidate-id <id>', 'Candidate ID to intake')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output as JSON')
+  .option('--dry-run', 'Show what would be written without writing')
+  .action(async (opts) => {
+    await handleCandidateIntake(opts);
   });
 
 // ── Artifact inspection commands ────────────────────────────────────────────
