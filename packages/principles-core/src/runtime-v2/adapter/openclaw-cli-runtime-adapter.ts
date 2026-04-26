@@ -299,12 +299,16 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
         warnings.push(`openclaw agents list exited with code ${listResult.exitCode}`);
       } else {
         // Parse agent list and check if target agent exists
+        // The output may contain config warnings/ANSI codes before the JSON array
         try {
-          const parsed = JSON.parse(listResult.stdout);
+          const jsonStart = listResult.stdout.indexOf('[');
+          if (jsonStart === -1) throw new Error('No JSON array found');
+          const jsonStr = listResult.stdout.slice(jsonStart);
+          const parsed = JSON.parse(jsonStr);
           // agents list returns an array of agent objects (each with an `id` field)
-          const agentIds: string[] = Array.isArray(parsed)
-            ? parsed.map((a) => typeof a === 'string' ? a : (a as { id?: string }).id)
-            : (parsed.agents ?? parsed.items ?? []).map((a: unknown) => typeof a === 'string' ? a : (a as { id?: string }).id);
+          const agentIds: string[] = parsed.map((a: unknown) =>
+            typeof a === 'string' ? a : (a as { id?: string }).id
+          );
 
           if (!agentIds.includes(this.agentId)) {
             healthy = false;
