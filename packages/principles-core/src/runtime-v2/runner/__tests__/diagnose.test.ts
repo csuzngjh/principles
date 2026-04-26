@@ -68,7 +68,7 @@ describe('cli/diagnose', () => {
     const getTaskMock = vi.fn<() => Promise<TaskRecord | null>>().mockResolvedValue(taskRecord);
     const mockStateManager = { getTask: getTaskMock } as unknown as RuntimeStateManager;
 
-    const mockRunner = {} as unknown as DiagnosticianRunner;
+    const _mockRunner = {} as unknown as DiagnosticianRunner;
 
     const result = await status({ taskId: TASK_ID, stateManager: mockStateManager });
 
@@ -92,7 +92,7 @@ describe('cli/diagnose', () => {
     const getTaskMock = vi.fn<() => Promise<TaskRecord | null>>().mockResolvedValue(null);
     const mockStateManager = { getTask: getTaskMock } as unknown as RuntimeStateManager;
 
-    const mockRunner = {} as unknown as DiagnosticianRunner;
+    const _mockRunner = {} as unknown as DiagnosticianRunner;
 
     const result = await status({ taskId: TASK_ID, stateManager: mockStateManager });
 

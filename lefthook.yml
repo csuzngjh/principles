@@ -16,4 +16,4 @@ pre-push:
       run: node scripts/protect-branch.cjs
     lint:
       # Block lint errors from being pushed (warnings are allowed but should be fixed)
-      run: npx eslint packages/openclaw-plugin/src
+      run: npm run lint --workspace=principles-disciple
