@@ -20,9 +20,9 @@ resurrecting heartbeat/cron/subagent.
 - [x] **Phase m6-06: E2E Verification** -- SHIPPED
 - [x] **Phase m7-01: Candidate Intake Contract** -- Interface + schema for intake workflow (SHIPPED)
 - [x] **Phase m7-02: PrincipleTreeLedger Adapter** -- LedgerAdapter implementation with field expansion + idempotency (SHIPPED 2026-04-26)
-- [ ] **Phase m7-03: Intake Service + Idempotency** -- Core service with deduplication
-	- [ ] m7-03-01-PLAN.md -- CandidateIntakeService class: consume pending candidates, write via adapter, idempotency
-	- [ ] m7-03-02-PLAN.md -- CandidateIntakeService tests: happy path, deduplication, error handling
+- [x] **Phase m7-03: Intake Service + Idempotency** -- Core service with deduplication (SHIPPED 2026-04-26)
+	- [x] m7-03-01-PLAN.md -- CandidateIntakeService class: consume pending candidates, write via adapter, idempotency
+	- [x] m7-03-02-PLAN.md -- CandidateIntakeService tests: happy path, deduplication, error handling
 - [ ] **Phase m7-04: CLI: `pd candidate intake`** -- `pd candidate intake --candidate-id <id> --workspace <path> --json`
 	- [ ] m7-04-01-PLAN.md -- CLI handler: parse args, call service, format output
 - [ ] **Phase m7-05: E2E: candidate -> ledger entry** -- Full traceability + idempotency verification
@@ -103,8 +103,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] m7-03-01-PLAN.md -- CandidateIntakeService implementation + idempotency logic
-- [ ] m7-03-02-PLAN.md -- Intake service unit tests (happy path, double-intake, failure)
+ - [x] m7-03-01-PLAN.md -- CandidateIntakeService implementation + idempotency logic
+ - [x] m7-03-02-PLAN.md -- Intake service unit tests (happy path, double-intake, failure)
 
 ---
 
