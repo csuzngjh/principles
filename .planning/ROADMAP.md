@@ -125,8 +125,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] m7-04-01-PLAN.md -- `pd candidate intake` CLI command + dry-run
-- [ ] m7-04-02-PLAN.md -- Intake CLI integration tests
+- [x] m7-04-01-PLAN.md -- `pd candidate intake` CLI command + dry-run
+- [x] m7-04-02-PLAN.md -- Intake CLI integration tests
 
 ---
 
