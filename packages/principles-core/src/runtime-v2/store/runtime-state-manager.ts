@@ -86,9 +86,9 @@ export interface ArtifactWithCandidates {
 // ── RuntimeStateManager ──────────────────────────────────────────────────────
 
 export class RuntimeStateManager {
-  private connection!: SqliteConnection;
-  private taskStore!: TaskStore;
-  private runStore!: RunStore;
+  private _connection!: SqliteConnection;
+  private _taskStore!: TaskStore;
+  private _runStore!: RunStore;
   private leaseManager!: LeaseManager;
   private retryPolicy!: RetryPolicy;
   private recoverySweep!: RecoverySweep;
@@ -105,24 +105,24 @@ export class RuntimeStateManager {
   async initialize(): Promise<void> {
     if (this._initialized) return;
 
-    this.connection = new SqliteConnectionClass(this.options.workspaceDir);
-    this.taskStore = new SqliteTaskStore(this.connection);
-    this.runStore = new SqliteRunStore(this.connection);
+    this._connection = new SqliteConnectionClass(this.options.workspaceDir);
+    this._taskStore = new SqliteTaskStore(this._connection);
+    this._runStore = new SqliteRunStore(this._connection);
 
     this.retryPolicy = new DefaultRetryPolicy(this.options.retryPolicyConfig);
 
     this.leaseManager = new DefaultLeaseManager(
-      this.taskStore,
-      this.runStore,
-      this.connection,
-      { taskStore: this.taskStore, runStore: this.runStore, connection: this.connection, emitter: this.emitter },
+      this._taskStore,
+      this._runStore,
+      this._connection,
+      { taskStore: this._taskStore, runStore: this._runStore, connection: this._connection, emitter: this.emitter },
     );
 
     this.recoverySweep = new DefaultRecoverySweep(
-      this.taskStore,
+      this._taskStore,
       this.leaseManager,
       this.retryPolicy,
-      this.connection,
+      this._connection,
       this.emitter,
     );
 
@@ -133,10 +133,32 @@ export class RuntimeStateManager {
     return this._initialized;
   }
 
+  /** Readonly accessors for internal stores — used by CLI DiagnosticianRunner setup. */
+  get connection(): SqliteConnection {
+    this.assertInitialized();
+    return this._connection;
+  }
+
+  get taskStore(): TaskStore {
+    this.assertInitialized();
+    return this._taskStore;
+  }
+
+  get runStore(): RunStore {
+    this.assertInitialized();
+    return this._runStore;
+  }
+
+  private assertInitialized(): void {
+    if (!this._initialized) {
+      throw new Error('RuntimeStateManager has not been initialized — call initialize() first');
+    }
+  }
+
   /** Close the state manager and release resources. */
   async close(): Promise<void> {
-    if (this.connection) {
-      this.connection.close();
+    if (this._connection) {
+      this._connection.close();
     }
     this._initialized = false;
   }
@@ -145,39 +167,39 @@ export class RuntimeStateManager {
 
   async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
     this.assertInitialized();
-    return this.taskStore.createTask(record);
+    return this._taskStore.createTask(record);
   }
 
   async getTask(taskId: string): Promise<TaskRecord | null> {
     this.assertInitialized();
-    return this.taskStore.getTask(taskId);
+    return this._taskStore.getTask(taskId);
   }
 
   async listTasks(filter?: TaskStoreFilter): Promise<TaskRecord[]> {
     this.assertInitialized();
-    return this.taskStore.listTasks(filter);
+    return this._taskStore.listTasks(filter);
   }
 
   async updateTask(taskId: string, patch: TaskStoreUpdatePatch): Promise<TaskRecord> {
     this.assertInitialized();
-    return this.taskStore.updateTask(taskId, patch);
+    return this._taskStore.updateTask(taskId, patch);
   }
 
   async deleteTask(taskId: string): Promise<boolean> {
     this.assertInitialized();
-    return this.taskStore.deleteTask(taskId);
+    return this._taskStore.deleteTask(taskId);
   }
 
   // ── Run operations ────────────────────────────────────────────────────────
 
   async getRunsByTask(taskId: string): Promise<RunRecord[]> {
     this.assertInitialized();
-    return this.runStore.listRunsByTask(taskId);
+    return this._runStore.listRunsByTask(taskId);
   }
 
   async getRun(runId: string): Promise<RunRecord | null> {
     this.assertInitialized();
-    return this.runStore.getRun(runId);
+    return this._runStore.getRun(runId);
   }
 
   // ── Lease operations ──────────────────────────────────────────────────────
@@ -213,7 +235,7 @@ export class RuntimeStateManager {
     this.assertInitialized();
     const now = new Date().toISOString();
 
-    const updated = await this.taskStore.updateTask(taskId, {
+    const updated = await this._taskStore.updateTask(taskId, {
       status: 'succeeded',
       leaseOwner: null,
       leaseExpiresAt: null,
@@ -221,10 +243,10 @@ export class RuntimeStateManager {
     });
 
     // Update the latest run to terminal 'succeeded' state
-    const runs = await this.runStore.listRunsByTask(taskId);
+    const runs = await this._runStore.listRunsByTask(taskId);
     const latestRun = runs[runs.length - 1];
     if (latestRun) {
-      await this.runStore.updateRun(latestRun.runId, {
+      await this._runStore.updateRun(latestRun.runId, {
         executionStatus: 'succeeded',
         endedAt: now,
         reason: 'task_completed',
@@ -248,7 +270,7 @@ export class RuntimeStateManager {
     this.assertInitialized();
     const now = new Date().toISOString();
 
-    const updated = await this.taskStore.updateTask(taskId, {
+    const updated = await this._taskStore.updateTask(taskId, {
       status: 'failed',
       leaseOwner: null,
       leaseExpiresAt: null,
@@ -256,10 +278,10 @@ export class RuntimeStateManager {
     });
 
     // Update the latest run to terminal 'failed' state
-    const runs = await this.runStore.listRunsByTask(taskId);
+    const runs = await this._runStore.listRunsByTask(taskId);
     const latestRun = runs[runs.length - 1];
     if (latestRun) {
-      await this.runStore.updateRun(latestRun.runId, {
+      await this._runStore.updateRun(latestRun.runId, {
         executionStatus: 'failed',
         endedAt: now,
         reason: 'task_failed',
@@ -283,7 +305,7 @@ export class RuntimeStateManager {
     this.assertInitialized();
     const now = new Date().toISOString();
 
-    const updated = await this.taskStore.updateTask(taskId, {
+    const updated = await this._taskStore.updateTask(taskId, {
       status: 'retry_wait',
       leaseOwner: null,
       leaseExpiresAt: null,
@@ -291,10 +313,10 @@ export class RuntimeStateManager {
     });
 
     // Update the latest run to 'failed' state with error category
-    const runs = await this.runStore.listRunsByTask(taskId);
+    const runs = await this._runStore.listRunsByTask(taskId);
     const latestRun = runs[runs.length - 1];
     if (latestRun) {
-      await this.runStore.updateRun(latestRun.runId, {
+      await this._runStore.updateRun(latestRun.runId, {
         executionStatus: 'failed',
         endedAt: now,
         reason: 'task_retry',
@@ -321,7 +343,7 @@ export class RuntimeStateManager {
     this.assertInitialized();
     const now = new Date().toISOString();
 
-    const updated = await this.runStore.updateRun(runId, {
+    const updated = await this._runStore.updateRun(runId, {
       outputPayload,
       executionStatus: 'succeeded',
       endedAt: now,
@@ -355,7 +377,7 @@ export class RuntimeStateManager {
   /** Returns the most recent CommitRecord for a task, or null if no commit exists. */
   async getCommitByTaskId(taskId: string): Promise<CommitRecord | null> {
     this.assertInitialized();
-    const db = this.connection.getDb();
+    const db = this._connection.getDb();
     const row = db.prepare(`
       SELECT commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at
       FROM commits WHERE task_id = ? ORDER BY created_at DESC LIMIT 1
@@ -367,7 +389,7 @@ export class RuntimeStateManager {
   /** Returns all principle candidates reachable via tasks→runs→commits chain for a given taskId. */
   async getCandidatesByTaskId(taskId: string): Promise<CandidateRecord[]> {
     this.assertInitialized();
-    const db = this.connection.getDb();
+    const db = this._connection.getDb();
     const rows = db.prepare(`
       SELECT pc.candidate_id, pc.artifact_id, pc.task_id, pc.source_run_id,
              pc.title, pc.description, pc.confidence, pc.status, pc.created_at, pc.source_recommendation_json
@@ -384,7 +406,7 @@ export class RuntimeStateManager {
   /** Returns a single candidate by ID, or null if not found. */
   async getCandidate(candidateId: string): Promise<CandidateRecord | null> {
     this.assertInitialized();
-    const db = this.connection.getDb();
+    const db = this._connection.getDb();
     const row = db.prepare(`
       SELECT candidate_id, artifact_id, task_id, source_run_id, title, description,
              confidence, source_recommendation_json, status, created_at
@@ -397,7 +419,7 @@ export class RuntimeStateManager {
   /** Returns a single artifact by ID, or null if not found. */
   async getArtifact(artifactId: string): Promise<ArtifactRecord | null> {
     this.assertInitialized();
-    const db = this.connection.getDb();
+    const db = this._connection.getDb();
     const row = db.prepare(`
       SELECT artifact_id, run_id, task_id, artifact_kind, content_json, created_at
       FROM artifacts WHERE artifact_id = ?
@@ -411,7 +433,7 @@ export class RuntimeStateManager {
     this.assertInitialized();
     const artifact = await this.getArtifact(artifactId);
     if (!artifact) return null;
-    const db = this.connection.getDb();
+    const db = this._connection.getDb();
     const rows = db.prepare(`
       SELECT candidate_id, artifact_id, task_id, source_run_id, title, description,
              confidence, source_recommendation_json, status, created_at
@@ -423,10 +445,4 @@ export class RuntimeStateManager {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-
-  private assertInitialized(): void {
-    if (!this._initialized) {
-      throw new Error('RuntimeStateManager not initialized — call initialize() first');
-    }
-  }
 }

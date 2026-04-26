@@ -40,6 +40,12 @@ export type RecommendationKind = Static<typeof RecommendationKindSchema>;
 export const DiagnosticianRecommendationSchema = Type.Object({
   kind: RecommendationKindSchema,
   description: Type.String({ minLength: 1 }),
+  /** Trigger pattern (regex/keywords) — required when kind is 'principle' */
+  triggerPattern: Type.Optional(Type.String()),
+  /** Action to take when pattern matches — required when kind is 'principle' */
+  action: Type.Optional(Type.String()),
+  /** Highly abstracted principle (≤40 chars) — required when kind is 'principle' */
+  abstractedPrinciple: Type.Optional(Type.String()),
 });
  
 export type DiagnosticianRecommendation = Static<typeof DiagnosticianRecommendationSchema>;

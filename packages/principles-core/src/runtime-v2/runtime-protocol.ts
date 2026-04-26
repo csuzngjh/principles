@@ -14,6 +14,7 @@ import { PDErrorCategorySchema } from './error-categories.js';
 
 export const RuntimeKindSchema = Type.Union([
   Type.Literal('openclaw'),
+  Type.Literal('openclaw-cli'),
   Type.Literal('openclaw-history'), // compatibility import from OpenClaw trajectory.db
   Type.Literal('claude-cli'),
   Type.Literal('codex-cli'),

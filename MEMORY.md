@@ -72,3 +72,13 @@
 - quota 默认只有 3 次/天（已通过配置改为 20）
 - idle 检测依赖无活跃会话，开发中很难触发（已通过 periodic 模式绕过）
 - 所有 sleep_reflection 相关日志已从 debug 改为 info 级别
+
+## Runtime v2 重构事实 (2026-04-26)
+- 当前方向：PD Runtime v2 已完成 M1-M5，M6 正在接入 `openclaw-cli` 作为第一个真实生产 runtime adapter。目标是摆脱 OpenClaw 插件 API / heartbeat / prompt hook / sessions_spawn / marker file，改成 `pd diagnose run --runtime openclaw-cli` 的显式执行链。
+- M3 已建立 PD-owned retrieval：`pd legacy import openclaw` 将 OpenClaw `.state/diagnostician_tasks.json` 和 `.state/trajectory.db` 导入 `workspace/.pd/state.db`；`pd trajectory locate`、`pd history query`、`pd context build` 可基于 PD-owned DB 工作。
+- M4/M5 已建立 runner + commit：`DiagnosticianRunner` 使用 lease -> context -> runtime -> validate -> commit；M5 committer 将 diagnosis artifact 和 principle candidates 写入 SQLite artifact registry。
+- 当前真实 OpenClaw 环境：`openclaw --version` 可用；`main` agent 存在，`diagnostician` agent 不存在。默认 diagnostician agent 会失败，真实验证应显式使用 `--agent main`，除非先在 OpenClaw 中创建 diagnostician agent。
+- M6 最新 blocker：`pd runtime probe --runtime openclaw-cli --openclaw-local --agent main` 不能只依赖 `openclaw --version` / `openclaw agents list`。真实 `openclaw agent --agent main --message ... --json --local` 会因 OpenClaw 插件加载失败（例如 qqbot PluginLoadFailureError）而 exit 1，但 probe 可能只返回 degraded/exit 0，导致 hard gate 假阳性。
+- M6 最新 blocker：`OpenClawCliRuntimeAdapter.pollRun()` 对非零 exit 只返回 `CLI exited with code X`，丢弃 stdout/stderr；真实 `pd diagnose run` 失败后只看到 `execution_failed`，无法定位 OpenClaw 插件加载、参数、prompt 或输出解析问题。必须保留 bounded stdout/stderr excerpts 到 RunStatus.reason / telemetry / CLI JSON。
+- M6 最新 blocker：`pd diagnose run --json` 在 runner result 为 `retried` / `failed` 时仍 exit 0；operator E2E 会误判成功。非 `succeeded` 必须 exit non-zero。
+- M6 修复后验收必须在真实环境执行：`pd runtime probe --runtime openclaw-cli --openclaw-local --agent main --json`、`--agent diagnostician` 负例、以及真实/临时 task 的 `pd diagnose run --runtime openclaw-cli --openclaw-local --agent main --json`，并确认成功时产生 artifact/candidate，失败时有可行动错误细节。
