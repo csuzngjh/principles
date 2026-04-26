@@ -120,50 +120,6 @@ function extractPayloadFromCliOutput(stdout: string, stderr?: string): unknown |
 
   return null;
 }
-
-/**
- * Navigate the three possible envelope shapes to find the payload text that
- * contains the DiagnosticianOutputV1 JSON string.
- *
- * Returns the parsed JSON object (not a string) if extraction succeeds,
- * or null if the envelope structure doesn't match any known shape.
- */
-function extractDiagnosisFromEnvelope(parsed: unknown): unknown | null {
-  if (typeof parsed !== 'object' || parsed === null) {
-    return null;
-  }
-
-  // Case 2: local envelope — { payloads: [{ text: "<json>" }] }
-  const asLocal = parsed as { payloads?: { text?: unknown }[] };
-  if (Array.isArray(asLocal.payloads) && asLocal.payloads.length > 0) {
-    const [first] = asLocal.payloads;
-    if (first && typeof first.text === 'string') {
-      try {
-        return JSON.parse(first.text);
-      } catch { /* not JSON — fall through */ }
-    }
-  }
-
-  // Case 3: gateway envelope — { result: { payloads: [{ text: "<json>" }] } }
-  const asGateway = parsed as { result?: { payloads?: { text?: unknown }[] } };
-  if (
-    asGateway.result &&
-    typeof asGateway.result === 'object' &&
-    Array.isArray(asGateway.result.payloads) &&
-    asGateway.result.payloads.length > 0
-  ) {
-    const [first] = asGateway.result.payloads;
-    if (first && typeof first.text === 'string') {
-      try {
-        return JSON.parse(first.text);
-      } catch { /* not JSON — fall through */ }
-    }
-  }
-
-  // No matching envelope shape
-  return null;
-}
-
 /**
  * Search for a single JSON object literal inside `text` using a balanced-bracket
  * scan. Returns the parsed object, or null if no valid object is found.
@@ -186,6 +142,55 @@ function extractJsonObject(text: string): unknown | null {
       }
     }
   }
+  return null;
+}
+
+/**
+ * Navigate the three possible envelope shapes to find the payload text that
+ * contains the DiagnosticianOutputV1 JSON string.
+ *
+ * Returns the parsed JSON object (not a string) if extraction succeeds,
+ * or null if the envelope structure doesn't match any known shape.
+ */
+function extractDiagnosisFromEnvelope(parsed: unknown): unknown | null {
+  if (typeof parsed !== 'object' || parsed === null) {
+    return null;
+  }
+
+  // Case 2: local envelope — { payloads: [{ text: "<json>" }] }
+  const asLocal = parsed as { payloads?: { text?: unknown }[] };
+  if (Array.isArray(asLocal.payloads) && asLocal.payloads.length > 0) {
+    const [first] = asLocal.payloads;
+    if (first && typeof first.text === 'string') {
+      const inner = first.text.trim();
+      try {
+        return JSON.parse(inner);
+      } catch { /* fall through — try prose extraction */ }
+      const extracted = extractJsonObject(inner);
+      if (extracted !== null) return extracted;
+    }
+  }
+
+  // Case 3: gateway envelope — { result: { payloads: [{ text: "<json>" }] } }
+  const asGateway = parsed as { result?: { payloads?: { text?: unknown }[] } };
+  if (
+    asGateway.result &&
+    typeof asGateway.result === 'object' &&
+    Array.isArray(asGateway.result.payloads) &&
+    asGateway.result.payloads.length > 0
+  ) {
+    const [first] = asGateway.result.payloads;
+    if (first && typeof first.text === 'string') {
+      const inner = first.text.trim();
+      try {
+        return JSON.parse(inner);
+      } catch { /* fall through */ }
+      const extracted = extractJsonObject(inner);
+      if (extracted !== null) return extracted;
+    }
+  }
+
+  // No matching envelope shape
   return null;
 }
 
