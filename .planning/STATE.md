@@ -1,11 +1,11 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.5
-milestone_name: milestone
-status: m6-02 shipped on feature/pd-runtime-v2-m6
-last_updated: "2026-04-25T01:24:50.420Z"
+milestone: v2.6
+milestone_name: M7 Principle Candidate Intake
+status: m7-01 context gathered — ready for planning
+last_updated: "2026-04-26T12:00:00.000Z"
 progress:
-  total_phases: 6
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,35 +17,37 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.5 M6 Production Runtime Adapter: OpenClaw CLI Diagnostician
+**Current Focus:** v2.6 M7 Principle Candidate Intake: consume pending candidates and write ledger probation entries
 
 ## Current Position
 
-Phase: m6-04 (complete)
-Phase: m6-05 (context gathered — ready for planning)
-Status: m6-02 shipped on feature/pd-runtime-v2-m6
+Phase: m7-01 (context gathered — ready for planning)
+Session stopped at: Phase m7-01 context gathered
+Resume from: .planning/phases/m7-01-Candidate-Intake-Contract/m7-01-CONTEXT.md
 
-## M6 Phase Structure
+## M7 Phase Structure
 
 | Phase | Name | Requirements |
 |-------|------|--------------|
-| m6-01 | CliProcessRunner + RuntimeKind | RUNR-01~04, RUK-01~02 (6 req) |
-| m6-02 | OpenClawCliRuntimeAdapter Core | OCRA-01~05 (5 req) |
-| m6-03 | DiagnosticianPromptBuilder + Workspace | DPB-01~05, OCRA-06 (6 req) |
-| m6-04 | PD CLI Extension + Error Mapping | CLI-01~04, ERR-01~05 (8 req) |
-| m6-05 | Telemetry Events | TELE-01~04 (4 req) |
-| m6-06 | E2E Verification | E2EV-01~06 (6 req) |
+| m7-01 | Candidate Intake Contract | INTAKE-01~04, LEDGER-01 (5 req) |
+| m7-02 | PrincipleTreeLedger Adapter | LEDGER-01~03 (3 req) |
+| m7-03 | Intake Service + Idempotency | INTAKE-05~07 (3 req) |
+| m7-04 | CLI: pd candidate intake | CLI-INTAKE-01~03 (3 req) |
+| m7-05 | E2E: candidate → ledger entry | E2E-INTAKE-01~04 (4 req) |
 
 ## Context
 
-**M5 Boundary Constraints (still valid for M6):**
+**M7 Boundary Constraints:**
 
-1. Atomic commit truth in SQLite .pd/state.db ONLY
-2. Runner only depends on Committer interface
-3. task succeeded MUST happen after commit success
-4. Cannot produce "task succeeded but candidate missing" state
-5. E2E verification is a hard gate
-6. No principle promotion, no active injection, no multi-runtime, no plugin demotion
+1. Atomic commit truth in SQLite .pd/state.db ONLY (carried from M5)
+2. Runner only depends on Committer interface (carried from M5)
+3. task succeeded MUST happen after commit success (carried from M5)
+4. Cannot produce "task succeeded but candidate missing" state (carried from M5)
+5. No pain signal bridge in M7
+6. No legacy path deletion in M7
+7. No heartbeat/cron/subagent resurrection
+8. No direct promotion to active principle
+9. Idempotency is a hard requirement for intake
 
 **Baseline (Frozen):**
 
@@ -54,5 +56,6 @@ Status: m6-02 shipped on feature/pd-runtime-v2-m6
 - v2.2 M3: History Retrieval + Context Build — SHIPPED 2026-04-23
 - v2.3 M4: Diagnostician Runner v2 — SHIPPED 2026-04-23
 - v2.4 M5: Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24
+- v2.5 M6: Production Runtime Adapter — SHIPPED 2026-04-25
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
