@@ -10,7 +10,9 @@
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "declaration": true
+    "declaration": true,
+    "allowJs": true,
+    "checkJs": false
   },
   "include": ["src/**/*"]
 }
