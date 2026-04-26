@@ -350,10 +350,10 @@ export const CandidateIntakeOutputSchema = Type.Object({
 export type CandidateIntakeOutput = Static<typeof CandidateIntakeOutputSchema>;
 ```
 
-### LedgerPrincipleEntry Schema (Draft is Correct)
+### LedgerPrincipleEntry Schema (UPDATED: artifactRef + taskRef added)
 ```typescript
-// Source: draft candidate-intake.ts lines 37-47 -- matches D-03
-// Verified against DiagnosticianOutputV1 for triggerPattern/action source
+// Source: D-03 (revised) -- sourceRef uses candidate://<candidateId> for idempotency
+// artifactRef/taskRef are traceability-only provenance references
 export const LedgerPrincipleEntrySchema = Type.Object({
   id: Type.String(),
   title: Type.String(),
@@ -362,7 +362,9 @@ export const LedgerPrincipleEntrySchema = Type.Object({
   action: Type.Optional(Type.String()),
   status: Type.Literal('probation'),
   evaluability: Type.Literal('weak_heuristic'),
-  sourceRef: Type.String(),
+  sourceRef: Type.String(),         // candidate://<candidateId> — idempotency key
+  artifactRef: Type.Optional(Type.String()), // artifact://<artifactId> — traceability only
+  taskRef: Type.Optional(Type.String()),    // task://<taskId> — traceability only
   createdAt: Type.String(),
 });
 export type LedgerPrincipleEntry = Static<typeof LedgerPrincipleEntrySchema>;
@@ -476,27 +478,27 @@ const DEFAULTS = {
 | A4 | `text` field construction from DiagnosticianRecommendation is the service's responsibility (m7-03), not defined in the contract [ASSUMED] | Ledger Entry Contract | The contract only defines field types, not construction logic. If downstream consumers expect a specific `text` format, that format should be specified. |
 | A5 | `CandidateIntakeService` class lives in `store/` directory per established pattern (DiagnosticianCommitter, etc.) [ASSUMED] | Architecture Patterns | The current draft places the service alongside schemas in the root `runtime-v2/` directory. Moving to `store/` follows the committer pattern. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Who owns ID generation for probation entries?**
    - What we know: D-03 says `id` is a "generated unique ID". The draft generates it in `CandidateIntakeService` as `P_${Date.now().slice(-6)}`. But other runtime-v2 components use `randomUUID()`.
    - What's unclear: Should the service generate the ID (as draft does) or the adapter? If the service generates it, the `writeProbationEntry` type must accept full `LedgerPrincipleEntry` (including `id`). If the adapter generates it, the type should omit `id` and `createdAt`.
-   - Recommendation: Service generates `id` using `randomUUID()` (consistent with committer). Update `writeProbationEntry` type to accept full `LedgerPrincipleEntry`. This gives the service control over identity and keeps the adapter as a simple passthrough.
+   - Recommendation (RESOLVED): Service generates `id` using `randomUUID()` (consistent with committer). Update `writeProbationEntry` type to accept full `LedgerPrincipleEntry`. This gives the service control over identity and keeps the adapter as a simple passthrough.
 
 2. **Where should `CandidateIntakeService` live in the file tree?**
    - What we know: The draft places it in `candidate-intake.ts` (root of `runtime-v2/`). But `DiagnosticianCommitter` implementation is in `store/diagnostician-committer.ts`.
    - What's unclear: Should service follow the `store/` pattern (alongside committer) or stay at `runtime-v2/` level (alongside runner)?
-   - Recommendation: Place `CandidateIntakeService` in `store/candidate-intake-service.ts` (follows committer pattern). Keep schemas/interfaces/errors in `runtime-v2/candidate-intake.ts`. This separates contract from implementation cleanly.
+   - Recommendation (RESOLVED): Place `CandidateIntakeService` in `store/candidate-intake-service.ts` (follows committer pattern). Keep schemas/interfaces/errors in `runtime-v2/candidate-intake.ts`. This separates contract from implementation cleanly.
 
 3. **Should `text` field format be specified in the contract or left to the service?**
    - What we know: The draft constructs `text` as `When ${triggerPattern}, then ${action}.` from `DiagnosticianRecommendation` fields. D-03 says `text` is a "synthesized principle statement."
    - What's unclear: Is the format `"When X, then Y."` a contract requirement or an implementation choice?
-   - Recommendation: The contract should specify the field type and provenance (derived from recommendation), not the exact construction logic. Let m7-03 decide the format. The contract test should verify the schema shape, not the content.
+   - Recommendation (RESOLVED): The contract should specify the field type and provenance (derived from recommendation), not the exact construction logic. Let m7-03 decide the format. The contract test should verify the schema shape, not the content.
 
 4. **ROADMAP success criteria vs CONTEXT.md decisions -- which is authoritative?**
    - What we know: ROADMAP says input captures `candidateId, taskId, artifactId, diagnostic output`. CONTEXT.md D-01 says `candidateId, workspaceDir` only. These conflict directly.
    - What's unclear: Does the ROADMAP need updating, or does CONTEXT.md need revision?
-   - Recommendation: CONTEXT.md is more recent and was gathered through direct discussion. The decisions are explicitly "LOCKED." Planner should follow D-01 and note that ROADMAP.md success criteria 1 needs updating.
+   - Recommendation (RESOLVED): CONTEXT.md is more recent and was gathered through direct discussion. The decisions are explicitly "LOCKED." Planner should follow D-01 and note that ROADMAP.md success criteria 1 needs updating.
 
 ## Validation Architecture
 
@@ -505,26 +507,26 @@ const DEFAULTS = {
 |----------|-------|
 | Framework | vitest 4.1.0 [VERIFIED: packages/principles-core/package.json] |
 | Config file | `packages/principles-core/vitest.config.ts` |
-| Quick run command | `npx vitest run src/runtime-v2/__tests__/candidate-intake.test.ts` |
+| Quick run command | `npx vitest run tests/candidate-intake.test.ts` |
 | Full suite command | `npx vitest run` (from packages/principles-core) |
 
 ### Phase Requirements -> Test Map
 
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| INTAKE-01 | CandidateIntakeInputSchema validates correct shape, rejects missing fields, rejects extra fields | unit | `npx vitest run src/runtime-v2/__tests__/candidate-intake.test.ts -t "INTAKE-01"` | No - Wave 0 |
-| INTAKE-02 | CandidateIntakeOutputSchema validates correct shape with status='consumed' | unit | `npx vitest run src/runtime-v2/__tests__/candidate-intake.test.ts -t "INTAKE-02"` | No - Wave 0 |
-| INTAKE-03 | CandidateIntakeError has correct name, code property, and all 5 error codes defined | unit | `npx vitest run src/runtime-v2/__tests__/candidate-intake.test.ts -t "INTAKE-03"` | No - Wave 0 |
-| INTAKE-04 | LedgerAdapter interface shape (structural type check -- no runtime test possible for interface) | unit | `npx vitest run src/runtime-v2/__tests__/candidate-intake.test.ts -t "INTAKE-04"` | No - Wave 0 |
-| LEDGER-01 | LedgerPrincipleEntrySchema validates all 9 fields, optional fields optional, literal fields restricted | unit | `npx vitest run src/runtime-v2/__tests__/candidate-intake.test.ts -t "LEDGER-01"` | No - Wave 0 |
+| INTAKE-01 | CandidateIntakeInputSchema validates correct shape, rejects missing fields, rejects extra fields | unit | `npx vitest run tests/candidate-intake.test.ts -t "INTAKE-01"` | No - Wave 0 |
+| INTAKE-02 | CandidateIntakeOutputSchema validates correct shape with status='consumed' | unit | `npx vitest run tests/candidate-intake.test.ts -t "INTAKE-02"` | No - Wave 0 |
+| INTAKE-03 | CandidateIntakeError has correct name, code property, and all 5 error codes defined | unit | `npx vitest run tests/candidate-intake.test.ts -t "INTAKE-03"` | No - Wave 0 |
+| INTAKE-04 | LedgerAdapter interface shape (structural type check -- no runtime test possible for interface) | unit | `npx vitest run tests/candidate-intake.test.ts -t "INTAKE-04"` | No - Wave 0 |
+| LEDGER-01 | LedgerPrincipleEntrySchema validates all 9 fields, optional fields optional, literal fields restricted | unit | `npx vitest run tests/candidate-intake.test.ts -t "LEDGER-01"` | No - Wave 0 |
 
 ### Sampling Rate
-- **Per task commit:** `npx vitest run src/runtime-v2/__tests__/candidate-intake.test.ts`
+- **Per task commit:** `npx vitest run tests/candidate-intake.test.ts`
 - **Per wave merge:** `npx vitest run` (full suite in principles-core)
 - **Phase gate:** Full suite green before `/gsd-verify-work`
 
 ### Wave 0 Gaps
-- [ ] `src/runtime-v2/__tests__/candidate-intake.test.ts` -- covers all 5 requirements (INTAKE-01 through LEDGER-01)
+- [ ] `tests/candidate-intake.test.ts` -- covers all 5 requirements (INTAKE-01 through LEDGER-01)
 - [ ] Framework already installed: vitest 4.1.0 present in devDependencies
 - [ ] Vitest config already includes `src/runtime-v2/**/*.test.ts` in `include` array [VERIFIED: vitest.config.ts line 6]
 

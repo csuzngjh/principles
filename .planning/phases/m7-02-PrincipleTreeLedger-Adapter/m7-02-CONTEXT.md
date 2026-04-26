@@ -40,14 +40,14 @@ The `sourceRef = 'candidate://<candidateId>'` is the primary provenance/idempote
 
 ### B — triggerPattern / action defaults
 
-**Decision: Extract from DiagnosticianRecommendation JSON; null if absent.**
-`CandidateRecord.sourceRecommendationJson` contains the full `DiagnosticianOutputV1` JSON. The adapter parses it to extract `triggerPattern` and `action` from the `DiagnosticianRecommendation` record.
+**Decision: Populated by m7-03 (CandidateIntakeService), adapter passes through.**
+`CandidateRecord.sourceRecommendationJson` contains the full `DiagnosticianOutputV1` JSON. The extraction happens in m7-03, which populates `triggerPattern` and `action` on the `LedgerPrincipleEntry`. The adapter uses the entry fields as-is — no JSON parsing.
 
-- If `triggerPattern` is present in the recommendation → use it
-- If absent → `triggerPattern` field is omitted from `LedgerPrincipleEntry` (Type.Optional, null equivalent)
+- If `triggerPattern` is present on the entry → map to `LedgerPrinciple.triggerPattern`
+- If absent → use empty string `''`
 - Same logic for `action`
 
-No derivation from `description` text. M7 does not infer patterns.
+No derivation from `description` text. M7 does not infer patterns. Adapter stays focused on field expansion + ledger write.
 
 ### C — sourceRef storage in ledger
 
@@ -82,13 +82,13 @@ LedgerPrincipleEntry (11 fields)  →  LedgerPrinciple (18+ fields)
 id: UUID v4                        →  id: UUID v4 (same)
 title: string                      →  text: "When {triggerPattern}, then {action}." OR title if no trigger/action
 text: string                       →  text: same (principle statement)
-triggerPattern: string | null      →  trigger: triggerPattern (or "")
+triggerPattern: string | null      →  triggerPattern: triggerPattern (or "")
 action: string | null              →  action: action (or "")
 status: 'probation'                →  status: 'candidate' (ledger uses 'candidate' not 'probation')
 evaluability: 'weak_heuristic'     →  evaluability: 'weak_heuristic'
 sourceRef: candidate://<id>        →  (NOT written to ledger — adapter memory only)
-artifactRef: artifact://<id>        →  (stored as annotation or provenance metadata)
-taskRef: task://<id> | absent      →  (stored as provenance metadata, optional)
+artifactRef: artifact://<id>        →  (NOT written to ledger — adapter memory only)
+taskRef: task://<id> | absent      →  (NOT written to ledger — adapter memory only)
 createdAt: ISO timestamp           →  createdAt: same, also used as updatedAt initially
 
 --- Fields set to defaults (m7-02 does not populate) ---
@@ -99,7 +99,7 @@ domain: undefined
 valueScore: 0
 adherenceRate: 0
 painPreventedCount: 0
-derivedFromPainIds: []
+derivedFromPainIds: [candidateId] (as proxy, for compatibility)
 ruleIds: []
 conflictsWithPrincipleIds: []
 supersedesPrincipleId: undefined
@@ -109,9 +109,6 @@ deprecatedReason: undefined
 detectorMetadata: undefined
 compilationRetryCount: undefined
 suggestedRules: undefined
-source.painId: candidateId (as proxy, for compatibility)
-source.painType: 'diagnostician'
-source.timestamp: createdAt
 ```
 
 **Important: `status: 'probation'` in LedgerPrincipleEntry maps to `status: 'candidate'` in LedgerPrinciple.** The ledger uses `'candidate'` as the probationary status, not `'probation'`.

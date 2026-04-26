@@ -1,7 +1,9 @@
 import { CandidateIntakeError, INTAKE_ERROR_CODES } from '@principles/core/runtime-v2';
 import type { LedgerAdapter, LedgerPrincipleEntry } from '@principles/core/runtime-v2';
-import { addPrincipleToLedger } from './principle-tree-ledger.js';
+import { addPrincipleToLedger, loadLedger } from './principle-tree-ledger.js';
 import type { LedgerPrinciple } from './principle-tree-ledger.js';
+
+const VALID_EVALUABILITIES = ['deterministic', 'weak_heuristic', 'manual_only'] as const;
 
 /**
  * PrincipleTreeLedgerAdapter — bridges 11-field LedgerPrincipleEntry to 18+ field LedgerPrinciple.
@@ -50,10 +52,38 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
   /**
    * Check if a ledger entry already exists for a given candidate.
    *
+   * Queries both the in-memory Map (fast path for same-process repeat calls)
+   * and the ledger file (for cross-process idempotency across CLI invocations).
+   *
    * @returns The existing LedgerPrincipleEntry if found, null otherwise.
    */
   existsForCandidate(candidateId: string): LedgerPrincipleEntry | null {
-    return this.#entryMap.get(candidateId) ?? null;
+    // Fast path: check in-memory Map (covers same-process repeat calls)
+    const cached = this.#entryMap.get(candidateId);
+    if (cached) return cached;
+
+    // Cross-process path: check ledger file by derivedFromPainIds
+    const ledger = loadLedger(this.#stateDir);
+    const found = Object.values(ledger.tree.principles).find((p) =>
+      p.derivedFromPainIds.includes(candidateId),
+    );
+    if (!found) return null;
+
+    // Reconstruct LedgerPrincipleEntry from LedgerPrinciple fields
+    // Note: sourceRef, artifactRef, taskRef are not stored in LedgerPrinciple,
+    // so we cannot fully reconstruct the original LedgerPrincipleEntry.
+    // Return minimal entry sufficient for idempotency signaling.
+    return {
+      id: found.id,
+      sourceRef: `candidate://${candidateId}`,
+      artifactRef: '',
+      taskRef: '',
+      text: found.text,
+      triggerPattern: found.triggerPattern,
+      action: found.action,
+      evaluability: found.evaluability,
+      createdAt: found.createdAt,
+    } as LedgerPrincipleEntry;
   }
 
   /**
@@ -75,11 +105,20 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
    * - status: 'probation' → 'candidate'
    * - triggerPattern/action: pass through (empty string if absent)
    * - All defaults applied per CONTEXT.md expansion table
-   * - sourceRef/artifactRef/taskRef are NOT written to LedgerPrinciple
+   * - sourceRef/artifactRef/taskRef are NOT written to LedgerPrinciple (not stored)
+   * - title is NOT written to LedgerPrinciple — intentionally excluded; title
+   *   is available in LedgerPrincipleEntry but LedgerPrinciple has no title field
    *
    * @internal
    */
   #expandToLedgerPrinciple(entry: LedgerPrincipleEntry, candidateId: string): LedgerPrinciple {
+    if (!VALID_EVALUABILITIES.includes(entry.evaluability as (typeof VALID_EVALUABILITIES)[number])) {
+      throw new CandidateIntakeError(
+        INTAKE_ERROR_CODES.INPUT_INVALID,
+        `Invalid evaluability value: ${entry.evaluability}. Must be one of: ${VALID_EVALUABILITIES.join(', ')}`,
+      );
+    }
+
     const result: LedgerPrinciple = {
       id: entry.id,
       version: 1,
