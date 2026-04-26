@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v2.6
 milestone_name: milestone
-status: m7-02 ready — Candidate Intake Contract SHIPPED
-last_updated: "2026-04-26T12:17:00.000Z"
+status: m7-02 context gathered — ready for planning
+last_updated: "2026-04-26T13:00:00.000Z"
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 2
-  completed_plans: 2
+  completed_plans: 0
 ---
 
 # Project State: Principles
@@ -21,9 +21,9 @@ progress:
 
 ## Current Position
 
-Phase: m7-02 (Candidate Intake Contract SHIPPED — next: PrincipleTreeLedger Adapter)
-Session stopped at: Phase m7-01 complete — all 2 plans done, 27/27 tests passing
-Resume from: .planning/phases/m7-02-PrincipleTreeLedger-Adapter/
+Phase: m7-02 (context gathered — ready for planning)
+Session stopped at: Phase m7-02 context gathered — 4 decisions captured
+Resume from: .planning/phases/m7-02-PrincipleTreeLedger-Adapter/m7-02-CONTEXT.md
 
 ## M7 Phase Structure
 
