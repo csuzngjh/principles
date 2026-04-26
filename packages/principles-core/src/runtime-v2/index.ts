@@ -111,6 +111,7 @@ export type {
   LedgerPrincipleEntry,
   LedgerAdapter,
 } from './candidate-intake.js';
+export { CandidateIntakeService, CandidateIntakeServiceOptions } from './candidate-intake-service.js';
 
 // Store
 export { SqliteTaskStore } from './store/sqlite-task-store.js';
