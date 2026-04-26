@@ -17,7 +17,8 @@
     "resolveJsonModule": true,
     "types": ["node"],
     "paths": {
-      "@principles/core/runtime-v2/*": ["../principles-core/dist/runtime-v2/*"]
+      "@principles/core/runtime-v2/*": ["../principles-core/dist/runtime-v2/*"],
+      "@principles/openclaw-plugin/*": ["../openclaw-plugin/dist/*"]
     }
   },
   "include": ["src/**/*"],
