@@ -35,8 +35,12 @@
   - `action` — extracted from source recommendation (optional)
   - `status` — always `'probation'`
   - `evaluability` — always `'weak_heuristic'`
-  - `sourceRef` — `artifact://<artifactId>` provenance link
+  - `sourceRef` — `candidate://<candidateId>` provenance link (immutable idempotency key — one ledger entry per candidate, never per artifact)
+  - `artifactRef` — `artifact://<artifactId>` provenance reference (for traceability only, not used for idempotency matching)
+  - `taskRef` — `task://<taskId>` provenance reference (optional, for traceability)
   - `createdAt` — ISO timestamp
+
+  **Idempotency rationale:** M5 can produce multiple `principle_candidates` from a single artifact (e.g., LLM generates N recommendations → N candidates). Using `artifact://<artifactId>` as `sourceRef` would cause all N entries to collide on the same key, making only the first one retrievable by `existsForCandidate`. Using `candidate://<candidateId>` guarantees one unique ledger entry per candidate.
 - **D-04:** Probation entry is written to the existing `principle_training_state.json` ledger file via `addPrincipleToLedger()` (openclaw-plugin). It uses the full `LedgerPrinciple` shape but most fields default to 0/empty — only the minimal set above is populated.
 - **D-05:** No direct promotion to active principle in M7. The status remains `probation`.
 
@@ -52,13 +56,13 @@
 
 - **D-09:** Status transition order: write to ledger FIRST, then UPDATE `principle_candidates.status = 'consumed'`. If ledger write fails, candidate stays `pending` and the operation can be retried.
 - **D-10:** Idempotent: re-intaking an already-consumed candidate returns the same `{ candidateId, artifactId, ledgerRef, status: 'consumed' }` result without error. No duplicate ledger write.
-- **D-11:** Idempotency check uses `LedgerAdapter.existsForCandidate()` — if a ledger entry already exists for this candidateId (via sourceRef match), skip the write and return existing result.
+- **D-11:** Idempotency check uses `LedgerAdapter.existsForCandidate()` — if a ledger entry already exists for this candidateId (via `sourceRef === 'candidate://<candidateId>'` match), skip the write and return existing result. Matching is by `sourceRef` field (candidate-level key), NOT by `artifactId`.
 
 ### Error Handling
 
 - **D-12:** `CandidateIntakeError` class with error codes:
   - `candidate_not_found` — candidateId does not exist in DB
-  - `candidate_already_consumed` — status is already `consumed` (non-idempotent fallback)
+  - `candidate_already_consumed` — **[REMOVED from happy-path]** — this code is ONLY for data corruption detection (candidate is `consumed` in DB but no corresponding ledger entry exists). Normal re-intake of an already-consumed candidate returns `status: 'consumed'` with the existing `ledgerRef` (D-10), NOT an error.
   - `artifact_not_found` — candidate exists but associated artifact is missing (data integrity issue)
   - `ledger_write_failed` — ledger write operation failed
   - `input_invalid` — input schema validation failure
