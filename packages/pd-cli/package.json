@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@principles/core": "^0.1.0",
+    "@principles/openclaw-plugin": "^0.1.0",
     "commander": "^12.0.0"
   },
   "devDependencies": {

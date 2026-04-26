@@ -753,4 +753,6 @@ const plugin = {
   }
 };
 
+export { PrincipleTreeLedgerAdapter } from './core/principle-tree-ledger-adapter.js';
+
 export default plugin;
