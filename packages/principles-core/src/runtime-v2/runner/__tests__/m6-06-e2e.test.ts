@@ -345,8 +345,8 @@ describe('E2E m6-06 — OpenClawCliRuntimeAdapter + FakeCliProcessRunner', () =>
       expect(localResult.status).toBe('succeeded');
 
       // HG-3 CRITICAL: args include '--local'
-      const rawLocal = vi.mocked(runCliProcess).mock.calls[0]![0] as unknown as Record<string, unknown>;
-       
+      const rawLocal = vi.mocked(runCliProcess).mock.calls[0]?.[0] as unknown as Record<string, unknown>;
+
       expect(rawLocal.args).toContain('--local');
 
       // ── Sub-case: gateway mode ──────────────────────────────────────────────
@@ -380,8 +380,8 @@ describe('E2E m6-06 — OpenClawCliRuntimeAdapter + FakeCliProcessRunner', () =>
       expect(gatewayResult.status).toBe('succeeded');
 
       // HG-3 CRITICAL: args do NOT include '--local'
-      const rawGateway = vi.mocked(runCliProcess).mock.calls[0]![0] as unknown as Record<string, unknown>;
-       
+      const rawGateway = vi.mocked(runCliProcess).mock.calls[0]?.[0] as unknown as Record<string, unknown>;
+
       expect(rawGateway.args).not.toContain('--local');
     });
   });
