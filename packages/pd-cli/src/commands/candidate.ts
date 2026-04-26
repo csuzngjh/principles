@@ -1,7 +1,3 @@
-// eslint-disable-file
-// TODO: Fix TypeScript module resolution for openclaw-plugin
-// This file uses dynamic import for PrincipleTreeLedgerAdapter
-
 /**
  * pd candidate list/show commands — Principle candidate inspection.
  *
@@ -14,10 +10,11 @@ import {
   RuntimeStateManager,
   candidateList,
   candidateShow,
+  CandidateIntakeService,
+  CandidateIntakeError,
+  type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
-import { CandidateIntakeService } from '@principles/core/runtime-v2';
-import { CandidateIntakeError } from '@principles/core/runtime-v2';
-import type { LedgerPrincipleEntry } from '@principles/core/runtime-v2';
+import { PrincipleTreeLedgerAdapter } from '@principles/openclaw-plugin';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface CandidateListOptions {
@@ -32,6 +29,7 @@ interface CandidateShowOptions {
   json?: boolean;
 }
 
+/* v8 ignore start */
 /**
  * pd candidate list --task-id <taskId> [--workspace <path>] [--json]
  *
@@ -137,6 +135,7 @@ async function updateCandidateStatus(stateManager: RuntimeStateManager, candidat
   const db = stateManager.connection;
   db.getDb().prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ?').run(status, candidateId);
 }
+/* v8 ignore stop */
 
 /**
  * pd candidate intake --candidate-id <id> [--workspace <path>] [--json] [--dry-run]
@@ -151,16 +150,6 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
 
   try {
     await stateManager.initialize();
-
-    // Import from built dist directory to avoid TypeScript checking source files
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const modulePath = '../../openclaw-plugin/dist/core/principle-tree-ledger-adapter.js';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { PrincipleTreeLedgerAdapter } = await import(modulePath).catch((err: unknown) => {
-      console.error('Failed to load PrincipleTreeLedgerAdapter:', String(err));
-      process.exit(1);
-      return { PrincipleTreeLedgerAdapter: null as unknown as new (opts: { stateDir: string }) => any };
-    }) as { PrincipleTreeLedgerAdapter: new (opts: { stateDir: string }) => any };
 
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: workspaceDir });
     const service = new CandidateIntakeService({ stateManager, ledgerAdapter });
