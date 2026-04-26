@@ -566,4 +566,89 @@ describe('OpenClawCliRuntimeAdapter', () => {
       expect(localCount).toBe(0);
     });
   });
+
+  // Probe 3: healthCheck validates {ok: true} from OpenClaw agent response envelope
+  describe('healthCheck() probe 3 {ok: true} validation', () => {
+    // healthCheck calls runCliProcess in this order:
+    //   1. probe 1 (openclaw --version)
+    //   2. probe 2 (openclaw agents list --json)
+    //   3. probe 3 (openclaw agent --agent ... --message ... --json --local)
+    // So the mock chain order must match: mock[0] → probe 1, mock[1] → probe 2, mock[2] → probe 3.
+
+    it('healthy when stderr envelope payload is {"ok":true}', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      // OpenClaw `--json --local` sends the JSON envelope to stderr; stdout is empty
+      const envelope = JSON.stringify({ payloads: [{ text: '{"ok":true}' }] });
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' })) // probe 1
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))           // probe 2
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: envelope }));                   // probe 3
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(true);
+    });
+
+    it('healthy when envelope payload text contains prose-wrapped {"ok":true}', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      const envelope = JSON.stringify({ payloads: [{ text: 'Here is the result: {"ok":true} — done.' }] });
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: envelope }));
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(true);
+    });
+
+    it('healthy when bare {ok:true} is parsed directly (no envelope)', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      // Bare {ok:true} as the parsed JSON (direct response, no envelope wrapping)
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: '{"ok":true}' }));
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(true);
+    });
+
+    it('unhealthy when payload text is plain prose (not JSON)', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      const envelope = JSON.stringify({ payloads: [{ text: 'Hello, this is the agent speaking.' }] });
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: envelope }));
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(false);
+      expect(result.warnings.some(w => w.includes('probe returned unexpected result'))).toBe(true);
+    });
+
+    it('unhealthy when payload is valid JSON but not {ok:true}', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      const envelope = JSON.stringify({ payloads: [{ text: '{"diagnosisId":"d1","summary":"something"}' }] });
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: envelope }));
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(false);
+      expect(result.warnings.some(w => w.includes('probe returned unexpected result'))).toBe(true);
+    });
+
+    it('unhealthy when envelope JSON does not match expected shape', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      // Stdout has unrelated JSON that doesn't match the expected envelope structure
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: '{"agentMeta":{"model":"test"},"status":"ok"}' }));
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(false);
+      expect(result.warnings.some(w => w.includes('probe returned unexpected result') || w.includes('unparseable'))).toBe(true);
+    });
+  });
 });

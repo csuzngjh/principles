@@ -92,7 +92,11 @@ function extractPayloadFromCliOutput(stdout: string, stderr?: string): unknown |
       return JSON.parse(source);
     } catch { /* fall through */ }
 
-    // Attempt 2: balanced-bracket extraction — handles trailing text around the JSON
+    // Attempt 2: balanced-bracket extraction — handles text that surrounds JSON.
+    // When multiple JSON objects are present (e.g. probe message + agent response in
+    // stderr), return the LAST complete object — the agent's response comes after the
+    // probe message that was injected into the session.
+    const objects: unknown[] = [];
     let depth = 0;
     let start = -1;
     for (let i = 0; i < source.length; i++) {
@@ -105,12 +109,13 @@ function extractPayloadFromCliOutput(stdout: string, stderr?: string): unknown |
         depth--;
         if (depth === 0 && start !== -1) {
           try {
-            return JSON.parse(source.slice(start, i + 1));
-          } catch { /* continue searching */ }
+            objects.push(JSON.parse(source.slice(start, i + 1)));
+          } catch { /* keep scanning */ }
           start = -1;
         }
       }
     }
+    if (objects.length > 0) return objects[objects.length - 1];
   }
 
   return null;
@@ -156,6 +161,87 @@ function extractDiagnosisFromEnvelope(parsed: unknown): unknown | null {
   }
 
   // No matching envelope shape
+  return null;
+}
+
+/**
+ * Search for a single JSON object literal inside `text` using a balanced-bracket
+ * scan. Returns the parsed object, or null if no valid object is found.
+ */
+function extractJsonObject(text: string): unknown | null {
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{') {
+      if (start === -1) start = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        try {
+          return JSON.parse(text.slice(start, i + 1));
+        } catch { /* keep scanning */ }
+        start = -1;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract the inner result object from an OpenClaw agent response envelope.
+ *
+ * OpenClaw `--json --local` wraps the agent's response text inside an envelope:
+ *   Case A — local envelope:  { payloads: [{ text: "<json or prose>" }] }
+ *   Case B — gateway envelope: { result: { payloads: [{ text: "<json or prose>" }] } }
+ *   Case C — bare object:     { ok: true }   (no envelope, direct response)
+ *
+ * The inner text may be bare JSON (`{"ok":true}`) or wrapped in a small amount
+ * of prose that surrounds the JSON. We balance-bracket extract to find the JSON
+ * object within the text, then return the parsed result.
+ *
+ * Returns the parsed inner object on success, or null if extraction fails.
+ */
+function extractProbeResult(parsed: unknown): unknown | null {
+  // Case A: local envelope — { payloads: [{ text: "..." }] }
+  const asLocal = parsed as { payloads?: { text?: unknown }[] };
+  if (Array.isArray(asLocal.payloads) && asLocal.payloads.length > 0) {
+    const [first] = asLocal.payloads;
+    if (first && typeof first.text === 'string') {
+      const inner = first.text.trim();
+      try {
+        return JSON.parse(inner);
+      } catch { /* fall through — try prose extraction */ }
+      const extracted = extractJsonObject(inner);
+      if (extracted !== null) return extracted;
+    }
+  }
+
+  // Case B: gateway envelope — { result: { payloads: [{ text: "..." }] } }
+  const asGateway = parsed as { result?: { payloads?: { text?: unknown }[] } };
+  if (
+    asGateway.result &&
+    typeof asGateway.result === 'object' &&
+    Array.isArray(asGateway.result.payloads) &&
+    asGateway.result.payloads.length > 0
+  ) {
+    const [first] = asGateway.result.payloads;
+    if (first && typeof first.text === 'string') {
+      const inner = first.text.trim();
+      try {
+        return JSON.parse(inner);
+      } catch { /* fall through */ }
+      const extracted = extractJsonObject(inner);
+      if (extracted !== null) return extracted;
+    }
+  }
+
+  // Case C: bare object — already the result
+  if (typeof parsed === 'object' && parsed !== null) {
+    return parsed;
+  }
+
   return null;
 }
 
@@ -395,12 +481,34 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       }
 
       // exit code 0 — verify the output is parseable JSON
-      const excerpt = extractPayloadFromCliOutput(probeResult.stdout, probeResult.stderr);
-      if (excerpt === null) {
+      const rawParsed = extractPayloadFromCliOutput(probeResult.stdout, probeResult.stderr);
+      if (rawParsed === null) {
         return {
           healthy: false,
           degraded: false,
           warnings: ['openclaw agent probe produced unparseable output'],
+          lastCheckedAt: new Date().toISOString(),
+        };
+      }
+
+      // Extract the inner result from the OpenClaw envelope and verify {ok: true}
+      const result = extractProbeResult(rawParsed);
+      if (
+        typeof result !== 'object' ||
+        result === null ||
+        !('ok' in result) ||
+        (result as { ok?: unknown }).ok !== true
+      ) {
+        const excerpt =
+          rawParsed && typeof rawParsed === 'object'
+            ? JSON.stringify(rawParsed).substring(0, 2000)
+            : String(rawParsed).substring(0, 2000);
+        return {
+          healthy: false,
+          degraded: false,
+          warnings: [
+            `openclaw agent '${this.agentId}' probe returned unexpected result: ${excerpt}`,
+          ],
           lastCheckedAt: new Date().toISOString(),
         };
       }
