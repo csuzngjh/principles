@@ -156,6 +156,7 @@ export type { RuntimeStateManagerOptions } from './store/runtime-state-manager.j
 export { DiagnosticianRunner } from './runner/diagnostician-runner.js';
 export { RunnerPhase } from './runner/runner-phase.js';
 export { PassThroughValidator } from './runner/diagnostician-validator.js';
+export { DefaultDiagnosticianValidator } from './runner/default-validator.js';
 export { resolveRunnerOptions, DEFAULT_RUNNER_OPTIONS } from './runner/diagnostician-runner-options.js';
 export type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js';
 export type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './runner/diagnostician-runner-options.js';

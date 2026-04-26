@@ -471,7 +471,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
         command: 'openclaw',
         args: probeArgs,
         cwd: this.workspaceDir,
-        timeoutMs: 300_000,
+        timeoutMs: 60_000, // 60s — probe just verifies agent can respond with {"ok":true}
       });
 
       if (probeResult.spawnError === 'ENOENT') {

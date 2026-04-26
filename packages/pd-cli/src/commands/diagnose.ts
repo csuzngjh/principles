@@ -13,7 +13,7 @@ import {
   StoreEventEmitter,
   storeEmitter,
   DiagnosticianRunner,
-  PassThroughValidator,
+  DefaultDiagnosticianValidator,
   TestDoubleRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
   PDRuntimeError,
@@ -177,7 +177,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         contextAssembler,
         runtimeAdapter,
         eventEmitter,
-        validator: new PassThroughValidator(),
+        validator: new DefaultDiagnosticianValidator(),
         committer,
       },
       {
