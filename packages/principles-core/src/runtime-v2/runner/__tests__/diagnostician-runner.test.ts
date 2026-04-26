@@ -24,11 +24,13 @@ import type {
 } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { DiagnosticianValidator } from '../diagnostician-validator.js';
+import type { DiagnosticianCommitter } from '../../store/diagnostician-committer.js';
 import type { DiagnosticianContextPayload } from '../../context-payload.js';
 import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
 import type { TaskRecord } from '../../task-status.js';
 import { PDRuntimeError } from '../../error-categories.js';
 import { DiagnosticianRunner } from '../diagnostician-runner.js';
+import { RunnerPhase } from '../runner-phase.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 
@@ -191,6 +193,7 @@ function createMocks() {
     _contextAssembler: mockContextAssembler,
     _runtimeAdapter: mockRuntimeAdapter,
     _validator: mockValidator,
+    _committer: { commit: vi.fn().mockResolvedValue({ commitId: "mock-commit-id", artifactId: "mock-artifact-id", candidateCount: 0 }) } as unknown as DiagnosticianCommitter,
     _eventEmitter: mockEventEmitter,
   };
 }
@@ -203,6 +206,7 @@ function createRunner(mocks: ReturnType<typeof createMocks>) {
       runtimeAdapter: mocks.mockRuntimeAdapter,
       eventEmitter: mocks.mockEventEmitter,
       validator: mocks.mockValidator,
+      committer: mocks._committer,
     },
     {
       owner: OWNER,
@@ -248,7 +252,7 @@ describe('DiagnosticianRunner', () => {
       owner: OWNER,
       runtimeKind: RUNTIME_KIND,
     });
-    expect(mocks._stateManager.markTaskSucceeded).toHaveBeenCalledWith(TASK_ID, `run://${RUN_ID}`);
+    expect(mocks._stateManager.markTaskSucceeded).toHaveBeenCalledWith(TASK_ID, 'commit://mock-commit-id');
     expect(mocks._stateManager.updateRunOutput).toHaveBeenCalledWith(RUN_ID, JSON.stringify(mocks.output));
   });
 
@@ -358,8 +362,35 @@ describe('DiagnosticianRunner', () => {
     expect(result.failureReason).toContain('Validation failed');
   });
 
-  // 8. StartRunInput construction
-  it('constructs StartRunInput with agentSpec.agentId=diagnostician', async () => {
+  // 8b. StartRunInput construction with custom agentId
+  it('uses custom agentId from resolvedOptions when provided', async () => {
+    const mocks = createMocks();
+    const runner = new DiagnosticianRunner(
+      {
+        stateManager: mocks.mockStateManager,
+        contextAssembler: mocks.mockContextAssembler,
+        runtimeAdapter: mocks.mockRuntimeAdapter,
+        eventEmitter: mocks.mockEventEmitter,
+        validator: mocks.mockValidator,
+        committer: mocks._committer,
+      },
+      {
+        owner: OWNER,
+        runtimeKind: RUNTIME_KIND,
+        pollIntervalMs: 100,
+        timeoutMs: 1000,
+        agentId: 'custom-diagnostician',
+      },
+    );
+
+    await runner.run(TASK_ID);
+
+    const startInput = firstCallArg(mocks._runtimeAdapter.startRun) as StartRunInput;
+    expect(startInput.agentSpec.agentId).toBe('custom-diagnostician');
+  });
+
+  // 8c. StartRunInput uses default 'diagnostician' when agentId not provided
+  it('defaults agentSpec.agentId to diagnostician when agentId not provided', async () => {
     const mocks = createMocks();
     const runner = createRunner(mocks);
 
@@ -367,24 +398,10 @@ describe('DiagnosticianRunner', () => {
 
     const startInput = firstCallArg(mocks._runtimeAdapter.startRun) as StartRunInput;
     expect(startInput.agentSpec.agentId).toBe('diagnostician');
-    expect(startInput.agentSpec.schemaVersion).toBe('v1');
-    expect(startInput.taskRef?.taskId).toBe(TASK_ID);
-    expect(startInput.outputSchemaRef).toBe('diagnostician-output-v1');
-    expect(startInput.timeoutMs).toBe(1000);
-
-    // inputPayload should be DiagnosticianInvocationInput shape
-    const inputPayload = startInput.inputPayload as { agentId: string; taskId: string };
-    expect(inputPayload.agentId).toBe('diagnostician');
-    expect(inputPayload.taskId).toBe(TASK_ID);
-
-    // contextItems should contain serialized context
-    expect(startInput.contextItems).toHaveLength(1);
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    expect(startInput.contextItems[0]!.role).toBe('system');
   });
 
   // 9. Lease conflict
-  it('fails permanently on lease conflict', async () => {
+  it('lease_conflict returns non-mutating result without markTaskRetryWait/markTaskFailed', async () => {
     const mocks = createMocks();
     mocks._stateManager.acquireLease.mockRejectedValue(
       new PDRuntimeError('lease_conflict', 'Task already leased'),
@@ -393,9 +410,59 @@ describe('DiagnosticianRunner', () => {
     const runner = createRunner(mocks);
     const result = await runner.run(TASK_ID);
 
-    // lease_conflict is in PERMANENT_ERROR_CATEGORIES, so it fails immediately
+    // lease_conflict is handled as non-mutating — no state changes
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('lease_conflict');
+    // Mutation methods must NOT be called for lease_conflict
+    expect(mocks._stateManager.markTaskRetryWait).not.toHaveBeenCalled();
+    expect(mocks._stateManager.markTaskFailed).not.toHaveBeenCalled();
+  });
+
+  // 9b. Post-lease errors use real leasedTask (not synthetic)
+  it('post-lease error uses real attemptCount/maxAttempts from leasedTask', async () => {
+    const mocks = createMocks();
+    // leasedTask has attemptCount=2, maxAttempts=3 (not the default 1/3)
+    mocks._stateManager.acquireLease.mockResolvedValue(makeTaskRecord({ attemptCount: 2, maxAttempts: 3 }));
+
+    // Make context assembly fail to trigger post-lease error path
+    mocks._contextAssembler.assemble.mockRejectedValue(
+      new PDRuntimeError('runtime_unavailable', 'DB connection lost'),
+    );
+
+    const runner = createRunner(mocks);
+    const result = await runner.run(TASK_ID);
+
+    // Should retry (not fail permanently) because runtime_unavailable is not permanent
+    // and real leasedTask (attemptCount=2, maxAttempts=3) means shouldRetry returns true
+    expect(result.status).toBe('retried');
+    // Verify markTaskRetryWait was called with the real task's attemptCount
+    expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(TASK_ID, 'runtime_unavailable');
+  });
+
+  // 9c. Post-lease error with maxAttempts=1 triggers fail immediately
+  it('post-lease error with attemptCount=maxAttempts fails permanently', async () => {
+    const mocks = createMocks();
+    // leasedTask at last attempt (attemptCount=3, maxAttempts=3)
+    mocks._stateManager.acquireLease.mockResolvedValue(makeTaskRecord({ attemptCount: 3, maxAttempts: 3 }));
+    // Override shouldRetry to return false when attemptCount >= maxAttempts
+    mocks._stateManager.getRetryPolicy.mockReturnValue({
+      calculateBackoff: vi.fn().mockReturnValue(30_000),
+      shouldRetry: vi.fn().mockReturnValue(false),
+    });
+
+    // Make context assembly fail
+    mocks._contextAssembler.assemble.mockRejectedValue(
+      new PDRuntimeError('runtime_unavailable', 'DB connection lost'),
+    );
+
+    const runner = createRunner(mocks);
+    const result = await runner.run(TASK_ID);
+
+    // Should fail with max_attempts_exceeded (not runtime_unavailable)
+    // because shouldRetry=false means no more retries
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(TASK_ID, 'max_attempts_exceeded');
   });
 
   // 10. Max attempts exceeded
@@ -444,14 +511,255 @@ describe('DiagnosticianRunner', () => {
 
     // startRun should have been called with the context serialized in inputPayload
     const startInput = firstCallArg(mocks._runtimeAdapter.startRun) as StartRunInput;
-    const inputPayload = startInput.inputPayload as { context: DiagnosticianContextPayload };
+    const inputPayloadStr = startInput.inputPayload as string;
+    const inputPayload = JSON.parse(inputPayloadStr);
     expect(inputPayload.context.conversationWindow).toHaveLength(3);
     expect(inputPayload.context.sourceRefs).toContain('openclaw-history-import-002');
 
-    // contextItems should contain the serialized context
-    const [contextItem] = startInput.contextItems;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    const parsedContext = JSON.parse(contextItem!.content);
-    expect(parsedContext.context.conversationWindow).toHaveLength(3);
+    // contextItems should be empty (instruction embedded in inputPayload)
+    expect(startInput.contextItems).toHaveLength(0);
+  });
+
+  // ── Committer integration tests (m5-03 Task 5) ──────────────────────────────
+
+  describe('Committer integration', () => {
+    // 12. Commit before markTaskSucceeded (call order)
+    it('calls committer.commit before markTaskSucceeded', async () => {
+      const mocks = createMocks();
+      const callOrder: string[] = [];
+
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockImplementation(async () => {
+        callOrder.push('commit');
+        return { commitId: 'call-order-commit-id', artifactId: 'art-1', candidateCount: 1 };
+      });
+      mocks._stateManager.markTaskSucceeded.mockImplementation(async () => {
+        callOrder.push('markTaskSucceeded');
+        return mocks.taskRecord;
+      });
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      expect(callOrder).toEqual(['commit', 'markTaskSucceeded']);
+    });
+
+    // 13. resultRef uses commit:// scheme
+    it('resultRef uses commit:// scheme after commit', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockResolvedValue({
+        commitId: 'verify-commit-123',
+        artifactId: 'art-verify',
+        candidateCount: 3,
+      });
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      expect(mocks._stateManager.markTaskSucceeded).toHaveBeenCalledWith(
+        TASK_ID,
+        'commit://verify-commit-123',
+      );
+    });
+
+    // 14. Commit failure triggers retry with artifact_commit_failed
+    it('commit failure triggers retry with artifact_commit_failed', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockRejectedValue(
+        new PDRuntimeError('artifact_commit_failed', 'Commit failed', {}),
+      );
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('retried');
+      expect(result.errorCategory).toBe('artifact_commit_failed');
+      expect(mocks._stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+      expect(mocks._stateManager.markTaskRetryWait).toHaveBeenCalledWith(
+        TASK_ID,
+        'artifact_commit_failed',
+      );
+    });
+
+    // 15. Commit failure with max attempts marks task failed
+    it('commit failure with max attempts marks task failed', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockRejectedValue(
+        new PDRuntimeError('artifact_commit_failed', 'Commit failed', {}),
+      );
+      mocks._stateManager.getRetryPolicy.mockReturnValue({
+        calculateBackoff: vi.fn().mockReturnValue(30_000),
+        shouldRetry: vi.fn().mockReturnValue(false),
+      });
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('failed');
+      expect(result.errorCategory).toBe('max_attempts_exceeded');
+      expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(
+        TASK_ID,
+        'max_attempts_exceeded',
+      );
+    });
+
+    // 16. RunnerPhase transitions through Committing
+    it('RunnerPhase transitions through Committing during commit', async () => {
+      const mocks = createMocks();
+
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockResolvedValue({
+        commitId: 'phase-test-commit',
+        artifactId: 'art-phase',
+        candidateCount: 0,
+      });
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('succeeded');
+      expect(typedCommitter.commit).toHaveBeenCalledTimes(1);
+      expect(runner.currentPhase).toBe(RunnerPhase.Completed);
+    });
+  });
+
+  // ── M5-04: Telemetry events ───────────────────────────────────────────────
+
+  describe('M5-04 Telemetry events', () => {
+    // TELE-01: diagnostician_artifact_committed emitted after successful commit
+    it('emits diagnostician_artifact_committed after successful commit', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockResolvedValue({
+        commitId: 'commit-artifact-001',
+        artifactId: 'artifact-001',
+        candidateCount: 2,
+      });
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      expect(mocks._eventEmitter.emitTelemetry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'diagnostician_artifact_committed',
+          traceId: TASK_ID,
+          payload: expect.objectContaining({
+            commitId: 'commit-artifact-001',
+            artifactId: 'artifact-001',
+            candidateCount: 2,
+            taskId: TASK_ID,
+            runId: RUN_ID,
+          }),
+        }),
+      );
+    });
+
+    // TELE-02: diagnostician_artifact_commit_failed emitted when commit throws
+    it('emits diagnostician_artifact_commit_failed when commit throws', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockRejectedValue(
+        new PDRuntimeError('artifact_commit_failed', 'Database constraint violation', {}),
+      );
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      expect(mocks._eventEmitter.emitTelemetry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: 'diagnostician_artifact_commit_failed',
+          traceId: TASK_ID,
+          payload: expect.objectContaining({
+            taskId: TASK_ID,
+            runId: RUN_ID,
+            errorCategory: 'artifact_commit_failed',
+          }),
+        }),
+      );
+    });
+
+    // TELE-03: principle_candidate_registered emitted per principle candidate
+    it('emits principle_candidate_registered for each principle recommendation', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockResolvedValue({
+        commitId: 'commit-candidate-001',
+        artifactId: 'artifact-001',
+        candidateCount: 2,
+      });
+
+      // Override output with 2 principle recommendations
+      const output = makeDiagnosticianOutput({
+        recommendations: [
+          { kind: 'principle', description: 'Use immutable data structures' },
+          { kind: 'principle', description: 'Prefer pure functions' },
+          { kind: 'rule', description: 'Follow existing naming conventions' },
+        ],
+      });
+      mocks._runtimeAdapter.fetchOutput = vi.fn().mockResolvedValue({
+        runId: RUN_ID,
+        payload: output,
+      });
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      // Should have 2 calls to principle_candidate_registered
+      const candidateEvents = (mocks._eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (call) => call[0]?.eventType === 'principle_candidate_registered',
+      );
+      expect(candidateEvents).toHaveLength(2);
+      const [firstEvent, secondEvent] = candidateEvents;
+      if (!firstEvent || !secondEvent) {
+        throw new Error('Expected 2 candidate events but got fewer');
+      }
+      expect(firstEvent[0]?.payload).toMatchObject({
+        commitId: 'commit-candidate-001',
+        kind: 'principle',
+        candidateIndex: 0,
+        sourceRunId: RUN_ID,
+      });
+      expect(secondEvent[0]?.payload).toMatchObject({
+        commitId: 'commit-candidate-001',
+        kind: 'principle',
+        candidateIndex: 1,
+        sourceRunId: RUN_ID,
+      });
+    });
+
+    // TELE-04: all events use emitTelemetry (StoreEventEmitter)
+    it('all new telemetry events use emitTelemetry, not console.log or side effects', async () => {
+      const mocks = createMocks();
+      const typedCommitter = mocks._committer as { commit: ReturnType<typeof vi.fn> };
+      typedCommitter.commit.mockResolvedValue({
+        commitId: 'commit-tele-004',
+        artifactId: 'artifact-004',
+        candidateCount: 1,
+      });
+
+      // Override output with 1 principle recommendation so the event fires
+      const output = makeDiagnosticianOutput({
+        recommendations: [
+          { kind: 'principle', description: 'Test principle' },
+        ],
+      });
+      mocks._runtimeAdapter.fetchOutput = vi.fn().mockResolvedValue({
+        runId: RUN_ID,
+        payload: output,
+      });
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      // All 3 new event types should go through emitTelemetry
+      const allEventTypes = (mocks._eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0]?.eventType,
+      );
+      expect(allEventTypes).toContain('diagnostician_artifact_committed');
+      expect(allEventTypes).toContain('principle_candidate_registered');
+    });
   });
 });

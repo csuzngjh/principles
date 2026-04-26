@@ -106,6 +106,7 @@ export { SqliteConnection } from './store/sqlite-connection.js';
 export { SqliteTrajectoryLocator } from './store/sqlite-trajectory-locator.js';
 export { SqliteHistoryQuery } from './store/sqlite-history-query.js';
 export { SqliteContextAssembler } from './store/sqlite-context-assembler.js';
+export { SqliteDiagnosticianCommitter } from './store/diagnostician-committer.js';
 export { ResilientContextAssembler } from './store/resilient-context-assembler.js';
 export { ResilientHistoryQuery } from './store/resilient-history-query.js';
 export type {
@@ -129,6 +130,11 @@ export type {
   RunRecord,
 } from './store/run-store.js';
 export type { TrajectoryLocator } from './store/trajectory-locator.js';
+export type {
+  DiagnosticianCommitter,
+  CommitInput,
+  CommitResult,
+} from './store/diagnostician-committer.js';
 
 // Lease & Recovery
 export { DefaultLeaseManager } from './store/lease-manager.js';
@@ -150,6 +156,7 @@ export type { RuntimeStateManagerOptions } from './store/runtime-state-manager.j
 export { DiagnosticianRunner } from './runner/diagnostician-runner.js';
 export { RunnerPhase } from './runner/runner-phase.js';
 export { PassThroughValidator } from './runner/diagnostician-validator.js';
+export { DefaultDiagnosticianValidator } from './runner/default-validator.js';
 export { resolveRunnerOptions, DEFAULT_RUNNER_OPTIONS } from './runner/diagnostician-runner-options.js';
 export type { RunnerResult, RunnerResultStatus } from './runner/runner-result.js';
 export type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './runner/diagnostician-runner-options.js';
@@ -157,11 +164,19 @@ export type { DiagnosticianValidator, DiagnosticianValidationResult } from './ru
 
 // Runtime Adapter (M4)
 export { TestDoubleRuntimeAdapter } from './adapter/index.js';
-export type { TestDoubleBehaviorOverrides } from './adapter/test-double-runtime-adapter.js';
+export type { TestDoubleBehaviorOverrides } from './adapter/index.js';
+
+// OpenClawCliRuntimeAdapter (M6)
+export { OpenClawCliRuntimeAdapter } from './adapter/index.js';
+export type { OpenClawCliRuntimeAdapterOptions } from './adapter/openclaw-cli-runtime-adapter.js';
+
+// Diagnostician Prompt Builder (M6)
+export { DiagnosticianPromptBuilder, summarizeConversationWindow } from './diagnostician-prompt-builder.js';
+export type { PromptInput, PromptBuildResult } from './diagnostician-prompt-builder.js';
 
 // CLI surface (M4)
-export { run, status } from './cli/diagnose.js';
-export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult } from './cli/diagnose.js';
+export { run, status, candidateList, candidateShow, artifactShow, probeRuntime } from './cli/index.js';
+export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult, CandidateListOptions, CandidateShowOptions, ArtifactShowOptions, ProbeOptions, ProbeResult } from './cli/index.js';
 
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';

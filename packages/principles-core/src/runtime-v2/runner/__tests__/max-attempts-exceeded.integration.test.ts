@@ -17,6 +17,7 @@ import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { DiagnosticianRunner } from '../diagnostician-runner.js';
 import { PassThroughValidator } from '../diagnostician-validator.js';
 import type { DiagnosticianValidator, DiagnosticianValidationResult } from '../diagnostician-validator.js';
+import type { DiagnosticianCommitter } from '../../store/diagnostician-committer.js';
 import type {
   PDRuntimeAdapter,
   RuntimeCapabilities,
@@ -225,7 +226,8 @@ describe('max_attempts_exceeded integration', () => {
     }
   });
 
-  function createRunner(validator: DiagnosticianValidator = new PassThroughValidator()): DiagnosticianRunner {
+  function createRunner(validator: DiagnosticianValidator = new PassThroughValidator(),
+    committer: DiagnosticianCommitter = { commit: async () => ({ commitId: "mock-commit-id", artifactId: "mock-artifact-id", candidateCount: 0 }) }): DiagnosticianRunner {
     return new DiagnosticianRunner(
       {
         stateManager,
@@ -233,6 +235,7 @@ describe('max_attempts_exceeded integration', () => {
         runtimeAdapter,
         eventEmitter,
         validator,
+      committer,
       },
       {
         owner: 'integration-test-runner',

@@ -13,6 +13,7 @@ export enum RunnerPhase {
   Polling = 'polling',
   FetchingOutput = 'fetching_output',
   Validating = 'validating',
+  Committing = 'committing',
   Completed = 'completed',
   Failed = 'failed',
   RetryWaiting = 'retry_waiting',

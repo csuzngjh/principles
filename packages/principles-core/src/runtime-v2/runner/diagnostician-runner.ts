@@ -25,12 +25,14 @@ import type {
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DiagnosticianContextPayload } from '../context-payload.js';
-import type { DiagnosticianOutputV1, DiagnosticianInvocationInput } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import { DiagnosticianPromptBuilder } from '../diagnostician-prompt-builder.js';
 import type { TaskRecord } from '../task-status.js';
 import type { PDErrorCategory } from '../error-categories.js';
 import type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './diagnostician-runner-options.js';
 import type { DiagnosticianValidator } from './diagnostician-validator.js';
 import type { RunnerResult } from './runner-result.js';
+import type { DiagnosticianCommitter, CommitResult } from '../store/diagnostician-committer.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { RunnerPhase } from './runner-phase.js';
@@ -43,6 +45,7 @@ export interface DiagnosticianRunnerDeps {
   readonly runtimeAdapter: PDRuntimeAdapter;
   readonly eventEmitter: StoreEventEmitter;
   readonly validator: DiagnosticianValidator;
+  readonly committer: DiagnosticianCommitter;
 }
 
 /** Context for retry-or-fail decision. */
@@ -78,6 +81,7 @@ export class DiagnosticianRunner {
   private readonly runtimeAdapter: PDRuntimeAdapter;
   private readonly eventEmitter: StoreEventEmitter;
   private readonly validator: DiagnosticianValidator;
+  private readonly committer: DiagnosticianCommitter;
 
   constructor(deps: DiagnosticianRunnerDeps, options: DiagnosticianRunnerOptions) {
     this.stateManager = deps.stateManager;
@@ -85,6 +89,7 @@ export class DiagnosticianRunner {
     this.runtimeAdapter = deps.runtimeAdapter;
     this.eventEmitter = deps.eventEmitter;
     this.validator = deps.validator;
+    this.committer = deps.committer;
     this.resolvedOptions = resolveRunnerOptions(options);
   }
 
@@ -119,20 +124,28 @@ export class DiagnosticianRunner {
    */
   async run(taskId: string): Promise<RunnerResult> {
     this.phase = RunnerPhase.Idle;
+
+    // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let leasedTask: TaskRecord;
     try {
-      // 1. Acquire lease (atomically creates RunRecord in the store)
-      const leasedTask = await this.stateManager.acquireLease({
+      leasedTask = await this.stateManager.acquireLease({
         taskId,
         owner: this.resolvedOptions.owner,
         runtimeKind: this.resolvedOptions.runtimeKind,
       });
+    } catch (error) {
+      return await this.handleLeaseOrPhaseError(taskId, error);
+    }
 
-      // Emit: diagnostician_task_leased
-      this.emitDiagnosticianEvent('diagnostician_task_leased', taskId, {
-        taskKind: leasedTask.taskKind,
-        attemptCount: leasedTask.attemptCount,
-      });
+    // Emit: diagnostician_task_leased (only on successful lease)
+    this.emitDiagnosticianEvent('diagnostician_task_leased', taskId, {
+      taskKind: leasedTask.taskKind,
+      attemptCount: leasedTask.attemptCount,
+    });
 
+    // All subsequent errors use the real leasedTask — no synthetic TaskRecord allowed
+    try {
       // Look up the store's runId for this attempt (acquireLease creates it).
       // The adapter's RunHandle.runId is separate from the store's runId.
       const storeRunId = await this.resolveStoreRunId(taskId);
@@ -179,11 +192,42 @@ export class DiagnosticianRunner {
         });
       }
 
+      // TELE-04: output_validation_succeeded — validator returned valid: true
+      this.emitDiagnosticianEvent('output_validation_succeeded', taskId, {
+        runtimeKind: this.resolvedOptions.runtimeKind,
+        outputValid: validationResult.valid,
+      });
+
       // 8. Succeed task -- store output and mark succeeded using store's runId
       return await this.succeedTask({ taskId, runId: storeRunId, output, task: leasedTask, contextHash });
     } catch (error) {
-      return await this.handleLeaseOrPhaseError(taskId, error);
+      // handleLeaseOrPhaseError is only used for lease errors (before lease).
+      // Post-lease errors use retryOrFail with the real leasedTask.
+      return await this.handlePostLeaseError(taskId, leasedTask, error);
     }
+  }
+
+  /**
+   * Handle errors that occur after a successful lease acquisition.
+   * Uses the real leasedTask (with actual attemptCount/maxAttempts) — never synthetic.
+   * lease_conflict is NOT handled here because it cannot occur after a successful lease.
+   */
+  private async handlePostLeaseError(
+    taskId: string,
+    task: TaskRecord,
+    error: unknown,
+  ): Promise<RunnerResult> {
+    const classified = this.classifyError(error);
+
+    // Emit: diagnostician_run_failed
+    this.emitDiagnosticianEvent('diagnostician_run_failed', taskId, {
+      errorCategory: classified.category,
+      errorMessage: classified.message,
+    });
+
+    // Post-lease errors always go through retryOrFail with the real task record.
+    // This ensures attemptCount/maxAttempts from the store are respected.
+    return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
   }
 
   // -- Phase methods (each independently testable) --
@@ -202,25 +246,20 @@ export class DiagnosticianRunner {
     const runs = await this.stateManager.getRunsByTask(taskId);
     const latestRun = runs[runs.length - 1];
     if (!latestRun) {
-      throw new PDRuntimeError('storage_unavailable', `No run record found for task ${taskId} after lease acquisition`);
+      throw new PDRuntimeError('execution_failed', `No run record found for task ${taskId} after lease acquisition`);
     }
     return latestRun.runId;
   }
 
   private async invokeRuntime(context: DiagnosticianContextPayload, taskId: string): Promise<RunHandle> {
-    const invocationInput: DiagnosticianInvocationInput = {
-      agentId: 'diagnostician',
-      taskId,
-      context,
-      outputSchemaRef: 'diagnostician-output-v1',
-      timeoutMs: this.resolvedOptions.timeoutMs,
-    };
+    const builder = new DiagnosticianPromptBuilder();
+    const { message } = builder.buildPrompt(context);
 
     const startInput: StartRunInput = {
-      agentSpec: { agentId: 'diagnostician', schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
-      inputPayload: invocationInput,
-      contextItems: [{ role: 'system', content: JSON.stringify(invocationInput) }],
+      inputPayload: message,
+      contextItems: [],
       outputSchemaRef: 'diagnostician-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
     };
@@ -243,8 +282,12 @@ export class DiagnosticianRunner {
     // Timeout -- cancel the run gracefully, preserving the timeout error
     try {
       await this.runtimeAdapter.cancelRun(runHandle.runId);
-    } catch {
-      // Cancellation failed but timeout error is the primary failure to report
+    } catch (cancelErr) {
+      // Log but do not throw — timeout error is the primary failure to report
+      this.emitDiagnosticianEvent('diagnostician_cancel_run_failed', 'timeout-task', {
+        runId: runHandle.runId,
+        errorMessage: cancelErr instanceof Error ? cancelErr.message : String(cancelErr),
+      });
     }
     throw new PDRuntimeError('timeout', `Run ${runHandle.runId} timed out after ${this.resolvedOptions.timeoutMs}ms`);
   }
@@ -258,17 +301,82 @@ export class DiagnosticianRunner {
   }
 
   private async succeedTask(ctx: SucceedContext): Promise<RunnerResult> {
-    // Store output in run record (D-04)
-    await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));
+    // Store output before commit so run record reflects output on disk
+    try {
+      await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));
+    } catch (updateErr) {
+      this.emitDiagnosticianEvent('diagnostician_update_output_failed', ctx.taskId, {
+        runId: ctx.runId,
+        errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
+      });
+      throw updateErr;
+    }
 
-    // Mark task succeeded
-    const resultRef = `run://${ctx.runId}`;
-    await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
+    // Commit artifact + candidates before marking task succeeded
+    this.phase = RunnerPhase.Committing;
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let commitResult: CommitResult | undefined;
+    try {
+      commitResult = await this.committer.commit({
+        runId: ctx.runId,
+        taskId: ctx.taskId,
+        output: ctx.output,
+        idempotencyKey: `${ctx.taskId}:${ctx.runId}`,
+      });
+    } catch (commitErr) {
+      // Emit: diagnostician_artifact_commit_failed (TELE-02)
+      this.emitDiagnosticianEvent('diagnostician_artifact_commit_failed', ctx.taskId, {
+        taskId: ctx.taskId,
+        runId: ctx.runId,
+        errorCategory: commitErr instanceof PDRuntimeError ? commitErr.category : 'artifact_commit_failed',
+        errorMessage: commitErr instanceof Error ? commitErr.message : String(commitErr),
+      });
+      throw commitErr; // Re-throw so outer try/catch in run() handles it
+    }
+
+    // Emit: principle_candidate_registered per candidate (TELE-03)
+    const principleRecs = ctx.output.recommendations.filter((r) => r.kind === 'principle');
+    for (let i = 0; i < principleRecs.length; i++) {
+      const rec = principleRecs[i]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion
+      this.emitDiagnosticianEvent('principle_candidate_registered', ctx.taskId, {
+        candidateIndex: i,
+        commitId: commitResult.commitId,
+        kind: 'principle',
+        description: rec.description,
+        sourceRunId: ctx.runId,
+      });
+    }
+
+    // Emit: diagnostician_artifact_committed (TELE-01)
+    this.emitDiagnosticianEvent('diagnostician_artifact_committed', ctx.taskId, {
+      commitId: commitResult.commitId,
+      artifactId: commitResult.artifactId,
+      candidateCount: commitResult.candidateCount,
+      taskId: ctx.taskId,
+      runId: ctx.runId,
+    });
+
+    // Use commit URI as resultRef
+    const resultRef = `commit://${commitResult.commitId}`;
+    try {
+      await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
+    } catch (stateErr) {
+      // markTaskSucceeded failed after commit succeeded — emit error event so this is observable
+      this.emitDiagnosticianEvent('diagnostician_mark_succeeded_failed', ctx.taskId, {
+        taskId: ctx.taskId,
+        runId: ctx.runId,
+        commitId: commitResult.commitId,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      throw stateErr;
+    }
 
     // Emit: diagnostician_task_succeeded
     this.emitDiagnosticianEvent('diagnostician_task_succeeded', ctx.taskId, {
       attemptCount: ctx.task.attemptCount,
       resultRef,
+      commitId: commitResult.commitId,
+      candidateCount: commitResult.candidateCount,
     });
 
     this.phase = RunnerPhase.Completed;
@@ -306,6 +414,12 @@ export class DiagnosticianRunner {
       errorCategory: category,
     });
 
+    // TELE-04: output_validation_failed — validator returned valid: false
+    this.emitDiagnosticianEvent('output_validation_failed', ctx.taskId, {
+      errorCount: ctx.errors.length,
+      errorCategory: category,
+    });
+
     return this.retryOrFail({ taskId: ctx.taskId, task: ctx.task, errorCategory: category, failureReason: `Validation failed: ${ctx.errors.join('; ')}` });
   }
 
@@ -331,14 +445,13 @@ export class DiagnosticianRunner {
       };
     }
 
-    // Emit: diagnostician_run_failed (for other phase/lease errors before retry decision)
+    // Non-lease errors (e.g. storage_unavailable before lease) also must not
+    // use synthetic TaskRecord. Build one with real defaults from options.
     this.emitDiagnosticianEvent('diagnostician_run_failed', taskId, {
       errorCategory: classified.category,
       errorMessage: classified.message,
     });
 
-    // When acquireLease fails we don't have a TaskRecord yet.
-    // Build a synthetic one for retry policy evaluation.
     const task: TaskRecord = {
       taskId,
       taskKind: 'diagnostician',
@@ -355,14 +468,11 @@ export class DiagnosticianRunner {
     // Check if error is permanent (never retry)
     if (this.isPermanentError(ctx.errorCategory)) {
       await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory);
-
-      // Emit: diagnostician_task_failed (permanent)
       this.emitDiagnosticianEvent('diagnostician_task_failed', ctx.taskId, {
         errorCategory: ctx.errorCategory,
         attemptCount: ctx.task.attemptCount,
         failureReason: ctx.failureReason,
       });
-
       this.phase = RunnerPhase.Failed;
       return { status: 'failed', taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: ctx.failureReason, attemptCount: ctx.task.attemptCount };
     }
@@ -371,27 +481,21 @@ export class DiagnosticianRunner {
     const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
     if (shouldRetry) {
       await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory);
-
-      // Emit: diagnostician_task_retried
       this.emitDiagnosticianEvent('diagnostician_task_retried', ctx.taskId, {
         errorCategory: ctx.errorCategory,
         attemptCount: ctx.task.attemptCount,
       });
-
       this.phase = RunnerPhase.RetryWaiting;
       return { status: 'retried', taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: ctx.failureReason, attemptCount: ctx.task.attemptCount };
     }
 
     // Max attempts exceeded
     await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded');
-
-    // Emit: diagnostician_task_failed (max_attempts_exceeded)
     this.emitDiagnosticianEvent('diagnostician_task_failed', ctx.taskId, {
       errorCategory: 'max_attempts_exceeded',
       attemptCount: ctx.task.attemptCount,
-      failureReason: ctx.failureReason,
+      failureReason: `Max attempts exceeded: ${ctx.failureReason}`,
     });
-
     this.phase = RunnerPhase.Failed;
     return {
       status: 'failed',
@@ -404,11 +508,9 @@ export class DiagnosticianRunner {
 
   // -- Error classification --
 
-  private readonly PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set([
-    'storage_unavailable',
-    'workspace_invalid',
-    'capability_missing',
-  ]);
+  private readonly PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set(
+    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing'] as const),
+  );
 
   private isPermanentError(category: PDErrorCategory): boolean {
     return this.PERMANENT_ERROR_CATEGORIES.has(category);
