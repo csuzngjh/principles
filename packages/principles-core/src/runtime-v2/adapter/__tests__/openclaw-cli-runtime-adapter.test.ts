@@ -1,0 +1,656 @@
+/**
+ * OpenClawCliRuntimeAdapter unit tests.
+ *
+ * Tests OCRA-01 (kind), OCRA-02 (startRun args), OCRA-03 (fetchOutput parsing),
+ * and OCRA-04 (5-category error mapping).
+ *
+ * runCliProcess is mocked so tests run without the real openclaw binary.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { OpenClawCliRuntimeAdapter } from '../openclaw-cli-runtime-adapter.js';
+import type { CliOutput } from '../../utils/cli-process-runner.js';
+
+// Mock runCliProcess before importing the adapter
+vi.mock('../../utils/cli-process-runner.js', () => ({
+  runCliProcess: vi.fn(),
+}));
+
+import { runCliProcess } from '../../utils/cli-process-runner.js';
+import { PDRuntimeError } from '../../error-categories.js';
+
+const mockRunCliProcess = runCliProcess as ReturnType<typeof vi.fn>;
+
+const VALID_PAYLOAD = {
+  valid: true,
+  diagnosisId: 'diag-1',
+  taskId: 'task-1',
+  summary: 'test summary',
+  rootCause: 'test root cause',
+  violatedPrinciples: [],
+  evidence: [],
+  recommendations: [],
+  confidence: 0.9,
+};
+
+function makeCliOutput(overrides: Partial<CliOutput> = {}): CliOutput {
+  return {
+    stdout: '',
+    stderr: '',
+    exitCode: 0,
+    timedOut: false,
+    durationMs: 100,
+    ...overrides,
+  };
+}
+
+describe('OpenClawCliRuntimeAdapter', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // OCRA-01: kind() returns 'openclaw-cli'
+  describe('kind()', () => {
+    it('returns RuntimeKind literal "openclaw-cli"', () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      expect(adapter.kind()).toBe('openclaw-cli');
+    });
+  });
+
+  // OCRA-02: startRun invokes openclaw agent with correct CLI args
+  describe('startRun()', () => {
+    it('calls runCliProcess with command "openclaw" and correct args', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
+
+      await adapter.startRun({
+        agentSpec: { agentId: 'my-agent', schemaVersion: 'v1' },
+        inputPayload: { foo: 'bar' },
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      expect(mockRunCliProcess).toHaveBeenCalledTimes(1);
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { command: string; args: string[]; timeoutMs?: number } | undefined;
+      if (!firstCall) throw new Error('expected firstCall');
+      const call = firstCall;
+      expect(call.command).toBe('openclaw');
+      expect(call.args).toContain('--agent');
+      expect(call.args).toContain('my-agent');
+      expect(call.args).toContain('--message');
+      const messageIdx = call.args.indexOf('--message');
+      expect(call.args[messageIdx + 1]).toMatch(/^@/);
+      expect(call.args).toContain('--json');
+      expect(call.args).toContain('--local');
+      expect(call.args).toContain('--timeout');
+      expect(call.timeoutMs).toBe(30000);
+    });
+
+    it('uses default "diagnostician" agentId when agentSpec.agentId is undefined', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
+
+      await adapter.startRun({
+        agentSpec: { agentId: 'diagnostician', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 60000,
+      });
+
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { args: string[] } | undefined;
+      if (!firstCall) throw new Error('expected firstCall');
+      expect(firstCall.args).toContain('diagnostician');
+    });
+
+    it('converts timeoutMs to seconds for --timeout CLI arg', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
+
+      await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 65000, // 65 seconds
+      });
+
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { args: string[] } | undefined;
+      if (!firstCall) throw new Error('expected firstCall');
+      const timeoutIdx = firstCall.args.indexOf('--timeout');
+      expect(firstCall.args[timeoutIdx + 1]).toBe('65'); // Math.ceil(65000/1000) = 65
+    });
+
+    it('stores cliOutput in memory after CLI completes', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const mockOutput = makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD), exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      // fetchOutput should work immediately since startRun blocks until CLI exits
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output.payload).toMatchObject({ diagnosisId: 'diag-1' });
+    });
+  });
+
+  // OCRA-03: fetchOutput parses CliOutput.stdout and returns DiagnosticianOutputV1
+  describe('fetchOutput()', () => {
+    it('parses valid DiagnosticianOutputV1 from CliOutput.stdout', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const mockOutput = makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD), exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const result = await adapter.fetchOutput(handle.runId);
+      expect(result.runId).toBe(handle.runId);
+      expect(result.payload).toMatchObject({
+        valid: true,
+        diagnosisId: 'diag-1',
+        taskId: 'task-1',
+      });
+    });
+
+    it('extracts JSON from mixed output with surrounding text', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const mixedOutput = 'Some text output\n' + JSON.stringify(VALID_PAYLOAD) + '\nmore text';
+      const mockCliOutput = makeCliOutput({ stdout: mixedOutput, exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockCliOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const result = await adapter.fetchOutput(handle.runId);
+      expect(result.payload).toMatchObject({ diagnosisId: 'diag-1' });
+    });
+
+    // OCRA-03 (revised): OpenClaw --json may produce three envelope shapes
+    it('parses local envelope { payloads: [{ text: "<json>" }] }', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const localEnvelope = { payloads: [{ text: JSON.stringify(VALID_PAYLOAD) }], meta: { model: 'claude' } };
+      const mockOutput = makeCliOutput({ stdout: JSON.stringify(localEnvelope), exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const result = await adapter.fetchOutput(handle.runId);
+      expect(result.payload).toMatchObject({ diagnosisId: 'diag-1', taskId: 'task-1' });
+    });
+
+    it('parses gateway envelope { result: { payloads: [{ text: "<json>" }] } }', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'gateway' });
+      const gatewayEnvelope = {
+        result: { payloads: [{ text: JSON.stringify(VALID_PAYLOAD) }] },
+        status: 'ok',
+      };
+      const mockOutput = makeCliOutput({ stdout: JSON.stringify(gatewayEnvelope), exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const result = await adapter.fetchOutput(handle.runId);
+      expect(result.payload).toMatchObject({ diagnosisId: 'diag-1', taskId: 'task-1' });
+    });
+
+    it('falls back to bare JSON when envelope has no matching payload structure', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      // Bare DiagnosticianOutputV1 JSON — no envelopes
+      const mockOutput = makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD), exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const result = await adapter.fetchOutput(handle.runId);
+      expect(result.payload).toMatchObject({ diagnosisId: 'diag-1', taskId: 'task-1' });
+    });
+  });
+
+  // OCRA-04: CLI failures map to correct PDErrorCategory
+  describe('fetchOutput() error mapping', () => {
+    it('throws PDRuntimeError("runtime_unavailable") when ENOENT (binary not found)', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const mockOutput = makeCliOutput({ stdout: '', stderr: 'ENOENT: ENOENT', exitCode: null, spawnError: 'ENOENT' });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toThrow(PDRuntimeError);
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toMatchObject({
+        category: 'runtime_unavailable',
+      });
+    });
+
+    it('throws PDRuntimeError("timeout") when timedOut=true', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const mockOutput = makeCliOutput({ stdout: '', stderr: '', exitCode: null, timedOut: true });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 1,
+      });
+
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toThrow(PDRuntimeError);
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toMatchObject({
+        category: 'timeout',
+      });
+    });
+
+    it('throws PDRuntimeError("execution_failed") when non-zero exit code', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const mockOutput = makeCliOutput({ stdout: '', stderr: '', exitCode: 42, timedOut: false });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toThrow(PDRuntimeError);
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toMatchObject({
+        category: 'execution_failed',
+      });
+    });
+
+    it('throws PDRuntimeError("execution_failed") with stderr excerpt on non-zero exit', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const mockOutput = makeCliOutput({ stdout: '', stderr: 'PluginLoadFailureError: cannot load plugin', exitCode: 1 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toMatchObject({
+        category: 'execution_failed',
+      });
+      // Verify the error message contains stderr excerpt
+      try {
+        await adapter.fetchOutput(handle.runId);
+      } catch (err) {
+        expect(err).toBeInstanceOf(PDRuntimeError);
+        expect((err as PDRuntimeError).message).toContain('PluginLoadFailureError');
+      }
+    });
+
+    it('throws PDRuntimeError("output_invalid") when JSON parse fails', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const mockOutput = makeCliOutput({ stdout: 'this is not JSON at all!!!', stderr: '', exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toThrow(PDRuntimeError);
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toMatchObject({
+        category: 'output_invalid',
+      });
+    });
+
+    it('throws PDRuntimeError("output_invalid") when DiagnosticianOutputV1 schema validation fails', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const invalidPayload = { valid: true /* missing required fields */ };
+      const mockOutput = makeCliOutput({ stdout: JSON.stringify(invalidPayload), exitCode: 0 });
+      mockRunCliProcess.mockResolvedValue(mockOutput);
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toThrow(PDRuntimeError);
+      await expect(adapter.fetchOutput(handle.runId)).rejects.toMatchObject({
+        category: 'output_invalid',
+      });
+    });
+  });
+
+  describe('pollRun()', () => {
+    it('returns succeeded when CLI exited with code 0', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD), exitCode: 0 }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const status = await adapter.pollRun(handle.runId);
+      expect(status.status).toBe('succeeded');
+      expect(status.runId).toBe(handle.runId);
+    });
+
+    it('returns failed when CLI exited with non-zero code', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: '', exitCode: 1 }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const status = await adapter.pollRun(handle.runId);
+      expect(status.status).toBe('failed');
+    });
+
+    it('returns timed_out when CLI timed out', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: '', exitCode: null, timedOut: true }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 1,
+      });
+
+      const status = await adapter.pollRun(handle.runId);
+      expect(status.status).toBe('timed_out');
+    });
+
+    it('includes stderr excerpt in reason when CLI exits non-zero', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const longStderr = 'PluginLoadFailureError: plugin principles-disciple failed to load';
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: '', exitCode: 1, stderr: longStderr }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const status = await adapter.pollRun(handle.runId);
+      expect(status.status).toBe('failed');
+      expect(status.reason).toContain('PluginLoadFailureError');
+      expect(status.reason).toContain('CLI exited with code 1');
+    });
+
+    it('truncates stderr excerpt at 2000 characters in reason', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const longStderr = 'A'.repeat(3000);
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: '', exitCode: 1, stderr: longStderr }));
+
+      const handle = await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const status = await adapter.pollRun(handle.runId);
+      expect(status.status).toBe('failed');
+      expect(status.reason?.length ?? 0).toBeLessThanOrEqual(2000 + 100); // 2000 + prefix overhead
+    });
+  });
+
+  describe('getCapabilities()', () => {
+    it('returns capabilities with structuredJsonOutput=true, cancellation=true', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const caps = await adapter.getCapabilities();
+      expect(caps.supportsStructuredJsonOutput).toBe(true);
+      expect(caps.supportsCancellation).toBe(true);
+      expect(caps.supportsToolUse).toBe(false);
+      expect(caps.supportsConcurrentRuns).toBe(false);
+    });
+  });
+
+  describe('cancelRun()', () => {
+    it('resolves without error even when run is not found', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      await expect(adapter.cancelRun('nonexistent-run-id')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('fetchArtifacts()', () => {
+    it('returns empty array', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      const artifacts = await adapter.fetchArtifacts('any-run-id');
+      expect(artifacts).toEqual([]);
+    });
+  });
+
+  // OCRA-07: runtimeMode 'local' → --local flag present
+  describe('runtimeMode="local"', () => {
+    it('passes --local flag when runtimeMode is local', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
+
+      await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { args: string[] } | undefined;
+      if (!firstCall) throw new Error('expected firstCall');
+      expect(firstCall.args).toContain('--local');
+    });
+  });
+
+  // OCRA-07: runtimeMode 'gateway' → --local flag absent (HG-03: no silent fallback)
+  describe('runtimeMode="gateway"', () => {
+    it('does NOT pass --local flag when runtimeMode is gateway', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'gateway' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
+
+      await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { args: string[] } | undefined;
+      if (!firstCall) throw new Error('expected firstCall');
+      expect(firstCall.args).not.toContain('--local');
+    });
+  });
+
+  // OCRA-06: workspaceDir passed as cwd to runCliProcess
+  describe('workspaceDir (OCRA-06, HG-02)', () => {
+    it('passes workspaceDir as cwd to runCliProcess when provided', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', workspaceDir: 'D:/work/.pd' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
+
+      await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { cwd?: string } | undefined;
+      if (!firstCall) throw new Error('expected firstCall');
+      expect(firstCall.cwd).toBe('D:/work/.pd');
+    });
+
+    it('passes undefined cwd when workspaceDir is not provided', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
+
+      await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { cwd?: string } | undefined;
+      if (!firstCall) throw new Error('expected firstCall');
+      expect(firstCall.cwd).toBeUndefined();
+    });
+
+    it('passes workspaceDir as cwd even when runtimeMode is gateway', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'gateway', workspaceDir: 'D:/work/.pd' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
+
+      await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { cwd?: string; args: string[] } | undefined;
+      if (!firstCall) throw new Error('expected firstCall');
+      expect(firstCall.cwd).toBe('D:/work/.pd');
+      expect(firstCall.args).not.toContain('--local');
+    });
+  });
+
+  // HG-03: Verify no silent fallback behavior
+  describe('HG-03: no silent fallback', () => {
+    it('gateway mode does NOT silently fall back to --local behavior', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'gateway' });
+      mockRunCliProcess.mockResolvedValue(makeCliOutput({ stdout: JSON.stringify(VALID_PAYLOAD) }));
+
+      await adapter.startRun({
+        agentSpec: { agentId: 'diag', schemaVersion: 'v1' },
+        inputPayload: {},
+        contextItems: [],
+        timeoutMs: 30000,
+      });
+
+      const firstCall = mockRunCliProcess.mock.calls[0]?.[0] as unknown as { args: string[] } | undefined;
+      if (!firstCall) throw new Error('expected firstCall');
+      const localCount = firstCall.args.filter((arg: string) => arg === '--local').length;
+      expect(localCount).toBe(0);
+    });
+  });
+
+  // Probe 3: healthCheck validates {ok: true} from OpenClaw agent response envelope
+  describe('healthCheck() probe 3 {ok: true} validation', () => {
+    // healthCheck calls runCliProcess in this order:
+    //   1. probe 1 (openclaw --version)
+    //   2. probe 2 (openclaw agents list --json)
+    //   3. probe 3 (openclaw agent --agent ... --message ... --json --local)
+    // So the mock chain order must match: mock[0] → probe 1, mock[1] → probe 2, mock[2] → probe 3.
+
+    it('healthy when stderr envelope payload is {"ok":true}', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      // OpenClaw `--json --local` sends the JSON envelope to stderr; stdout is empty
+      const envelope = JSON.stringify({ payloads: [{ text: '{"ok":true}' }] });
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' })) // probe 1
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))           // probe 2
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: envelope }));                   // probe 3
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(true);
+    });
+
+    it('healthy when envelope payload text contains prose-wrapped {"ok":true}', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      const envelope = JSON.stringify({ payloads: [{ text: 'Here is the result: {"ok":true} — done.' }] });
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: envelope }));
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(true);
+    });
+
+    it('healthy when bare {ok:true} is parsed directly (no envelope)', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      // Bare {ok:true} as the parsed JSON (direct response, no envelope wrapping)
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: '{"ok":true}' }));
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(true);
+    });
+
+    it('unhealthy when payload text is plain prose (not JSON)', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      const envelope = JSON.stringify({ payloads: [{ text: 'Hello, this is the agent speaking.' }] });
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: envelope }));
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(false);
+      expect(result.warnings.some(w => w.includes('probe returned unexpected result'))).toBe(true);
+    });
+
+    it('unhealthy when payload is valid JSON but not {ok:true}', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      const envelope = JSON.stringify({ payloads: [{ text: '{"diagnosisId":"d1","summary":"something"}' }] });
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: envelope }));
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(false);
+      expect(result.warnings.some(w => w.includes('probe returned unexpected result'))).toBe(true);
+    });
+
+    it('unhealthy when envelope JSON does not match expected shape', async () => {
+      const adapter = new OpenClawCliRuntimeAdapter({ runtimeMode: 'local', agentId: 'diag' });
+      // Stdout has unrelated JSON that doesn't match the expected envelope structure
+      mockRunCliProcess
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: 'openclaw version output' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stdout: '[{"id":"diag"}]' }))
+        .mockResolvedValueOnce(makeCliOutput({ exitCode: 0, stderr: '{"agentMeta":{"model":"test"},"status":"ok"}' }));
+
+      const result = await adapter.healthCheck();
+      expect(result.healthy).toBe(false);
+      expect(result.warnings.some(w => w.includes('probe returned unexpected result') || w.includes('unparseable'))).toBe(true);
+    });
+  });
+});

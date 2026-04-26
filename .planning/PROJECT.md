@@ -27,9 +27,31 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - v2.3 M4: Diagnostician Runner v2 — explicit runner, runtime adapter, validator, telemetry, CLI — SHIPPED 2026-04-23
 - v2.4 M5: Unified Commit + Principle Candidate Intake — DiagnosticianCommitter, artifact registry, transaction-safe commit, CLI visibility, E2E hard gate — SHIPPED 2026-04-24
 
-## Current Milestone: v2.5 — Candidate Gating + Promotion (Planning)
+## Current Milestone: v2.5 M6 — Production Runtime Adapter: OpenClaw CLI Diagnostician
 
-**Goal:** Principle candidate promotion via gating/scoring, active principle injection, ledger bridge filesystem sync
+**Goal:** 实现第一个真实生产级 PDRuntimeAdapter，让 `pd diagnose run --runtime openclaw-cli` 能通过 OpenClaw CLI 调用真实诊断智能体，返回 DiagnosticianOutputV1，并沿用 M3/M4/M5 链路完成全流程。
+
+**Target features:**
+- CliProcessRunner — 通用进程执行器（command/args/cwd/env/timeoutMs，捕获 stdout/stderr/exitCode/durationMs，timeout kill，no shell injection）
+- OpenClawCliRuntimeAdapter — 实现 PDRuntimeAdapter，RuntimeKind=`openclaw-cli`，one-shot run，错误映射 PDErrorCategory
+- DiagnosticianPromptBuilder — DiagnosticianContextPayload → OpenClaw agent message，只输出 JSON，代码负责提交
+- pd diagnose run --runtime 扩展 — `--runtime test-double|openclaw-cli [--agent <id>]`
+- pd runtime probe --runtime openclaw-cli — 必须交付（HARD GATE）
+
+**Hard Gates (HG-1 ~ HG-6):**
+- HG-1: `pd runtime probe --runtime openclaw-cli` 必须交付
+- HG-2: OpenClaw CLI 无 `--workspace`；PD workspace 与 OpenClaw agent workspace 是两个不同边界；adapter 必须通过 cwd/env/profile/agent config 明确控制，禁止隐式假设
+- HG-3: `--local` 不能静默默认或静默 fallback，必须作为显式 option/config，并测试 gateway/local 失败映射
+- HG-4: OpenClaw `--json` 返回 CliOutput { text }，DiagnosticianOutputV1 在 text 里；PD 必须解析 text、校验 schema，失败映射 output_invalid
+- HG-5: M6 签收必须包含真实 `D:\.openclaw\workspace` 验证
+- HG-6: Non-goals: 不使用 heartbeat/prompt hook/sessions_spawn/marker file/OpenClaw 插件 API，不做 principle promotion，不静默 fallback 到 TestDouble
+
+**Non-goals (M6 scope):**
+- 不调用 OpenClaw 插件 API
+- 不使用 heartbeat / prompt hook / sessions_spawn / marker file
+- 不依赖 OpenClaw skill dispatch
+- 不做 principle promotion / PrincipleTreeLedger 修改
+- 不静默 fallback 到 TestDouble（TestDouble 仅作为显式测试 runtime）
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
@@ -54,30 +76,7 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Phase 1.5 Validation | N=2 (coding + 1) is not enough for "Universal" claim; need extreme case | Active |
 | Freeze Semver after Ph 1.5 | Ensure stability only after cross-domain stress testing | Active |
 
-## Current Milestone: v2.4 PD Runtime v2 — M5 Unified Commit + Principle Candidate Intake
-
-**Goal:** diagnostician output -> diagnosis artifact -> principle candidate -> task resultRef，全链路在 SQLite .pd/state.db 内原子完成
-
-**Target features:**
-- DiagnosticianCommitter — 接口隔离，runner 只依赖 Committer，不直接操作 artifact/candidate 表
-- Artifact Registry — diagnosis_artifact + principle_candidate 表在 .pd/state.db
-- Principle Candidate Intake — 从 recommendations 提取 kind='principle'，写入 candidate 表
-- Transaction-safe commit — 同一 SQLite transaction：artifact → candidate → refs → task.resultRef
-- Runner integration — 正确顺序：output validated → commit → task succeeded；commit 失败 = artifact_commit_failed
-- CLI visibility — pd candidate list/show，JSON 输出可追溯
-- E2E 硬门槛 — task→run→output→artifact→candidate→resultRef 全链路可查
-
-**Canonical source:** `packages/principles-core/src/runtime-v2/`
-
-**M5 边界约束（6 corrections）:**
-- 原子提交 truth 在 SQLite .pd/state.db，PrincipleTreeLedger 只做 adapter/bridge，不作为原子事务部分
-- Runner 不直接知道 artifact/candidate 表或 ledger 文件路径，只依赖 Committer 接口
-- task succeeded 必须在 commit 成功之后；commit 失败 = artifact_commit_failed
-- 不能产生"任务成功但 candidate 缺失"的状态
-- E2E 验证命令是硬门槛：task→run→output→artifact→candidate→resultRef 全链路可追溯
-- 不做 principle promotion、active injection、multi-runtime、plugin demotion
-
-**Previous:** v2.3 — M4 Diagnostician Runner v2 — SHIPPED 2026-04-23
+**Previous:** v2.4 M5 Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24 (PR #398)
 
 ## Evolution
 
@@ -96,4 +95,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-24 after v2.4 M5 shipped, v2.5 planned*
+*Last updated: 2026-04-24 after v2.5 M6 started*

@@ -25,7 +25,8 @@ import type {
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DiagnosticianContextPayload } from '../context-payload.js';
-import type { DiagnosticianOutputV1, DiagnosticianInvocationInput } from '../diagnostician-output.js';
+import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import { DiagnosticianPromptBuilder } from '../diagnostician-prompt-builder.js';
 import type { TaskRecord } from '../task-status.js';
 import type { PDErrorCategory } from '../error-categories.js';
 import type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './diagnostician-runner-options.js';
@@ -191,6 +192,12 @@ export class DiagnosticianRunner {
         });
       }
 
+      // TELE-04: output_validation_succeeded — validator returned valid: true
+      this.emitDiagnosticianEvent('output_validation_succeeded', taskId, {
+        runtimeKind: this.resolvedOptions.runtimeKind,
+        outputValid: validationResult.valid,
+      });
+
       // 8. Succeed task -- store output and mark succeeded using store's runId
       return await this.succeedTask({ taskId, runId: storeRunId, output, task: leasedTask, contextHash });
     } catch (error) {
@@ -239,25 +246,20 @@ export class DiagnosticianRunner {
     const runs = await this.stateManager.getRunsByTask(taskId);
     const latestRun = runs[runs.length - 1];
     if (!latestRun) {
-      throw new PDRuntimeError('storage_unavailable', `No run record found for task ${taskId} after lease acquisition`);
+      throw new PDRuntimeError('execution_failed', `No run record found for task ${taskId} after lease acquisition`);
     }
     return latestRun.runId;
   }
 
   private async invokeRuntime(context: DiagnosticianContextPayload, taskId: string): Promise<RunHandle> {
-    const invocationInput: DiagnosticianInvocationInput = {
-      agentId: 'diagnostician',
-      taskId,
-      context,
-      outputSchemaRef: 'diagnostician-output-v1',
-      timeoutMs: this.resolvedOptions.timeoutMs,
-    };
+    const builder = new DiagnosticianPromptBuilder();
+    const { message } = builder.buildPrompt(context);
 
     const startInput: StartRunInput = {
-      agentSpec: { agentId: 'diagnostician', schemaVersion: 'v1' },
+      agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
-      inputPayload: invocationInput,
-      contextItems: [{ role: 'system', content: JSON.stringify(invocationInput) }],
+      inputPayload: message,
+      contextItems: [],
       outputSchemaRef: 'diagnostician-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
     };
@@ -299,7 +301,16 @@ export class DiagnosticianRunner {
   }
 
   private async succeedTask(ctx: SucceedContext): Promise<RunnerResult> {
-    await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));
+    // Store output before commit so run record reflects output on disk
+    try {
+      await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));
+    } catch (updateErr) {
+      this.emitDiagnosticianEvent('diagnostician_update_output_failed', ctx.taskId, {
+        runId: ctx.runId,
+        errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
+      });
+      throw updateErr;
+    }
 
     // Commit artifact + candidates before marking task succeeded
     this.phase = RunnerPhase.Committing;
@@ -403,6 +414,12 @@ export class DiagnosticianRunner {
       errorCategory: category,
     });
 
+    // TELE-04: output_validation_failed — validator returned valid: false
+    this.emitDiagnosticianEvent('output_validation_failed', ctx.taskId, {
+      errorCount: ctx.errors.length,
+      errorCategory: category,
+    });
+
     return this.retryOrFail({ taskId: ctx.taskId, task: ctx.task, errorCategory: category, failureReason: `Validation failed: ${ctx.errors.join('; ')}` });
   }
 
@@ -451,14 +468,11 @@ export class DiagnosticianRunner {
     // Check if error is permanent (never retry)
     if (this.isPermanentError(ctx.errorCategory)) {
       await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory);
-
-      // Emit: diagnostician_task_failed (permanent)
       this.emitDiagnosticianEvent('diagnostician_task_failed', ctx.taskId, {
         errorCategory: ctx.errorCategory,
         attemptCount: ctx.task.attemptCount,
         failureReason: ctx.failureReason,
       });
-
       this.phase = RunnerPhase.Failed;
       return { status: 'failed', taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: ctx.failureReason, attemptCount: ctx.task.attemptCount };
     }
@@ -467,27 +481,21 @@ export class DiagnosticianRunner {
     const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
     if (shouldRetry) {
       await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory);
-
-      // Emit: diagnostician_task_retried
       this.emitDiagnosticianEvent('diagnostician_task_retried', ctx.taskId, {
         errorCategory: ctx.errorCategory,
         attemptCount: ctx.task.attemptCount,
       });
-
       this.phase = RunnerPhase.RetryWaiting;
       return { status: 'retried', taskId: ctx.taskId, errorCategory: ctx.errorCategory, failureReason: ctx.failureReason, attemptCount: ctx.task.attemptCount };
     }
 
     // Max attempts exceeded
     await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded');
-
-    // Emit: diagnostician_task_failed (max_attempts_exceeded)
     this.emitDiagnosticianEvent('diagnostician_task_failed', ctx.taskId, {
       errorCategory: 'max_attempts_exceeded',
       attemptCount: ctx.task.attemptCount,
-      failureReason: ctx.failureReason,
+      failureReason: `Max attempts exceeded: ${ctx.failureReason}`,
     });
-
     this.phase = RunnerPhase.Failed;
     return {
       status: 'failed',

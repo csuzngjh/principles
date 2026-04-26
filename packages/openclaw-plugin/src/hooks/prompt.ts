@@ -535,7 +535,13 @@ The empathy observer subagent handles pain detection independently.
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
 
-  const empathyEnabled = wctx.config.get('empathy_engine.enabled') !== false;
+  // LEGACY PATH GUARD: empathy subagent spawning is disabled by default.
+  // Set PD_LEGACY_EMPATHY_SUBAGENT_ENABLED=true to re-enable.
+  const legacyEmpathyEnabled = process.env.PD_LEGACY_EMPATHY_SUBAGENT_ENABLED === 'true';
+  const empathyEnabled = legacyEmpathyEnabled && wctx.config.get('empathy_engine.enabled') !== false;
+  if (!legacyEmpathyEnabled) {
+    logger?.debug?.('[PD:Prompt] Legacy empathy subagent DISABLED (PD_LEGACY_EMPATHY_SUBAGENT_ENABLED != true)');
+  }
   logger?.info?.(`[PD:Empathy] Conditions: enabled=${empathyEnabled}, isUser=${isUserInteraction}, sessionId=${!!sessionId}, api=${!!api}, !agentToAgent=${!isAgentToAgent}, workspaceDir=${!!workspaceDir}, hasMessage=${!!latestUserMessage}`);
 
   // Track if we should inject behavioral constraints (will be added to appendSystemContext later)
@@ -728,6 +734,15 @@ ${heartbeatChecklist}
       }
     }
 
+    // ──── LEGACY PATH GUARD ────
+    // PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED=false (default) disables the
+    // legacy heartbeat/cron path that injects diagnostician tasks into the
+    // main agent session. M6 uses `pd diagnose run` via runtime-v2 instead.
+    const legacyDiagnosticianEnabled = process.env.PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED === 'true';
+    if (!legacyDiagnosticianEnabled) {
+      logger?.debug?.('[PD:Prompt] Legacy diagnostician heartbeat injection DISABLED (PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED != true); use `pd diagnose run` for diagnosis');
+    }
+
     // ──── 4b. Inject pending diagnostician tasks (compact summary) ────
     // FIX (#283/#380): The evolution worker writes pain diagnosis tasks to
     // diagnostician_tasks.json. The heartbeat prompt hook must read and inject
@@ -739,7 +754,7 @@ ${heartbeatChecklist}
     // original from diagnostician_tasks.json if it needs the full context.
     try {
       const pendingTasks = getPendingDiagnosticianTasks(wctx.stateDir);
-      if (pendingTasks.length > 0) {
+      if (legacyDiagnosticianEnabled && pendingTasks.length > 0) {
         pendingDiagTaskCount = pendingTasks.length;
 
         // Build compact summary blocks — one per task (only first is processed per heartbeat)
