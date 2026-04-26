@@ -37,17 +37,19 @@ resurrecting heartbeat/cron/subagent.
 **Requirements**: INTAKE-01, INTAKE-02, INTAKE-03, INTAKE-04, LEDGER-01
 
 **Success Criteria** (what must be TRUE):
-1. `CandidateIntakeInput` schema captures: candidateId, taskId, artifactId, diagnostic output (summary, rootCause, confidence, recommendations)
-2. `CandidateIntakeOutput` schema captures: ledgerEntryId, status, candidateId
+1. `CandidateIntakeInput` schema captures: candidateId, workspaceDir (D-01: DB is single source of truth — candidate data loaded by RuntimeStateManager)
+2. `CandidateIntakeOutput` schema captures: candidateId, artifactId, ledgerRef, status='consumed'
 3. Intake input does NOT accept arbitrary ledger entries — it maps committer output to ledger contract
-4. Ledger entry is a probation principle entry (status=probation), not active
-5. `principle_candidates.status` transitions: `pending` → `consumed` (never back)
+4. Ledger entry is a probation principle entry (status=probation, evaluability=weak_heuristic, 9 fields per D-03)
+5. `CandidateIntakeError` class defines 5 error codes per D-12
+
+See CONTEXT.md for authoritative success criteria. ROADMAP updated 2026-04-26 to reflect D-01 decision.
 
 **Plans**: 2 plans
 
 Plans:
-- [ ] m7-01-01-PLAN.md — CandidateIntakeInput/Output schemas + committer → intake mapping
-- [ ] m7-01-02-PLAN.md — Ledger entry contract (what fields are written, what are derived)
+- [x] m7-01-01-PLAN.md — CandidateIntakeInput/Output schemas, error class, LedgerAdapter interface, tests (INTAKE-01~04)
+- [x] m7-01-02-PLAN.md — Ledger entry contract documentation, field provenance, default values, LEDGER-01 tests
 
 ---
 
@@ -150,7 +152,7 @@ Plans:
 | m6-04: PD CLI Extension + Error Mapping | 3/3 | Complete | 2026-04-25 |
 | m6-05: Telemetry Events | 3/3 | Complete | 2026-04-25 |
 | m6-06: E2E Verification | 2/3 | Complete | 2026-04-25 |
-| m7-01: Candidate Intake Contract | 0/2 | Planning | — |
+| m7-01: Candidate Intake Contract | 2/2 | Planned | — |
 | m7-02: PrincipleTreeLedger Adapter | 0/2 | Planning | — |
 | m7-03: Intake Service + Idempotency | 0/2 | Planning | — |
 | m7-04: CLI: pd candidate intake | 0/2 | Planning | — |
