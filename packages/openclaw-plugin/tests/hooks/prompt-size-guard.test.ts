@@ -20,6 +20,12 @@ const mockGetPendingDiagnosticianTasks = vi.fn<(stateDir: string) => unknown[]>(
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetPendingDiagnosticianTasks.mockReturnValue([]);
+  // Enable legacy diagnostician injection — tests verify the compact block format
+  process.env.PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED = 'true';
+});
+
+afterEach(() => {
+  process.env.PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED = '';
 });
 
 vi.mock('../../src/core/diagnostician-task-store.js', async () => ({
