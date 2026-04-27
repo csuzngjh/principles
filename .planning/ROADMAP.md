@@ -165,7 +165,7 @@ Plans:
 | m7-01: Candidate Intake Contract | 2/2 | SHIPPED | 2026-04-26 |
 | m7-02: PrincipleTreeLedger Adapter | 2/2 | SHIPPED | 2026-04-26 |
 | m7-03: Intake Service + Idempotency | 2/2 | SHIPPED | 2026-04-26 |
-| m7-04: CLI: pd candidate intake | 0/2 | Context Gathered | -- |
+| m7-04: CLI: pd candidate intake | 2/2 | SHIPPED | 2026-04-27 |
 | m7-05: E2E: candidate -> ledger entry | 0/1 | Planning | -- |
 
 ---
