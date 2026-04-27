@@ -81,12 +81,13 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        working-directory: packages/openclaw-plugin
-        run: npm ci
+        run: npm ci --ignore-scripts
+
+      - name: Build dependencies
+        run: npm run build
 
       - name: Run unit tests
-        working-directory: packages/openclaw-plugin
-        run: npm run test:unit
+        run: npm run test:unit --workspace=principles-disciple
 
   test-openclaw-plugin-integration:
     name: Test OpenClaw Plugin (integration)
