@@ -8,7 +8,7 @@ import Database from 'better-sqlite3';
 describe('E2E: pd candidate intake flow', () => {
   let tempWorkspace: string;
   let db: Database.Database;
-  const pdCliPath = join(process.cwd(), 'packages/pd-cli/dist/index.js');
+  const pdCliPath = join(process.cwd(), 'dist/index.js');
 
   beforeEach(() => {
     tempWorkspace = mkdtempSync(join(tmpdir(), 'pd-e2e-'));
