@@ -33,8 +33,16 @@ async function loadCentralHealthService(): Promise<{ CentralHealthService: new (
 }
 
 export async function handleHealth(): Promise<void> {
-  const { CentralHealthService } = await loadCentralHealthService();
-  const service = new CentralHealthService();
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+  let service: Awaited<ReturnType<typeof loadCentralHealthService>>['CentralHealthService']['prototype'];
+  try {
+    const { CentralHealthService } = await loadCentralHealthService();
+    service = new CentralHealthService();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Error: Health check failed — ${message}`);
+    process.exit(1);
+  }
   const result = service.getAllWorkspaceHealth();
 
   if (result.workspaces.length === 0) {
