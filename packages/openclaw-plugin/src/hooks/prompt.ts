@@ -13,7 +13,6 @@ import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec, isExpected
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
 import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
-import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
@@ -734,93 +733,6 @@ ${heartbeatChecklist}
       }
     }
 
-    // ──── LEGACY PATH GUARD ────
-    // PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED=false (default) disables the
-    // legacy heartbeat/cron path that injects diagnostician tasks into the
-    // main agent session. M6 uses `pd diagnose run` via runtime-v2 instead.
-    const legacyDiagnosticianEnabled = process.env.PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED === 'true';
-    if (!legacyDiagnosticianEnabled) {
-      logger?.debug?.('[PD:Prompt] Legacy diagnostician heartbeat injection DISABLED (PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED != true); use `pd diagnose run` for diagnosis');
-    }
-
-    // ──── 4b. Inject pending diagnostician tasks (compact summary) ────
-    // FIX (#283/#380): The evolution worker writes pain diagnosis tasks to
-    // diagnostician_tasks.json. The heartbeat prompt hook must read and inject
-    // them so the LLM (acting as diagnostician) can process them.
-    //
-    // INJECTION FORMAT: Compact summary (not full prompt) to stay well within
-    // OpenClaw's ~10 000 char platform limit.  Full task.prompt can be 2–4 KB;
-    // the compact block is < 400 chars.  The agent is instructed to read the
-    // original from diagnostician_tasks.json if it needs the full context.
-    try {
-      const pendingTasks = getPendingDiagnosticianTasks(wctx.stateDir);
-      if (legacyDiagnosticianEnabled && pendingTasks.length > 0) {
-        pendingDiagTaskCount = pendingTasks.length;
-
-        // Build compact summary blocks — one per task (only first is processed per heartbeat)
-        const taskBlocks = pendingTasks
-          .slice(0, 1)
-          .map(({ id, task }) => {
-            // Extract summary fields; reason is truncated to 200 chars to keep
-            // the injected block small and stable.
-            const reason = (task.prompt
-              .match(/reason["\s:]+([^\n]{0,240})/i)?.[1]
-              ?? task.prompt.slice(0, 200)
-            ).slice(0, 200);
-
-            const safeId = escapeXml(id);
-            const safeReason = escapeXml(reason);
-            const safeCreatedAt = escapeXml(task.createdAt);
-            const markerFile = `.evolution_complete_${safeId}`;
-            const reportFile = `.diagnostician_report_${safeId}.json`;
-
-            return `<diagnostician_task id="${safeId}">
-task_id: ${safeId}
-reason: ${safeReason}
-marker: ${markerFile}
-report: ${reportFile}
-queued_at: ${safeCreatedAt}
-action: Analyze pain signal → identify violated principles → write ${markerFile} + ${reportFile}
-</diagnostician_task>`;
-          })
-          .join('\n\n');
-
-        const processingNote = pendingDiagTaskCount > 1
-          ? `\n\nNOTE: ${pendingDiagTaskCount - 1} more task(s) are queued. ` +
-            `Process one at a time; remaining tasks are handled on subsequent heartbeats.`
-          : '';
-
-        prependContext += `<diagnostician_tasks pending="${pendingDiagTaskCount}">
-You are acting as a **Pain Diagnostician**. For each task:
-1. Read the full prompt from: ${escapeXml(wctx.stateDir)}/diagnostician_tasks.json [task_id=${escapeXml(pendingTasks[0]?.id ?? '')}]
-2. Analyze the pain signal and its context
-3. Identify the root cause and violated principles
-4. Write a completion marker: .evolution_complete_<TASK_ID>
-5. Write a diagnostic report: .diagnostician_report_<TASK_ID>.json
-
-${taskBlocks}${processingNote}
-</diagnostician_tasks>\n`;
-
-        logger?.info?.(
-          `[PD:Prompt] Injected compact diagnostician task block ` +
-          `(task=${pendingTasks[0]?.id}, total_pending=${pendingDiagTaskCount})`
-        );
-
-        // C: Record heartbeat_diagnosis event for observability
-        try {
-          const eventLog = EventLogService.get(wctx.stateDir, logger);
-          eventLog.recordHeartbeatDiagnosis({
-            taskCount: pendingDiagTaskCount,
-            taskIds: pendingTasks.slice(0, 1).map(t => t.id),
-            trigger: 'heartbeat',
-          });
-        } catch (evErr) {
-          logger?.warn?.(`[PD:Prompt] Failed to record heartbeat_diagnosis event: ${String(evErr)}`);
-        }
-      }
-    } catch (e) {
-      logger?.warn?.(`[PD:Prompt] Failed to read diagnostician tasks: ${String(e)}`);
-    }
   }
 
   // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
