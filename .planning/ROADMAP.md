@@ -26,7 +26,7 @@ resurrecting heartbeat/cron/subagent.
 - [ ] **Phase m7-04: CLI: `pd candidate intake`** -- `pd candidate intake --candidate-id <id> --workspace <path> --json`
 	- [ ] m7-04-01-PLAN.md -- CLI handler: parse args, call service, format output
 - [ ] **Phase m7-05: E2E: candidate -> ledger entry** -- Full traceability + idempotency verification
-	- [ ] m7-05-01-PLAN.md -- E2E test: full flow from candidate pending to ledger entry
+	- [x] m7-05-01-PLAN.md -- E2E test: full flow from candidate pending to ledger entry
 
 ---
 
@@ -148,7 +148,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] m7-05-01-PLAN.md -- E2E tests: happy path, idempotency, traceability, CLI show
+- [x] m7-05-01-PLAN.md -- E2E tests: happy path, idempotency, traceability, CLI show
 
 ---
 
