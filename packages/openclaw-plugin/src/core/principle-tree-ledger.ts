@@ -294,7 +294,11 @@ function readLedgerFromFile(filePath: string): HybridLedgerStore {
   }
 
   try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
+    const content = fs.readFileSync(filePath, 'utf-8');
+    if (!content || content.trim() === '') {
+      return { trainingStore: {}, tree: createEmptyTree() };
+    }
+    const parsed = JSON.parse(content) as unknown;
     const raw = isRecord(parsed) ? parsed : {};
     // #219: Handle both formats:
     // - New format: { trainingStore: {...}, tree: {...} }
@@ -307,7 +311,7 @@ function readLedgerFromFile(filePath: string): HybridLedgerStore {
     };
   } catch (err) {
     console.error(`[principle-tree-ledger] Failed to load ledger from ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
-    throw new Error(`Failed to load ledger file`, { cause: err });
+    return { trainingStore: {}, tree: createEmptyTree() };
   }
 }
 
