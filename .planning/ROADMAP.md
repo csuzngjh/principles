@@ -24,9 +24,9 @@
 
 </details>
 
-### 🚧 v2.7 M8 — Pain Signal -> Diagnostician Bridge (In Progress / Planned)
+### 🚧 v2.7 M8 — Pain Signal → Principle Single Path Cutover (In Progress)
 
-- [ ] m8-01: Pain Signal Bridge (TBD plans)
+- [ ] m8-01: Legacy Code Map + Single Path Cutover (TBD plans)
 
 ## Backlog: Future Milestones
 
