@@ -26,23 +26,16 @@
 
 ### 🚧 v2.7 M8 — Pain Signal → Principle Single Path Cutover (In Progress)
 
-- [ ] m8-01: Legacy Code Map + Single Path Cutover (TBD plans)
+- [ ] m8-01: Legacy Code Map + Single Path Cutover (5/5 plans)
+
+Plans:
+- [ ] m8-01-01-PLAN.md — Delete diagnostician-task-store.ts
+- [ ] m8-01-02-PLAN.md — Remove legacy diagnostician block from prompt.ts and evolution-worker.ts
+- [ ] m8-01-03-PLAN.md — Update runtime-summary-service.ts and event-types.ts
+- [ ] m8-01-04-PLAN.md — Implement PainSignalBridge service + wire into pain.ts
+- [ ] m8-01-05-PLAN.md — E2E verification + ROADMAP update
 
 ## Backlog: Future Milestones
-
-### v2.7 M8 -- Pain Signal -> Diagnostician Bridge
-
-**Goal**: Trigger runtime-v2 task intake from pain signals (without heartbeat/cron/subagent).
-
-**Depends on**: M7
-
-**Non-goals**: No legacy deletion, no principle promotion.
-
-**Canonical source:** `packages/principles-core/src/runtime-v2/`
-
-**Plans**: TBD
-
----
 
 ### v2.8 M9 -- Legacy Path Decommission
 
@@ -58,4 +51,4 @@
 
 ---
 
-_Last updated: 2026-04-27 after v2.6 M7 milestone_
+_Last updated: 2026-04-27 after v2.7 M8 milestone start_
