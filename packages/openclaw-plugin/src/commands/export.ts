@@ -1,5 +1,6 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import { exportORPOSamples, listExports } from '../core/nocturnal-export.js';
 
@@ -10,7 +11,7 @@ function isZh(ctx: PluginCommandContext): boolean {
 export function handleExportCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'export');
   const zh = isZh(ctx);
-  const args = (ctx.args || '').trim();
+  const args = normalizeCommandArgs(ctx.args).trim();
   const parts = args.split(/\s+/).filter(Boolean);
   const [subcommand = 'corrections'] = parts;
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });

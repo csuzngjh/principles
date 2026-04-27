@@ -1,6 +1,7 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { resetFriction } from '../core/session-tracker.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 /**
@@ -26,7 +27,7 @@ export function handleRollbackCommand(ctx: PluginCommandContext): PluginCommandR
     const isZh = lang === 'zh';
     const { sessionId } = ctx as SessionAwareCommandContext;
 
-    const args = (ctx.args || '').trim();
+    const args = normalizeCommandArgs(ctx.args).trim();
 
     if (!args) {
         return {
