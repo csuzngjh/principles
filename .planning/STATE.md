@@ -1,11 +1,11 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.6
-milestone_name: milestone
-status: v2.6 M7 SHIPPED — milestone complete
-last_updated: "2026-04-27T07:29:57.452Z"
+milestone: v2.7
+milestone_name: M8 Pain Signal → Principle Single Path Cutover
+status: planning
+last_updated: "2026-04-27"
 progress:
-  total_phases: 5
+  total_phases: 0
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,44 +17,41 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.6 M7 shipped — next: v2.7 M8 Pain Signal Bridge planning
+**Current Focus:** v2.7 M8 — Pain Signal → Principle Single Path Cutover (planning)
 
 ## Current Position
 
-Phase: m7-05 (complete — v2.6 M7 shipped)
-Session ready for: /gsd-new-milestone — start v2.7 M8 Pain Signal Bridge
+Phase: Not started (defining roadmap)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-27 — Milestone v2.7 M8 started
 
-## M7 Phase Structure
+## M8 Pipeline (single path, no fallback)
 
-| Phase | Name | Requirements |
-|-------|------|--------------|
-| m7-01 | Candidate Intake Contract | INTAKE-01~04, LEDGER-01 (5 req) ✅ SHIPPED |
-| m7-02 | PrincipleTreeLedger Adapter | LEDGER-01~03 (3 req) ✅ SHIPPED |
-| m7-03 | Intake Service + Idempotency | INTAKE-05~07 (3 req) ✅ SHIPPED |
-| m7-04 | CLI: pd candidate intake | CLI-INTAKE-01~03 (3 req) ✅ SHIPPED |
-| m7-05 | E2E: candidate → ledger entry | E2E-INTAKE-01~04 (4 req) ✅ SHIPPED |
+pain → PD task/run store → DiagnosticianRunner → OpenClawCliRuntimeAdapter → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
+
+## M8 约束
+
+1. Legacy deletion 只针对旧诊断执行路径，不删除无关的 evolution-worker 功能
+2. M8 成功标准：链路终点必须是 PrincipleTreeLedger probation entry
+3. Candidate intake 是 happy path 的一部分
 
 ## Context
 
-**M7 Boundary Constraints:**
+**M8 依赖：** M7 (Candidate Intake 已完成)
 
-1. Atomic commit truth in SQLite .pd/state.db ONLY (carried from M5)
-2. Runner only depends on Committer interface (carried from M5)
-3. task succeeded MUST happen after commit success (carried from M5)
-4. Cannot produce "task succeeded but candidate missing" state (carried from M5)
-5. No pain signal bridge in M7
-6. No legacy path deletion in M7
-7. No heartbeat/cron/subagent resurrection
-8. No direct promotion to active principle
-9. Idempotency is a hard requirement for intake
+**M8 非目标：**
+- 不保留旧诊断开关
+- 不做 legacy fallback
+- 不删除 sleep reflection / keyword optimization 等非诊断功能（仅服务于旧诊断链路的才删）
 
 **Baseline (Frozen):**
-
 - v2.0 M1: Foundation Contracts — SHIPPED 2026-04-21
 - v2.1 M2: Task/Run State Core — SHIPPED 2026-04-22
 - v2.2 M3: History Retrieval + Context Build — SHIPPED 2026-04-23
 - v2.3 M4: Diagnostician Runner v2 — SHIPPED 2026-04-23
 - v2.4 M5: Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24
 - v2.5 M6: Production Runtime Adapter — SHIPPED 2026-04-25
+- v2.6 M7: Principle Candidate Intake — SHIPPED 2026-04-27
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`

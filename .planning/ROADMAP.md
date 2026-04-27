@@ -9,6 +9,7 @@
 - ✅ **v2.4 M5** — Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24
 - ✅ **v2.5 M6** — Production Runtime Adapter: OpenClaw CLI Diagnostician — SHIPPED 2026-04-25
 - ✅ **v2.6 M7** — Principle Candidate Intake — SHIPPED 2026-04-27
+- 🚧 **v2.7 M8** — Pain Signal → Principle Single Path Cutover (In Progress)
 
 ## Phases
 
