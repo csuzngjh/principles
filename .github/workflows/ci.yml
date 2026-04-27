@@ -84,7 +84,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Build dependencies
-        run: npm run build
+        run: npm run build --workspace=@principles/core
 
       - name: Run unit tests
         run: npm run test:unit --workspace=principles-disciple
