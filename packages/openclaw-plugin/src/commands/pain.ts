@@ -1,6 +1,7 @@
 import { resetFriction, getSession } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import type { EmpathyEventStats } from '../types/event-types.js';
 
@@ -100,7 +101,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     const isZh = lang === 'zh';
     const { sessionId } = ctx as SessionAwareCommandContext;
 
-    const args = (ctx.args || '').trim();
+    const args = normalizeCommandArgs(ctx.args).trim();
 
     // Handle empathy subcommand
     if (args.startsWith('empathy')) {

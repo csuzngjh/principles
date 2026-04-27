@@ -21,6 +21,7 @@ import {
 } from '../core/principle-tree-ledger.js';
 import type { Implementation, ImplementationLifecycleState } from '../types/principle-tree-schema.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 /**
@@ -139,7 +140,7 @@ export function handleDisableImplCommand(ctx: PluginCommandContext): PluginComma
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
-  const args = (ctx.args || '').trim();
+  const args = normalizeCommandArgs(ctx.args).trim();
 
   // Parse args: [implId] [--reason "..."]
   const parts = args.split(/\s+/);

@@ -20,6 +20,7 @@ import {
 import type { Implementation, ImplementationLifecycleState } from '../types/principle-tree-schema.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 
 /**
  * Get all implementations from the ledger.
@@ -49,7 +50,7 @@ export function handleArchiveImplCommand(ctx: PluginCommandContext): PluginComma
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
-  const args = (ctx.args || '').trim().split(/\s+/);
+  const args = normalizeCommandArgs(ctx.args).trim().split(/\s+/);
   const subcommand = args[0] || '';
 
   // Subcommand: list

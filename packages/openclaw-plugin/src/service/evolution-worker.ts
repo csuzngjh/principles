@@ -890,7 +890,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             stateDir: wctx.stateDir,
                             logger: api?.logger || logger,
                              
-                            runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api!),
+                            runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
                             subagent: api?.runtime?.subagent,
                         });
                         try {
@@ -1641,14 +1641,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         snapshotData = snapshotValidation.snapshot;
                     }
 
-                    if (!api) {
+                    if (!api?.runtime) {
                         sleepTask.status = 'failed';
                         sleepTask.completed_at = new Date().toISOString();
                         sleepTask.resolution = 'failed_max_retries';
-                        sleepTask.lastError = 'No API available to create NocturnalWorkflowManager';
+                        sleepTask.lastError = 'No API runtime available to create NocturnalWorkflowManager';
                         sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
                         sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} skipped: no API`);
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} skipped: no API runtime`);
                         continue;
                     }
 
@@ -1656,7 +1656,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         workspaceDir: wctx.workspaceDir,
                         stateDir: wctx.stateDir,
                         logger: api.logger,
-                        runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
+                        runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
                         subagent: api.runtime.subagent,
                     });
 
@@ -2400,13 +2400,14 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // the diagnostician without waiting for the next 15-minute interval.
                 // Must run AFTER processEvolutionQueue — HEARTBEAT.md must be written first.
                 if (painCheckResult.enqueued) {
-                    const canTrigger = !!api?.runtime?.system?.runHeartbeatOnce;
-                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — runHeartbeatOnce available: ${canTrigger} (api=${!!api}, runtime=${!!api?.runtime}, system=${!!api?.runtime?.system})`);
-                    if (canTrigger) {
+                    const systemRef = api?.runtime?.system;
+                    const runHeartbeat = systemRef?.runHeartbeatOnce;
+                    if (runHeartbeat) {
+                        logger.info(`[PD:EvolutionWorker] Pain flag enqueued — runHeartbeatOnce available (api=${!!api}, runtime=${!!api?.runtime}, system=${!!systemRef})`);
                         try {
-                            const hbResult = await api.runtime.system.runHeartbeatOnce({
+                            const hbResult = await runHeartbeat({
                                 reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
-                            });
+                            }) as { status: string; durationMs?: number; reason?: string };
                             logger.info(`[PD:EvolutionWorker] Immediate heartbeat result: status=${hbResult.status}${hbResult.status === 'ran' ? ` duration=${hbResult.durationMs}ms` : ''}${hbResult.status === 'skipped' || hbResult.status === 'failed' ? ` reason=${hbResult.reason}` : ''}`);
                             if (hbResult.status === 'skipped' || hbResult.status === 'failed') {
                                 logger.warn(`[PD:EvolutionWorker] Immediate heartbeat was ${hbResult.status} (${hbResult.reason}). Diagnostician will start on next regular heartbeat cycle.`);
@@ -2444,18 +2445,20 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                         }
 
                         // #183 + #188: Sweep Nocturnal workflows too (with gateway-safe fallback)
-                        try {
-                            const nocturnalMgr = new NocturnalWorkflowManager({
-                                workspaceDir: wctx.workspaceDir,
-                                stateDir: wctx.stateDir,
-                                logger: api.logger,
-                                runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
-                                subagent: api.runtime.subagent,
-                            });
-                            swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime, agentSession);
-                            nocturnalMgr.dispose();
-                        } catch (noctSweepErr) {
-                            logger?.warn?.(`[PD:EvolutionWorker] Nocturnal sweep failed: ${String(noctSweepErr)}`);
+                        if (api?.runtime) {
+                            try {
+                                const nocturnalMgr = new NocturnalWorkflowManager({
+                                    workspaceDir: wctx.workspaceDir,
+                                    stateDir: wctx.stateDir,
+                                    logger: api.logger,
+                                    runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
+                                    subagent: api.runtime.subagent,
+                                });
+                                swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime, agentSession);
+                                nocturnalMgr.dispose();
+                            } catch (noctSweepErr) {
+                                logger?.warn?.(`[PD:EvolutionWorker] Nocturnal sweep failed: ${String(noctSweepErr)}`);
+                            }
                         }
 
                         if (swept > 0) {

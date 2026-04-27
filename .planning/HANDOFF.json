@@ -1,28 +1,62 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-24T15:45:00+0800",
-  "phase": "m5-04",
-  "phase_name": "CLI + Telemetry",
-  "phase_dir": ".planning/phases/m5-04-CLITelemetry",
-  "plan": "03",
-  "task": 3,
-  "total_tasks": 3,
-  "status": "complete",
+  "timestamp": "2026-04-27T19:25:12Z",
+  "phase": "m7",
+  "phase_name": "M7 CI Baseline Repair",
+  "phase_dir": ".planning/phases/m7-05-E2E-Intake",
+  "plan": "01",
+  "task": 1,
+  "total_tasks": 1,
+  "status": "paused",
   "completed_tasks": [
-    {"id": 1, "name": "Wave 1: RuntimeStateManager Query Methods (m5-04-01)", "status": "done", "commit": "82912a0c"},
-    {"id": 2, "name": "Wave 1: CLI Functions (m5-04-02)", "status": "done", "commit": "9f37b9a8"},
-    {"id": 3, "name": "Wave 2: Telemetry Events (m5-04-03)", "status": "done", "commit": "20488697"}
+    {
+      "id": 1,
+      "name": "CI baseline repair: identified root causes",
+      "status": "done",
+      "progress": "Confirmed: 185 TS errors are origin/main technical debt (not M7 introduced). SDK type boundary issue identified. openclaw-sdk.d.ts renamed to .ts but @ts-nocheck prevents types from working."
+    }
   ],
-  "remaining_tasks": [],
-  "blockers": [],
+  "remaining_tasks": [
+    {"id": 2, "name": "Fix SDK type boundary properly", "status": "not_started"},
+    {"id": 3, "name": "Verify tsc --noEmit passes locally", "status": "not_started"},
+    {"id": 4, "name": "Verify pd-cli build passes", "status": "not_started"},
+    {"id": 5, "name": "Fix package-lock.json (principles-disciple dep)", "status": "not_started"},
+    {"id": 6, "name": "Commit clean CI/type baseline fix", "status": "not_started"}
+  ],
+  "blockers": [
+    {
+      "description": "SDK type file (.ts with @ts-nocheck) exports don't work as TypeScript module — removing @ts-nocheck causes more errors (SDK internal type issues)",
+      "type": "technical",
+      "workaround": "Must fix SDK types at source (openclaw-sdk.ts) — needs proper interfaces and no @ts-nocheck, OR accept origin/main error count as baseline"
+    },
+    {
+      "description": "273 pre-existing tsc errors on origin/main — these are technical debt, not M7 introduced",
+      "type": "technical",
+      "workaround": "CI baseline repair goal was: remove || true hack, restore TypeScript Check. But doing so reveals 273 errors that were always there."
+    }
+  ],
   "human_actions_pending": [],
   "decisions": [
-    {"decision": "CLI uses RuntimeStateManager interface (not direct store)", "rationale": "D-01 from m5-04-CONTEXT.md", "phase": "m5-04"},
-    {"decision": "DiagnoseStatusResult extended with nullable commitId/artifactId/candidateCount", "rationale": "D-02 from m5-04-CONTEXT.md", "phase": "m5-04"},
-    {"decision": "TELE events emitted from DiagnosticianRunner.succeedTask()", "rationale": "D-03 from m5-04-CONTEXT.md", "phase": "m5-04"},
-    {"decision": "Event names: diagnostician_artifact_committed, diagnostician_artifact_commit_failed, principle_candidate_registered", "rationale": "D-04 from m5-04-CONTEXT.md", "phase": "m5-04"},
-    {"decision": "candidate list joins through tasks→runs→commits→principle_candidates", "rationale": "D-05 from m5-04-CONTEXT.md", "phase": "m5-04"},
-    {"decision": "artifact show uses single query with JOIN", "rationale": "D-06 from m5-04-CONTEXT.md", "phase": "m5-04"}
+    {
+      "decision": "@ts-nocheck on openclaw-sdk.ts keeps it type-check-free but makes all exports resolve as '{}' — logger becomes '{}', api.runtime becomes '{}'",
+      "rationale": "Removing @ts-nocheck without fixing SDK internals explodes errors",
+      "phase": "m7"
+    },
+    {
+      "decision": "273 tsc errors are origin/main technical debt, confirmed by: git stash (clean) → tsc still shows errors",
+      "rationale": "Not M7's fault — these accumulated before M7 started",
+      "phase": "m7"
+    }
   ],
-  "next_action": "Run /gsd-verify-work m5-04 to verify phase goal achievement before advancing to m5-05"
+  "uncommitted_files": [
+    ".planning/HANDOFF.json",
+    "package-lock.json",
+    "packages/openclaw-plugin/.gitignore",
+    "packages/openclaw-plugin/src/core/principle-tree-ledger.ts",
+    "packages/openclaw-plugin/src/index.ts",
+    "packages/openclaw-plugin/tsconfig.json",
+    "packages/openclaw-plugin/src/openclaw-sdk.ts (new, untracked)"
+  ],
+  "next_action": "CRITICAL DECISION NEEDED: (A) Accept 273 pre-existing TS errors as origin/main baseline and commit only the CI hack removal, OR (B) Fix SDK type boundary properly (days of work). Option B: remove @ts-nocheck from openclaw-sdk.ts, fix all exported interface type errors, add normalizeArgs() helper to io.ts, fix event.params guards in gate.ts/lifecycle.ts.",
+  "context_notes": "User directive was clear: CI baseline repair = remove || true, restore TypeScript Check, don't fix 185 errors. But tsc --noEmit fails even after clean stash due to pre-existing errors. The SDK type boundary issue (openclaw-sdk.d.ts not tracked) is real but fixing it properly is a large effort."
 }

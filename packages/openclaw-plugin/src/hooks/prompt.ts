@@ -606,7 +606,7 @@ The empathy observer subagent handles pain detection independently.
         // Trigger subagent for sampling cases (Finding #1: use shared manager to avoid leaks)
         const runtimeSubagent =
           isSubagentRuntimeAvailable(api?.runtime?.subagent)
-            ? api.runtime.subagent
+            ? api?.runtime?.subagent
             : undefined;
 
         if (shouldCallSubagent && runtimeSubagent) {
@@ -654,7 +654,7 @@ The empathy observer subagent handles pain detection independently.
               workspaceDir,
               logger: api.logger ?? console,
                
-              subagent: toWorkflowSubagent(api.runtime.subagent),
+              subagent: toWorkflowSubagent(api?.runtime?.subagent),
             });
             
             empathyManager.startWorkflow(empathyObserverWorkflowSpec, {

@@ -19,7 +19,7 @@ function tryResolveFromAgent(
   attempts: string[],
 ): string | undefined {
   try {
-    const resolved = api.runtime.agent.resolveAgentWorkspaceDir(api.config, agentId);
+    const resolved = api.runtime?.agent?.resolveAgentWorkspaceDir?.(api.config, agentId);
     const issue = validateWorkspaceDir(resolved);
     if (!issue) {
       return resolved;

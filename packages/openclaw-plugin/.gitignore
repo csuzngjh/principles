@@ -5,9 +5,10 @@ node_modules/
 coverage/
 coverage-report.json
 
-# 编译产物 - 源码在 src/ 目录
+# 编译产物
 *.js
 !esbuild.config.js
+dist/
 *.d.ts
 
 # 历史遗留编译产物目录（已清理，防止再次生成）

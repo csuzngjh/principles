@@ -66,7 +66,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
     return;
   }
 
-  if (ctx.logger) ctx.logger.info(`[Pain Extractor] Scanning session transcript for pain signals: ${sessionFile}`);
+  ctx.logger?.info?.(`[Pain Extractor] Scanning session transcript for pain signals: ${sessionFile}`);
 
   const fileStream = fs.createReadStream(sessionFile);
   const rl = readline.createInterface({
@@ -97,13 +97,13 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
 
         if (msg.openclawAbort?.aborted) {
           const runIdSafe = msg.openclawAbort?.runId || 'unknown';
-          if (ctx.logger) ctx.logger.info(`[Pain Extractor] Detected hard-abort snapshot (runId: ${runIdSafe})`);
+          ctx.logger?.info?.(`[Pain Extractor] Detected hard-abort snapshot (runId: ${runIdSafe})`);
           painPoints.push(`[FATAL INTERCEPT] 动作被沙箱防御机制强制击落。大模型被击落前的思考流 (未遂动机): ${text.substring(0, 250)}...`);
           continue;
         }
 
         if (msg.__openclaw?.truncated && msg.__openclaw?.reason === 'oversized') {
-          if (ctx.logger) ctx.logger.info(`[Pain Extractor] Detected oversized data truncation placeholder`);
+          ctx.logger?.info?.(`[Pain Extractor] Detected oversized data truncation placeholder`);
           painPoints.push(`[COGNITIVE OVERLOAD] 大模型尝试读取极大体积的输入，已被底层守护程序抹除/折叠防爆。请反思是否读取了不当的文件或日志: ${text.substring(0, 150)}...`);
           continue;
         }
@@ -200,13 +200,14 @@ export async function handleBeforeCompaction(
   }
 
   // 提取工作记忆（从 sessionFile）
-  if (event.sessionFile) {
-    await extractPainFromSessionFile(event.sessionFile, ctx);
+  const sessionFile = (event as { sessionFile?: string }).sessionFile;
+  if (sessionFile) {
+    await extractPainFromSessionFile(sessionFile, ctx);
 
     // 新增：提取并保存工作记忆
-     
-     
-    await extractAndSaveWorkingMemory(event.sessionFile, ctx, wctx);
+
+
+    await extractAndSaveWorkingMemory(sessionFile, ctx, wctx);
   }
 }
 
@@ -296,20 +297,18 @@ async function extractAndSaveWorkingMemory(
     // 写入文件
     atomicWriteFileSync(focusPath, updatedContent);
     
-    if (ctx.logger) {
-      ctx.logger.info(`[WorkingMemory] Preserved ${snapshot.artifacts.length} artifacts, ` +
-        `${snapshot.activeProblems.length} problems, ` +
-        `${snapshot.nextActions.length} next actions to CURRENT_FOCUS.md`);
-    }
+    ctx.logger?.info?.(`[WorkingMemory] Preserved ${snapshot.artifacts.length} artifacts, ` +
+      `${snapshot.activeProblems.length} problems, ` +
+      `${snapshot.nextActions.length} next actions to CURRENT_FOCUS.md`);
   } catch (err) {
     ctx.logger?.error?.(`[PD:Lifecycle] Failed to save working memory: ${String(err)}`);
-    
+
     // 尝试恢复备份
     const backupPath = `${focusPath}.wm-backup`;
     if (fs.existsSync(backupPath)) {
       try {
         fs.copyFileSync(backupPath, focusPath);
-        if (ctx.logger) ctx.logger.warn(`[WorkingMemory] Restored from backup after failure`);
+        ctx.logger?.warn?.(`[WorkingMemory] Restored from backup after failure`);
       } catch {
         // 忽略恢复错误
       }
@@ -325,8 +324,9 @@ export async function handleAfterCompaction(
 
   const [dateStrPost] = new Date().toISOString().split('T');
   const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStrPost}.md`);
+  const messageCount = (event as { messageCount?: number }).messageCount ?? 0;
   const log =
-    `- Post-Compaction Complete. Reduced active context to ${event.messageCount} messages.\n`;
+    `- Post-Compaction Complete. Reduced active context to ${messageCount} messages.\n`;
 
   try {
     fs.appendFileSync(checkpointPath, log, 'utf8');
