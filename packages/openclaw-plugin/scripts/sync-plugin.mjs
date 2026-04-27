@@ -832,40 +832,55 @@ function restartGatewayWindows() {
 
         // Trigger via schtasks — reliable, avoids CLI busy-port misdetection
         console.log('   Starting gateway via scheduled task...');
-        execSync('schtasks /Run /TN "OpenClaw Gateway"', { stdio: 'inherit' });
+        let gatewayStarted = false;
+        try {
+            execSync('schtasks /Run /TN "OpenClaw Gateway"', { stdio: 'pipe' });
+            gatewayStarted = true;
+        } catch {
+            // schtasks failed — try direct CLI fallback
+            console.log('   Scheduled task not available, trying direct gateway start...');
+            try {
+                execSync('start /b cmd /c "openclaw gateway > nul 2>&1"', { stdio: 'pipe', shell: true });
+                gatewayStarted = true;
+            } catch {
+                // Gateway may already be running or no perms — not fatal
+            }
+        }
 
         // Wait for gateway to be listening on port (同步等待，不异步)
         const port = 18789;
-        const deadline = Date.now() + 30000;
-        const pollInterval = 1000;
+        const deadline = Date.now() + 15000; // 缩短等待时间，避免卡住
         let gatewayListening = false;
 
         while (Date.now() < deadline) {
             try {
+                // 使用 Test-NetConnection 替代有语法问题的 Get-NetTCPConnection + Measure-Object
                 const result = execSync(
-                    `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Measure-Object -Line).Count"`,
+                    `powershell -NoProfile -Command "(Test-NetConnection -ComputerName localhost -Port ${port} -WarningAction SilentlyContinue).TcpTestSucceeded"`,
                     { encoding: 'utf-8', timeout: 5000 }
                 ).trim();
-                if (parseInt(result) > 0) {
+                if (result === 'True') {
                     gatewayListening = true;
                     break;
                 }
             } catch { /* port not listening yet */ }
-            execSync('timeout /t 1 /nobreak > nul', { shell: true, stdio: 'ignore' });
+            try {
+                execSync('timeout /t 1 /nobreak > nul', { shell: true, stdio: 'ignore' });
+            } catch { /* ignore */ }
         }
 
         if (!gatewayListening) {
-            console.error('\n❌ Gateway did not start on port 18789 within 30s.');
-            console.error('   Please restart manually: openclaw gateway start');
-            process.exit(1);
+            console.warn('\n⚠️  Gateway may not be running on port 18789 (plugin files are installed).');
+            console.warn('   Run "openclaw gateway start" to verify.');
+            return; // 不 exit(1)，插件已安装完成
         }
 
         console.log('   ✅ Gateway is listening on port 18789');
 
     } catch (error) {
-        console.error(`\n❌ Gateway restart failed: ${error.message}`);
-        console.error('   You may need to manually restart: openclaw gateway start');
-        process.exit(1);
+        // Gateway 重启失败不算安装失败 — 插件文件已同步
+        console.warn(`\n⚠️  Gateway restart warning: ${error.message}`);
+        console.warn('   Plugin files are installed. Run "openclaw gateway start" manually if needed.');
     }
 }
 
