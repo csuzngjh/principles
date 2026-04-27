@@ -122,7 +122,7 @@ export function handleAfterToolCall(
   const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
 
   if (isFailure) {
-    const errorText = event.error || (typeof event.result === 'string' ? event.result : JSON.stringify(event.result));
+    const errorText = String(event.error ?? (typeof event.result === 'string' ? event.result : JSON.stringify(event.result)));
     const denoised = denoiseError(errorText);
     const hash = computeHash(denoised);
     

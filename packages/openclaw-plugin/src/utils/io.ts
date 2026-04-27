@@ -168,3 +168,13 @@ export function planStatus(projectDir: string): string {
   }
   return '';
 }
+
+/**
+ * Normalize command arguments from PluginCommandContext.args.
+ * Handles string | string[] | undefined union by joining arrays with spaces.
+ */
+export function normalizeCommandArgs(args: string | string[] | undefined): string {
+  if (args === undefined || args === null) return '';
+  if (Array.isArray(args)) return args.join(' ');
+  return args;
+}

@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { atomicWriteFileSync } from '../utils/io.js';
+import { atomicWriteFileSync, normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 const TOOLS_TO_SCAN = [
@@ -75,7 +75,7 @@ export function handleBootstrapTools(ctx: PluginCommandContext): PluginCommandRe
 }
 
 export function handleResearchTools(ctx: PluginCommandContext): PluginCommandResult {
-  const category = ctx.args?.trim() || "modern high-performance CLI tools for coding and architecture";
+  const category = normalizeCommandArgs(ctx.args).trim() || "modern high-performance CLI tools for coding and architecture";
   
   return {
     text:

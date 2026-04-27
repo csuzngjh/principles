@@ -1,5 +1,6 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 function isZh(ctx: PluginCommandContext): boolean {
@@ -9,7 +10,7 @@ function isZh(ctx: PluginCommandContext): boolean {
 export function handleSamplesCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'samples');
   const zh = isZh(ctx);
-  const args = (ctx.args || '').trim();
+  const args = normalizeCommandArgs(ctx.args).trim();
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
 
   if (args.startsWith('review ')) {

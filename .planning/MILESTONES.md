@@ -1,6 +1,28 @@
 # Milestones
 
-## Current: PD Runtime v2 — M5 Unified Commit + Principle Candidate Intake (Started: 2026-04-24)
+## v2.6 M7 — Principle Candidate Intake (Shipped: 2026-04-27)
+
+**Phases completed:** 5 phases (m7-01 through m7-05), 9 plans
+**Key accomplishments:**
+- CandidateIntakeService: consumes pending candidates, idempotent ledger entry writing
+- pd candidate intake CLI: --candidate-id, --workspace, --json, --dry-run
+- PrincipleTreeLedgerAdapter: 11-field → 18+ field expansion, in-memory idempotency Map
+- E2E traceability: candidate → artifact → task/run → ledger entry link
+- 6 E2E tests + 45 unit tests + 11 CLI integration tests all passing
+
+**Baseline (Frozen):**
+- v2.0 M1: Foundation Contracts — SHIPPED 2026-04-21 (PR #392)
+- v2.1 M2: Task/Run State Core — SHIPPED 2026-04-22 (PR #393)
+- v2.2 M3: History Retrieval + Context Build — SHIPPED 2026-04-23 (PR #394)
+- v2.3 M4: Diagnostician Runner v2 — SHIPPED 2026-04-23 (PR #395, #396)
+- v2.4 M5: Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24 (PR #398)
+- v2.5 M6: Production Runtime Adapter: OpenClaw CLI Diagnostician — SHIPPED 2026-04-25
+
+**Next:** v2.7 M8 — Pain Signal -> Diagnostician Bridge
+
+---
+
+## PD Runtime v2 — M5 Unified Commit + Principle Candidate Intake (Shipped: 2026-04-24)
 
 **Goal:**
 

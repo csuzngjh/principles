@@ -25,6 +25,7 @@
  */
 
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import {
   evaluatePromotionGate,
@@ -102,7 +103,7 @@ function formatConstraintCheck(
 export function handleNocturnalRolloutCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'nocturnal-rollout');
   const zh = isZh(ctx);
-  const args = (ctx.args || '').trim();
+  const args = normalizeCommandArgs(ctx.args).trim();
   const parts = args.split(/\s+/).filter(Boolean);
   const [subcommand = 'help'] = parts;
 

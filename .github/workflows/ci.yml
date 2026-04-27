@@ -88,6 +88,9 @@ jobs:
         working-directory: packages/openclaw-plugin
         run: npm ci
 
+      - name: Build dependencies
+        run: npm run build
+
       - name: Run unit tests
         working-directory: packages/openclaw-plugin
         run: npm run test:unit
@@ -108,6 +111,9 @@ jobs:
       - name: Install dependencies
         working-directory: packages/openclaw-plugin
         run: npm ci
+
+      - name: Build dependencies
+        run: npm run build
 
       - name: Run integration tests
         working-directory: packages/openclaw-plugin

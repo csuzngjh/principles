@@ -25,33 +25,27 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - v2.1 M2: Task/Run State Core — SqliteTaskStore, SqliteRunStore, LeaseManager, RetryPolicy, RecoverySweep — SHIPPED 2026-04-22
 - v2.2 M3: History Retrieval + Context Build — trajectory locate, history query, context assembly — SHIPPED 2026-04-23
 - v2.3 M4: Diagnostician Runner v2 — explicit runner, runtime adapter, validator, telemetry, CLI — SHIPPED 2026-04-23
-- v2.4 M5: Unified Commit + Principle Candidate Intake — DiagnosticianCommitter, artifact registry, transaction-safe commit, CLI visibility, E2E hard gate — SHIPPED 2026-04-24
+- v2.5 M6: Production Runtime Adapter: OpenClaw CLI Diagnostician — OpenClawCliRuntimeAdapter, DiagnosticianPromptBuilder, pd diagnose run --runtime openclaw-cli, HG-1~HG-5 all PASS — SHIPPED 2026-04-25
+- v2.6 M7: Principle Candidate Intake — CandidateIntakeService, pd candidate intake CLI, PrincipleTreeLedger adapter, idempotent probation entry writing, E2E traceability — SHIPPED 2026-04-27
 
-## Current Milestone: v2.5 M6 — Production Runtime Adapter: OpenClaw CLI Diagnostician
+## Current Milestone: v2.6 M7 — Principle Candidate Intake
 
-**Goal:** 实现第一个真实生产级 PDRuntimeAdapter，让 `pd diagnose run --runtime openclaw-cli` 能通过 OpenClaw CLI 调用真实诊断智能体，返回 DiagnosticianOutputV1，并沿用 M3/M4/M5 链路完成全流程。
+**Goal:** 消费 `principle_candidates.status=pending` 的候选，把它们转换为 PD principle ledger 可管理的 probation principle 条目。M7 不处理 pain signal 自动触发，不删除 legacy evolution-worker，不恢复 heartbeat/cron/subagent。
+
+**Pipeline:** `task → run(openclaw-cli) → DiagnosticianOutputV1 → commit → artifact → principle_candidate(status=pending)` → **[M7 intake]** → `principle_ledger(status=probation)`
 
 **Target features:**
-- CliProcessRunner — 通用进程执行器（command/args/cwd/env/timeoutMs，捕获 stdout/stderr/exitCode/durationMs，timeout kill，no shell injection）
-- OpenClawCliRuntimeAdapter — 实现 PDRuntimeAdapter，RuntimeKind=`openclaw-cli`，one-shot run，错误映射 PDErrorCategory
-- DiagnosticianPromptBuilder — DiagnosticianContextPayload → OpenClaw agent message，只输出 JSON，代码负责提交
-- pd diagnose run --runtime 扩展 — `--runtime test-double|openclaw-cli [--agent <id>]`
-- pd runtime probe --runtime openclaw-cli — 必须交付（HARD GATE）
+- `CandidateIntakeService` — 消费 pending candidate，幂等写入 ledger
+- `pd candidate intake --candidate-id <id> --workspace <path> --json` — CLI 入口
+- `PrincipleTreeLedger` adapter — probation principle 写入，不做 promotion
+- 链路可追溯：candidate → artifact → task/run → ledger entry
 
-**Hard Gates (HG-1 ~ HG-6):**
-- HG-1: `pd runtime probe --runtime openclaw-cli` 必须交付
-- HG-2: OpenClaw CLI 无 `--workspace`；PD workspace 与 OpenClaw agent workspace 是两个不同边界；adapter 必须通过 cwd/env/profile/agent config 明确控制，禁止隐式假设
-- HG-3: `--local` 不能静默默认或静默 fallback，必须作为显式 option/config，并测试 gateway/local 失败映射
-- HG-4: OpenClaw `--json` 返回 CliOutput { text }，DiagnosticianOutputV1 在 text 里；PD 必须解析 text、校验 schema，失败映射 output_invalid
-- HG-5: M6 签收必须包含真实 `D:\.openclaw\workspace` 验证
-- HG-6: Non-goals: 不使用 heartbeat/prompt hook/sessions_spawn/marker file/OpenClaw 插件 API，不做 principle promotion，不静默 fallback 到 TestDouble
-
-**Non-goals (M6 scope):**
+**M7 Non-goals:**
 - 不调用 OpenClaw 插件 API
 - 不使用 heartbeat / prompt hook / sessions_spawn / marker file
-- 不依赖 OpenClaw skill dispatch
-- 不做 principle promotion / PrincipleTreeLedger 修改
-- 不静默 fallback 到 TestDouble（TestDouble 仅作为显式测试 runtime）
+- 不做 pain signal 自动触发（M8 scope）
+- 不删除 legacy evolution-worker（M9 scope）
+- 不 promote to active principle
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
@@ -95,4 +89,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-24 after v2.5 M6 started*
+*Last updated: 2026-04-27 after v2.6 M7 shipped*

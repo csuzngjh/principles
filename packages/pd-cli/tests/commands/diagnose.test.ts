@@ -37,6 +37,7 @@ vi.mock('@principles/core/runtime-v2', () => {
     storeEmitter: { emitTelemetry: vi.fn() },
     DiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
     PassThroughValidator: vi.fn().mockImplementation(function () { return {}; }),
+    DefaultDiagnosticianValidator: vi.fn().mockImplementation(function () { return {}; }),
     TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     PDRuntimeError: class PDRuntimeError extends Error {
