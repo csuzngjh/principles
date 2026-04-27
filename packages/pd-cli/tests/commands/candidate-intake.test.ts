@@ -72,7 +72,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   RuntimeStateManager: MockRuntimeStateManager,
 }));
 
-vi.mock('@principles/openclaw-plugin', () => ({
+vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({
   PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
 }));
 

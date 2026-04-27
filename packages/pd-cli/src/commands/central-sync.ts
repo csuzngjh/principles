@@ -7,10 +7,22 @@
  * per-workspace sync results with exit code 0 on success, non-zero on failure.
  */
 
-import { CentralDatabase } from '../../../openclaw-plugin/src/service/central-database.js';
+async function loadCentralDatabase(): Promise<{ CentralDatabase: new () => {
+  syncAll(): Map<string, number>;
+  dispose(): void;
+} }> {
+  const importModule = Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<{
+    CentralDatabase: new () => {
+      syncAll(): Map<string, number>;
+      dispose(): void;
+    };
+  }>;
+  return importModule('../../../openclaw-plugin/src/service/central-database.js');
+}
 
 export async function handleCentralSync(): Promise<void> {
   try {
+    const { CentralDatabase } = await loadCentralDatabase();
     const centralDb = new CentralDatabase();
     const results = centralDb.syncAll();
 

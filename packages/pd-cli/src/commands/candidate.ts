@@ -14,7 +14,7 @@ import {
   CandidateIntakeError,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
-import { PrincipleTreeLedgerAdapter } from '@principles/openclaw-plugin';
+import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface CandidateListOptions {
@@ -90,9 +90,12 @@ export async function handleCandidateShow(opts: CandidateShowOptions): Promise<v
   try {
     await stateManager.initialize();
 
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: workspaceDir });
+
     const result = await candidateShow({
       candidateId: opts.candidateId,
       stateManager,
+      ledgerAdapter,
     });
 
     if (!result) {
@@ -114,6 +117,9 @@ export async function handleCandidateShow(opts: CandidateShowOptions): Promise<v
     console.log(`  Confidence:  ${result.confidence ?? 'N/A'}`);
     console.log(`  Status:      ${result.status}`);
     console.log(`  Created:     ${result.createdAt}`);
+    if (result.ledgerEntryId) {
+      console.log(`  Ledger Entry: ${result.ledgerEntryId}`);
+    }
     console.log('');
   } finally {
     await stateManager.close();
@@ -243,7 +249,6 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (err instanceof CandidateIntakeError || (err as any).name === 'CandidateIntakeError') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      console.error(`Intake failed [${(err as any).code}]: ${(err as any).message}`);
       console.error(`Intake failed [${(err as any).code}]: ${(err as any).message}`);
     } else {
       console.error(`Intake failed: ${String(err)}`);
