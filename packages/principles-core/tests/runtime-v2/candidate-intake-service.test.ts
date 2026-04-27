@@ -250,7 +250,7 @@ describe('CandidateIntakeService', () => {
       await expect(service.intake('test-candidate-001')).rejects.toThrow();
     });
 
-    it('throws ARTIFACT_NOT_FOUND when artifact content parse fails', async () => {
+    it('throws INPUT_INVALID when artifact content parse fails', async () => {
       const candidate = createCandidate();
       const badArtifact = createArtifact({ contentJson: 'invalid json' });
       vi.spyOn(mockLedgerAdapter, 'existsForCandidate').mockReturnValue(null);
@@ -260,7 +260,7 @@ describe('CandidateIntakeService', () => {
       try {
         await service.intake('test-candidate-001');
       } catch (err: unknown) {
-        expectCandidateError(err, INTAKE_ERROR_CODES.ARTIFACT_NOT_FOUND);
+        expectCandidateError(err, INTAKE_ERROR_CODES.INPUT_INVALID);
       }
     });
 

@@ -100,8 +100,8 @@ export class CandidateIntakeService {
       recommendation = rec;
     } catch (err: unknown) {
       throw new CandidateIntakeError(
-        INTAKE_ERROR_CODES.ARTIFACT_NOT_FOUND,
-        `Failed to parse artifact content for candidate ${candidateId}`,
+        INTAKE_ERROR_CODES.INPUT_INVALID,
+        `Failed to parse artifact content for candidate ${candidateId}: ${err instanceof Error ? err.message : String(err)}`,
         { candidateId, cause: err },
       );
     }

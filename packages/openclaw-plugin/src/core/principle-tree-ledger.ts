@@ -305,11 +305,9 @@ function readLedgerFromFile(filePath: string): HybridLedgerStore {
       trainingStore: parseLegacyTrainingStore(trainingStoreRaw),
       tree: parseTree(treeRaw),
     };
-  } catch {
-    return {
-      trainingStore: {},
-      tree: createEmptyTree(),
-    };
+  } catch (err) {
+    console.error(`[principle-tree-ledger] Failed to load ledger from ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Failed to load ledger file`, { cause: err });
   }
 }
 

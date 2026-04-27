@@ -75,13 +75,15 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
     // Return minimal entry sufficient for idempotency signaling.
     return {
       id: found.id,
+      title: '',
+      status: 'probation' as const,
       sourceRef: `candidate://${candidateId}`,
       artifactRef: '',
       taskRef: '',
       text: found.text,
       triggerPattern: found.triggerPattern,
       action: found.action,
-      evaluability: found.evaluability,
+      evaluability: 'weak_heuristic' as const,
       createdAt: found.createdAt,
     } as LedgerPrincipleEntry;
   }

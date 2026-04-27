@@ -177,8 +177,8 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
       try {
         const parsed = JSON.parse(artifact.contentJson || '{}');
         recommendation = parsed.recommendation || parsed;
-      } catch {
-        // Use defaults if parse fails
+      } catch (err) {
+        console.warn(`Warning: could not parse artifact content as JSON — using defaults. ${err instanceof Error ? err.message : String(err)}`);
       }
       // Build complete 11-field LedgerPrincipleEntry (same as CandidateIntakeService)
       const entry: LedgerPrincipleEntry = {
