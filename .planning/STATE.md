@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v2.6
 milestone_name: milestone
-status: m7-05 complete — M7 milestone complete
+status: v2.6 M7 SHIPPED — milestone complete
 last_updated: "2026-04-27T07:29:57.452Z"
 progress:
   total_phases: 5
@@ -17,13 +17,12 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.6 M7 Principle Candidate Intake: consume pending candidates and write ledger probation entries
+**Current Focus:** v2.6 M7 shipped — next: v2.7 M8 Pain Signal Bridge planning
 
 ## Current Position
 
-Phase: m7-05 (planned — ready for execution)
-Session stopped at: Phase m7-05 planning complete — ready for execute
-Resume from: .planning/phases/m7-05-E2E-Intake/m7-05-01-PLAN.md
+Phase: m7-05 (complete — v2.6 M7 shipped)
+Session ready for: /gsd-new-milestone — start v2.7 M8 Pain Signal Bridge
 
 ## M7 Phase Structure
 
@@ -33,7 +32,7 @@ Resume from: .planning/phases/m7-05-E2E-Intake/m7-05-01-PLAN.md
 | m7-02 | PrincipleTreeLedger Adapter | LEDGER-01~03 (3 req) ✅ SHIPPED |
 | m7-03 | Intake Service + Idempotency | INTAKE-05~07 (3 req) ✅ SHIPPED |
 | m7-04 | CLI: pd candidate intake | CLI-INTAKE-01~03 (3 req) ✅ SHIPPED |
-| m7-05 | E2E: candidate → ledger entry | E2E-INTAKE-01~04 (4 req) 📋 Planned |
+| m7-05 | E2E: candidate → ledger entry | E2E-INTAKE-01~04 (4 req) ✅ SHIPPED |
 
 ## Context
 

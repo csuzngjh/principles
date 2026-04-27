@@ -26,6 +26,7 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - v2.2 M3: History Retrieval + Context Build — trajectory locate, history query, context assembly — SHIPPED 2026-04-23
 - v2.3 M4: Diagnostician Runner v2 — explicit runner, runtime adapter, validator, telemetry, CLI — SHIPPED 2026-04-23
 - v2.5 M6: Production Runtime Adapter: OpenClaw CLI Diagnostician — OpenClawCliRuntimeAdapter, DiagnosticianPromptBuilder, pd diagnose run --runtime openclaw-cli, HG-1~HG-5 all PASS — SHIPPED 2026-04-25
+- v2.6 M7: Principle Candidate Intake — CandidateIntakeService, pd candidate intake CLI, PrincipleTreeLedger adapter, idempotent probation entry writing, E2E traceability — SHIPPED 2026-04-27
 
 ## Current Milestone: v2.6 M7 — Principle Candidate Intake
 
@@ -88,4 +89,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-24 after v2.5 M6 started*
+*Last updated: 2026-04-27 after v2.6 M7 shipped*
