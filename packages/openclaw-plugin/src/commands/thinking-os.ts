@@ -1,6 +1,7 @@
  
 import * as fs from 'fs';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 
@@ -162,7 +163,7 @@ function formatAuditReport(wctx: WorkspaceContext): string {
 export function handleThinkingOs(ctx: PluginCommandContext): PluginCommandResult {
     const workspaceDir = getWorkspaceDir(ctx);
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
-    const args = (ctx.args || '').trim();
+    const args = normalizeCommandArgs(ctx.args).trim();
     const subCommand = args.split(/\s+/)[0]?.toLowerCase();
     const rest = args.slice(subCommand?.length || 0).trim();
 

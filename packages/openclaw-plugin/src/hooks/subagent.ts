@@ -7,6 +7,7 @@ import { recordEvolutionSuccess } from '../core/evolution-engine.js';
 import { WorkflowStore } from '../service/subagent-workflow/workflow-store.js';
 import { EmpathyObserverWorkflowManager } from '../service/subagent-workflow/empathy-observer-workflow-manager.js';
 import type { WorkflowManager } from '../service/subagent-workflow/types.js';
+import type { PluginRuntimeSubagent } from '../service/subagent-workflow/runtime-direct-driver.js';
 
 /**
  * Factory to create the appropriate WorkflowManager by workflow_type string.
@@ -21,10 +22,10 @@ function createWorkflowManagerForType(
     subagent: NonNullable<OpenClawPluginApi['runtime']>['subagent'],
 ): WorkflowManager | null {
     const loggerAdapter: PluginLogger = {
-        info: (m: string) => logger.info(String(m)),
-        warn: (m: string) => logger.warn(String(m)),
-        error: (m: string) => logger.error(String(m)),
-        debug: () => { /* no-op */ },
+        info: (...args: unknown[]) => logger.info(String(args[0])),
+        warn: (...args: unknown[]) => logger.warn(String(args[0])),
+        error: (...args: unknown[]) => logger.error(String(args[0])),
+        debug: (..._args: unknown[]) => { /* no-op */ },
     };
 
     switch (workflowType) {
@@ -32,7 +33,7 @@ function createWorkflowManagerForType(
             return new EmpathyObserverWorkflowManager({
                 workspaceDir,
                 logger: loggerAdapter,
-                subagent,
+                subagent: subagent as unknown as PluginRuntimeSubagent,
             });
         default:
             return null;

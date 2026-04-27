@@ -61,7 +61,11 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Build
-        run: npm run build || true
+        run: npm run build
+
+      - name: TypeScript Check
+        working-directory: packages/openclaw-plugin
+        run: npx tsc --noEmit
 
       - name: Production Build & Verify
         working-directory: packages/openclaw-plugin
@@ -81,13 +85,12 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
+        working-directory: packages/openclaw-plugin
         run: npm ci
 
-      - name: Build dependencies
-        run: npm run build --workspace=@principles/core
-
       - name: Run unit tests
-        run: npm run test:unit --workspace=principles-disciple
+        working-directory: packages/openclaw-plugin
+        run: npm run test:unit
 
   test-openclaw-plugin-integration:
     name: Test OpenClaw Plugin (integration)
