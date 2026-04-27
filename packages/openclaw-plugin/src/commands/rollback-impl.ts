@@ -25,6 +25,7 @@ import {
 } from '../core/principle-tree-ledger.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
 /**
@@ -50,7 +51,7 @@ export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginComm
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
-  const args = (ctx.args || '').trim();
+  const args = normalizeCommandArgs(ctx.args).trim();
 
   // Parse args
   const subcommand = args.split(/\s+/)[0] || '';

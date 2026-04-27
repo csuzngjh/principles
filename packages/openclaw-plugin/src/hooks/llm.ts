@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
+import type { PluginHookLlmOutputEvent, PluginHookAgentContext, TokenUsage } from '../openclaw-sdk.js';
 import { trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
 import { recordAndWritePainFlag } from '../core/pain.js';
 import { normalizeSeverity } from '../core/empathy-types.js';
@@ -148,7 +148,12 @@ export function handleLlmOutput(
     const {eventLog} = wctx;
 
     // Track this turn in the core session memory
-    const state = trackLlmOutput(ctx.sessionId, event.usage, config, ctx.workspaceDir, ctx.sessionKey, ctx.trigger);
+    const trigger = (event as { trigger?: string }).trigger ?? undefined;
+    const usage = event.usage as TokenUsage | undefined;
+    const sessionId = (ctx as { sessionId?: string }).sessionId ?? 'unknown';
+    const workspaceDir = (ctx as { workspaceDir?: string }).workspaceDir;
+    const sessionKey = (ctx as { sessionKey?: string }).sessionKey ?? 'unknown';
+    const state = trackLlmOutput(sessionId, usage, config, workspaceDir, sessionKey, trigger);
 
     // We need actual assistant text to analyze
     if (!event.assistantTexts || event.assistantTexts.length === 0) return;
@@ -160,9 +165,9 @@ export function handleLlmOutput(
     try {
         assistantTurnId = wctx.trajectory?.recordAssistantTurn?.({
             sessionId: ctx.sessionId,
-            runId: event.runId,
-            provider: event.provider,
-            model: event.model,
+            runId: event.runId ?? 'unknown',
+            provider: event.provider ?? 'unknown',
+            model: event.model ?? 'unknown',
             rawText: text,
             sanitizedText: sanitizeAssistantText(text),
             usageJson: event.usage || {},
@@ -268,8 +273,8 @@ export function handleLlmOutput(
     trackThinkingModelUsage({
         text,
         wctx,
-        sessionId: ctx.sessionId,
-        runId: event.runId,
+        sessionId: ctx.sessionId ?? 'unknown',
+        runId: event.runId ?? 'unknown',
         assistantTurnId,
         createdAt,
         logger: ctx.logger,

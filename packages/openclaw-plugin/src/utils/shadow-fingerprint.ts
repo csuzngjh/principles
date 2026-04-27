@@ -35,8 +35,8 @@ export function computeRuntimeShadowTaskFingerprint(
     label: event.label ?? '',
     mode: event.mode,
     threadRequested: event.threadRequested,
-    requesterChannel: event.requester?.channel ?? '',
-    requesterThreadId: event.requester?.threadId ?? '',
+    requesterChannel: (event.requester as { channel?: string })?.channel ?? '',
+    requesterThreadId: (event.requester as { threadId?: string })?.threadId ?? '',
   };
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, RUNTIME_SHADOW_FINGERPRINT_HEX_LENGTH);
 }

@@ -1,11 +1,12 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 
      
 export function handlePrincipleRollbackCommand(ctx: PluginCommandContext): { text: string } {
   const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'principle-rollback');
-  const argText = (ctx.args || '').trim();
+  const argText = normalizeCommandArgs(ctx.args).trim();
   const [principleId = '', ...reasonParts] = argText.split(/\s+/);
   const reason = (reasonParts.join(' ') || 'manual rollback').trim();
   const isZh = (ctx.config?.language as string)?.startsWith('zh');

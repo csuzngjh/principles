@@ -1,5 +1,6 @@
 import type {
   OpenClawPluginApi,
+  PluginCommandContext,
   PluginHookBeforePromptBuildEvent,
   PluginHookAgentContext,
   PluginHookBeforePromptBuildResult,
@@ -131,7 +132,7 @@ const plugin = {
             api.logger.info(`[PD] EvolutionWorker started for workspace: ${workspaceDir}`);
           }
 
-          const result = await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });
+          const result = await handleBeforePromptBuild(event, { ...ctx, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'], workspaceDir });
           
           // Record success
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
@@ -676,7 +677,7 @@ const plugin = {
         try {
           const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleWorkflowDebugCommand(ctx);
+          return handleWorkflowDebugCommand(ctx as PluginCommandContext & { args?: string });
         } catch (err) {
           api.logger.error(`[PD] Command /pd-workflow-debug failed: ${String(err)}`);
           return { text: `Workflow debug command failed: ${String(err)}` };
@@ -752,5 +753,7 @@ const plugin = {
     api.registerTool(createWritePainFlagTool(api));
   }
 };
+
+export { PrincipleTreeLedgerAdapter } from './core/principle-tree-ledger-adapter.js';
 
 export default plugin;
