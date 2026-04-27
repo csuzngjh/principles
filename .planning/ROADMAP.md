@@ -23,9 +23,9 @@ resurrecting heartbeat/cron/subagent.
 - [x] **Phase m7-03: Intake Service + Idempotency** -- Core service with deduplication (SHIPPED 2026-04-26)
 	- [x] m7-03-01-PLAN.md -- CandidateIntakeService class: consume pending candidates, write via adapter, idempotency
 	- [x] m7-03-02-PLAN.md -- CandidateIntakeService tests: happy path, deduplication, error handling
-- [ ] **Phase m7-04: CLI: `pd candidate intake`** -- `pd candidate intake --candidate-id <id> --workspace <path> --json`
+- [x] **Phase m7-04: CLI: `pd candidate intake`** -- `pd candidate intake --candidate-id <id> --workspace <path> --json`
 	- [ ] m7-04-01-PLAN.md -- CLI handler: parse args, call service, format output
-- [ ] **Phase m7-05: E2E: candidate -> ledger entry** -- Full traceability + idempotency verification
+- [x] **Phase m7-05: E2E: candidate -> ledger entry** -- Full traceability + idempotency verification
 	- [x] m7-05-01-PLAN.md -- E2E test: full flow from candidate pending to ledger entry
 
 ---
