@@ -7,9 +7,33 @@
  * verbose diagnostic output for all enabled workspaces.
  */
 
-import { CentralHealthService } from '../../../openclaw-plugin/src/service/central-health-service.js';
+async function loadCentralHealthService(): Promise<{ CentralHealthService: new () => {
+  getAllWorkspaceHealth(): {
+    generatedAt: string;
+    workspaces: {
+      workspaceName: string;
+      health: {
+        activeStage: string;
+        gfi: { current: unknown; peakToday: unknown; threshold: unknown; trend: unknown };
+        trust: { stage: unknown; stageLabel: unknown; score: unknown };
+        evolution: { tier: unknown; points: unknown };
+        painFlag: { active: unknown; source?: unknown; score?: unknown };
+        principles: { candidate: unknown; probation: unknown; active: unknown; deprecated: unknown };
+        queue: { pending: unknown; inProgress: unknown; completed: unknown };
+      };
+    }[];
+  };
+} }> {
+  const importModule = Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<{
+    CentralHealthService: new () => {
+      getAllWorkspaceHealth(): ReturnType<Awaited<ReturnType<typeof loadCentralHealthService>>['CentralHealthService']['prototype']['getAllWorkspaceHealth']>;
+    };
+  }>;
+  return importModule('../../../openclaw-plugin/src/service/central-health-service.js');
+}
 
 export async function handleHealth(): Promise<void> {
+  const { CentralHealthService } = await loadCentralHealthService();
   const service = new CentralHealthService();
   const result = service.getAllWorkspaceHealth();
 

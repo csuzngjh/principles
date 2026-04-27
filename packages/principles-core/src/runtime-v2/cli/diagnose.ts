@@ -11,6 +11,7 @@ import type { RuntimeStateManager, CandidateRecord } from '../store/runtime-stat
 import type { DiagnosticianRunner } from '../runner/diagnostician-runner.js';
 import type { RunnerResult } from '../runner/runner-result.js';
 import type { TaskRecord } from '../task-status.js';
+import type { LedgerAdapter } from '../candidate-intake.js';
 
 /** Options for pd candidate list */
 export interface CandidateListOptions {
@@ -41,6 +42,7 @@ export interface CandidateShowResult {
   readonly sourceRunId: string;
   readonly status: 'pending' | 'consumed' | 'expired';
   readonly createdAt: string;
+  readonly ledgerEntryId: string | null;
 }
 
 /** Options for pd artifact show */
@@ -167,12 +169,21 @@ export async function candidateList(
  * Returns null if candidate not found.
  */
 export async function candidateShow(
-  options: CandidateShowOptions,
+  options: CandidateShowOptions & { ledgerAdapter?: LedgerAdapter },
 ): Promise<CandidateShowResult | null> {
   const candidate = await options.stateManager.getCandidate(options.candidateId);
   if (!candidate) {
     return null;
   }
+
+  let ledgerEntryId: string | null = null;
+  if (options.ledgerAdapter) {
+    const entry = options.ledgerAdapter.existsForCandidate(options.candidateId);
+    if (entry) {
+      ledgerEntryId = entry.id;
+    }
+  }
+
   return {
     candidateId: candidate.candidateId,
     artifactId: candidate.artifactId,
@@ -183,6 +194,7 @@ export async function candidateShow(
     sourceRunId: candidate.sourceRunId,
     status: candidate.status,
     createdAt: candidate.createdAt,
+    ledgerEntryId,
   };
 }
 
