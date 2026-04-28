@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v2.7
 milestone_name: M8 — Pain Signal → Principle Single Path Cutover
-status: executing
+status: awaiting_human
 last_updated: "2026-04-28T02:01:30Z"
 last_activity: 2026-04-28 — m8-02-01 completed (autoIntakeEnabled:true + idempotent upsert)
 progress:
@@ -19,14 +19,14 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.7 M8 — m8-01 SHIPPED, m8-02 planned (executing)
+**Current Focus:** v2.7 M8 — m8-02 SHIPPED (2026-04-28), m8-03 Real Environment UAT pending
 
 ## Current Position
 
-Phase: m8-02 (PainSignalBridge E2E + Auto-Intake Enable)
-Plan: 2 plans in 2 waves
-Status: Ready to execute
-Last activity: 2026-04-28 — m8-02 planned
+Phase: m8-03 (Real Environment UAT — M8 final sign-off)
+Plan: 1 plan in 1 wave
+Status: Pending — requires human operator to trigger pain in live OpenClaw session
+Last activity: 2026-04-28 — m8-02 SHIPPED (E2E 5/5 PASS)
 
 ## M8-03 Real Environment UAT
 

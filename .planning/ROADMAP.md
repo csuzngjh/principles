@@ -27,7 +27,7 @@
 ### 🚧 v2.7 M8 — Pain Signal → Principle Single Path Cutover (In Progress)
 
 - [x] m8-01: Legacy Code Map + Single Path Cutover (5/5 plans) — completed 2026-04-28
-- [ ] m8-02: PainSignalBridge E2E + Auto-Intake Enable (2/2 plans)
+- [x] m8-02: PainSignalBridge E2E + Auto-Intake Enable (2/2 plans) — completed 2026-04-28
 
 Plans:
 - [x] m8-01-01-PLAN.md — Delete diagnostician-task-store.ts
@@ -36,7 +36,7 @@ Plans:
 - [x] m8-01-04-PLAN.md — Implement PainSignalBridge service + wire into pain.ts
 - [x] m8-01-05-PLAN.md — E2E verification + ROADMAP update
 - [x] m8-02-01-PLAN.md — Enable autoIntakeEnabled:true + upsert idempotency (completed 2026-04-28)
-- [ ] m8-02-02-PLAN.md — Automated E2E test for full pain→ledger chain
+- [x] m8-02-02-PLAN.md — Automated E2E test for full pain→ledger chain (completed 2026-04-28)
 
 - [ ] m8-03: Real Environment UAT — M8 final sign-off (1/1 plan)
 
@@ -58,4 +58,4 @@ Plans:
 
 ---
 
-_Last updated: 2026-04-28 after m8-01 SHIPPED, m8-02 planned_
+_Last updated: 2026-04-28 after m8-02 SHIPPED (E2E 5/5 PASS, autoIntakeEnabled=true, idempotent upsert)_
