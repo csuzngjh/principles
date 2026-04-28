@@ -58,16 +58,6 @@ function glob(pattern: string): string[] {
   return results;
 }
 
-async function _archiveFile(filePath: string, archiveDir: string): Promise<string> {
-  if (!fs.existsSync(archiveDir)) {
-    fs.mkdirSync(archiveDir, { recursive: true });
-  }
-  const archivePath = path.join(archiveDir, path.basename(filePath));
-  fs.copyFileSync(filePath, archivePath);
-  fs.unlinkSync(filePath);
-  return archivePath;
-}
-
 function findLegacyTargets(workspacePath: string): CleanupTarget[] {
   const targets: CleanupTarget[] = [];
   const stateDir = path.join(workspacePath, '.state');
