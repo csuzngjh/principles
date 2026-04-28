@@ -74,7 +74,7 @@ export type DiagnosticianOutputV1 = Static<typeof DiagnosticianOutputV1Schema>;
  * is performed separately via DiagnosticianContextPayloadSchema.
  */
 export const DiagnosticianInvocationInputSchema = Type.Object({
-  agentId: Type.Literal('diagnostician'),
+  agentId: Type.String({ minLength: 1 }),
   taskId: Type.String({ minLength: 1 }),
   context: Type.Unknown(), // Validated separately — DiagnosticianContextPayload
   outputSchemaRef: Type.Literal('diagnostician-output-v1'),
@@ -83,8 +83,8 @@ export const DiagnosticianInvocationInputSchema = Type.Object({
 
 /** Typed interface for diagnostician invocation — context references DiagnosticianContextPayload (per D-02). */
 export interface DiagnosticianInvocationInput {
-  /** Agent identifier (always "diagnostician"). */
-  agentId: 'diagnostician';
+  /** Agent identifier — any valid agent ID (e.g., "diagnostician", "main"). */
+  agentId: string;
   /** The task being diagnosed. */
   taskId: string;
   /** Pre-assembled context for the diagnosis. */

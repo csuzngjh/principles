@@ -297,6 +297,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
 
   it('E2E-01: Full chain — pain signal → task succeeded → artifact → candidates → ledger probation entry', async () => {
     const painId = 'test-pain-e2e01';
+    const expectedTaskId = `diagnosis_${painId}`;
     const output = makeDiagnosticianOutputWithCandidates(painId);
 
     const stubAdapter = new StubRuntimeAdapter();
@@ -310,25 +311,28 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
       autoIntakeEnabled: true,
     });
 
-    const taskId = await bridge.onPainDetected({
+    const result = await bridge.onPainDetected({
       painId,
       painType: 'tool_failure',
       source: 'test',
       reason: 'test failure',
     });
 
-    // E2E-01 assertion 1: taskId returned
-    expect(taskId).toBe(painId);
+    // E2E-01 assertion 1: taskId is distinct from painId
+    expect(result.painId).toBe(painId);
+    expect(result.taskId).toBe(expectedTaskId);
+    expect(result.status).toBe('succeeded');
 
     // E2E-01 assertion 2: task record exists, status === 'succeeded'
-    const task = await stateManager.getTask(painId);
+    const task = await stateManager.getTask(expectedTaskId);
     expect(task).not.toBeNull();
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(task!.status).toBe('succeeded');
+    expect(task!.inputRef).toBe(painId);
 
     // E2E-01 assertion 3: artifact row exists with artifact_kind === 'diagnostician_output'
     const db = sqliteConn.getDb();
-    const artifactRow = db.prepare('SELECT * FROM artifacts WHERE task_id = ?').get(painId) as {
+    const artifactRow = db.prepare('SELECT * FROM artifacts WHERE task_id = ?').get(expectedTaskId) as {
       artifact_id: string;
       artifact_kind: string;
     } | undefined;
@@ -339,7 +343,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
     // E2E-01 assertion 4: >= 1 candidate rows exist
     const candidateRows = db.prepare(
       'SELECT * FROM principle_candidates WHERE task_id = ?',
-    ).all(painId) as { candidate_id: string }[];
+    ).all(expectedTaskId) as { candidate_id: string }[];
     expect(candidateRows.length).toBeGreaterThanOrEqual(1);
 
     // E2E-01 assertion 5: ledger has a probation entry for each candidate
@@ -388,6 +392,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
 
   it('E2E-03: Same painId twice — NO duplicate candidates or ledger entries', async () => {
     const painId = 'test-pain-idempotent';
+    const expectedTaskId = `diagnosis_${painId}`;
     const output = makeDiagnosticianOutputWithCandidates(painId);
 
     const stubAdapter = new StubRuntimeAdapter();
@@ -402,39 +407,41 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
     });
 
     // First call
-    const firstTaskId = await bridge.onPainDetected({
+    const firstResult = await bridge.onPainDetected({
       painId,
       painType: 'tool_failure',
       source: 'test',
       reason: 'test',
     });
-    expect(firstTaskId).toBe(painId);
+    expect(firstResult.taskId).toBe(expectedTaskId);
+    expect(firstResult.status).toBe('succeeded');
 
     // Record candidate count after first call
     const db = sqliteConn.getDb();
     const firstCandidateRows = db.prepare(
       'SELECT * FROM principle_candidates WHERE task_id = ?',
-    ).all(painId) as { candidate_id: string }[];
+    ).all(expectedTaskId) as { candidate_id: string }[];
     const firstCandidateCount = firstCandidateRows.length;
     expect(firstCandidateCount).toBeGreaterThanOrEqual(1);
 
     // Second call with SAME painId — should NO-OP (task already succeeded → Rule a)
-    const secondTaskId = await bridge.onPainDetected({
+    const secondResult = await bridge.onPainDetected({
       painId,
       painType: 'tool_failure',
       source: 'test',
       reason: 'test',
     });
-    expect(secondTaskId).toBe(painId);
+    expect(secondResult.taskId).toBe(expectedTaskId);
+    expect(secondResult.status).toBe('succeeded');
 
     // E2E-03 assertion 1: candidate count is UNCHANGED
     const secondCandidateRows = db.prepare(
       'SELECT * FROM principle_candidates WHERE task_id = ?',
-    ).all(painId) as { candidate_id: string }[];
+    ).all(expectedTaskId) as { candidate_id: string }[];
     expect(secondCandidateRows.length).toBe(firstCandidateCount);
 
     // E2E-03 assertion 2: task status === 'succeeded'
-    const task = await stateManager.getTask(painId);
+    const task = await stateManager.getTask(expectedTaskId);
     expect(task).not.toBeNull();
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(task!.status).toBe('succeeded');
@@ -446,6 +453,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
 
   it('E2E-04: autoIntakeEnabled=false — candidates exist but NO ledger write', async () => {
     const painId = 'test-pain-no-intake';
+    const expectedTaskId = `diagnosis_${painId}`;
     const output = makeDiagnosticianOutputWithCandidates(painId);
 
     const stubAdapter = new StubRuntimeAdapter();
@@ -459,15 +467,16 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
       autoIntakeEnabled: false, // debug mode — no ledger write
     });
 
-    await bridgeNoIntake.onPainDetected({
+    const result = await bridgeNoIntake.onPainDetected({
       painId,
       painType: 'tool_failure',
       source: 'test',
       reason: 'test failure',
     });
+    expect(result.taskId).toBe(expectedTaskId);
 
     // E2E-04 assertion 1: task record exists, status === 'succeeded'
-    const task = await stateManager.getTask(painId);
+    const task = await stateManager.getTask(expectedTaskId);
     expect(task).not.toBeNull();
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(task!.status).toBe('succeeded');
@@ -476,7 +485,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
     const db = sqliteConn.getDb();
     const candidateRows = db.prepare(
       'SELECT * FROM principle_candidates WHERE task_id = ?',
-    ).all(painId) as { candidate_id: string }[];
+    ).all(expectedTaskId) as { candidate_id: string }[];
     expect(candidateRows.length).toBeGreaterThanOrEqual(1);
 
     // E2E-04 assertion 3: ledger has NO entry for these candidates
@@ -492,6 +501,7 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
 
   it('E2E-05: Second trigger returns immediately while first run in-flight', async () => {
     const painId = 'test-pain-lease';
+    const expectedTaskId = `diagnosis_${painId}`;
 
     // Track runner.run() invocations
     let runnerRunCallCount = 0;
@@ -561,18 +571,21 @@ describe('E2E m8-02 — PainSignalBridge full chain', () => {
     // If it waited for the first run to complete, second call would take ~200ms+
     expect(secondCallReturnTime).toBeLessThan(100);
 
-    // E2E-05 assertion 2: second call returns painId (the SKIP path returns painId)
-    expect(secondResult).toBe(painId);
+    // E2E-05 assertion 2: second call returns the SKIP result for the same task
+    expect(secondResult.status).toBe('skipped');
+    expect(secondResult.painId).toBe(painId);
+    expect(secondResult.taskId).toBe(expectedTaskId);
 
     // Wait for first call to complete (it takes ~200ms due to poll delay)
     const firstResult = await firstPromise;
-    expect(firstResult).toBe(painId);
+    expect(firstResult.status).toBe('succeeded');
+    expect(firstResult.taskId).toBe(expectedTaskId);
 
     // E2E-05 assertion 3: at least one runner.run() was called (proves first call ran)
     expect(runnerRunCallCount).toBeGreaterThanOrEqual(1);
 
     // E2E-05 assertion 4: candidates exist (proves chain produced candidates)
-    const candidates = await stateManager.getCandidatesByTaskId(painId);
+    const candidates = await stateManager.getCandidatesByTaskId(expectedTaskId);
     expect(candidates.length).toBeGreaterThanOrEqual(1);
   });
 });

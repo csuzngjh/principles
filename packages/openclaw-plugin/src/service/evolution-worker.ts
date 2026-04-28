@@ -29,7 +29,6 @@ export type { RecentPainContext } from './queue-io.js';
 import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
 import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
-import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
 import {
     createNocturnalTrajectoryExtractor,

@@ -82,3 +82,12 @@
 - M6 最新 blocker：`OpenClawCliRuntimeAdapter.pollRun()` 对非零 exit 只返回 `CLI exited with code X`，丢弃 stdout/stderr；真实 `pd diagnose run` 失败后只看到 `execution_failed`，无法定位 OpenClaw 插件加载、参数、prompt 或输出解析问题。必须保留 bounded stdout/stderr excerpts 到 RunStatus.reason / telemetry / CLI JSON。
 - M6 最新 blocker：`pd diagnose run --json` 在 runner result 为 `retried` / `failed` 时仍 exit 0；operator E2E 会误判成功。非 `succeeded` 必须 exit non-zero。
 - M6 修复后验收必须在真实环境执行：`pd runtime probe --runtime openclaw-cli --openclaw-local --agent main --json`、`--agent diagnostician` 负例、以及真实/临时 task 的 `pd diagnose run --runtime openclaw-cli --openclaw-local --agent main --json`，并确认成功时产生 artifact/candidate，失败时有可行动错误细节。
+
+## Runtime v2 M7/M8 当前事实 (2026-04-28)
+- M7 已合并：principle candidate intake 已建立，`principle_candidates.status=pending` 可被消费成 PrincipleTreeLedger 的 probation entry；幂等键必须是 `candidate://<candidateId>`，不是 artifact 级 sourceRef。
+- M8 目标是最终单路径：pain signal -> Runtime v2 task/run -> DiagnosticianRunner -> OpenClawCliRuntimeAdapter -> DiagnosticianOutputV1 -> SQLite artifact/candidate -> CandidateIntakeService -> PrincipleTreeLedger probation entry；不保留 legacy fallback。
+- M8 已删除/移除运行入口：`write_pain_flag` tool 不再注册，`.pain_flag` 文件副作用不再作为完成机制；`pd pain record` 已改为 Runtime v2 pain entry。
+- 重要语义修正：`painId` 是触发事件/外部 provenance ID；`taskId` 是 Runtime v2 可执行诊断任务 ID，格式为 `diagnosis_<painId>`；`tasks.inputRef = painId`。不要再把 `painId` 当 `taskId`。
+- `PainSignalBridge.onPainDetected()` 应返回结构化结果：`painId/taskId/runId/artifactId/candidateIds/ledgerEntryIds/status/message`。`status=succeeded` 只能表示完整 pain->principle 链路成功，不能表示“已创建 task”或“已入队”。
+- 当前 M8 真实 UAT 状态：暂不签收。`pd pain record` 在真实环境返回 `status=retried` 且 exit 1，这是正确失败语义；UAT-01 blocked 在 OpenClaw CLI/runtime last-mile，尚未产生 artifact/candidate/ledgerEntry。
+- 当前最后 blocker：修 OpenClaw CLI runtime last-mile，使 `node packages/pd-cli/dist/index.js runtime probe --runtime openclaw-cli --openclaw-local --agent main --workspace D:/.openclaw/workspace --json` 能稳定成功；然后重跑 m8-03 UAT。不要再改 PainSignalBridge/CandidateIntake/ledger 主业务链路，除非 UAT 证明它们有缺陷。

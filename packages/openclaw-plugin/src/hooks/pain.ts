@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
-import { computePainScore, buildPainFlag, writePainFlag, trackPrincipleValue } from '../core/pain.js';
+import { computePainScore, buildPainFlag, trackPrincipleValue } from '../core/pain.js';
 import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds, type SessionState } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -12,21 +12,7 @@ import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
-import { PrincipleTreeLedgerAdapter } from '../core/principle-tree-ledger-adapter.js';
-import {
-  PainSignalBridge,
-  type PainDetectedData,
-  RuntimeStateManager,
-  DiagnosticianRunner,
-  CandidateIntakeService,
-  SqliteDiagnosticianCommitter,
-  SqliteContextAssembler,
-  SqliteHistoryQuery,
-  SqliteConnection,
-  OpenClawCliRuntimeAdapter,
-  DefaultDiagnosticianValidator,
-  storeEmitter,
-} from '@principles/core/runtime-v2';
+import { createPainSignalBridge, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
 
 /**
  * Interface for tool parameters to avoid 'any'
@@ -45,63 +31,15 @@ interface ToolParams {
 
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
-// M8: Per-workspace PainSignalBridge cache.
-// Created lazily on first pain_detected event per workspace.
-const painSignalBridges = new Map<string, PainSignalBridge>();
-
-async function getPainSignalBridge(wctx: WorkspaceContext): Promise<PainSignalBridge> {
-  let bridge = painSignalBridges.get(wctx.workspaceDir);
-  if (bridge) return bridge;
-
-  const stateManager = new RuntimeStateManager({ workspaceDir: wctx.workspaceDir });
-  await stateManager.initialize();
-
-  const connection = new SqliteConnection(wctx.workspaceDir);
-  const historyQuery = new SqliteHistoryQuery(connection);
-  const committer = new SqliteDiagnosticianCommitter(connection);
-  const validator = new DefaultDiagnosticianValidator();
-
-  const contextAssembler = new SqliteContextAssembler(
-    stateManager.taskStore,
-    historyQuery,
-    stateManager.runStore,
-  );
-
-  const runtimeAdapter = new OpenClawCliRuntimeAdapter({
-    runtimeMode: 'local',
-    workspaceDir: wctx.workspaceDir,
-  });
-
-  const runner = new DiagnosticianRunner(
-    {
-      stateManager,
-      contextAssembler,
-      runtimeAdapter,
-      eventEmitter: storeEmitter,
-      validator,
-      committer,
-    },
-    {
-      owner: 'pain-signal-bridge',
-      runtimeKind: 'openclaw-cli',
-      pollIntervalMs: 5000,
-      timeoutMs: 300_000,
-    },
-  );
-
+async function getPainSignalBridge(wctx: WorkspaceContext): Promise<ReturnType<typeof createPainSignalBridge>> {
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
-  const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
-
-  bridge = new PainSignalBridge({
-    stateManager,
-    runner,
-    intakeService,
+  return createPainSignalBridge({
+    workspaceDir: wctx.workspaceDir,
+    stateDir: wctx.stateDir,
     ledgerAdapter,
-    autoIntakeEnabled: true, // HG-4: production — pain signals auto-create ledger entries
+    owner: 'pain-signal-bridge',
+    autoIntakeEnabled: true,
   });
-
-  painSignalBridges.set(wctx.workspaceDir, bridge);
-  return bridge;
 }
 
 function shouldAttributePrincipleToTool(principle: { contextTags: string[]; trigger: string; }, toolName: string): boolean {
@@ -396,11 +334,7 @@ export function handleAfterToolCall(
     pain_event_id: trajectoryPainId !== undefined && trajectoryPainId >= 0 ? String(trajectoryPainId) : undefined,
   });
 
-  try {
-    writePainFlag(effectiveWorkspaceDir, painData);
-  } catch (e) {
-    SystemLogger.log(effectiveWorkspaceDir, 'WRITE_PAIN_FLAG_WARN', `Failed to write pain flag: ${String(e)}`);
-  }
+  // Pain signal emitted via emitPainDetectedEvent below — no .pain_flag file written (M8: single-path chain)
 
   // Observe: track which principles would have prevented this pain (Phase 1, observation-only)
   try {
