@@ -20,6 +20,7 @@ import { handleTrajectoryLocate } from './commands/trajectory.js';
 import { handleHistoryQuery } from './commands/history.js';
 import { handleContextBuild } from './commands/context.js';
 import { handleLegacyImportOpenClaw } from './commands/legacy-import.js';
+import { handleLegacyCleanup } from './commands/legacy-cleanup.js';
 import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js';
 import { handleRuntimeProbe } from './commands/runtime.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake } from './commands/candidate.js';
@@ -38,10 +39,12 @@ const painCmd = program
 
 painCmd
   .command('record')
-  .description('Record a pain signal')
+  .description('Record a pain signal via Runtime v2 bridge')
   .option('-r, --reason <text>', 'Reason for the pain signal (required)')
   .option('-s, --score <number>', 'Pain score 0-100', parseInt)
   .option('-S, --source <text>', 'Source of the pain signal', 'manual')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainRecord(opts);
   });
@@ -212,7 +215,7 @@ contextCmd
 
 const legacyCmd = program
   .command('legacy')
-  .description('Legacy data import (OpenClaw → PD Runtime v2)');
+  .description('Legacy data management (import and cleanup)');
 
 const importCmd = legacyCmd.command('import');
 importCmd
@@ -324,6 +327,21 @@ artifactCmd
   .option('--json', 'Output raw JSON')
   .action(async (artifactId, opts) => {
     await handleArtifactShow({ artifactId, ...opts });
+  });
+
+const _legacyCleanupCmd = legacyCmd
+  .command('cleanup')
+  .description('Clean legacy empathy/diagnostician artifacts from workspace')
+  .requiredOption('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Show what would be cleaned without applying', false)
+  .option('--apply', 'Actually apply the cleanup', false)
+  .action(async (opts) => {
+    const apply = opts.apply ?? false;
+    if (!apply && !opts.dryRun) {
+      console.error('Specify --dry-run or --apply');
+      process.exit(1);
+    }
+    await handleLegacyCleanup(opts.workspace, apply);
   });
 
 program.parse();
