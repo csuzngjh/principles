@@ -2,7 +2,7 @@
 /**
  * SqliteTrajectoryLocator comprehensive test suite.
  *
- * Tests all 6 locate modes (painId, taskId, runId, timeRange,
+ * Tests all 6 locate modes (runAlias, taskId, runId, timeRange,
  * sessionId+workspace, executionStatus) plus not-found edge cases
  * and query echo verification.
  */

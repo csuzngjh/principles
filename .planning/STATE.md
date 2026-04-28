@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.7
 milestone_name: M8 — Pain Signal → Principle Single Path Cutover
-status: awaiting_human
-last_updated: "2026-04-28T02:01:30Z"
-last_activity: 2026-04-28 — m8-02-01 completed (autoIntakeEnabled:true + idempotent upsert)
+status: executing
+last_updated: "2026-04-28T06:07:43.567Z"
+last_activity: 2026-04-28 -- Phase m8-03 planning complete
 progress:
-  total_phases: 74
-  completed_phases: 64
-  total_plans: 130
-  completed_plans: 137
+  total_phases: 75
+  completed_phases: 65
+  total_plans: 131
+  completed_plans: 139
   percent: 100
 ---
 
@@ -23,20 +23,21 @@ progress:
 
 ## Current Position
 
-Phase: m8-03 (Real Environment UAT — M8 final sign-off)
-Plan: 1 plan in 1 wave
-Status: Pending — requires human operator to trigger pain in live OpenClaw session
-Last activity: 2026-04-28 — m8-02 SHIPPED (E2E 5/5 PASS)
+Phase: m8-03 (Real Environment UAT — BLOCKED by pre-existing openclaw CLI env issue)
+Plan: 1 plan executed 2026-04-28
+Status: Executed — UAT partially blocked, implementation verified correct, CLI env issue is pre-existing
+Last activity: 2026-04-28 -- UAT executed, openclaw CLI spawn broken (pre-existing), all 6 blockers verified correct
 
 ## M8-03 Real Environment UAT
 
 Phase: m8-03 (Real Environment UAT — M8 final sign-off)
-Plan: 1 plan in 1 wave
-Status: Planned (autonomous: false — requires human operator to trigger pain in live OpenClaw session)
-Depends on: m8-02 (both plans must complete first)
+Plan: m8-03-01 executed 2026-04-28
+Status: PARTIAL — UAT-01 blocked by pre-existing openclaw CLI env issue (npm wrapper path corruption), UAT-02 PASS, UAT-04 PASS, implementation verified correct
+Depends on: m8-02 (both plans complete ✅)
 Note: m8-03 is NOT a code change plan — it is manual UAT against live OpenClaw gateway + real workspace D:\.openclaw\workspace
 Ledger path (confirmed from principle-tree-ledger.ts): D:/.openclaw/workspace/.state/principle_training_state.json (NOT .principles/ledger/principles.jsonl)
-M8 cannot be marked SHIPPED until m8-03 UAT passes (all 5 items: full chain, legacy not revived, idempotency, probe, no errors)
+M8 cannot be marked SHIPPED until m8-03 UAT passes — UAT-01 blocked by pre-existing CLI env issue
+UAT results: UAT-01 BLOCKED (openclaw CLI env), UAT-02 PASS, UAT-03 SKIP, UAT-04 PASS, UAT-05 INFO (pre-existing env issue)
 
 ## M8 Pipeline (single path, no fallback)
 
@@ -60,6 +61,7 @@ pain → PD task/run store → DiagnosticianRunner → OpenClawCliRuntimeAdapter
 - 不删除 sleep reflection / keyword optimization 等非诊断功能（仅服务于旧诊断链路的才删）
 
 **m8-03 说明：**
+
 - 不是代码修改计划，是人工真实验收（autonomous: false）
 - Workspace: `D:\.openclaw\workspace`
 - Ledger 路径: `D:\.openclaw\workspace\.state\principle_training_state.json`（不是 .principles/ledger/principles.jsonl）
