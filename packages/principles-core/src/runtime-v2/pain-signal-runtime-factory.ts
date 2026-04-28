@@ -22,6 +22,7 @@ import { SqliteConnection } from './store/sqlite-connection.js';
 import { OpenClawCliRuntimeAdapter } from './adapter/openclaw-cli-runtime-adapter.js';
 import { DefaultDiagnosticianValidator } from './runner/default-validator.js';
 import { storeEmitter } from './store/event-emitter.js';
+import { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 
 export interface PainSignalRuntimeFactoryOptions {
@@ -30,6 +31,35 @@ export interface PainSignalRuntimeFactoryOptions {
   ledgerAdapter: LedgerAdapter;
   owner?: string;
   autoIntakeEnabled?: boolean;
+}
+
+/** Funnel name for the Runtime v2 diagnosis path. */
+const DIAGNOSTIC_FUNNEL_ID = 'pd-runtime-v2-diagnosis';
+
+/** Defaults when no funnel policy is defined. */
+const DEFAULT_TIMEOUT_MS = 300_000;
+
+/**
+ * Resolve runner options from the pd-runtime-v2-diagnosis funnel policy.
+ * Falls back to DEFAULT_TIMEOUT_MS if no funnel is found.
+ * Silently ignores missing files and schema errors (factory should not crash
+ * if workflows.yaml is absent or malformed).
+ */
+function resolveRunnerOptions(stateDir: string): { timeoutMs: number; agentId: string } {
+  try {
+    const loader = new WorkflowFunnelLoader(stateDir);
+    const funnel = loader.getFunnel(DIAGNOSTIC_FUNNEL_ID);
+    if (!funnel || !funnel.policy) {
+      return { timeoutMs: DEFAULT_TIMEOUT_MS, agentId: 'main' };
+    }
+    return {
+      timeoutMs: funnel.policy.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      agentId: 'main', // agentId resolution reserved for future stage-level policy
+    };
+  } catch {
+    // Best-effort: do not crash factory on funnel loading errors
+    return { timeoutMs: DEFAULT_TIMEOUT_MS, agentId: 'main' };
+  }
 }
 
 // Per-workspace bridge cache — same lifetime as process
@@ -68,6 +98,8 @@ export async function createPainSignalBridge(
     workspaceDir: opts.workspaceDir,
   });
 
+  const { timeoutMs, agentId } = resolveRunnerOptions(opts.stateDir);
+
   const runner = new DiagnosticianRunner(
     {
       stateManager,
@@ -81,8 +113,8 @@ export async function createPainSignalBridge(
       owner: opts.owner ?? 'pain-signal-bridge',
       runtimeKind: 'openclaw-cli',
       pollIntervalMs: 5000,
-      timeoutMs: 300_000,
-      agentId: 'main',
+      timeoutMs,
+      agentId,
     },
   );
 

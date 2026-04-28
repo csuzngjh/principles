@@ -863,4 +863,166 @@ funnels:
       expect(typeof stage1.statsField).toBe('string');
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // POLICY-01: Funnel and stage policy fields
+  // Extended schema: timeoutMs, successCriteria, legacyDisabled, observability
+  // ─────────────────────────────────────────────────────────────────────────────
+  describe('POLICY-01: funnel and stage policy fields', () => {
+    it('should load funnel with policy fields', () => {
+      const yamlPath = path.join(tempDir, 'workflows.yaml');
+      fs.writeFileSync(yamlPath, `
+version: "1.0"
+funnels:
+  - workflowId: "pd-runtime-v2-diagnosis"
+    policy:
+      timeoutMs: 600000
+      stageOrder: "strict"
+      legacyDisabled: false
+      observability:
+        enabled: true
+        emitEvents: ["stage_entered", "stage_exited"]
+        logLevel: "debug"
+    stages:
+      - name: "pain_detected"
+        eventType: "pain_detected"
+        eventCategory: "created"
+        statsField: "diagnostic.painDetected"
+      - name: "task_created"
+        eventType: "task_created"
+        eventCategory: "created"
+        statsField: "diagnostic.taskCreated"
+        timeoutMs: 300000
+        legacyDisabled: false
+`, 'utf-8');
+
+      const loader = new WorkflowFunnelLoader(tempDir);
+      const funnel = loader.getFunnel('pd-runtime-v2-diagnosis');
+
+      expect(funnel).toBeDefined();
+      expect(funnel!.policy).toBeDefined();
+      expect(funnel!.policy!.timeoutMs).toBe(600000);
+      expect(funnel!.policy!.stageOrder).toBe('strict');
+      expect(funnel!.policy!.legacyDisabled).toBe(false);
+      expect(funnel!.policy!.observability!.enabled).toBe(true);
+      expect(funnel!.policy!.observability!.emitEvents).toEqual(['stage_entered', 'stage_exited']);
+      expect(funnel!.policy!.observability!.logLevel).toBe('debug');
+    });
+
+    it('should load stage-level policy fields', () => {
+      const yamlPath = path.join(tempDir, 'workflows.yaml');
+      fs.writeFileSync(yamlPath, `
+version: "1.0"
+funnels:
+  - workflowId: "policy-stage-test"
+    stages:
+      - name: "custom_stage"
+        eventType: "custom_event"
+        eventCategory: "completed"
+        statsField: "test.custom"
+        timeoutMs: 900000
+        successCriteria: "artifact.committed"
+        legacyDisabled: true
+        observability:
+          enabled: false
+          emitEvents: []
+`, 'utf-8');
+
+      const loader = new WorkflowFunnelLoader(tempDir);
+      const stages = loader.getStages('policy-stage-test');
+
+      expect(stages).toHaveLength(1);
+      expect(stages[0].timeoutMs).toBe(900000);
+      expect(stages[0].successCriteria).toBe('artifact.committed');
+      expect(stages[0].legacyDisabled).toBe(true);
+      expect(stages[0].observability!.enabled).toBe(false);
+    });
+
+    it('should return stages without policy fields (backward compatible)', () => {
+      const yamlPath = path.join(tempDir, 'workflows.yaml');
+      fs.writeFileSync(yamlPath, `
+version: "1.0"
+funnels:
+  - workflowId: "backward_compat"
+    stages:
+      - name: "plain_stage"
+        eventType: "plain_event"
+        eventCategory: "completed"
+        statsField: "test.plain"
+`, 'utf-8');
+
+      const loader = new WorkflowFunnelLoader(tempDir);
+      const stages = loader.getStages('backward_compat');
+
+      expect(stages).toHaveLength(1);
+      expect(stages[0].timeoutMs).toBeUndefined();
+      expect(stages[0].successCriteria).toBeUndefined();
+      expect(stages[0].legacyDisabled).toBeUndefined();
+      expect(stages[0].observability).toBeUndefined();
+    });
+
+    it('getAllFunnelsWithPolicy returns all funnels with policy', () => {
+      const yamlPath = path.join(tempDir, 'workflows.yaml');
+      fs.writeFileSync(yamlPath, `
+version: "1.0"
+funnels:
+  - workflowId: "funnel_a"
+    policy:
+      timeoutMs: 600000
+    stages:
+      - name: "s1"
+        eventType: "e1"
+        eventCategory: "c"
+        statsField: "f.f1"
+  - workflowId: "funnel_b"
+    stages:
+      - name: "s2"
+        eventType: "e2"
+        eventCategory: "c"
+        statsField: "f.f2"
+`, 'utf-8');
+
+      const loader = new WorkflowFunnelLoader(tempDir);
+      const all = loader.getAllFunnelsWithPolicy();
+
+      expect(all.get('funnel_a')!.policy!.timeoutMs).toBe(600000);
+      expect(all.get('funnel_b')!.policy).toBeUndefined();
+    });
+
+    it('getFunnel returns undefined for unknown workflowId', () => {
+      const yamlPath = path.join(tempDir, 'workflows.yaml');
+      fs.writeFileSync(yamlPath, `
+version: "1.0"
+funnels: []
+`, 'utf-8');
+
+      const loader = new WorkflowFunnelLoader(tempDir);
+      expect(loader.getFunnel('nonexistent')).toBeUndefined();
+    });
+
+    it('getFunnel returns shallow clone (mutation isolation)', () => {
+      const yamlPath = path.join(tempDir, 'workflows.yaml');
+      fs.writeFileSync(yamlPath, `
+version: "1.0"
+funnels:
+  - workflowId: "mutation_test"
+    policy:
+      timeoutMs: 600000
+    stages:
+      - name: "stage_one"
+        eventType: "e1"
+        eventCategory: "c"
+        statsField: "f.f1"
+`, 'utf-8');
+
+      const loader = new WorkflowFunnelLoader(tempDir);
+      const funnel1 = loader.getFunnel('mutation_test')!;
+      funnel1.policy!.timeoutMs = 999;
+      funnel1.stages[0].name = 'MUTATED';
+
+      const funnel2 = loader.getFunnel('mutation_test')!;
+      expect(funnel2.policy!.timeoutMs).toBe(600000);
+      expect(funnel2.stages[0].name).toBe('stage_one');
+    });
+  });
 });

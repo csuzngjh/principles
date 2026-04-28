@@ -216,3 +216,12 @@ export type { RecoverySweep, RecoveryResult } from './runtime-v2/index.js';
 
 // Event emitter
 export { StoreEventEmitter, storeEmitter } from './runtime-v2/index.js';
+
+// Workflow funnel loader
+export { WorkflowFunnelLoader } from './workflow-funnel-loader.js';
+export type {
+  WorkflowStage,
+  WorkflowFunnel,
+  FunnelPolicy,
+  WorkflowFunnelConfig,
+} from './workflow-funnel-loader.js';

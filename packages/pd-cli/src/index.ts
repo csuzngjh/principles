@@ -23,6 +23,7 @@ import { handleLegacyImportOpenClaw } from './commands/legacy-import.js';
 import { handleLegacyCleanup } from './commands/legacy-cleanup.js';
 import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js';
 import { handleRuntimeProbe } from './commands/runtime.js';
+import { handleFlowShow } from './commands/flow.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
@@ -276,6 +277,19 @@ runtimeCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeProbe(opts);
+  });
+
+const flowCmd = runtimeCmd
+  .command('flow')
+  .description('Workflow funnel inspection');
+
+flowCmd
+  .command('show')
+  .description('Show all workflow funnel definitions from workflows.yaml')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleFlowShow(opts);
   });
 
 // ── Candidate inspection commands ───────────────────────────────────────────

@@ -1822,20 +1822,10 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     const subagentRuntime = api?.runtime?.subagent;
                     const agentSession = api?.runtime?.agent?.session;
                     if (subagentRuntime) {
-                        const empathyMgr = new EmpathyObserverWorkflowManager({
-                            workspaceDir: wctx.workspaceDir,
-                            logger: api.logger,
-                            subagent: subagentRuntime,
-                            agentSession,
-                        });
                         let swept = 0;
-                        try {
-                            swept += await empathyMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS);
-                        } finally {
-                            empathyMgr.dispose();
-                        }
 
-                        // #183 + #188: Sweep Nocturnal workflows too (with gateway-safe fallback)
+                        // Sweep Nocturnal workflows (with gateway-safe fallback)
+                        // EmpathyObserverWorkflowManager sweep removed — M8: superseded by Runtime v2
                         if (api?.runtime) {
                             try {
                                 const nocturnalMgr = new NocturnalWorkflowManager({
