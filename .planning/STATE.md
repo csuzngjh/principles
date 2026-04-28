@@ -1,14 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v2.7
-milestone_name: M8 Pain Signal → Principle Single Path Cutover
-status: planning
-last_updated: "2026-04-27"
+milestone_name: M8 — Pain Signal → Principle Single Path Cutover
+status: Defining requirements
+last_updated: "2026-04-28T00:10:06.464Z"
+last_activity: 2026-04-27 — Milestone v2.7 M8 started
 progress:
-  total_phases: 0
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_phases: 73
+  completed_phases: 63
+  total_plans: 128
+  completed_plans: 135
+  percent: 100
 ---
 
 # Project State: Principles
@@ -41,11 +43,13 @@ pain → PD task/run store → DiagnosticianRunner → OpenClawCliRuntimeAdapter
 **M8 依赖：** M7 (Candidate Intake 已完成)
 
 **M8 非目标：**
+
 - 不保留旧诊断开关
 - 不做 legacy fallback
 - 不删除 sleep reflection / keyword optimization 等非诊断功能（仅服务于旧诊断链路的才删）
 
 **Baseline (Frozen):**
+
 - v2.0 M1: Foundation Contracts — SHIPPED 2026-04-21
 - v2.1 M2: Task/Run State Core — SHIPPED 2026-04-22
 - v2.2 M3: History Retrieval + Context Build — SHIPPED 2026-04-23

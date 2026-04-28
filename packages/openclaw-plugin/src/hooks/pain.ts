@@ -12,6 +12,21 @@ import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
+import { PrincipleTreeLedgerAdapter } from '../core/principle-tree-ledger-adapter.js';
+import {
+  PainSignalBridge,
+  type PainDetectedData,
+  RuntimeStateManager,
+  DiagnosticianRunner,
+  CandidateIntakeService,
+  SqliteDiagnosticianCommitter,
+  SqliteContextAssembler,
+  SqliteHistoryQuery,
+  SqliteConnection,
+  OpenClawCliRuntimeAdapter,
+  DefaultDiagnosticianValidator,
+  storeEmitter,
+} from '@principles/core/runtime-v2';
 
 /**
  * Interface for tool parameters to avoid 'any'
@@ -30,15 +45,81 @@ interface ToolParams {
 
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
+// M8: Per-workspace PainSignalBridge cache.
+// Created lazily on first pain_detected event per workspace.
+const painSignalBridges = new Map<string, PainSignalBridge>();
+
+async function getPainSignalBridge(wctx: WorkspaceContext): Promise<PainSignalBridge> {
+  let bridge = painSignalBridges.get(wctx.workspaceDir);
+  if (bridge) return bridge;
+
+  const stateManager = new RuntimeStateManager({ workspaceDir: wctx.workspaceDir });
+  await stateManager.initialize();
+
+  const connection = new SqliteConnection(wctx.workspaceDir);
+  const historyQuery = new SqliteHistoryQuery(connection);
+  const committer = new SqliteDiagnosticianCommitter(connection);
+  const validator = new DefaultDiagnosticianValidator();
+
+  const contextAssembler = new SqliteContextAssembler(
+    stateManager.taskStore,
+    historyQuery,
+    stateManager.runStore,
+  );
+
+  const runtimeAdapter = new OpenClawCliRuntimeAdapter({
+    runtimeMode: 'local',
+    workspaceDir: wctx.workspaceDir,
+  });
+
+  const runner = new DiagnosticianRunner(
+    {
+      stateManager,
+      contextAssembler,
+      runtimeAdapter,
+      eventEmitter: storeEmitter,
+      validator,
+      committer,
+    },
+    {
+      owner: 'pain-signal-bridge',
+      runtimeKind: 'openclaw-cli',
+      pollIntervalMs: 5000,
+      timeoutMs: 300_000,
+    },
+  );
+
+  const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
+  const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+
+  bridge = new PainSignalBridge({
+    stateManager,
+    runner,
+    intakeService,
+    ledgerAdapter,
+    autoIntakeEnabled: false, // HG-4: debug mode — chain runs but no ledger entries
+  });
+
+  painSignalBridges.set(wctx.workspaceDir, bridge);
+  return bridge;
+}
+
 function shouldAttributePrincipleToTool(principle: { contextTags: string[]; trigger: string; }, toolName: string): boolean {
   return principle.contextTags.includes(toolName) || principle.trigger.includes(toolName);
 }
 
-function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoopEvent): void {
+async function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoopEvent): Promise<void> {
   try {
     wctx.evolutionReducer.emitSync(event);
   } catch (e) {
     SystemLogger.log(wctx.workspaceDir, 'EVOLUTION_EMIT_WARN', `Failed to emit evolution event: ${String(e)}`);
+  }
+  // M8: Bridge pain_detected → diagnostician pipeline (fire-and-forget)
+  if (event.type === 'pain_detected') {
+    const bridge = await getPainSignalBridge(wctx);
+    bridge.onPainDetected(event.data as PainDetectedData).catch((err) => {
+      SystemLogger.log(wctx.workspaceDir, 'BRIDGE_ERROR', `PainSignalBridge failed: ${String(err)}`);
+    });
   }
 }
 

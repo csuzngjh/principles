@@ -22,7 +22,6 @@ import {
 } from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
-import { EventLogService } from '../core/event-log.js';
 import type { PluginRuntimeSubagent } from '../service/subagent-workflow/runtime-direct-driver.js';
 
 /**
