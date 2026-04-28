@@ -173,7 +173,8 @@ class SlowStubRuntimeAdapter extends StubRuntimeAdapter {
   }
 
   override setOutput(output: Record<string, unknown> | null): void {
-    // no-op for slow adapter
+    // Delegate to parent so nextOutput is actually set
+    super.setOutput(output);
   }
 }
 
