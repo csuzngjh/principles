@@ -217,12 +217,17 @@ export function handleAfterToolCall(
     const filePath = params.file_path || params.path || params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
     
-    // Load profile for risk_paths check
+    // Load profile for risk_paths check (once, with 1MB size guard)
     const profilePath = wctx.resolve('PROFILE');
     let profile = normalizeProfile({});
     if (fs.existsSync(profilePath)) {
       try {
-        profile = normalizeProfile(JSON.parse(fs.readFileSync(profilePath, 'utf8')));
+        const content = fs.readFileSync(profilePath, 'utf8');
+        if (content.length > 1024 * 1024) {
+          SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', 'PROFILE.json exceeds 1 MB, skipping');
+        } else {
+          profile = normalizeProfile(JSON.parse(content));
+        }
       } catch (e) {
         SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)}`);
       }
@@ -361,16 +366,6 @@ export function handleAfterToolCall(
 
   const filePath = params.file_path || params.path || params.file;
   const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
-
-  const profilePath = wctx.resolve('PROFILE');
-  let profile = normalizeProfile({});
-  if (fs.existsSync(profilePath)) {
-    try {
-      profile = normalizeProfile(JSON.parse(fs.readFileSync(profilePath, 'utf8')));
-    } catch (e) {
-      SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)}`);
-    }
-  }
 
   const isRisk = isRisky(relPath, profile.risk_paths);
   const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, effectiveWorkspaceDir);
