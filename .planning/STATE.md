@@ -19,14 +19,14 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.7 M8 — Pain Signal → Principle Single Path Cutover (planning)
+**Current Focus:** v2.7 M8 — m8-01 SHIPPED, m8-02 planned (executing)
 
 ## Current Position
 
-Phase: Not started (defining roadmap)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-04-27 — Milestone v2.7 M8 started
+Phase: m8-02 (PainSignalBridge E2E + Auto-Intake Enable)
+Plan: 2 plans in 2 waves
+Status: Ready to execute
+Last activity: 2026-04-28 — m8-02 planned
 
 ## M8 Pipeline (single path, no fallback)
 
