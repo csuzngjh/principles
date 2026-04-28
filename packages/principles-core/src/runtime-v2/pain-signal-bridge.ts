@@ -86,24 +86,25 @@ export class PainSignalBridge {
     const existingTask = await this.stateManager.getTask(painId);
 
     if (existingTask) {
-      const {status} = existingTask;
-      if (status === 'succeeded') {
-        // Rule a: succeeded — NO-OP. Candidates and ledger already exist.
-        // Do NOT re-run; return without creating duplicates.
+      const { status, leasedAt } = existingTask;
+      const LEASE_TTL_MS = 300_000; // 5 minutes, matches DiagnosticianRunner timeoutMs
+      const leaseExpired = leasedAt && (Date.now() - new Date(leasedAt).getTime()) > LEASE_TTL_MS;
+      if (status === 'leased' && !leaseExpired) {
+        // Rule b: another run is genuinely in progress — SKIP
         return painId;
       }
-      if (status === 'leased') {
-        // Rule b: another run is in progress — SKIP.
-        // Do not interrupt in-flight runs.
-        return painId;
+      // lease expired or status is not leased — fall through to reset + re-run
+      if (status === 'leased' && leaseExpired) {
+        // Lease expired — treat as stale, fall through to reset + re-run
+      } else if (status !== 'succeeded') {
+        // Rule c: failed / retry_wait / pending — allow re-run.
+        await this.stateManager.updateTask(painId, {
+          status: 'pending',
+          attemptCount: 0,
+          lastError: null,
+          resultRef: null,
+        });
       }
-      // Rule c: failed / retry_wait / pending — allow re-run.
-      await this.stateManager.updateTask(painId, {
-        status: 'pending',
-        attemptCount: 0,
-        lastError: null,
-        resultRef: null,
-      });
     } else {
       // Rule d: no existing task — create new.
       await this.stateManager.createTask({
