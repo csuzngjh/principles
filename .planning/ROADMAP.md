@@ -35,9 +35,13 @@ Plans:
 - [x] m8-01-03-PLAN.md — Update runtime-summary-service.ts and event-types.ts
 - [x] m8-01-04-PLAN.md — Implement PainSignalBridge service + wire into pain.ts
 - [x] m8-01-05-PLAN.md — E2E verification + ROADMAP update
-- [ ] m8-02-01-PLAN.md — Enable autoIntakeEnabled:true + upsert idempotency
+- [x] m8-02-01-PLAN.md — Enable autoIntakeEnabled:true + upsert idempotency (completed 2026-04-28)
 - [ ] m8-02-02-PLAN.md — Automated E2E test for full pain→ledger chain
 
+- [ ] m8-03: Real Environment UAT — M8 final sign-off (1/1 plan)
+
+Plans:
+- [ ] m8-03-01-PLAN.md — Real environment UAT: no mocks, live gateway, pain→ledger chain verification
 ## Backlog: Future Milestones
 
 ### v2.8 M9 -- Legacy Path Decommission
