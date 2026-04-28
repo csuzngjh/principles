@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookLlmOutputEvent, PluginHookAgentContext, TokenUsage } from '../openclaw-sdk.js';
 import { trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
-import { recordAndWritePainFlag } from '../core/pain.js';
 import { normalizeSeverity } from '../core/empathy-types.js';
 import { ControlUiDatabase } from '../core/control-ui-db.js';
 import { DetectionService } from '../core/detection-service.js';
@@ -10,6 +9,7 @@ import { detectThinkingModelMatches, deriveThinkingScenarios } from '../core/thi
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+import { emitPainDetectedEvent } from './pain.js';
 
 export interface EmpathySignal {
     detected: boolean;
@@ -232,32 +232,22 @@ export function handleLlmOutput(
         matchedReason = `Agent is stuck in low-output loops (${state.stuckLoops} consecutive turns with tiny output but huge context), indicating cognitive paralysis.`;
     }
 
-    // If a pain threshold is crossed, write the autonomous pain flag
+    // If a pain threshold is crossed, emit pain via Runtime v2 bridge (no .pain_flag file)
     const painTriggerThreshold = config.get('thresholds.pain_trigger') || 30;
     if (painScore >= painTriggerThreshold) {
-        // Inject the actual text snippet that triggered this for the diagnostician to read later
-        const snippet = text.length > 200 ? text.substring(0, 100) + '...' + text.substring(text.length - 100) : text;
-
-        try {
-            recordAndWritePainFlag(wctx, {
-                sessionId: ctx.sessionId || 'unknown',
+        emitPainDetectedEvent(wctx, {
+            ts: new Date().toISOString(),
+            type: 'pain_detected',
+            data: {
+                painId: `llm_${Date.now()}`,
+                painType: 'user_frustration' as const,
                 source,
+                reason: matchedReason,
                 score: painScore,
-                reason: matchedReason,
-                severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
-                origin: 'system_infer',
-            }, {
-                source,
-                score: String(painScore),
-                reason: matchedReason,
-                is_risky: false,
-                trigger_text_preview: snippet,
-                session_id: ctx.sessionId || '',
-                agent_id: ctx.agentId || '',
-            });
-        } catch (e) {
-            ctx.logger?.warn?.(`[PD:LLM] Failed to write pain flag: ${String(e)}`);
-        }
+                sessionId: ctx.sessionId || 'unknown',
+                agentId: ctx.agentId,
+            },
+        });
 
         eventLog.recordPainSignal(ctx.sessionId, {
             score: painScore,

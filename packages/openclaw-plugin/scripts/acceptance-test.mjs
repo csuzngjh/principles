@@ -114,48 +114,23 @@ function main() {
   assert(uniqueReasons.size === reasons.length, 'All pain reasons are unique', `${uniqueReasons.size}/${reasons.length} unique`);
 
   // ═══════════════════════════════════════════════
-  // SECTION 2: write_pain_flag Tool
+  // SECTION 2: PainSignalBridge + Runtime v2
   // ═══════════════════════════════════════════════
-  console.log('\n── 2. write_pain_flag Tool ──');
+  console.log('\n── 2. PainSignalBridge + Runtime v2 ──');
 
-  // 2.1 Test tool registered in source code
-  const indexSource = join(__dirname, '..', 'src', 'index.ts');
-  if (existsSync(indexSource)) {
-    const indexContent = readFileSync(indexSource, 'utf-8');
-    const hasImport = indexContent.includes("write-pain-flag");
-    const hasRegister = indexContent.includes('createWritePainFlagTool');
-    assert(hasImport && hasRegister, 'write_pain_flag registered in index.ts');
-  } else {
-    warn('write_pain_flag tool check', 'index.ts not found');
+  // 2.1 Verify PainSignalBridge is imported from runtime-v2 in pain.ts
+  const painHookSource = join(__dirname, '..', 'src', 'hooks', 'pain.ts');
+  if (existsSync(painHookSource)) {
+    const painContent = readFileSync(painHookSource, 'utf-8');
+    assert(painContent.includes('createPainSignalBridge'), 'pain.ts uses createPainSignalBridge from runtime-v2');
+    assert(!painContent.includes('recordAndWritePainFlag'), 'pain.ts no longer calls recordAndWritePainFlag');
   }
 
-  // 2.2 Verify tool source file exists
-  const toolSource = join(__dirname, '..', 'src', 'tools', 'write-pain-flag.ts');
-  assert(existsSync(toolSource), 'write-pain-flag.ts source exists');
-
-  // 2.3 Verify atomic write function
-  const toolContent = readFileSync(toolSource, 'utf-8');
-  assert(toolContent.includes('renameSync'), 'Uses atomic write (renameSync)', 'renameSync not found');
-
-  // 2.4 Verify KV serialization
-  assert(toolContent.includes('serializeKvLines'), 'Uses serializeKvLines for KV format', 'serializeKvLines not found');
-
-  // 2.5 Verify [object Object] protection
-  assert(toolContent.includes('buildPainFlag'), 'Uses buildPainFlag factory', 'buildPainFlag not found');
-
-  // 2.6 Test actual write end-to-end
-  const testFlagPath = join(stateDir, '.pain_flag_acceptance_test');
-  const testStateDir = join(stateDir, '.state_test_' + Date.now());
-  mkdirSync(testStateDir, { recursive: true });
-  try {
-    const testPath = join(testStateDir, '.pain_flag');
-    writeFileSync(testPath + '.tmp', 'source: manual\nscore: 80\ntime: 2026-04-13T00:00:00.000Z\nreason: acceptance test\n', 'utf-8');
-    execFileSync('mv', [testPath + '.tmp', testPath]);
-    const content = readFileSync(testPath, 'utf-8');
-    assert(content.includes('source: manual'), 'Manual pain flag write works');
-    assert(!content.includes('[object Object]'), 'No [object Object] corruption');
-  } finally {
-    rmSync(testStateDir, { recursive: true, force: true });
+  // 2.2 Verify write_pain_flag tool is NOT registered in index.ts
+  const indexSource2 = join(__dirname, '..', 'src', 'index.ts');
+  if (existsSync(indexSource2)) {
+    const indexContent = readFileSync(indexSource2, 'utf-8');
+    assert(!indexContent.includes('createWritePainFlagTool'), 'write_pain_flag NOT registered in index.ts');
   }
 
   // ═══════════════════════════════════════════════

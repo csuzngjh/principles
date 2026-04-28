@@ -105,6 +105,8 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private readonly failureStreak = new Map<string, number>();
   private lastPromotedAt: string | null = null;
   private isReplaying = false;
+  /** Registered pain_detected callbacks (e.g., PainSignalBridge). */
+  private readonly _painCallbacks: Array<(event: EvolutionLoopEvent) => void> = [];
 
   constructor(opts: { workspaceDir: string; stateDir?: string }) {
     this.workspaceDir = opts.workspaceDir;
@@ -143,6 +145,15 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       }
     }
     // Performance: sweepExpiredProbation() moved to getProbationPrinciples() for lazy cleanup
+  }
+
+  /**
+   * Register a callback for 'pain_detected' events.
+   * The callback is invoked synchronously within emitSync() after applyEvent completes.
+   * HG-4: Callbacks are fire-and-forget from the emitSync perspective.
+   */
+  on(callback: (event: EvolutionLoopEvent) => void): void {
+    this._painCallbacks.push(callback);
   }
 
   getEventLog(): EvolutionLoopEvent[] {
@@ -649,6 +660,14 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         this.updateFailureStreakFromPain(event.data);
         if (!this.isReplaying) {
           this.onPainDetected(event.data, event.ts);
+        }
+        // PainSignalBridge subscriptions: invoke registered callbacks (fire-and-forget)
+        for (const cb of this._painCallbacks) {
+          try {
+            cb(event);
+          } catch {
+            // Keep the evolution loop resilient — callback errors must not propagate
+          }
         }
         return;
       case 'candidate_created':

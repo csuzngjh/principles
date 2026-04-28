@@ -158,7 +158,10 @@ function makeMinimalEvent(): Parameters<typeof import('../../src/hooks/prompt.js
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe('Diagnostician compact task injection', () => {
+// M8: Legacy diagnostician task block injection removed — single-path pain→ledger pipeline
+// no longer injects diagnostician tasks into prompts. These tests verify the old behavior
+// and are kept as regression guards (skipped), not as M8 requirements.
+describe.skip('Diagnostician compact task injection', () => {
   it('injects a compact block containing task_id, reason, marker and report paths', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
 
@@ -289,7 +292,8 @@ describe('Size guard: fail-closed', () => {
   });
 });
 
-describe('Diagnostician priority mode', () => {
+// M8: Legacy diagnostician prompt injection removed — single-path pain→ledger pipeline
+describe.skip('Diagnostician priority mode', () => {
   it('sets pendingDiagTaskCount > 0 so size guard knows to strip low-priority blocks', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
 

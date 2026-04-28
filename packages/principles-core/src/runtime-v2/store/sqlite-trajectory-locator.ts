@@ -34,7 +34,7 @@ export class SqliteTrajectoryLocator implements TrajectoryLocator {
 
   private async routeQuery(query: TrajectoryLocateQuery): Promise<TrajectoryLocateResult> {
     if (query.painId) {
-      return this.locateByPainId(query.painId, query);
+      return this.locateByRunAlias(query.painId, query);
     }
     if (query.taskId) {
       return this.locateByTaskId(query.taskId, query);
@@ -55,23 +55,24 @@ export class SqliteTrajectoryLocator implements TrajectoryLocator {
   }
 
   /**
-   * Locate trajectory by painId.
+   * Locate trajectory by run alias (run_id lookup without full reference).
    *
-   * NOTE: Despite the name, this implementation treats `painId` as a run_id
-   * alias and queries the runs table directly. This is a pragmatic choice —
-   * callers pass `run_id` values when they have no better reference.
+   * This is a fallback path: callers who only have a run_id string but no
+   * formal lookup handle can use this to resolve it to a task_id.
    *
-   * If a true pain-signal → task lookup is needed, the query should be
-   * against tasks.diagnostic_json (SQLite JSON path extraction) instead.
+   * NOTE: The `painId` parameter name is a historical alias — it carries no
+   * pain-signal semantics here. The parameter is the caller's run_id value.
+   * If a true pain-signal → task lookup is needed, query against
+   * tasks.diagnostic_json (SQLite JSON path extraction) instead.
    */
-  private async locateByPainId(
-    painId: string,
+  private async locateByRunAlias(
+    runAlias: string,
     query: TrajectoryLocateQuery,
   ): Promise<TrajectoryLocateResult> {
     const db = this.connection.getDb();
     const row = db
       .prepare('SELECT task_id FROM runs WHERE run_id = ?')
-      .get(painId) as { task_id: string } | undefined;
+      .get(runAlias) as { task_id: string } | undefined;
 
     if (!row) {
       return { query, candidates: [] };
@@ -80,7 +81,7 @@ export class SqliteTrajectoryLocator implements TrajectoryLocator {
     const candidate: TrajectoryCandidate = {
       trajectoryRef: row.task_id,
       confidence: 0.95, // Same query as locateByRunId → same confidence
-      reasons: ['pain_id_to_run_id_lookup'],
+      reasons: ['run_alias_lookup'],
       sourceTypes: ['runs_table'],
     };
 
