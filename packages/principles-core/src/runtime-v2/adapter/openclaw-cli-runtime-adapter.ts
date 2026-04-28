@@ -53,7 +53,7 @@ export interface OpenClawCliRuntimeAdapterOptions {
    */
   workspaceDir?: string;
   /**
-   * Agent ID to invoke when running the diagnostician (default: 'diagnostician').
+   * Agent ID to invoke when running the diagnostician (default: 'main').
    * Used in healthCheck to verify the agent is available.
    */
   agentId?: string;
@@ -294,7 +294,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   constructor(options: OpenClawCliRuntimeAdapterOptions) {
     this.runtimeMode = options.runtimeMode;
     this.workspaceDir = options.workspaceDir;
-    this.agentId = options.agentId ?? 'diagnostician';
+    this.agentId = options.agentId ?? 'main';
     this.eventEmitter = options.eventEmitter ?? storeEmitter;
   }
 
@@ -614,7 +614,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       ? input.inputPayload
       : JSON.stringify(input.inputPayload);
     const timeoutSeconds = Math.ceil((input.timeoutMs ?? 600000) / 1000);
-    const agentId = input.agentSpec?.agentId ?? 'diagnostician';
+    const agentId = input.agentSpec?.agentId ?? 'main';
     const messageRef = await writeMessageFile(jsonPayload, this.workspaceDir);
 
     // DPB-09 (LOCKED): --local only passed when runtimeMode === 'local'

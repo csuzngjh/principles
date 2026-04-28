@@ -389,15 +389,15 @@ describe('DiagnosticianRunner', () => {
     expect(startInput.agentSpec.agentId).toBe('custom-diagnostician');
   });
 
-  // 8c. StartRunInput uses default 'diagnostician' when agentId not provided
-  it('defaults agentSpec.agentId to diagnostician when agentId not provided', async () => {
+// 8c. StartRunInput uses default 'main' when agentId not provided
+  it('defaults agentSpec.agentId to main when agentId not provided', async () => {
     const mocks = createMocks();
     const runner = createRunner(mocks);
 
     await runner.run(TASK_ID);
 
     const startInput = firstCallArg(mocks._runtimeAdapter.startRun) as StartRunInput;
-    expect(startInput.agentSpec.agentId).toBe('diagnostician');
+    expect(startInput.agentSpec.agentId).toBe('main');
   });
 
   // 9. Lease conflict
