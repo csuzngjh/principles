@@ -12,7 +12,7 @@
  *   DiagnosticianOutputV1Schema validation failure → output_invalid
  */
 import { Value } from '@sinclair/typebox/value';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCliProcess, type CliOutput } from '../utils/cli-process-runner.js';
@@ -53,7 +53,7 @@ export interface OpenClawCliRuntimeAdapterOptions {
    */
   workspaceDir?: string;
   /**
-   * Agent ID to invoke when running the diagnostician (default: 'diagnostician').
+   * Agent ID to invoke when running the diagnostician (default: 'main').
    * Used in healthCheck to verify the agent is available.
    */
   agentId?: string;
@@ -76,19 +76,30 @@ interface MessageFileRef {
   dir: string;
 }
 
-async function writeMessageFile(message: string): Promise<MessageFileRef> {
-  const dir = await mkdtemp(join(tmpdir(), 'pd-openclaw-message-'));
-  const filePath = join(dir, 'message.json');
+async function writeMessageFile(message: string, workspaceDir?: string): Promise<MessageFileRef> {
+  // Write to workspace/.pd/tmp/ so the agent (which runs with workspace cwd) can find it.
+  // The agent interprets @path as relative to its working directory, not an absolute path.
+  const baseDir = workspaceDir
+    ? join(workspaceDir, '.pd', 'tmp')
+    : tmpdir();
+  await mkdir(baseDir, { recursive: true });
+  const filePath = join(baseDir, `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.json`);
   await writeFile(filePath, message, 'utf8');
 
   // OpenClaw supports --message @file. Forward slashes avoid cmd.exe treating
   // backslashes inside the @file token as escaping/quoting boundaries.
-  return { arg: `@${filePath.replace(/\\/g, '/')}`, dir };
+  return { arg: `@${filePath.replace(/\\/g, '/')}`, dir: baseDir };
 }
 
 async function cleanupMessageFile(ref: MessageFileRef | undefined): Promise<void> {
   if (!ref) return;
-  await rm(ref.dir, { recursive: true, force: true });
+  // Extract the file path from the @arg (e.g. "@D:/workspace/.pd/tmp/msg-123.json" → file path)
+  const filePath = ref.arg.replace(/^@/, '');
+  try {
+    await rm(filePath, { force: true });
+  } catch {
+    // File may already be gone; ignore cleanup errors
+  }
 }
 
 /**
@@ -283,7 +294,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   constructor(options: OpenClawCliRuntimeAdapterOptions) {
     this.runtimeMode = options.runtimeMode;
     this.workspaceDir = options.workspaceDir;
-    this.agentId = options.agentId ?? 'diagnostician';
+    this.agentId = options.agentId ?? 'main';
     this.eventEmitter = options.eventEmitter ?? storeEmitter;
   }
 
@@ -455,12 +466,13 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
     try {
       // Unique session ID for probe to avoid lock conflicts with concurrent runs
       const probeSessionId = `pd-runtime-probe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      probeMessageRef = await writeMessageFile(JSON.stringify({ probe: 'pd-runtime-v2', instruction: 'reply with {"ok":true} only' }));
+      probeMessageRef = await writeMessageFile(JSON.stringify({ probe: 'pd-runtime-v2', instruction: 'reply with {"ok":true} only' }), this.workspaceDir);
       const probeArgs = [
         'agent',
         '--agent', this.agentId,
         '--message', probeMessageRef.arg,
         '--session-id', probeSessionId,
+        '--timeout', '240',
         '--json',
       ];
       if (this.runtimeMode === 'local') {
@@ -471,7 +483,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
         command: 'openclaw',
         args: probeArgs,
         cwd: this.workspaceDir,
-        timeoutMs: 60_000, // 60s — probe just verifies agent can respond with {"ok":true}
+        timeoutMs: 240_000, // 240s — agent init + bootstrap + skill loading can take >60s on cold start
       });
 
       if (probeResult.spawnError === 'ENOENT') {
@@ -602,8 +614,8 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
       ? input.inputPayload
       : JSON.stringify(input.inputPayload);
     const timeoutSeconds = Math.ceil((input.timeoutMs ?? 600000) / 1000);
-    const agentId = input.agentSpec?.agentId ?? 'diagnostician';
-    const messageRef = await writeMessageFile(jsonPayload);
+    const agentId = input.agentSpec?.agentId ?? 'main';
+    const messageRef = await writeMessageFile(jsonPayload, this.workspaceDir);
 
     // DPB-09 (LOCKED): --local only passed when runtimeMode === 'local'
     // HG-03 (HARD GATE): No silent fallback — must be explicit

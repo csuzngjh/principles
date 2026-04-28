@@ -37,7 +37,7 @@ export const DEFAULT_RUNNER_OPTIONS: Readonly<Omit<ResolvedDiagnosticianRunnerOp
   pollIntervalMs: 5_000,
   timeoutMs: 300_000,
   defaultMaxAttempts: 3,
-  agentId: 'diagnostician',
+  agentId: 'main',
 } as const;
 
 /** Resolve options by applying defaults. */

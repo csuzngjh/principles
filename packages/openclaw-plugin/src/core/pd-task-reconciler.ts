@@ -80,8 +80,7 @@ export interface ReconcileOptions {
 }
 
  
-async function readCronStore(logger?: { info?: (_: string) => void; warn?: (_: string) => void }): Promise<CronStoreFile> {
- 
+function readCronStore(logger?: { info?: (_: string) => void; warn?: (_: string) => void }): CronStoreFile {
   if (!fs.existsSync(CRON_STORE_PATH)) {
     logger?.info?.(`[PD:Reconciler] cron/jobs.json not found, starting with empty store`);
     return { version: 1, jobs: [] };
@@ -178,101 +177,7 @@ function buildCronJob(
 }
 
  
-function buildTaskPrompt(task: PDTaskSpec, workspaceDir: string, logger?: { info?: (_: string) => void }): string {
-  // Resolve paths dynamically from workspaceDir instead of hardcoding
-  const stateDir = path.join(workspaceDir, '.state');
-  const empathyKeywordsPath = path.join(stateDir, 'empathy_keywords.json');
-  const eventsJsonlPath = path.join(stateDir, 'logs', 'events.jsonl');
-
-  if (task.id === 'empathy-optimizer') {
-    logger?.info?.(`[PD:Reconciler] Building empathy optimizer prompt`);
-    return `You are the Principles Disciple Empathy Keyword Optimizer.
-
-## TASK
-Analyze the current empathy keyword store and recent user message logs to:
-1. Discover NEW frustration expressions not in the current store
-2. ADJUST weights of existing terms based on actual hit frequency
-3. REMOVE terms that produce too many false positives
-
-## WORKFLOW (execute in order)
-
-### Step 1: Read current keyword store
-Use read_file to load:
-\`${empathyKeywordsPath}\`
-
-Examine the "terms" object. For each term note:
-- weight (0.1-0.9): higher = stronger frustration signal
-- hitCount: how many times it matched
-- falsePositiveRate (0.05-0.5): how often it's a false alarm
-
-### Step 2: Read recent message logs
-Use search_file_content to scan:
-\`${eventsJsonlPath}\`
-
-Look for user messages containing frustration signals:
-- Negation: "不对", "错了", "不行", "重做"
-- Anger: "垃圾", "蠢", "废物", "白做"
-- Disappointment: "不行啊", "还是不对", "没解决"
-- Escalation: "你到底在干什么", "你确定吗", "what are you doing"
-
-### Step 3: Write updated keyword store
-Use write_file to save the updated store back to:
-\`${empathyKeywordsPath}\`
-
-The file format is:
-\`\`\`json
-{
-  "version": 1,
-  "lastUpdated": "ISO timestamp",
-  "lastOptimizedAt": "ISO timestamp",
-  "terms": {
-    "TERM": {
-      "weight": 0.5,
-      "source": "seed|llm_discovered|user_reported",
-      "hitCount": 0,
-      "falsePositiveRate": 0.15
-    }
-  },
-  "stats": {
-    "totalHits": 0,
-    "totalFalsePositives": 0,
-    "optimizationCount": 1
-  }
-}
-\`\`\`
-
-**IMPORTANT**: You MUST use the write_file tool. Do NOT just return JSON in your response.
-
-### Step 4: Report summary
-After writing the file, reply with a brief summary:
-\`\`\`
-Empathy keyword optimization complete:
-- Added: N new terms (list them)
-- Updated: M terms (list changes)
-- Removed: K terms (list them)
-- Total terms in store: X
-\`\`\`
-
-## RULES
-- ADD: If you find frustration expressions in logs NOT in current terms
-  - source = "llm_discovered", discoveredAt = current ISO timestamp
-  - weight: 0.5-0.7 for new terms (start conservative)
-  - falsePositiveRate: 0.2-0.3 (uncertain until validated)
-- UPDATE: Adjust based on evidence
-  - High hitCount + low FPR → increase weight
-  - Low hitCount + high FPR → decrease weight
-  - Keep weight in 0.1-0.9, FPR in 0.05-0.5
-- REMOVE: If hitCount=0 AND falsePositiveRate > 0.3 AND term is clearly generic
-  - Don't remove terms that might be valid but rare
-- PRESERVE: Keep existing hitCount, lastHitAt, discoveredAt for existing terms
-- Bump stats.optimizationCount by 1
-- Set lastOptimizedAt to current ISO timestamp
-
-## EXAMPLES
-- "不对" has hitCount=50 → increase weight from 0.5 to 0.7
-- "呵呵" has hitCount=0, FPR=0.4, generic term → REMOVE
-- User says "烦死了" in logs, not in store → ADD weight=0.6, FPR=0.25`;
-  }
+function buildTaskPrompt(task: PDTaskSpec, _workspaceDir: string, _logger?: { info?: (_: string) => void }): string {
   return task.description;
 }
 
@@ -334,8 +239,10 @@ export async function reconcilePDTasks(
       case 'DISABLE':
         if (action.job) {
           if (!dryRun) {
-            action.job.enabled = false;
-            action.job.updatedAtMs = nowMs;
+            const idx = cronStore.jobs.indexOf(action.job);
+            if (idx >= 0) {
+              cronStore.jobs[idx] = { ...action.job, enabled: false, updatedAtMs: nowMs };
+            }
           }
           logger.warn?.(`[PD:Reconciler] Disabled job: ${action.job.name}`);
         }
@@ -381,9 +288,9 @@ function healthCheck(
 ): PDTaskSpec[] {
   const jobByName = new Map(cronStore.jobs.map((j) => [j.name, j]));
 
-  for (const task of tasks) {
+  return tasks.map((task) => {
     const job = jobByName.get(task.name);
-    if (!job) continue;
+    if (!job) return task;
 
     const errors = job.state.consecutiveErrors ?? 0;
     const lastError = job.state.lastError ?? '';
@@ -402,27 +309,31 @@ function healthCheck(
     }
 
     // Auto-disable only for non-timeout errors after 3 consecutive failures
-    if (errors >= 3 && !isTimeout && !task.meta?.autoDisabled) {
-      if (!task.meta) task.meta = {};
-      task.meta.autoDisabled = true;
-      task.meta.autoDisabledAt = Date.now();
-      task.meta.autoDisabledReason = `consecutiveErrors=${errors}`;
-      logger.warn?.(`[PD:Reconciler] Auto-disabled task '${task.id}' due to ${errors} consecutive errors: ${lastError.substring(0, 80)}`);
-    }
+    const shouldAutoDisable = errors >= 3 && !isTimeout && !task.meta?.autoDisabled;
 
     // Reset consecutiveErrors on non-error runs
     if (errors === 0 && task.meta?.autoDisabled) {
       logger.info?.(`[PD:Reconciler] Task '${task.id}' was previously auto-disabled but has 0 consecutive errors now`);
     }
 
-    if (task.meta) {
-      task.meta.consecutiveFailCount = errors;
-      if (job.state.lastRunAtMs) {
-        task.meta.lastFailedAtMs = job.state.lastRunAtMs;
-      }
+    if (shouldAutoDisable || task.meta || job.state.lastRunAtMs) {
+      return {
+        ...task,
+        meta: {
+          ...task.meta,
+          ...(shouldAutoDisable ? {
+            autoDisabled: true,
+            autoDisabledAt: Date.now(),
+            autoDisabledReason: `consecutiveErrors=${errors}`,
+          } : {}),
+          ...(task.meta ? { consecutiveFailCount: errors } : {}),
+          ...(job.state.lastRunAtMs ? { lastFailedAtMs: job.state.lastRunAtMs } : {}),
+        },
+      };
     }
-  }
-  return tasks;
+
+    return task;
+  });
 }
 
 export async function trigger(

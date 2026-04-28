@@ -27,33 +27,38 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - v2.3 M4: Diagnostician Runner v2 — explicit runner, runtime adapter, validator, telemetry, CLI — SHIPPED 2026-04-23
 - v2.5 M6: Production Runtime Adapter: OpenClaw CLI Diagnostician — OpenClawCliRuntimeAdapter, DiagnosticianPromptBuilder, pd diagnose run --runtime openclaw-cli, HG-1~HG-5 all PASS — SHIPPED 2026-04-25
 - v2.6 M7: Principle Candidate Intake — CandidateIntakeService, pd candidate intake CLI, PrincipleTreeLedger adapter, idempotent probation entry writing, E2E traceability — SHIPPED 2026-04-27
+- v2.7 M8: Pain Signal → Principle Single Path Cutover — IN PROGRESS
 
-## Current Milestone: v2.6 M7 — Principle Candidate Intake
+## Current Milestone: v2.7 M8 — Pain Signal → Principle Single Path Cutover
 
-**Goal:** 消费 `principle_candidates.status=pending` 的候选，把它们转换为 PD principle ledger 可管理的 probation principle 条目。M7 不处理 pain signal 自动触发，不删除 legacy evolution-worker，不恢复 heartbeat/cron/subagent。
+**Goal:** 把痛苦信号到原则账本的端到端链路切到 Runtime v2，删除旧 diagnostician 执行链路。
 
-**Pipeline:** `task → run(openclaw-cli) → DiagnosticianOutputV1 → commit → artifact → principle_candidate(status=pending)` → **[M7 intake]** → `principle_ledger(status=probation)`
+**Pipeline (single path):**
+pain → PD task/run store → DiagnosticianRunner → OpenClawCliRuntimeAdapter → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
 
 **Target features:**
-- `CandidateIntakeService` — 消费 pending candidate，幂等写入 ledger
-- `pd candidate intake --candidate-id <id> --workspace <path> --json` — CLI 入口
-- `PrincipleTreeLedger` adapter — probation principle 写入，不做 promotion
-- 链路可追溯：candidate → artifact → task/run → ledger entry
+1. 单一诊断链路（无 fallback）— DELETE 所有旧诊断执行路径
+2. Legacy code map：先对所有引用分类为 DELETE / REPLACE_WITH_RUNTIME_V2 / KEEP_NON_DIAGNOSTIC，再动手实现
+3. 旧链路删除：diagnostician_tasks.json、heartbeat prompt 注入、LLM marker 文件、evolution-worker 轮询
+4. CLI 可观测：pd diagnose run / candidate list/show / intake / pain trigger 验证命令
+5. E2E 真实 workspace 签收：D:\.openclaw\workspace，runtime=openclaw-cli
 
-**M7 Non-goals:**
-- 不调用 OpenClaw 插件 API
-- 不使用 heartbeat / prompt hook / sessions_spawn / marker file
-- 不做 pain signal 自动触发（M8 scope）
-- 不删除 legacy evolution-worker（M9 scope）
-- 不 promote to active principle
+**M8 约束：**
+- Legacy deletion 只针对旧诊断执行路径，不删除无关的 evolution-worker 功能
+- M8 成功标准：链路终点必须是 PrincipleTreeLedger probation entry
+- Candidate intake 是 happy path 的一部分（除非明确禁用调试）
+
+**Non-goals：**
+- 不保留旧诊断开关（PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED 等）
+- 不做 legacy fallback
+- 不删除 sleep reflection / keyword optimization 等非诊断功能（除非它们仅服务于旧诊断链路）
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
 
 **Out of Scope:**
-
-- New UI/dashboard work
-- New feature surface areas (outside SDK scope)
-- LoRA or full fine-tune internalization paths
+- 新 UI/dashboard
+- 新功能表面区域（SDK scope 外）
+- 多 runtime 适配器套件（M8 只需要 OpenClawCliRuntimeAdapter）
 
 ## Context
 
@@ -89,4 +94,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-27 after v2.6 M7 shipped*
+*Last updated: 2026-04-27 after v2.6 M7 shipped, v2.7 M8 started*

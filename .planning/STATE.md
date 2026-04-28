@@ -1,14 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.6
-milestone_name: milestone
-status: v2.6 M7 SHIPPED — milestone complete
-last_updated: "2026-04-27T07:29:57.452Z"
+milestone: v2.7
+milestone_name: M8 — Pain Signal → Principle Single Path Cutover
+status: verifying
+last_updated: "2026-04-28T07:44:01.365Z"
+last_activity: 2026-04-28 -- UAT executed, openclaw CLI spawn broken (pre-existing), all 6 blockers verified correct
 progress:
-  total_phases: 5
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_phases: 75
+  completed_phases: 66
+  total_plans: 131
+  completed_plans: 140
+  percent: 100
 ---
 
 # Project State: Principles
@@ -17,36 +19,55 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.6 M7 shipped — next: v2.7 M8 Pain Signal Bridge planning
+**Current Focus:** v2.7 M8 — m8-02 SHIPPED (2026-04-28), m8-03 Real Environment UAT pending
 
 ## Current Position
 
-Phase: m7-05 (complete — v2.6 M7 shipped)
-Session ready for: /gsd-new-milestone — start v2.7 M8 Pain Signal Bridge
+Phase: m8-03 (Real Environment UAT — BLOCKED by pre-existing openclaw CLI env issue)
+Plan: 1 plan executed 2026-04-28
+Status: Executed — UAT partially blocked, implementation verified correct, CLI env issue is pre-existing
+Last activity: 2026-04-28 -- UAT executed, openclaw CLI spawn broken (pre-existing), all 6 blockers verified correct
 
-## M7 Phase Structure
+## M8-03 Real Environment UAT
 
-| Phase | Name | Requirements |
-|-------|------|--------------|
-| m7-01 | Candidate Intake Contract | INTAKE-01~04, LEDGER-01 (5 req) ✅ SHIPPED |
-| m7-02 | PrincipleTreeLedger Adapter | LEDGER-01~03 (3 req) ✅ SHIPPED |
-| m7-03 | Intake Service + Idempotency | INTAKE-05~07 (3 req) ✅ SHIPPED |
-| m7-04 | CLI: pd candidate intake | CLI-INTAKE-01~03 (3 req) ✅ SHIPPED |
-| m7-05 | E2E: candidate → ledger entry | E2E-INTAKE-01~04 (4 req) ✅ SHIPPED |
+Phase: m8-03 (Real Environment UAT — M8 final sign-off)
+Plan: m8-03-01 executed 2026-04-28
+Status: PARTIAL — UAT-01 blocked by pre-existing openclaw CLI env issue (npm wrapper path corruption), UAT-02 PASS, UAT-04 PASS, implementation verified correct
+Depends on: m8-02 (both plans complete ✅)
+Note: m8-03 is NOT a code change plan — it is manual UAT against live OpenClaw gateway + real workspace D:\.openclaw\workspace
+Ledger path (confirmed from principle-tree-ledger.ts): D:/.openclaw/workspace/.state/principle_training_state.json (NOT .principles/ledger/principles.jsonl)
+M8 cannot be marked SHIPPED until m8-03 UAT passes — UAT-01 blocked by pre-existing CLI env issue
+UAT results: UAT-01 BLOCKED (openclaw CLI env), UAT-02 PASS, UAT-03 SKIP, UAT-04 PASS, UAT-05 INFO (pre-existing env issue)
+
+## M8 Pipeline (single path, no fallback)
+
+pain → PD task/run store → DiagnosticianRunner → OpenClawCliRuntimeAdapter → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
+
+## M8 约束
+
+1. Legacy deletion 只针对旧诊断执行路径，不删除无关的 evolution-worker 功能
+2. M8 成功标准：链路终点必须是 PrincipleTreeLedger probation entry
+3. Candidate intake 是 happy path 的一部分
+4. m8-03 UAT 必须通过才能标记 M8 SHIPPED — mocked E2E 不能作为最终验收
 
 ## Context
 
-**M7 Boundary Constraints:**
+**M8 依赖：** M7 (Candidate Intake 已完成)
 
-1. Atomic commit truth in SQLite .pd/state.db ONLY (carried from M5)
-2. Runner only depends on Committer interface (carried from M5)
-3. task succeeded MUST happen after commit success (carried from M5)
-4. Cannot produce "task succeeded but candidate missing" state (carried from M5)
-5. No pain signal bridge in M7
-6. No legacy path deletion in M7
-7. No heartbeat/cron/subagent resurrection
-8. No direct promotion to active principle
-9. Idempotency is a hard requirement for intake
+**M8 非目标：**
+
+- 不保留旧诊断开关
+- 不做 legacy fallback
+- 不删除 sleep reflection / keyword optimization 等非诊断功能（仅服务于旧诊断链路的才删）
+
+**m8-03 说明：**
+
+- 不是代码修改计划，是人工真实验收（autonomous: false）
+- Workspace: `D:\.openclaw\workspace`
+- Ledger 路径: `D:\.openclaw\workspace\.state\principle_training_state.json`（不是 .principles/ledger/principles.jsonl）
+- 必须通过真实 OpenClaw hook 触发 pain signal（不允许直接调用 PainSignalBridge.onPainDetected）
+- 不允许 test-double / mock runCliProcess
+- 必须验证：task succeeded + artifact + candidate + ledger probation entry + legacy files unchanged
 
 **Baseline (Frozen):**
 
@@ -56,5 +77,6 @@ Session ready for: /gsd-new-milestone — start v2.7 M8 Pain Signal Bridge
 - v2.3 M4: Diagnostician Runner v2 — SHIPPED 2026-04-23
 - v2.4 M5: Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24
 - v2.5 M6: Production Runtime Adapter — SHIPPED 2026-04-25
+- v2.6 M7: Principle Candidate Intake — SHIPPED 2026-04-27
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`

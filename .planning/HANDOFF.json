@@ -1,62 +1,38 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-27T19:25:12Z",
-  "phase": "m7",
-  "phase_name": "M7 CI Baseline Repair",
-  "phase_dir": ".planning/phases/m7-05-E2E-Intake",
-  "plan": "01",
+  "timestamp": "2026-04-28T11:39:08Z",
+  "phase": "m8-03",
+  "phase_name": "Real Environment UAT",
+  "phase_dir": ".planning/phases/m8-03-Real-Environment-UAT",
+  "plan": 1,
   "task": 1,
   "total_tasks": 1,
-  "status": "paused",
+  "status": "blocked",
   "completed_tasks": [
-    {
-      "id": 1,
-      "name": "CI baseline repair: identified root causes",
-      "status": "done",
-      "progress": "Confirmed: 185 TS errors are origin/main technical debt (not M7 introduced). SDK type boundary issue identified. openclaw-sdk.d.ts renamed to .ts but @ts-nocheck prevents types from working."
-    }
+    {"id": 1, "name": "m8-03-01 Real Environment UAT", "status": "partial", "progress": "UAT-02 PASS, UAT-04 PASS, UAT-01 BLOCKED (agent hang)"},
+    {"id": 2, "name": "agentId schema relaxation", "status": "done", "commit": "uncommitted"},
+    {"id": 3, "name": "emitDiagnosticianEvent agentId fix", "status": "done", "commit": "uncommitted"}
   ],
   "remaining_tasks": [
-    {"id": 2, "name": "Fix SDK type boundary properly", "status": "not_started"},
-    {"id": 3, "name": "Verify tsc --noEmit passes locally", "status": "not_started"},
-    {"id": 4, "name": "Verify pd-cli build passes", "status": "not_started"},
-    {"id": 5, "name": "Fix package-lock.json (principles-disciple dep)", "status": "not_started"},
-    {"id": 6, "name": "Commit clean CI/type baseline fix", "status": "not_started"}
+    {"id": 4, "name": "Test main agent produces valid DiagnosticianOutputV1", "status": "not_started"},
+    {"id": 5, "name": "Verify full pain->ledger chain (UAT-01)", "status": "not_started"},
+    {"id": 6, "name": "Commit and ship M8", "status": "not_started"}
   ],
   "blockers": [
-    {
-      "description": "SDK type file (.ts with @ts-nocheck) exports don't work as TypeScript module — removing @ts-nocheck causes more errors (SDK internal type issues)",
-      "type": "technical",
-      "workaround": "Must fix SDK types at source (openclaw-sdk.ts) — needs proper interfaces and no @ts-nocheck, OR accept origin/main error count as baseline"
-    },
-    {
-      "description": "273 pre-existing tsc errors on origin/main — these are technical debt, not M7 introduced",
-      "type": "technical",
-      "workaround": "CI baseline repair goal was: remove || true hack, restore TypeScript Check. But doing so reveals 273 errors that were always there."
-    }
+    {"description": "openclaw agent CLI command hangs indefinitely (no stdout, no exit, timeout ineffective)", "type": "technical", "workaround": "Use node direct invocation: node openclaw.mjs agent ..."},
+    {"description": "openclaw.cmd PATH corrupted by Anaconda Git Bash PATH mangling", "type": "technical", "workaround": "Use full path: node C:/Users/Administrator/AppData/Roaming/npm/node_modules/openclaw/openclaw.mjs"}
   ],
-  "human_actions_pending": [],
+  "human_actions_pending": [
+    {"action": "Diagnose openclaw agent hang - check if model API key is valid, session not locked, agent startup not deadlocked", "context": "Agent invocation produces no output even with --timeout 30", "blocking": true}
+  ],
   "decisions": [
-    {
-      "decision": "@ts-nocheck on openclaw-sdk.ts keeps it type-check-free but makes all exports resolve as '{}' — logger becomes '{}', api.runtime becomes '{}'",
-      "rationale": "Removing @ts-nocheck without fixing SDK internals explodes errors",
-      "phase": "m7"
-    },
-    {
-      "decision": "273 tsc errors are origin/main technical debt, confirmed by: git stash (clean) → tsc still shows errors",
-      "rationale": "Not M7's fault — these accumulated before M7 started",
-      "phase": "m7"
-    }
+    {"decision": "Use main agent instead of diagnostician", "rationale": "diagnostician agent does not exist in deployment (only main and local-scheduler)", "phase": "m8-03"},
+    {"decision": "Relax DiagnosticianInvocationInputSchema.agentId to Type.String()", "rationale": "Allow any valid agent ID, not just 'diagnostician'", "phase": "m8-03"}
   ],
   "uncommitted_files": [
-    ".planning/HANDOFF.json",
-    "package-lock.json",
-    "packages/openclaw-plugin/.gitignore",
-    "packages/openclaw-plugin/src/core/principle-tree-ledger.ts",
-    "packages/openclaw-plugin/src/index.ts",
-    "packages/openclaw-plugin/tsconfig.json",
-    "packages/openclaw-plugin/src/openclaw-sdk.ts (new, untracked)"
+    "packages/principles-core/src/runtime-v2/diagnostician-output.ts",
+    "packages/principles-core/src/runtime-v2/runner/diagnostician-runner.ts"
   ],
-  "next_action": "CRITICAL DECISION NEEDED: (A) Accept 273 pre-existing TS errors as origin/main baseline and commit only the CI hack removal, OR (B) Fix SDK type boundary properly (days of work). Option B: remove @ts-nocheck from openclaw-sdk.ts, fix all exported interface type errors, add normalizeArgs() helper to io.ts, fix event.params guards in gate.ts/lifecycle.ts.",
-  "context_notes": "User directive was clear: CI baseline repair = remove || true, restore TypeScript Check, don't fix 185 errors. But tsc --noEmit fails even after clean stash due to pre-existing errors. The SDK type boundary issue (openclaw-sdk.d.ts not tracked) is real but fixing it properly is a large effort."
+  "next_action": "Test: node openclaw.mjs agent --agent main --message <file> --json --timeout 30. If returns JSON -> full UAT-01.",
+  "context_notes": "M8 code is complete. Only blocker is openclaw CLI environment hang. Not an M8 code issue."
 }

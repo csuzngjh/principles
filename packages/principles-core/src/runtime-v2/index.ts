@@ -184,6 +184,9 @@ export type { TestDoubleBehaviorOverrides } from './adapter/index.js';
 export { OpenClawCliRuntimeAdapter } from './adapter/index.js';
 export type { OpenClawCliRuntimeAdapterOptions } from './adapter/openclaw-cli-runtime-adapter.js';
 
+// PrincipleTreeLedgerAdapter (M8)
+export { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adapter.js';
+
 // Diagnostician Prompt Builder (M6)
 export { DiagnosticianPromptBuilder, summarizeConversationWindow } from './diagnostician-prompt-builder.js';
 export type { PromptInput, PromptBuildResult } from './diagnostician-prompt-builder.js';
@@ -191,6 +194,18 @@ export type { PromptInput, PromptBuildResult } from './diagnostician-prompt-buil
 // CLI surface (M4)
 export { run, status, candidateList, candidateShow, artifactShow, probeRuntime } from './cli/index.js';
 export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult, CandidateListOptions, CandidateShowOptions, ArtifactShowOptions, ProbeOptions, ProbeResult } from './cli/index.js';
+
+// Pain signal bridge (M8)
+export {
+  PainSignalBridge,
+} from './pain-signal-bridge.js';
+export type {
+  PainSignalBridgeOptions,
+  PainDetectedData,
+  PainSignalBridgeResult,
+  PainSignalBridgeStatus,
+} from './pain-signal-bridge.js';
+export { createPainSignalBridge, invalidatePainSignalBridge, type PainSignalRuntimeFactoryOptions } from './pain-signal-runtime-factory.js';
 
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';

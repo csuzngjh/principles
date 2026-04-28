@@ -18,7 +18,27 @@
 - v2.4 M5: Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24 (PR #398)
 - v2.5 M6: Production Runtime Adapter: OpenClaw CLI Diagnostician — SHIPPED 2026-04-25
 
-**Next:** v2.7 M8 — Pain Signal -> Diagnostician Bridge
+**Next:** v2.7 M8 — Pain Signal → Principle Single Path Cutover
+
+---
+
+## v2.7 M8 — Pain Signal → Principle Single Path Cutover (In Progress)
+
+**Goal:** 把痛苦信号到原则账本的端到端链路切到 Runtime v2，删除旧 diagnostician 执行链路。
+
+**Pipeline (single path):**
+pain → PD task/run store → DiagnosticianRunner → OpenClawCliRuntimeAdapter → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
+
+**Constraints:**
+- Legacy deletion 只针对旧诊断执行路径，不删除无关的 evolution-worker 功能
+- M8 成功标准：链路终点必须是 PrincipleTreeLedger probation entry
+- Candidate intake 是 happy path 的一部分
+
+**Non-goals:** 不保留旧诊断开关、不做 legacy fallback
+
+**Depends on:** M7
+
+**Plans:** TBD
 
 ---
 
