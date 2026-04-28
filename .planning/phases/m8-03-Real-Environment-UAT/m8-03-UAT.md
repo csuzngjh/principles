@@ -69,16 +69,18 @@ node packages/pd-cli/dist/index.js pain record \
 **JSON Output:**
 ```json
 {
-  "painId": "manual_1777357370328_4tl8qb77",
-  "taskId": "diagnosis_manual_1777357370328_4tl8qb77",
-  "runId": "run_diagnosis_manual_1777357370328_4tl8qb77_1",
-  "status": "succeeded"
+  "painId": "manual_1777359956773_32dc0abd",
+  "taskId": "diagnosis_manual_1777359956773_32dc0abd",
+  "candidateIds": [],
+  "ledgerEntryIds": [],
+  "status": "retried",
+  "message": "Runtime execution ended with status: failed"
 }
 ```
 
-**Exit code:** 0
+**Exit code:** 1
 
-> **Note on semantics:** `taskId` 由 `createDiagnosticianTaskId(painId)` 生成，格式为 `diagnosis_<painId>`。CLI 本地计算的 `taskId` 通过 `painData.taskId` 正确传递给 PainSignalBridge。`status: succeeded` 表示 pain signal 已成功入队，不代表 DiagnosticianRunner 已完成。
+> **Note on semantics:** `status: retried` 表示 runtime 执行失败，PainSignalBridge 已按幂等规则将任务重试。`status: succeeded` 在 M8 语境中仅当完整链路成功时才能使用（task succeeded + artifact + candidate + ledgerEntry）。当前 status 为 `retried` 说明 DiagnosticianRunner 未完成，UAT-01 仍 BLOCKED。
 
 ---
 
