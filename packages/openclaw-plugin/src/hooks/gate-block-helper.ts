@@ -17,7 +17,6 @@ import {
   TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS,
   TRAJECTORY_GATE_BLOCK_MAX_RETRIES
 } from '../config/index.js';
-import { buildPainFlag, writePainFlag } from '../core/pain.js';
 
 /**
  * Block context containing all information needed for block persistence
@@ -103,47 +102,34 @@ export function recordGateBlockAndReturn(
   // Gate blocks are a strong frustration signal — the agent tried to do something
   // and was blocked by a principle gate. This should feed into the nocturnal pipeline.
   if (sessionId) {
-    const GATE_BLOCK_PAIN_SCORE = 30; // Moderate — not a failure but a blocked intent
+    const GATE_BLOCK_PAIN_SCORE = 30;
+    // Record to trajectory (fire-and-forget, no .pain_flag file needed)
+    wctx.trajectory?.recordPainEvent?.({
+      sessionId,
+      source: 'gate_blocked',
+      score: GATE_BLOCK_PAIN_SCORE,
+      reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
+      severity: 'mild',
+      origin: 'system_infer',
+    });
+
+    // Emit via the Runtime v2 pain chain (M8: no .pain_flag file)
     try {
-      const trajectoryPainId = wctx.trajectory?.recordPainEvent?.({
-        sessionId,
-        source: 'gate_blocked',
-        score: GATE_BLOCK_PAIN_SCORE,
-        reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
-        severity: 'mild',
-        origin: 'system_infer',
+      wctx.evolutionReducer.emitSync({
+        ts: new Date().toISOString(),
+        type: 'pain_detected',
+        data: {
+          painId: `gate_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+          painType: 'user_frustration',
+          source: 'gate_blocked',
+          reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
+          score: GATE_BLOCK_PAIN_SCORE,
+          sessionId,
+          agentId: 'main',
+        },
       });
-
-      // Update .pain_flag if score is significant
-      wctx.eventLog.recordPainSignal(sessionId, {
-        source: 'gate_blocked',
-        score: GATE_BLOCK_PAIN_SCORE,
-        reason,
-      });
-
-      // Write to pain flag file (merge with existing if present)
-      try {
-         
-        const workspaceDir = wctx.workspaceDir;
-        const currentFlag = wctx.eventLog.findLatestPainSignal(sessionId);
-        const currentScore = currentFlag?.score ?? 0;
-        if (currentScore < GATE_BLOCK_PAIN_SCORE) {
-          const flag = buildPainFlag({
-            source: 'gate_blocked',
-            score: String(GATE_BLOCK_PAIN_SCORE),
-            reason: `Gate blocked: ${reason}`,
-            session_id: sessionId,
-            agent_id: 'main',
-            is_risky: false,
-            pain_event_id: trajectoryPainId !== undefined && trajectoryPainId >= 0 ? String(trajectoryPainId) : undefined,
-          });
-          writePainFlag(workspaceDir, flag);
-        }
-      } catch (flagErr) {
-        logWarn(`[PD_GATE] Failed to update pain flag for gate block: ${String(flagErr)}`);
-      }
-    } catch (painErr) {
-      logWarn(`[PD_GATE] Failed to record gate block pain signal: ${String(painErr)}`);
+    } catch (emitErr) {
+      logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
     }
   }
 

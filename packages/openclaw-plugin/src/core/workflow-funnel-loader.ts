@@ -18,16 +18,34 @@ import yaml from 'js-yaml';
 
 /**
  * A single stage in a workflow funnel.
+ * Policy fields are optional — existing stages without policy fields remain valid.
  */
 export interface WorkflowStage {
-  /** Stage name within the funnel (e.g., 'dreamer_completed') */
   name: string;
-  /** Event type string (e.g., 'nocturnal_dreamer_completed') */
   eventType: string;
-  /** Event category (e.g., 'completed', 'created', 'blocked') */
   eventCategory: string;
-  /** Dot-path to stats field (e.g., 'evolution.nocturnalDreamerCompleted') */
   statsField: string;
+  timeoutMs?: number;
+  successCriteria?: string;
+  legacyDisabled?: boolean;
+  observability?: {
+    enabled?: boolean;
+    emitEvents?: string[];
+  };
+}
+
+/**
+ * Funnel-level policy that applies to all stages unless overridden per-stage.
+ */
+export interface FunnelPolicy {
+  timeoutMs?: number;
+  stageOrder?: 'strict' | 'relaxed';
+  legacyDisabled?: boolean;
+  observability?: {
+    enabled?: boolean;
+    emitEvents?: string[];
+    logLevel?: 'debug' | 'info' | 'warn' | 'error';
+  };
 }
 
 /**
@@ -36,6 +54,7 @@ export interface WorkflowStage {
 export interface WorkflowFunnel {
   workflowId: string;
   stages: WorkflowStage[];
+  policy?: FunnelPolicy;
 }
 
 /**
@@ -50,56 +69,31 @@ export interface WorkflowFunnelConfig {
 // WorkflowFunnelLoader
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Loads and watches workflows.yaml, building an in-memory WORKFLOW_FUNNELS table.
- *
- * Failure semantics (per Codex review):
- * - Missing file: clears in-memory funnels, uses empty Map
- * - Malformed YAML: preserves last known-good config, logs warning
- * - Schema-invalid YAML: same as malformed YAML
- *
- * Usage:
- *   const loader = new WorkflowFunnelLoader(stateDir);
- *   const funnels = loader.getAllFunnels();  // Map<string, WorkflowStage[]>
- *   loader.watch();  // Enable hot reload
- */
 export class WorkflowFunnelLoader {
-  /** In-memory WORKFLOW_FUNNELS table: workflowId -> stages */
   private readonly funnels = new Map<string, WorkflowStage[]>();
-
+  private readonly fullFunnels = new Map<string, WorkflowFunnel>();
   private readonly configPath: string;
-
-  /** fs.watch() handle for cleanup */
   private watchHandle?: fs.FSWatcher;
-
-  /** YAML parse warnings from last load() call */
   private readonly warnings: string[] = [];
 
   constructor(stateDir: string) {
-    // D-02: workflows.yaml in .state/ directory
     this.configPath = path.join(stateDir, 'workflows.yaml');
     this.load();
   }
 
-  /**
-   * Load (or reload) workflows.yaml from disk.
-   * On parse/validation failure, preserves the last known-good config.
-   * On missing file, clears to empty.
-   */
   load(): void {
-    this.warnings.length = 0; // reset warnings on each load
+    this.warnings.length = 0;
     if (!fs.existsSync(this.configPath)) {
       this.warnings.push('workflows.yaml file not found.');
       this.funnels.clear();
+      this.fullFunnels.clear();
       return;
     }
 
     try {
       const content = fs.readFileSync(this.configPath, 'utf-8');
-      // Use safe load — no arbitrary code execution
       const config = yaml.load(content, { schema: yaml.DEFAULT_SCHEMA }) as WorkflowFunnelConfig;
 
-      // Validate top-level structure
       if (!config || typeof config.version !== 'string' || !Array.isArray(config.funnels)) {
         const msg = 'workflows.yaml validation failed: missing version or funnels array. Preserving last valid config.';
         console.warn(`[WorkflowFunnelLoader] ${msg}`);
@@ -107,11 +101,12 @@ export class WorkflowFunnelLoader {
         return;
       }
 
-      // Rebuild funnels map
       const newFunnels = new Map<string, WorkflowStage[]>();
+      const newFullFunnels = new Map<string, WorkflowFunnel>();
       for (const funnel of config.funnels) {
         if (funnel?.workflowId && typeof funnel.workflowId === 'string' && Array.isArray(funnel.stages)) {
           newFunnels.set(funnel.workflowId, funnel.stages);
+          newFullFunnels.set(funnel.workflowId, funnel);
         } else {
           const msg = 'Skipping invalid funnel entry: missing workflowId or stages.';
           console.warn(`[WorkflowFunnelLoader] ${msg}`);
@@ -119,44 +114,28 @@ export class WorkflowFunnelLoader {
         }
       }
 
-      // Atomic replace: only commit if entire parse/validation succeeded
       this.funnels.clear();
-      for (const [k, v] of newFunnels) {
-        this.funnels.set(k, v);
-      }
+      this.fullFunnels.clear();
+      for (const [k, v] of newFunnels) { this.funnels.set(k, v); }
+      for (const [k, v] of newFullFunnels) { this.fullFunnels.set(k, v); }
     } catch (err) {
-      // Best-effort: preserve last known-good config on parse error
       const msg = `Failed to parse workflows.yaml: ${String(err)}. Preserving last valid config.`;
       console.warn(`[WorkflowFunnelLoader] ${msg}`);
       this.warnings.push(msg);
     }
   }
 
-  /**
-   * Start watching workflows.yaml for changes.
-   * Calls load() automatically when the file changes.
-   * No-op if the config file does not exist.
-   */
   watch(): void {
-    // WATCHER-01: re-entry guard — prevent FSWatcher leak on double-watch
     if (this.watchHandle) return;
-    // Guard: fs.watch fails with ENOENT if the path does not exist
     if (!fs.existsSync(this.configPath)) return;
-    // Debounce: only re-read after file write settles (100ms)
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
     this.watchHandle = fs.watch(this.configPath, (eventType) => {
-      // PLAT-01: handle both 'change' and 'rename' events for Windows compatibility
       if (eventType !== 'change' && eventType !== 'rename') return;
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        this.load();
-      }, 100);
+      debounceTimer = setTimeout(() => this.load(), 100);
     });
   }
 
-  /**
-   * Stop watching and clean up the FSWatcher.
-   */
   dispose(): void {
     if (this.watchHandle) {
       this.watchHandle.close();
@@ -164,38 +143,53 @@ export class WorkflowFunnelLoader {
     }
   }
 
-  /**
-   * Get all stages for a workflow.
-   */
   getStages(workflowId: string): WorkflowStage[] {
     return this.funnels.get(workflowId) ?? [];
   }
 
-  /**
-   * Get the full WORKFLOW_FUNNELS table.
-   * Returns a deep clone — consumer mutations do not affect internal state.
-   */
+  getFunnel(workflowId: string): WorkflowFunnel | undefined {
+    const funnel = this.fullFunnels.get(workflowId);
+    if (!funnel) return undefined;
+    return this.cloneFunnel(funnel);
+  }
+
   getAllFunnels(): Map<string, WorkflowStage[]> {
     const result = new Map<string, WorkflowStage[]>();
     for (const [k, v] of this.funnels) {
-      // WATCHER-03: deep-clone arrays and stage objects
       result.set(k, v.map(stage => ({ ...stage })));
     }
     return result;
   }
 
-  /**
-   * Returns warnings from the last load() call.
-   * Callers can inspect these and propagate them to metadata.warnings.
-   */
+  getAllFunnelsWithPolicy(): Map<string, WorkflowFunnel> {
+    const result = new Map<string, WorkflowFunnel>();
+    for (const [k, v] of this.fullFunnels) {
+      result.set(k, this.cloneFunnel(v));
+    }
+    return result;
+  }
+
   getWarnings(): string[] {
     return [...this.warnings];
   }
 
-  /**
-   * Get the config file path (for testing/debugging).
-   */
   getConfigPath(): string {
     return this.configPath;
+  }
+
+  private cloneFunnel(funnel: WorkflowFunnel): WorkflowFunnel {
+    return {
+      ...funnel,
+      stages: funnel.stages.map(stage => ({ ...stage })),
+      policy: funnel.policy ? {
+        ...funnel.policy,
+        observability: funnel.policy.observability ? {
+          ...funnel.policy.observability,
+          emitEvents: funnel.policy.observability.emitEvents
+            ? [...funnel.policy.observability.emitEvents]
+            : undefined,
+        } : undefined,
+      } : undefined,
+    };
   }
 }

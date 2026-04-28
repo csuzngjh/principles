@@ -400,7 +400,6 @@ function verifyBundleContents() {
         { name: 'checkPainFlag',          reason: 'pain flag detection' },
         { name: 'processEvolutionQueue',  reason: 'queue processing' },
         { name: 'acquireQueueLock',       reason: 'queue lock for pd-reflect and worker' },
-        { name: 'write_pain_flag',        reason: 'pain signal recording tool' },
     ];
 
     const missing = [];

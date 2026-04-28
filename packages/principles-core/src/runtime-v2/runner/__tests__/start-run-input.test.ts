@@ -25,7 +25,7 @@ function buildStartRunInput(
   const { message } = builder.buildPrompt(context);
 
   return {
-    agentSpec: { agentId: 'diagnostician', schemaVersion: 'v1' },
+    agentSpec: { agentId: 'main', schemaVersion: 'v1' },
     taskRef: { taskId },
     inputPayload: message,
     contextItems: [],
@@ -57,8 +57,8 @@ describe('StartRunInput construction from invokeRuntime()', () => {
     expect(Value.Check(StartRunInputSchema, input)).toBe(true);
   });
 
-  it('agentSpec field is { agentId: "diagnostician", schemaVersion: "v1" }', () => {
-    expect(input.agentSpec).toEqual({ agentId: 'diagnostician', schemaVersion: 'v1' });
+it('agentSpec field is { agentId: "main", schemaVersion: "v1" }', () => {
+    expect(input.agentSpec).toEqual({ agentId: 'main', schemaVersion: 'v1' });
   });
 
   it('taskRef field is { taskId: "<taskId>" }', () => {

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
-import { computePainScore, buildPainFlag, writePainFlag, trackPrincipleValue } from '../core/pain.js';
+import { computePainScore, buildPainFlag, trackPrincipleValue } from '../core/pain.js';
 import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds, type SessionState } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -12,6 +12,7 @@ import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
+import { createPainSignalBridge, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
 
 /**
  * Interface for tool parameters to avoid 'any'
@@ -30,15 +31,37 @@ interface ToolParams {
 
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
+async function getPainSignalBridge(wctx: WorkspaceContext): Promise<ReturnType<typeof createPainSignalBridge>> {
+  const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
+  return createPainSignalBridge({
+    workspaceDir: wctx.workspaceDir,
+    stateDir: wctx.stateDir,
+    ledgerAdapter,
+    owner: 'pain-signal-bridge',
+    autoIntakeEnabled: true,
+  });
+}
+
 function shouldAttributePrincipleToTool(principle: { contextTags: string[]; trigger: string; }, toolName: string): boolean {
   return principle.contextTags.includes(toolName) || principle.trigger.includes(toolName);
 }
 
-function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoopEvent): void {
+export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoopEvent): Promise<void> {
   try {
     wctx.evolutionReducer.emitSync(event);
   } catch (e) {
     SystemLogger.log(wctx.workspaceDir, 'EVOLUTION_EMIT_WARN', `Failed to emit evolution event: ${String(e)}`);
+  }
+  // M8: Bridge pain_detected → diagnostician pipeline (fire-and-forget)
+  if (event.type === 'pain_detected') {
+    try {
+      const bridge = await getPainSignalBridge(wctx);
+      bridge.onPainDetected(event.data as PainDetectedData).catch((err) => {
+        SystemLogger.log(wctx.workspaceDir, 'BRIDGE_ERROR', `PainSignalBridge failed: ${String(err)}`);
+      });
+    } catch (err) {
+      SystemLogger.log(wctx.workspaceDir, 'BRIDGE_INIT_ERROR', `PainSignalBridge init failed: ${String(err)}`);
+    }
   }
 }
 
@@ -65,6 +88,22 @@ export function handleAfterToolCall(
   const sessionState = ctx.sessionId ? getSession(ctx.sessionId) : undefined;
   const gfiBefore = sessionState?.currentGfi ?? 0;
   const params = event.params as ToolParams;
+
+  // Load profile once (with 1MB size guard) — used by both failure and legacy risky-write paths
+  const profilePath = wctx.resolve('PROFILE');
+  let profile = normalizeProfile({});
+  if (fs.existsSync(profilePath)) {
+    try {
+      const content = fs.readFileSync(profilePath, 'utf8');
+      if (content.length > 1024 * 1024) {
+        SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', 'PROFILE.json exceeds 1 MB, skipping');
+      } else {
+        profile = normalizeProfile(JSON.parse(content));
+      }
+    } catch (e) {
+      SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)}`);
+    }
+  }
 
   // ── Track A: Empirical Friction (GFI) ──
   
@@ -136,17 +175,7 @@ export function handleAfterToolCall(
     const filePath = params.file_path || params.path || params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
     
-    // Load profile for risk_paths check
-    const profilePath = wctx.resolve('PROFILE');
-    let profile = normalizeProfile({});
-    if (fs.existsSync(profilePath)) {
-      try {
-        profile = normalizeProfile(JSON.parse(fs.readFileSync(profilePath, 'utf8')));
-      } catch (e) {
-        SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)}`);
-      }
-    }
-    
+    // Use profile loaded at function scope (1MB guard already applied)
     const isRisk = isRisky(relPath, profile.risk_paths);
     
     recordEvolutionFailure(effectiveWorkspaceDir, event.toolName, {
@@ -281,16 +310,6 @@ export function handleAfterToolCall(
   const filePath = params.file_path || params.path || params.file;
   const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
 
-  const profilePath = wctx.resolve('PROFILE');
-  let profile = normalizeProfile({});
-  if (fs.existsSync(profilePath)) {
-    try {
-      profile = normalizeProfile(JSON.parse(fs.readFileSync(profilePath, 'utf8')));
-    } catch (e) {
-      SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)}`);
-    }
-  }
-
   const isRisk = isRisky(relPath, profile.risk_paths);
   const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, effectiveWorkspaceDir);
   const traceId = createTraceId();
@@ -319,11 +338,7 @@ export function handleAfterToolCall(
     pain_event_id: trajectoryPainId !== undefined && trajectoryPainId >= 0 ? String(trajectoryPainId) : undefined,
   });
 
-  try {
-    writePainFlag(effectiveWorkspaceDir, painData);
-  } catch (e) {
-    SystemLogger.log(effectiveWorkspaceDir, 'WRITE_PAIN_FLAG_WARN', `Failed to write pain flag: ${String(e)}`);
-  }
+  // Pain signal emitted via emitPainDetectedEvent below — no .pain_flag file written (M8: single-path chain)
 
   // Observe: track which principles would have prevented this pain (Phase 1, observation-only)
   try {

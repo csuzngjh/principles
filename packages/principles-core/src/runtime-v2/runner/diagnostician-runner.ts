@@ -111,7 +111,7 @@ export class DiagnosticianRunner {
       traceId: taskId,
       timestamp: new Date().toISOString(),
       sessionId: this.resolvedOptions.owner,
-      agentId: 'diagnostician',
+      agentId: this.resolvedOptions.agentId,
       payload,
     });
   }

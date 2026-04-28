@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
-import { recordAndWritePainFlag } from '../core/pain.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { PD_DIRS } from '../core/paths.js';
@@ -10,6 +9,7 @@ import {
   mergeWorkingMemory,
 } from '../core/focus-history.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
+import { emitPainDetectedEvent } from './pain.js';
 
 export async function handleBeforeReset(
   event: PluginHookBeforeResetEvent,
@@ -154,21 +154,19 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
 
       const hasFatal = painPoints.some(p => p.includes('[FATAL INTERCEPT]'));
       if (hasFatal) {
-        recordAndWritePainFlag(wctx, {
-          sessionId: ctx.sessionId || 'unknown',
-          source: 'intercept_extraction',
-          score: 100,
-          reason: 'Hard intercept detected in session history compaction.',
-          severity: 'severe',
-          origin: 'system_infer',
-        }, {
-          source: 'intercept_extraction',
-          score: '100',
-          reason: 'Hard intercept detected in session history compaction.',
-          is_risky: true,
-          trigger_text_preview: painPoints.find(p => p.includes('[FATAL INTERCEPT]'))?.substring(0, 150) || 'Fatal intercept',
-          session_id: ctx.sessionId || '',
-          agent_id: ctx.agentId || '',
+        // Emit via the Runtime v2 pain chain — no .pain_flag file written
+        emitPainDetectedEvent(wctx, {
+          ts: new Date().toISOString(),
+          type: 'pain_detected',
+          data: {
+            painId: `intercept_${Date.now()}`,
+            painType: 'tool_failure' as const,
+            source: 'intercept_extraction',
+            reason: 'Hard intercept detected in session history compaction.',
+            score: 100,
+            sessionId: ctx.sessionId || 'unknown',
+            agentId: ctx.agentId,
+          },
         });
       }
     } catch (err) {

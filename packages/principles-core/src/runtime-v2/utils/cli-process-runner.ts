@@ -41,9 +41,9 @@ export interface CliOutput {
  * cmd.exe uses. `where.exe` (equivalent to `which` on Unix) resolves the actual
  * executable path including .cmd/.bat shims created by npm.
  *
- * Note: `where.exe` returns ALL matches, including Unix shell scripts (openclaw)
- * before Windows batch files (openclaw.cmd). We must scan all results and prefer
- * Windows-native executables (.cmd, .bat, .exe) over Unix scripts.
+ * When running under Git Bash (MSYS), `where.exe` returns Unix-style paths
+ * (e.g. /c/Users/.../openclaw) which spawn() cannot use. This function converts
+ * them to Windows paths and prefers Windows-native executables (.cmd, .bat, .exe).
  *
  * @returns The resolved command path, or the original if not Windows or already absolute.
  */
@@ -71,9 +71,27 @@ function resolveCommandForWindows(command: string): string {
     if (windowsNative) {
       return windowsNative;
     }
-    // Fall back to first result if no Windows-native executable found
+
+    // No Windows-native result found. The first line may be a Unix-style path
+    // (e.g. /c/Users/.../openclaw) returned by Git Bash's where.exe.
+    // Convert it to a Windows absolute path so spawn() can use it.
     if (lines.length > 0) {
-      return lines[0] ?? command;
+      const firstResult = lines[0] ?? command;
+      // Convert MSYS/Git Bash Unix-style path to Windows path
+      // /c/Users/... → C:\Users\...
+      // /d/Program Files/... → D:\Program Files\...
+      if (/^[A-Z]:/i.test(firstResult)) {
+        // Already a Windows absolute path (e.g. C:\Users\...)
+        return firstResult;
+      }
+      if (/^\/[a-z]\//i.test(firstResult)) {
+        // MSYS Unix-style path: /c/Users/... → C:\Users\...
+        const msysPath = /** @type {string} */ (firstResult);
+        const driveLetter = msysPath[1] ?? 'C';
+        const winPath = driveLetter.toUpperCase() + ':' + msysPath.slice(2).replace(/\//g, '\\');
+        return winPath;
+      }
+      return firstResult;
     }
   } catch {
     // where.exe failed — fall through to original command

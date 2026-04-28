@@ -1,11 +1,11 @@
 import * as fs from 'fs';
+import Database from 'better-sqlite3';
 import * as path from 'path';
 import { readPainFlagData } from '../core/pain.js';
 import { listSessions } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { evaluatePhase3Inputs } from './phase3-input-filter.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
-import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
 import type { WorkflowStage } from '../core/workflow-funnel-loader.js';
 import type { RuntimeTruth, AnalyticsTruth } from '../types/runtime-summary.js';
 
@@ -62,8 +62,8 @@ export interface RuntimeSummary {
     };
     dataQuality: RuntimeDataQuality;
   };
-  // D: Heartbeat Diagnostician chain — separate from evolution/nocturnal chain
-  heartbeatDiagnosis: {
+  // D: Runtime Diagnostician chain (M8) — replaced legacy heartbeat path
+  runtimeDiagnosis: {
     /** Tasks pending in diagnostician_tasks.json (not yet processed by heartbeat) */
     pendingTasks: number;
     /** Total diagnosis tasks written by evolution worker (today from event log) */
@@ -343,13 +343,24 @@ export class RuntimeSummaryService {
     const gfiSources = this.buildGfiSources(events, selectedSessionId);
     const gateStats = this.buildGateStats(events, selectedSessionId, warnings);
 
-    // D: Heartbeat Diagnostician chain — separate from evolution/nocturnal chain
-    // Read pending tasks from the diagnostician task store
-    const pendingDiagTasks = getPendingDiagnosticianTasks(wctx.stateDir);
+    // D: Runtime Diagnostician chain (M8) — queries runtime-v2 SQLite task store
     // Read heartbeat diagnosis stats from daily event log
     const diagDailyStats = dailyStats?.[todayStr]?.evolution;
-    const heartbeatDiagnosis = {
-      pendingTasks: pendingDiagTasks.length,
+    let pendingRuntimeDiagTasks = 0;
+    try {
+      const taskStoreDbPath = path.join(wctx.stateDir, '.principles', 'db', 'task-store.db');
+      if (fs.existsSync(taskStoreDbPath)) {
+        const db = new Database(taskStoreDbPath, { readonly: true });
+        const row = db.prepare(`
+          SELECT COUNT(*) as count FROM tasks
+          WHERE task_kind = 'diagnostician' AND status = 'pending'
+        `).get() as { count: number };
+        pendingRuntimeDiagTasks = row?.count ?? 0;
+        db.close();
+      }
+    } catch { /* task store not yet initialized — 0 pending */ }
+    const runtimeDiagnosis = {
+      pendingTasks: pendingRuntimeDiagTasks,
       tasksWrittenToday: diagDailyStats?.diagnosisTasksWritten ?? 0,
       reportsWrittenToday: diagDailyStats?.diagnosticianReportsWritten ?? 0,
       reportsMissingJsonToday: diagDailyStats?.reportsMissingJson ?? 0,
@@ -361,15 +372,15 @@ export class RuntimeSummaryService {
     // D: Stall detection — high-signal warning when the diagnostician loop appears broken.
     // Conditions: tasks are being injected (heartbeats > 0) but no reports are being written.
     if (
-      heartbeatDiagnosis.heartbeatsInjectedToday > 0 &&
-      heartbeatDiagnosis.reportsWrittenToday === 0 &&
-      heartbeatDiagnosis.pendingTasks > 0
+      runtimeDiagnosis.heartbeatsInjectedToday > 0 &&
+      runtimeDiagnosis.reportsWrittenToday === 0 &&
+      runtimeDiagnosis.pendingTasks > 0
     ) {
       pushWarning(
         warnings,
         'Diagnostician appears stalled: heartbeats are injecting tasks ' +
-        `(${heartbeatDiagnosis.heartbeatsInjectedToday}) but no reports are being written. ` +
-        `${heartbeatDiagnosis.pendingTasks} task(s) remain pending. ` +
+        `(${runtimeDiagnosis.heartbeatsInjectedToday}) but no reports are being written. ` +
+        `${runtimeDiagnosis.pendingTasks} task(s) remain pending. ` +
         'Check prompt injection size limits and diagnostician task processing.'
       );
     }
@@ -452,7 +463,7 @@ export class RuntimeSummaryService {
       },
       gate: gateStats,
       // D: Heartbeat Diagnostician chain — separate from evolution/nocturnal
-      heartbeatDiagnosis,
+      runtimeDiagnosis,
       ...(workflowFunnelsOutput && { workflowFunnels: workflowFunnelsOutput }),
       metadata: {
         generatedAt,

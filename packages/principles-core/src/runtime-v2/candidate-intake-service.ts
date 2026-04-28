@@ -93,11 +93,15 @@ export class CandidateIntakeService {
     }
 
     // 4b. Parse artifact content to extract recommendation (E-06)
+    // The artifact.contentJson format depends on the producer:
+    //   - DiagnosticianRunner (SqliteDiagnosticianCommitter): raw DiagnosticianOutputV1 JSON
+    //   - Manual insertion (pd-cli E2E tests): { recommendation: {...} } wrapper
+    // Handle both by checking for the recommendation field, falling back to parsed root.
     // eslint-disable-next-line @typescript-eslint/init-declarations
     let recommendation!: Recommendation;
     try {
-      const { recommendation: rec } = JSON.parse(artifact.contentJson) as { recommendation: Recommendation };
-      recommendation = rec;
+      const parsed = JSON.parse(artifact.contentJson) as { recommendation?: Recommendation };
+      recommendation = parsed.recommendation ?? parsed as unknown as Recommendation;
     } catch (err: unknown) {
       throw new CandidateIntakeError(
         INTAKE_ERROR_CODES.INPUT_INVALID,

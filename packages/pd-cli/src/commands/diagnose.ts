@@ -123,7 +123,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
         runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
         workspaceDir,
-        agentId: opts.agent ?? 'diagnostician',
+        agentId: opts.agent ?? 'main',
       });
 
       // TELE-01: runtime_adapter_selected — user explicitly chose openclaw-cli runtime

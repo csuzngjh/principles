@@ -9,6 +9,7 @@
 - ✅ **v2.4 M5** — Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24
 - ✅ **v2.5 M6** — Production Runtime Adapter: OpenClaw CLI Diagnostician — SHIPPED 2026-04-25
 - ✅ **v2.6 M7** — Principle Candidate Intake — SHIPPED 2026-04-27
+- 🚧 **v2.7 M8** — Pain Signal → Principle Single Path Cutover (In Progress)
 
 ## Phases
 
@@ -23,25 +24,25 @@
 
 </details>
 
-### 🚧 v2.7 M8 — Pain Signal -> Diagnostician Bridge (In Progress / Planned)
+### 🚧 v2.7 M8 — Pain Signal → Principle Single Path Cutover (In Progress)
 
-- [ ] m8-01: Pain Signal Bridge (TBD plans)
+- [x] m8-01: Legacy Code Map + Single Path Cutover (5/5 plans) — completed 2026-04-28
+- [x] m8-02: PainSignalBridge E2E + Auto-Intake Enable (2/2 plans) — completed 2026-04-28
 
+Plans:
+- [x] m8-01-01-PLAN.md — Delete diagnostician-task-store.ts
+- [x] m8-01-02-PLAN.md — Remove legacy diagnostician block from prompt.ts and evolution-worker.ts
+- [x] m8-01-03-PLAN.md — Update runtime-summary-service.ts and event-types.ts
+- [x] m8-01-04-PLAN.md — Implement PainSignalBridge service + wire into pain.ts
+- [x] m8-01-05-PLAN.md — E2E verification + ROADMAP update
+- [x] m8-02-01-PLAN.md — Enable autoIntakeEnabled:true + upsert idempotency (completed 2026-04-28)
+- [x] m8-02-02-PLAN.md — Automated E2E test for full pain→ledger chain (completed 2026-04-28)
+
+- [ ] m8-03: Real Environment UAT — M8 final sign-off (1/1 plan)
+
+Plans:
+- [ ] m8-03-01-PLAN.md — Real environment UAT: no mocks, live gateway, pain→ledger chain verification
 ## Backlog: Future Milestones
-
-### v2.7 M8 -- Pain Signal -> Diagnostician Bridge
-
-**Goal**: Trigger runtime-v2 task intake from pain signals (without heartbeat/cron/subagent).
-
-**Depends on**: M7
-
-**Non-goals**: No legacy deletion, no principle promotion.
-
-**Canonical source:** `packages/principles-core/src/runtime-v2/`
-
-**Plans**: TBD
-
----
 
 ### v2.8 M9 -- Legacy Path Decommission
 
@@ -57,4 +58,4 @@
 
 ---
 
-_Last updated: 2026-04-27 after v2.6 M7 milestone_
+_Last updated: 2026-04-28 after m8-02 SHIPPED (E2E 5/5 PASS, autoIntakeEnabled=true, idempotent upsert)_
