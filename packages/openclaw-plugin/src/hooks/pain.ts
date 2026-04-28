@@ -147,6 +147,22 @@ export function handleAfterToolCall(
   const gfiBefore = sessionState?.currentGfi ?? 0;
   const params = event.params as ToolParams;
 
+  // Load profile once (with 1MB size guard) — used by both failure and legacy risky-write paths
+  const profilePath = wctx.resolve('PROFILE');
+  let profile = normalizeProfile({});
+  if (fs.existsSync(profilePath)) {
+    try {
+      const content = fs.readFileSync(profilePath, 'utf8');
+      if (content.length > 1024 * 1024) {
+        SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', 'PROFILE.json exceeds 1 MB, skipping');
+      } else {
+        profile = normalizeProfile(JSON.parse(content));
+      }
+    } catch (e) {
+      SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)}`);
+    }
+  }
+
   // ── Track A: Empirical Friction (GFI) ──
   
   // 0. Special Case: Manual Pain Intervention
@@ -217,22 +233,7 @@ export function handleAfterToolCall(
     const filePath = params.file_path || params.path || params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
     
-    // Load profile for risk_paths check (once, with 1MB size guard)
-    const profilePath = wctx.resolve('PROFILE');
-    let profile = normalizeProfile({});
-    if (fs.existsSync(profilePath)) {
-      try {
-        const content = fs.readFileSync(profilePath, 'utf8');
-        if (content.length > 1024 * 1024) {
-          SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', 'PROFILE.json exceeds 1 MB, skipping');
-        } else {
-          profile = normalizeProfile(JSON.parse(content));
-        }
-      } catch (e) {
-        SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)}`);
-      }
-    }
-    
+    // Use profile loaded at function scope (1MB guard already applied)
     const isRisk = isRisky(relPath, profile.risk_paths);
     
     recordEvolutionFailure(effectiveWorkspaceDir, event.toolName, {

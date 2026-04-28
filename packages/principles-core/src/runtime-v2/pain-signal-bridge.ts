@@ -86,9 +86,9 @@ export class PainSignalBridge {
     const existingTask = await this.stateManager.getTask(painId);
 
     if (existingTask) {
-      const { status, leasedAt } = existingTask;
+      const { status, leaseExpiresAt } = existingTask;
       const LEASE_TTL_MS = 300_000; // 5 minutes, matches DiagnosticianRunner timeoutMs
-      const leaseExpired = leasedAt && (Date.now() - new Date(leasedAt).getTime()) > LEASE_TTL_MS;
+      const leaseExpired = leaseExpiresAt && (Date.now() - new Date(leaseExpiresAt).getTime()) > LEASE_TTL_MS;
       if (status === 'leased' && !leaseExpired) {
         // Rule b: another run is genuinely in progress — SKIP
         return painId;
