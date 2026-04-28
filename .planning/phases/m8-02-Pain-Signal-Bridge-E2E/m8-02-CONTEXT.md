@@ -16,8 +16,8 @@
 ## Implementation Decisions
 
 ### E2E 验证策略
-- **D-01:** 自动化 E2E 测试脚本（不是人工操作），专用测试 workspace `~/.openclaw/test-m8`，测试后不污染
-- **D-02:** 测试 workspace 为固定专用路径（`~/.openclaw/test-m8`），可重复跑，测试前清空状态
+- **D-01:** 自动化 E2E 测试脚本，测试 workspace 为 `os.tmpdir()` 下的临时目录（`/pd-e2e-m8-<pid>-<timestamp>`），不污染真实 workspace
+- **D-02:** 测试 workspace 可重复跑（每次新建临时目录），不清理历史（保留现场供人工复核）
 - **D-03:** 通过标准：UAT 5项全部 pass，包括 cold start smoke、legacy path removed、bridge init、runtime summary、full chain
 
 ### autoIntakeEnabled 开关
