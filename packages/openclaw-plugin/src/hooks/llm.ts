@@ -9,6 +9,7 @@ import { detectThinkingModelMatches, deriveThinkingScenarios } from '../core/thi
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+import { emitPainDetectedEvent } from './pain.js';
 
 export interface EmpathySignal {
     detected: boolean;
@@ -234,7 +235,7 @@ export function handleLlmOutput(
     // If a pain threshold is crossed, emit pain via Runtime v2 bridge (no .pain_flag file)
     const painTriggerThreshold = config.get('thresholds.pain_trigger') || 30;
     if (painScore >= painTriggerThreshold) {
-        wctx.evolutionReducer?.emitSync({
+        emitPainDetectedEvent(wctx, {
             ts: new Date().toISOString(),
             type: 'pain_detected',
             data: {

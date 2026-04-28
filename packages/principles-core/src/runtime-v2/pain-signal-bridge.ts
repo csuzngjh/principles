@@ -58,8 +58,8 @@ export interface PainSignalBridgeOptions {
   /** Owner tag passed to DiagnosticianRunner (default: 'pain-signal-bridge') */
   owner?: string;
   /**
-   * When true, CandidateIntakeService.intake() is called after runner succeeds.
-   * When false (default), intake is skipped — chain still runs but probation entry is not created.
+   * When true (default), CandidateIntakeService.intake() is called after runner succeeds.
+   * When false, intake is skipped — chain still runs but probation entry is not created.
    * HG-4: Debug mode.
    */
   autoIntakeEnabled?: boolean;
@@ -85,7 +85,7 @@ export class PainSignalBridge {
     this.intakeService = opts.intakeService;
     this.ledgerAdapter = opts.ledgerAdapter;
     this.owner = opts.owner ?? 'pain-signal-bridge';
-    this.autoIntakeEnabled = opts.autoIntakeEnabled ?? false;
+    this.autoIntakeEnabled = opts.autoIntakeEnabled ?? true;
   }
 
   /**

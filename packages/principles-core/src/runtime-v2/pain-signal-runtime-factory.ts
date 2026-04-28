@@ -56,8 +56,9 @@ function resolveRunnerOptions(stateDir: string): { timeoutMs: number; agentId: s
       timeoutMs: funnel.policy.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       agentId: 'main', // agentId resolution reserved for future stage-level policy
     };
-  } catch {
+  } catch (err) {
     // Best-effort: do not crash factory on funnel loading errors
+    console.warn(`[PainSignalRuntimeFactory] Funnel loading failed for ${DIAGNOSTIC_FUNNEL_ID}, using defaults: ${String(err)}`);
     return { timeoutMs: DEFAULT_TIMEOUT_MS, agentId: 'main' };
   }
 }

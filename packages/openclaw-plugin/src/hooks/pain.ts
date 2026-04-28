@@ -46,7 +46,7 @@ function shouldAttributePrincipleToTool(principle: { contextTags: string[]; trig
   return principle.contextTags.includes(toolName) || principle.trigger.includes(toolName);
 }
 
-async function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoopEvent): Promise<void> {
+export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoopEvent): Promise<void> {
   try {
     wctx.evolutionReducer.emitSync(event);
   } catch (e) {
@@ -54,10 +54,14 @@ async function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoo
   }
   // M8: Bridge pain_detected → diagnostician pipeline (fire-and-forget)
   if (event.type === 'pain_detected') {
-    const bridge = await getPainSignalBridge(wctx);
-    bridge.onPainDetected(event.data as PainDetectedData).catch((err) => {
-      SystemLogger.log(wctx.workspaceDir, 'BRIDGE_ERROR', `PainSignalBridge failed: ${String(err)}`);
-    });
+    try {
+      const bridge = await getPainSignalBridge(wctx);
+      bridge.onPainDetected(event.data as PainDetectedData).catch((err) => {
+        SystemLogger.log(wctx.workspaceDir, 'BRIDGE_ERROR', `PainSignalBridge failed: ${String(err)}`);
+      });
+    } catch (err) {
+      SystemLogger.log(wctx.workspaceDir, 'BRIDGE_INIT_ERROR', `PainSignalBridge init failed: ${String(err)}`);
+    }
   }
 }
 

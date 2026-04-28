@@ -9,6 +9,7 @@ import {
   mergeWorkingMemory,
 } from '../core/focus-history.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
+import { emitPainDetectedEvent } from './pain.js';
 
 export async function handleBeforeReset(
   event: PluginHookBeforeResetEvent,
@@ -154,7 +155,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
       const hasFatal = painPoints.some(p => p.includes('[FATAL INTERCEPT]'));
       if (hasFatal) {
         // Emit via the Runtime v2 pain chain — no .pain_flag file written
-        wctx.evolutionReducer?.emitSync({
+        emitPainDetectedEvent(wctx, {
           ts: new Date().toISOString(),
           type: 'pain_detected',
           data: {

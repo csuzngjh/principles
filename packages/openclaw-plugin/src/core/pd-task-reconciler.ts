@@ -80,8 +80,7 @@ export interface ReconcileOptions {
 }
 
  
-async function readCronStore(logger?: { info?: (_: string) => void; warn?: (_: string) => void }): Promise<CronStoreFile> {
- 
+function readCronStore(logger?: { info?: (_: string) => void; warn?: (_: string) => void }): CronStoreFile {
   if (!fs.existsSync(CRON_STORE_PATH)) {
     logger?.info?.(`[PD:Reconciler] cron/jobs.json not found, starting with empty store`);
     return { version: 1, jobs: [] };
@@ -240,8 +239,10 @@ export async function reconcilePDTasks(
       case 'DISABLE':
         if (action.job) {
           if (!dryRun) {
-            action.job.enabled = false;
-            action.job.updatedAtMs = nowMs;
+            const idx = cronStore.jobs.indexOf(action.job);
+            if (idx >= 0) {
+              cronStore.jobs[idx] = { ...action.job, enabled: false, updatedAtMs: nowMs };
+            }
           }
           logger.warn?.(`[PD:Reconciler] Disabled job: ${action.job.name}`);
         }
@@ -287,9 +288,9 @@ function healthCheck(
 ): PDTaskSpec[] {
   const jobByName = new Map(cronStore.jobs.map((j) => [j.name, j]));
 
-  for (const task of tasks) {
+  return tasks.map((task) => {
     const job = jobByName.get(task.name);
-    if (!job) continue;
+    if (!job) return task;
 
     const errors = job.state.consecutiveErrors ?? 0;
     const lastError = job.state.lastError ?? '';
@@ -308,27 +309,31 @@ function healthCheck(
     }
 
     // Auto-disable only for non-timeout errors after 3 consecutive failures
-    if (errors >= 3 && !isTimeout && !task.meta?.autoDisabled) {
-      if (!task.meta) task.meta = {};
-      task.meta.autoDisabled = true;
-      task.meta.autoDisabledAt = Date.now();
-      task.meta.autoDisabledReason = `consecutiveErrors=${errors}`;
-      logger.warn?.(`[PD:Reconciler] Auto-disabled task '${task.id}' due to ${errors} consecutive errors: ${lastError.substring(0, 80)}`);
-    }
+    const shouldAutoDisable = errors >= 3 && !isTimeout && !task.meta?.autoDisabled;
 
     // Reset consecutiveErrors on non-error runs
     if (errors === 0 && task.meta?.autoDisabled) {
       logger.info?.(`[PD:Reconciler] Task '${task.id}' was previously auto-disabled but has 0 consecutive errors now`);
     }
 
-    if (task.meta) {
-      task.meta.consecutiveFailCount = errors;
-      if (job.state.lastRunAtMs) {
-        task.meta.lastFailedAtMs = job.state.lastRunAtMs;
-      }
+    if (shouldAutoDisable || task.meta || job.state.lastRunAtMs) {
+      return {
+        ...task,
+        meta: {
+          ...task.meta,
+          ...(shouldAutoDisable ? {
+            autoDisabled: true,
+            autoDisabledAt: Date.now(),
+            autoDisabledReason: `consecutiveErrors=${errors}`,
+          } : {}),
+          ...(task.meta ? { consecutiveFailCount: errors } : {}),
+          ...(job.state.lastRunAtMs ? { lastFailedAtMs: job.state.lastRunAtMs } : {}),
+        },
+      };
     }
-  }
-  return tasks;
+
+    return task;
+  });
 }
 
 export async function trigger(
