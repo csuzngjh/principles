@@ -71,7 +71,8 @@ export class PainSignalBridge {
    * Handle a pain_detected event from openclaw-plugin.
    *
    * Flow:
-   *  1. Create a pending 'diagnostician' task in SqliteTaskStore
+   *  1. Idempotent upsert: check existing task by painId, route by status
+   *     - succeeded → NO-OP (return painId); leased → SKIP; failed/retry_wait/pending → reset + re-run
    *  2. Invoke DiagnosticianRunner.run(taskId) — runner internally acquires lease (DO NOT call createRun)
    *  3. After runner succeeds, query real candidateIds via stateManager.getCandidatesByTaskId()
    *  4. Call intakeService.intake(candidateId) for each candidate → ledger probation entry
@@ -81,16 +82,41 @@ export class PainSignalBridge {
   async onPainDetected(data: PainDetectedData): Promise<string> {
     const { painId } = data;
 
-    // Step 1: Create pending diagnostician task in SqliteTaskStore
+    // Step 1: Idempotent upsert — check existing task state before creating or re-running
+    const existingTask = await this.stateManager.getTask(painId);
+
+    if (existingTask) {
+      const {status} = existingTask;
+      if (status === 'succeeded') {
+        // Rule a: succeeded — NO-OP. Candidates and ledger already exist.
+        // Do NOT re-run; return without creating duplicates.
+        return painId;
+      }
+      if (status === 'leased') {
+        // Rule b: another run is in progress — SKIP.
+        // Do not interrupt in-flight runs.
+        return painId;
+      }
+      // Rule c: failed / retry_wait / pending — allow re-run.
+      await this.stateManager.updateTask(painId, {
+        status: 'pending',
+        attemptCount: 0,
+        lastError: null,
+        resultRef: null,
+      });
+    } else {
+      // Rule d: no existing task — create new.
+      await this.stateManager.createTask({
+        taskId: painId,
+        taskKind: 'diagnostician',
+        inputRef: painId,
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+      });
+    }
+
     const taskId = painId;
-    await this.stateManager.createTask({
-      taskId,
-      taskKind: 'diagnostician',
-      inputRef: painId,
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: 3,
-    });
 
     // Step 2: Invoke DiagnosticianRunner — runner manages run lifecycle via acquireLease
     // Bridge does NOT call stateManager.createRun() — doing so would create a duplicate run.

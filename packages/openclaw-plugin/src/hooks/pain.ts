@@ -97,7 +97,7 @@ async function getPainSignalBridge(wctx: WorkspaceContext): Promise<PainSignalBr
     runner,
     intakeService,
     ledgerAdapter,
-    autoIntakeEnabled: false, // HG-4: debug mode — chain runs but no ledger entries
+    autoIntakeEnabled: true, // HG-4: production — pain signals auto-create ledger entries
   });
 
   painSignalBridges.set(wctx.workspaceDir, bridge);
