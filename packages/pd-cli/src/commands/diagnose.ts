@@ -179,8 +179,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       let policyConfig: ReturnType<typeof resolveRuntimeConfig> | null = null;
       try {
         policyConfig = resolveRuntimeConfig(stateDir);
-      } catch {
-        // Fall through — will be overridden by flags or error
+      } catch (err: unknown) {
+        // workflows.yaml missing or malformed — warn and fall through to flag-based config
+        const detail = err instanceof Error ? err.message : String(err);
+        console.warn(`[pd diagnose] workflows.yaml policy load failed: ${detail}. Using CLI flags if provided.`);
       }
 
       const provider = opts.provider ?? policyConfig?.provider;

@@ -105,8 +105,10 @@ export class CandidateIntakeService {
           recommendation = fromCandidate;
         }
       }
-    } catch {
-      // sourceRecommendationJson is empty or invalid — fall through to artifact parsing
+    } catch (err: unknown) {
+      // sourceRecommendationJson is non-empty but malformed — warn and fall through
+      const detail = err instanceof Error ? err.message : String(err);
+      console.warn(`[CandidateIntakeService] sourceRecommendationJson parse failed for candidate ${candidateId}: ${detail}. Falling back to artifact.contentJson.`);
     }
 
     // 4c. Fall back to artifact.contentJson if no valid sourceRecommendationJson
