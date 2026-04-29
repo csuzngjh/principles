@@ -184,6 +184,10 @@ export type { TestDoubleBehaviorOverrides } from './adapter/index.js';
 export { OpenClawCliRuntimeAdapter } from './adapter/index.js';
 export type { OpenClawCliRuntimeAdapterOptions } from './adapter/openclaw-cli-runtime-adapter.js';
 
+// PiAiRuntimeAdapter (M9)
+export { PiAiRuntimeAdapter } from './adapter/index.js';
+export type { PiAiRuntimeAdapterConfig } from './adapter/pi-ai-runtime-adapter.js';
+
 // PrincipleTreeLedgerAdapter (M8)
 export { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adapter.js';
 
@@ -205,7 +209,7 @@ export type {
   PainSignalBridgeResult,
   PainSignalBridgeStatus,
 } from './pain-signal-bridge.js';
-export { createPainSignalBridge, invalidatePainSignalBridge, type PainSignalRuntimeFactoryOptions } from './pain-signal-runtime-factory.js';
+export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfig, validateRuntimeConfig, type PainSignalRuntimeFactoryOptions, type RuntimeConfig } from './pain-signal-runtime-factory.js';
 
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
