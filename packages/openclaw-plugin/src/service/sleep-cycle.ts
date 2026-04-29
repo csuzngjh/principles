@@ -9,10 +9,9 @@
  * - Cycle heartbeat tracking and periodic trigger reset
  *
  * Does NOT include (remain in evolution-worker.ts facade):
- * - checkPainFlag, processEvolutionQueueWithResult, processDetectionQueue
+ * - processEvolutionQueueWithResult, processDetectionQueue
  * - Workflow managers (EmpathyObserver, DeepReflect, Nocturnal)
  * - Workflow watchdog (runWorkflowWatchdog)
- * - Pain-flag-triggered immediate heartbeat
  *
  * Dependencies: nocturnal-runtime.js, nocturnal-config.js, queue-io.js
  * Zero imports from evolution-worker.ts.
@@ -61,8 +60,8 @@ export interface CycleOptions {
  * 4. Enqueue sleep_reflection task (idle-based OR periodic trigger + cooldown gate)
  * 5. Cycle result reporting
  *
- * Does NOT directly call checkPainFlag, processEvolutionQueueWithResult, or
- * processDetectionQueue — those remain in the evolution-worker.ts facade.
+ * Does NOT directly call processEvolutionQueueWithResult or processDetectionQueue —
+ * those remain in the evolution-worker.ts facade.
  *
  * @param options.wctx       — workspace context
  * @param options.logger     — plugin logger

@@ -147,12 +147,13 @@ describe('EvolutionWorkerService timeout mechanisms', () => {
     }
   });
 
-  it('does not timeout pain_diagnosis task under 30 minutes', async () => {
+  it('drops legacy pain_diagnosis tasks instead of timing them out', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-no-timeout-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
 
-    // Create an in_progress pain_diagnosis task that started 10 minutes ago
+    // Runtime v2 owns pain diagnosis. EvolutionWorker should not keep or
+    // timeout legacy pain_diagnosis queue items.
     const startedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     fs.writeFileSync(
       path.join(stateDir, 'evolution_queue.json'),
@@ -196,9 +197,7 @@ describe('EvolutionWorkerService timeout mechanisms', () => {
       const queue = readQueue(stateDir);
       const task = queue.find((t: any) => t.id === 'no-timeout-10min');
 
-      // Task should still be in_progress — not yet timed out
-      expect(task.status).toBe('in_progress');
-      expect(task.resolution).toBeUndefined();
+      expect(task).toBeUndefined();
     } finally {
       EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
