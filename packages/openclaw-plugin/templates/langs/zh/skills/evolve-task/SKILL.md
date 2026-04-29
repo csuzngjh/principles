@@ -10,7 +10,7 @@ disable-model-invocation: true
 - 读取 memory/CHECKPOINT.md 的最后一条
 - 读取 memory/ISSUE_LOG.md 的最近 3 条
 - 读取 memory/DECISIONS.md 的最近决策
-- 如果存在 .state/.pain_flag，先处理断点恢复
+- Runtime V2 痛苦诊断使用 task input/context，不使用 `.state/.pain_flag`
 
 ## Step 1: 读取运行参数与能力自检
 - 读取 .principles/PROFILE.json，理解 risk_paths、gate、tests.commands。

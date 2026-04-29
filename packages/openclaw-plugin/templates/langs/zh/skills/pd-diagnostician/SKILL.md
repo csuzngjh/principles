@@ -89,7 +89,7 @@ disable-model-invocation: true
 **目标**: 收集足够的事实证据，避免基于假设进行分析。
 
 **执行步骤**:
-1. 读取 `.state/.pain_flag` 获取 Pain 信号的完整上下文
+1. 使用 Runtime V2 task input/context 作为 Pain 信号来源。不要把 `.state/.pain_flag` 当作主要诊断输入。
 2. 读取 `.state/logs/events.jsonl` 最近 100 行日志
 3. 使用 `read_file` 或 `search_file_content` 搜索代码库中相关关键词
 4. 记录所有证据来源（文件路径:行号）

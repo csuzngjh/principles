@@ -8,7 +8,7 @@ On each heartbeat, run these core checks. **Don't just reply `HEARTBEAT_OK` ever
 
 ## 🩹 Pain & Evolution Check
 
-- [ ] **`.state/.pain_flag`** — Any unprocessed pain signals?
+- [ ] **Runtime V2 pain** — Check `pd candidate list` / ledger if a recent `pd pain record` or tool failure occurred. `.state/.pain_flag` is legacy compatibility only.
 - [ ] **`.state/evolution_queue.json`** — Any pending evolution tasks?
 - [ ] **`memory/logs/SYSTEM.log`** — Any unresolved high-priority issues?
 

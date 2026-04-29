@@ -8,7 +8,7 @@
 |------------|------|--------------|
 | `before_prompt_build` | `prompt.ts` | Multi-layer context injection: identity, trust, evolution, principles, thinking OS |
 | `before_tool_call` | `gate.ts` | Security gate: trust stage checks, risk path blocking, bash security (Cyrillic de-obfuscation, command tokenization) |
-| `after_tool_call` | `pain.ts` | Pain detection: failure → pain score → `.pain_flag` → evolution queue |
+| `after_tool_call` | `pain.ts` | Pain detection: failure → pain score → Runtime V2 `PainSignalBridge` |
 | `before_compaction` | `lifecycle.ts` | Checkpoints state before context loss |
 | `after_compaction` | `lifecycle.ts` | State recovery |
 | `before_reset` / `session_*` | `lifecycle.ts` | Session lifecycle management |

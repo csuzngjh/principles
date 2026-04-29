@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
-import { computePainScore, buildPainFlag, trackPrincipleValue } from '../core/pain.js';
+import { computePainScore, trackPrincipleValue } from '../core/pain.js';
 import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds, type SessionState } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -317,7 +317,7 @@ export function handleAfterToolCall(
   // Record to trajectory FIRST so we get the real auto-increment ID.
   // This ID propagates through the pain flag → evolution task → principle,
   // so the compiler can later resolve derivedFromPainIds correctly.
-  const trajectoryPainId = wctx.trajectory?.recordPainEvent({
+  wctx.trajectory?.recordPainEvent({
     sessionId,
     source: 'tool_failure',
     score: painScore,
@@ -327,24 +327,17 @@ export function handleAfterToolCall(
     text: params.text ?? params.content ?? undefined,
   });
 
-  const painData = buildPainFlag({
-    source: 'tool_failure',
-    score: String(painScore),
-    reason: `Tool ${event.toolName} failed on ${relPath}. Error: ${event.error ?? 'Non-zero exit code'}`,
-    is_risky: isRisk,
-    trace_id: traceId,
-    session_id: sessionId,
-    agent_id: ctx.agentId || '',
-    pain_event_id: trajectoryPainId !== undefined && trajectoryPainId >= 0 ? String(trajectoryPainId) : undefined,
-  });
-
   // Pain signal emitted via emitPainDetectedEvent below — no .pain_flag file written (M8: single-path chain)
 
   // Observe: track which principles would have prevented this pain (Phase 1, observation-only)
   try {
     trackPrincipleValue(
       effectiveWorkspaceDir,
-      { reason: painData.reason, source: painData.source, score: painData.score },
+      {
+        reason: `Tool ${event.toolName} failed on ${relPath}. Error: ${event.error ?? 'Non-zero exit code'}`,
+        source: 'tool_failure',
+        score: String(painScore),
+      },
       () => wctx.evolutionReducer.getActivePrinciples().map((p) => ({
         id: p.id,
         trigger: p.trigger,
