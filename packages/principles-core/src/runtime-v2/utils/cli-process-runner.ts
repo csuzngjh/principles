@@ -66,9 +66,20 @@ function resolveCommandForWindows(command: string): string {
     // where.exe returns all matches, one per line
     const lines = result.split('\n').map((l: string) => l.trim()).filter(Boolean);
 
-    // Prefer Windows-native executables (.cmd, .bat, .exe) over Unix scripts
+    // Prefer Windows-native executables (.cmd, .bat, .exe) over Unix scripts.
+    // If a .cmd/.bat file is found, return it directly — avoids the broken
+    // anaconda MSYS cygpath bug where shell scripts get wrong path resolution.
     const windowsNative = lines.find((l: string) => /\.(cmd|bat|exe)$/i.test(l));
     if (windowsNative) {
+      // Convert MSYS Unix-style .cmd paths (e.g. /c/Users/.../openclaw.cmd)
+      // to proper Windows absolute paths before returning.
+      const normalized = windowsNative.replace(/\\/g, '/');
+      if (/^\/[a-z]\//i.test(normalized)) {
+        const msysPath = normalized;
+        const driveLetter = msysPath[1] ?? 'C';
+        const winPath = driveLetter.toUpperCase() + ':' + msysPath.slice(2).replace(/\//g, '\\');
+        return winPath;
+      }
       return windowsNative;
     }
 
@@ -98,16 +109,6 @@ function resolveCommandForWindows(command: string): string {
   }
 
   return command;
-}
-
-function quoteWindowsCmdArg(arg: string): string {
-  if (arg === '') return '""';
-  if (!/[\s"&|<>^()]/.test(arg)) return arg;
-
-  // This path is only used for Windows .cmd/.bat shims. Keep quoting narrow:
-  // wrap the token and escape cmd metacharacters so argv boundaries survive
-  // without turning arbitrary args into shell syntax.
-  return `"${arg.replace(/(["&|<>^])/g, '^$1')}"`;
 }
 
 /**
@@ -157,13 +158,12 @@ export async function runCliProcess(opts: CliProcessRunnerOptions): Promise<CliO
     }
 
     if (isWindowsCmdShim) {
-      // Windows batch files (.cmd/.bat) via npm shims require command-string mode.
-      // The working pattern (confirmed by experiment) is:
-      //   spawn('cmd.exe /c "path/to/file.cmd args..."', [], {shell:true})
-      // NOT spawn('cmd.exe', ['/c', 'path/to/file.cmd args...'], {shell:true})
-      const normalizedPath = resolved.replace(/\\/g, '/');
-      const allArgsStr = [quoteWindowsCmdArg(normalizedPath), ...args.map(quoteWindowsCmdArg)].join(' ');
-      return { command: `cmd.exe /c ${allArgsStr}`, args: [], shell: true };
+      // Windows batch files (.cmd/.bat): use spawn with shell:false and array args.
+      // Use forward slashes (/ instead of \) — cmd.exe accepts both but MSYS bash
+      // does NOT do path conversion on forward slashes, avoiding the anaconda
+      // cygpath bug that corrupts /c/ → D:\ProgramData\anaconda3\Library\c\.
+      const forwardPath = resolved.replace(/\\/g, '/');
+      return { command: 'cmd.exe', args: ['/c', forwardPath, ...args], shell: false };
     }
 
     // Non-batch Windows executables can be spawned directly. Keeping shell=false
