@@ -24,10 +24,11 @@ import { CandidateIntakeError, INTAKE_ERROR_CODES } from './candidate-intake.js'
 import type { RuntimeStateManager } from './store/runtime-state-manager.js';
 
 interface Recommendation {
-  title: string;
-  text: string;
+  title?: string;
+  text?: string;
   triggerPattern?: string;
   action?: string;
+  abstractedPrinciple?: string;
 }
 
 export interface CandidateIntakeServiceOptions {
@@ -92,22 +93,38 @@ export class CandidateIntakeService {
       );
     }
 
-    // 4b. Parse artifact content to extract recommendation (E-06)
-    // The artifact.contentJson format depends on the producer:
-    //   - DiagnosticianRunner (SqliteDiagnosticianCommitter): raw DiagnosticianOutputV1 JSON
-    //   - Manual insertion (pd-cli E2E tests): { recommendation: {...} } wrapper
-    // Handle both by checking for the recommendation field, falling back to parsed root.
+    // 4b. Parse recommendation from candidate.sourceRecommendationJson FIRST (canonical source)
+    // Fall back to artifact.contentJson for backwards-compatibility with legacy/manual inserts.
     // eslint-disable-next-line @typescript-eslint/init-declarations
     let recommendation!: Recommendation;
+    const sourceRecJson = candidate.sourceRecommendationJson;
     try {
-      const parsed = JSON.parse(artifact.contentJson) as { recommendation?: Recommendation };
-      recommendation = parsed.recommendation ?? parsed as unknown as Recommendation;
+      if (sourceRecJson && sourceRecJson.trim() !== '') {
+        const fromCandidate = JSON.parse(sourceRecJson) as Recommendation;
+        if (fromCandidate && typeof fromCandidate === 'object') {
+          recommendation = fromCandidate;
+        }
+      }
     } catch (err: unknown) {
-      throw new CandidateIntakeError(
-        INTAKE_ERROR_CODES.INPUT_INVALID,
-        `Failed to parse artifact content for candidate ${candidateId}: ${err instanceof Error ? err.message : String(err)}`,
-        { candidateId, cause: err },
-      );
+      // sourceRecommendationJson is non-empty but malformed — warn and fall through
+      const detail = err instanceof Error ? err.message : String(err);
+      console.warn(`[CandidateIntakeService] sourceRecommendationJson parse failed for candidate ${candidateId}: ${detail}. Falling back to artifact.contentJson.`);
+    }
+
+    // 4c. Fall back to artifact.contentJson if no valid sourceRecommendationJson
+    if (!recommendation) {
+      try {
+        const parsed = JSON.parse(artifact.contentJson) as { recommendation?: Recommendation };
+        // DiagnosticianRunner stores raw DiagnosticianOutputV1 (no wrapper)
+        // Manual E2E tests store { recommendation: {...} } wrapper
+        recommendation = parsed.recommendation ?? parsed as unknown as Recommendation;
+      } catch (err: unknown) {
+        throw new CandidateIntakeError(
+          INTAKE_ERROR_CODES.INPUT_INVALID,
+          `Failed to parse artifact content for candidate ${candidateId}: ${err instanceof Error ? err.message : String(err)}`,
+          { candidateId, cause: err },
+        );
+      }
     }
 
     // 5. Build 11-field LedgerPrincipleEntry (E-06)

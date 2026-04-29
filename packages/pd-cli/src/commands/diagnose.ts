@@ -16,7 +16,9 @@ import {
   DefaultDiagnosticianValidator,
   TestDoubleRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
+  PiAiRuntimeAdapter,
   PDRuntimeError,
+  resolveRuntimeConfig,
   run as diagnoseRun,
   status as diagnoseStatus,
 } from '@principles/core/runtime-v2';
@@ -37,6 +39,12 @@ interface DiagnoseRunOptions {
   openclawLocal?: boolean;
   openclawGateway?: boolean;
   agent?: string;
+  provider?: string;
+  model?: string;
+  apiKeyEnv?: string;
+  baseUrl?: string;
+  maxRetries?: number;
+  timeoutMs?: number;
 }
 
 /**
@@ -164,8 +172,79 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           },
         }),
       });
+    } else if (runtimeKind === 'pi-ai') {
+      // D-06: flags + policy fallback
+      // D-01: have flag → use flag, no flag → read from policy
+      const stateDir = `${workspaceDir}/.state`;
+      let policyConfig: ReturnType<typeof resolveRuntimeConfig> | null = null;
+      try {
+        policyConfig = resolveRuntimeConfig(stateDir);
+      } catch (err: unknown) {
+        // workflows.yaml missing or malformed — warn and fall through to flag-based config
+        const detail = err instanceof Error ? err.message : String(err);
+        console.warn(`[pd diagnose] workflows.yaml policy load failed: ${detail}. Using CLI flags if provided.`);
+      }
+
+      const provider = opts.provider ?? policyConfig?.provider;
+      const model = opts.model ?? policyConfig?.model;
+      const apiKeyEnv = opts.apiKeyEnv ?? policyConfig?.apiKeyEnv;
+      const baseUrl = opts.baseUrl ?? policyConfig?.baseUrl;
+      const maxRetries = opts.maxRetries ?? policyConfig?.maxRetries;
+      const effectiveTimeoutMs = opts.timeoutMs ?? policyConfig?.timeoutMs;
+
+      // D-11: validate config — missing fields + fix suggestion
+      const missing: string[] = [];
+      if (!provider) missing.push('provider');
+      if (!model) missing.push('model');
+      if (!apiKeyEnv) missing.push('apiKeyEnv');
+      if (missing.length > 0) {
+        console.error(
+          `error: missing required pi-ai config: ${missing.join(', ')}.\n` +
+          `Pass via --flag or add to workflows.yaml pd-runtime-v2-diagnosis funnel policy.\n` +
+          `Example:\n` +
+          `  pd diagnose run --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY\n` +
+          `  Or add to workflows.yaml:\n` +
+          `    policy:\n` +
+          `      runtimeKind: pi-ai\n` +
+          `      provider: openrouter\n` +
+          `      model: anthropic/claude-sonnet-4\n` +
+          `      apiKeyEnv: OPENROUTER_API_KEY`,
+        );
+        process.exit(1);
+      }
+
+      // After validation: all fields are confirmed non-null
+      const validProvider: string = provider as string;
+      const validModel: string = model as string;
+      const validApiKeyEnv: string = apiKeyEnv as string;
+
+      // D-09: validate env var exists
+      if (!process.env[validApiKeyEnv]) {
+        console.error(`error: environment variable '${validApiKeyEnv}' is not set`);
+        process.exit(1);
+      }
+
+      runtimeAdapter = new PiAiRuntimeAdapter({
+        provider: validProvider,
+        model: validModel,
+        apiKeyEnv: validApiKeyEnv,
+        baseUrl,
+        maxRetries,
+        timeoutMs: effectiveTimeoutMs,
+        workspace: workspaceDir,
+      });
+
+      // TELE: runtime_adapter_selected telemetry
+      storeEmitter.emitTelemetry({
+        eventType: 'runtime_adapter_selected',
+        traceId: opts.taskId,
+        timestamp: new Date().toISOString(),
+        sessionId: 'pd-cli-diagnose',
+        agentId: 'pi-ai-adapter',
+        payload: { runtimeKind: 'pi-ai', provider: validProvider, model: validModel, baseUrlPresent: !!baseUrl },
+      });
     } else {
-      console.error(`error: unknown runtime kind '${runtimeKind}'`);
+      console.error(`error: unknown runtime kind '${runtimeKind}' (supported: openclaw-cli, test-double, pi-ai)`);
       process.exit(1);
     }
 

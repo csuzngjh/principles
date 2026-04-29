@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.7
-milestone_name: M8 — Pain Signal → Principle Single Path Cutover
-status: verifying
-last_updated: "2026-04-28T07:44:01.365Z"
-last_activity: 2026-04-28 -- UAT executed, openclaw CLI spawn broken (pre-existing), all 6 blockers verified correct
+milestone: v2.8
+milestone_name: M9 — PiAi Runtime Adapter
+status: completed
+last_updated: "2026-04-29T11:37:55.720Z"
+last_activity: "2026-04-29 -- M9 shipped: PR #412 — xiaomi-coding/mimo-v2.5-pro real UAT"
 progress:
-  total_phases: 75
-  completed_phases: 66
-  total_plans: 131
-  completed_plans: 140
+  total_phases: 80
+  completed_phases: 71
+  total_plans: 139
+  completed_plans: 148
   percent: 100
 ---
 
@@ -19,55 +19,46 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.7 M8 — m8-02 SHIPPED (2026-04-28), m8-03 Real Environment UAT pending
+**Current Focus:** v2.8 M9 — PiAi Runtime Adapter (Default Diagnostician Runtime) — SHIPPED
 
 ## Current Position
 
-Phase: m8-03 (Real Environment UAT — BLOCKED by pre-existing openclaw CLI env issue)
-Plan: 1 plan executed 2026-04-28
-Status: Executed — UAT partially blocked, implementation verified correct, CLI env issue is pre-existing
-Last activity: 2026-04-28 -- UAT executed, openclaw CLI spawn broken (pre-existing), all 6 blockers verified correct
+Phase: m9-05 complete
+Plan: 1/1 complete
+Status: SHIPPED — M9 complete: PR #412 (m9-05 Real UAT PASS, 8/8 requirements)
+Last activity: 2026-04-29 -- M9 shipped: PR #412 — xiaomi-coding/mimo-v2.5-pro real UAT
 
-## M8-03 Real Environment UAT
+## M9 Pipeline
 
-Phase: m8-03 (Real Environment UAT — M8 final sign-off)
-Plan: m8-03-01 executed 2026-04-28
-Status: PARTIAL — UAT-01 blocked by pre-existing openclaw CLI env issue (npm wrapper path corruption), UAT-02 PASS, UAT-04 PASS, implementation verified correct
-Depends on: m8-02 (both plans complete ✅)
-Note: m8-03 is NOT a code change plan — it is manual UAT against live OpenClaw gateway + real workspace D:\.openclaw\workspace
-Ledger path (confirmed from principle-tree-ledger.ts): D:/.openclaw/workspace/.state/principle_training_state.json (NOT .principles/ledger/principles.jsonl)
-M8 cannot be marked SHIPPED until m8-03 UAT passes — UAT-01 blocked by pre-existing CLI env issue
-UAT results: UAT-01 BLOCKED (openclaw CLI env), UAT-02 PASS, UAT-03 SKIP, UAT-04 PASS, UAT-05 INFO (pre-existing env issue)
+pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (pi-ai complete) → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
 
-## M8 Pipeline (single path, no fallback)
+## M9 Scope (COMPLETE)
 
-pain → PD task/run store → DiagnosticianRunner → OpenClawCliRuntimeAdapter → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
+1. RuntimeKindSchema add `"pi-ai"` ✓
+2. PiAiRuntimeAdapter: getModel() + complete() + DiagnosticianOutputV1 validation + AbortSignal.timeout + provider/model/apiKeyEnv/maxRetries config ✓
+3. workflows.yaml policy driven: runtimeKind/provider/model/timeoutMs/apiKeyEnv/maxRetries ✓
+4. PainSignalRuntimeFactory select runtime from policy (no longer hardcoded openclaw-cli) ✓
+5. CLI: `pd runtime probe --runtime pi-ai`, `pd diagnose run --runtime pi-ai`, `pd pain record` default via workflows.yaml ✓
+6. Tests: mock success/failure/timeout/invalid-json, probe, E2E pain→artifact→candidate→ledger ✓
+7. Real UAT: xiaomi-coding/mimo-v2.5-pro verify + probe + pain record + assert status=succeeded + artifactId + candidateIds.length > 0 + ledgerEntryIds.length > 0 + idempotency ✓
 
-## M8 约束
+## LOCKED Decisions
 
-1. Legacy deletion 只针对旧诊断执行路径，不删除无关的 evolution-worker 功能
-2. M8 成功标准：链路终点必须是 PrincipleTreeLedger probation entry
-3. Candidate intake 是 happy path 的一部分
-4. m8-03 UAT 必须通过才能标记 M8 SHIPPED — mocked E2E 不能作为最终验收
+- **LOCKED-01**: PiAiRuntimeAdapter is direct LLM completion only. No tools, no agent loop, no OpenClaw dependency.
+- **LOCKED-02**: M9 success means ledger probation entry exists. LLM response success alone is not success.
+- **LOCKED-03**: workflows.yaml is the runtime SSOT. Runtime kind, provider, model, timeout, apiKeyEnv, maxRetries, baseUrl must be consumed by code, not only documented.
+
+## Hard Boundaries
+
+- 不引入 `@mariozechner/pi-agent-core`
+- 不支持工具调用
+- 不支持 OpenClaw session/gateway/plugin hooks
+- 不改 OpenClawCliRuntimeAdapter（保留为 alternative）
+- 不修改 candidate/ledger 主链路（除非测试证明有 bug）
 
 ## Context
 
-**M8 依赖：** M7 (Candidate Intake 已完成)
-
-**M8 非目标：**
-
-- 不保留旧诊断开关
-- 不做 legacy fallback
-- 不删除 sleep reflection / keyword optimization 等非诊断功能（仅服务于旧诊断链路的才删）
-
-**m8-03 说明：**
-
-- 不是代码修改计划，是人工真实验收（autonomous: false）
-- Workspace: `D:\.openclaw\workspace`
-- Ledger 路径: `D:\.openclaw\workspace\.state\principle_training_state.json`（不是 .principles/ledger/principles.jsonl）
-- 必须通过真实 OpenClaw hook 触发 pain signal（不允许直接调用 PainSignalBridge.onPainDetected）
-- 不允许 test-double / mock runCliProcess
-- 必须验证：task succeeded + artifact + candidate + ledger probation entry + legacy files unchanged
+**M9 依赖：** M8 (pain signal bridge + single path cutover)
 
 **Baseline (Frozen):**
 
@@ -78,5 +69,7 @@ pain → PD task/run store → DiagnosticianRunner → OpenClawCliRuntimeAdapter
 - v2.4 M5: Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24
 - v2.5 M6: Production Runtime Adapter — SHIPPED 2026-04-25
 - v2.6 M7: Principle Candidate Intake — SHIPPED 2026-04-27
+- v2.7 M8: Pain Signal → Principle Single Path Cutover — SHIPPED 2026-04-28
+- **v2.8 M9: PiAi Runtime Adapter — SHIPPED 2026-04-29**
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
