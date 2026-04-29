@@ -30,7 +30,7 @@ pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (p
 
 **Phases:**
 
-- [ ] **m9-01**: PiAiRuntimeAdapter Core (RS-01~02, AD-01~15) — 实现 PDRuntimeAdapter 接口 + pi-ai complete 调用 + DiagnosticianOutputV1 验证
+- [x] **m9-01**: PiAiRuntimeAdapter Core (RS-01~02, AD-01~15) — 实现 PDRuntimeAdapter 接口 + pi-ai complete 调用 + DiagnosticianOutputV1 验证 — completed 2026-04-29
 - [ ] **m9-02**: Policy + Factory Integration (PL-01~03, FC-01~04) — workflows.yaml policy 扩展 + PainSignalRuntimeFactory 选择 runtime
 - [ ] **m9-03**: CLI Commands (CLI-01~04) — pd runtime probe --runtime pi-ai, pd diagnose run --runtime pi-ai, pd pain record policy-driven
 - [ ] **m9-04**: Tests (TEST-01~06) — mock success/failure/timeout/invalid-json, probe, E2E pain→ledger

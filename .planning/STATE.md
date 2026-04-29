@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v2.8
-milestone_name: M9 — PiAi Runtime Adapter (Default Diagnostician Runtime)
+milestone_name: M9 — PiAi Runtime Adapter
 status: executing
-last_updated: "2026-04-29T00:00:00.000Z"
+last_updated: "2026-04-29T01:55:52.616Z"
 last_activity: 2026-04-29 -- M9 milestone initialized
 progress:
-  total_phases: 0
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_phases: 80
+  completed_phases: 66
+  total_plans: 137
+  completed_plans: 140
+  percent: 100
 ---
 
 # Project State: Principles
