@@ -308,6 +308,61 @@ describe('recommendations shape', () => {
     );
     assertValid(principleResult);
   });
+
+  it('abstractedPrinciple at 200 chars passes', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const longPrinciple = 'a'.repeat(200);
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{
+          kind: 'principle',
+          description: 'Validate tool arguments before execution',
+          triggerPattern: 'tool.*argument',
+          action: 'Use schema validation',
+          abstractedPrinciple: longPrinciple,
+        }],
+      }),
+      'task-001',
+    );
+    assertValid(result);
+  });
+
+  it('abstractedPrinciple over 200 chars fails', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const tooLongPrinciple = 'a'.repeat(201);
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{
+          kind: 'principle',
+          description: 'Validate tool arguments before execution',
+          triggerPattern: 'tool.*argument',
+          action: 'Use schema validation',
+          abstractedPrinciple: tooLongPrinciple,
+        }],
+      }),
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('abstractedPrinciple') && e.includes('200'))).toBe(true);
+  });
+
+  it('abstractedPrinciple at 41 chars passes (old 40-char limit increased)', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const principle41 = 'x'.repeat(41);
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{
+          kind: 'principle',
+          description: 'Validate tool arguments before execution',
+          triggerPattern: 'tool.*argument',
+          action: 'Use schema validation',
+          abstractedPrinciple: principle41,
+        }],
+      }),
+      'task-001',
+    );
+    assertValid(result);
+  });
 });
 
 // ── REQ-2.3f: Confidence range [0, 1] ────────────────────────────────────────

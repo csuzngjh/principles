@@ -190,10 +190,11 @@ describe('E2E m9-adapter-integration — PiAiRuntimeAdapter + DiagnosticianRunne
     const db = sqliteConn.getDb();
     const artifacts = db.prepare('SELECT * FROM artifacts WHERE task_id = ?').all(taskId) as { artifact_id: string; artifact_kind: string }[];
     expect(artifacts).toHaveLength(1);
-    expect(artifacts[0].artifact_kind).toBe('diagnostician_output');
+    const artifact = artifacts[0] as { artifact_id: string; artifact_kind: string };
+    expect(artifact.artifact_kind).toBe('diagnostician_output');
 
     // Assert >= 2 candidate records were created
-    const artifactId = artifacts[0].artifact_id;
+    const artifactId = artifact.artifact_id;
     const candidates = db.prepare('SELECT * FROM principle_candidates WHERE artifact_id = ?').all(artifactId) as { candidate_id: string }[];
     expect(candidates.length).toBeGreaterThanOrEqual(2);
   });

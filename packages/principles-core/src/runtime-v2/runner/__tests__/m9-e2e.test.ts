@@ -161,7 +161,8 @@ describe('E2E m9 — PainSignalBridge + PiAiRuntimeAdapter full chain', () => {
     const db = sqliteConn.getDb();
     const artifacts = db.prepare('SELECT * FROM artifacts WHERE task_id = ?').all(expectedTaskId) as { artifact_id: string; artifact_kind: string }[];
     expect(artifacts).toHaveLength(1);
-    expect(artifacts[0].artifact_kind).toBe('diagnostician_output');
+    const artifact = artifacts[0] as { artifact_id: string; artifact_kind: string };
+    expect(artifact.artifact_kind).toBe('diagnostician_output');
 
     const candidates = db.prepare('SELECT * FROM principle_candidates WHERE task_id = ?').all(expectedTaskId) as { candidate_id: string }[];
     expect(candidates.length).toBeGreaterThanOrEqual(1);
@@ -169,7 +170,8 @@ describe('E2E m9 — PainSignalBridge + PiAiRuntimeAdapter full chain', () => {
     for (const row of candidates) {
       const ledgerEntry = ledgerAdapter.existsForCandidate(row.candidate_id);
       expect(ledgerEntry).not.toBeNull();
-      expect(ledgerEntry!.status).toBe('probation');
+      const entry = ledgerEntry as { status: string };
+      expect(entry.status).toBe('probation');
     }
   });
 

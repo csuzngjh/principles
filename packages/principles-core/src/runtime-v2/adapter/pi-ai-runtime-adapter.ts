@@ -14,8 +14,8 @@
  *   Missing apiKeyEnv → runtime_unavailable
  *   Retries exhausted → execution_failed
  */
-import { getModel, complete } from '@mariozechner/pi-ai';
-import type { KnownProvider, Context, UserMessage, AssistantMessage } from '@mariozechner/pi-ai';
+import { getModel, getProviders, complete } from '@mariozechner/pi-ai';
+import type { KnownProvider, Context, UserMessage, AssistantMessage, Model } from '@mariozechner/pi-ai';
 import { Value } from '@sinclair/typebox/value';
 import { PDRuntimeError } from '../error-categories.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
@@ -50,6 +50,8 @@ export interface PiAiRuntimeAdapterConfig {
   maxRetries?: number;
   /** Timeout in milliseconds for LLM completion. Default: 300_000 (5 min). */
   timeoutMs?: number;
+  /** Custom base URL for OpenAI-compatible providers not in pi-ai's built-in registry. */
+  baseUrl?: string;
   /** Optional workspace directory (reserved for future use). */
   workspace?: string;
   /** Optional StoreEventEmitter for telemetry. Falls back to global storeEmitter. */
@@ -59,29 +61,109 @@ export interface PiAiRuntimeAdapterConfig {
 /**
  * Resolve a pi-ai Model from dynamic config values.
  *
- * getModel() has a strict generic that doesn't accept runtime strings.
- * This helper uses a broader cast so config values from workflows.yaml
- * can be passed directly.
+ * For built-in providers (openrouter, anthropic, etc.), uses getModel().
+ * For custom providers (e.g., xiaomi-coding with custom baseUrl), creates
+ * a Model<Api> object directly. This enables pi-ai to call OpenAI-compatible
+ * endpoints that aren't in pi-ai's built-in provider registry.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function resolveModel(provider: string, modelId: string): any {
-  // getModel() generic is too strict for dynamic config values from workflows.yaml.
-  // The cast is safe because config values are validated at the policy layer.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (getModel as any)(provider as KnownProvider, modelId);
+function resolveModel(provider: string, modelId: string, baseUrl?: string) {
+  const knownProviders = getProviders();
+  if (knownProviders.includes(provider as KnownProvider) && !baseUrl) {
+    // Built-in provider — use getModel()
+    // @ts-expect-error — getModel requires literal model ID types; runtime strings from config are acceptable
+    return getModel(provider as KnownProvider, modelId);
+  }
+
+  // Custom provider — baseUrl is required
+  if (!baseUrl) {
+    throw new PDRuntimeError(
+      'runtime_unavailable',
+      `Provider '${provider}' is not a built-in pi-ai provider and requires a custom baseUrl. ` +
+      `Pass --baseUrl <url> or add 'baseUrl' to your workflows.yaml policy.`,
+    );
+  }
+
+  // Custom provider with baseUrl — construct Model object directly
+  // Default to openai-completions API for custom OpenAI-compatible endpoints
+  const model: Model<'openai-completions'> = {
+    id: modelId,
+    name: modelId,
+    api: 'openai-completions',
+    provider,
+    baseUrl,
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 32000,
+  };
+  return model;
 }
 
 /**
- * Broad detection for abort/timeout errors from any provider SDK.
- * Covers DOMException AbortError, error messages containing "abort" or "timeout",
- * and objects with name === 'AbortError'.
+ * Detection for abort/timeout errors from provider SDKs.
+ *
+ * Checks:
+ *   1. AbortSignal already aborted
+ *   2. DOMException AbortError (native fetch/Node abort)
+ *   3. Error objects with name === 'AbortError' (some SDKs)
+ *   4. Non-PDRuntimeError Error with "timeout" or "abort" in message
+ *      (provider SDKs that throw plain Error on timeout)
+ *
+ * Excludes PDRuntimeError to avoid false positives from our own wrapped
+ * error messages that may contain "timed out".
  */
 function isAbortError(err: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true;
   if (err instanceof DOMException && err.name === 'AbortError') return true;
-  if (err instanceof Error && (/abort/i.test(err.message) || /timeout/i.test(err.message))) return true;
   if (typeof err === 'object' && err !== null && 'name' in err && (err as { name?: unknown }).name === 'AbortError') return true;
+  if (err instanceof Error && !(err instanceof PDRuntimeError) && (/abort/i.test(err.message) || /timeout/i.test(err.message))) return true;
   return false;
+}
+
+/**
+ * Extract text content from an AssistantMessage, or throw PDRuntimeError.
+ *
+ * pi-ai complete() may RESOLVE (not reject) with stopReason:'error' when
+ * the provider returns an error response (e.g., 401, rate limit).
+ * This helper normalizes those resolved-error responses into PDRuntimeError
+ * so downstream code never sees a "successful" response that is actually broken.
+ *
+ * Error classification:
+ *   stopReason:'aborted'                              → timeout
+ *   stopReason:'error' + timeout/abort in errorMessage → timeout
+ *   stopReason:'error' + other                        → execution_failed
+ *   no text content block                              → output_invalid
+ */
+function extractAssistantTextOrThrow(
+  response: { content: { type: string; text?: string }[]; stopReason?: string; errorMessage?: string },
+  signal?: AbortSignal,
+): string {
+  // Handle resolved-error responses from pi-ai
+  if (response.stopReason === 'error' || response.stopReason === 'aborted') {
+    const rawMessage = response.errorMessage ?? 'unknown provider error';
+    // Truncate to 300 chars to avoid leaking huge payloads into logs/telemetry
+    const boundedMessage = rawMessage.length > 300 ? rawMessage.substring(0, 300) + '...' : rawMessage;
+
+    const isTimeout = response.stopReason === 'aborted'
+      || signal?.aborted
+      || /timeout|timed\s*out/i.test(rawMessage)
+      || /abort/i.test(rawMessage);
+
+    throw new PDRuntimeError(
+      isTimeout ? 'timeout' : 'execution_failed',
+      isTimeout
+        ? `LLM request timed out: ${boundedMessage}`
+        : `LLM execution failed: ${boundedMessage}`,
+    );
+  }
+
+  const textContent = response.content.find(c => c.type === 'text');
+  if (!textContent || textContent.type !== 'text' || !textContent.text) {
+    throw new PDRuntimeError('output_invalid', 'No text content in LLM response');
+  }
+
+  return textContent.text;
 }
 
 /**
@@ -122,7 +204,7 @@ interface RunState {
   runId: string;
   startedAt: string;
   endedAt: string;
-  status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled';
+  status: 'succeeded' | 'failed' | 'timed_out';
   reason?: string;
   output?: StructuredRunOutput;
 }
@@ -131,30 +213,30 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private readonly config: PiAiRuntimeAdapterConfig;
   private readonly runs = new Map<string, RunState>();
   private readonly eventEmitter: StoreEventEmitter;
+  private readonly runtimeKind: RuntimeKind = 'pi-ai';
+  private readonly defaultCapabilities: RuntimeCapabilities = {
+    supportsStructuredJsonOutput: true,
+    supportsToolUse: false,
+    supportsWorkingDirectory: false,
+    supportsModelSelection: true,
+    supportsLongRunningSessions: false,
+    supportsCancellation: true,
+    supportsArtifactWriteBack: false,
+    supportsConcurrentRuns: false,
+    supportsStreaming: false,
+  };
 
   constructor(config: PiAiRuntimeAdapterConfig) {
     this.config = config;
     this.eventEmitter = config.eventEmitter ?? storeEmitter;
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   kind(): RuntimeKind {
-    return 'pi-ai';
+    return this.runtimeKind;
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async getCapabilities(): Promise<RuntimeCapabilities> {
-    return {
-      supportsStructuredJsonOutput: true,
-      supportsToolUse: false,
-      supportsWorkingDirectory: false,
-      supportsModelSelection: true,
-      supportsLongRunningSessions: false,
-      supportsCancellation: true,
-      supportsArtifactWriteBack: false,
-      supportsConcurrentRuns: false,
-      supportsStreaming: false,
-    };
+    return this.defaultCapabilities;
   }
 
   /**
@@ -180,8 +262,9 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
     // Stage 2+3: getModel valid + minimal complete probe
     try {
-      const model = resolveModel(this.config.provider, this.config.model);
-      const signal = AbortSignal.timeout(30_000);
+      const model = resolveModel(this.config.provider, this.config.model, this.config.baseUrl);
+      const timeoutMs = this.config.timeoutMs ?? 60_000;
+      const signal = AbortSignal.timeout(timeoutMs);
       const probeContext: Context = {
         messages: [{
           role: 'user',
@@ -189,24 +272,17 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           timestamp: Date.now(),
         }],
       };
-       
+
       const response = await complete(model, probeContext, {
         signal,
         apiKey,
+        timeoutMs,
         maxRetries: 0,
       });
 
-      const textContent = response.content.find(c => c.type === 'text');
-      if (!textContent || textContent.type !== 'text') {
-        return {
-          healthy: false,
-          degraded: true,
-          warnings: ['probe returned no text content'],
-          lastCheckedAt,
-        };
-      }
-
-      const parsed = extractJsonObject(textContent.text);
+      // extractAssistantTextOrThrow normalizes resolved-error responses
+      const text = extractAssistantTextOrThrow(response, signal);
+      const parsed = extractJsonObject(text);
       if (
         typeof parsed !== 'object' ||
         parsed === null ||
@@ -216,16 +292,34 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         return {
           healthy: false,
           degraded: true,
-          warnings: [`probe returned unexpected result: ${textContent.text.substring(0, 200)}`],
+          warnings: [`probe returned unexpected result: ${text.substring(0, 200)}`],
           lastCheckedAt,
         };
       }
     } catch (err) {
+      // PDRuntimeError from extractAssistantTextOrThrow (timeout/execution_failed)
+      // or thrown errors from complete() (AbortError, network, etc.)
+      if (err instanceof PDRuntimeError && err.category === 'timeout') {
+        return {
+          healthy: false,
+          degraded: true,
+          warnings: [`probe timed out: ${err.message}`],
+          lastCheckedAt,
+        };
+      }
+      if (err instanceof PDRuntimeError) {
+        return {
+          healthy: false,
+          degraded: err.category === 'output_invalid',
+          warnings: [`probe failed: ${err.message}`],
+          lastCheckedAt,
+        };
+      }
       if (isAbortError(err)) {
         return {
           healthy: false,
           degraded: true,
-          warnings: ['probe timed out after 30s'],
+          warnings: ['probe timed out'],
           lastCheckedAt,
         };
       }
@@ -282,7 +376,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     const context: Context = { messages: [userMessage] };
 
     // Get model
-    const model = resolveModel(this.config.provider, this.config.model);
+    const model = resolveModel(this.config.provider, this.config.model, this.config.baseUrl);
 
     // Emit runtime_invocation_started telemetry
     this.eventEmitter.emitTelemetry({
@@ -304,14 +398,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       // Call LLM with retry
       const response = await this.completeWithRetry(model, context, { signal, apiKey });
 
-      // Guard text content
-      const textContent = response.content.find(c => c.type === 'text');
-      if (!textContent || textContent.type !== 'text') {
-        throw new PDRuntimeError('output_invalid', 'No text content in LLM response');
-      }
+      // extractAssistantTextOrThrow normalizes resolved-error responses
+      // (e.g., stopReason:'error' + errorMessage:'401 Unauthorized')
+      // into proper PDRuntimeError — prevents misclassifying API errors as output_invalid
+      const text = extractAssistantTextOrThrow(response, signal);
 
       // Parse response — handles prose-wrapped and code-fenced JSON
-      const parsed = extractJsonObject(textContent.text);
+      const parsed = extractJsonObject(text);
       if (!parsed) {
         throw new PDRuntimeError('output_invalid', 'No valid JSON found in LLM response');
       }
@@ -402,16 +495,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     };
   }
 
-  async cancelRun(_runId: string): Promise<void> {
-    // For one-shot mode: startRun blocks until complete, so cancel is a no-op.
-    // If the run exists and is not yet terminal, mark as cancelled.
-    const state = this.runs.get(_runId);
-    if (state && state.status === 'failed') {
-      // Run already failed — nothing to cancel
+  async cancelRun(runId: string): Promise<void> {
+    // One-shot mode: startRun() blocks until LLM responds, so cancel is always a no-op.
+    // The run is already terminal by the time cancelRun could be called.
+    const state = this.runs.get(runId);
+    if (state && state.status === 'succeeded') {
       return;
     }
-    // In one-shot mode, startRun blocks, so we can't cancel mid-flight.
-    // This is a documented limitation of the one-shot pattern.
   }
 
   async fetchOutput(runId: string): Promise<StructuredRunOutput | null> {
@@ -422,8 +512,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     return state.output;
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async fetchArtifacts(_runId: string): Promise<RuntimeArtifactRef[]> {
+  async fetchArtifacts(runId: string): Promise<RuntimeArtifactRef[]> {
+    this.runs.get(runId);
     return [];
   }
 
@@ -434,8 +524,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
    * Disables pi-ai built-in retry (maxRetries: 0) to avoid double-retry.
    */
   private async completeWithRetry(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    model: any,
+    model: ReturnType<typeof resolveModel>,
     context: Context,
     options: { signal: AbortSignal; apiKey: string },
   ): Promise<AssistantMessage> {
@@ -445,16 +534,44 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        return await complete(model, context, {
+        const response = await complete(model, context, {
           signal: options.signal,
           apiKey: options.apiKey,
           timeoutMs: effectiveTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
         });
+
+        // If provider resolved with an error response, classify and potentially retry.
+        // Only retry execution_failed (transient provider errors); timeout/output_invalid are not retryable.
+        if (response.stopReason === 'error' || response.stopReason === 'aborted') {
+          const rawMessage = response.errorMessage ?? 'unknown provider error';
+          const isTimeout = response.stopReason === 'aborted'
+            || options.signal?.aborted
+            || /timeout|timed\s*out/i.test(rawMessage)
+            || /abort/i.test(rawMessage);
+
+          if (isTimeout) {
+            throw new PDRuntimeError('timeout', `LLM request timed out after ${effectiveTimeoutMs}ms`);
+          }
+
+          // execution_failed — retryable if attempts remain
+          lastError = new PDRuntimeError('execution_failed', `LLM execution failed: ${rawMessage.substring(0, 300)}`);
+          if (attempt < maxRetries) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 30_000);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+          throw lastError;
+        }
+
+        return response;
       } catch (err) {
         lastError = err;
         if (isAbortError(err, options.signal)) {
           throw new PDRuntimeError('timeout', `LLM request timed out after ${effectiveTimeoutMs}ms`);
+        }
+        if (err instanceof PDRuntimeError) {
+          throw err; // PDRuntimeError (timeout from above) — don't retry
         }
         if (attempt < maxRetries) {
           const delay = Math.min(1000 * Math.pow(2, attempt), 30_000);
@@ -463,9 +580,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       }
     }
 
+    // If lastError is already a PDRuntimeError, re-throw it; otherwise wrap it
+    if (lastError instanceof PDRuntimeError) {
+      throw lastError;
+    }
     throw new PDRuntimeError(
       'execution_failed',
-      `LLM completion failed after ${maxRetries + 1} attempts: ${lastError}`,
+      `LLM completion failed after ${maxRetries + 1} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
     );
   }
 }

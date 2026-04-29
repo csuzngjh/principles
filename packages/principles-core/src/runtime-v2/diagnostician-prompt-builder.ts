@@ -135,10 +135,10 @@ Classify into ONE: People | Design | Assumption | Tooling
 - Tooling: tool misconfiguration, API changes
 
 PHASE 4 — Principle Extraction:
-Extract ONE highly abstracted principle (max 40 chars, cross-scenario).
+Extract ONE highly abstracted principle (max 200 chars, cross-scenario).
 - trigger_pattern: regex/keywords for when this applies
 - action: what to do differently
-- abstracted_principle: one sentence, max 40 chars
+- abstracted_principle: one sentence, max 200 chars
 
 OUTPUT FORMAT (pure JSON, no markdown):
 {
@@ -155,7 +155,7 @@ OUTPUT FORMAT (pure JSON, no markdown):
       "description": "<specific action>",
       "triggerPattern": "<regex/keywords>",
       "action": "<what to do differently>",
-      "abstractedPrinciple": "<one sentence, max 40 chars>"
+      "abstractedPrinciple": "<one sentence, max 200 chars>"
     },
     {"kind": "rule|implementation|defer", "description": "<specific action>"}
   ],
