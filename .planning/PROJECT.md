@@ -29,36 +29,47 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - v2.6 M7: Principle Candidate Intake — CandidateIntakeService, pd candidate intake CLI, PrincipleTreeLedger adapter, idempotent probation entry writing, E2E traceability — SHIPPED 2026-04-27
 - v2.7 M8: Pain Signal → Principle Single Path Cutover — IN PROGRESS
 
-## Current Milestone: v2.7 M8 — Pain Signal → Principle Single Path Cutover
+## Current Milestone: v2.8 M9 — PiAi Runtime Adapter (Default Diagnostician Runtime)
 
-**Goal:** 把痛苦信号到原则账本的端到端链路切到 Runtime v2，删除旧 diagnostician 执行链路。
+**Goal:** PiAiRuntimeAdapter 成为 PD Runtime v2 默认 diagnostician runtime，绕过 OpenClaw CLI 直接调用 LLM。
 
-**Pipeline (single path):**
-pain → PD task/run store → DiagnosticianRunner → OpenClawCliRuntimeAdapter → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
+**Pipeline (M9):**
+pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (pi-ai complete) → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
 
 **Target features:**
-1. 单一诊断链路（无 fallback）— DELETE 所有旧诊断执行路径
-2. Legacy code map：先对所有引用分类为 DELETE / REPLACE_WITH_RUNTIME_V2 / KEEP_NON_DIAGNOSTIC，再动手实现
-3. 旧链路删除：diagnostician_tasks.json、heartbeat prompt 注入、LLM marker 文件、evolution-worker 轮询
-4. CLI 可观测：pd diagnose run / candidate list/show / intake / pain trigger 验证命令
-5. E2E 真实 workspace 签收：D:\.openclaw\workspace，runtime=openclaw-cli
+1. RuntimeKindSchema 增加 `"pi-ai"`
+2. PiAiRuntimeAdapter: `getModel()` + `complete()` + DiagnosticianOutputV1 验证 + `AbortSignal.timeout` + provider/model/apiKeyEnv/maxRetries 配置
+3. workflows.yaml policy 驱动: runtimeKind/provider/model/timeoutMs/apiKeyEnv/maxRetries
+4. PainSignalRuntimeFactory 从 policy 选择 runtime（不再硬编码 openclaw-cli）
+5. CLI: `pd runtime probe --runtime pi-ai`、`pd diagnose run --runtime pi-ai`、`pd pain record` 默认走 workflows.yaml
+6. Tests: mock complete success/failure/timeout/invalid-json, probe, E2E pain→artifact→candidate→ledger
+7. Real UAT: OPENROUTER_API_KEY 验证 + probe + pain record + ledgerEntryIds 非空 + 幂等性验证
 
-**M8 约束：**
-- Legacy deletion 只针对旧诊断执行路径，不删除无关的 evolution-worker 功能
-- M8 成功标准：链路终点必须是 PrincipleTreeLedger probation entry
-- Candidate intake 是 happy path 的一部分（除非明确禁用调试）
+**Hard Boundaries:**
+- 不引入 `@mariozechner/pi-agent-core`
+- 不支持工具调用
+- 不支持 OpenClaw session/gateway/plugin hooks
+- 不改 OpenClawCliRuntimeAdapter（保留为 alternative）
+- 不修改 candidate/ledger 主链路（除非测试证明有 bug）
 
-**Non-goals：**
-- 不保留旧诊断开关（PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED 等）
-- 不做 legacy fallback
-- 不删除 sleep reflection / keyword optimization 等非诊断功能（除非它们仅服务于旧诊断链路）
+**LOCKED Decisions:**
+- LOCKED-01: PiAiRuntimeAdapter is direct LLM completion only. No tools, no agent loop, no OpenClaw dependency.
+- LOCKED-02: M9 success means ledger probation entry exists. LLM response success alone is not success.
+- LOCKED-03: workflows.yaml is the runtime SSOT. Runtime kind, provider, model, timeout, apiKeyEnv, maxRetries must be consumed by code, not only documented.
+
+**Non-goals:**
+- 多 runtime 适配器套件（M9 只新增 PiAiRuntimeAdapter）
+- OpenClaw agent/tool 调用
+- 新 UI/dashboard
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`
+
+**Depends on:** M8 (pain signal bridge + single path cutover)
 
 **Out of Scope:**
 - 新 UI/dashboard
 - 新功能表面区域（SDK scope 外）
-- 多 runtime 适配器套件（M8 只需要 OpenClawCliRuntimeAdapter）
+- pi-agent-core 或其他 agent framework
 
 ## Context
 
