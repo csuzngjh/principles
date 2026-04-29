@@ -21,6 +21,8 @@ import { SqliteHistoryQuery } from './store/sqlite-history-query.js';
 import { SqliteConnection } from './store/sqlite-connection.js';
 import { OpenClawCliRuntimeAdapter } from './adapter/openclaw-cli-runtime-adapter.js';
 import { PiAiRuntimeAdapter } from './adapter/pi-ai-runtime-adapter.js';
+import { getProviders } from '@mariozechner/pi-ai';
+import type { KnownProvider } from '@mariozechner/pi-ai';
 import { DefaultDiagnosticianValidator } from './runner/default-validator.js';
 import { storeEmitter } from './store/event-emitter.js';
 import { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
@@ -42,7 +44,7 @@ const DIAGNOSTIC_FUNNEL_ID = 'pd-runtime-v2-diagnosis';
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 /** Resolved runtime configuration from funnel policy. */
-interface RuntimeConfig {
+export interface RuntimeConfig {
   runtimeKind: RuntimeKind;
   timeoutMs: number;
   agentId: string;
@@ -50,6 +52,8 @@ interface RuntimeConfig {
   model?: string;
   apiKeyEnv?: string;
   maxRetries?: number;
+  /** Custom base URL for OpenAI-compatible providers not in pi-ai's built-in registry. */
+  baseUrl?: string;
 }
 
 /**
@@ -58,7 +62,7 @@ interface RuntimeConfig {
  * Silently ignores missing files and schema errors (factory should not crash
  * if workflows.yaml is absent or malformed).
  */
-function resolveRuntimeConfig(stateDir: string): RuntimeConfig {
+export function resolveRuntimeConfig(stateDir: string): RuntimeConfig {
   try {
     const loader = new WorkflowFunnelLoader(stateDir);
     const funnel = loader.getFunnel(DIAGNOSTIC_FUNNEL_ID);
@@ -78,6 +82,7 @@ function resolveRuntimeConfig(stateDir: string): RuntimeConfig {
       model: policy.model,
       apiKeyEnv: policy.apiKeyEnv,
       maxRetries: policy.maxRetries,
+      baseUrl: policy.baseUrl,
     };
   } catch (err) {
     console.warn(`[PainSignalRuntimeFactory] Funnel loading failed for ${DIAGNOSTIC_FUNNEL_ID}, using defaults: ${String(err)}`);
@@ -94,12 +99,21 @@ function resolveRuntimeConfig(stateDir: string): RuntimeConfig {
  * Throws plain Error (not PDRuntimeError) for config issues (D-06).
  * Includes migration guidance for D-05 breaking change.
  */
-function validateRuntimeConfig(config: RuntimeConfig): void {
+export function validateRuntimeConfig(config: RuntimeConfig): void {
   if (config.runtimeKind === 'pi-ai') {
     const missing: string[] = [];
     if (!config.provider) missing.push('provider');
     if (!config.model) missing.push('model');
     if (!config.apiKeyEnv) missing.push('apiKeyEnv');
+
+    // Non-built-in providers require baseUrl
+    if (config.provider) {
+      const knownProviders = getProviders();
+      if (!knownProviders.includes(config.provider as KnownProvider) && !config.baseUrl) {
+        missing.push('baseUrl');
+      }
+    }
+
     if (missing.length > 0) {
       throw new Error(
         `[PainSignalRuntimeFactory] Missing required fields for runtimeKind 'pi-ai': ${missing.join(', ')}. ` +
@@ -107,9 +121,10 @@ function validateRuntimeConfig(config: RuntimeConfig): void {
         `Example:\n` +
         `  policy:\n` +
         `    runtimeKind: pi-ai\n` +
-        `    provider: openrouter\n` +
-        `    model: anthropic/claude-sonnet-4\n` +
-        `    apiKeyEnv: OPENROUTER_API_KEY\n` +
+        `    provider: xiaomi-coding\n` +
+        `    model: mimo-v2.5-pro\n` +
+        `    apiKeyEnv: ANTHROPIC_AUTH_TOKEN\n` +
+        `    baseUrl: https://token-plan-cn.xiaomimimo.com/v1\n` +
         `\nIf you want to use the OpenClaw CLI runtime instead, set runtimeKind: openclaw-cli`,
       );
     }
@@ -158,6 +173,7 @@ export async function createPainSignalBridge(
         apiKeyEnv: String(runtimeConfig.apiKeyEnv),
         maxRetries: runtimeConfig.maxRetries,
         timeoutMs: runtimeConfig.timeoutMs,
+        baseUrl: runtimeConfig.baseUrl,
         workspace: opts.workspaceDir,
       })
     : new OpenClawCliRuntimeAdapter({
