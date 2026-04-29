@@ -1,6 +1,6 @@
 ---
 name: pd-runtime-v2
-description: Use this skill when manually triggering, verifying, or debugging Principles Disciple Runtime V2 pain diagnosis. It enforces the Runtime V2 entrypoints: after_tool_call failure for automatic diagnosis and `pd pain record` for manual diagnosis. It forbids writing `.state/.pain_flag` directly.
+description: Use this skill when manually triggering, verifying, or debugging Principles Disciple Runtime V2 pain diagnosis. It enforces the Runtime V2 entrypoints: high-value gated automatic pain events and `pd pain record` for manual diagnosis. It forbids writing `.state/.pain_flag` directly.
 disable-model-invocation: false
 ---
 
@@ -11,8 +11,9 @@ Use Runtime V2 for all pain diagnosis work. Do not use legacy pain flag files as
 ## Entry Points
 
 Automatic:
-- Tool failure in `after_tool_call` emits `pain_detected`.
-- `pain_detected` enters `PainSignalBridge`.
+- Tool failures first accumulate GFI/friction.
+- Only high-value episodes enter Runtime V2: high GFI, repeated same failure, severe semantic pain, LLM paralysis, or explicit manual pain.
+- Approved `pain_detected` events enter `PainSignalBridge`.
 - The bridge runs `DiagnosticianRunner`, commits candidates, and intakes them into the ledger.
 
 Manual:

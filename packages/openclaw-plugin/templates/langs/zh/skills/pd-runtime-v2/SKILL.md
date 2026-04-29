@@ -1,6 +1,6 @@
 ---
 name: pd-runtime-v2
-description: 当需要手动触发、验证或调试 Principles Disciple Runtime V2 痛苦诊断时使用。本技能强制使用 Runtime V2 入口：自动入口是 after_tool_call 失败，手动入口是 `pd pain record`。禁止直接写 `.state/.pain_flag`。
+description: 当需要手动触发、验证或调试 Principles Disciple Runtime V2 痛苦诊断时使用。本技能强制使用 Runtime V2 入口：自动入口是高价值门控痛苦事件，手动入口是 `pd pain record`。禁止直接写 `.state/.pain_flag`。
 disable-model-invocation: false
 ---
 
@@ -11,8 +11,9 @@ disable-model-invocation: false
 ## 入口
 
 自动入口：
-- `after_tool_call` 中的工具失败会发出 `pain_detected`。
-- `pain_detected` 进入 `PainSignalBridge`。
+- 工具失败先累计 GFI/摩擦。
+- 只有高价值 episode 才进入 Runtime V2：高 GFI、重复同类失败、严重语义痛苦、LLM paralysis，或明确手动 pain。
+- 通过门控的 `pain_detected` 进入 `PainSignalBridge`。
 - Bridge 调用 `DiagnosticianRunner`，提交 candidate，并 intake 到 ledger。
 
 手动入口：

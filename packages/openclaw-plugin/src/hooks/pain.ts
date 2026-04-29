@@ -13,6 +13,7 @@ import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPlugi
 import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
 import { createPainSignalBridge, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
+import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 
 /**
  * Interface for tool parameters to avoid 'any'
@@ -87,6 +88,7 @@ export function handleAfterToolCall(
   const sessionId = ctx.sessionId || 'unknown';
   const sessionState = ctx.sessionId ? getSession(ctx.sessionId) : undefined;
   const gfiBefore = sessionState?.currentGfi ?? 0;
+  let latestFailureState: SessionState | undefined;
   const params = event.params as ToolParams;
 
   // Load profile once (with 1MB size guard) — used by both failure and legacy risky-write paths
@@ -167,6 +169,7 @@ export function handleAfterToolCall(
     
     const deltaF = config.get('scores.tool_failure_friction') || 30;
     const updatedState = trackFriction(sessionId, deltaF, hash, effectiveWorkspaceDir, { source: 'tool_failure' });
+    latestFailureState = updatedState;
     
     // ── Trust Engine: Record failure ──
      
@@ -313,10 +316,32 @@ export function handleAfterToolCall(
   const isRisk = isRisky(relPath, profile.risk_paths);
   const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, effectiveWorkspaceDir);
   const traceId = createTraceId();
+  const diagnosticGate = evaluatePainDiagnosticGate({
+    source: 'tool_failure',
+    score: painScore,
+    currentGfi: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.currentGfi ?? 0,
+    consecutiveErrors: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.consecutiveErrors ?? 0,
+    isRisky: isRisk,
+    errorHash: latestFailureState?.lastErrorHash,
+    sessionId,
+    thresholds: {
+      painTrigger: config.get('thresholds.pain_trigger') || 40,
+      highSeverity: config.get('severity_thresholds.high') || 70,
+      repeatedFailure: config.get('thresholds.stuck_loops_trigger') || 4,
+    },
+  });
 
-  // Record to trajectory FIRST so we get the real auto-increment ID.
-  // This ID propagates through the pain flag → evolution task → principle,
-  // so the compiler can later resolve derivedFromPainIds correctly.
+  if (!diagnosticGate.shouldDiagnose) {
+    SystemLogger.log(
+      effectiveWorkspaceDir,
+      'PAIN_DIAGNOSE_SKIPPED',
+      `Tool failure recorded as friction only: ${diagnosticGate.detail}; tool=${event.toolName}; path=${relPath}`,
+    );
+    return;
+  }
+
+  // Record to trajectory before Runtime V2 diagnosis so the compiler can later
+  // resolve derivedFromPainIds to the originating failed action.
   wctx.trajectory?.recordPainEvent({
     sessionId,
     source: 'tool_failure',
@@ -397,7 +422,7 @@ export function handleAfterToolCall(
       painId: createPainId(sessionId),
       painType: 'tool_failure',
       source: event.toolName,
-      reason: `Tool ${event.toolName} failed on ${relPath}`,
+      reason: `Tool ${event.toolName} failed on ${relPath}; diagnosticGate=${diagnosticGate.reason}`,
       score: painScore,
       sessionId,
       traceId,
