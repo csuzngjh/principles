@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.8
 milestone_name: M9 — PiAi Runtime Adapter
-status: SHIPPED — M9 complete: PR #412 (m9-05 Real UAT PASS, 8/8 requirements)
-last_updated: "2026-04-29"
-last_activity: "2026-04-29 -- M9 shipped: PR #412 - xiaomi-coding/mimo-v2.5-pro real UAT + abstractedPrinciple 40->200 fix + candidate intake sourceRecommendationJson priority
+status: completed
+last_updated: "2026-04-29T11:37:55.720Z"
+last_activity: "2026-04-29 -- M9 shipped: PR #412 — xiaomi-coding/mimo-v2.5-pro real UAT"
 progress:
   total_phases: 80
   completed_phases: 71
   total_plans: 139
   completed_plans: 148
-  percent: 89
+  percent: 100
 ---
 
 # Project State: Principles
@@ -61,6 +61,7 @@ pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (p
 **M9 依赖：** M8 (pain signal bridge + single path cutover)
 
 **Baseline (Frozen):**
+
 - v2.0 M1: Foundation Contracts — SHIPPED 2026-04-21
 - v2.1 M2: Task/Run State Core — SHIPPED 2026-04-22
 - v2.2 M3: History Retrieval + Context Build — SHIPPED 2026-04-23

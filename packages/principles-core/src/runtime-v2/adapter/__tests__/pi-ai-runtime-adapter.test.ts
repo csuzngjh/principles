@@ -13,6 +13,7 @@ import { PDRuntimeError } from '../../error-categories.js';
 // Mock @mariozechner/pi-ai at module level
 vi.mock('@mariozechner/pi-ai', () => ({
   getModel: vi.fn(),
+  getProviders: vi.fn(() => ['openrouter', 'anthropic', 'openai', 'google']),
   complete: vi.fn(),
 }));
 
@@ -44,11 +45,37 @@ const VALID_DIAGNOSIS = {
   confidence: 0.9,
 };
 
-function makeAssistantMessage(text: string) {
+function makeAssistantMessage(text: string, overrides: Record<string, unknown> = {}) {
   return {
     content: [{ type: 'text' as const, text }],
     role: 'assistant' as const,
+    stopReason: 'stop' as const,
+    api: 'openai-completions',
+    provider: 'openrouter',
+    model: 'anthropic/claude-sonnet-4',
+    usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    timestamp: Date.now(),
+    ...overrides,
   };
+}
+
+/** Create an AssistantMessage that resolved with stopReason:'error'. */
+function makeErrorResponse(errorMessage: string, overrides: Record<string, unknown> = {}) {
+  return makeAssistantMessage('', {
+    stopReason: 'error',
+    errorMessage,
+    content: [],
+    ...overrides,
+  });
+}
+
+/** Create an AssistantMessage that resolved with stopReason:'aborted'. */
+function makeAbortedResponse(errorMessage = 'The operation was aborted') {
+  return makeAssistantMessage('', {
+    stopReason: 'aborted',
+    errorMessage,
+    content: [],
+  });
 }
 
 function makeStartRunInput(overrides: Partial<StartRunInput> = {}): StartRunInput {
@@ -203,6 +230,46 @@ describe('PiAiRuntimeAdapter', () => {
       expect(health.degraded).toBe(true);
       expect(health.warnings.some(w => w.includes('timed out'))).toBe(true);
     });
+
+    it('returns healthy=false with degraded=true when complete resolves with stopReason:error + timeout message', async () => {
+      mockComplete.mockResolvedValueOnce(makeErrorResponse('Request timed out.'));
+
+      const adapter = makeAdapter();
+      const health = await adapter.healthCheck();
+
+      expect(health.healthy).toBe(false);
+      expect(health.degraded).toBe(true);
+      expect(health.warnings.some(w => w.includes('timed out'))).toBe(true);
+      // Must NOT say "no text content"
+      expect(health.warnings.every(w => !w.includes('no text content'))).toBe(true);
+    });
+
+    it('returns healthy=false with degraded=false when complete resolves with stopReason:error + auth error', async () => {
+      mockComplete.mockResolvedValueOnce(makeErrorResponse('401 Unauthorized'));
+
+      const adapter = makeAdapter();
+      const health = await adapter.healthCheck();
+
+      expect(health.healthy).toBe(false);
+      expect(health.degraded).toBe(false);
+      expect(health.warnings.some(w => w.includes('execution failed') || w.includes('401'))).toBe(true);
+      // Must NOT misclassify as "no text content"
+      expect(health.warnings.every(w => !w.includes('no text content'))).toBe(true);
+    });
+
+    it('respects config.timeoutMs for probe timeout', async () => {
+      // Capture the timeoutMs passed to complete
+      let capturedTimeoutMs: number | undefined = undefined;
+      mockComplete.mockImplementationOnce(async (_model: unknown, _ctx: unknown, opts: Record<string, unknown>) => {
+        capturedTimeoutMs = opts.timeoutMs as number;
+        return makeAssistantMessage('{"ok":true}');
+      });
+
+      const adapter = makeAdapter({ timeoutMs: 15_000 });
+      await adapter.healthCheck();
+
+      expect(capturedTimeoutMs).toBe(15_000);
+    });
   });
 
   // ── startRun() — success path ──
@@ -352,6 +419,60 @@ describe('PiAiRuntimeAdapter', () => {
         mockComplete.mockReset();
         mockComplete.mockRejectedValue(new Error('ECONNREFUSED'));
       }, { maxRetries: 1 });
+    });
+
+    it('throws PDRuntimeError("timeout") when complete resolves with stopReason:error + timeout message', async () => {
+      await expectStartRunError('timeout', () => {
+        mockComplete.mockReset();
+        mockComplete.mockResolvedValue(makeErrorResponse('Request timed out.'));
+      });
+    });
+
+    it('throws PDRuntimeError("execution_failed") when complete resolves with stopReason:error + 401 Unauthorized', async () => {
+      await expectStartRunError('execution_failed', () => {
+        mockComplete.mockReset();
+        mockComplete.mockResolvedValue(makeErrorResponse('401 Unauthorized'));
+      });
+    });
+
+    it('throws PDRuntimeError("timeout") when complete resolves with stopReason:aborted', async () => {
+      await expectStartRunError('timeout', () => {
+        mockComplete.mockReset();
+        mockComplete.mockResolvedValue(makeAbortedResponse());
+      });
+    });
+
+    it('retries resolved stopReason:error (execution_failed) before giving up', async () => {
+      // First call: resolves with error, second call: succeeds
+      mockComplete
+        .mockResolvedValueOnce(makeErrorResponse('503 Service Unavailable'))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ maxRetries: 2 });
+      const handle = await adapter.startRun(makeStartRunInput());
+
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+      expect(handle.runId).toBeTruthy();
+    });
+
+    it('RunStatus.reason includes bounded errorMessage from resolved-error response', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockResolvedValue(makeErrorResponse('401 Unauthorized: invalid API key'));
+
+      const adapter = makeAdapter({ maxRetries: 0 });
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch {
+        // startRun throws, but internally run state should have the reason
+      }
+
+      // Telemetry should include the error message
+      const failedEvent = findTelemetryEvent('runtime_invocation_failed');
+      expect(failedEvent).toBeDefined();
+      const payload = failedEvent?.payload as Record<string, unknown>;
+      expect(payload.errorCategory).toBe('execution_failed');
+      expect(typeof payload.errorMessage).toBe('string');
+      expect((payload.errorMessage as string).includes('401')).toBe(true);
     });
   });
 

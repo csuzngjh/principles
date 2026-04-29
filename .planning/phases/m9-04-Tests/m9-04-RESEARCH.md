@@ -481,7 +481,7 @@ describe('E2E m9 — PainSignalBridge full chain with PiAiRuntimeAdapter', () =>
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should m9-adapter-integration.test.ts also test failure paths?**
    - Unit tests already cover success/failure for the adapter in isolation

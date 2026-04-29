@@ -10,7 +10,7 @@
 - ✅ **v2.5 M6** — Production Runtime Adapter: OpenClaw CLI Diagnostician — SHIPPED 2026-04-25
 - ✅ **v2.6 M7** — Principle Candidate Intake — SHIPPED 2026-04-27
 - ✅ **v2.7 M8** — Pain Signal → Principle Single Path Cutover — SHIPPED 2026-04-28
-- 🚧 **v2.8 M9** — PiAi Runtime Adapter (Default Diagnostician Runtime) — In Progress
+- ✅ **v2.8 M9** — PiAi Runtime Adapter (Default Diagnostician Runtime) — SHIPPED 2026-04-29
 
 ## Phases
 
@@ -23,26 +23,32 @@
 
 </details>
 
-### 🚧 v2.8 M9 — PiAi Runtime Adapter (Default Diagnostician Runtime) — In Progress
+### v2.8 M9 — PiAi Runtime Adapter (Default Diagnostician Runtime) — SHIPPED 2026-04-29
 
 **Pipeline:**
 pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (pi-ai complete) → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
 
 **Phases:**
 
-- [x] **m9-01**: PiAiRuntimeAdapter Core (RS-01~02, AD-01~15) — 实现 PDRuntimeAdapter 接口 + pi-ai complete 调用 + DiagnosticianOutputV1 验证 — completed 2026-04-29
-- [ ] **m9-02**: Policy + Factory Integration (PL-01~03, FC-01~04) — workflows.yaml policy 扩展 + PainSignalRuntimeFactory 选择 runtime
-- [ ] **m9-03**: CLI Commands (CLI-01~04) — pd runtime probe --runtime pi-ai, pd diagnose run --runtime pi-ai, pd pain record policy-driven — **2 plans, 2 waves**
+- [x] **m9-01**: PiAiRuntimeAdapter Core — completed 2026-04-29
+- [x] **m9-03-01**: CLI probe for pi-ai — completed 2026-04-29
+- [x] **m9-03-02**: diagnose run pi-ai + resolveRuntimeConfig — completed 2026-04-29
+- [x] **m9-04**: Tests (m9-adapter-integration.test.ts + m9-e2e.test.ts) — completed 2026-04-29
+- [x] **m9-05**: Real UAT with xiaomi-coding/mimo-v2.5-pro — completed 2026-04-29 (PR #412)
 
-  Plans:
-  - [ ] m9-03-01-PLAN.md — Extend probeRuntime + pd runtime probe for pi-ai (Wave 1)
-  - [ ] m9-03-02-PLAN.md — Add pi-ai to diagnose + export resolveRuntimeConfig (Wave 2)
+**Key accomplishment:** PiAiRuntimeAdapter with xiaomi-coding provider as default diagnostician runtime, replacing openclaw-cli as the default for pain→principle pipeline.
 
-  Cross-cutting constraints:
-  - CLI flags (--provider, --model, --apiKeyEnv, --maxRetries, --timeoutMs) used in both plans
-  - PiAiRuntimeAdapter config pattern shared across probe and diagnose
-- [ ] **m9-04**: Tests (TEST-01~06) — mock success/failure/timeout/invalid-json, probe, E2E pain→ledger
-- [ ] **m9-05**: Real UAT (UAT-01~08) — OPENROUTER_API_KEY 真实验证 + 幂等性
+**Hard Boundaries:**
+- 不引入 @mariozechner/pi-agent-core
+- 不支持工具调用
+- 不支持 OpenClaw session/gateway/plugin hooks
+- 不改 OpenClawCliRuntimeAdapter（保留为 alternative）
+- 不修改 candidate/ledger 主链路
+
+**LOCKED Decisions:**
+- LOCKED-01: PiAiRuntimeAdapter is direct LLM completion only
+- LOCKED-02: M9 success = ledger probation entry exists
+- LOCKED-03: workflows.yaml is runtime SSOT
 
 **Dependencies:**
 - m9-01 → m9-02 (factory needs adapter)
@@ -66,4 +72,4 @@ pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (p
 
 ---
 
-_Last updated: 2026-04-29 after M9 milestone start_
+_Last updated: 2026-04-29 after M9 shipped_

@@ -70,6 +70,8 @@ export interface FunnelPolicy {
   apiKeyEnv?: string;
   /** Maximum retry attempts for transient LLM failures. */
   maxRetries?: number;
+  /** Custom base URL for OpenAI-compatible providers not in pi-ai's built-in registry. */
+  baseUrl?: string;
 }
 
 /**
