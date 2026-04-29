@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.8
 milestone_name: M9 — PiAi Runtime Adapter
 status: executing
-last_updated: "2026-04-29T01:55:52.616Z"
-last_activity: 2026-04-29 -- M9 milestone initialized
+last_updated: "2026-04-29T03:30:00.000Z"
+last_activity: 2026-04-29 -- m9-02 Policy+Factory Integration complete
 progress:
   total_phases: 80
   completed_phases: 66
@@ -23,10 +23,10 @@ progress:
 
 ## Current Position
 
-Phase: M9 initialization
-Plan: Requirements + Roadmap pending
-Status: Executing — milestone scope defined, requirements and roadmap to be created
-Last activity: 2026-04-29 -- M9 milestone initialized
+Phase: m9-02 complete
+Plan: 1/1 complete
+Status: Executing — policy-driven runtime adapter selection shipped
+Last activity: 2026-04-29 -- m9-02 Policy+Factory Integration complete (7/7 requirements verified)
 
 ## M9 Pipeline
 
