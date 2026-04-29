@@ -513,7 +513,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   }
 
   async fetchArtifacts(runId: string): Promise<RuntimeArtifactRef[]> {
-    this.runs.get(runId);
+    // Artifact refs are not yet exposed by the pi-ai adapter.
+    // The DiagnosticianRunner stores artifacts via committer.writeArtifact() directly.
+    // Validate runId exists for API consistency with other methods.
+    if (!this.runs.has(runId)) {
+      throw new PDRuntimeError('input_invalid', `Run '${runId}' not found`);
+    }
     return [];
   }
 
