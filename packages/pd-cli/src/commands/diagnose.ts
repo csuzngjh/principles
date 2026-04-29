@@ -176,19 +176,19 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       // D-06: flags + policy fallback
       // D-01: have flag → use flag, no flag → read from policy
       const stateDir = `${workspaceDir}/.state`;
-      let policyConfig: ReturnType<typeof resolveRuntimeConfig>;
+      let policyConfig: ReturnType<typeof resolveRuntimeConfig> | null = null;
       try {
         policyConfig = resolveRuntimeConfig(stateDir);
       } catch {
-        policyConfig = { runtimeKind: 'pi-ai', timeoutMs: 300_000, agentId: 'main' };
+        // Fall through — will be overridden by flags or error
       }
 
-      const provider = opts.provider ?? policyConfig.provider;
-      const model = opts.model ?? policyConfig.model;
-      const apiKeyEnv = opts.apiKeyEnv ?? policyConfig.apiKeyEnv;
-      const baseUrl = opts.baseUrl ?? policyConfig.baseUrl;
-      const maxRetries = opts.maxRetries ?? policyConfig.maxRetries;
-      const effectiveTimeoutMs = opts.timeoutMs ?? policyConfig.timeoutMs;
+      const provider = opts.provider ?? policyConfig?.provider;
+      const model = opts.model ?? policyConfig?.model;
+      const apiKeyEnv = opts.apiKeyEnv ?? policyConfig?.apiKeyEnv;
+      const baseUrl = opts.baseUrl ?? policyConfig?.baseUrl;
+      const maxRetries = opts.maxRetries ?? policyConfig?.maxRetries;
+      const effectiveTimeoutMs = opts.timeoutMs ?? policyConfig?.timeoutMs;
 
       // D-11: validate config — missing fields + fix suggestion
       const missing: string[] = [];
@@ -211,10 +211,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         process.exit(1);
       }
 
-      // After validation: all fields are defined (process.exit never returns)
-      const validProvider = provider!;
-      const validModel = model!;
-      const validApiKeyEnv = apiKeyEnv!;
+      // After validation: all fields are confirmed non-null
+      const validProvider: string = provider as string;
+      const validModel: string = model as string;
+      const validApiKeyEnv: string = apiKeyEnv as string;
 
       // D-09: validate env var exists
       if (!process.env[validApiKeyEnv]) {
