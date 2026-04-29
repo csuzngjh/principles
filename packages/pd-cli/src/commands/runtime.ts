@@ -3,6 +3,7 @@
  *
  * Usage:
  *   pd runtime probe --runtime openclaw-cli [--openclaw-local|--openclaw-gateway] [--json]
+ *   pd runtime probe --runtime pi-ai --provider <name> --model <id> --apiKeyEnv <name> [--baseUrl <url>] [--json]
  *
  * HG-01 HARD GATE: This command must deliver.
  */
@@ -14,6 +15,12 @@ interface RuntimeProbeOptions {
   openclawLocal?: boolean;
   openclawGateway?: boolean;
   agent?: string;
+  provider?: string;
+  model?: string;
+  apiKeyEnv?: string;
+  baseUrl?: string;
+  maxRetries?: number;
+  timeoutMs?: number;
   json?: boolean;
 }
 
@@ -30,15 +37,9 @@ function formatCapabilitiesTable(capabilities: Record<string, unknown>): string 
 }
 
 /**
- * pd runtime probe --runtime openclaw-cli [--openclaw-local|--openclaw-gateway] [--json]
+ * openclaw-cli probe branch (existing behavior, unchanged).
  */
-export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<void> {
-  // Validate runtime kind (HG-01: only openclaw-cli supported)
-  if (opts.runtime !== 'openclaw-cli') {
-    console.error(`error: 'probe' command only supports --runtime openclaw-cli (got '${opts.runtime}')`);
-    process.exit(1);
-  }
-
+async function handleOpenClawProbe(opts: RuntimeProbeOptions): Promise<void> {
   // Validate mutually exclusive flags (HG-03)
   if (opts.openclawLocal && opts.openclawGateway) {
     console.error('error: --openclaw-local and --openclaw-gateway are mutually exclusive');
@@ -124,4 +125,125 @@ export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<voi
     }
     process.exit(1);
   }
+}
+
+/**
+ * pi-ai probe branch — validates flags, calls probeRuntime, formats output.
+ */
+async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
+  // D-01: flags are required for pi-ai probe (no policy fallback for probe)
+  if (!opts.provider) {
+    console.error("error: --provider is required for --runtime pi-ai (e.g., --provider openrouter)");
+    process.exit(1);
+  }
+  if (!opts.model) {
+    console.error("error: --model is required for --runtime pi-ai (e.g., --model anthropic/claude-sonnet-4)");
+    process.exit(1);
+  }
+  if (!opts.apiKeyEnv) {
+    console.error("error: --apiKeyEnv is required for --runtime pi-ai (e.g., --apiKeyEnv OPENROUTER_API_KEY)");
+    process.exit(1);
+  }
+
+  // D-09: check env var exists before calling probeRuntime
+  if (!process.env[opts.apiKeyEnv]) {
+    console.error(`error: environment variable '${opts.apiKeyEnv}' is not set`);
+    process.exit(1);
+  }
+
+  try {
+    const result = await probeRuntime({
+      runtimeKind: 'pi-ai',
+      provider: opts.provider,
+      model: opts.model,
+      apiKeyEnv: opts.apiKeyEnv,
+      baseUrl: opts.baseUrl,
+      maxRetries: opts.maxRetries,
+      timeoutMs: opts.timeoutMs ?? 60_000, // D-04: probe timeout 60s
+    });
+
+    // Narrow to pi-ai result (TypeScript can't infer from input args alone)
+    if (result.runtimeKind !== 'pi-ai') {
+      throw new Error('unexpected: probeRuntime returned non-pi-ai result');
+    }
+
+    // Determine status from health
+    let exitCode = 0;
+    const status = !result.health.healthy ? 'failed'
+      : result.health.degraded ? 'degraded'
+      : 'succeeded';
+    if (!result.health.healthy) exitCode = 1;
+
+    if (opts.json) {
+      console.log(JSON.stringify({
+        status,
+        runtimeKind: result.runtimeKind,
+        provider: result.provider,
+        model: result.model,
+        baseUrlPresent: !!opts.baseUrl,
+        health: result.health,
+        capabilities: result.capabilities,
+      }, null, 2));
+      if (exitCode !== 0) process.exit(exitCode);
+      return;
+    }
+
+    // D-05: human-readable output
+    console.log(`\nRuntime: ${result.runtimeKind}`);
+    console.log(`Provider: ${result.provider}`);
+    console.log(`Model:    ${result.model}`);
+    if (opts.baseUrl) console.log(`BaseUrl:  ${opts.baseUrl}`);
+    console.log(`Status:   ${status}`);
+    console.log('');
+    console.log('Health:');
+    console.log(`  healthy:       ${result.health.healthy ? 'yes' : 'no'}`);
+    console.log(`  degraded:      ${result.health.degraded ? 'yes' : 'no'}`);
+    if (result.health.warnings.length > 0) {
+      console.log('  warnings:');
+      for (const w of result.health.warnings) {
+        console.log(`    - ${w}`);
+      }
+    }
+    console.log(`  lastCheckedAt: ${result.health.lastCheckedAt}`);
+    console.log('');
+    console.log('Capabilities:');
+    console.log(formatCapabilitiesTable(result.capabilities as Record<string, unknown>));
+    console.log('');
+
+    if (exitCode !== 0) process.exit(exitCode);
+  } catch (error: unknown) {
+    // D-10: test complete failure → error category + raw error
+    const message = error instanceof Error ? error.message : String(error);
+    let errorCategory = 'execution_failed';
+    if (error instanceof PDRuntimeError) {
+      errorCategory = error.category;
+    }
+    if (opts.json) {
+      console.log(JSON.stringify({
+        status: 'failed',
+        errorCategory,
+        message,
+        runtimeKind: 'pi-ai',
+      }, null, 2));
+    } else {
+      console.error(`error: ${message} (${errorCategory})`);
+    }
+    process.exit(1);
+  }
+}
+
+/**
+ * pd runtime probe — dispatches to openclaw-cli or pi-ai branch.
+ */
+export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<void> {
+  if (opts.runtime === 'openclaw-cli') {
+    return handleOpenClawProbe(opts);
+  }
+
+  if (opts.runtime === 'pi-ai') {
+    return handlePiAiProbe(opts);
+  }
+
+  console.error(`error: unsupported --runtime '${opts.runtime}' (supported: openclaw-cli, pi-ai)`);
+  process.exit(1);
 }

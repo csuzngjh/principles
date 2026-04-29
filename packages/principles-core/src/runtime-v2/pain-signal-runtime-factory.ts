@@ -20,9 +20,13 @@ import { SqliteContextAssembler } from './store/sqlite-context-assembler.js';
 import { SqliteHistoryQuery } from './store/sqlite-history-query.js';
 import { SqliteConnection } from './store/sqlite-connection.js';
 import { OpenClawCliRuntimeAdapter } from './adapter/openclaw-cli-runtime-adapter.js';
+import { PiAiRuntimeAdapter } from './adapter/pi-ai-runtime-adapter.js';
+import { getProviders } from '@mariozechner/pi-ai';
+import type { KnownProvider } from '@mariozechner/pi-ai';
 import { DefaultDiagnosticianValidator } from './runner/default-validator.js';
 import { storeEmitter } from './store/event-emitter.js';
 import { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
+import type { RuntimeKind, PDRuntimeAdapter } from './runtime-protocol.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 
 export interface PainSignalRuntimeFactoryOptions {
@@ -39,31 +43,96 @@ const DIAGNOSTIC_FUNNEL_ID = 'pd-runtime-v2-diagnosis';
 /** Defaults when no funnel policy is defined. */
 const DEFAULT_TIMEOUT_MS = 300_000;
 
+/** Resolved runtime configuration from funnel policy. */
+export interface RuntimeConfig {
+  runtimeKind: RuntimeKind;
+  timeoutMs: number;
+  agentId: string;
+  provider?: string;
+  model?: string;
+  apiKeyEnv?: string;
+  maxRetries?: number;
+  /** Custom base URL for OpenAI-compatible providers not in pi-ai's built-in registry. */
+  baseUrl?: string;
+}
+
 /**
- * Resolve runner options from the pd-runtime-v2-diagnosis funnel policy.
- * Falls back to DEFAULT_TIMEOUT_MS if no funnel is found.
+ * Resolve runtime configuration from the pd-runtime-v2-diagnosis funnel policy.
+ * Falls back to defaults if no funnel is found.
  * Silently ignores missing files and schema errors (factory should not crash
  * if workflows.yaml is absent or malformed).
  */
-function resolveRunnerOptions(stateDir: string): { timeoutMs: number; agentId: string } {
+export function resolveRuntimeConfig(stateDir: string): RuntimeConfig {
   try {
     const loader = new WorkflowFunnelLoader(stateDir);
     const funnel = loader.getFunnel(DIAGNOSTIC_FUNNEL_ID);
     if (!funnel || !funnel.policy) {
-      return { timeoutMs: DEFAULT_TIMEOUT_MS, agentId: 'main' };
+      return {
+        runtimeKind: 'pi-ai',
+        timeoutMs: DEFAULT_TIMEOUT_MS,
+        agentId: 'main',
+      };
     }
+    const {policy} = funnel;
     return {
-      timeoutMs: funnel.policy.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      agentId: 'main', // agentId resolution reserved for future stage-level policy
+      runtimeKind: policy.runtimeKind ?? 'pi-ai',
+      timeoutMs: policy.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      agentId: 'main',
+      provider: policy.provider,
+      model: policy.model,
+      apiKeyEnv: policy.apiKeyEnv,
+      maxRetries: policy.maxRetries,
+      baseUrl: policy.baseUrl,
     };
   } catch (err) {
-    // Best-effort: do not crash factory on funnel loading errors
     console.warn(`[PainSignalRuntimeFactory] Funnel loading failed for ${DIAGNOSTIC_FUNNEL_ID}, using defaults: ${String(err)}`);
-    return { timeoutMs: DEFAULT_TIMEOUT_MS, agentId: 'main' };
+    return {
+      runtimeKind: 'pi-ai',
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      agentId: 'main',
+    };
   }
 }
 
-// Per-workspace bridge cache — same lifetime as process
+/**
+ * Validate runtime configuration before adapter creation (D-02).
+ * Throws plain Error (not PDRuntimeError) for config issues (D-06).
+ * Includes migration guidance for D-05 breaking change.
+ */
+export function validateRuntimeConfig(config: RuntimeConfig): void {
+  if (config.runtimeKind === 'pi-ai') {
+    const missing: string[] = [];
+    if (!config.provider) missing.push('provider');
+    if (!config.model) missing.push('model');
+    if (!config.apiKeyEnv) missing.push('apiKeyEnv');
+
+    // Non-built-in providers require baseUrl
+    if (config.provider) {
+      const knownProviders = getProviders();
+      if (!knownProviders.includes(config.provider as KnownProvider) && !config.baseUrl) {
+        missing.push('baseUrl');
+      }
+    }
+
+    if (missing.length > 0) {
+      throw new Error(
+        `[PainSignalRuntimeFactory] Missing required fields for runtimeKind 'pi-ai': ${missing.join(', ')}. ` +
+        `Add these fields to your workflows.yaml pd-runtime-v2-diagnosis funnel policy. ` +
+        `Example:\n` +
+        `  policy:\n` +
+        `    runtimeKind: pi-ai\n` +
+        `    provider: xiaomi-coding\n` +
+        `    model: mimo-v2.5-pro\n` +
+        `    apiKeyEnv: ANTHROPIC_AUTH_TOKEN\n` +
+        `    baseUrl: https://token-plan-cn.xiaomimimo.com/v1\n` +
+        `\nIf you want to use the OpenClaw CLI runtime instead, set runtimeKind: openclaw-cli`,
+      );
+    }
+  }
+}
+
+// Per-workspace+runtime bridge cache — same lifetime as process
+// Key format: `${workspaceDir}:${runtimeKind}` (D-03)
 const bridgeCache = new Map<string, PainSignalBridge>();
 
 /**
@@ -77,7 +146,10 @@ const bridgeCache = new Map<string, PainSignalBridge>();
 export async function createPainSignalBridge(
   opts: PainSignalRuntimeFactoryOptions,
 ): Promise<PainSignalBridge> {
-  const cached = bridgeCache.get(opts.workspaceDir);
+  const runtimeConfig = resolveRuntimeConfig(opts.stateDir);
+  validateRuntimeConfig(runtimeConfig);
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}`;
+  const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
   const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
@@ -94,12 +166,20 @@ export async function createPainSignalBridge(
     stateManager.runStore,
   );
 
-  const runtimeAdapter = new OpenClawCliRuntimeAdapter({
-    runtimeMode: 'local',
-    workspaceDir: opts.workspaceDir,
-  });
-
-  const { timeoutMs, agentId } = resolveRunnerOptions(opts.stateDir);
+  const runtimeAdapter: PDRuntimeAdapter = runtimeConfig.runtimeKind === 'pi-ai'
+    ? new PiAiRuntimeAdapter({
+        provider: String(runtimeConfig.provider),
+        model: String(runtimeConfig.model),
+        apiKeyEnv: String(runtimeConfig.apiKeyEnv),
+        maxRetries: runtimeConfig.maxRetries,
+        timeoutMs: runtimeConfig.timeoutMs,
+        baseUrl: runtimeConfig.baseUrl,
+        workspace: opts.workspaceDir,
+      })
+    : new OpenClawCliRuntimeAdapter({
+        runtimeMode: 'local',
+        workspaceDir: opts.workspaceDir,
+      });
 
   const runner = new DiagnosticianRunner(
     {
@@ -112,10 +192,10 @@ export async function createPainSignalBridge(
     },
     {
       owner: opts.owner ?? 'pain-signal-bridge',
-      runtimeKind: 'openclaw-cli',
+      runtimeKind: runtimeConfig.runtimeKind,
       pollIntervalMs: 5000,
-      timeoutMs,
-      agentId,
+      timeoutMs: runtimeConfig.timeoutMs,
+      agentId: runtimeConfig.agentId,
     },
   );
 
@@ -132,13 +212,14 @@ export async function createPainSignalBridge(
     autoIntakeEnabled: opts.autoIntakeEnabled ?? true,
   });
 
-  bridgeCache.set(opts.workspaceDir, bridge);
+  bridgeCache.set(cacheKey, bridge);
   return bridge;
 }
 
 /**
  * Invalidate the cached bridge for a workspace (for testing).
  */
-export function invalidatePainSignalBridge(workspaceDir: string): void {
-  bridgeCache.delete(workspaceDir);
+export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: string): void {
+  const effectiveKind = runtimeKind ?? 'pi-ai';
+  bridgeCache.delete(`${workspaceDir}:${effectiveKind}`);
 }

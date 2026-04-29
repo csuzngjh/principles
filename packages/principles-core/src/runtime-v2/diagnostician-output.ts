@@ -44,7 +44,9 @@ export const DiagnosticianRecommendationSchema = Type.Object({
   triggerPattern: Type.Optional(Type.String()),
   /** Action to take when pattern matches — required when kind is 'principle' */
   action: Type.Optional(Type.String()),
-  /** Highly abstracted principle (≤40 chars) — required when kind is 'principle' */
+  /** Highly abstracted principle (≤200 chars) — required when kind is 'principle'
+   * @see MAX_ABSTRACTED_PRINCIPLE_CHARS in runner/default-validator.ts
+   */
   abstractedPrinciple: Type.Optional(Type.String()),
 });
  

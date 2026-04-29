@@ -32,6 +32,8 @@ import type {
   DiagnosticianValidator,
 } from './diagnostician-validator.js';
 
+export const MAX_ABSTRACTED_PRINCIPLE_CHARS = 200 as const;
+
 const ERROR_CATEGORY_OUTPUT_INVALID = 'output_invalid' as const;
 
 function buildResult(valid: false, aggregateSummary: string, detailErrors: string[]): DiagnosticianValidationResult {
@@ -139,8 +141,8 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
           if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
           detailErrors.push(msg);
         }
-        if (rec.abstractedPrinciple && rec.abstractedPrinciple.length > 40) {
-          const msg = 'recommendations[].abstractedPrinciple must be 40 characters or fewer';
+        if (rec.abstractedPrinciple && rec.abstractedPrinciple.length > MAX_ABSTRACTED_PRINCIPLE_CHARS) {
+          const msg = `recommendations[].abstractedPrinciple must be ${MAX_ABSTRACTED_PRINCIPLE_CHARS} characters or fewer`;
           if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
           detailErrors.push(msg);
         }

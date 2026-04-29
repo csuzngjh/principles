@@ -1,94 +1,106 @@
-# Requirements: M8 Pain Signal → Principle Single Path Cutover
+# Requirements: M9 PiAi Runtime Adapter
 
-**Defined:** 2026-04-27
-**Core Value:** 把痛苦信号到原则账本的端到端链路切到 Runtime v2，删除旧 diagnostician 执行链路。只保留一条诊断链路（无 fallback），M8 成功终点必须是 PrincipleTreeLedger probation entry。
+**Defined:** 2026-04-29
+**Core Value:** PiAiRuntimeAdapter 成为 PD Runtime v2 默认 diagnostician runtime，绕过 OpenClaw CLI 直接调用 LLM，解决 m8-03 UAT 阻塞问题（main agent >300s）。
 
-## v2.7 M8 Requirements
+## v2.8 M9 Requirements
 
-### Legacy Code Map
+### Runtime Schema
 
-- [ ] **MAP-01**: 列出所有旧诊断链路文件、函数、测试、env flag、状态文件引用
-- [ ] **MAP-02**: 对每个引用标记分类：DELETE / REPLACE_WITH_RUNTIME_V2 / KEEP_NON_DIAGNOSTIC
-- [ ] **MAP-03**: 不误删 sleep reflection / keyword optimization 等非诊断功能（除非它们仅服务旧诊断链路）
-- [ ] **MAP-04**: Legacy map 必须先完成并确认，再动手实现
+- [ ] **RS-01**: RuntimeKindSchema 增加 `"pi-ai"` literal
+- [ ] **RS-02**: 类型系统正确推导，`kind()` 返回 `'pi-ai'`
 
-### 旧链路删除
+### PiAiRuntimeAdapter
 
-- [ ] **DEL-01**: 不再写/读 `.state/diagnostician_tasks.json`
-- [ ] **DEL-02**: 不再通过 heartbeat prompt 注入 `<diagnostician_task>`
-- [ ] **DEL-03**: 不再要求 LLM 写 `.evolution_complete_*` marker 文件
-- [ ] **DEL-04**: 不再要求 LLM 写 `.diagnostician_report_*.json`
-- [ ] **DEL-05**: 不再由 evolution-worker 轮询 marker/report 文件判断诊断完成
-- [ ] **DEL-06**: 不保留 `PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED` 等旧诊断开关
-- [ ] **DEL-07**: 不删除 sleep reflection / keyword optimization / 原则注入等非诊断功能
+- [ ] **AD-01**: 实现 PDRuntimeAdapter 接口所有方法：`kind()`, `getCapabilities()`, `healthCheck()`, `startRun()`, `pollRun()`, `cancelRun()`, `fetchOutput()`, `fetchArtifacts()`
+- [ ] **AD-02**: `getModel(provider, modelId)` 使用 `@mariozechner/pi-ai` 获取模型实例
+- [ ] **AD-03**: `complete(model, context, options?)` 调用 pi-ai complete，返回 AssistantMessage
+- [ ] **AD-04**: DiagnosticianOutputV1 验证 — LLM 响应必须符合 DiagnosticianOutputV1Schema
+- [ ] **AD-05**: `AbortSignal.timeout(timeoutMs)` 超时控制
+- [ ] **AD-06**: 构造函数接受配置：`{ provider, model, apiKeyEnv, maxRetries, timeoutMs, workspace }`
+- [ ] **AD-07**: apiKeyEnv 从环境变量读取 API key，不存在时 throw PDRuntimeError(runtime_unavailable)
+- [ ] **AD-08**: maxRetries 失败重试（指数退避），超过后 throw PDRuntimeError(execution_failed)
+- [ ] **AD-09**: startRun() 一次性执行：complete → validate → store output → return terminal RunHandle
+- [ ] **AD-10**: pollRun() 对已 terminal 的 run 直接返回 current status
+- [ ] **AD-11**: fetchOutput() 返回 stored StructuredRunOutput
+- [ ] **AD-12**: fetchArtifacts() 返回空数组（pi-ai 无 artifact 概念，output 在 fetchOutput 中）
+- [ ] **AD-13**: healthCheck() 验证 apiKeyEnv 存在 + pi-ai getModel 不抛异常
+- [ ] **AD-14**: getCapabilities() 返回 `{ streaming: false, cancellation: true, artifactDelivery: false }`
+- [ ] **AD-15**: Telemetry events: runtime_invocation_started, runtime_invocation_succeeded/failed
 
-### 单一诊断链路（无 fallback）
+### workflows.yaml Policy
 
-- [ ] **PATH-01**: pain signal → PD task/run store（SqliteTaskStore/SqliteRunStore）
-- [ ] **PATH-02**: task/run store → DiagnosticianRunner.startRun()
-- [ ] **PATH-03**: DiagnosticianRunner → OpenClawCliRuntimeAdapter → DiagnosticianOutputV1
-- [ ] **PATH-04**: DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → artifact + principle_candidate
-- [ ] **PATH-05**: principle_candidate → CandidateIntakeService → PrincipleTreeLedger probation entry
-- [ ] **PATH-06**: Candidate intake 是 happy path 的一部分（除非明确禁用调试）
+- [ ] **PL-01**: `pd-runtime-v2-diagnosis` funnel policy 增加字段：`runtimeKind`, `provider`, `model`, `apiKeyEnv`, `maxRetries`
+- [ ] **PL-02**: policy 字段有合理默认值（runtimeKind: 'openclaw-cli', provider: 'openrouter', model: 'anthropic/claude-sonnet-4', apiKeyEnv: 'OPENROUTER_API_KEY', maxRetries: 2）
+- [ ] **PL-03**: WorkflowFunnelLoader 正确解析新 policy 字段
 
-### Pain Signal Bridge（新链路入口）
+### PainSignalRuntimeFactory
 
-- [ ] **BRIDGE-01**: pain signal 被检测到后，创建 PD task/run 记录
-- [ ] **BRIDGE-02**: runner 成功后必须产生 artifact 和 pending candidate
-- [ ] **BRIDGE-03**: 自动执行 intake 生成 probation ledger entry（happy path 的一部分）
-- [ ] **BRIDGE-04**: 调试模式下 intake 可禁用（不阻断链路）
+- [ ] **FC-01**: 从 workflows.yaml policy 读取 runtimeKind
+- [ ] **FC-02**: runtimeKind === 'pi-ai' 时创建 PiAiRuntimeAdapter
+- [ ] **FC-03**: runtimeKind === 'openclaw-cli'（或未指定）时创建 OpenClawCliRuntimeAdapter（保持现有行为）
+- [ ] **FC-04**: 不再硬编码 openclaw-cli，policy 驱动
 
-### CLI 可观测
+### CLI
 
-- [ ] **CLI-01**: `pd diagnose run` — 验证新链路
-- [ ] **CLI-02**: `pd candidate list / show` — 验证 candidate 创建
-- [ ] **CLI-03**: `pd candidate intake` — 验证 ledger entry 生成
-- [ ] **CLI-04**: 新增或复用 pain trigger 验证命令，能模拟 pain signal 触发完整链路
+- [ ] **CLI-01**: `pd runtime probe --runtime pi-ai` — 验证 pi-ai runtime 可用
+- [ ] **CLI-02**: `pd diagnose run --runtime pi-ai` — 使用 pi-ai 执行诊断
+- [ ] **CLI-03**: `pd pain record` 默认走 workflows.yaml policy（读取 runtimeKind）
+- [ ] **CLI-04**: CLI 正确传递 provider/model/apiKeyEnv 等配置到 PiAiRuntimeAdapter
 
-### E2E 签收（真实 workspace）
+### Tests
 
-- [ ] **E2E-01**: workspace: `D:\.openclaw\workspace`，runtime: openclaw-cli，agent: main
-- [ ] **E2E-02**: 验证链路：写入 pain signal → Runtime v2 自动诊断 → artifact 创建 → candidate 创建 → intake → ledger probation entry
-- [ ] **E2E-03**: 不允许只用 test-double 作为最终签收
+- [ ] **TEST-01**: mock complete success — 验证 DiagnosticianOutputV1 正确生成
+- [ ] **TEST-02**: mock complete failure — 验证 PDRuntimeError(execution_failed) + maxRetries
+- [ ] **TEST-03**: mock complete timeout — 验证 PDRuntimeError(timeout)
+- [ ] **TEST-04**: mock complete invalid-json — 验证 PDRuntimeError(output_invalid)
+- [ ] **TEST-05**: probe success/failure — 验证 healthCheck 行为
+- [ ] **TEST-06**: E2E pain→artifact→candidate→ledger — 完整链路验证（mock pi-ai）
 
-### 删除后验证
+### Real UAT
 
-- [ ] **VERIFY-01**: `rg "diagnostician_tasks\.json|evolution_complete_|\.diagnostician_report_|PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED|<diagnostician_task>" packages` 必须没有旧诊断执行路径残留
-- [ ] **VERIFY-02**: 如果有残留引用，解释为什么不是执行路径
-- [ ] **VERIFY-03**: `npm run verify:merge` 必须通过
+- [ ] **UAT-01**: OPENROUTER_API_KEY 存在验证
+- [ ] **UAT-02**: `pd runtime probe --runtime pi-ai` 返回 healthy
+- [ ] **UAT-03**: `pd pain record --runtime pi-ai` 执行成功
+- [ ] **UAT-04**: assert status === 'succeeded'
+- [ ] **UAT-05**: assert artifactId 存在
+- [ ] **UAT-06**: assert candidateIds.length > 0
+- [ ] **UAT-07**: assert ledgerEntryIds.length > 0
+- [ ] **UAT-08**: 幂等性验证 — 重复执行不产生重复 ledger entry
 
 ## Non-Goals
 
 | Feature | Reason |
 |---------|--------|
-| 多 runtime 适配器套件 | M8 只需要 OpenClawCliRuntimeAdapter |
-| Legacy fallback | 单一链路，不做 fallback |
+| 多 runtime 适配器套件 | M9 只新增 PiAiRuntimeAdapter |
+| OpenClaw agent/tool 调用 | LOCKED-01: direct LLM completion only |
 | 新 UI/dashboard | SDK scope 外 |
-| principle promotion | 下游 milestone |
-| 不删除非诊断功能 | 只删旧诊断链路相关的代码 |
+| pi-agent-core 依赖 | Hard boundary: 不引入 |
+| 修改 OpenClawCliRuntimeAdapter | 保留为 alternative |
+| 修改 candidate/ledger 主链路 | 除非测试证明有 bug |
 
 ## Hard Gates
 
 | ID | Description |
 |----|-------------|
-| HG-1 | M8 成功终点必须是 PrincipleTreeLedger probation entry（不是 pending candidate） |
-| HG-2 | Candidate intake 是 happy path 的一部分 |
-| HG-3 | Legacy deletion 只针对旧诊断执行路径，不误删其他功能 |
-| HG-4 | Legacy code map 必须先完成并确认，再动手实现 |
-| HG-5 | E2E 签收必须用真实 workspace（D:\.openclaw\workspace） |
+| HG-1 | PiAiRuntimeAdapter 实现 PDRuntimeAdapter 完整接口 |
+| HG-2 | workflows.yaml policy 是 runtime 配置的唯一来源（LOCKED-03） |
+| HG-3 | M9 成功终点是 ledger probation entry 存在（LOCKED-02） |
+| HG-4 | 不引入 pi-agent-core，不支持 tool calling（Hard boundary） |
+| HG-5 | Real UAT 必须用真实 OPENROUTER_API_KEY 执行 |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MAP-01~04 | m8-01 | Pending |
-| DEL-01~07 | m8-01 | Pending |
-| PATH-01~06 | m8-01 | Pending |
-| BRIDGE-01~04 | m8-01 | Pending |
-| CLI-01~04 | m8-01 | Pending |
-| E2E-01~03 | m8-01 | Pending |
-| VERIFY-01~03 | m8-01 | Pending |
+| RS-01~02 | m9-01 | Pending |
+| AD-01~15 | m9-01 | Pending |
+| PL-01~03 | m9-02 | Pending |
+| FC-01~04 | m9-02 | Pending |
+| CLI-01~04 | m9-03 | Pending |
+| TEST-01~06 | m9-04 | Pending |
+| UAT-01~08 | m9-05 | Pending |
 
 ---
-*Requirements defined: 2026-04-27*
-*Last updated: 2026-04-27 after M8 milestone start*
+*Requirements defined: 2026-04-29*
+*Last updated: 2026-04-29 after M9 milestone start*
