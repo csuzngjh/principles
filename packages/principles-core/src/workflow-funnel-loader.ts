@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import yaml from 'js-yaml';
+import type { RuntimeKind } from './runtime-v2/runtime-protocol.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -58,6 +59,19 @@ export interface FunnelPolicy {
     emitEvents?: string[];
     logLevel?: 'debug' | 'info' | 'warn' | 'error';
   };
+  // ── M9: Runtime configuration (D-01) ──────────────────────────────────
+  /** Runtime adapter kind. Default: 'pi-ai' (D-04). */
+  runtimeKind?: RuntimeKind;
+  /** LLM provider name (e.g., 'openrouter', 'anthropic'). Required for pi-ai. */
+  provider?: string;
+  /** Model ID (e.g., 'anthropic/claude-sonnet-4'). Required for pi-ai. */
+  model?: string;
+  /** Name of the environment variable containing the API key. Required for pi-ai. */
+  apiKeyEnv?: string;
+  /** Maximum retry attempts for transient LLM failures. */
+  maxRetries?: number;
+  /** Custom base URL for OpenAI-compatible providers not in pi-ai's built-in registry. */
+  baseUrl?: string;
 }
 
 /**
