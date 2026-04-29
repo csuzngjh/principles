@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.8
 milestone_name: M9 — PiAi Runtime Adapter
-status: executing
-last_updated: "2026-04-29T04:58:47.723Z"
-last_activity: 2026-04-29 -- m9-03 CLI Commands planned (2 plans, verification passed)
+status: READY — m9-04 Tests shipped: 3/3 tests passing (m9-adapter-integration.test.ts + m9-e2e.test.ts)
+last_updated: "2026-04-29T10:34:39.106Z"
+last_activity: "2026-04-29 -- m9-03-01 complete: baseUrl first-class field, probeRuntime pi-ai, pd runtime probe --baseUrl"
 progress:
   total_phases: 80
-  completed_phases: 68
-  total_plans: 140
-  completed_plans: 143
+  completed_phases: 70
+  total_plans: 139
+  completed_plans: 147
   percent: 100
 ---
 
@@ -23,11 +23,28 @@ progress:
 
 ## Current Position
 
-Phase: m9-03 planned
-Plan: 0/2 complete
-Status: Ready to execute — CLI Commands
-Last activity: 2026-04-29 -- m9-03 CLI Commands planned (2 plans, verification passed)
-Resume file: .planning/phases/m9-03-CLI-Commands/m9-03-01-PLAN.md
+Phase: m9-04 complete
+Plan: 2/2 complete
+Status: READY — m9-04 Tests shipped (3/3 tests passing)
+Last activity: 2026-04-29 -- m9-04 complete: m9-adapter-integration.test.ts + m9-e2e.test.ts E2E tests for PiAiRuntimeAdapter
+Resume file: none
+
+## Blocker: RESOLVED
+
+OPENROUTER_API_KEY 返回 402，但找到了可用替代：`xiaomi-coding` provider + `mimo-v2.5-pro` model + `ANTHROPIC_AUTH_TOKEN` key + custom baseUrl。
+
+Adapter 已更新支持自定义 baseUrl（非内置 provider 的 OpenAI-compatible 端点）。
+
+真实 smoke 结果：`health.healthy=true`, `degraded: false`, `warnings: []` — P1 硬门禁通过。
+
+m9-03 CLI wiring 继续执行中。Provider/model 参数：
+
+- `--provider xiaomi-coding`
+- `--model mimo-v2.5-pro`
+- `--apiKeyEnv ANTHROPIC_AUTH_TOKEN`
+- `--baseUrl https://token-plan-cn.xiaomimimo.com/v1`
+
+m9-03-01 P1 hard gate 已通过：health.healthy=true, status=succeeded, baseUrlPresent=true
 
 ## M9 Pipeline
 
@@ -47,7 +64,7 @@ pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (p
 
 - **LOCKED-01**: PiAiRuntimeAdapter is direct LLM completion only. No tools, no agent loop, no OpenClaw dependency.
 - **LOCKED-02**: M9 success means ledger probation entry exists. LLM response success alone is not success.
-- **LOCKED-03**: workflows.yaml is the runtime SSOT. Runtime kind, provider, model, timeout, apiKeyEnv, maxRetries must be consumed by code, not only documented.
+- **LOCKED-03**: workflows.yaml is the runtime SSOT. Runtime kind, provider, model, timeout, apiKeyEnv, maxRetries, baseUrl must be consumed by code, not only documented.
 
 ## Hard Boundaries
 
