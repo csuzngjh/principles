@@ -22,6 +22,7 @@ import {
   resolveRuntimeConfig,
 } from '@principles/core/runtime-v2';
 import { PDRuntimeError } from '@principles/core/runtime-v2';
+import type { KnownProvider } from '@mariozechner/pi-ai';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface RecordOptions {
@@ -87,7 +88,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
         try {
           const { getProviders } = await import('@mariozechner/pi-ai');
           const knownProviders = getProviders();
-          if (!knownProviders.includes(config.provider as never) && !config.baseUrl) {
+          if (!knownProviders.includes(config.provider as KnownProvider) && !config.baseUrl) {
             missing.push('baseUrl');
           }
         } catch {
