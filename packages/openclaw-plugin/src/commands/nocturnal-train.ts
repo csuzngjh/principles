@@ -348,7 +348,7 @@ Hardware tiers:
                       resolve(JSON.parse(trimmed));
                       return;
                     } catch {
-                      // fall through to result file
+                      // stdout was not valid JSON — fall through to result file
                     }
                   }
                   // Fallback to result file
