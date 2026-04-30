@@ -216,6 +216,7 @@ describe('NocturnalWorkflowManager', () => {
 
       // Async pipeline runs after startWorkflow returns
       await new Promise((r) => setTimeout(r, 50));
+      expect(executeNocturnalReflectionAsync).toHaveBeenCalled();
     });
 
     test('records nocturnal_failed when async pipeline throws', async () => {
