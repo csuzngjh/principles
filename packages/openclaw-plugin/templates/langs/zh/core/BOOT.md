@@ -16,7 +16,7 @@
 2. **确认工作空间**: 检查当前工作目录是否正确
 3. **读取身份文件**: `SOUL.md`, `USER.md`, `IDENTITY.md`
 4. **检查记忆状态**: 读取今日和昨日的 `memory/YYYY-MM-DD.md`
-5. **检查痛觉信号**: 查看 `.state/.pain_flag` 是否存在
+5. **检查 Runtime V2 痛苦诊断**: 使用 `pd candidate list` / ledger state；`.state/.pain_flag` 仅为 legacy compatibility
 
 ---
 

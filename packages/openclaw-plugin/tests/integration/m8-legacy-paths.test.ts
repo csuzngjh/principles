@@ -50,9 +50,9 @@ describe('M8: Legacy diagnostician/cron/subagent paths disabled', () => {
   });
 
   test('pain signal calls PainSignalBridge.emit via evolutionReducer', () => {
-    const content = readFile('packages/openclaw-plugin/src/hooks/gate-block-helper.ts');
-    expect(content).toMatch(/emitSync/);
-    expect(content).toMatch(/evolutionReducer/);
+    const content = readFile('packages/openclaw-plugin/src/hooks/pain.ts');
+    expect(content).toMatch(/emitPainDetectedEvent/);
+    expect(content).toMatch(/evolutionReducer\.emitSync/);
   });
 
   test('empathy keyword matcher is still functional (kept capability)', () => {

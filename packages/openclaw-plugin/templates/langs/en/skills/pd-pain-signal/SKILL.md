@@ -1,52 +1,30 @@
 ---
 name: pd-pain-signal
-description: Manually inject a pain signal into the evolution system. Trigger conditions: (1) User reports agent stuck/looping/unresponsive (2) User says "record this issue", "force reflection", "trigger pain", "create pain signal", "人工注入 pain", "创建一个痛苦信号" (3) Tool failure with no follow-up action (4) User provides human intervention feedback. Mandatory enforcement: any manual pain flag creation scenario MUST use this skill, no bypassing allowed.
+description: Manually trigger a Principles Disciple Runtime V2 pain diagnosis. Use this when the user reports the agent is stuck, looping, unresponsive, or asks to record/trigger a pain signal. Mandatory path: use `pd pain record`; never write `.state/.pain_flag` and never use legacy write_pain_flag tooling.
 disable-model-invocation: false
 ---
 
-# Pain Signal (Force Pain Signal)
+# Pain Signal (Runtime V2)
 
-You are now the "Manual Intervention Pain" component.
+Manual pain diagnosis must enter Runtime V2 through the CLI:
 
-**Task**:
-1. Record the user's feedback `$ARGUMENTS` as a **high-priority** pain signal.
-2. Inform the user that the signal has been injected, and suggest waiting for the next Hook trigger (e.g., Stop or PreCompact) or manually running `/reflection-log`.
-
-**Mandatory Enforcement**:
-
-When you need to create, write, or manually create a pain flag, you **MUST** use this skill via the `write_pain_flag` tool. Any bypassing of this skill to directly operate on files violates the mandatory constraint of this skill.
-
-**Absolutely forbidden**:
-- ❌ Writing to `.state/.pain_flag` directly (any method)
-- ❌ Using bash heredoc (`cat <<EOF > .pain_flag`)
-- ❌ Using `echo "..." > .pain_flag`
-- ❌ Using `Set-Content` / `Out-File` or other PowerShell file-writing cmdlets
-- ❌ Using `node -e` to call `writePainFlag` or `buildPainFlag`
-- ❌ Any method that `toString()` a JavaScript object to the file
-- ❌ Using `exec` tool to invoke shell commands to write the pain_flag file
-
-**Why use the tool?**
-The `write_pain_flag` tool encapsulates correct KV-format serialization, ensuring `.pain_flag` is never corrupted. Historically, direct file writes caused `[object Object]` corruption and field loss (painScore → score mapping failure). Using the tool is the only safe path.
-
-**Parameters**:
-- `reason` (required): The reason for the pain signal — describe what went wrong
-- `score` (optional): Pain score 0-100, default 80 (manual intervention)
-- `source` (optional): Source, default `human_intervention`
-- `is_risky` (optional): Whether this is a high-risk action, default false
-
-**Example**:
-```
-write_pain_flag({
-  reason: "Agent edited a file without reading it first, breaking existing logic",
-  score: 85,
-  source: "human_intervention",
-  is_risky: false
-})
+```bash
+pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --json
 ```
 
-**Workflow**:
-1. Recognize trigger condition → read this skill
-2. Call `write_pain_flag` tool with `reason` and other parameters
-3. Confirm tool executed successfully (returns ✅)
-4. Inform user the pain signal has been injected; evolution system will process it on next heartbeat
-5. Do NOT perform any direct file write operations after this
+## Forbidden
+
+- Do not write `.state/.pain_flag` directly.
+- Do not use `write_file`, shell redirection, `Set-Content`, `Out-File`, `node -e`, or any other file-writing method to create `.state/.pain_flag`.
+- Do not use `write_pain_flag`. That was a legacy path.
+
+## Verify
+
+Use:
+```bash
+pd runtime probe --runtime pi-ai --workspace "<workspace>" --json
+pd candidate list --workspace "<workspace>" --json
+pd runtime flow show --workspace "<workspace>" --json
+```
+
+Success requires non-empty `candidateIds` and `ledgerEntryIds`.

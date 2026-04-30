@@ -10,7 +10,7 @@ You must execute the following steps in order (no skipping). ARGUMENTS: $ARGUMEN
 - Read the last entry in memory/CHECKPOINT.md
 - Read the last 3 entries in memory/ISSUE_LOG.md
 - Read recent decisions in memory/DECISIONS.md
-- If .state/.pain_flag exists, handle breakpoint recovery first
+- Runtime V2 pain diagnosis uses task input/context, not `.state/.pain_flag`
 
 ## Step 1: Read Runtime Parameters & Self-Check
 - Read .principles/PROFILE.json, understand risk_paths, gate, tests.commands.

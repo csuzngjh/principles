@@ -10,6 +10,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { emitPainDetectedEvent } from './pain.js';
+import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 
 export interface EmpathySignal {
     detected: boolean;
@@ -232,20 +233,21 @@ export function handleLlmOutput(
         matchedReason = `Agent is stuck in low-output loops (${state.stuckLoops} consecutive turns with tiny output but huge context), indicating cognitive paralysis.`;
     }
 
-    // If a pain threshold is crossed, emit pain via Runtime v2 bridge (no .pain_flag file)
+    // If a semantic pain threshold is crossed, only valuable episodes enter Runtime v2.
+    // Lower-signal detections remain in the event log/GFI layer for accumulation.
     const painTriggerThreshold = config.get('thresholds.pain_trigger') || 30;
     if (painScore >= painTriggerThreshold) {
-        emitPainDetectedEvent(wctx, {
-            ts: new Date().toISOString(),
-            type: 'pain_detected',
-            data: {
-                painId: `llm_${Date.now()}`,
-                painType: 'user_frustration' as const,
-                source,
-                reason: matchedReason,
-                score: painScore,
-                sessionId: ctx.sessionId || 'unknown',
-                agentId: ctx.agentId,
+        const gate = evaluatePainDiagnosticGate({
+            source: source === 'llm_paralysis' ? 'llm_paralysis' : 'semantic',
+            score: painScore,
+            currentGfi: state.currentGfi,
+            consecutiveErrors: state.consecutiveErrors,
+            sessionId: ctx.sessionId || 'unknown',
+            errorHash: source,
+            thresholds: {
+                painTrigger: painTriggerThreshold,
+                highSeverity: config.get('severity_thresholds.high') || 70,
+                semanticPain: Math.max(painTriggerThreshold, 60),
             },
         });
 
@@ -255,6 +257,24 @@ export function handleLlmOutput(
             reason: matchedReason,
             isRisky: false
         });
+
+        if (gate.shouldDiagnose) {
+            emitPainDetectedEvent(wctx, {
+                ts: new Date().toISOString(),
+                type: 'pain_detected',
+                data: {
+                    painId: `llm_${Date.now()}`,
+                    painType: 'user_frustration' as const,
+                    source,
+                    reason: `${matchedReason}; diagnosticGate=${gate.reason}`,
+                    score: painScore,
+                    sessionId: ctx.sessionId || 'unknown',
+                    agentId: ctx.agentId,
+                },
+            });
+        } else {
+            ctx.logger?.info?.(`[PD:LLM] Pain signal recorded without Runtime V2 diagnosis: ${gate.detail}`);
+        }
     }
 
     // ═══ Thinking OS: Mental Model Usage Tracking ═══

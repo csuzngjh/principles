@@ -1,16 +1,18 @@
 import * as fs from 'fs';
-import * as path from 'path';
-import { serializeKvLines, parseKvLines, atomicWriteFileSync } from '../utils/io.js';
+import { parseKvLines } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
 import { ConfigService } from './config-service.js';
 import { SystemLogger } from './system-logger.js';
 
 // =========================================================================
-// Pain Flag Contract (Single Source of Truth)
+// Legacy Pain Flag Contract (Compatibility Only)
 //
-// All pain flag writers MUST use buildPainFlag() below.
-// If you need to add a new field, update this type AND buildPainFlag().
-// This prevents format drift across the 5+ pain signal sources.
+// Runtime V2 pain diagnosis does NOT write .state/.pain_flag or consume it as
+// an entry point. New pain signals must enter through emitPainDetectedEvent() or
+// `pd pain record`, which both route to PainSignalBridge.
+//
+// The readers below remain only for legacy sleep-reflection context and
+// historical state inspection. They must not trigger the diagnostician.
 // =========================================================================
 
 /**
@@ -47,15 +49,8 @@ export interface PainFlagContractResult {
 }
 
 /**
- * Factory function — the ONLY way to construct pain flag data.
- *
- * All callers (hooks/pain.ts, hooks/subagent.ts, hooks/lifecycle.ts,
- * hooks/llm.ts, skills/pain/SKILL.md) must go through this function.
- *
- * Required fields are enforced by TypeScript — you can't compile
- * without providing source, score, time, reason, session_id, agent_id.
- *
- * Optional fields (trace_id, trigger_text_preview) default to empty string.
+ * Builds legacy pain flag data for compatibility tests and historical readers.
+ * Do not use this to create new Runtime V2 diagnosis requests.
  */
 export function buildPainFlag(input: {
   source: string;
@@ -153,71 +148,6 @@ export function painSeverityLabel(painScore: number, isSpiral = false, projectDi
   }
 }
 
-export function writePainFlag(projectDir: string, painData: PainFlagData): void {
-  const painFlagPath = resolvePdPath(projectDir, 'PAIN_FLAG');
-  const dir = path.dirname(painFlagPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  atomicWriteFileSync(painFlagPath, serializeKvLines(painData));
-}
-
-/**
- * Combined trajectory record + pain flag write.
- *
- * Records the pain event to trajectory first to get the AUTOINCREMENT ID,
- * then builds and writes the pain flag with that ID embedded.
- * This guarantees the pain→principle→compile chain has the exact matching ID.
- *
- * Error handling: if trajectory write fails, continues without pain_event_id.
- * If flag write fails, the error propagates to the caller.
- */
-export function recordAndWritePainFlag(
-  wctx: {
-    trajectory?: { recordPainEvent(input: { sessionId: string; source: string; score: number; reason?: string | null; severity?: string | null; origin?: string | null; confidence?: number | null; text?: string }): number } | null;
-    workspaceDir: string;
-  },
-  trajectoryParams: {
-    sessionId: string;
-    source: string;
-    score: number;
-    reason?: string | null;
-    severity?: string | null;
-    origin?: string | null;
-    confidence?: number | null;
-    text?: string;
-  },
-  painFlagParams: {
-    source: string;
-    score: string;
-    reason: string;
-    session_id?: string;
-    agent_id?: string;
-    is_risky?: boolean;
-    trace_id?: string;
-    trigger_text_preview?: string;
-  }
-): void {
-  const trajectoryPainId = wctx.trajectory?.recordPainEvent({
-    sessionId: trajectoryParams.sessionId,
-    source: trajectoryParams.source,
-    score: trajectoryParams.score,
-    reason: trajectoryParams.reason ?? null,
-    severity: trajectoryParams.severity ?? null,
-    origin: trajectoryParams.origin ?? null,
-    confidence: trajectoryParams.confidence ?? null,
-    text: trajectoryParams.text,
-  });
-
-  const painData = buildPainFlag({
-    ...painFlagParams,
-    pain_event_id:
-      trajectoryPainId !== undefined && trajectoryPainId >= 0 ? String(trajectoryPainId) : undefined,
-  });
-
-  writePainFlag(wctx.workspaceDir, painData);
-}
-
 /**
  * Converts a JSON pain flag object to KV format.
  */
@@ -252,10 +182,10 @@ function convertJsonToKv(json: Record<string, unknown>): Record<string, string> 
 }
 
 /**
- * Reads and validates the pain flag file with auto-repair.
+ * Reads and validates the legacy pain flag file.
  *
  * - If file doesn't exist → returns {}
- * - If file is JSON format (wrong) → converts to KV, logs warning, rewrites file
+ * - If file is JSON format → converts to KV in memory only
  * - If file is KV format → validates required fields, logs warning if missing
  * - If file has unknown fields → silently ignores them (forward-compatible)
  */
@@ -270,7 +200,8 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
       return {};
     }
 
-    // Detect JSON format (wrong — should be KV)
+    // Detect JSON format. Legacy compatibility only: parse in memory and do not
+    // rewrite .pain_flag, because Runtime V2 must not create or repair this file.
     if (content.startsWith('{')) {
        
       let json: Record<string, unknown>;
@@ -281,12 +212,8 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
         return {};
       }
 
-      // Auto-repair: convert JSON to KV format
       const kvData = convertJsonToKv(json);
-
-      const repaired = serializeKvLines(kvData);
-      atomicWriteFileSync(painFlagPath, repaired);
-      SystemLogger.log(projectDir, 'PAIN_FLAG_AUTO_REPAIRED', `Auto-repaired pain flag from JSON to KV format (${Object.keys(json).length} fields)`);
+      SystemLogger.log(projectDir, 'PAIN_FLAG_LEGACY_JSON_READ', `Read legacy JSON pain flag in memory (${Object.keys(json).length} fields)`);
       return kvData;
     }
 

@@ -9,12 +9,15 @@
  *     { reason: 'edited file without reading first', source: 'manual', score: 75 },
  *     '/path/to/workspace'
  *   );
+ *
+ * Runtime V2 note:
+ * This helper no longer writes .state/.pain_flag. Manual diagnosis requests
+ * must use `pd pain record`, and OpenClaw runtime events must use
+ * PainSignalBridge/emitPainDetectedEvent.
  */
 
 import { validatePainSignal, deriveSeverity } from './pain-signal.js';
 import type { PainSignal } from './pain-signal.js';
-import { atomicWriteFileSync, painFlagLock } from './io.js';
-import { resolvePainFlagPath } from './pain-flag-resolver.js';
 
 /** Input shape for recordPainSignal. */
 export interface PainSignalInput {
@@ -25,61 +28,21 @@ export interface PainSignalInput {
   is_risky?: boolean;
 }
 
-/** KV-serializable pain flag data shape. */
-interface PainFlagData {
-  source: string;
-  score: string;
-  reason: string;
-  session_id: string;
-  is_risky: string;
-  time: string;
-  pain_event_id?: string;
-}
-
 /**
- * Build pain flag data object from input.
- */
-function buildPainFlag(input: PainSignalInput, timestamp: string, painEventId?: string): PainFlagData {
-  return {
-    source: input.source ?? 'manual',
-    score: String(input.score ?? 80),
-    reason: input.reason,
-    session_id: input.sessionId ?? '',
-    is_risky: String(input.is_risky ?? false),
-    time: timestamp,
-    pain_event_id: painEventId,
-  };
-}
-
-/**
- * Serialize pain flag data to KV-format string.
- */
-function serializeKvLines(data: PainFlagData): string {
-  const lines: string[] = [];
-  if (data.source) lines.push(`source: ${data.source}`);
-  if (data.score) lines.push(`score: ${data.score}`);
-  if (data.reason) lines.push(`reason: ${data.reason}`);
-  if (data.session_id) lines.push(`session_id: ${data.session_id}`);
-  if (data.is_risky) lines.push(`is_risky: ${data.is_risky}`);
-  if (data.time) lines.push(`time: ${data.time}`);
-  if (data.pain_event_id) lines.push(`pain_event_id: ${data.pain_event_id}`);
-  return lines.join('\n');
-}
-
-/**
- * Record a pain signal to the workspace's .pain_flag file.
+ * Validate and normalize a pain signal.
  *
- * This is a pure function — it requires only a workspaceDir string,
- * no OpenClawPluginApi or plugin runtime.
+ * This does not write .state/.pain_flag. It remains as an SDK validation
+ * helper for callers that need a framework-agnostic PainSignal object.
  *
  * @param input - PainSignalInput (reason required, source/score optional)
- * @param workspaceDir - Absolute path to the workspace directory
+ * @param workspaceDir - Kept for API compatibility; not used for file writes.
  * @returns Promise resolving to a validated PainSignal
  */
 export async function recordPainSignal(
   input: PainSignalInput,
   workspaceDir: string,
 ): Promise<PainSignal> {
+  void workspaceDir;
   // Validate required fields
   if (!input.reason || !input.reason.trim()) {
     throw new Error('PainSignalInput.reason is required and must be non-empty');
@@ -112,14 +75,6 @@ export async function recordPainSignal(
 
   const {signal} = result;
   if (!signal) throw new Error('Unexpected: validated PainSignal is undefined');
-
-  // Write to .pain_flag (KV format, atomic) — serialized via AsyncQueueLock
-  const painFlagPath = resolvePainFlagPath(workspaceDir);
-  const painFlagData = buildPainFlag(input, timestamp);
-  const serialized = serializeKvLines(painFlagData);
-  await painFlagLock.withLock(painFlagPath, async () => {
-    atomicWriteFileSync(painFlagPath, serialized);
-  });
 
   return signal;
 }
