@@ -431,7 +431,7 @@ describe('m10 artificer pipeline', () => {
     expect(persistedSource).toContain('Plan required for high-risk writes');
   });
 
-  it('Artificer failure falls back to stub', async () => {
+  it('Artificer LLM failure skips candidate generation (DD-04)', async () => {
     seedTrajectorySession(trajectory, 'session-artificer-fallback');
     const snapshot = getSeededSnapshot(workspaceDir, 'session-artificer-fallback');
     const result = await runAsyncPipeline(
@@ -442,15 +442,13 @@ describe('m10 artificer pipeline', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(result.diagnostics.artificer.status).toBe('persisted_candidate');
+    // DD-04: "No candidate is better than a bad candidate" - LLM failure = skipped
+    expect(result.diagnostics.artificer.status).toBe('skipped');
+    expect(result.diagnostics.artificer.reason).toBe('parse_failed');
 
+    // No implementation should be persisted when LLM fails
     const implementations = listImplementationsForRule(stateDir, 'R-001');
-    expect(implementations).toHaveLength(1);
-
-    const persistedPath = result.diagnostics.artificer.persistedPath!;
-    const persistedSource = fs.readFileSync(path.join(persistedPath, 'entry.js'), 'utf-8');
-    expect(persistedSource).toContain("decision: 'requireApproval'");
-    expect(persistedSource).not.toContain('Plan required for high-risk writes');
+    expect(implementations).toHaveLength(0);
   });
 
   it('Artificer candidate is trackable by lifecycle service', async () => {
