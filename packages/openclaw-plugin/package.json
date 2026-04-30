@@ -71,6 +71,7 @@
     "@principles/core": "^0.1.0",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.9.0",
+    "commander": "^12.0.0",
     "js-yaml": "^4.1.1",
     "lucide-react": "^1.7.0",
     "micromatch": "^4.0.8",

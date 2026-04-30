@@ -43,14 +43,15 @@ function appendJsonLine(filePath: string, value: unknown): void {
   fs.appendFileSync(filePath, `${JSON.stringify(value)}\n`, 'utf8');
 }
 
+function getSessionsColumns(db: Database.Database): string[] {
+  const cols = db.prepare('PRAGMA table_info(sessions)').all() as { name: string }[];
+  return cols.map((c) => c.name);
+}
+
 function ensurePainEventsSchema(db: Database.Database): void {
-db.exec(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        session_id TEXT PRIMARY KEY,
-        started_at TEXT,
-        updated_at TEXT,
-        metadata_json TEXT
-      );
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(`
       CREATE TABLE IF NOT EXISTS pain_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
@@ -66,6 +67,28 @@ db.exec(`
       CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
       CREATE INDEX IF NOT EXISTS idx_pain_events_created_at ON pain_events(created_at);
     `);
+
+    // Ensure sessions table exists (legacy schema without metadata_json is OK)
+    const existingTables = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'"
+    ).all() as { name: string }[];
+
+    if (existingTables.length === 0) {
+      db.exec(`
+        CREATE TABLE sessions (
+          session_id TEXT PRIMARY KEY,
+          started_at TEXT,
+          updated_at TEXT,
+          metadata_json TEXT
+        );
+      `);
+    }
+    // NO migration, NO ALTER, NO DROP —两种 schema 都能工作
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
 function recordTrajectoryPainEvent(
@@ -79,11 +102,22 @@ function recordTrajectoryPainEvent(
   try {
     ensurePainEventsSchema(db);
     const sessionId = data.sessionId ?? 'cli';
-    db.prepare(`
-      INSERT INTO sessions (session_id, started_at, updated_at, metadata_json)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at
-    `).run(sessionId, timestamp, timestamp, JSON.stringify({ source: 'pd-runtime-v2' }));
+    const sessionColumns = getSessionsColumns(db);
+    const hasMetadataJson = sessionColumns.includes('metadata_json');
+
+    if (hasMetadataJson) {
+      db.prepare(`
+        INSERT INTO sessions (session_id, started_at, updated_at, metadata_json)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at
+      `).run(sessionId, timestamp, timestamp, JSON.stringify({ source: 'pd-runtime-v2' }));
+    } else {
+      db.prepare(`
+        INSERT INTO sessions (session_id, started_at, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at
+      `).run(sessionId, timestamp, timestamp);
+    }
 
     const result = db.prepare(`
       INSERT INTO pain_events (
