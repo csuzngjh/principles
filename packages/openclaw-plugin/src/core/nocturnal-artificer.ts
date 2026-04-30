@@ -234,7 +234,11 @@ export function shouldRunArtificer(
 
 export function parseArtificerOutput(payload: string): ArtificerOutput | null {
   try {
-    const parsed = JSON.parse(payload) as Partial<ArtificerOutput>;
+    const extracted = extractJsonOrPlaintext(payload);
+    if (!extracted) {
+      return null;
+    }
+    const parsed = JSON.parse(extracted) as Partial<ArtificerOutput>;
     const validDecisions = ['allow', 'block', 'requireApproval'] as const;
     if (
       typeof parsed.ruleId !== 'string' ||
@@ -266,6 +270,47 @@ export function parseArtificerOutput(payload: string): ArtificerOutput | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Extract JSON from LLM output that may be wrapped in prose/markdown.
+ * Tries direct parse first, then fenced code blocks, then bare { } slice.
+ */
+function extractJsonOrPlaintext(text: string): string | null {
+  // Try direct parse first
+  try {
+    JSON.parse(text);
+    return text;
+  } catch {
+    // Try extracting from markdown code blocks
+  }
+
+  // Match triple-backtick JSON blocks
+  const codeBlockMatch = /```(?:json)?\s*\n?([\s\S]*?)\n?```/.exec(text);
+  if (codeBlockMatch) {
+    const extracted = codeBlockMatch[1].trim();
+    try {
+      JSON.parse(extracted);
+      return extracted;
+    } catch {
+      // Not valid JSON
+    }
+  }
+
+  // Try to find first { and last } to extract JSON object
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    const extracted = text.slice(firstBrace, lastBrace + 1);
+    try {
+      JSON.parse(extracted);
+      return extracted;
+    } catch {
+      // Not valid JSON
+    }
+  }
+
+  return null;
 }
 
 export function buildArtificerPrompt(

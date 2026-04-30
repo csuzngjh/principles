@@ -44,28 +44,28 @@ function appendJsonLine(filePath: string, value: unknown): void {
 }
 
 function ensurePainEventsSchema(db: Database.Database): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      session_id TEXT PRIMARY KEY,
-      started_at TEXT,
-      last_seen_at TEXT,
-      metadata_json TEXT
-    );
-    CREATE TABLE IF NOT EXISTS pain_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
-      source TEXT NOT NULL,
-      score INTEGER NOT NULL,
-      reason TEXT,
-      severity TEXT,
-      origin TEXT,
-      confidence REAL,
-      text TEXT,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
-    CREATE INDEX IF NOT EXISTS idx_pain_events_created_at ON pain_events(created_at);
-  `);
+db.exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        session_id TEXT PRIMARY KEY,
+        started_at TEXT,
+        updated_at TEXT,
+        metadata_json TEXT
+      );
+      CREATE TABLE IF NOT EXISTS pain_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        score INTEGER NOT NULL,
+        reason TEXT,
+        severity TEXT,
+        origin TEXT,
+        confidence REAL,
+        text TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
+      CREATE INDEX IF NOT EXISTS idx_pain_events_created_at ON pain_events(created_at);
+    `);
 }
 
 function recordTrajectoryPainEvent(
@@ -80,9 +80,9 @@ function recordTrajectoryPainEvent(
     ensurePainEventsSchema(db);
     const sessionId = data.sessionId ?? 'cli';
     db.prepare(`
-      INSERT INTO sessions (session_id, started_at, last_seen_at, metadata_json)
+      INSERT INTO sessions (session_id, started_at, updated_at, metadata_json)
       VALUES (?, ?, ?, ?)
-      ON CONFLICT(session_id) DO UPDATE SET last_seen_at = excluded.last_seen_at
+      ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at
     `).run(sessionId, timestamp, timestamp, JSON.stringify({ source: 'pd-runtime-v2' }));
 
     const result = db.prepare(`
