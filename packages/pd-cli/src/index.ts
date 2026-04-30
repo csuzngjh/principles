@@ -24,7 +24,7 @@ import { handleLegacyCleanup } from './commands/legacy-cleanup.js';
 import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js';
 import { handleRuntimeProbe } from './commands/runtime.js';
 import { handleFlowShow } from './commands/flow.js';
-import { handleCandidateList, handleCandidateShow, handleCandidateIntake } from './commands/candidate.js';
+import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
 const program = new Command();
@@ -338,6 +338,25 @@ candidateCmd
   .option('--dry-run', 'Show what would be written without writing')
   .action(async (opts) => {
     await handleCandidateIntake(opts);
+  });
+
+candidateCmd
+  .command('audit')
+  .description('Audit candidate/ledger consistency for Runtime v2')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    await handleCandidateAudit(opts);
+  });
+
+candidateCmd
+  .command('repair')
+  .description('Repair consumed candidate with missing ledger entry')
+  .requiredOption('--candidate-id <id>', 'Candidate ID to repair')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    await handleCandidateRepair(opts);
   });
 
 // ── Artifact inspection commands ────────────────────────────────────────────
