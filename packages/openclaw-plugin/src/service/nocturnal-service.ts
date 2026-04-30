@@ -594,25 +594,30 @@ function processArtificerOutput(
   void stateDir;
   void isStub;
 
+  // Callers guarantee status === 'selected' (skip early-returns are handled
+  // before calling this function), but TS doesn't narrow across function
+  // boundaries. The cast is safe by construction.
+  const ruleId = (ruleResolution as Extract<typeof ruleResolution, { status: 'selected' }>).ruleId;
+
   if (!parsedArtificer) {
     return {
       status: 'validation_failed',
       reason: 'parse_failed',
       ruleResolution,
       validationFailures: ['Artificer output could not be parsed.'],
-      ruleId: ruleResolution.ruleId,
+      ruleId,
     };
   }
 
-  if (parsedArtificer.ruleId !== ruleResolution.ruleId) {
+  if (parsedArtificer.ruleId !== ruleId) {
     return {
       status: 'validation_failed',
       reason: 'rule_mismatch',
       ruleResolution,
       validationFailures: [
-        `Resolved rule ${ruleResolution.ruleId} did not match candidate rule ${parsedArtificer.ruleId}.`,
+        `Resolved rule ${ruleId} did not match candidate rule ${parsedArtificer.ruleId}.`,
       ],
-      ruleId: ruleResolution.ruleId,
+      ruleId,
     };
   }
 
@@ -623,7 +628,7 @@ function processArtificerOutput(
       reason: 'validator_rejected',
       ruleResolution,
       validationFailures: validation.failures.map((failure) => failure.message),
-      ruleId: ruleResolution.ruleId,
+      ruleId: (ruleResolution as Extract<typeof ruleResolution, { status: 'selected' }>).ruleId,
     };
   }
 
@@ -739,6 +744,7 @@ async function maybePersistArtificerCandidateAsync(
       candidateCount: 1,
       selectedCandidateIndex: 0,
       stageFailures: [],
+      usedStubs: false,
     };
 
     const artificerOutput = await runArtificerAsync(
