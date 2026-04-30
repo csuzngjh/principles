@@ -2,7 +2,19 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const repoRoot = process.cwd();
+// Find repo root by walking up from cwd until we find .git
+function findRepoRoot(cwd: string): string {
+  let dir = cwd;
+  while (dir !== path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, '.git'))) {
+      return dir;
+    }
+    dir = path.dirname(dir);
+  }
+  return cwd;
+}
+
+const repoRoot = findRepoRoot(process.cwd());
 
 function read(relativePath: string): string {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
