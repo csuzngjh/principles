@@ -7,6 +7,7 @@ import * as ioUtils from '../../src/utils/io.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
 import { setInjectedProbationIds, clearSession } from '../../src/core/session-tracker.js';
+import { resetPainDiagnosticGateForTest } from '../../src/core/pain-diagnostic-gate.js';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io.js');
@@ -68,6 +69,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     clearSession('s-success');
     clearSession('s-low-value-failure');
     clearSession('s-repeated-failure');
+    resetPainDiagnosticGateForTest();
   });
 
   afterEach(() => {

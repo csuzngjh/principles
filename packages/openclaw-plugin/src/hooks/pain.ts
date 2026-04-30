@@ -55,13 +55,16 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
   }
   // M8: Bridge pain_detected → diagnostician pipeline (fire-and-forget)
   if (event.type === 'pain_detected') {
+    const painData = event.data as PainDetectedData;
+    const painId = painData?.painId ?? 'unknown';
+    const sessionId = painData?.sessionId ?? 'unknown';
     try {
       const bridge = await getPainSignalBridge(wctx);
-      bridge.onPainDetected(event.data as PainDetectedData).catch((err) => {
-        SystemLogger.log(wctx.workspaceDir, 'BRIDGE_ERROR', `PainSignalBridge failed: ${String(err)}`);
+      bridge.onPainDetected(painData).catch((err) => {
+        SystemLogger.log(wctx.workspaceDir, 'BRIDGE_ERROR', `PainSignalBridge failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
       });
     } catch (err) {
-      SystemLogger.log(wctx.workspaceDir, 'BRIDGE_INIT_ERROR', `PainSignalBridge init failed: ${String(err)}`);
+      SystemLogger.log(wctx.workspaceDir, 'BRIDGE_INIT_ERROR', `PainSignalBridge init failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
     }
   }
 }
@@ -140,6 +143,19 @@ export function handleAfterToolCall(
       toolName: event.toolName,
       sessionId,
     });
+
+    // Apply PainDiagnosticGate with cooldown to prevent duplicate diagnoses
+    const session = getSession(sessionId);
+    const gate = evaluatePainDiagnosticGate({
+      source: 'manual',
+      score: 100,
+      currentGfi: session?.currentGfi ?? 0,
+      sessionId,
+    });
+    if (!gate.shouldDiagnose) {
+      SystemLogger.log(effectiveWorkspaceDir, 'MANUAL_PAIN_SKIPPED', `Manual pain within cooldown: ${gate.detail}`);
+      return;
+    }
 
     emitPainDetectedEvent(wctx, {
       ts: new Date().toISOString(),

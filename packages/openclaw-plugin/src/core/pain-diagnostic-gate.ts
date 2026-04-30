@@ -1,3 +1,5 @@
+import { SystemLogger } from './system-logger.js';
+
 export type PainDiagnosticSource =
   | 'manual'
   | 'tool_failure'
@@ -51,6 +53,9 @@ function normalizedSource(source: string): PainDiagnosticSource | string {
   if (source.startsWith('llm_') && source !== 'llm_paralysis') {
     return 'semantic';
   }
+  if (!['manual', 'tool_failure', 'gate_blocked', 'user_empathy', 'llm_paralysis', 'semantic', 'subagent_error'].includes(source)) {
+    SystemLogger.log('', 'GATE_UNKNOWN_SOURCE', `Unknown pain source: "${source}"`);
+  }
   return source;
 }
 
@@ -88,9 +93,7 @@ export function evaluatePainDiagnosticGate(input: PainDiagnosticGateInput): Pain
   const semanticPain = input.thresholds?.semanticPain ?? Math.max(painTrigger, 60);
   const score = Number.isFinite(input.score) ? input.score : 0;
   const currentGfi = Number.isFinite(input.currentGfi) ? input.currentGfi : 0;
-  const consecutiveErrors = Number.isFinite(input.consecutiveErrors)
-    ? Number(input.consecutiveErrors)
-    : 0;
+  const consecutiveErrors: number = Number.isFinite(input.consecutiveErrors) ? (input.consecutiveErrors as number) : 0;
 
   const approve = (reason: PainDiagnosticGateReason, detail: string): PainDiagnosticGateDecision => {
     if (withinCooldown(input, episodeKey)) {

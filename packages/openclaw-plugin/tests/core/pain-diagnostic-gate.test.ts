@@ -102,4 +102,127 @@ describe('PainDiagnosticGate', () => {
       reason: 'cooldown',
     });
   });
+
+  it('diagnoses subagent_error when score >= painTrigger', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'subagent_error',
+      score: 40,
+      currentGfi: 0,
+      sessionId: 's1',
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: true,
+      reason: 'subagent_error',
+    });
+  });
+
+  it('skips subagent_error when score < painTrigger', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'subagent_error',
+      score: 39,
+      currentGfi: 0,
+      sessionId: 's1',
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: false,
+      reason: 'below_gate',
+    });
+  });
+
+  it('diagnoses llm_paralysis when score >= painTrigger', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'llm_paralysis',
+      score: 40,
+      currentGfi: 0,
+      sessionId: 's1',
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: true,
+      reason: 'llm_paralysis',
+    });
+  });
+
+  it('diagnoses risky_high_score when isRisky=true and score >= highSeverity', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'tool_failure',
+      score: 70,
+      currentGfi: 0,
+      isRisky: true,
+      sessionId: 's1',
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: true,
+      reason: 'risky_high_score',
+    });
+  });
+
+  it('skips risky_high_score when isRisky=true but score < highSeverity', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'tool_failure',
+      score: 69,
+      currentGfi: 0,
+      isRisky: true,
+      sessionId: 's1',
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: false,
+      reason: 'below_gate',
+    });
+  });
+
+  it('diagnoses user_empathy when score >= semanticPain threshold', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'user_empathy',
+      score: 60,
+      currentGfi: 0,
+      sessionId: 's1',
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: true,
+      reason: 'semantic_pain',
+    });
+  });
+
+  it('uses custom threshold overrides', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'tool_failure',
+      score: 50,
+      currentGfi: 60,
+      consecutiveErrors: 2,
+      sessionId: 's1',
+      thresholds: {
+        painTrigger: 40,
+        highSeverity: 70,
+        highGfi: 55,
+        repeatedFailure: 4,
+        semanticPain: 60,
+      },
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: true,
+      reason: 'high_gfi',
+    });
+  });
+
+  it('handles exact threshold boundary (score === painTrigger)', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'subagent_error',
+      score: 40,
+      currentGfi: 0,
+      sessionId: 's1',
+      thresholds: { painTrigger: 40 },
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: true,
+      reason: 'subagent_error',
+    });
+  });
 });
