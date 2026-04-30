@@ -5,6 +5,12 @@ import {
   listRuleImplementationsByState,
 } from './principle-tree-ledger.js';
 import type { LedgerRule } from './principle-tree-ledger.js';
+import type {
+  ArtificerRuleContext,
+  TrinityRuntimeAdapter,
+  TrinityTelemetry,
+  TrinityConfig,
+} from './nocturnal-trinity.js';
 
 export type ArtificerArtifactKind = 'rule-implementation-candidate';
 
@@ -252,6 +258,88 @@ export function parseArtificerOutput(payload: string): ArtificerOutput | null {
       lineage: parsed.lineage,
     };
   } catch {
+    return null;
+  }
+}
+
+export function buildArtificerPrompt(
+  input: ArtificerInput,
+  ruleContext: ArtificerRuleContext
+): string {
+  const sections: string[] = [];
+
+  sections.push('## Target Rule');
+  sections.push(`Rule ID: ${input.ruleId}`);
+  sections.push(`Rule Name: ${ruleContext.ruleName}`);
+  sections.push(`Description: ${ruleContext.ruleDescription}`);
+  sections.push(`Trigger Condition: ${ruleContext.triggerCondition}`);
+  sections.push(`Action: ${ruleContext.action}`);
+  sections.push('');
+
+  sections.push('## Scribe Reflection');
+  sections.push(`Bad Decision: ${input.scribeArtifact.badDecision}`);
+  sections.push(`Better Decision: ${input.scribeArtifact.betterDecision}`);
+  sections.push(`Rationale: ${input.scribeArtifact.rationale}`);
+  sections.push('');
+
+  sections.push('## Pain Events');
+  const painSummaries = input.snapshot.painEvents
+    .slice(0, 5)
+    .map((pe) => `- [score: ${pe.score}] ${pe.reason || 'no reason'} (source: ${pe.source})`);
+  sections.push(painSummaries.length > 0 ? painSummaries.join('\n') : '(none)');
+  sections.push('');
+
+  sections.push('## Gate Blocks');
+  const gateSummaries = input.snapshot.gateBlocks
+    .slice(0, 5)
+    .map((gb) => `- ${gb.toolName}: ${gb.reason}`);
+  sections.push(gateSummaries.length > 0 ? gateSummaries.join('\n') : '(none)');
+  sections.push('');
+
+  sections.push('## Lineage');
+  sections.push(`Source Snapshot: ${input.lineage.sourceSnapshotRef}`);
+  sections.push(`Pain IDs: ${input.lineage.sourcePainIds.join(', ') || '(none)'}`);
+  sections.push(`Gate Block IDs: ${input.lineage.sourceGateBlockIds.join(', ') || '(none)'}`);
+
+  return sections.join('\n');
+}
+
+/**
+ * Execute the Artificer stage: generate a rule implementation candidate via LLM.
+ *
+ * Flow:
+ *  1. Call adapter.invokeArtificer with structured prompt
+ *  2. Parse raw JSON response with parseArtificerOutput
+ *  3. Return ArtificerOutput or null on any failure
+ *
+ * Does NOT call validateRuleImplementationCandidate — that's the caller's responsibility.
+ */
+export async function runArtificerAsync(
+  input: ArtificerInput,
+  ruleContext: ArtificerRuleContext,
+  adapter: TrinityRuntimeAdapter,
+  telemetry: TrinityTelemetry,
+  config: TrinityConfig
+): Promise<ArtificerOutput | null> {
+  try {
+    const rawJson = await adapter.invokeArtificer(input, ruleContext, telemetry, config);
+    if (!rawJson) {
+      return null;
+    }
+
+    const parsed = parseArtificerOutput(rawJson);
+    if (!parsed) {
+      return null;
+    }
+
+    // Verify the parsed output references the correct rule
+    if (parsed.ruleId !== input.ruleId) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    // Artificer failure is non-fatal — return null to skip candidate generation
     return null;
   }
 }
