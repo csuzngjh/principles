@@ -1,10 +1,9 @@
 # 项目记忆 — Principles Disciple
 
-## 当前状态 (2026-04-14)
-- **版本**: v1.10.x (PR #290 已合并)
+## 当前状态 (2026-04-30)
+- **版本**: v1.10.40 (PR #414 已合并)
 - **OpenClaw 版本**: 2026.4.11
-- **OpenClaw 源码**: `/home/csuzngjh/code/openclaw/`
-- **Agent worktree**: `/home/csuzngjh/code/principles/agent-worktree` (分支 `agent-worktree`)
+- **当前里程碑**: v2.9 M10 (Nocturnal Artificer LLM Upgrade) 已 SHIPPED，m10-03 deferred to v2.10
 
 ## 核心架构事实
 
@@ -43,18 +42,17 @@
 6. **代码操作纪律**：commit 前必须验证 staged 文件；写代码前必须 grep 确认 API 存在；修复后必须读回验证
 
 ## 部署
-- `cd packages/openclaw-plugin && node scripts/sync-plugin.mjs --dev` 构建、同步、重启
+- 插件同步：`node packages/openclaw-plugin/scripts/sync-plugin.mjs`
 - 验证部署：`grep "EvolutionWorker started for workspace:" ~/.openclaw/extensions/principles-disciple/dist/bundle.js`
-- 查看运行时日志：`journalctl --user -u openclaw-gateway --since "5 min ago" | grep "PD:"`
-- `npx tsx scripts/pipeline-health.ts --workspace ~/.openclaw/workspace-main` 健康检查
+- Windows 运行时日志：`Get-Content $env:USERPROFILE/.openclaw/logs/plugin.log -Tail 100 -Wait`
+- 健康检查：`npx tsx scripts/pipeline-health.ts --workspace ~/.openclaw/workspace-main`
 
 ## 关键文件位置
 - 插件源码: `packages/openclaw-plugin/src/`
 - 测试: `packages/openclaw-plugin/tests/`
-- OpenClaw 源码: `/home/csuzngjh/code/openclaw/`
+- OpenClaw 源码: `C:/Users/Administrator/.openclaw/` 或自定义路径
 - 插件配置: `~/.openclaw/openclaw.json`
 - 状态文件: `~/.openclaw/workspace-*/.state/`
-- 故障排查文档: `docs/troubleshooting/evolution-worker-start.md`
 - Cron jobs: `~/.openclaw/cron/jobs.json`
 
 ## 已验证通的链路
@@ -72,6 +70,18 @@
 - quota 默认只有 3 次/天（已通过配置改为 20）
 - idle 检测依赖无活跃会话，开发中很难触发（已通过 periodic 模式绕过）
 - 所有 sleep_reflection 相关日志已从 debug 改为 info 级别
+
+## Runtime v2 当前事实 (2026-04-30)
+- M9 已合并 (2026-04-29)：PiAiRuntimeAdapter 作为默认 Diagnostician Runtime，ledger probation entry = 成功标准
+- M10 已合并 (2026-04-30, PR #414)：Artificer LLM Upgrade 替换 hardcoded stub
+  - m10-01 ✅: runArtificerAsync + parseArtificerOutput + buildArtificerPrompt
+  - m10-02 ✅: Pipeline Integration，LLM 失败返回 `skipped`（DD-04: no candidate > bad candidate）
+  - m10-03 ❌: Dynamic Pruning & E2E Validation — **deferred to v2.10**
+- LOCKED-04 ✅: Artificer 使用与 Diagnostician 相同的 runtimeAdapter 配置
+- LOCKED-05 ✅: 静态验证（validateRuleImplementationCandidate）是强制门控
+- LOCKED-06 ⚠️: Dynamic Pruning 可验证性 — m10-03 deferred，无 adherence-based lifecycle
+- 重要修复：sessions 表 schema 与 OpenClaw trajectory 对齐（`updated_at` 而非 `last_seen_at`）
+- 重要修复：parseArtificerOutput 使用 extractJsonOrPlaintext 支持 markdown/fenced JSON
 
 ## Runtime v2 重构事实 (2026-04-26)
 - 当前方向：PD Runtime v2 已完成 M1-M5，M6 正在接入 `openclaw-cli` 作为第一个真实生产 runtime adapter。目标是摆脱 OpenClaw 插件 API / heartbeat / prompt hook / sessions_spawn / marker file，改成 `pd diagnose run --runtime openclaw-cli` 的显式执行链。
