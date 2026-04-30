@@ -235,13 +235,19 @@ export function shouldRunArtificer(
 export function parseArtificerOutput(payload: string): ArtificerOutput | null {
   try {
     const parsed = JSON.parse(payload) as Partial<ArtificerOutput>;
+    const validDecisions = ['allow', 'block', 'requireApproval'] as const;
     if (
       typeof parsed.ruleId !== 'string' ||
       typeof parsed.candidateSource !== 'string' ||
       !Array.isArray(parsed.helperUsage) ||
       typeof parsed.expectedDecision !== 'string' ||
+      !validDecisions.includes(parsed.expectedDecision as typeof validDecisions[number]) ||
       typeof parsed.rationale !== 'string' ||
-      !parsed.lineage
+      !parsed.lineage ||
+      typeof parsed.lineage.sourceSnapshotRef !== 'string' ||
+      !Array.isArray(parsed.lineage.sourcePainIds) ||
+      !Array.isArray(parsed.lineage.sourceGateBlockIds) ||
+      parsed.lineage.artifactKind !== 'rule-implementation-candidate'
     ) {
       return null;
     }

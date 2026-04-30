@@ -1301,6 +1301,8 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     input: ArtificerInput,
     ruleContext: ArtificerRuleContext
   ): string {
+    // NOTE: Duplicated from nocturnal-artificer.ts:buildArtificerPrompt to avoid circular import.
+    // Both implementations must remain in sync.
     const sections: string[] = [];
 
     sections.push('## Target Rule');

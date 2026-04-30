@@ -756,24 +756,15 @@ async function maybePersistArtificerCandidateAsync(
     );
 
     if (!artificerOutput) {
-      const fallbackParsed = buildDefaultArtificerOutput(
-        ruleResolution.ruleId,
-        artifact,
-        artifact.sourceSnapshotRef,
-        sourcePainIds,
-        sourceGateBlockIds
-      );
-      return processArtificerOutput(
-        fallbackParsed,
+      // DD-04 design: "No candidate is better than a bad candidate"
+      // LLM failure = no valid output, so skip candidate generation entirely
+      return {
+        status: 'skipped',
+        reason: 'parse_failed',
         ruleResolution,
-        validationFailures,
-        stateDir,
-        workspaceDir,
-        artifact,
-        selectedPrincipleId,
-        selectedSessionId,
-        true
-      );
+        validationFailures: ['Artificer LLM call failed or returned unparseable output.'],
+        ruleId: ruleResolution.ruleId,
+      };
     }
 
     return processArtificerOutput(
