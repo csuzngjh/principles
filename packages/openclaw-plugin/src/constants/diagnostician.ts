@@ -1,7 +1,7 @@
 /**
  * Diagnostician 协议常量
  *
- * 用于 evolution-worker.ts（后台心跳）和 prompt.ts（实时路径）
+ * 用于 Runtime V2 diagnostician prompt
  * 与 templates/langs/zh/skills/pd-diagnostician/SKILL.md 保持一致
  */
 
@@ -13,7 +13,7 @@
 export const DIAGNOSTICIAN_PROTOCOL_SUMMARY = `## Diagnostic Protocol (5 Whys)
 
 **Phase 1 - Evidence Gathering**:
-- Read .state/.pain_flag for full pain context
+- Use the task input/context provided by Runtime V2 for pain context
 - Read .state/logs/events.jsonl recent entries
 - Search codebase for error patterns from Reason field
 - Record all evidence sources (file:line)

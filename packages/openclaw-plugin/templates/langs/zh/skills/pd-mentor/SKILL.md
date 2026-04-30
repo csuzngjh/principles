@@ -211,7 +211,7 @@ A: GFI (Global Friction Index) 衡量系统的"痛苦程度"，分值范围 0-10
 A: EP (Evolution Points) 通过成功完成任务和问题修复累积。失败会扣除EP但有保护机制。达到阈值后自动升级EP等级，解锁更多权限（更大的代码修改限额）。
 
 **Q: Pain Signal 是什么？**
-A: Pain Signal 是系统检测到的问题信号，存储在 `.state/.pain_flag` 中。触发后系统会启动进化循环。
+A: Pain Signal 是系统检测到的问题信号。Runtime V2 通过 `PainSignalBridge` 处理；手动触发使用 `pd pain record`。`.state/.pain_flag` 仅为 legacy compatibility。
 
 **Q: 如何查看已安装的工具能力？**
 A: 查看 `.state/SYSTEM_CAPABILITIES.json` 或运行 `/pd-bootstrap` 重新扫描。

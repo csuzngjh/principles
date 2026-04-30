@@ -211,7 +211,7 @@ A: GFI (Global Friction Index) measures the system's "pain level", range 0-100. 
 A: EP is earned through successful task completion and problem resolution. Failures may deduct EP but have protection mechanisms. Reaching EP thresholds automatically upgrades your tier, unlocking more permissions (larger code modification limits).
 
 **Q: What is Pain Signal?**
-A: Pain Signal is a problem signal detected by the system, stored in `.state/.pain_flag`. When triggered, the system starts the evolution loop.
+A: Pain Signal is a problem signal detected by the system. Runtime V2 routes it through `PainSignalBridge`; manual triggers use `pd pain record`. `.state/.pain_flag` is legacy compatibility only.
 
 **Q: How to view installed tool capabilities?**
 A: Check `.state/SYSTEM_CAPABILITIES.json` or run `/pd-bootstrap` to rescan.

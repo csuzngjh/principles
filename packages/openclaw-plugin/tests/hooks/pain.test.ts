@@ -7,6 +7,7 @@ import * as ioUtils from '../../src/utils/io.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
 import { setInjectedProbationIds, clearSession } from '../../src/core/session-tracker.js';
+import { resetPainDiagnosticGateForTest } from '../../src/core/pain-diagnostic-gate.js';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io.js');
@@ -66,6 +67,9 @@ describe('Post-Write Checks & Pain Hook', () => {
     vi.spyOn(WorkspaceContext, 'fromHookContext').mockReturnValue(mockWctx as any);
     vi.spyOn(EventLogService, 'get').mockReturnValue(mockEventLog as any);
     clearSession('s-success');
+    clearSession('s-low-value-failure');
+    clearSession('s-repeated-failure');
+    resetPainDiagnosticGateForTest();
   });
 
   afterEach(() => {
@@ -102,9 +106,8 @@ describe('Post-Write Checks & Pain Hook', () => {
     expect(mockApi.runtime.agent.resolveAgentWorkspaceDir).toHaveBeenCalledWith(mockApi.config, 'main');
   });
 
-  // TODO: Fix this test - fs.writeFileSync mock not being called
-  it.skip('should capture pain on tool error with correct source', () => {
-    const mockCtx = { workspaceDir, sessionId: 's1', api: { logger: {} } };
+  it('records ordinary write failures as friction only without Runtime V2 diagnosis', () => {
+    const mockCtx = { workspaceDir, sessionId: 's-low-value-failure', api: { logger: {} } };
     const mockEvent = { 
         toolName: 'write', 
         params: { file_path: 'src/main.ts' },
@@ -114,25 +117,49 @@ describe('Post-Write Checks & Pain Hook', () => {
 
     vi.mocked(ioUtils.normalizePath).mockReturnValue('src/main.ts');
     vi.mocked(ioUtils.isRisky).mockReturnValue(false);
-    vi.mocked(ioUtils.serializeKvLines).mockReturnValue('mocked-pain-flag-content');
-
-    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
 
     handleAfterToolCall(mockEvent as any, mockCtx as any);
 
-    expect(fs.writeFileSync).toHaveBeenCalled();
-    const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
-    expect(callArgs[0]).toContain('.pain_flag');
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+    expect(mockEmitSync).not.toHaveBeenCalled();
+    expect(mockEventLog.recordPainSignal).not.toHaveBeenCalled();
+    expect(mockWctx.trajectory.recordPainEvent).not.toHaveBeenCalled();
+    expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 's-low-value-failure',
+      toolName: 'write',
+      outcome: 'failure',
+    }));
+  });
+
+  it('emits Runtime V2 diagnosis after repeated same write failures', () => {
+    const mockCtx = { workspaceDir, sessionId: 's-repeated-failure', api: { logger: {} } };
+    const mockEvent = {
+        toolName: 'write',
+        params: { file_path: 'src/main.ts' },
+        error: 'Permission denied',
+        result: { exitCode: 1 }
+    };
+
+    vi.mocked(ioUtils.normalizePath).mockReturnValue('src/main.ts');
+    vi.mocked(ioUtils.isRisky).mockReturnValue(false);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+    expect(mockEmitSync).not.toHaveBeenCalled();
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
 
     expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
       type: 'pain_detected',
       data: expect.objectContaining({
         painType: 'tool_failure',
         source: 'write',
+        reason: expect.stringContaining('diagnosticGate=high_gfi'),
       }),
     }));
     expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
-      sessionId: 's1',
+      sessionId: 's-repeated-failure',
       toolName: 'write',
       outcome: 'failure',
     }));
@@ -186,7 +213,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     };
 
     vi.mocked(ioUtils.normalizePath).mockReturnValue('src/main.ts');
-    vi.mocked(ioUtils.isRisky).mockReturnValue(false);
+    vi.mocked(ioUtils.isRisky).mockReturnValue(true);
     vi.mocked(ioUtils.serializeKvLines).mockReturnValue('mocked-pain-flag-content');
     vi.mocked(fs.existsSync).mockImplementation((filePath: fs.PathLike) => {
       const normalizedPath = String(filePath).replace(/\\/g, '/');

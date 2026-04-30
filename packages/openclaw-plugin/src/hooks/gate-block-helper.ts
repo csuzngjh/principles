@@ -10,9 +10,11 @@
  * had their own block persistence implementations.
  */
 
-import { trackBlock } from '../core/session-tracker.js';
+import { getSession, trackBlock } from '../core/session-tracker.js';
 import type { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
+import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
+import { emitPainDetectedEvent } from './pain.js';
 import {
   TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS,
   TRAJECTORY_GATE_BLOCK_MAX_RETRIES
@@ -98,9 +100,8 @@ export function recordGateBlockAndReturn(
     scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, logWarn, logError);
   }
 
-  // 5. Emit pain signal for gate block (#256)
-  // Gate blocks are a strong frustration signal — the agent tried to do something
-  // and was blocked by a principle gate. This should feed into the nocturnal pipeline.
+  // 5. Record gate block pain context. Runtime V2 diagnosis is gated by GFI
+  // so one mild block does not start a long diagnostician run.
   if (sessionId) {
     const GATE_BLOCK_PAIN_SCORE = 30;
     // Record to trajectory (fire-and-forget, no .pain_flag file needed)
@@ -113,9 +114,22 @@ export function recordGateBlockAndReturn(
       origin: 'system_infer',
     });
 
-    // Emit via the Runtime v2 pain chain (M8: no .pain_flag file)
-    try {
-      wctx.evolutionReducer.emitSync({
+    const session = getSession(sessionId);
+    const gate = evaluatePainDiagnosticGate({
+      source: 'gate_blocked',
+      score: GATE_BLOCK_PAIN_SCORE,
+      currentGfi: session?.currentGfi ?? 0,
+      consecutiveErrors: session?.consecutiveErrors ?? 0,
+      sessionId,
+      errorHash: `${toolName}:${filePath}:${reason}`,
+      thresholds: {
+        painTrigger: wctx.config.get('thresholds.pain_trigger') || 40,
+        highSeverity: wctx.config.get('severity_thresholds.high') || 70,
+      },
+    });
+
+    if (gate.shouldDiagnose) {
+      void emitPainDetectedEvent(wctx, {
         ts: new Date().toISOString(),
         type: 'pain_detected',
         data: {
@@ -127,9 +141,11 @@ export function recordGateBlockAndReturn(
           sessionId,
           agentId: 'main',
         },
+      }).catch((emitErr) => {
+        logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
       });
-    } catch (emitErr) {
-      logWarn(`[PD_GATE] Failed to emit gate block pain event: ${String(emitErr)}`);
+    } else {
+      logger.info?.(`[PD_GATE] Gate block recorded without Runtime V2 diagnosis: ${gate.detail}`);
     }
   }
 
