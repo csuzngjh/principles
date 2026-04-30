@@ -753,7 +753,7 @@ ${heartbeatChecklist}
 
   // 0. Behavioral Constraints (empathy observer coordination)
   // Injected here (appendSystemContext) instead of prependContext to hide from WebUI users.
-  // See: https://github.com/csuzngjh/principles/issues/XXX
+  // Behavioral constraints: empathy observer coordination
   if (shouldInjectBehavioralConstraints) {
     appendParts.push(`<behavioral_constraints>
 ${empathySilenceConstraint}
