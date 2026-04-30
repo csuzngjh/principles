@@ -44,7 +44,9 @@ function appendJsonLine(filePath: string, value: unknown): void {
 }
 
 function ensurePainEventsSchema(db: Database.Database): void {
-db.exec(`
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         session_id TEXT PRIMARY KEY,
         started_at TEXT,
@@ -66,6 +68,18 @@ db.exec(`
       CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
       CREATE INDEX IF NOT EXISTS idx_pain_events_created_at ON pain_events(created_at);
     `);
+
+    // Migration: add metadata_json column to existing sessions table
+    // (CREATE TABLE IF NOT EXISTS only affects new DBs)
+    const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all() as { name: string }[];
+    if (!sessionColumns.some((c) => c.name === 'metadata_json')) {
+      db.exec('ALTER TABLE sessions ADD COLUMN metadata_json TEXT');
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
 function recordTrajectoryPainEvent(
