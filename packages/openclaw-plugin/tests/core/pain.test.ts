@@ -4,7 +4,6 @@ import * as path from 'path';
 import {
   computePainScore,
   painSeverityLabel,
-  writePainFlag,
   readPainFlagData,
   buildPainFlag,
   validatePainFlag,
