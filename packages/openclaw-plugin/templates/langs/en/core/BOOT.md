@@ -16,7 +16,7 @@ Short, explicit instructions for what OpenClaw should do on startup. If the task
 2. **Confirm workspace**: Check current working directory is correct
 3. **Read identity files**: `SOUL.md`, `USER.md`, `IDENTITY.md`
 4. **Check memory state**: Read today's and yesterday's `memory/YYYY-MM-DD.md`
-5. **Check pain signals**: See if `.state/.pain_flag` exists
+5. **Check Runtime V2 pain diagnostics**: use `pd candidate list` / ledger state; `.state/.pain_flag` is legacy compatibility only
 
 ---
 
