@@ -998,7 +998,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         if (attempt < maxAttempts) { await this.sleep(2000); continue; }
         return null;
       } finally {
-        try { fs.unlinkSync(sessionFile); } catch (_) { /* session file cleanup */ }
+        try { fs.unlinkSync(sessionFile); } catch { /* session file cleanup */ }
       }
     }
     return null;
