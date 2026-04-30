@@ -744,7 +744,8 @@ function syncPdCli() {
 function getNpmGlobalBinDir() {
     try {
         const prefix = execSync('npm prefix -g', { encoding: 'utf-8' }).trim();
-        return prefix || null;
+        if (!prefix) return null;
+        return process.platform === 'win32' ? prefix : join(prefix, 'bin');
     } catch {
         return null;
     }
