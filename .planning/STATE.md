@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.8
-milestone_name: M9 — PiAi Runtime Adapter
-status: completed
-last_updated: "2026-04-29T11:37:55.720Z"
-last_activity: "2026-04-29 -- M9 shipped: PR #412 — xiaomi-coding/mimo-v2.5-pro real UAT"
+milestone: v2.9
+milestone_name: M10 — Nocturnal Artificer LLM Upgrade
+status: complete
+last_updated: "2026-04-30T12:00:00.000Z"
+last_activity: "2026-04-30 -- M10 COMPLETE: Artificer LLM upgrade — 42/42 tests pass"
 progress:
-  total_phases: 80
+  total_phases: 83
   completed_phases: 71
   total_plans: 139
   completed_plans: 148
-  percent: 100
+  percent: 85
 ---
 
 # Project State: Principles
@@ -19,16 +19,40 @@ progress:
 
 **Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-**Current Focus:** v2.8 M9 — PiAi Runtime Adapter (Default Diagnostician Runtime) — SHIPPED
+**Current Focus:** v2.9 M10 — Nocturnal Artificer LLM Upgrade (Self-Evolution Decoupling)
 
 ## Current Position
 
-Phase: m9-05 complete
-Plan: 1/1 complete
-Status: SHIPPED — M9 complete: PR #412 (m9-05 Real UAT PASS, 8/8 requirements)
-Last activity: 2026-04-29 -- M9 shipped: PR #412 — xiaomi-coding/mimo-v2.5-pro real UAT
+Phase: M10 COMPLETE
+Plan: 3/3 (m10-01 ✅ m10-02 ✅ m10-03 ✅)
+Status: Complete — All phases delivered, 42/42 tests pass
+Last activity: 2026-04-30 -- M10 Artificer LLM upgrade complete on fix/nocturnal-artificer-llm-upgrade
 
-## M9 Pipeline
+## M10 Pipeline (Target)
+
+pain → Diagnostician → principle → **Nocturnal Trinity Reflection** → **Artificer (LLM)** → sandbox `.js` rule → validateRuleImplementationCandidate → maybePersistArtificerCandidate → active interception rule
+
+## M10 Scope
+
+1. `runArtificerAsync`: LLM-backed code generation replacing `buildDefaultArtificerOutput` stub
+2. Prompt engineering: Trinity reflection → targeted interception rule JS
+3. Pipeline integration: Replace stub in `maybePersistArtificerCandidate`
+4. Dynamic pruning verification: adherence-based rule lifecycle
+5. E2E: reflection → artificer → sandbox validation → persistence
+
+## LOCKED Decisions
+
+- **LOCKED-04**: Artificer must use the same `runtimeAdapter` configuration as Diagnostician.
+- **LOCKED-05**: Static validation (`validateRuleImplementationCandidate`) is a non-negotiable gate for LLM-generated code.
+- **LOCKED-06**: Dynamic Pruning must be verifiable.
+
+## Hard Boundaries
+
+- Artificer 不直接修改生产代码，仅生成 Sandbox `.js`
+- 必须通过 `RuleHost` 沙盒验证
+- 不修改 Trinity reflection 链路（Dreamer → Philosopher → Scribe）
+- 不修改 Diagnostician 主链路
+- 不引入新的 runtime 依赖（复用现有 TrinityRuntimeAdapter）
 
 pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (pi-ai complete) → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
 
@@ -58,7 +82,7 @@ pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (p
 
 ## Context
 
-**M9 依赖：** M8 (pain signal bridge + single path cutover)
+**M10 依赖：** M9 (PiAi Runtime Adapter — runtime infrastructure)
 
 **Baseline (Frozen):**
 
@@ -71,5 +95,6 @@ pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (p
 - v2.6 M7: Principle Candidate Intake — SHIPPED 2026-04-27
 - v2.7 M8: Pain Signal → Principle Single Path Cutover — SHIPPED 2026-04-28
 - **v2.8 M9: PiAi Runtime Adapter — SHIPPED 2026-04-29**
+- **v2.9 M10: Nocturnal Artificer LLM Upgrade — COMPLETE**
 
 **Canonical source:** `packages/principles-core/src/runtime-v2/`

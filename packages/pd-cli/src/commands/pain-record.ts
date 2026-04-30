@@ -15,7 +15,11 @@
  *   Exit: non-0 on failure
  */
 
-import { createPainSignalBridge, PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
+import {
+  createPainSignalBridge,
+  PrincipleTreeLedgerAdapter,
+  recordPainSignalObservability,
+} from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface RecordOptions {
@@ -35,6 +39,7 @@ interface PainRecordResult {
   ledgerEntryIds: string[];
   status: 'succeeded' | 'skipped' | 'failed' | 'retried';
   message?: string;
+  observabilityWarnings?: string[];
 }
 
 export async function handlePainRecord(opts: RecordOptions): Promise<void> {
@@ -75,6 +80,12 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     agentId: 'pd-cli',
   };
 
+  const observability = recordPainSignalObservability({
+    workspaceDir,
+    stateDir,
+    data: painData,
+  });
+
   const result = await (async (): Promise<PainRecordResult> => {
     const bridgeResult = await bridge.onPainDetected(painData);
 
@@ -87,6 +98,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       ledgerEntryIds: bridgeResult.ledgerEntryIds,
       status: bridgeResult.status,
       message: bridgeResult.message,
+      observabilityWarnings: observability.warnings.length > 0 ? observability.warnings : undefined,
     };
   })().catch((err: unknown) => ({
     painId,
@@ -95,6 +107,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     candidateIds: [],
     ledgerEntryIds: [],
     message: err instanceof Error ? err.message : String(err),
+    observabilityWarnings: observability.warnings.length > 0 ? observability.warnings : undefined,
   }));
 
   if (opts.json) {

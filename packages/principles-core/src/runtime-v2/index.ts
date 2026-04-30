@@ -209,6 +209,8 @@ export type {
   PainSignalBridgeResult,
   PainSignalBridgeStatus,
 } from './pain-signal-bridge.js';
+export { recordPainSignalObservability } from './pain-signal-observability.js';
+export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
 export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfig, validateRuntimeConfig, type PainSignalRuntimeFactoryOptions, type RuntimeConfig } from './pain-signal-runtime-factory.js';
 
 // Migration bridge

@@ -70,6 +70,35 @@ pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (p
 
 ## Backlog: Future Milestones
 
+### v2.9 M10 — Nocturnal Artificer LLM Upgrade — IN PROGRESS
+
+**Goal:** Replace hardcoded Artificer stub with LLM-backed dynamic code generator, completing the PD system's self-evolution closed loop.
+
+**Pipeline:**
+pain → Diagnostician → principle → Nocturnal Trinity Reflection → **Artificer (LLM)** → sandbox `.js` rule → validateRuleImplementationCandidate → maybePersistArtificerCandidate → active interception rule
+
+**Phases:**
+
+- [ ] **m10-01**: Artificer Core & LLM Integration — `runArtificerAsync` + prompt engineering
+- [ ] **m10-02**: Pipeline Integration — Replace stub in NocturnalService
+- [ ] **m10-03**: Dynamic Pruning & E2E Validation — adherence-based lifecycle + end-to-end
+
+**LOCKED Decisions:**
+- LOCKED-04: Artificer uses same `runtimeAdapter` config as Diagnostician
+- LOCKED-05: Static validation is non-negotiable gate for LLM code
+- LOCKED-06: Dynamic Pruning must be verifiable
+
+**Hard Boundaries:**
+- Artificer 仅生成 Sandbox `.js`，不直接修改生产代码
+- 必须通过 `RuleHost` 沙盒验证
+- 不修改 Trinity reflection 链路
+- 不修改 Diagnostician 主链路
+- 不引入新 runtime 依赖
+
+**Dependencies:**
+- m10-01 → m10-02 (pipeline needs runArtificerAsync)
+- m10-02 → m10-03 (E2E needs pipeline integrated)
+
 ---
 
 _Last updated: 2026-04-29 after M9 shipped_

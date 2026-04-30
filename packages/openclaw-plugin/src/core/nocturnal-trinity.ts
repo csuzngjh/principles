@@ -33,6 +33,7 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import type { ArtificerInput } from './nocturnal-artificer.js';
 import type { NocturnalSessionSnapshot } from './nocturnal-trajectory-extractor.js';
 import { computeThinkingModelDelta } from './nocturnal-trajectory-extractor.js';
 import {
@@ -358,13 +359,80 @@ If you cannot synthesize an artifact:
     "scribePassed": false,
     "candidateCount": 2,
     "selectedCandidateIndex": -1,
-    "stageFailures": ["Philosopher: no valid judgments produced"]
+   "stageFailures": ["Philosopher: no valid judgments produced"]
   }
 }`;
+
+const ARTIFICER_SYSTEM_PROMPT = `# Nocturnal Artificer — Rule Implementation Generator
+
+> System prompt for Artificer stage.
+> Role: Generate a sandbox-safe JavaScript interception rule from Trinity reflection results.
+
+## Role
+
+You are a code generation specialist for the Principles Disciple framework.
+Your task is to take the Trinity reflection output (bad decision, better decision, rationale)
+and generate a JavaScript interception rule that would prevent the bad decision from recurring.
+
+## Sandbox Constraints (MANDATORY)
+
+The generated code runs in a sandboxed RuleHost. It MUST:
+1. Export a \`meta\` object with: name (string), version (string), ruleId (string), coversCondition (string)
+2. Export an \`evaluate(input, helpers)\` function
+3. \`evaluate\` must return: { decision: 'allow'|'block'|'requireApproval', matched: boolean, reason: string }
+
+### Available Helpers (via helpers parameter):
+- helpers.isRiskPath() — boolean: whether the target path is a risk path
+- helpers.getToolName() — string: the tool being called
+- helpers.getEstimatedLineChanges() — number: estimated line changes
+- helpers.getBashRisk() — 'normal'|'high'|'critical': bash command risk level
+- helpers.hasPlanFile() — boolean: whether a plan file exists
+- helpers.getPlanStatus() — 'DRAFT'|'READY'|string: plan status
+- helpers.getCurrentEpiTier() — number: current evolution tier
+
+### FORBIDDEN APIs (will cause validation rejection):
+- eval(), Function(), import(), require()
+- fetch, XMLHttpRequest
+- child_process, process, fs, http, https, net
+- setTimeout/setInterval with string arguments
+- WebSocket, Buffer
+
+## Output Format
+
+You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no preamble.
+
+{
+  "ruleId": "<target rule ID>",
+  "implementationType": "code",
+  "candidateSource": "<the JavaScript source code as a single string, with proper escaping>",
+  "helperUsage": ["<list of helper names used>"],
+  "expectedDecision": "allow"|"block"|"requireApproval",
+  "rationale": "<why this implementation addresses the bad decision>",
+  "lineage": {
+    "artifactKind": "rule-implementation-candidate",
+    "sourceSnapshotRef": "<from input>",
+    "sourcePainIds": ["<from input>"],
+    "sourceGateBlockIds": ["<from input>"]
+  }
+}
+
+## Important Notes
+- The candidateSource must be valid JavaScript that can be compiled with new Function()
+- Use template literals for string values inside the code
+- The evaluate function should be specific to the observed bad decision pattern
+- Return matched: false and decision: 'allow' when the rule does not apply
+- The code must be deterministic (same input → same output)`;
 
 // ---------------------------------------------------------------------------
 // Trinity Runtime Adapter
 // ---------------------------------------------------------------------------
+
+export interface ArtificerRuleContext {
+  ruleName: string;
+  ruleDescription: string;
+  triggerCondition: string;
+  action: string;
+}
 
 /**
  * Interface for Trinity stage invocation.
@@ -427,6 +495,22 @@ export interface TrinityRuntimeAdapter {
     _telemetry: TrinityTelemetry,
     _config: TrinityConfig
   ): Promise<TrinityDraftArtifact | null>;
+
+  /**
+   * Invoke the Artificer stage.
+   * Generates a rule implementation candidate from Trinity reflection results.
+   * @param input Artificer input with principle, rule, snapshot, and scribe artifact
+   * @param ruleContext Target rule metadata for prompt context
+   * @param telemetry Running telemetry
+   * @param config Trinity config
+   * @returns Raw JSON string matching ArtificerOutput, or null on failure
+   */
+  invokeArtificer(
+    _input: ArtificerInput,
+    _ruleContext: ArtificerRuleContext,
+    _telemetry: TrinityTelemetry,
+    _config: TrinityConfig
+  ): Promise<string | null>;
 
   /**
    * Clean up any resources used by the adapter.
@@ -867,6 +951,59 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     return null;
   }
 
+  async invokeArtificer(
+    input: ArtificerInput,
+    ruleContext: ArtificerRuleContext,
+    _telemetry: TrinityTelemetry,
+    _config: TrinityConfig
+  ): Promise<string | null> {
+    this.lastFailureReason = null;
+    const prompt = this.buildArtificerPrompt(input, ruleContext);
+    const model = this.resolveModel();
+
+    this.api.logger?.info(`[Trinity:Artificer] Using model: ${model.provider}/${model.model}`);
+
+    const maxAttempts = 2;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const runId = `artificer-${randomUUID()}`;
+      const sessionFile = this.createSessionFile('artificer');
+
+      try {
+        const result = await this.api.runtime.agent.runEmbeddedPiAgent({
+          sessionId: runId,
+          sessionFile,
+          prompt,
+          extraSystemPrompt: ARTIFICER_SYSTEM_PROMPT,
+          config: this.loadFullConfig(),
+          provider: model.provider,
+          model: model.model,
+          timeoutMs: this.stageTimeoutMs,
+          runId,
+          disableTools: true,
+        });
+
+        const outputText = this.extractPayloadText(result);
+        if (!outputText) {
+          this.recordFailure('runtime_session_read_failed', 'Artificer returned empty response');
+          if (attempt < maxAttempts) { await this.sleep(1000); continue; }
+          return null;
+        }
+
+        this.api.logger?.info(`[Trinity:Artificer] Output preview (attempt ${attempt}): ${outputText.slice(0, 500)}`);
+
+        // Return raw JSON string for caller to parse
+        return outputText;
+      } catch (err) {
+        this.recordFailure(this.classifyRuntimeError(err), err);
+        if (attempt < maxAttempts) { await this.sleep(2000); continue; }
+        return null;
+      } finally {
+        try { fs.unlinkSync(sessionFile); } catch { /* session file cleanup */ }
+      }
+    }
+    return null;
+  }
+
   async close(): Promise<void> {
     // Clean up temp directory
     try {
@@ -1156,6 +1293,50 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       ``,
       `Respond with ONLY a valid JSON object.`
     );
+
+    return sections.join('\n');
+  }
+
+  private buildArtificerPrompt(
+    input: ArtificerInput,
+    ruleContext: ArtificerRuleContext
+  ): string {
+    // NOTE: Duplicated from nocturnal-artificer.ts:buildArtificerPrompt to avoid circular import.
+    // Both implementations must remain in sync.
+    const sections: string[] = [];
+
+    sections.push('## Target Rule');
+    sections.push(`Rule ID: ${input.ruleId}`);
+    sections.push(`Rule Name: ${ruleContext.ruleName}`);
+    sections.push(`Description: ${ruleContext.ruleDescription}`);
+    sections.push(`Trigger Condition: ${ruleContext.triggerCondition}`);
+    sections.push(`Action: ${ruleContext.action}`);
+    sections.push('');
+
+    sections.push('## Scribe Reflection');
+    sections.push(`Bad Decision: ${input.scribeArtifact.badDecision}`);
+    sections.push(`Better Decision: ${input.scribeArtifact.betterDecision}`);
+    sections.push(`Rationale: ${input.scribeArtifact.rationale}`);
+    sections.push('');
+
+    sections.push('## Pain Events');
+    const painSummaries = input.snapshot.painEvents
+      .slice(0, 5)
+      .map((pe) => `- [score: ${pe.score}] ${pe.reason || 'no reason'} (source: ${pe.source})`);
+    sections.push(painSummaries.length > 0 ? painSummaries.join('\n') : '(none)');
+    sections.push('');
+
+    sections.push('## Gate Blocks');
+    const gateSummaries = input.snapshot.gateBlocks
+      .slice(0, 5)
+      .map((gb) => `- ${gb.toolName}: ${gb.reason}`);
+    sections.push(gateSummaries.length > 0 ? gateSummaries.join('\n') : '(none)');
+    sections.push('');
+
+    sections.push('## Lineage');
+    sections.push(`Source Snapshot: ${input.lineage.sourceSnapshotRef}`);
+    sections.push(`Pain IDs: ${input.lineage.sourcePainIds.join(', ') || '(none)'}`);
+    sections.push(`Gate Block IDs: ${input.lineage.sourceGateBlockIds.join(', ') || '(none)'}`);
 
     return sections.join('\n');
   }
