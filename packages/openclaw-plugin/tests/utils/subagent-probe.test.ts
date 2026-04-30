@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import {
   getSubagentRuntimeAvailability,
   isSubagentRuntimeAvailable,
@@ -55,6 +55,11 @@ describe('getAvailableSubagentRuntime', () => {
     });
 
     afterEach(() => {
+      delete (globalThis as any)[symbol];
+    });
+
+    afterAll(() => {
+      // Safety net: ensure cleanup even if a test crashes before afterEach
       delete (globalThis as any)[symbol];
     });
 

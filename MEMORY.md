@@ -44,13 +44,13 @@
 ## 部署
 - 插件同步：`node packages/openclaw-plugin/scripts/sync-plugin.mjs`
 - 验证部署：`grep "EvolutionWorker started for workspace:" ~/.openclaw/extensions/principles-disciple/dist/bundle.js`
-- Windows 运行时日志：`Get-Content $env:USERPROFILE/.openclaw/logs/plugin.log -Tail 100 -Wait`
+- Windows 运行时日志（PowerShell）：`Get-Content $env:USERPROFILE/.openclaw/logs/plugin.log -Tail 100 -Wait`
 - 健康检查：`npx tsx scripts/pipeline-health.ts --workspace ~/.openclaw/workspace-main`
 
 ## 关键文件位置
 - 插件源码: `packages/openclaw-plugin/src/`
 - 测试: `packages/openclaw-plugin/tests/`
-- OpenClaw 源码: `C:/Users/Administrator/.openclaw/` 或自定义路径
+- OpenClaw 源码: `~/.openclaw/`（Windows: `C:/Users/Administrator/.openclaw/`）
 - 插件配置: `~/.openclaw/openclaw.json`
 - 状态文件: `~/.openclaw/workspace-*/.state/`
 - Cron jobs: `~/.openclaw/cron/jobs.json`
