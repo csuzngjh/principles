@@ -106,9 +106,10 @@ tasksCmd
 program
   .command('health')
   .description('Show health diagnostics for all workspaces')
-  .option('-w, --workspace <path>', 'Workspace directory (required for trajectory/history/context commands)')
-  .action(async (_opts) => {
-    await handleHealth();
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleHealth(opts);
   });
 
 const centralCmd = program

@@ -215,3 +215,6 @@ export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfi
 
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
+
+// Ledger file utilities (for audit/consistency checks)
+export { loadLedger, getLedgerFilePathPublic } from '../principle-tree-ledger.js';
