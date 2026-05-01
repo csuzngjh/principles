@@ -82,7 +82,9 @@ jobs:
 
       - name: TypeScript Check
         working-directory: packages/openclaw-plugin
-        run: npx tsc --noEmit
+        run: |
+          rm -f ../principles-core/tsconfig.tsbuildinfo
+          npx tsc --noEmit
 
       - name: Production Build & Verify
         working-directory: packages/openclaw-plugin
