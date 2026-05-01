@@ -9,7 +9,6 @@
  *   pd candidate repair --candidate-id <id> --workspace <path> [--json]
  */
 import { randomUUID } from 'crypto';
-import * as fs from 'fs';
 import * as path from 'path';
 import {
   RuntimeStateManager,
@@ -17,6 +16,8 @@ import {
   candidateShow,
   CandidateIntakeService,
   CandidateIntakeError,
+  loadLedger,
+  getLedgerFilePathPublic,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
@@ -58,7 +59,6 @@ interface AuditResult {
   status: 'ok' | 'degraded';
   consumedCount: number;
   missingLedgerEntryIds: string[];
-  missingCandidates: string[];
   checkedLedgerPath: string;
   checkedDbPath: string;
 }
@@ -78,6 +78,20 @@ async function updateCandidateStatus(stateManager: RuntimeStateManager, candidat
       'UPDATE principle_candidates SET status = ? WHERE candidate_id = ?'
     ).run(status, candidateId);
   }
+}
+
+/**
+ * Ensure consumed_at is set for a consumed candidate.
+ * Returns the consumed_at value (existing or newly written), or null if candidate not found.
+ */
+async function ensureConsumedAt(stateManager: RuntimeStateManager, candidateId: string): Promise<string | null> {
+  const db = stateManager.connection;
+  const row = db.getDb().prepare('SELECT consumed_at FROM principle_candidates WHERE candidate_id = ?').get(candidateId) as { consumed_at: string | null } | undefined;
+  if (!row) return null;
+  if (row.consumed_at) return row.consumed_at;
+  const now = new Date().toISOString();
+  db.getDb().prepare('UPDATE principle_candidates SET consumed_at = ? WHERE candidate_id = ?').run(now, candidateId);
+  return now;
 }
 
 // ── List ───────────────────────────────────────────────────────────────────────
@@ -131,7 +145,7 @@ export async function handleCandidateShow(opts: CandidateShowOptions): Promise<v
   try {
     await stateManager.initialize();
 
-    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: workspaceDir });
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
 
     const result = await candidateShow({
       candidateId: opts.candidateId,
@@ -167,7 +181,7 @@ export async function handleCandidateShow(opts: CandidateShowOptions): Promise<v
   }
 }
 
-// ── Intake ────────────────────────────────────────────────────────────────────
+// ── Intake ───────────────────────────────────────────────────────────────────
 
 /**
  * pd candidate intake --candidate-id <id> [--workspace <path>] [--json] [--dry-run]
@@ -184,7 +198,7 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
   try {
     await stateManager.initialize();
 
-    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: workspaceDir });
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     const service = new CandidateIntakeService({ stateManager, ledgerAdapter });
 
     if (opts.dryRun) {
@@ -285,14 +299,14 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
   }
 }
 
-// ── Audit ───────────────────────────────────────────────────────────────────────
+// ── Audit ─────────────────────────────────────────────────────────────────────
 
 /**
  * pd candidate audit --workspace <path> [--json]
  *
  * Reads workspace/.pd/state.db principle_candidates and
- * workspace/.state/principle_training_state.json.
- * Checks each consumed candidate has a ledger sourceRef = candidate://<id>.
+ * the workspace ledger (same file used by OpenClaw plugin).
+ * Checks each consumed candidate has a ledger entry.
  * Exits non-zero if any consumed candidate is missing from ledger.
  */
 export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise<void> {
@@ -304,7 +318,8 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
 
     // Load all candidates from DB
     const dbPath = path.join(workspaceDir, '.pd', 'state.db');
-    const ledgerPath = path.join(workspaceDir, '.state', 'principle_training_state.json');
+    const ledgerStateDir = path.join(workspaceDir, '.state');
+    const ledgerPath = getLedgerFilePathPublic(ledgerStateDir);
 
     const db = stateManager.connection;
     const consumedRows = db.getDb().prepare(
@@ -313,27 +328,16 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
 
     const consumedIds = consumedRows.map(r => r.candidate_id);
 
-    // Load ledger
-    let ledgerPrinciples: Record<string, unknown> = {};
-    if (fs.existsSync(ledgerPath)) {
-      try {
-        const ledgerContent = fs.readFileSync(ledgerPath, 'utf8');
-        const ledger = JSON.parse(ledgerContent);
-        ledgerPrinciples = ledger._tree?.principles || {};
-      } catch {
-        // ignore parse errors
-      }
-    }
+    // Load ledger using core's loadLedger (same format as plugin)
+    const ledger = loadLedger(ledgerStateDir);
+    const ledgerPrinciples = ledger.tree.principles;
 
     // Check each consumed candidate has ledger entry
     const missingLedgerEntryIds: string[] = [];
     for (const candidateId of consumedIds) {
-      const sourceRef = `candidate://${candidateId}`;
-      const found = Object.values(ledgerPrinciples).some((p: unknown) => {
-        const principle = p as { sourceRef?: string; derivedFromPainIds?: string[] };
-        return principle.sourceRef === sourceRef ||
-          (principle.derivedFromPainIds && principle.derivedFromPainIds.includes(candidateId));
-      });
+      const found = Object.values(ledgerPrinciples).some((p) =>
+        p.derivedFromPainIds.includes(candidateId),
+      );
       if (!found) {
         missingLedgerEntryIds.push(candidateId);
       }
@@ -343,7 +347,6 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
       status: missingLedgerEntryIds.length === 0 ? 'ok' : 'degraded',
       consumedCount: consumedIds.length,
       missingLedgerEntryIds,
-      missingCandidates: [], // not applicable in V2 audit
       checkedLedgerPath: ledgerPath,
       checkedDbPath: dbPath,
     };
@@ -401,17 +404,19 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
       process.exit(1);
     }
 
-    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: workspaceDir });
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     const service = new CandidateIntakeService({ stateManager, ledgerAdapter });
 
     // Check if already in ledger
     const existing = ledgerAdapter.existsForCandidate(opts.candidateId);
     if (existing) {
+      const consumedAt = await ensureConsumedAt(stateManager, opts.candidateId);
       const result = {
         candidateId: opts.candidateId,
         status: 'already_consistent',
         message: `Candidate ${opts.candidateId} already has ledger entry.`,
         ledgerEntryId: existing.id,
+        consumedAt,
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -424,19 +429,13 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
 
     // Re-intake to restore ledger entry
     const entry = await service.intake(opts.candidateId);
-
-    // Ensure consumed_at is set (belt-and-suspenders)
-    const db = stateManager.connection;
-    const row = db.getDb().prepare('SELECT consumed_at FROM principle_candidates WHERE candidate_id = ?').get(opts.candidateId) as { consumed_at: string | null } | undefined;
-    if (!row?.consumed_at) {
-      const now = new Date().toISOString();
-      db.getDb().prepare('UPDATE principle_candidates SET consumed_at = ? WHERE candidate_id = ?').run(now, opts.candidateId);
-    }
+    const consumedAt = await ensureConsumedAt(stateManager, opts.candidateId);
 
     const result = {
       candidateId: opts.candidateId,
       status: 'repaired',
       ledgerEntryId: entry.id,
+      consumedAt,
       message: `Ledger entry restored for consumed candidate ${opts.candidateId}.`,
     };
     if (opts.json) {
