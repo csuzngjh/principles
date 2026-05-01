@@ -23,7 +23,7 @@ interface ArtifactShowOptions {
  * Returns: artifactId, runId, taskId, artifactKind, contentJson, createdAt, candidates[].
  */
 export async function handleArtifactShow(opts: ArtifactShowOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const workspaceDir: string = resolveWorkspaceDir(opts.workspace);
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {

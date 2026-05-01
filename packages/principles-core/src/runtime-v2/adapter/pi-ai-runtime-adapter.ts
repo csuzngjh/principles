@@ -263,7 +263,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     // Stage 2+3: getModel valid + minimal complete probe
     try {
       const model = resolveModel(this.config.provider, this.config.model, this.config.baseUrl);
-      const timeoutMs = this.config.timeoutMs ?? 60_000;
+      const timeoutMs = this.config.timeoutMs ?? 120_000;
       const signal = AbortSignal.timeout(timeoutMs);
       const probeContext: Context = {
         messages: [{
