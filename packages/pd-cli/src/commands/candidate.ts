@@ -181,7 +181,7 @@ export async function handleCandidateShow(opts: CandidateShowOptions): Promise<v
   }
 }
 
-// ── Intake ────────────────────────────────────────────────────────────────────
+// ── Intake ───────────────────────────────────────────────────────────────────
 
 /**
  * pd candidate intake --candidate-id <id> [--workspace <path>] [--json] [--dry-run]
