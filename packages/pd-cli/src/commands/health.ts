@@ -15,16 +15,21 @@ import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadLedger, getLedgerFilePathPublic } from '@principles/core/runtime-v2';
 
 interface LastSuccessfulChain {
+  painId?: string;
   taskId: string;
   runId: string;
   artifactId: string;
   candidateIds: string[];
   ledgerEntryIds: string[];
+  latencyMs?: { totalMs?: number };
+  failureCategory: string | null;
+  checkedAt: string;
 }
 
 interface WorkspaceHealth {
   generatedAt: string;
   workspace: string;
+  partialHealth?: boolean;
   pdStateDb: { path: string; exists: boolean };
   ledger: { path: string; exists: boolean; totalPrinciples: number; byStatus: Record<string, number> };
   candidates: { total: number; consumed: number; pending: number };
@@ -75,11 +80,13 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   let pdDbExists = false;
   let missingLedgerCount = 0;
   let lastSuccessfulChain: LastSuccessfulChain | undefined = undefined;
+  let partialHealth = false;
 
   function buildHealth(): WorkspaceHealth {
     return {
       generatedAt,
       workspace: workspaceDir,
+      partialHealth,
       pdStateDb: { path: pdDbPath, exists: pdDbExists },
       ledger: {
         path: ledgerPath,
@@ -163,8 +170,8 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
 
       // Last successful chain query — graceful degradation if schema incomplete
       const lastSucceeded = db.prepare(
-        "SELECT task_id FROM tasks WHERE status = 'succeeded' ORDER BY updated_at DESC LIMIT 1"
-      ).get() as { task_id: string } | undefined;
+        "SELECT task_id, input_ref, created_at FROM tasks WHERE status = 'succeeded' ORDER BY updated_at DESC LIMIT 1"
+      ).get() as { task_id: string; input_ref: string | null; created_at: string } | undefined;
       if (!lastSucceeded) { db.close(); writeHealth(); return; }
 
       const run = db.prepare(
@@ -173,8 +180,8 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       if (!run) { db.close(); writeHealth(); return; }
 
       const artifacts = db.prepare(
-        "SELECT artifact_id FROM artifacts WHERE run_id = ? ORDER BY created_at DESC LIMIT 1"
-      ).get(run.run_id) as { artifact_id: string } | undefined;
+        "SELECT artifact_id, created_at FROM artifacts WHERE run_id = ? ORDER BY created_at DESC LIMIT 1"
+      ).get(run.run_id) as { artifact_id: string; created_at: string } | undefined;
       if (!artifacts) { db.close(); writeHealth(); return; }
 
       const candidates = db.prepare(
@@ -189,16 +196,25 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       }
 
       lastSuccessfulChain = {
+        painId: lastSucceeded.input_ref ?? undefined,
         taskId: lastSucceeded.task_id,
         runId: run.run_id,
         artifactId: artifacts.artifact_id,
         candidateIds: candidates.map(c => c.candidate_id),
         ledgerEntryIds,
+        latencyMs: {
+          totalMs: lastSucceeded.created_at
+            ? Math.max(0, new Date(artifacts.created_at).getTime() - new Date(lastSucceeded.created_at).getTime())
+            : undefined,
+        },
+        failureCategory: null,
+        checkedAt: generatedAt,
       };
     } catch (err) {
       // Schema mismatch or transient SQLite error — emit partial health report
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`Warning: could not read full state.db metrics — partial health data: ${msg}`);
+      partialHealth = true;
     } finally {
       db.close();
     }

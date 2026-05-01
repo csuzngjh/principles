@@ -34,7 +34,7 @@ export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, Reco
 export { CandidateIntakeInputSchema, CandidateIntakeOutputSchema, LedgerPrincipleEntrySchema } from './candidate-intake.js';
 
 // Error categories
-export { PD_ERROR_CATEGORIES, PDRuntimeError } from './error-categories.js';
+export { PD_ERROR_CATEGORIES, PDRuntimeError, FAILURE_CATEGORY_MAP, mapFailureCategory } from './error-categories.js';
 // Candidate intake errors (M7)
 export { INTAKE_ERROR_CODES, CandidateIntakeError } from './candidate-intake.js';
 export type { PDErrorCategory } from './error-categories.js';
