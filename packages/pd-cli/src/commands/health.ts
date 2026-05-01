@@ -161,7 +161,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
         if (!candidateToLedgerEntry.has(r.candidate_id)) missingLedgerCount++;
       }
 
-      // Last successful chain query
+      // Last successful chain query — graceful degradation if schema incomplete
       const lastSucceeded = db.prepare(
         "SELECT task_id FROM tasks WHERE status = 'succeeded' ORDER BY updated_at DESC LIMIT 1"
       ).get() as { task_id: string } | undefined;
@@ -195,6 +195,10 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
         candidateIds: candidates.map(c => c.candidate_id),
         ledgerEntryIds,
       };
+    } catch (err) {
+      // Schema mismatch or transient SQLite error — emit partial health report
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`Warning: could not read full state.db metrics — partial health data: ${msg}`);
     } finally {
       db.close();
     }
