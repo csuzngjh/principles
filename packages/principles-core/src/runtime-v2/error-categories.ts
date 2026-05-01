@@ -93,7 +93,15 @@ export const FAILURE_CATEGORY_MAP: Record<PDErrorCategory, string> = {
 
 export function mapFailureCategory(errorCategory?: string | null): string | null {
   if (!errorCategory) return null;
-  return FAILURE_CATEGORY_MAP[errorCategory as PDErrorCategory] ?? 'runtime_unavailable';
+  if (!isPDErrorCategory(errorCategory)) return 'runtime_unavailable';
+  return FAILURE_CATEGORY_MAP[errorCategory];
+}
+
+// Runtime exhaustiveness assertion — verify every PDErrorCategory has a mapping
+for (const cat of PD_ERROR_CATEGORIES) {
+  if (!(cat in FAILURE_CATEGORY_MAP)) {
+    throw new Error(`FAILURE_CATEGORY_MAP is missing mapping for PDErrorCategory: ${cat}`);
+  }
 }
 
 /**

@@ -29,6 +29,7 @@ interface LastSuccessfulChain {
 interface WorkspaceHealth {
   generatedAt: string;
   workspace: string;
+  partialHealth?: boolean;
   pdStateDb: { path: string; exists: boolean };
   ledger: { path: string; exists: boolean; totalPrinciples: number; byStatus: Record<string, number> };
   candidates: { total: number; consumed: number; pending: number };
@@ -79,11 +80,13 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   let pdDbExists = false;
   let missingLedgerCount = 0;
   let lastSuccessfulChain: LastSuccessfulChain | undefined = undefined;
+  let partialHealth = false;
 
   function buildHealth(): WorkspaceHealth {
     return {
       generatedAt,
       workspace: workspaceDir,
+      partialHealth,
       pdStateDb: { path: pdDbPath, exists: pdDbExists },
       ledger: {
         path: ledgerPath,
@@ -211,6 +214,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       // Schema mismatch or transient SQLite error — emit partial health report
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`Warning: could not read full state.db metrics — partial health data: ${msg}`);
+      partialHealth = true;
     } finally {
       db.close();
     }

@@ -154,17 +154,13 @@ export function handleAfterToolCall(
     });
     if (!gate.shouldDiagnose) {
       SystemLogger.log(effectiveWorkspaceDir, 'MANUAL_PAIN_SKIPPED', `Manual pain within cooldown: ${gate.detail}`);
-      SystemLogger.log(
-        effectiveWorkspaceDir,
-        'PAIN_GATE_REJECTED',
-        JSON.stringify({
-          event: 'pain_gate_rejected',
-          reason: gate.reason,
-          detail: gate.detail,
-          source: 'manual',
-          sessionId,
-        }),
-      );
+      let payload: string;
+      try {
+        payload = JSON.stringify({ reason: gate.reason, detail: gate.detail, source: 'manual', sessionId });
+      } catch {
+        payload = JSON.stringify({ reason: gate.reason, detail: '(log serialization failed)' });
+      }
+      SystemLogger.log(effectiveWorkspaceDir, 'PAIN_GATE_REJECTED', payload);
       return;
     }
 
@@ -365,17 +361,18 @@ export function handleAfterToolCall(
       `Tool failure recorded as friction only: ${diagnosticGate.detail}; tool=${event.toolName}; path=${relPath}`,
     );
     // Structured gate rejection event for traceability
-    SystemLogger.log(
-      effectiveWorkspaceDir,
-      'PAIN_GATE_REJECTED',
-      JSON.stringify({
-        event: 'pain_gate_rejected',
+    let rejectPayload: string;
+    try {
+      rejectPayload = JSON.stringify({
         reason: diagnosticGate.reason,
         detail: diagnosticGate.detail,
         gfi: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.currentGfi ?? 0,
         score: painScore,
-      }),
-    );
+      });
+    } catch {
+      rejectPayload = JSON.stringify({ reason: diagnosticGate.reason, detail: '(log serialization failed)' });
+    }
+    SystemLogger.log(effectiveWorkspaceDir, 'PAIN_GATE_REJECTED', rejectPayload);
     return;
   }
 
@@ -425,14 +422,16 @@ export function handleAfterToolCall(
               implementationCost: 0,
               benefitScore: 0,
             });
-          } catch {
+          } catch (e) {
             // Non-critical — metrics tracked in memory
+            SystemLogger.log(effectiveWorkspaceDir, 'METRICS_UPDATE_SKIP', String(e));
           }
         }
       },
     );
-  } catch {
+  } catch (e) {
     // Observation only — never disrupt the pain pipeline
+    SystemLogger.log(effectiveWorkspaceDir, ' PRINCIPLE_TRACK_SKIP', String(e));
   }
 
   eventLog.recordPainSignal(sessionId, {
