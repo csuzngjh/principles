@@ -22,6 +22,13 @@ interface WorkspaceHealth {
   candidates: { total: number; consumed: number; pending: number };
   tasks: { total: number; byStatus: Record<string, number> };
   candidateLedgerConsistency: { status: 'ok' | 'degraded'; missing: number };
+  lastSuccessfulChain?: {
+    taskId: string;
+    runId: string;
+    artifactId: string;
+    candidateIds: string[];
+    ledgerEntryIds: string[];
+  };
 }
 
 interface HealthOptions {
@@ -57,39 +64,6 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   let pdDbExists = false;
   let missingLedgerCount = 0;
 
-  if (fs.existsSync(pdDbPath)) {
-    pdDbExists = true;
-    const db = Database(pdDbPath, { readonly: true });
-    try {
-      const cRow = db.prepare('SELECT COUNT(*) as total, status FROM principle_candidates GROUP BY status').all() as { total: number; status: string }[];
-      for (const r of cRow) {
-        candidatesTotal += r.total;
-        if (r.status === 'consumed') candidatesConsumed = r.total;
-        if (r.status === 'pending') candidatesPending = r.total;
-      }
-
-      const tRows = db.prepare('SELECT COUNT(*) as total, status FROM tasks GROUP BY status').all() as { total: number; status: string }[];
-      for (const r of tRows) {
-        tasksTotal += r.total;
-        tasksByStatus[r.status] = r.total;
-      }
-
-      // Check candidate/ledger consistency
-      const consumedRows = db.prepare("SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'").all() as { candidate_id: string }[];
-      for (const r of consumedRows) {
-        const found = principleEntries.some((p: unknown) => {
-          const principle = p as { derivedFromPainIds?: string[] };
-          return principle.derivedFromPainIds?.includes(r.candidate_id);
-        });
-        if (!found) missingLedgerCount++;
-      }
-    } catch {
-      // DB accessible but query failed — continue with partial data
-    } finally {
-      db.close();
-    }
-  }
-
   const health: WorkspaceHealth = {
     generatedAt,
     workspace: workspaceDir,
@@ -111,6 +85,52 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       missing: missingLedgerCount,
     },
   };
+
+  if (fs.existsSync(pdDbPath)) {
+    const db = Database(pdDbPath, { readonly: true });
+    try {
+      // Query last successful task with candidates → ledger chain
+      const lastSucceeded = db.prepare(
+        "SELECT task_id FROM tasks WHERE status = 'succeeded' ORDER BY updated_at DESC LIMIT 1"
+      ).get() as { task_id: string } | undefined;
+
+      if (lastSucceeded) {
+        const run = db.prepare(
+          "SELECT run_id FROM runs WHERE task_id = ? AND execution_status = 'succeeded' ORDER BY started_at DESC LIMIT 1"
+        ).get(lastSucceeded.task_id) as { run_id: string } | undefined;
+
+        if (run) {
+          const artifacts = db.prepare(
+            "SELECT artifact_id FROM artifacts WHERE run_id = ? ORDER BY created_at DESC LIMIT 1"
+          ).get(run.run_id) as { artifact_id: string } | undefined;
+
+          const candidates = db.prepare(
+            "SELECT candidate_id FROM principle_candidates WHERE artifact_id = ?"
+          ).all(artifacts?.artifact_id) as { candidate_id: string }[];
+
+          const ledgerEntryIds: string[] = [];
+          for (const c of candidates) {
+            const entry = Object.values(principleEntries).find(
+              (p: unknown) => (p as { derivedFromPainIds?: string[] }).derivedFromPainIds?.includes(c.candidate_id)
+            );
+            if (entry) ledgerEntryIds.push((entry as { id: string }).id);
+          }
+
+          if (candidates.length > 0) {
+            health.lastSuccessfulChain = {
+              taskId: lastSucceeded.task_id,
+              runId: run.run_id,
+              artifactId: artifacts?.artifact_id ?? '',
+              candidateIds: candidates.map(c => c.candidate_id),
+              ledgerEntryIds,
+            };
+          }
+        }
+      }
+    } finally {
+      db.close();
+    }
+  }
 
   if (opts.json) {
     console.log(JSON.stringify(health, null, 2));
@@ -135,6 +155,14 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   console.log(`tasks.byStatus: ${JSON.stringify(health.tasks.byStatus)}`);
   console.log(`candidateLedgerConsistency.status: ${health.candidateLedgerConsistency.status}`);
   console.log(`candidateLedgerConsistency.missing: ${health.candidateLedgerConsistency.missing}`);
+  if (health.lastSuccessfulChain) {
+    console.log('lastSuccessfulChain:');
+    console.log(`  taskId:       ${health.lastSuccessfulChain.taskId}`);
+    console.log(`  runId:        ${health.lastSuccessfulChain.runId}`);
+    console.log(`  artifactId:   ${health.lastSuccessfulChain.artifactId}`);
+    console.log(`  candidateIds: ${health.lastSuccessfulChain.candidateIds.join(', ')}`);
+    console.log(`  ledgerEntries: ${health.lastSuccessfulChain.ledgerEntryIds.join(', ')}`);
+  }
   console.log('');
 
   if (health.candidateLedgerConsistency.status === 'degraded') {
