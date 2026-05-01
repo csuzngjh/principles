@@ -106,11 +106,11 @@ async function main() {
   log('');
 
   // 1. Check environment
-  if (!process.env.XIAOMI_KEY) {
-    error('XIAOMI_KEY environment variable not set');
+  if (!process.env.MINIMAX_CN_API_KEY) {
+    error('MINIMAX_CN_API_KEY environment variable not set');
     process.exit(1);
   }
-  log('✓ XIAOMI_KEY is set');
+  log('✓ MINIMAX_CN_API_KEY is set');
 
   // 2. Runtime probe
   log('Probing runtime...');
