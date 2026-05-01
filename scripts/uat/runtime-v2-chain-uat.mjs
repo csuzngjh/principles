@@ -73,7 +73,8 @@ function error(msg) {
 }
 
 function pd(args, workspace, timeoutMs = 300_000) {
-  // All args are program-generated (no user input) — safe for shell execution
+  // args are program-generated internally; workspace is validated path from parseArgs
+  // execSync with string cmd is required on Windows (execFileSync causes EINVAL on npx)
   const cmd = `pd ${args.join(' ')} --workspace "${workspace}"`;
   try {
     return execSync(cmd, {
