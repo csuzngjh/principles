@@ -145,7 +145,7 @@ rtTaskCmd
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output raw JSON')
   .action(async (taskId, opts) => {
-    await handleTaskShow({ id: taskId, json: opts.json });
+    await handleTaskShow({ id: taskId, json: opts.json, workspace: opts.workspace });
   });
 
 const rtRunCmd = program
