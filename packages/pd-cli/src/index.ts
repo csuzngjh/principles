@@ -24,6 +24,7 @@ import { handleLegacyCleanup } from './commands/legacy-cleanup.js';
 import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js';
 import { handleRuntimeProbe } from './commands/runtime.js';
 import { handleFlowShow } from './commands/flow.js';
+import { handleTraceShow } from './commands/trace.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
@@ -306,6 +307,20 @@ flowCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleFlowShow(opts);
+  });
+
+const traceCmd = runtimeCmd
+  .command('trace')
+  .description('Trace full pain-to-ledger chain');
+
+traceCmd
+  .command('show')
+  .description('Show full trace for a pain ID')
+  .requiredOption('--pain-id <id>', 'Pain ID to trace')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleTraceShow({ painId: opts.painId, workspace: opts.workspace, json: opts.json });
   });
 
 // ── Candidate inspection commands ───────────────────────────────────────────
