@@ -80,6 +80,20 @@ async function updateCandidateStatus(stateManager: RuntimeStateManager, candidat
   }
 }
 
+/**
+ * Ensure consumed_at is set for a consumed candidate.
+ * Returns the consumed_at value (existing or newly written), or null if candidate not found.
+ */
+async function ensureConsumedAt(stateManager: RuntimeStateManager, candidateId: string): Promise<string | null> {
+  const db = stateManager.connection;
+  const row = db.getDb().prepare('SELECT consumed_at FROM principle_candidates WHERE candidate_id = ?').get(candidateId) as { consumed_at: string | null } | undefined;
+  if (!row) return null;
+  if (row.consumed_at) return row.consumed_at;
+  const now = new Date().toISOString();
+  db.getDb().prepare('UPDATE principle_candidates SET consumed_at = ? WHERE candidate_id = ?').run(now, candidateId);
+  return now;
+}
+
 // ── List ───────────────────────────────────────────────────────────────────────
 
 export async function handleCandidateList(opts: CandidateListOptions): Promise<void> {
@@ -396,11 +410,13 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
     // Check if already in ledger
     const existing = ledgerAdapter.existsForCandidate(opts.candidateId);
     if (existing) {
+      const consumedAt = await ensureConsumedAt(stateManager, opts.candidateId);
       const result = {
         candidateId: opts.candidateId,
         status: 'already_consistent',
         message: `Candidate ${opts.candidateId} already has ledger entry.`,
         ledgerEntryId: existing.id,
+        consumedAt,
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -413,19 +429,13 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
 
     // Re-intake to restore ledger entry
     const entry = await service.intake(opts.candidateId);
-
-    // Ensure consumed_at is set (belt-and-suspenders)
-    const db = stateManager.connection;
-    const row = db.getDb().prepare('SELECT consumed_at FROM principle_candidates WHERE candidate_id = ?').get(opts.candidateId) as { consumed_at: string | null } | undefined;
-    if (!row?.consumed_at) {
-      const now = new Date().toISOString();
-      db.getDb().prepare('UPDATE principle_candidates SET consumed_at = ? WHERE candidate_id = ?').run(now, opts.candidateId);
-    }
+    const consumedAt = await ensureConsumedAt(stateManager, opts.candidateId);
 
     const result = {
       candidateId: opts.candidateId,
       status: 'repaired',
       ledgerEntryId: entry.id,
+      consumedAt,
       message: `Ledger entry restored for consumed candidate ${opts.candidateId}.`,
     };
     if (opts.json) {
