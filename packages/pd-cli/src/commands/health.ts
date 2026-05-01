@@ -1,82 +1,145 @@
 /**
- * pd health command implementation.
+ * pd health command implementation — Runtime V2 edition.
  *
- * Usage: pd health
+ * Usage: pd health [--workspace <path>] [--json]
  *
- * Queries CentralHealthService.getAllWorkspaceHealth() and displays
- * verbose diagnostic output for all enabled workspaces.
+ * Reads workspace/.pd/state.db and workspace/.state/principle_training_state.json
+ * to provide Runtime V2 health diagnostics.
+ * Does NOT depend on openclaw-plugin source paths.
  */
 
-async function loadCentralHealthService(): Promise<{ CentralHealthService: new () => {
-  getAllWorkspaceHealth(): {
-    generatedAt: string;
-    workspaces: {
-      workspaceName: string;
-      health: {
-        activeStage: string;
-        gfi: { current: unknown; peakToday: unknown; threshold: unknown; trend: unknown };
-        trust: { stage: unknown; stageLabel: unknown; score: unknown };
-        evolution: { tier: unknown; points: unknown };
-        painFlag: { active: unknown; source?: unknown; score?: unknown };
-        principles: { candidate: unknown; probation: unknown; active: unknown; deprecated: unknown };
-        queue: { pending: unknown; inProgress: unknown; completed: unknown };
-      };
-    }[];
-  };
-} }> {
-  const importModule = Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<{
-    CentralHealthService: new () => {
-      getAllWorkspaceHealth(): ReturnType<Awaited<ReturnType<typeof loadCentralHealthService>>['CentralHealthService']['prototype']['getAllWorkspaceHealth']>;
-    };
-  }>;
-  return importModule('../../../openclaw-plugin/src/service/central-health-service.js');
+import * as fs from 'fs';
+import * as path from 'path';
+import Database from 'better-sqlite3';
+import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { loadLedger, getLedgerFilePathPublic } from '@principles/core/runtime-v2';
+
+interface WorkspaceHealth {
+  generatedAt: string;
+  workspace: string;
+  pdStateDb: { path: string; exists: boolean };
+  ledger: { path: string; exists: boolean; totalPrinciples: number; byStatus: Record<string, number> };
+  candidates: { total: number; consumed: number; pending: number };
+  tasks: { total: number; byStatus: Record<string, number> };
+  candidateLedgerConsistency: { status: 'ok' | 'degraded'; missing: number };
 }
 
-export async function handleHealth(): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
-  let service: Awaited<ReturnType<typeof loadCentralHealthService>>['CentralHealthService']['prototype'];
-  try {
-    const { CentralHealthService } = await loadCentralHealthService();
-    service = new CentralHealthService();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Health check failed — ${message}`);
-    process.exit(1);
-  }
-  const result = service.getAllWorkspaceHealth();
+interface HealthOptions {
+  workspace?: string;
+  json?: boolean;
+}
 
-  if (result.workspaces.length === 0) {
-    console.log('No workspaces found.');
+export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
+  const workspaceDir = opts.workspace
+    ? path.resolve(opts.workspace)
+    : resolveWorkspaceDir();
+
+  const generatedAt = new Date().toISOString();
+  const pdDbPath = path.join(workspaceDir, '.pd', 'state.db');
+  const ledgerStateDir = path.join(workspaceDir, '.state');
+  const ledgerPath = getLedgerFilePathPublic(ledgerStateDir);
+
+  // Load ledger using core's loadLedger (same HybridLedgerStore format as plugin)
+  const ledger = loadLedger(ledgerStateDir);
+  const principleEntries = Object.values(ledger.tree.principles);
+
+  // Count by status in ledger
+  const ledgerByStatus: Record<string, number> = {};
+  for (const p of principleEntries) {
+    const status = (p as { status?: string }).status || 'unknown';
+    ledgerByStatus[status] = (ledgerByStatus[status] || 0) + 1;
+  }
+
+  // Load PD state.db metrics (SQLite) — single connection
+  let candidatesTotal = 0, candidatesConsumed = 0, candidatesPending = 0;
+  let tasksTotal = 0;
+  const tasksByStatus: Record<string, number> = {};
+  let pdDbExists = false;
+  let missingLedgerCount = 0;
+
+  if (fs.existsSync(pdDbPath)) {
+    pdDbExists = true;
+    const db = Database(pdDbPath, { readonly: true });
+    try {
+      const cRow = db.prepare('SELECT COUNT(*) as total, status FROM principle_candidates GROUP BY status').all() as { total: number; status: string }[];
+      for (const r of cRow) {
+        candidatesTotal += r.total;
+        if (r.status === 'consumed') candidatesConsumed = r.total;
+        if (r.status === 'pending') candidatesPending = r.total;
+      }
+
+      const tRows = db.prepare('SELECT COUNT(*) as total, status FROM tasks GROUP BY status').all() as { total: number; status: string }[];
+      for (const r of tRows) {
+        tasksTotal += r.total;
+        tasksByStatus[r.status] = r.total;
+      }
+
+      // Check candidate/ledger consistency
+      const consumedRows = db.prepare("SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'").all() as { candidate_id: string }[];
+      for (const r of consumedRows) {
+        const found = principleEntries.some((p: unknown) => {
+          const principle = p as { derivedFromPainIds?: string[] };
+          return principle.derivedFromPainIds?.includes(r.candidate_id);
+        });
+        if (!found) missingLedgerCount++;
+      }
+    } catch {
+      // DB accessible but query failed — continue with partial data
+    } finally {
+      db.close();
+    }
+  }
+
+  const health: WorkspaceHealth = {
+    generatedAt,
+    workspace: workspaceDir,
+    pdStateDb: { path: pdDbPath, exists: pdDbExists },
+    ledger: {
+      path: ledgerPath,
+      exists: fs.existsSync(ledgerPath),
+      totalPrinciples: principleEntries.length,
+      byStatus: ledgerByStatus,
+    },
+    candidates: {
+      total: candidatesTotal,
+      consumed: candidatesConsumed,
+      pending: candidatesPending,
+    },
+    tasks: { total: tasksTotal, byStatus: tasksByStatus },
+    candidateLedgerConsistency: {
+      status: missingLedgerCount === 0 ? 'ok' : 'degraded',
+      missing: missingLedgerCount,
+    },
+  };
+
+  if (opts.json) {
+    console.log(JSON.stringify(health, null, 2));
+    if (health.candidateLedgerConsistency.status === 'degraded') {
+      process.exit(1);
+    }
     return;
   }
 
-  console.log(`generatedAt: ${result.generatedAt}`);
-  console.log(`workspaceCount: ${result.workspaces.length}`);
+  console.log(`generatedAt: ${health.generatedAt}`);
+  console.log(`workspace: ${health.workspace}`);
+  console.log(`pdStateDb.exists: ${health.pdStateDb.exists}`);
+  console.log(`pdStateDb.path: ${health.pdStateDb.path}`);
+  console.log(`ledger.exists: ${health.ledger.exists}`);
+  console.log(`ledger.path: ${health.ledger.path}`);
+  console.log(`ledger.totalPrinciples: ${health.ledger.totalPrinciples}`);
+  console.log(`ledger.byStatus: ${JSON.stringify(health.ledger.byStatus)}`);
+  console.log(`candidates.total: ${health.candidates.total}`);
+  console.log(`candidates.consumed: ${health.candidates.consumed}`);
+  console.log(`candidates.pending: ${health.candidates.pending}`);
+  console.log(`tasks.total: ${health.tasks.total}`);
+  console.log(`tasks.byStatus: ${JSON.stringify(health.tasks.byStatus)}`);
+  console.log(`candidateLedgerConsistency.status: ${health.candidateLedgerConsistency.status}`);
+  console.log(`candidateLedgerConsistency.missing: ${health.candidateLedgerConsistency.missing}`);
   console.log('');
 
-  for (const ws of result.workspaces) {
-    console.log(`[${ws.workspaceName}]`);
-    const h = ws.health;
-    console.log(`activeStage: ${h.activeStage}`);
-    console.log(`gfi.current: ${h.gfi.current}`);
-    console.log(`gfi.peakToday: ${h.gfi.peakToday}`);
-    console.log(`gfi.threshold: ${h.gfi.threshold}`);
-    console.log(`gfi.trend: ${JSON.stringify(h.gfi.trend)}`);
-    console.log(`trust.stage: ${h.trust.stage}`);
-    console.log(`trust.stageLabel: ${h.trust.stageLabel}`);
-    console.log(`trust.score: ${h.trust.score}`);
-    console.log(`evolution.tier: ${h.evolution.tier}`);
-    console.log(`evolution.points: ${h.evolution.points}`);
-    console.log(`painFlag.active: ${h.painFlag.active}`);
-    console.log(`painFlag.source: ${h.painFlag.source ?? 'null'}`);
-    console.log(`painFlag.score: ${h.painFlag.score ?? 'null'}`);
-    console.log(`principles.candidate: ${h.principles.candidate}`);
-    console.log(`principles.probation: ${h.principles.probation}`);
-    console.log(`principles.active: ${h.principles.active}`);
-    console.log(`principles.deprecated: ${h.principles.deprecated}`);
-    console.log(`queue.pending: ${h.queue.pending}`);
-    console.log(`queue.inProgress: ${h.queue.inProgress}`);
-    console.log(`queue.completed: ${h.queue.completed}`);
-    console.log('');
+  if (health.candidateLedgerConsistency.status === 'degraded') {
+    console.warn('⚠️  Candidate/ledger consistency is DEGRADED. Run: pd candidate audit --workspace "' + workspaceDir + '" --json');
+    console.warn('   To repair missing entries: pd candidate repair --candidate-id <id> --workspace "' + workspaceDir + '" --json');
+    process.exit(1);
   }
 }

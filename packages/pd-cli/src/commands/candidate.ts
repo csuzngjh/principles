@@ -1,21 +1,29 @@
 /**
- * pd candidate list/show commands — Principle candidate inspection.
+ * pd candidate commands — Principle candidate inspection, intake, audit, repair.
  *
  * Usage:
  *   pd candidate list --task-id <taskId> --workspace <path> [--json]
  *   pd candidate show <candidateId> --workspace <path> [--json]
+ *   pd candidate intake --candidate-id <id> [--workspace <path>] [--json] [--dry-run]
+ *   pd candidate audit --workspace <path> [--json]
+ *   pd candidate repair --candidate-id <id> --workspace <path> [--json]
  */
 import { randomUUID } from 'crypto';
+import * as path from 'path';
 import {
   RuntimeStateManager,
   candidateList,
   candidateShow,
   CandidateIntakeService,
   CandidateIntakeError,
+  loadLedger,
+  getLedgerFilePathPublic,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+
+// ── Interfaces ────────────────────────────────────────────────────────────────
 
 interface CandidateListOptions {
   taskId: string;
@@ -29,13 +37,65 @@ interface CandidateShowOptions {
   json?: boolean;
 }
 
-/* v8 ignore start */
+interface CandidateIntakeOptions {
+  candidateId: string;
+  workspace?: string;
+  json?: boolean;
+  dryRun?: boolean;
+}
+
+interface CandidateAuditOptions {
+  workspace?: string;
+  json?: boolean;
+}
+
+interface CandidateRepairOptions {
+  candidateId: string;
+  workspace?: string;
+  json?: boolean;
+}
+
+interface AuditResult {
+  status: 'ok' | 'degraded';
+  consumedCount: number;
+  missingLedgerEntryIds: string[];
+  checkedLedgerPath: string;
+  checkedDbPath: string;
+}
+
+// ── Shared helpers ───────────────────────────────────────────────────────────
+
+/** Update candidate status. Sets consumed_at when status='consumed'. */
+async function updateCandidateStatus(stateManager: RuntimeStateManager, candidateId: string, status: string): Promise<void> {
+  const db = stateManager.connection;
+  const now = new Date().toISOString();
+  if (status === 'consumed') {
+    db.getDb().prepare(
+      'UPDATE principle_candidates SET status = ?, consumed_at = ? WHERE candidate_id = ?'
+    ).run(status, now, candidateId);
+  } else {
+    db.getDb().prepare(
+      'UPDATE principle_candidates SET status = ? WHERE candidate_id = ?'
+    ).run(status, candidateId);
+  }
+}
+
 /**
- * pd candidate list --task-id <taskId> [--workspace <path>] [--json]
- *
- * Lists all principle candidates for a task, including candidateId, artifactId,
- * taskId, title, description, confidence, status, sourceRunId.
+ * Ensure consumed_at is set for a consumed candidate.
+ * Returns the consumed_at value (existing or newly written), or null if candidate not found.
  */
+async function ensureConsumedAt(stateManager: RuntimeStateManager, candidateId: string): Promise<string | null> {
+  const db = stateManager.connection;
+  const row = db.getDb().prepare('SELECT consumed_at FROM principle_candidates WHERE candidate_id = ?').get(candidateId) as { consumed_at: string | null } | undefined;
+  if (!row) return null;
+  if (row.consumed_at) return row.consumed_at;
+  const now = new Date().toISOString();
+  db.getDb().prepare('UPDATE principle_candidates SET consumed_at = ? WHERE candidate_id = ?').run(now, candidateId);
+  return now;
+}
+
+// ── List ───────────────────────────────────────────────────────────────────────
+
 export async function handleCandidateList(opts: CandidateListOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const stateManager = new RuntimeStateManager({ workspaceDir });
@@ -58,7 +118,7 @@ export async function handleCandidateList(opts: CandidateListOptions): Promise<v
       return;
     }
 
-    console.log(`\nPrinciple Candidates for Task: ${result.taskId}\n`);
+    console.log(`\nPrinciple Candidates for Task: ${opts.taskId}\n`);
     console.log(`  Total: ${result.candidates.length}\n`);
 
     for (const candidate of result.candidates) {
@@ -76,13 +136,8 @@ export async function handleCandidateList(opts: CandidateListOptions): Promise<v
   }
 }
 
-/**
- * pd candidate show <candidateId> [--workspace <path>] [--json]
- *
- * Shows full detail for a single principle candidate.
- * Returns: candidateId, artifactId, taskId, title, description,
- * confidence, sourceRunId, status, createdAt.
- */
+// ── Show ───────────────────────────────────────────────────────────────────────
+
 export async function handleCandidateShow(opts: CandidateShowOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const stateManager = new RuntimeStateManager({ workspaceDir });
@@ -90,7 +145,7 @@ export async function handleCandidateShow(opts: CandidateShowOptions): Promise<v
   try {
     await stateManager.initialize();
 
-    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: workspaceDir });
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
 
     const result = await candidateShow({
       candidateId: opts.candidateId,
@@ -126,29 +181,15 @@ export async function handleCandidateShow(opts: CandidateShowOptions): Promise<v
   }
 }
 
-interface CandidateIntakeOptions {
-  candidateId: string;
-  workspace?: string;
-  json?: boolean;
-  dryRun?: boolean;
-}
-
-/**
- * Update candidate status to 'consumed' via direct SQL.
- * RuntimeStateManager doesn't expose this method, so we access the DB directly.
- */
-async function updateCandidateStatus(stateManager: RuntimeStateManager, candidateId: string, status: string): Promise<void> {
-  const db = stateManager.connection;
-  db.getDb().prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ?').run(status, candidateId);
-}
-/* v8 ignore stop */
+// ── Intake ────────────────────────────────────────────────────────────────────
 
 /**
  * pd candidate intake --candidate-id <id> [--workspace <path>] [--json] [--dry-run]
  *
  * Intakes a principle candidate into the ledger.
  * Wires together CandidateIntakeService + PrincipleTreeLedgerAdapter.
- * Updates candidate status to 'consumed' after successful ledger write.
+ * Updates candidate status to 'consumed' (with consumed_at) after successful ledger write.
+ * If ledger write succeeds but DB update fails, exits non-zero with clear error.
  */
 export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
@@ -157,11 +198,10 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
   try {
     await stateManager.initialize();
 
-    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: workspaceDir });
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
     const service = new CandidateIntakeService({ stateManager, ledgerAdapter });
 
     if (opts.dryRun) {
-      // Dry-run: build complete 11-field entry without writing (CLI-02)
       const candidate = await stateManager.getCandidate(opts.candidateId);
       if (!candidate) {
         console.error(`Candidate not found: ${opts.candidateId}`);
@@ -172,7 +212,6 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
         console.error(`Artifact not found for candidate: ${opts.candidateId}`);
         process.exit(1);
       }
-      // Parse artifact to extract recommendation
       let recommendation: { title?: string; text?: string; triggerPattern?: string; action?: string } = {};
       try {
         const parsed = JSON.parse(artifact.contentJson || '{}');
@@ -180,7 +219,6 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
       } catch (err) {
         console.warn(`Warning: could not parse artifact content as JSON — using defaults. ${err instanceof Error ? err.message : String(err)}`);
       }
-      // Build complete 11-field LedgerPrincipleEntry (same as CandidateIntakeService)
       const entry: LedgerPrincipleEntry = {
         id: randomUUID(),
         title: recommendation.title || candidate.title,
@@ -194,7 +232,6 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
         taskRef: candidate.taskId ? `task://${candidate.taskId}` : undefined,
         createdAt: new Date().toISOString(),
       };
-      // Output
       if (opts.json) {
         console.log(JSON.stringify(entry, null, 2));
       } else {
@@ -204,13 +241,12 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
       return;
     }
 
-    // Normal intake (CLI-01: ledger write first, then update status)
+    // Normal intake: ledger write first
     const entry = await service.intake(opts.candidateId);
 
-    // Check if candidate was already consumed (idempotent return per CLI-04)
+    // Check if already consumed before this call
     const candidate = await stateManager.getCandidate(opts.candidateId);
     if (candidate?.status === 'consumed') {
-      // Already consumed before this call - output info message
       const infoMessage = `Candidate ${opts.candidateId} was already consumed. Ledger entry: ${entry.id}`;
       if (opts.json) {
         console.log(JSON.stringify({
@@ -225,10 +261,16 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
       return;
     }
 
-    // Update candidate status to 'consumed' (CLI-01)
-    await updateCandidateStatus(stateManager, opts.candidateId, 'consumed');
+    // Update DB status — this must succeed; if it fails, exit non-zero
+    try {
+      await updateCandidateStatus(stateManager, opts.candidateId, 'consumed');
+    } catch (err) {
+      const msg = `Ledger write succeeded (entry ${entry.id}) but DB status update failed: ${err instanceof Error ? err.message : String(err)}. ` +
+        `Candidate ${opts.candidateId} may be in inconsistent state.`;
+      console.error(`ERROR: ${msg}`);
+      process.exit(1);
+    }
 
-    // Output success
     const result = {
       candidateId: opts.candidateId,
       ledgerEntryId: entry.id,
@@ -245,13 +287,171 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
       console.log('Intake complete.\n');
     }
   } catch (err) {
-    // Error handling (CLI-04)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if (err instanceof CandidateIntakeError || (err as any).name === 'CandidateIntakeError') {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      console.error(`Intake failed [${(err as any).code}]: ${(err as any).message}`);
+    if (err instanceof CandidateIntakeError || (err as { name?: string }).name === 'CandidateIntakeError') {
+      const e = err as { code?: string; message: string };
+      console.error(`Intake failed [${e.code ?? 'unknown'}]: ${e.message}`);
     } else {
       console.error(`Intake failed: ${String(err)}`);
+    }
+    process.exit(1);
+  } finally {
+    await stateManager.close();
+  }
+}
+
+// ── Audit ─────────────────────────────────────────────────────────────────────
+
+/**
+ * pd candidate audit --workspace <path> [--json]
+ *
+ * Reads workspace/.pd/state.db principle_candidates and
+ * the workspace ledger (same file used by OpenClaw plugin).
+ * Checks each consumed candidate has a ledger entry.
+ * Exits non-zero if any consumed candidate is missing from ledger.
+ */
+export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise<void> {
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+
+  try {
+    await stateManager.initialize();
+
+    // Load all candidates from DB
+    const dbPath = path.join(workspaceDir, '.pd', 'state.db');
+    const ledgerStateDir = path.join(workspaceDir, '.state');
+    const ledgerPath = getLedgerFilePathPublic(ledgerStateDir);
+
+    const db = stateManager.connection;
+    const consumedRows = db.getDb().prepare(
+      "SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'"
+    ).all() as { candidate_id: string }[];
+
+    const consumedIds = consumedRows.map(r => r.candidate_id);
+
+    // Load ledger using core's loadLedger (same format as plugin)
+    const ledger = loadLedger(ledgerStateDir);
+    const ledgerPrinciples = ledger.tree.principles;
+
+    // Check each consumed candidate has ledger entry
+    const missingLedgerEntryIds: string[] = [];
+    for (const candidateId of consumedIds) {
+      const found = Object.values(ledgerPrinciples).some((p) =>
+        p.derivedFromPainIds.includes(candidateId),
+      );
+      if (!found) {
+        missingLedgerEntryIds.push(candidateId);
+      }
+    }
+
+    const result: AuditResult = {
+      status: missingLedgerEntryIds.length === 0 ? 'ok' : 'degraded',
+      consumedCount: consumedIds.length,
+      missingLedgerEntryIds,
+      checkedLedgerPath: ledgerPath,
+      checkedDbPath: dbPath,
+    };
+
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`\nCandidate Audit Results\n`);
+      console.log(`  consumedCount: ${result.consumedCount}`);
+      console.log(`  checkedLedgerPath: ${result.checkedLedgerPath}`);
+      console.log(`  checkedDbPath: ${result.checkedDbPath}`);
+      console.log(`  status: ${result.status}`);
+      if (result.missingLedgerEntryIds.length > 0) {
+        console.log(`\n  MISSING LEDGER ENTRIES (${result.missingLedgerEntryIds.length}):`);
+        result.missingLedgerEntryIds.forEach(id => console.log(`    - ${id}`));
+      } else {
+        console.log(`\n  All consumed candidates have ledger entries.`);
+      }
+      console.log('');
+    }
+
+    if (result.status === 'degraded') {
+      process.exit(1);
+    }
+  } finally {
+    await stateManager.close();
+  }
+}
+
+// ── Repair ─────────────────────────────────────────────────────────────────────
+
+/**
+ * pd candidate repair --candidate-id <id> --workspace <path> [--json]
+ *
+ * Handles consumed but missing ledger entries.
+ * Re-calls CandidateIntakeService.intake() to write ledger entry.
+ * Does not regenerate candidate; does not update status (already consumed).
+ * Fills consumed_at if empty.
+ */
+export async function handleCandidateRepair(opts: CandidateRepairOptions): Promise<void> {
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+
+  try {
+    await stateManager.initialize();
+
+    // Verify candidate exists and is consumed
+    const candidate = await stateManager.getCandidate(opts.candidateId);
+    if (!candidate) {
+      console.error(`Candidate not found: ${opts.candidateId}`);
+      process.exit(1);
+    }
+    if (candidate.status !== 'consumed') {
+      console.error(`Candidate ${opts.candidateId} is not consumed (status=${candidate.status}). Repair only handles consumed candidates.`);
+      process.exit(1);
+    }
+
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+    const service = new CandidateIntakeService({ stateManager, ledgerAdapter });
+
+    // Check if already in ledger
+    const existing = ledgerAdapter.existsForCandidate(opts.candidateId);
+    if (existing) {
+      const consumedAt = await ensureConsumedAt(stateManager, opts.candidateId);
+      const result = {
+        candidateId: opts.candidateId,
+        status: 'already_consistent',
+        message: `Candidate ${opts.candidateId} already has ledger entry.`,
+        ledgerEntryId: existing.id,
+        consumedAt,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\nCandidate ${opts.candidateId} already has ledger entry: ${existing.id}\n`);
+        console.log('No repair needed.\n');
+      }
+      return;
+    }
+
+    // Re-intake to restore ledger entry
+    const entry = await service.intake(opts.candidateId);
+    const consumedAt = await ensureConsumedAt(stateManager, opts.candidateId);
+
+    const result = {
+      candidateId: opts.candidateId,
+      status: 'repaired',
+      ledgerEntryId: entry.id,
+      consumedAt,
+      message: `Ledger entry restored for consumed candidate ${opts.candidateId}.`,
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`\nCandidate Repair: ${opts.candidateId}\n`);
+      console.log(`  Status:        repaired`);
+      console.log(`  Ledger Entry:   ${entry.id}\n`);
+      console.log('Repair complete.\n');
+    }
+  } catch (err) {
+    if (err instanceof CandidateIntakeError || (err as { name?: string }).name === 'CandidateIntakeError') {
+      const e = err as { code?: string; message: string };
+      console.error(`Repair failed [${e.code ?? 'unknown'}]: ${e.message}`);
+    } else {
+      console.error(`Repair failed: ${String(err)}`);
     }
     process.exit(1);
   } finally {
