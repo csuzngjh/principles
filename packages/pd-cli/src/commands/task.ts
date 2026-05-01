@@ -5,6 +5,7 @@
  *   pd task list [--status <status>] [--kind <kind>] [--limit <n>]
  *   pd task show <taskId>
  */
+import * as path from 'path';
 import { RuntimeStateManager } from '@principles/core';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
@@ -63,10 +64,12 @@ export async function handleTaskList(opts: TaskListOptions): Promise<void> {
 
 interface TaskShowOptions {
   id: string;
+  json?: boolean;
+  workspace?: string;
 }
 
 export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir();
+  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();
 
@@ -76,6 +79,13 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
     if (!task) {
       console.error(`Task not found: ${opts.id}`);
       process.exit(1);
+    }
+
+    const runs = await stateManager.getRunsByTask(opts.id);
+
+    if (opts.json) {
+      console.log(JSON.stringify({ task, runs }, null, 2));
+      return;
     }
 
     console.log(`\nTask: ${task.taskId}\n`);
@@ -99,7 +109,6 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
     console.log(`  Updated:       ${new Date(task.updatedAt).toLocaleString()}`);
     console.log('');
 
-    const runs = await stateManager.getRunsByTask(opts.id);
     if (runs.length > 0) {
       console.log(`Runs (${runs.length}):`);
       console.log('  %-22s %-12s %-6s %s', 'RUN_ID', 'STATUS', 'ATT', 'STARTED');

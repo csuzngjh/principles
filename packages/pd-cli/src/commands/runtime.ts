@@ -7,6 +7,7 @@
  *
  * HG-01 HARD GATE: This command must deliver.
  */
+import * as path from 'path';
 import { probeRuntime } from '@principles/core/runtime-v2';
 import { PDRuntimeError } from '@principles/core/runtime-v2';
 
@@ -21,6 +22,7 @@ interface RuntimeProbeOptions {
   baseUrl?: string;
   maxRetries?: number;
   timeoutMs?: number;
+  workspace?: string;
   json?: boolean;
 }
 
@@ -131,35 +133,60 @@ async function handleOpenClawProbe(opts: RuntimeProbeOptions): Promise<void> {
  * pi-ai probe branch — validates flags, calls probeRuntime, formats output.
  */
 async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
-  // D-01: flags are required for pi-ai probe (no policy fallback for probe)
-  if (!opts.provider) {
-    console.error("error: --provider is required for --runtime pi-ai (e.g., --provider openrouter)");
+  // D-01: flags are required for pi-ai probe unless --workspace is provided (policy fallback)
+  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : undefined;
+  let provider = opts.provider ?? '';
+  let model = opts.model ?? '';
+  let apiKeyEnv = opts.apiKeyEnv ?? '';
+  let baseUrl = opts.baseUrl ?? '';
+  let {timeoutMs} = opts;
+
+  // D-01: always load workspace policy; CLI values take priority as override
+  if (workspaceDir) {
+    try {
+      const { resolveRuntimeConfig } = await import('@principles/core/runtime-v2');
+      const config = resolveRuntimeConfig(path.join(workspaceDir, '.state'));
+      provider = provider || config.provider || '';
+      model = model || config.model || '';
+      apiKeyEnv = apiKeyEnv || config.apiKeyEnv || '';
+      baseUrl = baseUrl || config.baseUrl || '';
+      timeoutMs = timeoutMs ?? config.timeoutMs;
+    } catch (err) {
+      console.warn(`Warning: could not load workspace runtime config — policy fallback disabled: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  if (!provider) {
+    console.error("error: --provider is required for --runtime pi-ai (or set in --workspace workflows.yaml)");
+    console.error("  e.g.: pd runtime probe --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY");
     process.exit(1);
   }
-  if (!opts.model) {
-    console.error("error: --model is required for --runtime pi-ai (e.g., --model anthropic/claude-sonnet-4)");
+  if (!model) {
+    console.error("error: --model is required for --runtime pi-ai (or set in --workspace workflows.yaml)");
+    console.error("  e.g.: pd runtime probe --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY");
     process.exit(1);
   }
-  if (!opts.apiKeyEnv) {
-    console.error("error: --apiKeyEnv is required for --runtime pi-ai (e.g., --apiKeyEnv OPENROUTER_API_KEY)");
+  if (!apiKeyEnv) {
+    console.error("error: --apiKeyEnv is required for --runtime pi-ai (or set in --workspace workflows.yaml)");
+    console.error("  e.g.: pd runtime probe --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY");
     process.exit(1);
   }
 
   // D-09: check env var exists before calling probeRuntime
-  if (!process.env[opts.apiKeyEnv]) {
-    console.error(`error: environment variable '${opts.apiKeyEnv}' is not set`);
+  if (!process.env[apiKeyEnv]) {
+    console.error(`error: environment variable '${apiKeyEnv}' is not set`);
     process.exit(1);
   }
 
   try {
     const result = await probeRuntime({
       runtimeKind: 'pi-ai',
-      provider: opts.provider,
-      model: opts.model,
-      apiKeyEnv: opts.apiKeyEnv,
-      baseUrl: opts.baseUrl,
+      provider,
+      model,
+      apiKeyEnv,
+      baseUrl,
       maxRetries: opts.maxRetries,
-      timeoutMs: opts.timeoutMs ?? 60_000, // D-04: probe timeout 60s
+      timeoutMs: timeoutMs ?? 120_000, // D-04: probe timeout 120s (matches Runtime defaults)
     });
 
     // Narrow to pi-ai result (TypeScript can't infer from input args alone)
@@ -180,7 +207,7 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
         runtimeKind: result.runtimeKind,
         provider: result.provider,
         model: result.model,
-        baseUrlPresent: !!opts.baseUrl,
+        baseUrlPresent: !!baseUrl,
         health: result.health,
         capabilities: result.capabilities,
       }, null, 2));
@@ -192,7 +219,7 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
     console.log(`\nRuntime: ${result.runtimeKind}`);
     console.log(`Provider: ${result.provider}`);
     console.log(`Model:    ${result.model}`);
-    if (opts.baseUrl) console.log(`BaseUrl:  ${opts.baseUrl}`);
+    if (baseUrl) console.log(`BaseUrl:  ${baseUrl}`);
     console.log(`Status:   ${status}`);
     console.log('');
     console.log('Health:');
