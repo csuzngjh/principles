@@ -141,16 +141,18 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
   let baseUrl = opts.baseUrl ?? '';
   let {timeoutMs} = opts;
 
-  if (!provider || !model || !apiKeyEnv) {
-    // Load from policy if available
-    if (workspaceDir) {
+  // D-01: always load workspace policy; CLI values take priority as override
+  if (workspaceDir) {
+    try {
       const { resolveRuntimeConfig } = await import('@principles/core/runtime-v2');
       const config = resolveRuntimeConfig(path.join(workspaceDir, '.state'));
-      provider = config.provider ?? provider;
-      model = config.model ?? model;
-      apiKeyEnv = config.apiKeyEnv ?? apiKeyEnv;
-      baseUrl = config.baseUrl ?? baseUrl;
-      timeoutMs = config.timeoutMs ?? timeoutMs;
+      provider = provider || config.provider || '';
+      model = model || config.model || '';
+      apiKeyEnv = apiKeyEnv || config.apiKeyEnv || '';
+      baseUrl = baseUrl || config.baseUrl || '';
+      timeoutMs = timeoutMs ?? config.timeoutMs;
+    } catch (err) {
+      console.warn(`Warning: could not load workspace runtime config — policy fallback disabled: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

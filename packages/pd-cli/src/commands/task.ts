@@ -5,6 +5,7 @@
  *   pd task list [--status <status>] [--kind <kind>] [--limit <n>]
  *   pd task show <taskId>
  */
+import * as path from 'path';
 import { RuntimeStateManager } from '@principles/core';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
@@ -64,10 +65,11 @@ export async function handleTaskList(opts: TaskListOptions): Promise<void> {
 interface TaskShowOptions {
   id: string;
   json?: boolean;
+  workspace?: string;
 }
 
 export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir();
+  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();
 
