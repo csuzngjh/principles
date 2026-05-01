@@ -67,6 +67,36 @@ export function isPDErrorCategory(value: string): value is PDErrorCategory {
 }
 
 /**
+ * Maps PDErrorCategory (17 internal codes) to 9 user-facing failure categories.
+ *
+ * Used by pd-cli trace + pain-record commands for consistent classification.
+ */
+export const FAILURE_CATEGORY_MAP: Record<PDErrorCategory, string> = {
+  runtime_unavailable: 'runtime_unavailable',
+  capability_missing: 'config_missing',
+  input_invalid: 'config_missing',
+  lease_conflict: 'runtime_unavailable',
+  lease_expired: 'runtime_unavailable',
+  execution_failed: 'runtime_unavailable',
+  timeout: 'runtime_timeout',
+  cancelled: 'runtime_timeout',
+  output_invalid: 'output_invalid',
+  artifact_commit_failed: 'artifact_missing',
+  max_attempts_exceeded: 'runtime_timeout',
+  context_assembly_failed: 'runtime_unavailable',
+  history_not_found: 'runtime_unavailable',
+  trajectory_ambiguous: 'runtime_unavailable',
+  storage_unavailable: 'ledger_write_failed',
+  workspace_invalid: 'config_missing',
+  query_invalid: 'runtime_unavailable',
+};
+
+export function mapFailureCategory(errorCategory?: string | null): string | null {
+  if (!errorCategory) return null;
+  return FAILURE_CATEGORY_MAP[errorCategory as PDErrorCategory] ?? 'runtime_unavailable';
+}
+
+/**
  * Structured PD error carrying a normalized category.
  *
  * Adapters and services should throw or return PDRuntimeError

@@ -154,6 +154,17 @@ export function handleAfterToolCall(
     });
     if (!gate.shouldDiagnose) {
       SystemLogger.log(effectiveWorkspaceDir, 'MANUAL_PAIN_SKIPPED', `Manual pain within cooldown: ${gate.detail}`);
+      SystemLogger.log(
+        effectiveWorkspaceDir,
+        'PAIN_GATE_REJECTED',
+        JSON.stringify({
+          event: 'pain_gate_rejected',
+          reason: gate.reason,
+          detail: gate.detail,
+          source: 'manual',
+          sessionId,
+        }),
+      );
       return;
     }
 
@@ -352,6 +363,18 @@ export function handleAfterToolCall(
       effectiveWorkspaceDir,
       'PAIN_DIAGNOSE_SKIPPED',
       `Tool failure recorded as friction only: ${diagnosticGate.detail}; tool=${event.toolName}; path=${relPath}`,
+    );
+    // Structured gate rejection event for traceability
+    SystemLogger.log(
+      effectiveWorkspaceDir,
+      'PAIN_GATE_REJECTED',
+      JSON.stringify({
+        event: 'pain_gate_rejected',
+        reason: diagnosticGate.reason,
+        detail: diagnosticGate.detail,
+        gfi: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.currentGfi ?? 0,
+        score: painScore,
+      }),
     );
     return;
   }
