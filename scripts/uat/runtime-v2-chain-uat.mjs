@@ -15,7 +15,7 @@
  *   - Built pd-cli (npx pd must be resolvable)
  */
 
-import { execSync, execFileSync } from 'child_process';
+import { execSync } from 'child_process';
 import * as path from 'path';
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
@@ -73,13 +73,12 @@ function error(msg) {
 }
 
 function pd(args, workspace, timeoutMs = 300_000) {
-  const fullArgs = [...args, '--workspace', workspace];
-  const env = { ...process.env };
+  // All args are program-generated (no user input) — safe for shell execution
+  const cmd = `pd ${args.join(' ')} --workspace "${workspace}"`;
   try {
-    return execFileSync('npx', ['pd', ...fullArgs], {
+    return execSync(cmd, {
       encoding: 'utf8',
       timeout: timeoutMs,
-      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (err) {
