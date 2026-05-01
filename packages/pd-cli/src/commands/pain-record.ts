@@ -20,8 +20,10 @@ import {
   PrincipleTreeLedgerAdapter,
   recordPainSignalObservability,
   resolveRuntimeConfig,
+  FAILURE_CATEGORY_MAP,
 } from '@principles/core/runtime-v2';
 import { PDRuntimeError } from '@principles/core/runtime-v2';
+import type { PainSignalBridgeResult } from '@principles/core/runtime-v2';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
@@ -43,6 +45,8 @@ interface PainRecordResult {
   status: 'succeeded' | 'skipped' | 'failed' | 'retried';
   message?: string;
   observabilityWarnings?: string[];
+  failureCategory?: string;
+  latencyMs?: number;
 }
 
 export async function handlePainRecord(opts: RecordOptions): Promise<void> {
@@ -146,8 +150,32 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     data: painData,
   });
 
+  function classifyResult(br: PainSignalBridgeResult): string | undefined {
+    if (br.errorCategory) {
+      return FAILURE_CATEGORY_MAP[br.errorCategory] ?? 'runtime_unavailable';
+    }
+    if (br.status === 'failed') {
+      if (br.candidateIds.length === 0) return 'candidate_missing';
+      if (br.ledgerEntryIds.length === 0) return 'ledger_write_failed';
+    }
+    return undefined;
+  }
+
+  function classifyCatch(err: unknown): string | undefined {
+    if (err instanceof PDRuntimeError && err.category) {
+      return FAILURE_CATEGORY_MAP[err.category] ?? 'runtime_unavailable';
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/api[_\s]?key|not found in env|XIAOMI_KEY|OPENROUTER|missing required/i.test(msg)) return 'config_missing';
+    if (/timeout|timed[_\s]?out/i.test(msg)) return 'runtime_timeout';
+    if (/output.*invalid|validation.*fail/i.test(msg)) return 'output_invalid';
+    return 'runtime_unavailable';
+  }
+
+  const startTime = Date.now();
   const result = await (async (): Promise<PainRecordResult> => {
     const bridgeResult = await bridge.onPainDetected(painData);
+    const latencyMs = Date.now() - startTime;
 
     return {
       painId: bridgeResult.painId,
@@ -159,16 +187,23 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       status: bridgeResult.status,
       message: bridgeResult.message,
       observabilityWarnings: observability.warnings.length > 0 ? observability.warnings : undefined,
+      failureCategory: classifyResult(bridgeResult),
+      latencyMs,
     };
-  })().catch((err: unknown) => ({
-    painId,
-    taskId,
-    status: 'failed' as const,
-    candidateIds: [],
-    ledgerEntryIds: [],
-    message: err instanceof Error ? err.message : String(err),
-    observabilityWarnings: observability.warnings.length > 0 ? observability.warnings : undefined,
-  }));
+  })().catch((err: unknown) => {
+    const latencyMs = Date.now() - startTime;
+    return {
+      painId,
+      taskId,
+      status: 'failed' as const,
+      candidateIds: [],
+      ledgerEntryIds: [],
+      message: err instanceof Error ? err.message : String(err),
+      observabilityWarnings: observability.warnings.length > 0 ? observability.warnings : undefined,
+      failureCategory: classifyCatch(err),
+      latencyMs,
+    };
+  });
 
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
