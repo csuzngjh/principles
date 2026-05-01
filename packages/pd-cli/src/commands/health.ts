@@ -22,7 +22,7 @@ interface LastSuccessfulChain {
   candidateIds: string[];
   ledgerEntryIds: string[];
   latencyMs?: { totalMs?: number };
-  failureCategory: null;
+  failureCategory: string | null;
   checkedAt: string;
 }
 
@@ -204,7 +204,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
         ledgerEntryIds,
         latencyMs: {
           totalMs: lastSucceeded.created_at
-            ? new Date(artifacts.created_at).getTime() - new Date(lastSucceeded.created_at).getTime()
+            ? Math.max(0, new Date(artifacts.created_at).getTime() - new Date(lastSucceeded.created_at).getTime())
             : undefined,
         },
         failureCategory: null,

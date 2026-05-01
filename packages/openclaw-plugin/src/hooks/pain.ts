@@ -156,7 +156,14 @@ export function handleAfterToolCall(
       SystemLogger.log(effectiveWorkspaceDir, 'MANUAL_PAIN_SKIPPED', `Manual pain within cooldown: ${gate.detail}`);
       let payload: string;
       try {
-        payload = JSON.stringify({ reason: gate.reason, detail: gate.detail, source: 'manual', sessionId });
+        payload = JSON.stringify({
+          reason: gate.reason,
+          detail: gate.detail,
+          source: 'manual',
+          sessionId,
+          gfi: 0,
+          score: 100,
+        });
       } catch {
         payload = JSON.stringify({ reason: gate.reason, detail: '(log serialization failed)' });
       }
@@ -366,6 +373,8 @@ export function handleAfterToolCall(
       rejectPayload = JSON.stringify({
         reason: diagnosticGate.reason,
         detail: diagnosticGate.detail,
+        source: 'tool_failure',
+        sessionId: sessionId,
         gfi: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.currentGfi ?? 0,
         score: painScore,
       });

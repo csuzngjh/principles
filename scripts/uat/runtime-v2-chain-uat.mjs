@@ -15,7 +15,7 @@
  *   - Built pd-cli (npx pd must be resolvable)
  */
 
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import * as path from 'path';
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
@@ -75,17 +75,14 @@ function error(msg) {
 function pd(args, workspace, timeoutMs = 300_000) {
   const fullArgs = [...args, '--workspace', workspace];
   const env = { ...process.env };
-  // Ensure XIAOMI_KEY propagates
-  const cmd = `npx pd ${fullArgs.join(' ')}`;
   try {
-    return execSync(cmd, {
+    return execFileSync('npx', ['pd', ...fullArgs], {
       encoding: 'utf8',
       timeout: timeoutMs,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (err) {
-    // execSync throws on non-zero exit — return stdout anyway
     if (err.stdout) return err.stdout;
     if (err.stderr) throw new Error(err.stderr?.toString() ?? err.message);
     throw err;

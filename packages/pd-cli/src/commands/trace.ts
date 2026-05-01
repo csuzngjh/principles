@@ -13,6 +13,7 @@ import {
   RuntimeStateManager,
   loadLedger,
   mapFailureCategory,
+  isPDErrorCategory,
 } from '@principles/core/runtime-v2';
 
 interface TraceLatencyMs {
@@ -45,6 +46,9 @@ interface TraceOptions {
 
 function parseTaskErrorCategory(task: { lastError?: string | null }): string | null {
   if (!task.lastError) return null;
+  // lastError may be stored as plain PDErrorCategory string (e.g. "timeout", "execution_failed")
+  if (isPDErrorCategory(task.lastError)) return task.lastError;
+  // Fallback: try JSON parse for legacy structured formats
   try {
     const parsed = JSON.parse(task.lastError);
     return parsed.category ?? null;
