@@ -59,7 +59,6 @@ interface AuditResult {
   status: 'ok' | 'degraded';
   consumedCount: number;
   missingLedgerEntryIds: string[];
-  missingCandidates: string[];
   checkedLedgerPath: string;
   checkedDbPath: string;
 }
@@ -334,7 +333,6 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
       status: missingLedgerEntryIds.length === 0 ? 'ok' : 'degraded',
       consumedCount: consumedIds.length,
       missingLedgerEntryIds,
-      missingCandidates: [],
       checkedLedgerPath: ledgerPath,
       checkedDbPath: dbPath,
     };
