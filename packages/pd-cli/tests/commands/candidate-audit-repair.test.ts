@@ -4,17 +4,20 @@ import { handleCandidateAudit, handleCandidateRepair } from '../../src/commands/
 // Use vi.hoisted to define mocks
 const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mockGetLedgerFilePath, MockRuntimeStateManager, MockCandidateIntakeService, MockPrincipleTreeLedgerAdapter } = vi.hoisted(() => {
   const mockDbRows: Record<string, unknown[]> = {};
+  // Track all run() calls: { sql, args }[]
+  const runCalls: { sql: string; args: unknown[] }[] = [];
 
   const mockDb = {
     getDb: () => ({
       prepare: (sql: string) => {
-        // Return rows based on SQL pattern
         const key = sql.trim();
         const rows = mockDbRows[key] ?? [];
         return {
           get: (..._args: unknown[]) => rows[0] ?? undefined,
           all: () => rows,
-          run: vi.fn(),
+          run: (...args: unknown[]) => {
+            runCalls.push({ sql: key, args });
+          },
         };
       },
     }),
@@ -25,7 +28,9 @@ const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mock
       for (const key of Object.keys(mockDbRows)) {
         delete mockDbRows[key];
       }
+      runCalls.length = 0;
     },
+    runCalls,
   };
 
   const mockStateManager = {
@@ -253,6 +258,11 @@ describe('pd candidate repair', () => {
     // consumedAt should be a freshly written ISO timestamp
     expect(parsed.consumedAt).toBeDefined();
     expect(typeof parsed.consumedAt).toBe('string');
+    // Directly assert SQL UPDATE was executed
+    const updateCall = mockDb.runCalls.find((c) => c.sql.startsWith('UPDATE principle_candidates SET consumed_at'));
+    expect(updateCall).toBeDefined();
+    expect(updateCall!.args[0]).toBe(parsed.consumedAt); // timestamp arg
+    expect(updateCall!.args[1]).toBe('c1'); // candidate_id arg
     // Should not exit 1
     expect(exitSpy).not.toHaveBeenCalledWith(1);
   });
@@ -301,6 +311,11 @@ describe('pd candidate repair', () => {
     expect(parsed.status).toBe('repaired');
     expect(parsed.ledgerEntryId).toBe('new-ledger-entry');
     expect(parsed.consumedAt).toBeDefined();
+    // Directly assert SQL UPDATE was executed
+    const updateCall = mockDb.runCalls.find((c) => c.sql.startsWith('UPDATE principle_candidates SET consumed_at'));
+    expect(updateCall).toBeDefined();
+    expect(updateCall!.args[0]).toBe(parsed.consumedAt);
+    expect(updateCall!.args[1]).toBe('c2');
     expect(exitSpy).not.toHaveBeenCalledWith(1);
   });
 
