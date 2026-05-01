@@ -142,8 +142,10 @@ rtTaskCmd
 rtTaskCmd
   .command('show <taskId>')
   .description('Show detailed task information')
-  .action(async (taskId) => {
-    await handleTaskShow({ id: taskId });
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (taskId, opts) => {
+    await handleTaskShow({ id: taskId, json: opts.json });
   });
 
 const rtRunCmd = program
@@ -281,12 +283,13 @@ runtimeCmd
   .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
   .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
   .option('-a, --agent <agentId>', 'Agent ID to probe')
-  .option('--provider <name>', 'LLM provider (e.g., openrouter) — required for pi-ai')
-  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — required for pi-ai')
-  .option('--apiKeyEnv <name>', 'Env var name for API key (e.g., OPENROUTER_API_KEY) — required for pi-ai')
-  .option('--baseUrl <url>', 'Custom base URL for OpenAI-compatible providers — required for non-built-in pi-ai providers')
+  .option('--provider <name>', 'LLM provider (e.g., openrouter) — for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--apiKeyEnv <name>', 'Env var name for API key (e.g., OPENROUTER_API_KEY) — for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--baseUrl <url>', 'Custom base URL for OpenAI-compatible providers — for pi-ai, falls back to --workspace workflows.yaml')
   .option('--maxRetries <n>', 'Max retry attempts for LLM failures', parseInt)
   .option('--timeoutMs <ms>', 'Timeout in milliseconds for probe', parseInt)
+  .option('-w, --workspace <path>', 'Workspace directory — loads pi-ai policy from .state/workflows.yaml')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeProbe(opts);

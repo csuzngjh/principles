@@ -63,6 +63,7 @@ export async function handleTaskList(opts: TaskListOptions): Promise<void> {
 
 interface TaskShowOptions {
   id: string;
+  json?: boolean;
 }
 
 export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
@@ -76,6 +77,13 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
     if (!task) {
       console.error(`Task not found: ${opts.id}`);
       process.exit(1);
+    }
+
+    const runs = await stateManager.getRunsByTask(opts.id);
+
+    if (opts.json) {
+      console.log(JSON.stringify({ task, runs }, null, 2));
+      return;
     }
 
     console.log(`\nTask: ${task.taskId}\n`);
@@ -99,7 +107,6 @@ export async function handleTaskShow(opts: TaskShowOptions): Promise<void> {
     console.log(`  Updated:       ${new Date(task.updatedAt).toLocaleString()}`);
     console.log('');
 
-    const runs = await stateManager.getRunsByTask(opts.id);
     if (runs.length > 0) {
       console.log(`Runs (${runs.length}):`);
       console.log('  %-22s %-12s %-6s %s', 'RUN_ID', 'STATUS', 'ATT', 'STARTED');
