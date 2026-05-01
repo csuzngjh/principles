@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { loadLedger, getLedgerFilePathPublic } from '@principles/core/runtime-v2';
 
 interface WorkspaceHealth {
   generatedAt: string;
@@ -23,36 +24,24 @@ interface WorkspaceHealth {
   candidateLedgerConsistency: { status: 'ok' | 'degraded'; missing: number };
 }
 
-function loadLedger(ledgerPath: string): { principles: Record<string, unknown> } {
-  if (!fs.existsSync(ledgerPath)) return { principles: {} };
-  try {
-    const content = fs.readFileSync(ledgerPath, 'utf8').trim();
-    if (!content) return { principles: {} };
-    const parsed = JSON.parse(content);
-    return { principles: parsed._tree?.principles || {} };
-  } catch {
-    return { principles: {} };
-  }
+interface HealthOptions {
+  workspace?: string;
+  json?: boolean;
 }
 
-export async function handleHealth(): Promise<void> {
-  const workspaceDir = (() => {
-    try {
-      return resolveWorkspaceDir();
-    } catch {
-      console.error('Error: No workspace directory configured. Set --workspace <path>, PD_WORKSPACE_DIR, or run from initialized workspace.');
-      process.exit(1);
-      return ''; // unreachable
-    }
-  })();
+export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
+  const workspaceDir = opts.workspace
+    ? path.resolve(opts.workspace)
+    : resolveWorkspaceDir();
 
   const generatedAt = new Date().toISOString();
   const pdDbPath = path.join(workspaceDir, '.pd', 'state.db');
-  const ledgerPath = path.join(workspaceDir, '.state', 'principle_training_state.json');
+  const ledgerStateDir = path.join(workspaceDir, '.state');
+  const ledgerPath = getLedgerFilePathPublic(ledgerStateDir);
 
-  // Load ledger
-  const { principles: ledgerPrinciples } = loadLedger(ledgerPath);
-  const principleEntries = Object.values(ledgerPrinciples);
+  // Load ledger using core's loadLedger (same HybridLedgerStore format as plugin)
+  const ledger = loadLedger(ledgerStateDir);
+  const principleEntries = Object.values(ledger.tree.principles);
 
   // Count by status in ledger
   const ledgerByStatus: Record<string, number> = {};
@@ -61,17 +50,17 @@ export async function handleHealth(): Promise<void> {
     ledgerByStatus[status] = (ledgerByStatus[status] || 0) + 1;
   }
 
-  // Load PD state.db metrics (SQLite)
+  // Load PD state.db metrics (SQLite) — single connection
   let candidatesTotal = 0, candidatesConsumed = 0, candidatesPending = 0;
   let tasksTotal = 0;
   const tasksByStatus: Record<string, number> = {};
   let pdDbExists = false;
+  let missingLedgerCount = 0;
 
   if (fs.existsSync(pdDbPath)) {
     pdDbExists = true;
+    const db = Database(pdDbPath, { readonly: true });
     try {
-      const db = Database(pdDbPath, { readonly: true });
-
       const cRow = db.prepare('SELECT COUNT(*) as total, status FROM principle_candidates GROUP BY status').all() as { total: number; status: string }[];
       for (const r of cRow) {
         candidatesTotal += r.total;
@@ -85,30 +74,19 @@ export async function handleHealth(): Promise<void> {
         tasksByStatus[r.status] = r.total;
       }
 
-      db.close();
-    } catch {
-      // DB accessible but query failed — continue with partial data
-    }
-  }
-
-  // Check candidate/ledger consistency
-  let missingLedgerCount = 0;
-  if (pdDbExists) {
-    try {
-      const db = Database(pdDbPath, { readonly: true });
+      // Check candidate/ledger consistency
       const consumedRows = db.prepare("SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'").all() as { candidate_id: string }[];
       for (const r of consumedRows) {
-        const sourceRef = `candidate://${r.candidate_id}`;
         const found = principleEntries.some((p: unknown) => {
-          const principle = p as { sourceRef?: string; derivedFromPainIds?: string[] };
-          return principle.sourceRef === sourceRef ||
-            (principle.derivedFromPainIds && principle.derivedFromPainIds.includes(r.candidate_id));
+          const principle = p as { derivedFromPainIds?: string[] };
+          return principle.derivedFromPainIds?.includes(r.candidate_id);
         });
         if (!found) missingLedgerCount++;
       }
-      db.close();
     } catch {
-      // ignore
+      // DB accessible but query failed — continue with partial data
+    } finally {
+      db.close();
     }
   }
 
@@ -134,6 +112,14 @@ export async function handleHealth(): Promise<void> {
     },
   };
 
+  if (opts.json) {
+    console.log(JSON.stringify(health, null, 2));
+    if (health.candidateLedgerConsistency.status === 'degraded') {
+      process.exit(1);
+    }
+    return;
+  }
+
   console.log(`generatedAt: ${health.generatedAt}`);
   console.log(`workspace: ${health.workspace}`);
   console.log(`pdStateDb.exists: ${health.pdStateDb.exists}`);
@@ -154,5 +140,6 @@ export async function handleHealth(): Promise<void> {
   if (health.candidateLedgerConsistency.status === 'degraded') {
     console.warn('⚠️  Candidate/ledger consistency is DEGRADED. Run: pd candidate audit --workspace "' + workspaceDir + '" --json');
     console.warn('   To repair missing entries: pd candidate repair --candidate-id <id> --workspace "' + workspaceDir + '" --json');
+    process.exit(1);
   }
 }
