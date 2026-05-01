@@ -15,7 +15,7 @@
  *   - Built pd-cli (npx pd must be resolvable)
  */
 
-import { execSync, execFileSync } from 'child_process';
+import { execSync } from 'child_process';
 import * as path from 'path';
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
@@ -73,13 +73,13 @@ function error(msg) {
 }
 
 function pd(args, workspace, timeoutMs = 300_000) {
-  const fullArgs = [...args, '--workspace', workspace];
-  const env = { ...process.env };
+  // args are program-generated internally; workspace is validated path from parseArgs
+  // execSync with string cmd is required on Windows (execFileSync causes EINVAL on npx)
+  const cmd = `pd ${args.join(' ')} --workspace "${workspace}"`;
   try {
-    return execFileSync('npx', ['pd', ...fullArgs], {
+    return execSync(cmd, {
       encoding: 'utf8',
       timeout: timeoutMs,
-      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (err) {
