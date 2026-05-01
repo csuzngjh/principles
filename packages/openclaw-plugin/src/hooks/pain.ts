@@ -154,6 +154,20 @@ export function handleAfterToolCall(
     });
     if (!gate.shouldDiagnose) {
       SystemLogger.log(effectiveWorkspaceDir, 'MANUAL_PAIN_SKIPPED', `Manual pain within cooldown: ${gate.detail}`);
+      let payload: string;
+      try {
+        payload = JSON.stringify({
+          reason: gate.reason,
+          detail: gate.detail,
+          source: 'manual',
+          sessionId,
+          gfi: 0,
+          score: 100,
+        });
+      } catch {
+        payload = JSON.stringify({ reason: gate.reason, detail: '(log serialization failed)' });
+      }
+      SystemLogger.log(effectiveWorkspaceDir, 'PAIN_GATE_REJECTED', payload);
       return;
     }
 
@@ -353,6 +367,21 @@ export function handleAfterToolCall(
       'PAIN_DIAGNOSE_SKIPPED',
       `Tool failure recorded as friction only: ${diagnosticGate.detail}; tool=${event.toolName}; path=${relPath}`,
     );
+    // Structured gate rejection event for traceability
+    let rejectPayload: string;
+    try {
+      rejectPayload = JSON.stringify({
+        reason: diagnosticGate.reason,
+        detail: diagnosticGate.detail,
+        source: 'tool_failure',
+        sessionId: sessionId,
+        gfi: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.currentGfi ?? 0,
+        score: painScore,
+      });
+    } catch {
+      rejectPayload = JSON.stringify({ reason: diagnosticGate.reason, detail: '(log serialization failed)' });
+    }
+    SystemLogger.log(effectiveWorkspaceDir, 'PAIN_GATE_REJECTED', rejectPayload);
     return;
   }
 
@@ -402,14 +431,16 @@ export function handleAfterToolCall(
               implementationCost: 0,
               benefitScore: 0,
             });
-          } catch {
+          } catch (e) {
             // Non-critical — metrics tracked in memory
+            SystemLogger.log(effectiveWorkspaceDir, 'METRICS_UPDATE_SKIP', String(e));
           }
         }
       },
     );
-  } catch {
+  } catch (e) {
     // Observation only — never disrupt the pain pipeline
+    SystemLogger.log(effectiveWorkspaceDir, ' PRINCIPLE_TRACK_SKIP', String(e));
   }
 
   eventLog.recordPainSignal(sessionId, {
