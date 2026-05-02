@@ -80,11 +80,13 @@ describe('NocturnalRuntime', () => {
             expect(result.idleForMs).toBeGreaterThan(30 * 60 * 1000);
         });
 
-        // TODO: Fix - abandonedSessionIds not being populated correctly
-        it.skip('should treat abandoned sessions as not contributing to idle check', () => {
+        it('should treat abandoned sessions as not contributing to idle check', () => {
             // Session active 3 hours ago — should be treated as abandoned
             vi.setSystemTime(new Date('2026-03-27T09:00:00.000Z')); // 3 hours before "now"
-            trackToolRead('session-abandoned', 'src/main.ts', workspaceDir);
+            // Explicitly set trigger and sessionKey to undefined to simulate legacy sessions
+            const session = trackToolRead('session-abandoned', 'src/main.ts', workspaceDir);
+            session.trigger = undefined;
+            session.sessionKey = undefined;
             vi.setSystemTime(new Date('2026-03-27T12:00:00.000Z')); // reset to "now"
 
             const result = checkWorkspaceIdle(workspaceDir, {
@@ -98,11 +100,12 @@ describe('NocturnalRuntime', () => {
             expect(result.reason).toContain('abandoned session(s) ignored');
         });
 
-        // TODO: Fix - abandonedSessionIds not being populated correctly
-        it.skip('should ignore ancient sessions but still detect recent activity from other sessions', () => {
+        it('should ignore ancient sessions but still detect recent activity from other sessions', () => {
             // Ancient session (4 hours ago — abandoned)
             vi.setSystemTime(new Date('2026-03-27T08:00:00.000Z'));
-            trackToolRead('session-ancient', 'src/main.ts', workspaceDir);
+            const session = trackToolRead('session-ancient', 'src/main.ts', workspaceDir);
+            session.trigger = undefined;
+            session.sessionKey = undefined;
             vi.setSystemTime(new Date('2026-03-27T12:00:00.000Z'));
 
             // Recent session (5 minutes ago — still active)
@@ -402,11 +405,12 @@ describe('NocturnalRuntime', () => {
             expect(result.userActiveSessions).toBe(0);
         });
 
-        // TODO: Fix - abandonedSessionIds not being populated correctly
-        it.skip('should not incorrectly block when there are abandoned AND active sessions', () => {
+        it('should not incorrectly block when there are abandoned AND active sessions', () => {
             // Abandoned session (3 hours ago)
             vi.setSystemTime(new Date('2026-03-27T09:00:00.000Z'));
-            trackToolRead('session-abandoned', 'src/main.ts', workspaceDir);
+            const session = trackToolRead('session-abandoned', 'src/main.ts', workspaceDir);
+            session.trigger = undefined;
+            session.sessionKey = undefined;
 
             // Recent session (5 min ago)
             vi.setSystemTime(new Date('2026-03-27T11:55:00.000Z'));
