@@ -168,7 +168,8 @@ describe('PruningReviewLog', () => {
   it('corrupt line skipped on list', () => {
     const logPath = path.join(tmpDir, '.state', 'pruning_reviews.jsonl');
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
-    fs.writeFileSync(logPath, 'valid json line\n{"reviewId":"r1","principleId":"p1","decision":"keep","note":"ok","reviewer":"op","reviewedAt":"2026-05-02T00:00:00.000Z","signalSnapshot":{}}\n');
+    // First line is invalid JSON (plain text), second line is valid
+    fs.writeFileSync(logPath, 'not-valid-json\n{"reviewId":"r1","principleId":"p1","decision":"keep","note":"ok","reviewer":"op","reviewedAt":"2026-05-02T00:00:00.000Z","signalSnapshot":{}}\n');
 
     const records = listPruningReviews(tmpDir);
     expect(records).toHaveLength(1);

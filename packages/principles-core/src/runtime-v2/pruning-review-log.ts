@@ -14,6 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import type { PrinciplePruningSignal } from './pruning-read-model.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,20 +27,7 @@ export interface PruningReviewRecord {
   note: string;
   reviewer: string;
   reviewedAt: string;
-  signalSnapshot: {
-    principleId: string;
-    status: string;
-    createdAt: string;
-    updatedAt: string;
-    derivedCandidateIds: string[];
-    derivedPainCount: number;
-    matchedCandidateCount: number;
-    recentCandidateCount: number;
-    orphanCandidateCount: number;
-    ageDays: number;
-    riskLevel: string;
-    reasons: string[];
-  };
+  signalSnapshot: PrinciplePruningSignal;
 }
 
 export interface AppendPruningReviewInput {
