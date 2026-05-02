@@ -121,7 +121,7 @@ describe('pd-cli command boundaries', () => {
     expect(src).not.toContain('recordPainSignalObservability');
   });
 
-  it('trace.ts does not import RuntimeStateManager or loadLedger', async () => {
+  it.skip('trace.ts does not import RuntimeStateManager or loadLedger', async () => {
     // TODO: Enable this guard once trace.ts is migrated to PainChainReadModel.
   });
 });

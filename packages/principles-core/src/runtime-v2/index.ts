@@ -208,7 +208,6 @@ export {
 export type {
   /** @deprecated Use PainToPrincipleServiceOptions instead */
   PainSignalBridgeOptions,
-  /** @deprecated Use PainToPrincipleInput instead */
   PainDetectedData,
   /** @deprecated Use PainToPrincipleOutput instead */
   PainSignalBridgeResult,

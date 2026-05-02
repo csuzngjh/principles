@@ -109,7 +109,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
 
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
-    if (result.status !== 'succeeded' && result.status !== 'skipped') process.exit(1);
+    if (result.status !== 'succeeded' && result.status !== 'skipped' && result.status !== 'retried') process.exit(1);
   } else {
     if (result.status === 'succeeded') {
       console.log('[OK] Pain signal recorded via PainToPrincipleService');
@@ -128,6 +128,10 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       console.log(`   pd task show ${result.taskId} --workspace "${workspaceDir}"`);
     } else if (result.status === 'skipped') {
       console.log(`[SKIP] Task already in progress: ${result.message ?? 'unknown'}`);
+      console.log(`   Pain ID: ${result.painId}`);
+      console.log(`   Task ID: ${result.taskId}`);
+    } else if (result.status === 'retried') {
+      console.log(`[RETRY] Task retried: ${result.message ?? 'unknown'}`);
       console.log(`   Pain ID: ${result.painId}`);
       console.log(`   Task ID: ${result.taskId}`);
     } else {

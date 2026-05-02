@@ -32,13 +32,13 @@ interface ToolParams {
 
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
-async function getPainService(wctx: WorkspaceContext): Promise<PainToPrincipleService> {
+function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleService {
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
   return new PainToPrincipleService({
     workspaceDir: wctx.workspaceDir,
     stateDir: wctx.stateDir,
     ledgerAdapter,
-    owner: 'pain-signal-bridge',
+    owner: 'openclaw-plugin',
     autoIntakeEnabled: true,
   });
 }
@@ -53,14 +53,12 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
   } catch (e) {
     SystemLogger.log(wctx.workspaceDir, 'EVOLUTION_EMIT_WARN', `Failed to emit evolution event: ${String(e)}`);
   }
-  // M8: Bridge pain_detected → diagnostician pipeline (fire-and-forget)
+  // M8: Bridge pain_detected → diagnostician pipeline
   if (event.type === 'pain_detected') {
     const painData = event.data as PainDetectedData;
-    const painId = painData?.painId ?? 'unknown';
-    const sessionId = painData?.sessionId ?? 'unknown';
     try {
-      const service = await getPainService(wctx);
-      service.recordPain({
+      const service = createPainToPrincipleService(wctx);
+      const result = await service.recordPain({
         painId: painData.painId,
         painType: painData.painType,
         source: painData.source,
@@ -70,15 +68,26 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
         agentId: painData.agentId,
         taskId: painData.taskId,
         traceId: painData.traceId,
-      }).then((result) => {
-        if (result.status === 'failed') {
-          SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_ERROR', `PainToPrincipleService failed: painId=${painId} sessionId=${sessionId}: ${result.message ?? 'unknown'}`);
-        }
-      }).catch((err) => {
-        SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_ERROR', `PainToPrincipleService unexpected rejection: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
+        recordObservability: true,
       });
+      if (result.status === 'failed' && result.failureCategory) {
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_FAILED', JSON.stringify({
+          painId: result.painId,
+          taskId: result.taskId,
+          failureCategory: result.failureCategory,
+          latencyMs: result.latencyMs,
+          message: result.message,
+        }));
+      } else if (result.status === 'skipped') {
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_SKIPPED', JSON.stringify({
+          painId: result.painId,
+          taskId: result.taskId,
+          latencyMs: result.latencyMs,
+          message: result.message,
+        }));
+      }
     } catch (err) {
-      SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_INIT_ERROR', `PainToPrincipleService init failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
+      SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_ERROR', `recordPain threw: ${String(err)}`);
     }
   }
 }
