@@ -222,6 +222,10 @@ export type { PainToPrincipleServiceOptions, PainToPrincipleInput, PainToPrincip
 export { PainChainReadModel } from './pain-chain-read-model.js';
 export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions } from './pain-chain-read-model.js';
 
+// Pruning read model (PRI-15)
+export { PruningReadModel } from './pruning-read-model.js';
+export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, PrincipleStatus } from './pruning-read-model.js';
+
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
 
