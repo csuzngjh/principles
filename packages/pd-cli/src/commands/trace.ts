@@ -8,7 +8,7 @@
 
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { PainChainReadModel } from '@principles/core/runtime-v2';
+import { PainChainReadModel, createDiagnosticianTaskId } from '@principles/core/runtime-v2';
 
 interface TraceOptions {
   painId: string;
@@ -17,7 +17,7 @@ interface TraceOptions {
 }
 
 function outputNoTask(opts: TraceOptions, workspaceDir: string, checkedAt: string): never {
-  const taskId = `diagnosis_${opts.painId}`;
+  const taskId = createDiagnosticianTaskId(opts.painId);
   const result = {
     painId: opts.painId,
     taskId,

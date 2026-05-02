@@ -13,6 +13,7 @@ import * as path from 'path';
 import Database from 'better-sqlite3';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadLedger, getLedgerFilePathPublic, PainChainReadModel } from '@principles/core/runtime-v2';
+import type { FailureCategory } from '@principles/core/runtime-v2';
 
 interface LastSuccessfulChain {
   painId?: string;
@@ -22,7 +23,7 @@ interface LastSuccessfulChain {
   candidateIds: string[];
   ledgerEntryIds: string[];
   latencyMs?: { totalMs?: number };
-  failureCategory: string | null;
+  failureCategory: FailureCategory | null;
   checkedAt: string;
 }
 
