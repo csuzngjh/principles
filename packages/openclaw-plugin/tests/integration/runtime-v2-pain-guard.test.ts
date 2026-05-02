@@ -69,7 +69,7 @@ describe('Runtime V2 pain entrypoint guard', () => {
 
     expect(source).toMatch(/emitPainDetectedEvent\(wctx,\s*\{/);
     expect(source).toMatch(/type:\s*'pain_detected'/);
-    expect(source).toMatch(/PainSignalBridge|createPainSignalBridge/);
+    expect(source).toMatch(/PainToPrincipleService/);
     expect(source).not.toMatch(/writePainFlag|recordAndWritePainFlag/);
     expect(source).not.toMatch(/writeFileSync\s*\([^)]*painFlagPath/s);
     expect(source).not.toMatch(/atomicWriteFileSync\s*\([^)]*painFlagPath/s);

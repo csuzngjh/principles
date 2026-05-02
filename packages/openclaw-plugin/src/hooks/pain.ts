@@ -12,7 +12,7 @@ import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
-import { createPainSignalBridge, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
+import { PrincipleTreeLedgerAdapter, PainToPrincipleService, type PainDetectedData } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 
 /**
@@ -32,13 +32,13 @@ interface ToolParams {
 
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
-async function getPainSignalBridge(wctx: WorkspaceContext): Promise<ReturnType<typeof createPainSignalBridge>> {
+function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleService {
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
-  return createPainSignalBridge({
+  return new PainToPrincipleService({
     workspaceDir: wctx.workspaceDir,
     stateDir: wctx.stateDir,
     ledgerAdapter,
-    owner: 'pain-signal-bridge',
+    owner: 'openclaw-plugin',
     autoIntakeEnabled: true,
   });
 }
@@ -59,12 +59,32 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
     const painId = painData?.painId ?? 'unknown';
     const sessionId = painData?.sessionId ?? 'unknown';
     try {
-      const bridge = await getPainSignalBridge(wctx);
-      bridge.onPainDetected(painData).catch((err) => {
-        SystemLogger.log(wctx.workspaceDir, 'BRIDGE_ERROR', `PainSignalBridge failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
+      const service = createPainToPrincipleService(wctx);
+      service.recordPain({
+        painId: painData.painId,
+        painType: painData.painType,
+        source: painData.source,
+        reason: painData.reason,
+        score: painData.score,
+        sessionId: painData.sessionId,
+        agentId: painData.agentId,
+        taskId: painData.taskId,
+        traceId: painData.traceId,
+      }).then((result) => {
+        if (result.status === 'failed' && result.failureCategory) {
+          SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_FAILED', JSON.stringify({
+            painId: result.painId,
+            taskId: result.taskId,
+            failureCategory: result.failureCategory,
+            latencyMs: result.latencyMs,
+            message: result.message,
+          }));
+        }
+      }).catch((err) => {
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_ERROR', `PainToPrincipleService failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
       });
     } catch (err) {
-      SystemLogger.log(wctx.workspaceDir, 'BRIDGE_INIT_ERROR', `PainSignalBridge init failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
+      SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_INIT_ERROR', `PainToPrincipleService init failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
     }
   }
 }
