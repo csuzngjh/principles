@@ -80,8 +80,6 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
             message: result.message,
           }));
         }
-      }).catch((err) => {
-        SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_ERROR', `PainToPrincipleService failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
       });
     } catch (err) {
       SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_INIT_ERROR', `PainToPrincipleService init failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
