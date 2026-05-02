@@ -77,9 +77,31 @@ Logic that stays in plugin:
 | **C** | Thin openclaw-plugin pain hook to adapter | PRI-13 |
 | **D** | Extract read model, deprecate inline factory | PRI-14 |
 
+## Recommended Public API (post-consolidation)
+
+| API | Role | Consumers |
+|-----|------|-----------|
+| `PainToPrincipleService` | Write-side orchestration (record pain, run pipeline) | CLI, plugin |
+| `PainChainReadModel` | Read-side pain-chain traversal (trace, health) | CLI |
+| `PruningReadModel` | Non-destructive pruning metrics | CLI |
+
+**Internal implementation details (DO NOT import from CLI/plugin):**
+
+| API | Reason |
+|-----|--------|
+| `createPainSignalBridge` | Internal factory — use `PainToPrincipleService` constructor |
+| `recordPainSignalObservability` | Handled automatically by `PainToPrincipleService` |
+| `PainSignalBridge` class | Core implementation — use `PainToPrincipleService.recordPain()` |
+| `RuntimeStateManager` | Core state management — use `PainChainReadModel` for reads |
+| `loadLedger` | Core ledger — use `PainChainReadModel` for reads |
+
 ## Compatibility Rules
 
-- `PainSignalBridge` class and `createPainSignalBridge()` are unchanged
+- `PainToPrincipleService` is the **only** write-side orchestration API for CLI and plugin
+- `PainChainReadModel` is the **only** read-side API for pain-chain traversal
+- `createPainSignalBridge` is a core-internal factory, not for direct CLI/plugin use
+- `recordPainSignalObservability` is handled automatically by PainToPrincipleService (never called manually from entry points)
+- `PainSignalBridge` class remains as core implementation detail
 - No database schema changes
 - No behavior changes in this round
 
@@ -98,7 +120,6 @@ Service uses chain-integrity-first classification (moved from pd-cli):
 - No `RuleHost` / `PrincipleCompiler` move
 - No auto-pruning design (PRI-15)
 - No runtime provider selection change
-- No read model extraction (PRI-14)
 
 ## Rollback
 
