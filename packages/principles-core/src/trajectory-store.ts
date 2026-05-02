@@ -96,6 +96,8 @@ export function listCorrectionSamples(
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     }));
+  } catch {
+    return [];
   } finally {
     db.close();
   }
