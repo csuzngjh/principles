@@ -9,6 +9,7 @@
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { PruningReadModel, appendPruningReview } from '@principles/core/runtime-v2';
+import type { PruningReviewDecision } from '@principles/core/runtime-v2';
 
 interface PruningReportOptions {
   workspace?: string;
@@ -92,7 +93,7 @@ export interface PruningExplainOptions {
 
 export interface PruningReviewOptions {
   principleId: string;
-  decision: string;
+  decision: PruningReviewDecision;
   note?: string;
   reviewer?: string;
   workspace?: string;
@@ -116,7 +117,7 @@ export function handlePruningReview(opts: PruningReviewOptions): void {
       console.error(`Error: Principle not found: '${opts.principleId}'`);
     }
     process.exit(1);
-    return;
+    return; // satisfies TypeScript control flow (process.exit is [noreturn] in tests)
   }
 
   if (opts.decision !== 'keep' && opts.decision !== 'defer' && opts.decision !== 'archive-candidate') {
