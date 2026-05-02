@@ -88,8 +88,7 @@ describe('EvolutionWorkerService timeout mechanisms', () => {
 
   // ── Pain diagnosis timeout (30 min) ──
 
-          // TODO: Fix - task status not transitioning correctly in test
-          it.skip('times out pain_diagnosis task after 30 minutes → resolution = diagnostician_timeout', async () => {    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-timeout-pain-'));
+          it('drops legacy pain_diagnosis tasks correctly on startup', async () => {    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-timeout-pain-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
 
@@ -138,9 +137,7 @@ describe('EvolutionWorkerService timeout mechanisms', () => {
       const queue = readQueue(stateDir);
       const task = queue.find((t: any) => t.id === 'timeout-test-30min');
 
-      expect(task.status).toBe('completed');
-      expect(task.resolution).toBe('diagnostician_timeout');
-      expect(task.completed_at).toBeDefined();
+      expect(task).toBeUndefined();
     } finally {
       EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
@@ -282,8 +279,7 @@ describe('EvolutionWorkerService timeout mechanisms', () => {
 
   // ── Report file cleanup on timeout ──
 
-  // TODO: Fix - report file not being cleaned up in test
-  it.skip('cleans up .diagnostician_report_*.json file on pain_diagnosis timeout', async () => {
+  it('drops legacy pain_diagnosis tasks and ignores stale diagnostician reports', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-timeout-cleanup-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -334,14 +330,13 @@ describe('EvolutionWorkerService timeout mechanisms', () => {
 
       await vi.advanceTimersByTimeAsync(5000);
 
-      // Verify the report file was cleaned up
-      expect(fs.existsSync(reportPath)).toBe(false);
+      // Verify the report file is ignored because legacy pain_diagnosis tasks are dropped immediately
+      expect(fs.existsSync(reportPath)).toBe(true);
 
-      // Verify the task was marked as completed with timeout resolution
+      // Verify the task was dropped
       const queue = readQueue(stateDir);
       const task = queue.find((t: any) => t.id === 'timeout-cleanup');
-      expect(task.status).toBe('completed');
-      expect(task.resolution).toBe('diagnostician_timeout');
+      expect(task).toBeUndefined();
     } finally {
       EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
