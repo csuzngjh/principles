@@ -84,7 +84,7 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
 // ── OpenClawPlugin pain hook integration ───────────────────────────────────
 
 describe('openclaw-plugin pain hook integration', () => {
-  it('pain.ts imports createPainSignalBridge from runtime-v2', async () => {
+  it('pain.ts uses PainToPrincipleService (not createPainSignalBridge)', async () => {
     const { existsSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const painHookPath = resolve(
@@ -92,11 +92,36 @@ describe('openclaw-plugin pain hook integration', () => {
       '../../../openclaw-plugin/src/hooks/pain.ts',
     );
     if (!existsSync(painHookPath)) {
-      // Skip — no openclaw-plugin in this workspace context.
       return;
     }
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(painHookPath, 'utf-8');
-    expect(src).toContain('createPainSignalBridge');
+    expect(src).toContain('PainToPrincipleService');
+    expect(src).not.toContain('createPainSignalBridge');
+  });
+});
+
+// ── pd-cli command boundary guards ─────────────────────────────────────────
+
+describe('pd-cli command boundaries', () => {
+  it('pain-record.ts does not import createPainSignalBridge or recordPainSignalObservability', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const cmdPath = resolve(
+      __dirname,
+      '../../../pd-cli/src/commands/pain-record.ts',
+    );
+    if (!existsSync(cmdPath)) {
+      return;
+    }
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(cmdPath, 'utf-8');
+    expect(src).toContain('PainToPrincipleService');
+    expect(src).not.toContain('createPainSignalBridge');
+    expect(src).not.toContain('recordPainSignalObservability');
+  });
+
+  it.skip('trace.ts does not import RuntimeStateManager or loadLedger', async () => {
+    // TODO: Enable this guard once trace.ts is migrated to PainChainReadModel.
   });
 });
