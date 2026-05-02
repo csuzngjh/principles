@@ -202,6 +202,7 @@ export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult, C
 // Pain signal bridge (M8)
 export {
   PainSignalBridge,
+  createDiagnosticianTaskId,
 } from './pain-signal-bridge.js';
 export type {
   PainSignalBridgeOptions,
@@ -215,7 +216,7 @@ export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfi
 
 // Pain-to-Principle service facade (PRI-12)
 export { PainToPrincipleService } from './pain-to-principle-service.js';
-export type { PainToPrincipleServiceOptions, PainToPrincipleInput, PainToPrincipleOutput } from './pain-to-principle-service.js';
+export type { PainToPrincipleServiceOptions, PainToPrincipleInput, PainToPrincipleOutput, FailureCategory } from './pain-to-principle-service.js';
 
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
