@@ -13,7 +13,7 @@ import {
   PrincipleTreeLedgerAdapter,
   resolveRuntimeConfig,
 } from '@principles/core/runtime-v2';
-import type { PainToPrincipleOutput } from '@principles/core/runtime-v2';
+import type { PainToPrincipleOutput, FailureCategory } from '@principles/core/runtime-v2';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
@@ -35,12 +35,23 @@ interface PainRecordResult {
   status: 'succeeded' | 'skipped' | 'failed' | 'retried';
   message?: string;
   observabilityWarnings?: string[];
-  failureCategory?: string;
+  failureCategory?: FailureCategory;
   latencyMs?: number;
 }
 
 async function formatConfigDiagnostic(stateDir: string, errMsg: string): Promise<void> {
-  const config = resolveRuntimeConfig(stateDir);
+  const config = (() => {
+    try {
+      return resolveRuntimeConfig(stateDir);
+    } catch {
+      return null;
+    }
+  })();
+  if (!config) {
+    console.error('Error: Pain signal processing failed — configuration issue\n');
+    console.error(`  Details: ${errMsg}`);
+    return;
+  }
   const missing: string[] = [];
   if (!config.provider) missing.push('provider');
   if (!config.model) missing.push('model');
@@ -57,7 +68,7 @@ async function formatConfigDiagnostic(stateDir: string, errMsg: string): Promise
     }
   }
 
-  console.error('Error: Pain signal bridge initialization failed\n');
+  console.error('Error: Pain signal processing failed — configuration issue\n');
 
   if (missing.length > 0) {
     console.error('  Missing configuration:');
@@ -93,6 +104,7 @@ function serviceOutputToResult(out: PainToPrincipleOutput): PainRecordResult {
     ledgerEntryIds: out.ledgerEntryIds,
     status: out.status,
     message: out.message,
+    // Omit empty warnings from JSON output for cleaner display
     observabilityWarnings: out.observabilityWarnings.length > 0 ? out.observabilityWarnings : undefined,
     failureCategory: out.failureCategory,
     latencyMs: out.latencyMs,
@@ -146,7 +158,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
 
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
-    if (result.status !== 'succeeded') process.exit(1);
+    if (result.status === 'failed') process.exit(1);
   } else {
     if (result.status === 'succeeded') {
       console.log('[OK] Pain signal recorded via Runtime v2 bridge');
@@ -162,6 +174,14 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
       console.log(`   Workspace: ${workspaceDir}`);
       console.log(`\nDiagnostician pipeline running. Check progress with:`);
       console.log(`   pd task show ${result.taskId} --workspace "${workspaceDir}"`);
+    } else if (result.status === 'skipped') {
+      console.log('[SKIP] Pain signal already processed:', result.message);
+      console.log(`   Pain ID: ${result.painId}`);
+      console.log(`   Task ID: ${result.taskId}`);
+    } else if (result.status === 'retried') {
+      console.log('[RETRY] Pain signal triggered retry:', result.message);
+      console.log(`   Pain ID: ${result.painId}`);
+      console.log(`   Task ID: ${result.taskId}`);
     } else {
       console.error('[FAIL] Pain signal failed:', result.message);
       process.exit(1);
