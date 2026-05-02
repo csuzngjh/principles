@@ -25,7 +25,7 @@ import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js'
 import { handleRuntimeProbe } from './commands/runtime.js';
 import { handleFlowShow } from './commands/flow.js';
 import { handleTraceShow } from './commands/trace.js';
-import { handlePruningReport, handlePruningExplain } from './commands/runtime-pruning.js';
+import { handlePruningReport, handlePruningExplain, handlePruningReview } from './commands/runtime-pruning.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
@@ -345,6 +345,26 @@ pruningCmd
   .option('--json', 'Output raw JSON')
   .action((opts) => {
     handlePruningExplain({ principleId: opts.principleId, workspace: opts.workspace, json: opts.json });
+  });
+
+pruningCmd
+  .command('review')
+  .description('Record a human pruning decision for a flagged principle')
+  .requiredOption('--principle-id <id>', 'Principle ID to review')
+  .requiredOption('--decision <decision>', "Decision: keep, defer, or archive-candidate")
+  .option('--note <text>', 'Review note (required for archive-candidate)')
+  .option('--reviewer <name>', 'Reviewer name', 'operator')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action((opts) => {
+    handlePruningReview({
+      principleId: opts.principleId,
+      decision: opts.decision,
+      note: opts.note,
+      reviewer: opts.reviewer,
+      workspace: opts.workspace,
+      json: opts.json,
+    });
   });
 
 // ── Candidate inspection commands ───────────────────────────────────────────
