@@ -25,6 +25,11 @@ vi.mock('fs', () => ({
   writeFileSync: vi.fn(),
   statSync: vi.fn(),
   unlinkSync: vi.fn(),
+  promises: {
+    readdir: vi.fn(),
+    stat: vi.fn(),
+    readFile: vi.fn(),
+  }
 }));
 
 describe('focus-history', () => {
@@ -164,29 +169,82 @@ describe('focus-history', () => {
   });
 
   describe('getHistoryVersions', () => {
-    it('should return empty array if no history', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+    it('should return empty array if no history', async () => {
+      const err = new Error('ENOENT: no such file or directory') as NodeJS.ErrnoException;
+      err.code = 'ENOENT';
+      vi.mocked(fs.promises.readdir).mockRejectedValue(err);
 
-      const result = getHistoryVersions(mockFocusPath, 3);
+      const result = await getHistoryVersions(mockFocusPath, 3);
 
       expect(result).toEqual([]);
     });
 
-    it('should return history versions sorted by mtime', () => {
+    it('should return history versions sorted by mtime', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readdirSync).mockReturnValue([
+      // fs.promises.readdir mock
+      vi.mocked(fs.promises.readdir).mockResolvedValue([
         'CURRENT_FOCUS.v1.2026-03-10.md',
         'CURRENT_FOCUS.v2.2026-03-11.md',
       ] as any);
-      vi.mocked(fs.statSync)
-        .mockReturnValueOnce({ mtime: new Date('2026-03-10') } as any)
-        .mockReturnValueOnce({ mtime: new Date('2026-03-11') } as any);
-      vi.mocked(fs.readFileSync).mockReturnValue('history content');
+      // fs.promises.stat mock
+      vi.mocked(fs.promises.stat)
+        .mockResolvedValueOnce({ mtime: new Date('2026-03-10') } as any)
+        .mockResolvedValueOnce({ mtime: new Date('2026-03-11') } as any);
+      // fs.promises.readFile mock
+      vi.mocked(fs.promises.readFile).mockResolvedValue('history content');
 
-      const result = getHistoryVersions(mockFocusPath, 3);
+      const result = await getHistoryVersions(mockFocusPath, 3);
 
       expect(result.length).toBe(2);
       expect(result[0]).toBe('history content');
+    });
+
+    it('should return empty array if readdir throws ENOENT', async () => {
+      const err = new Error('ENOENT') as NodeJS.ErrnoException;
+      err.code = 'ENOENT';
+      vi.mocked(fs.promises.readdir).mockRejectedValue(err);
+
+      const result = await getHistoryVersions(mockFocusPath, 3);
+
+      expect(result).toEqual([]);
+    });
+
+    it('should handle partial stat failures', async () => {
+      vi.mocked(fs.promises.readdir).mockResolvedValue([
+        'CURRENT_FOCUS.v1.md',
+        'CURRENT_FOCUS.v2.md',
+      ] as any);
+
+      // First fails, second succeeds
+      vi.mocked(fs.promises.stat)
+        .mockRejectedValueOnce(new Error('Deleted'))
+        .mockResolvedValueOnce({ mtime: new Date() } as any);
+
+      vi.mocked(fs.promises.readFile).mockResolvedValue('content');
+
+      const result = await getHistoryVersions(mockFocusPath, 3);
+
+      expect(result.length).toBe(1);
+      expect(result[0]).toBe('content');
+    });
+
+    it('should handle partial readFile failures', async () => {
+      vi.mocked(fs.promises.readdir).mockResolvedValue([
+        'CURRENT_FOCUS.v1.md',
+        'CURRENT_FOCUS.v2.md',
+      ] as any);
+
+      vi.mocked(fs.promises.stat).mockResolvedValue({ mtime: new Date() } as any);
+
+      // First fails, second succeeds
+      vi.mocked(fs.promises.readFile)
+        .mockRejectedValueOnce(new Error('Read error'))
+        .mockResolvedValueOnce('content v2');
+
+      const result = await getHistoryVersions(mockFocusPath, 3);
+
+      expect(result.length).toBe(1);
+      expect(result[0]).toBe('content v2');
     });
   });
 
