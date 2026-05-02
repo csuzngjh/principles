@@ -15,12 +15,14 @@ const REQUIRED_SOURCE_FILES = [
   'pain-signal-runtime-factory.ts',
   'pain-signal-observability.ts',
   'pruning-read-model.ts',
+  'pruning-review-log.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
   'pain-to-principle-service.test.ts',
   'pain-chain-read-model.test.ts',
   'pruning-read-model.test.ts',
+  'pruning-review-log.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [

@@ -25,7 +25,7 @@ import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js'
 import { handleRuntimeProbe } from './commands/runtime.js';
 import { handleFlowShow } from './commands/flow.js';
 import { handleTraceShow } from './commands/trace.js';
-import { handlePruningReport } from './commands/runtime-pruning.js';
+import { handlePruningReport, handlePruningExplain } from './commands/runtime-pruning.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
@@ -335,6 +335,16 @@ pruningCmd
   .option('--json', 'Output raw JSON')
   .action((opts) => {
     handlePruningReport({ workspace: opts.workspace, json: opts.json });
+  });
+
+pruningCmd
+  .command('explain')
+  .description('Explain why a specific principle was flagged')
+  .requiredOption('--principle-id <id>', 'Principle ID to explain')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action((opts) => {
+    handlePruningExplain({ principleId: opts.principleId, workspace: opts.workspace, json: opts.json });
   });
 
 // ── Candidate inspection commands ───────────────────────────────────────────

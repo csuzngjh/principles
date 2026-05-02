@@ -150,3 +150,55 @@ describe('pd runtime pruning report', () => {
     consoleSpy.mockRestore();
   });
 });
+
+// ── pd runtime pruning explain ───────────────────────────────────────────────
+
+describe('pd runtime pruning explain', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('explain --json outputs matching signal for p_watch', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { handlePruningExplain } = await import('../../src/commands/runtime-pruning.js');
+    handlePruningExplain({ principleId: 'p_watch', json: true });
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.principleId).toBe('p_watch');
+    expect(output.signal).toBeDefined();
+    expect(output.workspace).toBeDefined();
+    expect(output.generatedAt).toBeDefined();
+    consoleSpy.mockRestore();
+  });
+
+  it('explain text output includes reason lines and read-only note', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { handlePruningExplain } = await import('../../src/commands/runtime-pruning.js');
+    handlePruningExplain({ principleId: 'p_watch', json: false });
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(output).toContain('p_watch');
+    expect(output).toContain('watch');
+    expect(output).toContain('NOTE: This report is read-only.');
+    consoleSpy.mockRestore();
+  });
+
+  it('explain missing principle exits 1', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const processSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as (code: number) => never);
+    const { handlePruningExplain } = await import('../../src/commands/runtime-pruning.js');
+    handlePruningExplain({ principleId: 'nonexistent', json: false });
+    expect(processSpy).toHaveBeenCalledWith(1);
+    consoleSpy.mockRestore();
+    processSpy.mockRestore();
+  });
+
+  it('explain passes explicit workspace to PruningReadModel', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { handlePruningExplain } = await import('../../src/commands/runtime-pruning.js');
+    handlePruningExplain({ principleId: 'p_watch', workspace: '/custom/workspace', json: false });
+    const calls = (PruningReadModel as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    expect(String(calls[calls.length - 1][0].workspaceDir)).toMatch(/custom.*workspace/);
+    consoleSpy.mockRestore();
+  });
+});
