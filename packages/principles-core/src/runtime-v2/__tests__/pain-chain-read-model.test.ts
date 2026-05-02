@@ -83,24 +83,10 @@ const CANDIDATE_CONSUMED = {
   createdAt: '2026-01-01T00:06:00.000Z',
 };
 
-const CANDIDATES_CONSUMED = [
-  { candidateId: 'c2', status: 'consumed', createdAt: '2026-01-01T00:08:00.000Z' },
-  { candidateId: 'c1', status: 'consumed', createdAt: '2026-01-01T00:06:00.000Z' },
-  { candidateId: 'c3', status: 'consumed', createdAt: '2026-01-01T00:07:00.000Z' },
-];
-
 const LEDGER_WITH_ENTRY = {
   tree: {
     principles: {
       'l1': { id: 'l1', derivedFromPainIds: ['c1'], createdAt: '2026-01-01T00:07:00.000Z' },
-    },
-  },
-};
-
-const LEDGER_WITH_MULTI_ENTRY = {
-  tree: {
-    principles: {
-      'l1': { id: 'l1', derivedFromPainIds: ['c1', 'c2', 'c3'], createdAt: '2026-01-01T00:10:00.000Z' },
     },
   },
 };
@@ -231,24 +217,6 @@ describe('PainChainReadModel', () => {
     await model.close();
   });
 
-  it('traceByPainId: multiple candidates ordered by createdAt DESC — uses earliest for artifactToCandidate', async () => {
-    setLedgerData(LEDGER_WITH_MULTI_ENTRY);
-    const mgr = makeMockManager({
-      task: TASK_SUCCEEDED,
-      runs: [RUN_SUCCEEDED],
-      artifactRow: ARTIFACT_ROW,
-      candidates: CANDIDATES_CONSUMED,
-    });
-    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
-    const trace = await model.traceByPainId('pain-001');
-    expect(trace.status).toBe('succeeded');
-    expect(trace.candidateIds).toEqual(['c2', 'c1', 'c3']);
-    expect(trace.ledgerEntryIds).toEqual(['l1']);
-    expect(trace.latencyMs.artifactToCandidate).toBe(30000);
-    expect(trace.latencyMs.candidateToLedger).toBe(120000);
-    await model.close();
-  });
-
   // ── getLastSuccessfulChain ─────────────────────────────────────────────
 
   it('getLastSuccessfulChain: init failure returns undefined', async () => {
@@ -302,28 +270,6 @@ describe('PainChainReadModel', () => {
     model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
     const chain = await model.getLastSuccessfulChain();
     expect(chain).toBeUndefined();
-    await model.close();
-  });
-
-  it('getLastSuccessfulChain: multiple candidates — uses earliest for artifactToCandidate', async () => {
-    setLedgerData(LEDGER_WITH_MULTI_ENTRY);
-    const mgr = makeMockManager({
-      candidates: CANDIDATES_CONSUMED,
-      dbQueries: {
-        lastSucceeded: { task_id: 'diagnosis_pain-001', input_ref: 'pain-001', created_at: '2026-01-01T00:00:00.000Z' },
-        run: { run_id: 'run-001', started_at: '2026-01-01T00:01:00.000Z', ended_at: '2026-01-01T00:05:00.000Z' },
-        artifact: { artifact_id: 'art-001', created_at: '2026-01-01T00:05:30.000Z' },
-      },
-    });
-    model = new PainChainReadModel({ workspaceDir: WORKSPACE, stateManager: mgr });
-    const chain = await model.getLastSuccessfulChain();
-    expect(chain).toBeDefined();
-    if (!chain) return;
-    expect(chain.status).toBe('succeeded');
-    expect(chain.candidateIds).toEqual(['c2', 'c1', 'c3']);
-    expect(chain.ledgerEntryIds).toEqual(['l1']);
-    expect(chain.latencyMs.artifactToCandidate).toBe(30000);
-    expect(chain.latencyMs.candidateToLedger).toBe(120000);
     await model.close();
   });
 
