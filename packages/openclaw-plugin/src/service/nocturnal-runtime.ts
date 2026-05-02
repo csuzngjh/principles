@@ -63,6 +63,20 @@ function isSystemSession(state: SessionState): boolean {
     if (sessionId?.startsWith('boot-')) return true;
     if (sessionId?.startsWith('probe-')) return true;
 
+    // CRITICAL FIX: Legacy sessions from persistence may have missing trigger/sessionKey
+    // If both are missing AND the session is old (inactive > abandoned threshold),
+    // treat as legacy/orphan to avoid blocking idle detection with unknown sessions.
+    // Recent sessions without trigger/sessionKey are likely real user sessions still
+    // being enriched — do NOT classify them as system sessions.
+    const ABANDONED_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+    if (!trigger && !sessionKey) {
+        const inactiveFor = Date.now() - state.lastActivityAt;
+        if (inactiveFor > ABANDONED_THRESHOLD_MS) {
+            return true; // Legacy/orphan session — don't block idle detection
+        }
+        // Recent session without metadata — likely a real user session, let it through
+    }
+
     return false;
 }
 

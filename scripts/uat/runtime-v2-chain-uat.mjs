@@ -15,7 +15,7 @@
  *   - Built pd-cli (npx pd must be resolvable)
  */
 
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import * as path from 'path';
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
@@ -73,13 +73,13 @@ function error(msg) {
 }
 
 function pd(args, workspace, timeoutMs = 300_000) {
-  // args are program-generated internally; workspace is validated path from parseArgs
-  // execSync with string cmd is required on Windows (execFileSync causes EINVAL on npx)
-  const cmd = `pd ${args.join(' ')} --workspace "${workspace}"`;
+  const fullArgs = [...args, '--workspace', workspace];
+  const env = { ...process.env };
   try {
-    return execSync(cmd, {
+    return execFileSync('npx', ['pd', ...fullArgs], {
       encoding: 'utf8',
       timeout: timeoutMs,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (err) {
@@ -106,11 +106,11 @@ async function main() {
   log('');
 
   // 1. Check environment
-  if (!process.env.MINIMAX_CN_API_KEY) {
-    error('MINIMAX_CN_API_KEY environment variable not set');
+  if (!process.env.XIAOMI_KEY) {
+    error('XIAOMI_KEY environment variable not set');
     process.exit(1);
   }
-  log('✓ MINIMAX_CN_API_KEY is set');
+  log('✓ XIAOMI_KEY is set');
 
   // 2. Runtime probe
   log('Probing runtime...');

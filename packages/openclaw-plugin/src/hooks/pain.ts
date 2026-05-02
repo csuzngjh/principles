@@ -12,7 +12,7 @@ import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
-import { PrincipleTreeLedgerAdapter, PainToPrincipleService, type PainDetectedData } from '@principles/core/runtime-v2';
+import { createPainSignalBridge, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 
 /**
@@ -32,13 +32,13 @@ interface ToolParams {
 
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
-function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleService {
+async function getPainSignalBridge(wctx: WorkspaceContext): Promise<ReturnType<typeof createPainSignalBridge>> {
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
-  return new PainToPrincipleService({
+  return createPainSignalBridge({
     workspaceDir: wctx.workspaceDir,
     stateDir: wctx.stateDir,
     ledgerAdapter,
-    owner: 'openclaw-plugin',
+    owner: 'pain-signal-bridge',
     autoIntakeEnabled: true,
   });
 }
@@ -53,40 +53,18 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
   } catch (e) {
     SystemLogger.log(wctx.workspaceDir, 'EVOLUTION_EMIT_WARN', `Failed to emit evolution event: ${String(e)}`);
   }
+  // M8: Bridge pain_detected → diagnostician pipeline (fire-and-forget)
   if (event.type === 'pain_detected') {
     const painData = event.data as PainDetectedData;
+    const painId = painData?.painId ?? 'unknown';
+    const sessionId = painData?.sessionId ?? 'unknown';
     try {
-      const service = createPainToPrincipleService(wctx);
-      const result = await service.recordPain({
-        painId: painData.painId,
-        painType: painData.painType,
-        source: painData.source,
-        reason: painData.reason,
-        score: painData.score,
-        sessionId: painData.sessionId,
-        agentId: painData.agentId,
-        taskId: painData.taskId,
-        traceId: painData.traceId,
-        recordObservability: true,
+      const bridge = await getPainSignalBridge(wctx);
+      bridge.onPainDetected(painData).catch((err) => {
+        SystemLogger.log(wctx.workspaceDir, 'BRIDGE_ERROR', `PainSignalBridge failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
       });
-      if (result.status === 'failed' && result.failureCategory) {
-        SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_FAILED', JSON.stringify({
-          painId: result.painId,
-          taskId: result.taskId,
-          failureCategory: result.failureCategory,
-          latencyMs: result.latencyMs,
-          message: result.message,
-        }));
-      } else if (result.status === 'skipped') {
-        SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_SKIPPED', JSON.stringify({
-          painId: result.painId,
-          taskId: result.taskId,
-          latencyMs: result.latencyMs,
-          message: result.message,
-        }));
-      }
     } catch (err) {
-      SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_ERROR', `recordPain threw: ${String(err)}`);
+      SystemLogger.log(wctx.workspaceDir, 'BRIDGE_INIT_ERROR', `PainSignalBridge init failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
     }
   }
 }
@@ -211,9 +189,7 @@ export function handleAfterToolCall(
   }
 
   // 1. Determine if this was a failure
-  const resultObj = (event.result && typeof event.result === 'object') ? event.result as Record<string, unknown> : null;
-  const details = resultObj?.details && typeof resultObj.details === 'object' ? resultObj.details as Record<string, unknown> : null;
-  const exitCode = (resultObj?.exitCode as number | undefined) ?? (details?.exitCode as number | undefined) ?? 0;
+  const exitCode = (event.result && typeof event.result === 'object') ? (event.result as Record<string, unknown>).exitCode : 0;
   const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
 
   if (isFailure) {
