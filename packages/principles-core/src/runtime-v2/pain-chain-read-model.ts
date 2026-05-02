@@ -136,10 +136,14 @@ export class PainChainReadModel {
 
       const candidateIds = candidates.map(c => c.candidateId);
       const ledgerEntryIds: string[] = [];
+      const seenEntryIds = new Set<string>();
       for (const c of candidates) {
         const entryId = candidateToLedgerEntry.get(c.candidateId);
         if (entryId) {
-          ledgerEntryIds.push(entryId);
+          if (!seenEntryIds.has(entryId)) {
+            seenEntryIds.add(entryId);
+            ledgerEntryIds.push(entryId);
+          }
         } else if (c.status === 'consumed') {
           missingLinks.push(`candidate:${c.candidateId} consumed but missing from ledger`);
         }
@@ -156,14 +160,22 @@ export class PainChainReadModel {
         latencyMs.runToArtifact = Math.max(0, new Date(artifactCreatedAt).getTime() - new Date(latestRun.endedAt).getTime());
       }
       if (artifactCreatedAt && candidates.length > 0) {
-        const [firstCandidate] = candidates;
-        if (firstCandidate) {
-          latencyMs.artifactToCandidate = Math.max(0, new Date(firstCandidate.createdAt).getTime() - new Date(artifactCreatedAt).getTime());
+        const [first] = candidates;
+        if (first) {
+          let earliestCandidateAt = first.createdAt;
+          for (const c of candidates) {
+            if (c.createdAt < earliestCandidateAt) earliestCandidateAt = c.createdAt;
+          }
+          latencyMs.artifactToCandidate = Math.max(0, new Date(earliestCandidateAt).getTime() - new Date(artifactCreatedAt).getTime());
         }
       }
       if (candidates.length > 0 && ledgerEntryIds.length > 0) {
-        const [lastCandidate] = candidates.slice(-1);
-        if (lastCandidate) {
+        const [first] = candidates;
+        if (first) {
+          let latestCandidateAt = first.createdAt;
+          for (const c of candidates) {
+            if (c.createdAt > latestCandidateAt) latestCandidateAt = c.createdAt;
+          }
           let earliestLedgerAt: string | undefined = undefined;
           for (const entry of principleEntries) {
             const e = entry as { id: string; createdAt?: string };
@@ -172,7 +184,7 @@ export class PainChainReadModel {
             }
           }
           if (earliestLedgerAt) {
-            latencyMs.candidateToLedger = Math.max(0, new Date(earliestLedgerAt).getTime() - new Date(lastCandidate.createdAt).getTime());
+            latencyMs.candidateToLedger = Math.max(0, new Date(earliestLedgerAt).getTime() - new Date(latestCandidateAt).getTime());
           }
         }
       }
@@ -264,9 +276,15 @@ export class PainChainReadModel {
 
       const candidateIds = candidates.map(c => c.candidateId);
       const ledgerEntryIds: string[] = [];
+      const seenEntryIds = new Set<string>();
       for (const c of candidates) {
         const entryId = candidateToLedgerEntry.get(c.candidateId);
-        if (entryId) ledgerEntryIds.push(entryId);
+        if (entryId) {
+          if (!seenEntryIds.has(entryId)) {
+            seenEntryIds.add(entryId);
+            ledgerEntryIds.push(entryId);
+          }
+        }
       }
 
       const latencyMs: PainChainTraceLatencyMs = {};
@@ -280,14 +298,22 @@ export class PainChainReadModel {
         latencyMs.runToArtifact = Math.max(0, new Date(artifacts.created_at).getTime() - new Date(run.ended_at).getTime());
       }
       if (artifacts.created_at && candidates.length > 0) {
-        const [firstCandidate] = candidates;
-        if (firstCandidate) {
-          latencyMs.artifactToCandidate = Math.max(0, new Date(firstCandidate.createdAt).getTime() - new Date(artifacts.created_at).getTime());
+        const [first] = candidates;
+        if (first) {
+          let earliestCandidateAt = first.createdAt;
+          for (const c of candidates) {
+            if (c.createdAt < earliestCandidateAt) earliestCandidateAt = c.createdAt;
+          }
+          latencyMs.artifactToCandidate = Math.max(0, new Date(earliestCandidateAt).getTime() - new Date(artifacts.created_at).getTime());
         }
       }
       if (candidates.length > 0 && ledgerEntryIds.length > 0) {
-        const [lastCandidate] = candidates.slice(-1);
-        if (lastCandidate) {
+        const [first] = candidates;
+        if (first) {
+          let latestCandidateAt = first.createdAt;
+          for (const c of candidates) {
+            if (c.createdAt > latestCandidateAt) latestCandidateAt = c.createdAt;
+          }
           let earliestLedgerAt: string | undefined = undefined;
           for (const entry of principleEntries) {
             const e = entry as { id: string; createdAt?: string };
@@ -296,7 +322,7 @@ export class PainChainReadModel {
             }
           }
           if (earliestLedgerAt) {
-            latencyMs.candidateToLedger = Math.max(0, new Date(earliestLedgerAt).getTime() - new Date(lastCandidate.createdAt).getTime());
+            latencyMs.candidateToLedger = Math.max(0, new Date(earliestLedgerAt).getTime() - new Date(latestCandidateAt).getTime());
           }
         }
       }
