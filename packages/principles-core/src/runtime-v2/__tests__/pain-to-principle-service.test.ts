@@ -16,18 +16,22 @@ let mockBridgeResult: PainSignalBridgeResult = {
   status: 'succeeded', painId: '', taskId: '', candidateIds: [], ledgerEntryIds: [],
 };
 let mockBridgeError: Error | null = null;
+let mockBridgeInitError: Error | null = null;
 let observabilityCalled = false;
 let mockObservabilityWarnings: string[] = [];
 let lastPainDetectedData: PainDetectedData | null = null;
 
 vi.mock('../pain-signal-runtime-factory.js', () => ({
-  createPainSignalBridge: vi.fn(async (_opts: PainSignalRuntimeFactoryOptions) => ({
-    onPainDetected: vi.fn(async (data: PainDetectedData) => {
-      lastPainDetectedData = data;
-      if (mockBridgeError) throw mockBridgeError;
-      return { ...mockBridgeResult, taskId: data.taskId ?? mockBridgeResult.taskId };
-    }),
-  })),
+  createPainSignalBridge: vi.fn(async (_opts: PainSignalRuntimeFactoryOptions) => {
+    if (mockBridgeInitError) throw mockBridgeInitError;
+    return {
+      onPainDetected: vi.fn(async (data: PainDetectedData) => {
+        lastPainDetectedData = data;
+        if (mockBridgeError) throw mockBridgeError;
+        return { ...mockBridgeResult, taskId: data.taskId ?? mockBridgeResult.taskId };
+      }),
+    };
+  }),
 }));
 
 vi.mock('../pain-signal-observability.js', () => ({
@@ -62,6 +66,7 @@ describe('PainToPrincipleService', () => {
     vi.clearAllMocks();
     mockBridgeResult = { ...SUCCEEDED };
     mockBridgeError = null;
+    mockBridgeInitError = null;
     observabilityCalled = false;
     mockObservabilityWarnings = [];
     lastPainDetectedData = null;
@@ -188,6 +193,25 @@ describe('PainToPrincipleService', () => {
     const r = await service.recordPain({ painId: 'p', painType: 'tool_failure', source: 's', reason: 'r', taskId: 'custom-task-123' });
     expect(r.taskId).toBe('custom-task-123');
   });
+
+  // 13. Bridge init failure does NOT write observability
+  it('recordPain does not call observability when createPainSignalBridge throws', async () => {
+    mockBridgeInitError = new Error('API key not found in env');
+    const r = await service.recordPain({ painId: 'p', painType: 'tool_failure', source: 's', reason: 'r' });
+    expect(r.status).toBe('failed');
+    expect(observabilityCalled).toBe(false);
+    expect(r.observabilityWarnings).toEqual([]);
+    expect(r.failureCategory).toBe('config_missing');
+  });
+
+  // 14. Bridge call failure does NOT write observability
+  it('recordPain does not call observability when onPainDetected throws', async () => {
+    mockBridgeError = new Error('runtime crashed');
+    const r = await service.recordPain({ painId: 'p', painType: 'tool_failure', source: 's', reason: 'r' });
+    expect(r.status).toBe('failed');
+    expect(observabilityCalled).toBe(false);
+    expect(r.observabilityWarnings).toEqual([]);
+  });
 });
 
 // ── Parity: all 17 PDErrorCategory → FAILURE_CATEGORY_MAP ──────────────────
@@ -198,6 +222,9 @@ describe('PainToPrincipleService error classification parity', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockBridgeResult = { ...SUCCEEDED };
+    mockBridgeError = null;
+    mockBridgeInitError = null;
     observabilityCalled = false;
     mockObservabilityWarnings = [];
     lastPainDetectedData = null;
@@ -206,7 +233,7 @@ describe('PainToPrincipleService error classification parity', () => {
 
   it('classifyFromBridge maps all 17 PDErrorCategories correctly', async () => {
     for (const cat of PD_ERROR_CATEGORIES) {
-      mockBridgeResult = { ...SUCCEEDED, status: 'failed', errorCategory: cat, candidateIds: [], ledgerEntryIds: [] };
+      mockBridgeResult = { ...SUCCEEDED, status: 'failed', errorCategory: cat, candidateIds: ['c1'], ledgerEntryIds: ['l1'] };
       const r = await service.recordPain({ painId: 'p', painType: 'tool_failure', source: 's', reason: 'r' });
       expect(r.failureCategory).toBe(FAILURE_CATEGORY_MAP[cat]);
     }
