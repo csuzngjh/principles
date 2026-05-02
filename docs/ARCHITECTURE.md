@@ -66,14 +66,14 @@ User Request → OpenClaw → Gate Hook (gate.ts)
           Execute      Return Error     Adjust Params
 ```
 
-### 2. Pain Detection (after_tool_call)
+### 2. Pain Detection (after_tool_call) — Runtime V2
 ```
 Tool Result → Pain Hook (hooks/pain.ts)
                     │
           ┌─────────▼──────────┐
           │ Error Classification │
           │ - Tool failures     │
-          │ - Risk detections   │
+          │ - Risk detections  │
           │ - Empathy signals   │
           └─────────┬──────────┘
                     │
@@ -84,11 +84,16 @@ Tool Result → Pain Hook (hooks/pain.ts)
           │ - Context hash     │
           └─────────┬──────────┘
                     │
-          ┌─────────▼──────────┐
-          │ Pain Flag Write    │
-          │ → {stateDir}/pain/ │
-          └───────────────────┘
+          ┌─────────▼──────────────────────────┐
+          │ PainToPrincipleService (core)       │
+          │ - Bridge creation + invocation       │
+          │ - Latency measurement               │
+          │ - Failure category mapping          │
+          │ - Observability write               │
+          └────────────────────────────────────┘
 ```
+
+> **Note:** Runtime V1 wrote `{stateDir}/pain/` files. Runtime V2 routes all pain signals through `PainToPrincipleService` (core), which owns bridge lifecycle, latency, and failure classification. The plugin retains GFI gate, cooldown, `PainDiagnosticGate`, and trajectory/event-log writes.
 
 ### 3. Prompt Injection (before_prompt_build)
 ```
@@ -152,6 +157,21 @@ Captures behavior data during tool calls and LLM output for offline training. St
 ### EvolutionWorkerService (`src/service/evolution-worker.ts`)
 Background service that periodically scans for pain signals and queues evolution tasks. Runs every 90 seconds.
 
+### PainToPrincipleService (`@principles/core/runtime-v2/pain-to-principle-service.ts`)
+Core-owned facade for the pain-to-principle pipeline. Single write-side entry point for all pain signals.
+
+**Key interface:**
+- `recordPain(input: PainToPrincipleInput): Promise<PainToPrincipleOutput>`
+- Owns: bridge lifecycle, latency measurement, failure category mapping, observability write
+
+### PainChainReadModel (`@principles/core/runtime-v2/pain-chain-read-model.ts`)
+Core-owned read model for pain-chain queries. Single read-side entry point for trace and health.
+
+**Key interface:**
+- `traceByPainId(painId: string): Promise<PainChainTrace>`
+- `getLastSuccessfulChain(): Promise<PainChainTrace | undefined>`
+- `close(): Promise<void>`
+
 ### ShadowObservationRegistry (`src/core/shadow-observation-registry.ts`)
 Tracks shadow routing observations for local-worker delegation. Records task fingerprints and outcomes for later analysis.
 
@@ -200,7 +220,7 @@ packages/create-principles-disciple/
 |------|---------|---------|
 | `before_prompt_build` | `hooks/prompt.ts` | Injects Thinking OS, pain signals, OKR context |
 | `before_tool_call` | `hooks/gate.ts` | Security gate - blocks risky operations without approval |
-| `after_tool_call` | `hooks/pain.ts` | Detects failures, writes pain flags, updates trust |
+| `after_tool_call` | `hooks/pain.ts` | Detects failures → PainToPrincipleService (Runtime V2) |
 | `llm_output` | `hooks/llm.ts` | Analyzes LLM reasoning patterns |
 | `before_message_write` | `hooks/message-sanitize.ts` | Sanitizes output |
 | `subagent_spawning` | `hooks/subagent.ts` | Shadow routing for local workers |
