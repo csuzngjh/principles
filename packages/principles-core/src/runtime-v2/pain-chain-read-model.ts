@@ -222,6 +222,7 @@ export class PainChainReadModel {
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      console.error(`[PainChainReadModel] traceByPainId(${painId}) failed: ${message}`);
       const isConfigError = /disk|unavailable|config|api[_\s]?key|not found in env/i.test(message);
       return {
         painId,
@@ -340,7 +341,9 @@ export class PainChainReadModel {
         checkedAt: new Date().toISOString(),
         missingLinks: [],
       };
-    } catch {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[PainChainReadModel] getLastSuccessfulChain failed: ${message}`);
       return undefined;
     }
   }
