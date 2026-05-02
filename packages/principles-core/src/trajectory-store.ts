@@ -96,6 +96,8 @@ export function listCorrectionSamples(
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     }));
+  } catch {
+    return [];
   } finally {
     db.close();
   }
@@ -119,7 +121,15 @@ export function reviewCorrectionSample(
   workspaceDir: string,
 ): CorrectionSampleRecord {
   const dbPath = getDbPath(workspaceDir);
-  const db = new Database(dbPath);
+
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+  let db: Database.Database;
+  try {
+    db = new Database(dbPath);
+  } catch {
+    throw new Error(`Database not found or cannot be opened: ${dbPath}`);
+  }
+
   const updatedAt = nowIso();
 
   try {

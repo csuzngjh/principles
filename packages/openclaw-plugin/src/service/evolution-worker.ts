@@ -918,10 +918,19 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     } catch { /* empty queue if corrupted */ }
 
                     // Merge: update tasks by ID
+                    const queueMap = new Map<string, number>();
+                    for (let i = 0; i < freshQueue.length; i++) {
+                        const id = (freshQueue[i] as { id?: string }).id;
+                        if (id !== undefined && !queueMap.has(id)) {
+                            queueMap.set(id, i);
+                        }
+                    }
                     for (const sleepTask of sleepReflectionTasks) {
-                        const idx = freshQueue.findIndex((t) => (t as { id?: string }).id === sleepTask.id);
-                        if (idx >= 0) {
-                            freshQueue[idx] = sleepTask;
+                        if (sleepTask.id !== undefined) {
+                            const idx = queueMap.get(sleepTask.id);
+                            if (idx !== undefined) {
+                                freshQueue[idx] = sleepTask;
+                            }
                         }
                     }
                     atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
@@ -1134,10 +1143,22 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 }
 
                 // Append or replace keyword_optimization tasks
+                const koQueueMap = new Map<string, number>();
+                for (let i = 0; i < freshQueue.length; i++) {
+                    const id = (freshQueue[i] as { id?: string }).id;
+                    if (id !== undefined && !koQueueMap.has(id)) {
+                        koQueueMap.set(id, i);
+                    }
+                }
                 for (const koTask of keywordOptTasks) {
-                    const idx = freshQueue.findIndex((t) => (t as { id?: string }).id === koTask.id);
-                    if (idx >= 0) {
-                        freshQueue[idx] = koTask;
+                    if (koTask.id !== undefined) {
+                        const idx = koQueueMap.get(koTask.id);
+                        if (idx !== undefined) {
+                            freshQueue[idx] = koTask;
+                        } else {
+                            freshQueue.push(koTask);
+                            koQueueMap.set(koTask.id, freshQueue.length - 1);
+                        }
                     } else {
                         freshQueue.push(koTask);
                     }
