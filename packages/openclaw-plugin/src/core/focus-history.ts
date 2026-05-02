@@ -183,24 +183,50 @@ export function cleanupHistory(focusPath: string, maxFiles: number = MAX_HISTORY
  * @param count 获取数量
  * @returns 历史版本内容数组（按时间倒序）
  */
-export function getHistoryVersions(focusPath: string, count: number = FULL_MODE_HISTORY_COUNT): string[] {
+export async function getHistoryVersions(focusPath: string, count: number = FULL_MODE_HISTORY_COUNT): Promise<string[]> {
   const historyDir = getHistoryDir(focusPath);
 
-  if (!fs.existsSync(historyDir)) {
-    return [];
+  let allFiles: string[];
+  try {
+    allFiles = await fs.promises.readdir(historyDir);
+  } catch (err: unknown) {
+    if (typeof err === 'object' && err !== null && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw err;
   }
 
-  // 获取所有历史文件并按修改时间排序（最新的在前）
-  const files = fs.readdirSync(historyDir)
-    .filter(f => f.startsWith('CURRENT_FOCUS.v') && f.endsWith('.md'))
-    .map(f => ({
-      path: path.join(historyDir, f),
-      mtime: fs.statSync(path.join(historyDir, f)).mtime.getTime()
-    }))
+  const historyFiles = allFiles.filter(f => f.startsWith('CURRENT_FOCUS.v') && f.endsWith('.md'));
+
+  // 并行获取所有文件的状态，使用 allSettled 处理竞态条件（文件在 readdir 后被删除）
+  const statResults = await Promise.allSettled(
+    historyFiles.map(async f => {
+      const filePath = path.join(historyDir, f);
+      const stat = await fs.promises.stat(filePath);
+      return {
+        path: filePath,
+        mtime: stat.mtime.getTime()
+      };
+    })
+  );
+
+  const filesWithStat = statResults
+    .filter((r): r is PromiseFulfilledResult<{path: string, mtime: number}> => r.status === 'fulfilled')
+    .map(r => r.value);
+
+  // 按修改时间排序并取前 count 个
+  const selectedFiles = filesWithStat
     .sort((a, b) => b.mtime - a.mtime)
     .slice(0, count);
 
-  return files.map(f => fs.readFileSync(f.path, 'utf-8'));
+  // 并行读取文件内容，使用 allSettled 确保部分失败不影响整体
+  const readResults = await Promise.allSettled(
+    selectedFiles.map(f => fs.promises.readFile(f.path, 'utf-8'))
+  );
+
+  return readResults
+    .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+    .map(r => r.value);
 }
 
 /**

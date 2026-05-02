@@ -218,3 +218,7 @@ export { EvolutionQueueItemMigrator } from './store/task-migration.js';
 
 // Ledger file utilities (for audit/consistency checks)
 export { loadLedger, getLedgerFilePathPublic } from '../principle-tree-ledger.js';
+
+// Pruning read model (PRI-15)
+export { PruningReadModel } from './pruning-read-model.js';
+export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, PrincipleStatus } from './pruning-read-model.js';
