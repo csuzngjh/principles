@@ -72,11 +72,13 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
         traceId: painData.traceId,
       }).then((result) => {
         if (result.status === 'failed') {
-          SystemLogger.log(wctx.workspaceDir, 'BRIDGE_ERROR', `PainSignalBridge failed: painId=${painId} sessionId=${sessionId}: ${result.message ?? 'unknown'}`);
+          SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_ERROR', `PainToPrincipleService failed: painId=${painId} sessionId=${sessionId}: ${result.message ?? 'unknown'}`);
         }
+      }).catch((err) => {
+        SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_ERROR', `PainToPrincipleService unexpected rejection: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
       });
     } catch (err) {
-      SystemLogger.log(wctx.workspaceDir, 'BRIDGE_INIT_ERROR', `PainToPrincipleService init failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
+      SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_INIT_ERROR', `PainToPrincipleService init failed: painId=${painId} sessionId=${sessionId}: ${String(err)}`);
     }
   }
 }
