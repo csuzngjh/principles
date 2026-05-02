@@ -194,7 +194,7 @@ describe('PainToPrincipleService', () => {
     expect(r.taskId).toBe('custom-task-123');
   });
 
-  // 13. Bridge init failure does NOT write observability (P2 fix)
+  // 13. Bridge init failure does NOT write observability
   it('recordPain does not call observability when createPainSignalBridge throws', async () => {
     mockBridgeInitError = new Error('API key not found in env');
     const r = await service.recordPain({ painId: 'p', painType: 'tool_failure', source: 's', reason: 'r' });
@@ -202,6 +202,15 @@ describe('PainToPrincipleService', () => {
     expect(observabilityCalled).toBe(false);
     expect(r.observabilityWarnings).toEqual([]);
     expect(r.failureCategory).toBe('config_missing');
+  });
+
+  // 14. Bridge call failure does NOT write observability
+  it('recordPain does not call observability when onPainDetected throws', async () => {
+    mockBridgeError = new Error('runtime crashed');
+    const r = await service.recordPain({ painId: 'p', painType: 'tool_failure', source: 's', reason: 'r' });
+    expect(r.status).toBe('failed');
+    expect(observabilityCalled).toBe(false);
+    expect(r.observabilityWarnings).toEqual([]);
   });
 });
 
@@ -213,6 +222,8 @@ describe('PainToPrincipleService error classification parity', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockBridgeResult = { ...SUCCEEDED };
+    mockBridgeError = null;
     mockBridgeInitError = null;
     observabilityCalled = false;
     mockObservabilityWarnings = [];
@@ -222,7 +233,7 @@ describe('PainToPrincipleService error classification parity', () => {
 
   it('classifyFromBridge maps all 17 PDErrorCategories correctly', async () => {
     for (const cat of PD_ERROR_CATEGORIES) {
-      mockBridgeResult = { ...SUCCEEDED, status: 'failed', errorCategory: cat, candidateIds: [], ledgerEntryIds: [] };
+      mockBridgeResult = { ...SUCCEEDED, status: 'failed', errorCategory: cat, candidateIds: ['c1'], ledgerEntryIds: ['l1'] };
       const r = await service.recordPain({ painId: 'p', painType: 'tool_failure', source: 's', reason: 'r' });
       expect(r.failureCategory).toBe(FAILURE_CATEGORY_MAP[cat]);
     }
