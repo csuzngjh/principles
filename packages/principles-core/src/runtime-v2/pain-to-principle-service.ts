@@ -120,8 +120,7 @@ export class PainToPrincipleService {
         autoIntakeEnabled: this.opts.autoIntakeEnabled,
       });
 
-      const bridgeResult = await bridge.onPainDetected(painData);
-
+      // Observability only after bridge init succeeds — avoids orphan events on init failure
       let observabilityWarnings: string[] = [];
       if (input.recordObservability !== false) {
         const obs = recordPainSignalObservability({
@@ -131,6 +130,8 @@ export class PainToPrincipleService {
         });
         observabilityWarnings = obs.warnings;
       }
+
+      const bridgeResult = await bridge.onPainDetected(painData);
 
       const latencyMs = Date.now() - startTime;
 
@@ -148,20 +149,6 @@ export class PainToPrincipleService {
         latencyMs,
       };
     } catch (err: unknown) {
-      let observabilityWarnings: string[] = [];
-      if (input.recordObservability !== false) {
-        try {
-          const obs = recordPainSignalObservability({
-            workspaceDir: this.opts.workspaceDir,
-            stateDir: this.opts.stateDir,
-            data: painData,
-          });
-          observabilityWarnings = obs.warnings;
-        } catch {
-          // Observability is best-effort; swallow errors on failure path
-        }
-      }
-
       const latencyMs = Date.now() - startTime;
       return {
         status: 'failed',
@@ -170,7 +157,7 @@ export class PainToPrincipleService {
         candidateIds: [],
         ledgerEntryIds: [],
         message: err instanceof Error ? err.message : String(err),
-        observabilityWarnings,
+        observabilityWarnings: [],
         failureCategory: classifyFromError(err),
         latencyMs,
       };
