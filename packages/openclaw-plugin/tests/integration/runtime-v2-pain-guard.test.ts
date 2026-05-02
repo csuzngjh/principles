@@ -56,11 +56,11 @@ describe('Runtime V2 pain entrypoint guard', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('pd pain record enters PainSignalBridge directly', () => {
+  it('pd pain record uses PainToPrincipleService', () => {
     const source = read('packages/pd-cli/src/commands/pain-record.ts');
 
-    expect(source).toMatch(/createPainSignalBridge/);
-    expect(source).toMatch(/bridge\.onPainDetected/);
+    expect(source).toMatch(/PainToPrincipleService/);
+    expect(source).toMatch(/service\.recordPain/);
     expect(source).not.toMatch(/\.pain_flag|PAIN_FLAG|writePainFlag/);
   });
 
