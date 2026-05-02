@@ -2,7 +2,7 @@
 
 **Status:** Done
 **Completed:** 2026-05-02
-**PR:** (pending)
+**PR:** #437 merged
 
 ## Goal
 
@@ -24,15 +24,16 @@ Build non-destructive pruning observability infrastructure — read-only metrics
 **API:**
 ```typescript
 const model = new PruningReadModel({ workspaceDir });
-const signals = await model.getPrincipleSignals();
-const summary = await model.getHealthSummary();
+const signals = model.getPrincipleSignals();
+const summary = model.getHealthSummary();
 ```
 
 **`PrinciplePruningSignal` per principle:**
 - `principleId`, `status`, `createdAt`, `updatedAt`
-- `derivedCandidateIds`, `derivedPainCount`, `candidateCount`
+- `derivedCandidateIds`, `derivedPainCount`, `matchedCandidateCount`
 - `recentCandidateCount` (within 30 days)
-- `ageDays`, `staleDays`
+- `orphanCandidateCount`
+- `ageDays`
 - `riskLevel: 'none' | 'watch' | 'review'`
 - `reasons: string[]` (with `[source: ...]` citations)
 
@@ -98,11 +99,10 @@ PruningReadModel (core)
 | Signal | Source | Trigger |
 |--------|--------|---------|
 | `derivedPainCount` | `derivedFromPainIds.length` | ledger |
-| `candidateCount` | `derivedFromPainIds.length` | ledger |
+| `matchedCandidateCount` | derived ID found in consumed candidates table | state.db |
 | `recentCandidateCount` | candidate.createdAt ≥ 30 days ago | state.db |
-| `orphanDerivedCandidateCount` | derived ID not in consumed candidates table | state.db |
+| `orphanCandidateCount` | derived ID not in consumed candidates table | state.db |
 | `ageDays` | `createdAt` vs now | ledger |
-| `staleDays` | `ageDays` when derivedPainCount > 0 && candidateCount = 0 | computed |
 | `riskLevel` | deterministic rules above | computed |
 
 ## Non-Destructive Guarantee
