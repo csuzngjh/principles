@@ -218,6 +218,10 @@ export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfi
 export { PainToPrincipleService } from './pain-to-principle-service.js';
 export type { PainToPrincipleServiceOptions, PainToPrincipleInput, PainToPrincipleOutput, FailureCategory } from './pain-to-principle-service.js';
 
+// Pain-chain read model (PRI-14)
+export { PainChainReadModel } from './pain-chain-read-model.js';
+export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions } from './pain-chain-read-model.js';
+
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
 
