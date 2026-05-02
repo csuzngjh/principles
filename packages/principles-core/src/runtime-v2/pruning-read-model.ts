@@ -192,9 +192,8 @@ export class PruningReadModel {
       }
     }
 
-    // 90-day threshold for recent candidates
-    const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
-    void ninetyDaysMs; // reserved for future 90-day filtering
+    // 90-day threshold for recent candidates (reserved for future 90-day recent candidate filtering)
+    const _ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
 
     return principleEntries.map((p) => {
       const derivedPainCount = p.derivedFromPainIds?.length ?? 0;
@@ -261,25 +260,15 @@ export class PruningReadModel {
   async getHealthSummary(): Promise<PruningHealthSummary> {
     const now = new Date();
     const signals = await this.getPrincipleSignals();
-    const stateDir = path.join(this.workspaceDir, '.state');
-    const ledger = loadLedger(stateDir);
-    const principleEntries = Object.values(ledger.tree.principles);
 
     const byStatus: Record<string, number> = {};
     let totalAgeDays = 0;
-
-    for (const p of principleEntries) {
-      const entry = p;
-      const status = entry.status || 'unknown';
-      byStatus[status] = (byStatus[status] ?? 0) + 1;
-      totalAgeDays += daysBetween(entry.createdAt, now);
-    }
-
-    // Count orphan derived candidates
     const allDerivedCandIds = new Set<string>();
-    for (const p of principleEntries) {
-      const entry = p;
-      for (const cid of entry.derivedFromPainIds ?? []) {
+
+    for (const s of signals) {
+      byStatus[s.status] = (byStatus[s.status] ?? 0) + 1;
+      totalAgeDays += s.ageDays;
+      for (const cid of s.derivedCandidateIds) {
         allDerivedCandIds.add(cid);
       }
     }
@@ -306,13 +295,13 @@ export class PruningReadModel {
     }
 
     return {
-      totalPrinciples: principleEntries.length,
+      totalPrinciples: signals.length,
       byStatus,
       watchCount: signals.filter((s) => s.riskLevel === 'watch').length,
       reviewCount: signals.filter((s) => s.riskLevel === 'review').length,
       orphanDerivedCandidateCount,
-      averageAgeDays: principleEntries.length > 0
-        ? Math.round(totalAgeDays / principleEntries.length)
+      averageAgeDays: signals.length > 0
+        ? Math.round(totalAgeDays / signals.length)
         : 0,
       generatedAt: now.toISOString(),
     };
