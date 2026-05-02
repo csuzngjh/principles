@@ -117,6 +117,15 @@
 - 系统动力学指标方向：长期跟踪 `pain_signal_count`、`gfi_gate_pass_rate`、`diagnosis_success_rate`、`pain_to_candidate_rate`、`candidate_to_ledger_rate`、`p95_pain_to_ledger_latency_ms`、`runtime_timeout_rate`、`output_invalid_rate`、`active_principle_count`、`soft_to_hard_conversion_rate`、`context_load_tokens`。
 - 后续架构重构方向（不要立即开始）：将 CLI/plugin/bridge/intake/ledger 编排收敛为 core 层 `PainToPrincipleService`，CLI 和 OpenClaw plugin 都只做入口适配。
 
+## Runtime v2 Core Service Refactor (2026-05-02)
+- PRI-16 Phase C 已完成并落到 `main`；子任务 PRI-12/13/14/17/18 全部 Done。
+- PR #428：新增 ADR-0001 与 `PainToPrincipleService` facade，明确 core/pd-cli/openclaw-plugin/runtime-pi 边界。
+- PR #429：`pd pain record` 已迁移到 `PainToPrincipleService`，并修复 bridge init 失败时 orphan observability 的 P2 问题。
+- PR #430/#432：抽出 `PainChainReadModel`，`pd runtime trace show` 和 `pd health` 的链路读取开始复用 core read model；#432 修复多 candidate latency 不能依赖返回顺序的问题。
+- PR #434：PRI-13 OpenClaw plugin thinning 已合并；openclaw-plugin pain hook 只保留事件适配、GFI gate、cooldown/dedup 和结构化日志，pain->principle 编排委托给 core `PainToPrincipleService`。
+- 当前架构事实：Runtime V2 写侧统一入口是 `PainToPrincipleService`，读侧统一入口是 `PainChainReadModel`；CLI 和 plugin 不应重新实现 bridge creation、observability write、failure classification 或 pain->task->run->candidate->ledger traversal。
+- 下一步建议：先做 PRI-16 收尾验收（全链路 smoke/UAT、docs/README 更新、Linear parent closeout），再进入 PRI-15 dynamic pruning metrics/read model；不要在 plugin 里回填 domain orchestration。
+
 ## Runtime v2 重构事实 (2026-04-26)
 - 当前方向：PD Runtime v2 已完成 M1-M5，M6 正在接入 `openclaw-cli` 作为第一个真实生产 runtime adapter。目标是摆脱 OpenClaw 插件 API / heartbeat / prompt hook / sessions_spawn / marker file，改成 `pd diagnose run --runtime openclaw-cli` 的显式执行链。
 - M3 已建立 PD-owned retrieval：`pd legacy import openclaw` 将 OpenClaw `.state/diagnostician_tasks.json` 和 `.state/trajectory.db` 导入 `workspace/.pd/state.db`；`pd trajectory locate`、`pd history query`、`pd context build` 可基于 PD-owned DB 工作。
