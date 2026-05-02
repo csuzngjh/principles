@@ -120,7 +120,8 @@ export class PainToPrincipleService {
         autoIntakeEnabled: this.opts.autoIntakeEnabled,
       });
 
-      // Observability only after bridge init succeeds — avoids orphan events on init failure
+      const bridgeResult = await bridge.onPainDetected(painData);
+
       let observabilityWarnings: string[] = [];
       if (input.recordObservability !== false) {
         const obs = recordPainSignalObservability({
@@ -130,8 +131,6 @@ export class PainToPrincipleService {
         });
         observabilityWarnings = obs.warnings;
       }
-
-      const bridgeResult = await bridge.onPainDetected(painData);
 
       const latencyMs = Date.now() - startTime;
 
