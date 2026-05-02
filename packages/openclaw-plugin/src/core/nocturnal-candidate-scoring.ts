@@ -447,7 +447,7 @@ export function rankCandidates(
     return a.candidateIndex - b.candidateIndex;
   });
 
-  // Assign ranks
+  // Assign ranks (standard competition ranking: 1,1,3 for ties)
   let currentRank = 1;
   let lastThresholdPassed: boolean | null = null;
   let lastAggregate: number | null = null;

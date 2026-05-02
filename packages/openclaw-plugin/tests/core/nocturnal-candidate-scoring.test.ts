@@ -306,7 +306,7 @@ describe('rankCandidates', () => {
       makeCandidate({ candidateIndex: 1 }),
     ];
     const judgments = [
-      makeJudgment(1, { score: 0.9, principleAligned: true }), // Reversed order
+      makeJudgment(1, { score: 0.9, principleAligned: true }),
       makeJudgment(0, { score: 0.5, principleAligned: true }),
     ];
     const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
@@ -316,14 +316,14 @@ describe('rankCandidates', () => {
 
   it('handles judgments with non-sequential candidateIndex', () => {
     const candidates = [
-      makeCandidate({ candidateIndex: 10 }),
-      makeCandidate({ candidateIndex: 0 }),
-      makeCandidate({ candidateIndex: 5 }),
+      makeCandidate({ candidateIndex: 10, confidence: 0.9, betterDecision: 'Review main.ts for issues' }),
+      makeCandidate({ candidateIndex: 0, confidence: 0.8, betterDecision: 'Read config.json to verify' }),
+      makeCandidate({ candidateIndex: 5, confidence: 0.7, betterDecision: 'Check error.json for details' }),
     ];
     const judgments = [
-      makeJudgment(5, { score: 0.7 }),
-      makeJudgment(0, { score: 0.8 }),
-      makeJudgment(10, { score: 0.9 }),
+      makeJudgment(5, { score: 0.7, principleAligned: true }),
+      makeJudgment(0, { score: 0.8, principleAligned: true }),
+      makeJudgment(10, { score: 0.9, principleAligned: true }),
     ];
     const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
     expect(ranked).toHaveLength(3);
@@ -340,11 +340,10 @@ describe('rankCandidates', () => {
     ];
     const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
     expect(ranked).toHaveLength(1);
-    expect(ranked[0].scores.principleAlignment).toBe(1.0); // Aligned (from second judgment)
+    expect(ranked[0].scores.principleAlignment).toBe(1.0);
   });
 
   it('separates ranks between threshold-passed and threshold-failed even with same aggregate', () => {
-    // Both candidates will have same aggregate but one passes threshold and other fails
     const candidates = [
       makeCandidate({ candidateIndex: 0, confidence: 0.9, betterDecision: 'Read config.json' }),
       makeCandidate({ candidateIndex: 1, confidence: 0.9, betterDecision: 'generic' }),
@@ -354,13 +353,11 @@ describe('rankCandidates', () => {
       makeJudgment(1, { score: 0.9, principleAligned: true }),
     ];
 
-    // Candidate 1 fails executability threshold due to 'generic' betterDecision
     const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
 
     expect(ranked[0].thresholdPassed).toBe(true);
     expect(ranked[1].thresholdPassed).toBe(false);
 
-    // Ranks should be different even if scores are very close
     expect(ranked[0].rank).toBe(1);
     expect(ranked[1].rank).toBe(2);
   });
