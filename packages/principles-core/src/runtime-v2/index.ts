@@ -220,7 +220,7 @@ export type { PainToPrincipleServiceOptions, PainToPrincipleInput, PainToPrincip
 
 // Pain-chain read model (PRI-14)
 export { PainChainReadModel } from './pain-chain-read-model.js';
-export type { PainChainTrace } from './pain-chain-read-model.js';
+export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions } from './pain-chain-read-model.js';
 
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
