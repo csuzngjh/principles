@@ -100,7 +100,7 @@ vi.mock('../../src/core/correction-cue-learner.js', () => ({
 
 vi.mock('../../src/core/focus-history.js', () => ({
   extractSummary: vi.fn().mockReturnValue(''),
-  getHistoryVersions: vi.fn().mockReturnValue([]),
+  getHistoryVersions: vi.fn().mockResolvedValue([]),
   parseWorkingMemorySection: vi.fn().mockReturnValue(null),
   workingMemoryToInjection: vi.fn().mockReturnValue(''),
   autoCompressFocus: vi.fn().mockReturnValue({ compressed: false, reason: 'not_needed' }),

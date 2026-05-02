@@ -196,6 +196,52 @@ describe('focus-history', () => {
       expect(result.length).toBe(2);
       expect(result[0]).toBe('history content');
     });
+
+    it('should return empty array if readdir throws ENOENT', async () => {
+      vi.mocked(fs.promises.readdir).mockRejectedValue({ code: 'ENOENT' });
+
+      const result = await getHistoryVersions(mockFocusPath, 3);
+
+      expect(result).toEqual([]);
+    });
+
+    it('should handle partial stat failures', async () => {
+      vi.mocked(fs.promises.readdir).mockResolvedValue([
+        'CURRENT_FOCUS.v1.md',
+        'CURRENT_FOCUS.v2.md',
+      ] as any);
+
+      // First fails, second succeeds
+      vi.mocked(fs.promises.stat)
+        .mockRejectedValueOnce(new Error('Deleted'))
+        .mockResolvedValueOnce({ mtime: new Date() } as any);
+
+      vi.mocked(fs.promises.readFile).mockResolvedValue('content');
+
+      const result = await getHistoryVersions(mockFocusPath, 3);
+
+      expect(result.length).toBe(1);
+      expect(result[0]).toBe('content');
+    });
+
+    it('should handle partial readFile failures', async () => {
+      vi.mocked(fs.promises.readdir).mockResolvedValue([
+        'CURRENT_FOCUS.v1.md',
+        'CURRENT_FOCUS.v2.md',
+      ] as any);
+
+      vi.mocked(fs.promises.stat).mockResolvedValue({ mtime: new Date() } as any);
+
+      // First fails, second succeeds
+      vi.mocked(fs.promises.readFile)
+        .mockRejectedValueOnce(new Error('Read error'))
+        .mockResolvedValueOnce('content v2');
+
+      const result = await getHistoryVersions(mockFocusPath, 3);
+
+      expect(result.length).toBe(1);
+      expect(result[0]).toBe('content v2');
+    });
   });
 
   describe('extractSummary', () => {
