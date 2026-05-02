@@ -30,10 +30,10 @@ export interface PrinciplePruningSignal {
   updatedAt: string;
   derivedCandidateIds: string[];
   derivedPainCount: number;
-  candidateCount: number;
+  matchedCandidateCount: number;
   recentCandidateCount: number;
+  orphanCandidateCount: number;
   ageDays: number;
-  staleDays: number | null;   // null = unknown (no createdAt)
   riskLevel: PruningRiskLevel;
   reasons: string[];
 }
@@ -54,8 +54,6 @@ export interface PruningReadModelOptions {
   watchThresholdDays?: number;
   /** Override days threshold for 'review' risk level (default: 90) */
   reviewThresholdDays?: number;
-  /** Override minimum candidate count for 'review' (default: 0) */
-  reviewMinCandidateCount?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -63,14 +61,14 @@ export interface PruningReadModelOptions {
 function daysBetween(dateA: string | number, dateB: Date | number): number {
   const a = typeof dateA === 'string' ? new Date(dateA).getTime() : dateA;
   const b = typeof dateB === 'number' ? dateB : dateB.getTime();
-  if (isNaN(a)) return 0;
+  if (isNaN(a)) return 9999;
   return Math.max(0, Math.round((b - a) / (1000 * 60 * 60 * 24)));
 }
 
 function computeRiskLevel(
   ageDays: number,
   derivedPainCount: number,
-  opts: { watchThresholdDays: number; reviewThresholdDays: number; reviewMinCandidateCount: number },
+  opts: { watchThresholdDays: number; reviewThresholdDays: number },
 ): PruningRiskLevel {
   if (ageDays >= opts.reviewThresholdDays && derivedPainCount === 0) {
     return 'review';
@@ -85,7 +83,7 @@ function buildReasons(
   ageDays: number,
   derivedPainCount: number,
   params: {
-    candidateCount: number;
+    matchedCandidateCount: number;
     recentCandCount: number;
     orphanCandCount: number;
     status: PrincipleStatus;
@@ -94,7 +92,7 @@ function buildReasons(
   },
 ): string[] {
   const reasons: string[] = [];
-  const { candidateCount, recentCandCount, orphanCandCount, status } = params;
+  const { matchedCandidateCount, recentCandCount, orphanCandCount, status } = params;
   const opts = { watchThresholdDays: params.watchThresholdDays, reviewThresholdDays: params.reviewThresholdDays };
 
   if (ageDays >= opts.reviewThresholdDays && derivedPainCount === 0) {
@@ -111,8 +109,8 @@ function buildReasons(
     reasons.push(`orphan: ${orphanCandCount} derived candidate(s) not found in candidates table [source: derivedFromPainIds + state.db]`);
   }
 
-  if (derivedPainCount > 0 && candidateCount === 0) {
-    reasons.push('gap: derived pain signals exist but no candidates in ledger [source: derivedFromPainIds + ledger entry count]');
+  if (derivedPainCount > 0 && matchedCandidateCount === 0) {
+    reasons.push('gap: derived pain signals exist but no matched candidates in DB [source: derivedFromPainIds + state.db]');
   }
 
   if (recentCandCount > 0 && derivedPainCount === 0) {
@@ -132,13 +130,11 @@ export class PruningReadModel {
   private readonly workspaceDir: string;
   private readonly watchThresholdDays: number;
   private readonly reviewThresholdDays: number;
-  private readonly reviewMinCandidateCount: number;
 
   constructor(opts: PruningReadModelOptions) {
     this.workspaceDir = opts.workspaceDir;
     this.watchThresholdDays = opts.watchThresholdDays ?? 30;
     this.reviewThresholdDays = opts.reviewThresholdDays ?? 90;
-    this.reviewMinCandidateCount = opts.reviewMinCandidateCount ?? 0;
   }
 
   /**
@@ -150,7 +146,7 @@ export class PruningReadModel {
    *
    * Returns one signal per ledger principle entry.
    */
-  async getPrincipleSignals(): Promise<PrinciplePruningSignal[]> {
+  getPrincipleSignals(): PrinciplePruningSignal[] {
     const now = new Date();
     const stateDir = path.join(this.workspaceDir, '.state');
     const ledger = loadLedger(stateDir);
@@ -160,7 +156,6 @@ export class PruningReadModel {
       return [];
     }
 
-    // Build candidate_id → createdAt map from SQLite (only 'consumed' candidates matter)
     const candidateCreatedAtMap = new Map<string, string>();
     const pdDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     try {
@@ -184,53 +179,36 @@ export class PruningReadModel {
     const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
     const recentCutoff = new Date(now.getTime() - thirtyDaysMs).toISOString();
 
-    // Build set of all candidate IDs referenced in ledger
-    const ledgerCandidateIds = new Set<string>();
-    for (const p of principleEntries) {
-      for (const cid of p.derivedFromPainIds ?? []) {
-        ledgerCandidateIds.add(cid);
-      }
-    }
-
-    // 90-day threshold for recent candidates (reserved for future 90-day recent candidate filtering)
-    const _ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
-
     return principleEntries.map((p) => {
       const derivedPainCount = p.derivedFromPainIds?.length ?? 0;
-      const candidateCount = derivedPainCount; // Each derivedFromPainIds entry corresponds to one candidate intake
 
-      // Recent = candidate created within 30 days
+      let matchedCandidateCount = 0;
       let recentCandidateCount = 0;
+      let orphanCandidateCount = 0;
       for (const cid of p.derivedFromPainIds ?? []) {
         const cAt = candidateCreatedAtMap.get(cid);
-        if (cAt && cAt >= recentCutoff) recentCandidateCount++;
-      }
-
-      // Orphan = derived candidate ID not in candidates table
-      let orphanDerivedCandidateCount = 0;
-      for (const cid of p.derivedFromPainIds ?? []) {
-        if (!candidateCreatedAtMap.has(cid)) {
-          // derived candidate ID not found in consumed candidates table
-          orphanDerivedCandidateCount++;
+        if (cAt) {
+          matchedCandidateCount++;
+          if (cAt >= recentCutoff) recentCandidateCount++;
+        } else {
+          orphanCandidateCount++;
         }
       }
 
       const ageDays = daysBetween(p.createdAt, now);
-      const staleDays = derivedPainCount > 0 && candidateCount === 0 ? ageDays : null;
 
       const riskLevel = computeRiskLevel(ageDays, derivedPainCount, {
         watchThresholdDays: this.watchThresholdDays,
         reviewThresholdDays: this.reviewThresholdDays,
-        reviewMinCandidateCount: this.reviewMinCandidateCount,
       });
 
       const reasons = buildReasons(
         ageDays,
         derivedPainCount,
         {
-          candidateCount,
+          matchedCandidateCount,
           recentCandCount: recentCandidateCount,
-          orphanCandCount: orphanDerivedCandidateCount,
+          orphanCandCount: orphanCandidateCount,
           status: p.status as PrincipleStatus,
           watchThresholdDays: this.watchThresholdDays,
           reviewThresholdDays: this.reviewThresholdDays,
@@ -244,10 +222,10 @@ export class PruningReadModel {
         updatedAt: p.updatedAt ?? p.createdAt,
         derivedCandidateIds: [...(p.derivedFromPainIds ?? [])],
         derivedPainCount,
-        candidateCount,
+        matchedCandidateCount,
         recentCandidateCount,
+        orphanCandidateCount,
         ageDays,
-        staleDays,
         riskLevel,
         reasons,
       };
@@ -256,42 +234,20 @@ export class PruningReadModel {
 
   /**
    * Build aggregate pruning health summary.
+   * Reuses getPrincipleSignals() to avoid duplicate DB queries.
    */
-  async getHealthSummary(): Promise<PruningHealthSummary> {
+  getHealthSummary(): PruningHealthSummary {
     const now = new Date();
-    const signals = await this.getPrincipleSignals();
+    const signals = this.getPrincipleSignals();
 
     const byStatus: Record<string, number> = {};
     let totalAgeDays = 0;
-    const allDerivedCandIds = new Set<string>();
+    let orphanDerivedCandidateCount = 0;
 
     for (const s of signals) {
       byStatus[s.status] = (byStatus[s.status] ?? 0) + 1;
       totalAgeDays += s.ageDays;
-      for (const cid of s.derivedCandidateIds) {
-        allDerivedCandIds.add(cid);
-      }
-    }
-
-    const pdDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
-    let orphanDerivedCandidateCount = 0;
-    try {
-      if (fs.existsSync(pdDbPath)) {
-        const db = new Database(pdDbPath, { readonly: true });
-        try {
-          const rows = db.prepare(
-            "SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'"
-          ).all() as { candidate_id: string }[];
-          const dbCandIds = new Set(rows.map((r) => r.candidate_id));
-          for (const cid of allDerivedCandIds) {
-            if (!dbCandIds.has(cid)) orphanDerivedCandidateCount++;
-          }
-        } finally {
-          db.close();
-        }
-      }
-    } catch {
-      orphanDerivedCandidateCount = 0;
+      orphanDerivedCandidateCount += s.orphanCandidateCount;
     }
 
     return {

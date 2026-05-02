@@ -333,8 +333,8 @@ pruningCmd
   .description('Show pruning health report — watch/review principle signals')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output raw JSON')
-  .action(async (opts) => {
-    await handlePruningReport({ workspace: opts.workspace, json: opts.json });
+  .action((opts) => {
+    handlePruningReport({ workspace: opts.workspace, json: opts.json });
   });
 
 // ── Candidate inspection commands ───────────────────────────────────────────

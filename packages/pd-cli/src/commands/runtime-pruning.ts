@@ -16,8 +16,8 @@ interface PruningReportOptions {
 }
 
 function outputText(
-  summary: Awaited<ReturnType<PruningReadModel['getHealthSummary']>>,
-  signals: Awaited<ReturnType<PruningReadModel['getPrincipleSignals']>>,
+  summary: ReturnType<PruningReadModel['getHealthSummary']>,
+  signals: ReturnType<PruningReadModel['getPrincipleSignals']>,
   workspaceDir: string,
 ): void {
   console.log(`generatedAt: ${summary.generatedAt}`);
@@ -65,26 +65,19 @@ function outputText(
   console.log('NOTE: This report is read-only. No principles are modified or deleted.');
 }
 
-export async function handlePruningReport(opts: PruningReportOptions): Promise<void> {
+export function handlePruningReport(opts: PruningReportOptions): void {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
     : resolveWorkspaceDir();
 
   const model = new PruningReadModel({ workspaceDir });
+  const signals = model.getPrincipleSignals();
+  const summary = model.getHealthSummary();
 
-  try {
-    const [summary, signals] = await Promise.all([
-      model.getHealthSummary(),
-      model.getPrincipleSignals(),
-    ]);
-
-    if (opts.json) {
-      console.log(JSON.stringify({ generatedAt: summary.generatedAt, workspace: workspaceDir, summary, signals }, null, 2));
-      return;
-    }
-
-    outputText(summary, signals, workspaceDir);
-  } finally {
-    // PruningReadModel is stateless — no close() needed
+  if (opts.json) {
+    console.log(JSON.stringify({ generatedAt: summary.generatedAt, workspace: workspaceDir, summary, signals }, null, 2));
+    return;
   }
+
+  outputText(summary, signals, workspaceDir);
 }

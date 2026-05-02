@@ -44,9 +44,9 @@ const LEDGER_MIXED: LedgerStore = {
       old_watch: {
         id: 'old_watch',
         status: 'active',
-        createdAt: '2026-03-18T00:00:00.000Z',   // ~45 days old → watch (>=30 && <90 && no derived pain)
+        createdAt: '2026-03-18T00:00:00.000Z',
         updatedAt: '2025-12-01T00:00:00.000Z',
-        derivedFromPainIds: [],                   // no derived pain → watch
+        derivedFromPainIds: [],
         ruleIds: [],
         conflictsWithPrincipleIds: [],
         version: 1,
@@ -63,9 +63,9 @@ const LEDGER_MIXED: LedgerStore = {
       old_review: {
         id: 'old_review',
         status: 'active',
-        createdAt: '2026-01-02T00:00:00.000Z',   // ~120 days old → review (>=90 && no derived pain)
+        createdAt: '2026-01-02T00:00:00.000Z',
         updatedAt: '2025-01-01T00:00:00.000Z',
-        derivedFromPainIds: [],                   // no derived pain → review
+        derivedFromPainIds: [],
         ruleIds: [],
         conflictsWithPrincipleIds: [],
         version: 1,
@@ -156,7 +156,6 @@ const LEDGER_DEPRECATED: LedgerStore = {
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
-// Module-level mocks — must come before any dynamic imports
 let mockLedgerData: LedgerStore = LEDGER_EMPTY;
 let mockCandidateRows: { candidate_id: string; created_at: string }[] = [];
 let mockDbExists = false;
@@ -166,12 +165,12 @@ vi.mock('../../principle-tree-ledger.js', () => ({
 }));
 
 vi.mock('better-sqlite3', () => ({
-  default: vi.fn(() => ({
-    prepare: vi.fn(() => ({
+  default: vi.fn(function (this: Record<string, unknown>) {
+    this.prepare = vi.fn(() => ({
       all: vi.fn(() => mockCandidateRows),
-    })),
-    close: vi.fn(),
-  })),
+    }));
+    this.close = vi.fn();
+  }),
 }));
 
 vi.mock('fs', () => ({
@@ -194,25 +193,21 @@ describe('PruningReadModel', () => {
     reset();
   });
 
-  // ── getPrincipleSignals — empty ledger ──────────────────────────────
-
-  it('empty ledger returns empty signals', async () => {
+  it('empty ledger returns empty signals', () => {
     mockLedgerData = LEDGER_EMPTY;
     mockDbExists = false;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const signals = await model.getPrincipleSignals();
+    const signals = model.getPrincipleSignals();
     expect(signals).toEqual([]);
   });
 
-  // ── getPrincipleSignals — status grouping ─────────────────────────────
-
-  it('status grouping counts correct', async () => {
+  it('status grouping counts correct', () => {
     mockLedgerData = LEDGER_MIXED;
     mockDbExists = false;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const signals = await model.getPrincipleSignals();
+    const signals = model.getPrincipleSignals();
 
     const byStatus: Record<string, number> = {};
     for (const s of signals) {
@@ -222,14 +217,12 @@ describe('PruningReadModel', () => {
     expect(byStatus.archived).toBe(1);
   });
 
-  // ── getPrincipleSignals — risk levels ─────────────────────────────────
-
-  it('old principle with no recent candidate → riskLevel watch', async () => {
+  it('old principle with no recent candidate → riskLevel watch', () => {
     mockLedgerData = LEDGER_MIXED;
     mockDbExists = false;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const signals = await model.getPrincipleSignals();
+    const signals = model.getPrincipleSignals();
 
     const oldWatch = signals.find((s) => s.principleId === 'old_watch');
     expect(oldWatch).toBeDefined();
@@ -237,12 +230,12 @@ describe('PruningReadModel', () => {
     expect(oldWatch && oldWatch.reasons.some((r) => r.includes('watch'))).toBe(true);
   });
 
-  it('very old principle with no derived candidates → riskLevel review', async () => {
+  it('very old principle with no derived candidates → riskLevel review', () => {
     mockLedgerData = LEDGER_MIXED;
     mockDbExists = false;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const signals = await model.getPrincipleSignals();
+    const signals = model.getPrincipleSignals();
 
     const oldReview = signals.find((s) => s.principleId === 'old_review');
     expect(oldReview).toBeDefined();
@@ -250,12 +243,12 @@ describe('PruningReadModel', () => {
     expect(oldReview && oldReview.reasons.some((r) => r.includes('review'))).toBe(true);
   });
 
-  it('recent derived candidate → riskLevel none', async () => {
+  it('recent derived candidate → riskLevel none', () => {
     mockLedgerData = LEDGER_MIXED;
     mockDbExists = false;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const signals = await model.getPrincipleSignals();
+    const signals = model.getPrincipleSignals();
 
     const active1 = signals.find((s) => s.principleId === 'active1');
     expect(active1).toBeDefined();
@@ -263,8 +256,7 @@ describe('PruningReadModel', () => {
     expect(active1 && active1.derivedPainCount).toBe(1);
   });
 
-  it('all derived candidates present in DB → orphan count 0', async () => {
-    // Both p_orphan's derived candidate c_orphan is returned by the mock DB → not an orphan
+  it('all derived candidates present in DB → orphan count 0', () => {
     mockLedgerData = {
       tree: {
         principles: {
@@ -296,17 +288,102 @@ describe('PruningReadModel', () => {
     mockDbExists = true;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const summary = await model.getHealthSummary();
+    const signals = model.getPrincipleSignals();
+    const summary = model.getHealthSummary();
 
+    const [s0] = signals;
+    expect(s0).toBeDefined();
+    if (!s0) return;
+    expect(s0.matchedCandidateCount).toBe(1);
+    expect(s0.orphanCandidateCount).toBe(0);
     expect(summary.orphanDerivedCandidateCount).toBe(0);
   });
 
-  it('principle in probation → reasons include status source', async () => {
+  it('orphan candidates detected when derived ID not in DB', () => {
+    mockLedgerData = {
+      tree: {
+        principles: {
+          p1: {
+            id: 'p1',
+            status: 'active',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            derivedFromPainIds: ['c_missing'],
+            ruleIds: [],
+            conflictsWithPrincipleIds: [],
+            version: 1,
+            text: '',
+            triggerPattern: '',
+            action: '',
+            priority: 'P1',
+            scope: 'general',
+            evaluability: 'deterministic',
+            valueScore: 0,
+            adherenceRate: 0,
+            painPreventedCount: 0,
+          } as LedgerPrinciple,
+        },
+      },
+    };
+    mockCandidateRows = [];
+    mockDbExists = true;
+
+    const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+    const signals = model.getPrincipleSignals();
+    const summary = model.getHealthSummary();
+
+    const [s0] = signals;
+    expect(s0).toBeDefined();
+    if (!s0) return;
+    expect(s0.orphanCandidateCount).toBe(1);
+    expect(s0.matchedCandidateCount).toBe(0);
+    expect(summary.orphanDerivedCandidateCount).toBe(1);
+  });
+
+  it('gap reason when derivedPainCount > 0 but matchedCandidateCount === 0', () => {
+    mockLedgerData = {
+      tree: {
+        principles: {
+          p_gap: {
+            id: 'p_gap',
+            status: 'active',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            derivedFromPainIds: ['c_orphan'],
+            ruleIds: [],
+            conflictsWithPrincipleIds: [],
+            version: 1,
+            text: '',
+            triggerPattern: '',
+            action: '',
+            priority: 'P1',
+            scope: 'general',
+            evaluability: 'deterministic',
+            valueScore: 0,
+            adherenceRate: 0,
+            painPreventedCount: 0,
+          } as LedgerPrinciple,
+        },
+      },
+    };
+    mockCandidateRows = [];
+    mockDbExists = true;
+
+    const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+    const signals = model.getPrincipleSignals();
+
+    const [s0] = signals;
+    expect(s0).toBeDefined();
+    if (!s0) return;
+    expect(s0.reasons.some((r) => r.includes('gap'))).toBe(true);
+  });
+
+  it('principle in probation → reasons include status source', () => {
     mockLedgerData = LEDGER_PROBATION;
     mockDbExists = false;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const signals = await model.getPrincipleSignals();
+    const signals = model.getPrincipleSignals();
 
     const prob = signals.find((s) => s.principleId === 'prob1');
     expect(prob).toBeDefined();
@@ -314,12 +391,12 @@ describe('PruningReadModel', () => {
     expect(prob && prob.reasons.some((r) => r.includes('probation'))).toBe(true);
   });
 
-  it('deprecated principle → reasons include deprecated status', async () => {
+  it('deprecated principle → reasons include deprecated status', () => {
     mockLedgerData = LEDGER_DEPRECATED;
     mockDbExists = false;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const signals = await model.getPrincipleSignals();
+    const signals = model.getPrincipleSignals();
 
     const dep = signals.find((s) => s.principleId === 'dep1');
     expect(dep).toBeDefined();
@@ -327,14 +404,12 @@ describe('PruningReadModel', () => {
     expect(dep && dep.reasons.some((r) => r.includes('deprecated'))).toBe(true);
   });
 
-  // ── getHealthSummary ──────────────────────────────────────────────────
-
-  it('empty ledger returns zero summary counts', async () => {
+  it('empty ledger returns zero summary counts', () => {
     mockLedgerData = LEDGER_EMPTY;
     mockDbExists = false;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const summary = await model.getHealthSummary();
+    const summary = model.getHealthSummary();
 
     expect(summary.totalPrinciples).toBe(0);
     expect(summary.watchCount).toBe(0);
@@ -343,7 +418,7 @@ describe('PruningReadModel', () => {
     expect(summary.generatedAt).toBeTruthy();
   });
 
-  it('recent candidate present → orphan count 0', async () => {
+  it('recent candidate present → orphan count 0', () => {
     mockLedgerData = {
       tree: {
         principles: {
@@ -375,32 +450,36 @@ describe('PruningReadModel', () => {
     mockDbExists = true;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const summary = await model.getHealthSummary();
+    const signals = model.getPrincipleSignals();
+    const summary = model.getHealthSummary();
 
     expect(summary.totalPrinciples).toBe(1);
+    const [s0] = signals;
+    expect(s0).toBeDefined();
+    if (!s0) return;
+    expect(s0.orphanCandidateCount).toBe(0);
     expect(summary.orphanDerivedCandidateCount).toBe(0);
   });
 
-  it('DB does not exist → graceful degradation, orphan count 0', async () => {
+  it('DB does not exist → graceful degradation, orphan count reflects missing DB', () => {
     mockLedgerData = LEDGER_MIXED;
     mockDbExists = false;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const summary = await model.getHealthSummary();
+    const summary = model.getHealthSummary();
 
-    // Should not throw, orphan count degrades to 0
     expect(summary.totalPrinciples).toBe(4);
-    expect(summary.orphanDerivedCandidateCount).toBe(0);
+    expect(summary.orphanDerivedCandidateCount).toBe(1);
   });
 
-  it('custom threshold options respected', async () => {
+  it('custom threshold options respected', () => {
     mockLedgerData = {
       tree: {
         principles: {
           mid_age: {
             id: 'mid_age',
             status: 'active',
-            createdAt: '2026-03-18T00:00:00.000Z', // ~45 days old → watch with default 30d threshold
+            createdAt: '2026-03-18T00:00:00.000Z',
             updatedAt: '2025-12-01T00:00:00.000Z',
             derivedFromPainIds: [],
             ruleIds: [],
@@ -421,21 +500,69 @@ describe('PruningReadModel', () => {
     };
     mockDbExists = false;
 
-    // Default 30-day watch threshold → mid_age is watch (60 > 30)
     const modelDefault = new PruningReadModel({ workspaceDir: WORKSPACE });
-    const signalsDefault = await modelDefault.getPrincipleSignals();
+    const signalsDefault = modelDefault.getPrincipleSignals();
     expect(signalsDefault.length).toBe(1);
     const signalDefault0 = signalsDefault.at(0);
     expect(signalDefault0 && signalDefault0.riskLevel).toBe('watch');
 
-    // Custom 90-day watch threshold → mid_age is none (60 < 90)
     const modelCustom = new PruningReadModel({
       workspaceDir: WORKSPACE,
       watchThresholdDays: 90,
     });
-    const signalsCustom = await modelCustom.getPrincipleSignals();
+    const signalsCustom = modelCustom.getPrincipleSignals();
     expect(signalsCustom.length).toBe(1);
     const signalCustom0 = signalsCustom.at(0);
     expect(signalCustom0 && signalCustom0.riskLevel).toBe('none');
+  });
+
+  it('invalid createdAt returns large ageDays (not 0)', () => {
+    mockLedgerData = {
+      tree: {
+        principles: {
+          bad_date: {
+            id: 'bad_date',
+            status: 'active',
+            createdAt: 'not-a-date',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            derivedFromPainIds: [],
+            ruleIds: [],
+            conflictsWithPrincipleIds: [],
+            version: 1,
+            text: '',
+            triggerPattern: '',
+            action: '',
+            priority: 'P1',
+            scope: 'general',
+            evaluability: 'deterministic',
+            valueScore: 0,
+            adherenceRate: 0,
+            painPreventedCount: 0,
+          } as LedgerPrinciple,
+        },
+      },
+    };
+    mockDbExists = false;
+
+    const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+    const signals = model.getPrincipleSignals();
+
+    const [s0] = signals;
+    expect(s0).toBeDefined();
+    if (!s0) return;
+    expect(s0.ageDays).toBe(9999);
+    expect(s0.riskLevel).toBe('review');
+  });
+
+  it('getHealthSummary reuses signals without duplicate DB query', () => {
+    mockLedgerData = LEDGER_MIXED;
+    mockCandidateRows = [];
+    mockDbExists = true;
+
+    const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+    const summary = model.getHealthSummary();
+
+    expect(summary.totalPrinciples).toBe(4);
+    expect(summary.orphanDerivedCandidateCount).toBe(1);
   });
 });
