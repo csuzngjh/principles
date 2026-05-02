@@ -81,3 +81,52 @@ export function handlePruningReport(opts: PruningReportOptions): void {
 
   outputText(summary, signals, workspaceDir);
 }
+
+// ── Pruning explain ────────────────────────────────────────────────────────────
+
+export interface PruningExplainOptions {
+  principleId: string;
+  workspace?: string;
+  json?: boolean;
+}
+
+export function handlePruningExplain(opts: PruningExplainOptions): void {
+  const workspaceDir = opts.workspace
+    ? path.resolve(opts.workspace)
+    : resolveWorkspaceDir();
+
+  const model = new PruningReadModel({ workspaceDir });
+  const signals = model.getPrincipleSignals();
+  const now = new Date().toISOString();
+
+  const signal = signals.find((s) => s.principleId === opts.principleId);
+
+  if (!signal) {
+    if (opts.json) {
+      console.log(JSON.stringify({ error: `Principle not found: '${opts.principleId}'`, workspace: workspaceDir, generatedAt: now }, null, 2));
+    } else {
+      console.error(`Error: Principle not found: '${opts.principleId}'`);
+    }
+    process.exit(1);
+    return; // unreachable but satisfies TypeScript
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify({ workspace: workspaceDir, principleId: signal.principleId, signal, generatedAt: now }, null, 2));
+    return;
+  }
+
+  console.log(`principleId: ${signal.principleId}`);
+  console.log(`status: ${signal.status}`);
+  console.log(`riskLevel: ${signal.riskLevel}`);
+  console.log(`ageDays: ${signal.ageDays}`);
+  console.log(`derivedPainCount: ${signal.derivedPainCount}`);
+  console.log(`matchedCandidateCount: ${signal.matchedCandidateCount}`);
+  console.log(`orphanCandidateCount: ${signal.orphanCandidateCount}`);
+  console.log(`reasons:`);
+  for (const r of signal.reasons) {
+    console.log(`  ${r}`);
+  }
+  console.log('');
+  console.log('NOTE: This report is read-only. No principles are modified or deleted.');
+}

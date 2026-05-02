@@ -117,6 +117,25 @@
 - 系统动力学指标方向：长期跟踪 `pain_signal_count`、`gfi_gate_pass_rate`、`diagnosis_success_rate`、`pain_to_candidate_rate`、`candidate_to_ledger_rate`、`p95_pain_to_ledger_latency_ms`、`runtime_timeout_rate`、`output_invalid_rate`、`active_principle_count`、`soft_to_hard_conversion_rate`、`context_load_tokens`。
 - 后续架构重构方向（不要立即开始）：将 CLI/plugin/bridge/intake/ledger 编排收敛为 core 层 `PainToPrincipleService`，CLI 和 OpenClaw plugin 都只做入口适配。
 
+## Runtime v2 路线图与 Linear 治理事实 (2026-05-02)
+- Runtime V2 架构回退事件：PR #438 曾删除/回退 PRI-12/13/14/15/16 的部分成果；PR #444 已恢复 `PainToPrincipleService`、`PainChainReadModel`、ADR-0001、相关测试；PR #445 已做 public orchestration API consolidation。
+- 当前核心边界：写侧统一入口是 `PainToPrincipleService`；pain-chain 读侧统一入口是 `PainChainReadModel`；principle lifecycle/pruning 读侧入口是 `PruningReadModel`。CLI/plugin 不应直接编排 `createPainSignalBridge` 或手写 `recordPainSignalObservability`。
+- Linear milestone 已建立：
+  - `M1 Runtime V2 Architecture Stability`：恢复、收口并防回退 Runtime V2 service/read-model 边界。已 100%，包含 `PRI-20`、`PRI-22`。
+  - `M2 Principle Lifecycle Review`：把 pruning signals 变成人工可审计 review workflow。当前主线，先做 `PRI-23` + `PRI-24`，再做 `PRI-25`，最后 `PRI-26`。
+  - `M3 Runtime V2 Production Reliability`：重复 UAT、真实 OpenClaw auto-trigger 验证、operator health snapshot/runbook。
+- M2 issue 顺序：`PRI-23 Add pruning signal explain command` 与 `PRI-24 Add pruning review audit log` 可并行；`PRI-25 Add pruning review CLI workflow` blocked by PRI-23/PRI-24；`PRI-26 Document principle lifecycle review workflow` blocked by PRI-25。
+- M3 issue 顺序：`PRI-27 Establish Runtime V2 repeated UAT baseline`；`PRI-29 Validate real OpenClaw auto-trigger pain path` blocked by PRI-27；`PRI-28 Add Runtime V2 operator health snapshot` 可在 UAT 基线后做；`PRI-30 Document Runtime V2 production runbook` blocked by PRI-27/28/29。
+- `PRI-31 Calibrate Diagnostician recommendation taxonomy` 已加入 M2，priority Low，blocked by PRI-23/PRI-24。它来自一次外部代码分析：`DiagnosticianPromptBuilder` 可能偏向 `kind: principle`，但正确目标是校准 recommendation taxonomy（principle/rule/implementation/defer），不是强制多产 rule。
+- Linear 模板库已用普通 issue 形式创建（因为当前 Linear document 创建工具不可用）：
+  - `PRI-32 Template — TDD Feature Issue`
+  - `PRI-33 Template — Architecture Recovery / Regression Issue`
+  - `PRI-34 Template — AI Prompt / Eval Calibration Issue`
+  - `PRI-35 Template — Production Reliability / UAT Issue`
+  - `PRI-36 Template — Project Status Update`
+- 后续创建 issue 时优先复制上述模板的 description。每个开发 issue 都应有 `Goal / Context / Must Read First / Scope / Non-Goals / TDD Requirements / Verification / Acceptance Criteria / Completion Comment Template`。AI prompt/eval 类 issue 用 PRI-34；架构回退类用 PRI-33；真实 UAT/可靠性用 PRI-35。
+- Linear 管理纪律：每 2-3 个 PR 或 milestone 边界用 PRI-36 模板写 status update；每个 PR 合并后在对应 issue 留事实型 comment（Merged PR、Changed files、Tests、Remaining risk、Follow-up）。
+
 ## Runtime v2 重构事实 (2026-04-26)
 - 当前方向：PD Runtime v2 已完成 M1-M5，M6 正在接入 `openclaw-cli` 作为第一个真实生产 runtime adapter。目标是摆脱 OpenClaw 插件 API / heartbeat / prompt hook / sessions_spawn / marker file，改成 `pd diagnose run --runtime openclaw-cli` 的显式执行链。
 - M3 已建立 PD-owned retrieval：`pd legacy import openclaw` 将 OpenClaw `.state/diagnostician_tasks.json` 和 `.state/trajectory.db` 导入 `workspace/.pd/state.db`；`pd trajectory locate`、`pd history query`、`pd context build` 可基于 PD-owned DB 工作。
