@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple",
-  "version": "1.10.37",
+  "version": "1.10.40",
   "description": "Native OpenClaw plugin for Principles Disciple",
   "type": "module",
   "main": "./dist/bundle.js",
@@ -35,7 +35,7 @@
     "test:integration": "vitest run tests/integration/",
     "test:coverage": "vitest run --coverage",
     "test:all": "vitest run",
-    "lint": "eslint src/",
+    "lint": "eslint \"src/**/*.ts\"",
     "bootstrap-rules": "node scripts/bootstrap-rules.mjs",
     "compile-principles": "node scripts/compile-principles.mjs",
     "validate-live-path": "tsx scripts/validate-live-path.ts"
@@ -51,10 +51,10 @@
     "@types/ws": "^8.5.13",
     "@typescript-eslint/eslint-plugin": "^8.58.2",
     "@typescript-eslint/parser": "^8.58.0",
-    "@vitest/coverage-v8": "^4.1.0",
+    "@vitest/coverage-v8": "^4.1.5",
     "esbuild": "^0.28.0",
     "eslint": "^10.2.1",
-    "jsdom": "^29.0.1",
+    "jsdom": "^29.1.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.0",
     "ws": "^8.18.0"
@@ -71,6 +71,7 @@
     "@principles/core": "^0.1.0",
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.9.0",
+    "commander": "^12.0.0",
     "js-yaml": "^4.1.1",
     "lucide-react": "^1.7.0",
     "micromatch": "^4.0.8",

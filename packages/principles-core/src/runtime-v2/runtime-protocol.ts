@@ -14,12 +14,14 @@ import { PDErrorCategorySchema } from './error-categories.js';
 
 export const RuntimeKindSchema = Type.Union([
   Type.Literal('openclaw'),
+  Type.Literal('openclaw-cli'),
   Type.Literal('openclaw-history'), // compatibility import from OpenClaw trajectory.db
   Type.Literal('claude-cli'),
   Type.Literal('codex-cli'),
   Type.Literal('gemini-cli'),
   Type.Literal('local-worker'),
   Type.Literal('test-double'),
+  Type.Literal('pi-ai'), // M9: direct LLM completion via @mariozechner/pi-ai
 ]);
  
 export type RuntimeKind = Static<typeof RuntimeKindSchema>;

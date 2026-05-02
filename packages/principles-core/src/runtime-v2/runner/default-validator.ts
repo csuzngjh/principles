@@ -32,6 +32,8 @@ import type {
   DiagnosticianValidator,
 } from './diagnostician-validator.js';
 
+export const MAX_ABSTRACTED_PRINCIPLE_CHARS = 200 as const;
+
 const ERROR_CATEGORY_OUTPUT_INVALID = 'output_invalid' as const;
 
 function buildResult(valid: false, aggregateSummary: string, detailErrors: string[]): DiagnosticianValidationResult {
@@ -110,7 +112,7 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
       }
     }
 
-    // 2f: Recommendations shape
+    // 2f: Recommendations shape + principle structural fields
     for (const rec of output.recommendations) {
       if (!Value.Check(RecommendationKindSchema, rec.kind)) {
         const msg = `recommendations[].kind "${rec.kind}" is not a valid RecommendationKind`;
@@ -121,6 +123,29 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
         const msg = 'recommendations[].description must be a non-empty string';
         if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
         detailErrors.push(msg);
+      }
+      // Principle recommendations require structural fields (triggerPattern, action, abstractedPrinciple)
+      if (rec.kind === 'principle') {
+        if (!rec.triggerPattern || rec.triggerPattern.trim() === '') {
+          const msg = 'recommendations[].triggerPattern is required when kind is "principle"';
+          if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
+          detailErrors.push(msg);
+        }
+        if (!rec.action || rec.action.trim() === '') {
+          const msg = 'recommendations[].action is required when kind is "principle"';
+          if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
+          detailErrors.push(msg);
+        }
+        if (!rec.abstractedPrinciple || rec.abstractedPrinciple.trim() === '') {
+          const msg = 'recommendations[].abstractedPrinciple is required when kind is "principle"';
+          if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
+          detailErrors.push(msg);
+        }
+        if (rec.abstractedPrinciple && rec.abstractedPrinciple.length > MAX_ABSTRACTED_PRINCIPLE_CHARS) {
+          const msg = `recommendations[].abstractedPrinciple must be ${MAX_ABSTRACTED_PRINCIPLE_CHARS} characters or fewer`;
+          if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
+          detailErrors.push(msg);
+        }
       }
     }
 

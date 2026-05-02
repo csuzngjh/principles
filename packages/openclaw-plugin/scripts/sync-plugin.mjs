@@ -17,7 +17,7 @@
  *   --help             Show help message
  */
 
-import { copyFileSync, cpSync, existsSync, lstatSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -27,6 +27,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const SOURCE_DIR = join(__dirname, '..');
+const ROOT_DIR = join(SOURCE_DIR, '..', '..');
+const PD_CLI_SOURCE_DIR = join(ROOT_DIR, 'packages', 'pd-cli');
 
 /**
  * Cross-platform home directory resolution.
@@ -42,6 +44,8 @@ function getHomeDir() {
 
 const OPENCLAW_DIR = join(getHomeDir(), '.openclaw');
 const INSTALL_DIR = join(OPENCLAW_DIR, 'extensions', 'principles-disciple');
+const INSTALLED_PD_CLI_DIR = join(INSTALL_DIR, 'pd-cli');
+const INSTALLED_BIN_DIR = join(INSTALL_DIR, 'bin');
 function getConfiguredWorkspaceDir() {
   const configPath = join(OPENCLAW_DIR, 'openclaw.json');
   try {
@@ -385,6 +389,36 @@ function buildPlugin() {
 }
 
 /**
+ * Build the Runtime V2 CLI that agents invoke through the `pd` command.
+ * This is intentionally part of plugin sync so installed OpenClaw agents do not
+ * depend on a repo checkout, stale global npm package, or guessed CLI path.
+ */
+function buildPdCli() {
+    console.log('\n🔨 Building PD CLI...');
+
+    if (!existsSync(join(PD_CLI_SOURCE_DIR, 'package.json'))) {
+        console.error(`❌ PD CLI package not found: ${PD_CLI_SOURCE_DIR}`);
+        process.exit(1);
+    }
+
+    try {
+        execSync('npm run build --workspace=@principles/core', {
+            cwd: ROOT_DIR,
+            stdio: 'inherit'
+        });
+        execSync('npm run build --workspace=@principles/pd-cli', {
+            cwd: ROOT_DIR,
+            stdio: 'inherit'
+        });
+        console.log('✅ PD CLI built');
+    } catch (error) {
+        console.error('\n❌ PD CLI build failed');
+        console.error(`   ${error.message}`);
+        process.exit(1);
+    }
+}
+
+/**
  * Verify the built bundle contains all critical symbols.
  */
 function verifyBundleContents() {
@@ -400,7 +434,6 @@ function verifyBundleContents() {
         { name: 'checkPainFlag',          reason: 'pain flag detection' },
         { name: 'processEvolutionQueue',  reason: 'queue processing' },
         { name: 'acquireQueueLock',       reason: 'queue lock for pd-reflect and worker' },
-        { name: 'write_pain_flag',        reason: 'pain signal recording tool' },
     ];
 
     const missing = [];
@@ -653,6 +686,113 @@ function syncItem(item) {
     }
 }
 
+function quoteCmdPath(filePath) {
+    return filePath.replace(/"/g, '""');
+}
+
+/**
+ * Copy the built pd-cli package into the plugin install directory and create
+ * deterministic shims. The global shim points at the installed plugin copy, not
+ * at a developer checkout.
+ */
+function syncPdCli() {
+    console.log('\n📦 Syncing PD CLI...');
+
+    const distDir = join(PD_CLI_SOURCE_DIR, 'dist');
+    if (!existsSync(join(distDir, 'index.js'))) {
+        console.error('❌ PD CLI dist/index.js missing. Run without --skip-build or build @principles/pd-cli first.');
+        process.exit(1);
+    }
+
+    rmSync(INSTALLED_PD_CLI_DIR, { recursive: true, force: true });
+    mkdirSync(INSTALLED_PD_CLI_DIR, { recursive: true });
+    cpSync(distDir, join(INSTALLED_PD_CLI_DIR, 'dist'), { recursive: true });
+    copyFileSync(join(PD_CLI_SOURCE_DIR, 'package.json'), join(INSTALLED_PD_CLI_DIR, 'package.json'));
+
+    mkdirSync(INSTALLED_BIN_DIR, { recursive: true });
+    const installedEntry = join(INSTALLED_PD_CLI_DIR, 'dist', 'index.js');
+
+    if (isWindows()) {
+        const cmdShim = [
+            '@echo off',
+            `node "${quoteCmdPath(installedEntry)}" %*`,
+            '',
+        ].join('\r\n');
+        const psShim = [
+            '$ErrorActionPreference = "Stop"',
+            `$entry = "${installedEntry.replace(/`/g, '``').replace(/"/g, '`"')}"`,
+            '& node $entry @args',
+            'exit $LASTEXITCODE',
+            '',
+        ].join('\r\n');
+        writeFileSync(join(INSTALLED_BIN_DIR, 'pd.cmd'), cmdShim, 'utf-8');
+        writeFileSync(join(INSTALLED_BIN_DIR, 'pd.ps1'), psShim, 'utf-8');
+    } else {
+        const shShim = [
+            '#!/usr/bin/env sh',
+            `exec node "${installedEntry.replace(/"/g, '\\"')}" "$@"`,
+            '',
+        ].join('\n');
+        const target = join(INSTALLED_BIN_DIR, 'pd');
+        writeFileSync(target, shShim, 'utf-8');
+        chmodSync(target, 0o755);
+    }
+
+    installGlobalPdShim();
+}
+
+function getNpmGlobalBinDir() {
+    try {
+        const prefix = execSync('npm prefix -g', { encoding: 'utf-8' }).trim();
+        if (!prefix) return null;
+        return process.platform === 'win32' ? prefix : join(prefix, 'bin');
+    } catch {
+        return null;
+    }
+}
+
+function installGlobalPdShim() {
+    const globalBin = getNpmGlobalBinDir();
+    if (!globalBin) {
+        console.warn('⚠️  Could not resolve npm global bin directory. Use plugin-local bin/pd shim.');
+        return;
+    }
+
+    try {
+        mkdirSync(globalBin, { recursive: true });
+        if (isWindows()) {
+            const pluginCmd = join(INSTALLED_BIN_DIR, 'pd.cmd');
+            const pluginPs = join(INSTALLED_BIN_DIR, 'pd.ps1');
+            writeFileSync(join(globalBin, 'pd.cmd'), `@echo off\r\ncall "${quoteCmdPath(pluginCmd)}" %*\r\n`, 'utf-8');
+            writeFileSync(
+                join(globalBin, 'pd.ps1'),
+                `$shim = "${pluginPs.replace(/`/g, '``').replace(/"/g, '`"')}"\r\n& $shim @args\r\nexit $LASTEXITCODE\r\n`,
+                'utf-8'
+            );
+        } else {
+            const pluginSh = join(INSTALLED_BIN_DIR, 'pd');
+            const globalSh = join(globalBin, 'pd');
+            writeFileSync(globalSh, `#!/usr/bin/env sh\nexec "${pluginSh.replace(/"/g, '\\"')}" "$@"\n`, 'utf-8');
+            chmodSync(globalSh, 0o755);
+        }
+        console.log(`✅ Global pd shim installed: ${globalBin}`);
+    } catch (err) {
+        console.warn(`⚠️  Could not install global pd shim: ${err.message}`);
+        console.warn(`   Use plugin-local shim: ${join(INSTALLED_BIN_DIR, isWindows() ? 'pd.cmd' : 'pd')}`);
+    }
+}
+
+function verifyPdCliShim() {
+    const localShim = join(INSTALLED_BIN_DIR, isWindows() ? 'pd.cmd' : 'pd');
+    try {
+        execSync(`"${localShim}" --version`, { stdio: 'pipe', shell: true });
+        console.log(`✅ PD CLI shim verified: ${localShim}`);
+    } catch (err) {
+        console.error(`❌ PD CLI shim verification failed: ${err.message}`);
+        process.exit(1);
+    }
+}
+
 /**
  * Recursive directory copy (Windows-safe, no symlinks).
  */
@@ -711,7 +851,7 @@ function injectLocalWorkspacePackages() {
 function installTargetDependencies() {
     console.log('\n📦 Installing production dependencies in target...');
     try {
-        execSync('npm install --production --no-audit --no-fund', {
+        execSync('npm install --omit=dev --no-audit --no-fund --prefer-offline', {
             cwd: INSTALL_DIR,
             stdio: 'inherit'
         });
@@ -832,40 +972,55 @@ function restartGatewayWindows() {
 
         // Trigger via schtasks — reliable, avoids CLI busy-port misdetection
         console.log('   Starting gateway via scheduled task...');
-        execSync('schtasks /Run /TN "OpenClaw Gateway"', { stdio: 'inherit' });
+        let gatewayStarted = false;
+        try {
+            execSync('schtasks /Run /TN "OpenClaw Gateway"', { stdio: 'pipe' });
+            gatewayStarted = true;
+        } catch {
+            // schtasks failed — try direct CLI fallback
+            console.log('   Scheduled task not available, trying direct gateway start...');
+            try {
+                execSync('start /b cmd /c "openclaw gateway > nul 2>&1"', { stdio: 'pipe', shell: true });
+                gatewayStarted = true;
+            } catch {
+                // Gateway may already be running or no perms — not fatal
+            }
+        }
 
         // Wait for gateway to be listening on port (同步等待，不异步)
         const port = 18789;
-        const deadline = Date.now() + 30000;
-        const pollInterval = 1000;
+        const deadline = Date.now() + 15000; // 缩短等待时间，避免卡住
         let gatewayListening = false;
 
         while (Date.now() < deadline) {
             try {
+                // 使用 Test-NetConnection 替代有语法问题的 Get-NetTCPConnection + Measure-Object
                 const result = execSync(
-                    `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Measure-Object -Line).Count"`,
+                    `powershell -NoProfile -Command "(Test-NetConnection -ComputerName localhost -Port ${port} -WarningAction SilentlyContinue).TcpTestSucceeded"`,
                     { encoding: 'utf-8', timeout: 5000 }
                 ).trim();
-                if (parseInt(result) > 0) {
+                if (result === 'True') {
                     gatewayListening = true;
                     break;
                 }
             } catch { /* port not listening yet */ }
-            execSync('timeout /t 1 /nobreak > nul', { shell: true, stdio: 'ignore' });
+            try {
+                execSync('timeout /t 1 /nobreak > nul', { shell: true, stdio: 'ignore' });
+            } catch { /* ignore */ }
         }
 
         if (!gatewayListening) {
-            console.error('\n❌ Gateway did not start on port 18789 within 30s.');
-            console.error('   Please restart manually: openclaw gateway start');
-            process.exit(1);
+            console.warn('\n⚠️  Gateway may not be running on port 18789 (plugin files are installed).');
+            console.warn('   Run "openclaw gateway start" to verify.');
+            return; // 不 exit(1)，插件已安装完成
         }
 
         console.log('   ✅ Gateway is listening on port 18789');
 
     } catch (error) {
-        console.error(`\n❌ Gateway restart failed: ${error.message}`);
-        console.error('   You may need to manually restart: openclaw gateway start');
-        process.exit(1);
+        // Gateway 重启失败不算安装失败 — 插件文件已同步
+        console.warn(`\n⚠️  Gateway restart warning: ${error.message}`);
+        console.warn('   Plugin files are installed. Run "openclaw gateway start" manually if needed.');
     }
 }
 
@@ -968,16 +1123,23 @@ function main() {
 
     if (!args.skipDeps) installDependencies();
 
-    buildPlugin();
+    if (!args.skipBuild) {
+        buildPlugin();
+        buildPdCli();
+    } else {
+        console.log('\n⏭️  Skipping build step (--skip-build)');
+    }
     cleanTargetDir(args.force);
     ensureInstallDir();
 
     console.log('\n📦 Syncing files to OpenClaw...');
     for (const item of SYNC_ITEMS) syncItem(item);
     syncSkillDirs();
+    syncPdCli();
 
     injectLocalWorkspacePackages();
     installTargetDependencies();
+    verifyPdCliShim();
 
     console.log('\n🔍 Verifying installed plugin can load native dependencies...');
     try {

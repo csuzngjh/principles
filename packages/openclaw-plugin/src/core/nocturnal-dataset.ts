@@ -362,9 +362,11 @@ export function listDatasetRecords(
   let records = readRegistry(workspaceDir);
 
   if (!filter) {
-    return records.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+    return records.sort((a, b) => {
+      const delta = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (delta !== 0) return delta;
+      return b.artifactId.localeCompare(a.artifactId);
+    });
   }
 
   // Filter by reviewStatus
@@ -396,9 +398,11 @@ export function listDatasetRecords(
     });
   }
 
-  return records.sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  return records.sort((a, b) => {
+    const delta = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    if (delta !== 0) return delta;
+    return b.artifactId.localeCompare(a.artifactId);
+  });
 }
 
 /**

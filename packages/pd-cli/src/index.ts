@@ -20,7 +20,13 @@ import { handleTrajectoryLocate } from './commands/trajectory.js';
 import { handleHistoryQuery } from './commands/history.js';
 import { handleContextBuild } from './commands/context.js';
 import { handleLegacyImportOpenClaw } from './commands/legacy-import.js';
+import { handleLegacyCleanup } from './commands/legacy-cleanup.js';
 import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js';
+import { handleRuntimeProbe } from './commands/runtime.js';
+import { handleFlowShow } from './commands/flow.js';
+import { handleTraceShow } from './commands/trace.js';
+import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair } from './commands/candidate.js';
+import { handleArtifactShow } from './commands/artifact.js';
 
 const program = new Command();
 
@@ -35,10 +41,12 @@ const painCmd = program
 
 painCmd
   .command('record')
-  .description('Record a pain signal')
+  .description('Record a pain signal via Runtime v2 bridge')
   .option('-r, --reason <text>', 'Reason for the pain signal (required)')
   .option('-s, --score <number>', 'Pain score 0-100', parseInt)
   .option('-S, --source <text>', 'Source of the pain signal', 'manual')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainRecord(opts);
   });
@@ -99,9 +107,10 @@ tasksCmd
 program
   .command('health')
   .description('Show health diagnostics for all workspaces')
-  .option('-w, --workspace <path>', 'Workspace directory (required for trajectory/history/context commands)')
-  .action(async (_opts) => {
-    await handleHealth();
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleHealth(opts);
   });
 
 const centralCmd = program
@@ -134,8 +143,10 @@ rtTaskCmd
 rtTaskCmd
   .command('show <taskId>')
   .description('Show detailed task information')
-  .action(async (taskId) => {
-    await handleTaskShow({ id: taskId });
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (taskId, opts) => {
+    await handleTaskShow({ id: taskId, json: opts.json, workspace: opts.workspace });
   });
 
 const rtRunCmd = program
@@ -209,7 +220,7 @@ contextCmd
 
 const legacyCmd = program
   .command('legacy')
-  .description('Legacy data import (OpenClaw → PD Runtime v2)');
+  .description('Legacy data management (import and cleanup)');
 
 const importCmd = legacyCmd.command('import');
 importCmd
@@ -245,9 +256,156 @@ diagnoseCmd
   .description('Execute diagnostician runner for a task')
   .requiredOption('-t, --task-id <taskId>', 'Task ID to execute')
   .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'test-double', 'pi-ai'")
+  .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
+  .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
+  .option('-a, --agent <agentId>', 'Agent ID to invoke')
+  .option('--provider <name>', 'LLM provider (e.g., openrouter) — for pi-ai, falls back to policy')
+  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — for pi-ai, falls back to policy')
+  .option('--apiKeyEnv <name>', 'Env var name for API key — for pi-ai, falls back to policy')
+  .option('--baseUrl <url>', 'Custom base URL — for pi-ai, falls back to policy')
+  .option('--maxRetries <n>', 'Max retry attempts for LLM failures — for pi-ai, falls back to policy', parseInt)
+  .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleDiagnoseRun(opts);
+  });
+
+// ── Runtime probe command (HG-01 HARD GATE) ─────────────────────────────────
+
+const runtimeCmd = program
+  .command('runtime')
+  .description('Runtime inspection and health checks');
+
+runtimeCmd
+  .command('probe')
+  .description('Probe runtime health and capabilities (HG-01 HARD GATE)')
+  .requiredOption('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli' or 'pi-ai'")
+  .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
+  .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
+  .option('-a, --agent <agentId>', 'Agent ID to probe')
+  .option('--provider <name>', 'LLM provider (e.g., openrouter) — for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--apiKeyEnv <name>', 'Env var name for API key (e.g., OPENROUTER_API_KEY) — for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--baseUrl <url>', 'Custom base URL for OpenAI-compatible providers — for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--maxRetries <n>', 'Max retry attempts for LLM failures', parseInt)
+  .option('--timeoutMs <ms>', 'Timeout in milliseconds for probe', parseInt)
+  .option('-w, --workspace <path>', 'Workspace directory — loads pi-ai policy from .state/workflows.yaml')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeProbe(opts);
+  });
+
+const flowCmd = runtimeCmd
+  .command('flow')
+  .description('Workflow funnel inspection');
+
+flowCmd
+  .command('show')
+  .description('Show all workflow funnel definitions from workflows.yaml')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleFlowShow(opts);
+  });
+
+const traceCmd = runtimeCmd
+  .command('trace')
+  .description('Trace full pain-to-ledger chain');
+
+traceCmd
+  .command('show')
+  .description('Show full trace for a pain ID')
+  .requiredOption('--pain-id <id>', 'Pain ID to trace')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleTraceShow({ painId: opts.painId, workspace: opts.workspace, json: opts.json });
+  });
+
+// ── Candidate inspection commands ───────────────────────────────────────────
+
+const candidateCmd = program
+  .command('candidate')
+  .description('Principle candidate inspection');
+
+candidateCmd
+  .command('list')
+  .description('List principle candidates for a task')
+  .requiredOption('-t, --task-id <taskId>', 'Task ID to query')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleCandidateList(opts);
+  });
+
+candidateCmd
+  .command('show <candidateId>')
+  .description('Show detail for a single principle candidate')
+  .requiredOption('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (candidateId, opts) => {
+    await handleCandidateShow({ candidateId, ...opts });
+  });
+
+candidateCmd
+  .command('intake')
+  .description('Intake a principle candidate into the ledger')
+  .requiredOption('--candidate-id <id>', 'Candidate ID to intake')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output as JSON')
+  .option('--dry-run', 'Show what would be written without writing')
+  .action(async (opts) => {
+    await handleCandidateIntake(opts);
+  });
+
+candidateCmd
+  .command('audit')
+  .description('Audit candidate/ledger consistency for Runtime v2')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    await handleCandidateAudit(opts);
+  });
+
+candidateCmd
+  .command('repair')
+  .description('Repair consumed candidate with missing ledger entry')
+  .requiredOption('--candidate-id <id>', 'Candidate ID to repair')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    await handleCandidateRepair(opts);
+  });
+
+// ── Artifact inspection commands ────────────────────────────────────────────
+
+const artifactCmd = program
+  .command('artifact')
+  .description('Artifact registry inspection');
+
+artifactCmd
+  .command('show <artifactId>')
+  .description('Show artifact content and its associated candidates')
+  .requiredOption('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (artifactId, opts) => {
+    await handleArtifactShow({ artifactId, ...opts });
+  });
+
+const _legacyCleanupCmd = legacyCmd
+  .command('cleanup')
+  .description('Clean legacy empathy/diagnostician artifacts from workspace')
+  .requiredOption('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Show what would be cleaned without applying', false)
+  .option('--apply', 'Actually apply the cleanup', false)
+  .action(async (opts) => {
+    const apply = opts.apply ?? false;
+    if (!apply && !opts.dryRun) {
+      console.error('Specify --dry-run or --apply');
+      process.exit(1);
+    }
+    await handleLegacyCleanup(opts.workspace, apply);
   });
 
 program.parse();

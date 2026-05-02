@@ -28,6 +28,7 @@ import { execFileSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { atomicWriteFileSync } from '../utils/io.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import {
   type TrainerBackendKind,
@@ -103,7 +104,7 @@ function formatTrainingRun(run: ReturnType<typeof getTrainingRun>, zh: boolean):
 export async function handleNocturnalTrainCommand(ctx: PluginCommandContext): Promise<PluginCommandResult> {
   const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'nocturnal-train');
   const zh = isZh(ctx);
-  const args = (ctx.args || '').trim();
+  const args = normalizeCommandArgs(ctx.args).trim();
   const parts = args.split(/\s+/).filter(Boolean);
   const [subcommand = 'help'] = parts;
 
@@ -347,7 +348,7 @@ Hardware tiers:
                       resolve(JSON.parse(trimmed));
                       return;
                     } catch {
-                      // fall through to result file
+                      // stdout was not valid JSON — fall through to result file
                     }
                   }
                   // Fallback to result file

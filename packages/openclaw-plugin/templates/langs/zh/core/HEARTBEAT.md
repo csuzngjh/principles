@@ -8,7 +8,7 @@
 
 ## 🩹 痛觉与进化检查
 
-- [ ] **`.state/.pain_flag`** — 是否存在未处理的痛觉信号？
+- [ ] **Runtime V2 pain** — 如果最近有 `pd pain record` 或工具失败，检查 `pd candidate list` / ledger。`.state/.pain_flag` 仅为 legacy compatibility。
 - [ ] **`.state/evolution_queue.json`** — 是否有待处理的进化任务？
 - [ ] **`memory/logs/SYSTEM.log`** — 最近是否有未解决的高优先级问题？
 

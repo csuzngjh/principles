@@ -11,6 +11,9 @@
     "build": "npm run build --workspace=@principles/core && npm run build --workspace=principles-disciple",
     "lint": "npm run build --workspace=@principles/core && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts",
     "lint:fix": "npm run build --workspace=@principles/core && npx eslint packages/**/*.ts --ignore-pattern **/*.test.ts --ignore-pattern **/*.spec.ts --ignore-pattern **/*.d.ts --fix",
+    "typecheck:openclaw-plugin": "cd packages/openclaw-plugin && npx tsc --noEmit",
+    "check:generated-artifacts": "node scripts/check-generated-artifacts.cjs",
+    "verify:merge": "npm run check:generated-artifacts && npm run lint && npm run build && npm run build --workspace=@principles/pd-cli && npm run typecheck:openclaw-plugin",
     "pre-commit": "lint-staged",
     "ai-sprint": "node packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs",
     "ai-sprint:test": "node --test packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/test/*.mjs",
@@ -35,7 +38,7 @@
     "@typescript-eslint/parser": "^8.58.0",
     "eslint": "^10.2.1",
     "globals": "^17.5.0",
-    "lefthook": "^2.1.5",
+    "lefthook": "^2.1.6",
     "lint-staged": "^16.4.0",
     "semantic-release": "^25.0.3"
   },

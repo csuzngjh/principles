@@ -23,13 +23,13 @@ import { SqliteHistoryQuery } from '../../store/sqlite-history-query.js';
 import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { DiagnosticianRunner } from '../diagnostician-runner.js';
 import { PassThroughValidator } from '../diagnostician-validator.js';
+import type { DiagnosticianCommitter } from '../../store/diagnostician-committer.js';
 import type {
   DiagnosticianValidator,
   DiagnosticianValidationResult,
 } from '../diagnostician-validator.js';
 import { TestDoubleRuntimeAdapter } from '../../adapter/test-double-runtime-adapter.js';
 import type { TaskRecord } from '../../task-status.js';
-import type { PDErrorCategory } from '../../error-categories.js';
 
 // -- Test fixtures --
 
@@ -87,6 +87,7 @@ function makeDiagnosticianTaskInput(
 // -- AlwaysInvalidValidator for Scenario 3 --
 
 class AlwaysInvalidValidator implements DiagnosticianValidator {
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async validate(
     _output: Parameters<DiagnosticianValidator['validate']>[0],
     _taskId: string,
@@ -104,10 +105,15 @@ class AlwaysInvalidValidator implements DiagnosticianValidator {
 const TMP_ROOT = path.join(os.tmpdir(), `pd-dual-track-e2e-${process.pid}`);
 
 describe('DiagnosticianRunner Dual-Track E2E', () => {
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let testDir: string;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let stateManager: RuntimeStateManager;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let contextAssembler: SqliteContextAssembler;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let historyQuery: SqliteHistoryQuery;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let eventEmitter: StoreEventEmitter;
 
   beforeEach(async () => {
@@ -136,8 +142,9 @@ describe('DiagnosticianRunner Dual-Track E2E', () => {
   });
 
   function createRunner(
-    validator: DiagnosticianValidator = new PassThroughValidator(),
     runtimeAdapter: TestDoubleRuntimeAdapter,
+    validator: DiagnosticianValidator = new PassThroughValidator(),
+    committer: DiagnosticianCommitter = { commit: async () => ({ commitId: "mock-commit-id", artifactId: "mock-artifact-id", candidateCount: 0 }) },
   ): DiagnosticianRunner {
     return new DiagnosticianRunner(
       {
@@ -146,6 +153,7 @@ describe('DiagnosticianRunner Dual-Track E2E', () => {
         runtimeAdapter,
         eventEmitter,
         validator,
+      committer,
       },
       {
         owner: 'dual-track-e2e-runner',
@@ -185,7 +193,7 @@ describe('DiagnosticianRunner Dual-Track E2E', () => {
         onFetchOutput: (_runId) => ({ runId: 'td-fetch-1', payload: successfulOutput }),
       });
 
-      const runner = createRunner(new PassThroughValidator(), runtimeAdapter);
+      const runner = createRunner(runtimeAdapter, new PassThroughValidator());
       const result = await runner.run(taskId);
 
       // Assertion 1: result.status === 'succeeded'
@@ -241,7 +249,7 @@ describe('DiagnosticianRunner Dual-Track E2E', () => {
         onFetchOutput: () => null,
       });
 
-      const runner = createRunner(new PassThroughValidator(), runtimeAdapter);
+      const runner = createRunner(runtimeAdapter, new PassThroughValidator());
       const result = await runner.run(taskId);
 
       // Assertion 1: result.status === 'retried'
@@ -296,7 +304,7 @@ describe('DiagnosticianRunner Dual-Track E2E', () => {
       });
 
       // Use AlwaysInvalidValidator that always rejects output
-      const runner = createRunner(new AlwaysInvalidValidator(), runtimeAdapter);
+      const runner = createRunner(runtimeAdapter, new AlwaysInvalidValidator());
       const result = await runner.run(taskId);
 
       // Assertion 1: result.status === 'retried' (shouldRetry=true by default)
@@ -376,7 +384,7 @@ describe('DiagnosticianRunner Dual-Track E2E', () => {
         onFetchOutput: (_runId) => ({ runId: 'td-oc-fetch-1', payload: successOutput }),
       });
 
-      const runner = createRunner(new PassThroughValidator(), runtimeAdapter);
+      const runner = createRunner(runtimeAdapter, new PassThroughValidator());
       const result = await runner.run(taskId);
 
       // Assertion 1: result.status === 'succeeded' (no errors from mixed runtime_kind)

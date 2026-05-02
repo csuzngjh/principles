@@ -1,102 +1,104 @@
-# Roadmap: Principles
+# Roadmap: Principles Disciple
 
 ## Milestones
 
-- ✅ **v2.0** — M1 Foundation Contracts — SHIPPED 2026-04-21
-- ✅ **v2.1** — M2 Task/Run State Core — SHIPPED 2026-04-22
-- ✅ **v2.2** — M3 History Retrieval + Context Build — SHIPPED 2026-04-23
-- 🔵 **v2.3** — M4 Diagnostician Runner v2 — Active
+- ✅ **v2.0 M1** — Foundation Contracts — SHIPPED 2026-04-21
+- ✅ **v2.1 M2** — Task/Run State Core — SHIPPED 2026-04-22
+- ✅ **v2.2 M3** — History Retrieval + Context Build — SHIPPED 2026-04-23
+- ✅ **v2.3 M4** — Diagnostician Runner v2 — SHIPPED 2026-04-23
+- ✅ **v2.4 M5** — Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24
+- ✅ **v2.5 M6** — Production Runtime Adapter: OpenClaw CLI Diagnostician — SHIPPED 2026-04-25
+- ✅ **v2.6 M7** — Principle Candidate Intake — SHIPPED 2026-04-27
+- ✅ **v2.7 M8** — Pain Signal → Principle Single Path Cutover — SHIPPED 2026-04-28
+- ✅ **v2.8 M9** — PiAi Runtime Adapter (Default Diagnostician Runtime) — SHIPPED 2026-04-29
 
 ## Phases
 
 <details>
-<summary>✅ v2.0 M1 Foundation Contracts (Phase 1-4) — SHIPPED 2026-04-21</summary>
+<summary>✅ v2.7 M8 — Pain Signal → Principle Single Path Cutover (SHIPPED 2026-04-28)</summary>
 
-- [x] Phase 1: Core Protocol + Agent + Error Contracts (3/3 plans) — completed 2026-04-21
-- [x] Phase 2: Context + Diagnostician Contracts (1/1 plans) — completed 2026-04-21
-- [x] Phase 3: Package Infrastructure (1/1 plans) — completed 2026-04-21
-- [x] Phase 4: Verification + Doc Sync (2/2 plans) — completed 2026-04-21
-
-</details>
-
-<details>
-<summary>✅ v2.1 M2 Task/Run State Core (Phase m2-01 through m2-07) — SHIPPED 2026-04-22</summary>
-
-- [x] m2-01: TaskStore Foundation (1/1 plans) — completed 2026-04-22
-- [x] m2-02: RunStore Foundation (1/1 plans) — completed 2026-04-22
-- [x] m2-03: LeaseManager (1/1 plans) — completed 2026-04-22
-- [x] m2-04: RetryPolicy (1/1 plans) — completed 2026-04-22
-- [x] m2-05: RecoverySweep + Integration Tests (1/1 plans) — completed 2026-04-22
-- [x] m2-06: Migration Bridge + Advanced Integration Tests (1/1 plans) — completed 2026-04-22
-- [x] m2-07: Runtime Integration + Event Emission + CLI Inspection (1/1 plans) — completed 2026-04-22
+- [x] m8-01: Legacy Code Map + Single Path Cutover (5/5 plans) — completed 2026-04-28
+- [x] m8-02: PainSignalBridge E2E + Auto-Intake Enable (2/2 plans) — completed 2026-04-28
+- [x] m8-03: Real Environment UAT — M8 final sign-off (1/1 plan) — completed 2026-04-28
 
 </details>
 
-<details>
-<summary>✅ v2.2 M3 History Retrieval + Context Build (Phase m3-01 through m3-09) — SHIPPED 2026-04-23</summary>
+### v2.8 M9 — PiAi Runtime Adapter (Default Diagnostician Runtime) — SHIPPED 2026-04-29
 
-- [x] m3-01: TrajectoryLocator — completed 2026-04-22
-- [x] m3-02: BoundedHistoryQuery — completed 2026-04-22
-- [x] m3-03: ContextAssembler — completed 2026-04-22
-- [x] m3-04: DegradationPolicy — completed 2026-04-22
-- [x] m3-05: WorkspaceIsolation — completed 2026-04-22
-- [x] m3-06: CLI Wiring — completed 2026-04-22
-- [x] m3-07: Legacy Import Boundary — completed 2026-04-23
-- [x] m3-08: OpenClaw-History Schema Alignment — completed 2026-04-23
-- [x] m3-09: OpenClaw-History Entry Mapping — completed 2026-04-23
+**Pipeline:**
+pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (pi-ai complete) → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
 
-</details>
+**Phases:**
 
-<details>
-<summary>✅ v2.3 M4 Diagnostician Runner v2 (Phase m4-01 through m4-06) — SHIPPED 2026-04-23</summary>
+- [x] **m9-01**: PiAiRuntimeAdapter Core — completed 2026-04-29
+- [x] **m9-03-01**: CLI probe for pi-ai — completed 2026-04-29
+- [x] **m9-03-02**: diagnose run pi-ai + resolveRuntimeConfig — completed 2026-04-29
+- [x] **m9-04**: Tests (m9-adapter-integration.test.ts + m9-e2e.test.ts) — completed 2026-04-29
+- [x] **m9-05**: Real UAT with xiaomi-coding/mimo-v2.5-pro — completed 2026-04-29 (PR #412)
 
-- [x] m4-01: RunnerCore (3/3 plans) — completed 2026-04-23
-  Plans:
-  - [x] m4-01-01-PLAN.md — Runner type contracts + RuntimeStateManager extensions
-  - [x] m4-01-02-PLAN.md — DiagnosticianRunner implementation + unit tests
-  - [x] m4-01-03-PLAN.md — Integration tests + index.ts exports
-- [x] m4-02: RuntimeInvocation (1/1 plans) — completed 2026-04-23
-  Plans:
-  - [x] m4-02-01-PLAN.md — TestDoubleRuntimeAdapter implementation + StartRunInput validation
-- [x] m4-03: Validator (1/1 plans) — completed 2026-04-23
-- [x] m4-04: RetryLeaseIntegration (1/1 plans) — completed 2026-04-23
-- [x] m4-05: TelemetryCLI (1/1 plans) — completed 2026-04-23
-- [x] m4-06: DualTrackE2E (1/1 plans) — completed 2026-04-23
-  Plans:
-  - [x] m4-06-01-PLAN.md — Dual-track E2E verification with TestDoubleRuntimeAdapter
+**Key accomplishment:** PiAiRuntimeAdapter with xiaomi-coding provider as default diagnostician runtime, replacing openclaw-cli as the default for pain→principle pipeline.
 
-</details>
+**Hard Boundaries:**
+- 不引入 @mariozechner/pi-agent-core
+- 不支持工具调用
+- 不支持 OpenClaw session/gateway/plugin hooks
+- 不改 OpenClawCliRuntimeAdapter（保留为 alternative）
+- 不修改 candidate/ledger 主链路
 
-## Progress
+**LOCKED Decisions:**
+- LOCKED-01: PiAiRuntimeAdapter is direct LLM completion only
+- LOCKED-02: M9 success = ledger probation entry exists
+- LOCKED-03: workflows.yaml is runtime SSOT
 
-| Phase | Milestone | Plans Complete | Status | Completed |
-|-------|-----------|---------------|--------|-----------|
-| 1. Core Protocol | v2.0 | 3/3 | Complete | 2026-04-21 |
-| 2. Context + Diag | v2.0 | 1/1 | Complete | 2026-04-21 |
-| 3. Infrastructure | v2.0 | 1/1 | Complete | 2026-04-21 |
-| 4. Verification | v2.0 | 2/2 | Complete | 2026-04-21 |
-| m2-01 TaskStore | v2.1 | 1/1 | Complete | 2026-04-22 |
-| m2-02 RunStore | v2.1 | 1/1 | Complete | 2026-04-22 |
-| m2-03 LeaseManager | v2.1 | 1/1 | Complete | 2026-04-22 |
-| m2-04 RetryPolicy | v2.1 | 1/1 | Complete | 2026-04-22 |
-| m2-05 RecoverySweep | v2.1 | 1/1 | Complete | 2026-04-22 |
-| m2-06 MigrationBridge | v2.1 | 1/1 | Complete | 2026-04-22 |
-| m2-07 RuntimeIntegration | v2.1 | 1/1 | Complete | 2026-04-22 |
-| m3-01 TrajectoryLocator | v2.2 | — | Complete | 2026-04-22 |
-| m3-02 BoundedHistoryQuery | v2.2 | — | Complete | 2026-04-22 |
-| m3-03 ContextAssembler | v2.2 | — | Complete | 2026-04-22 |
-| m3-04 DegradationPolicy | v2.2 | — | Complete | 2026-04-22 |
-| m3-05 WorkspaceIsolation | v2.2 | — | Complete | 2026-04-22 |
-| m3-06 CLI-Wiring | v2.2 | — | Complete | 2026-04-22 |
-| m3-07 LegacyImportBoundary | v2.2 | — | Complete | 2026-04-23 |
-| m3-08 SchemaAlignment | v2.2 | — | Complete | 2026-04-23 |
-| m3-09 EntryMapping | v2.2 | — | Complete | 2026-04-23 |
-| m4-01 RunnerCore | v2.3 | 3/3 | Complete | 2026-04-23 |
-| m4-02 RuntimeInvocation | v2.3 | 1/1 | Complete | 2026-04-23 |
-| m4-03 Validator | v2.3 | 1/1 | Complete | 2026-04-23 |
-| m4-04 RetryLeaseIntegration | v2.3 | 1/1 | Complete | 2026-04-23 |
-| m4-05 TelemetryCLI | v2.3 | 1/1 | Complete | 2026-04-23 |
-| m4-06 DualTrackE2E | v2.3 | 1/1 | Complete | 2026-04-23 |
+**Dependencies:**
+- m9-01 → m9-02 (factory needs adapter)
+- m9-02 → m9-03 (CLI needs factory)
+- m9-01 → m9-04 (tests need adapter)
+- m9-03 → m9-05 (UAT needs CLI)
+
+**Hard Boundaries:**
+- 不引入 `@mariozechner/pi-agent-core`
+- 不支持工具调用
+- 不支持 OpenClaw session/gateway/plugin hooks
+- 不改 OpenClawCliRuntimeAdapter（保留为 alternative）
+- 不修改 candidate/ledger 主链路（除非测试证明有 bug）
+
+**LOCKED Decisions:**
+- LOCKED-01: Direct LLM completion only. No tools, no agent loop, no OpenClaw dependency.
+- LOCKED-02: M9 success = ledger probation entry exists. LLM response success alone ≠ success.
+- LOCKED-03: workflows.yaml is runtime SSOT.
+
+## Backlog: Future Milestones
+
+### v2.9 M10 — Nocturnal Artificer LLM Upgrade — IN PROGRESS
+
+**Goal:** Replace hardcoded Artificer stub with LLM-backed dynamic code generator, completing the PD system's self-evolution closed loop.
+
+**Pipeline:**
+pain → Diagnostician → principle → Nocturnal Trinity Reflection → **Artificer (LLM)** → sandbox `.js` rule → validateRuleImplementationCandidate → maybePersistArtificerCandidate → active interception rule
+
+**Phases:**
+
+- [ ] **m10-01**: Artificer Core & LLM Integration — `runArtificerAsync` + prompt engineering
+- [ ] **m10-02**: Pipeline Integration — Replace stub in NocturnalService
+- [ ] **m10-03**: Dynamic Pruning & E2E Validation — adherence-based lifecycle + end-to-end
+
+**LOCKED Decisions:**
+- LOCKED-04: Artificer uses same `runtimeAdapter` config as Diagnostician
+- LOCKED-05: Static validation is non-negotiable gate for LLM code
+- LOCKED-06: Dynamic Pruning must be verifiable
+
+**Hard Boundaries:**
+- Artificer 仅生成 Sandbox `.js`，不直接修改生产代码
+- 必须通过 `RuleHost` 沙盒验证
+- 不修改 Trinity reflection 链路
+- 不修改 Diagnostician 主链路
+- 不引入新 runtime 依赖
+
+**Dependencies:**
+- m10-01 → m10-02 (pipeline needs runArtificerAsync)
+- m10-02 → m10-03 (E2E needs pipeline integrated)
 
 ---
-*Last updated: 2026-04-23*
+
+_Last updated: 2026-04-29 after M9 shipped_

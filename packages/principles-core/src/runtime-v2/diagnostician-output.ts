@@ -40,6 +40,14 @@ export type RecommendationKind = Static<typeof RecommendationKindSchema>;
 export const DiagnosticianRecommendationSchema = Type.Object({
   kind: RecommendationKindSchema,
   description: Type.String({ minLength: 1 }),
+  /** Trigger pattern (regex/keywords) — required when kind is 'principle' */
+  triggerPattern: Type.Optional(Type.String()),
+  /** Action to take when pattern matches — required when kind is 'principle' */
+  action: Type.Optional(Type.String()),
+  /** Highly abstracted principle (≤200 chars) — required when kind is 'principle'
+   * @see MAX_ABSTRACTED_PRINCIPLE_CHARS in runner/default-validator.ts
+   */
+  abstractedPrinciple: Type.Optional(Type.String()),
 });
  
 export type DiagnosticianRecommendation = Static<typeof DiagnosticianRecommendationSchema>;
@@ -68,7 +76,7 @@ export type DiagnosticianOutputV1 = Static<typeof DiagnosticianOutputV1Schema>;
  * is performed separately via DiagnosticianContextPayloadSchema.
  */
 export const DiagnosticianInvocationInputSchema = Type.Object({
-  agentId: Type.Literal('diagnostician'),
+  agentId: Type.String({ minLength: 1 }),
   taskId: Type.String({ minLength: 1 }),
   context: Type.Unknown(), // Validated separately — DiagnosticianContextPayload
   outputSchemaRef: Type.Literal('diagnostician-output-v1'),
@@ -77,8 +85,8 @@ export const DiagnosticianInvocationInputSchema = Type.Object({
 
 /** Typed interface for diagnostician invocation — context references DiagnosticianContextPayload (per D-02). */
 export interface DiagnosticianInvocationInput {
-  /** Agent identifier (always "diagnostician"). */
-  agentId: 'diagnostician';
+  /** Agent identifier — any valid agent ID (e.g., "diagnostician", "main"). */
+  agentId: string;
   /** The task being diagnosed. */
   taskId: string;
   /** Pre-assembled context for the diagnosis. */

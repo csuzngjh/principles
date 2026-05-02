@@ -55,9 +55,11 @@ import {
   runTrinityAsync,
   DEFAULT_TRINITY_CONFIG,
   type TrinityConfig,
+  type TrinityTelemetry,
   type TrinityResult,
   type TrinityDraftArtifact,
   type TrinityRuntimeAdapter,
+  type ArtificerRuleContext,
 } from '../core/nocturnal-trinity.js';
 import {
   validateExecutability,
@@ -70,7 +72,10 @@ import {
 import {
   parseArtificerOutput,
   resolveArtificerTargetRule,
+  runArtificerAsync,
   shouldRunArtificer,
+  type ArtificerInput,
+  type ArtificerLineageMetadata,
   type ArtificerOutput,
   type ArtificerTargetRuleResolution,
 } from '../core/nocturnal-artificer.js';
@@ -89,6 +94,8 @@ import {
 import {
   createImplementation,
   deleteImplementation,
+  getPrincipleSubtree,
+  type LedgerRule,
 } from '../core/principle-tree-ledger.js';
 import {
   checkPreflight,
@@ -573,8 +580,243 @@ function persistCodeCandidate(
   }
 }
 
- 
- 
+function processArtificerOutput(
+  parsedArtificer: ArtificerOutput | null,
+  ruleResolution: ArtificerTargetRuleResolution,
+  validationFailures: string[],
+  stateDir: string,
+  workspaceDir: string,
+  artifact: NocturnalArtifact,
+  selectedPrincipleId: string,
+  selectedSessionId: string,
+  isStub: boolean
+): NocturnalArtificerDiagnostics {
+  void stateDir;
+  void isStub;
+
+  // Callers guarantee status === 'selected' (skip early-returns are handled
+  // before calling this function), but TS doesn't narrow across function
+  // boundaries. The cast is safe by construction.
+  const ruleId = (ruleResolution as Extract<typeof ruleResolution, { status: 'selected' }>).ruleId;
+
+  if (!parsedArtificer) {
+    return {
+      status: 'validation_failed',
+      reason: 'parse_failed',
+      ruleResolution,
+      validationFailures: ['Artificer output could not be parsed.'],
+      ruleId,
+    };
+  }
+
+  if (parsedArtificer.ruleId !== ruleId) {
+    return {
+      status: 'validation_failed',
+      reason: 'rule_mismatch',
+      ruleResolution,
+      validationFailures: [
+        `Resolved rule ${ruleId} did not match candidate rule ${parsedArtificer.ruleId}.`,
+      ],
+      ruleId,
+    };
+  }
+
+  const validation = validateRuleImplementationCandidate(parsedArtificer.candidateSource);
+  if (!validation.passed) {
+    return {
+      status: 'validation_failed',
+      reason: 'validator_rejected',
+      ruleResolution,
+      validationFailures: validation.failures.map((failure) => failure.message),
+      ruleId: (ruleResolution as Extract<typeof ruleResolution, { status: 'selected' }>).ruleId,
+    };
+  }
+
+  const persisted = persistCodeCandidate(
+    workspaceDir,
+    stateDir,
+    artifact,
+    selectedPrincipleId,
+    selectedSessionId,
+    parsedArtificer
+  );
+  return {
+    ...persisted,
+    ruleResolution,
+  };
+}
+
+async function maybePersistArtificerCandidateAsync(
+  workspaceDir: string,
+  stateDir: string,
+  selectedPrincipleId: string,
+  selectedSessionId: string,
+  snapshot: NocturnalSessionSnapshot,
+  artifact: NocturnalArtifact,
+  options: NocturnalServiceOptions
+): Promise<NocturnalArtificerDiagnostics> {
+  const ruleResolution = resolveArtificerTargetRule(
+    stateDir,
+    selectedPrincipleId,
+    snapshot
+  );
+
+  if (ruleResolution.status !== 'selected') {
+    return {
+      status: 'skipped',
+      reason: 'no_deterministic_rule',
+      ruleResolution,
+      validationFailures: [],
+    };
+  }
+
+  const validationFailures: string[] = [];
+  if (snapshot._dataSource === 'pain_context_fallback') {
+    validationFailures.push('fallback_snapshot: stats derived from pain context only (trajectory extractor failed) - signal counts may be undercounted');
+  }
+
+  if (!shouldRunArtificer(snapshot, ruleResolution)) {
+    return {
+      status: 'skipped',
+      reason: 'insufficient_signal_density',
+      ruleResolution,
+      validationFailures,
+      ruleId: ruleResolution.ruleId,
+    };
+  }
+
+  if (!artifact.betterDecision || !artifact.rationale) {
+    return {
+      status: 'skipped',
+      reason: 'missing_scribe_input',
+      ruleResolution,
+      validationFailures: [],
+      ruleId: ruleResolution.ruleId,
+    };
+  }
+
+  const sourcePainIds = buildPainRefs(snapshot);
+  const sourceGateBlockIds = buildGateBlockRefs(snapshot);
+
+  if (options.runtimeAdapter) {
+    const lineage: ArtificerLineageMetadata = {
+      artifactKind: 'rule-implementation-candidate',
+      sourceSnapshotRef: artifact.sourceSnapshotRef,
+      sourcePainIds,
+      sourceGateBlockIds,
+    };
+    const artificerInput: ArtificerInput = {
+      principleId: selectedPrincipleId,
+      ruleId: ruleResolution.ruleId,
+      snapshot,
+      scribeArtifact: {
+        sessionId: selectedSessionId,
+        badDecision: artifact.badDecision,
+        betterDecision: artifact.betterDecision,
+        rationale: artifact.rationale,
+        sourceSnapshotRef: artifact.sourceSnapshotRef,
+      },
+      lineage,
+    };
+
+    const subtree = getPrincipleSubtree(stateDir, selectedPrincipleId);
+    const targetRule: LedgerRule | undefined = subtree?.rules.find(
+      (entry) => entry.rule.id === ruleResolution.ruleId
+    )?.rule;
+    const ruleContext: ArtificerRuleContext = {
+      ruleName: targetRule?.name ?? ruleResolution.ruleId,
+      ruleDescription: targetRule?.description ?? '',
+      triggerCondition: targetRule?.triggerCondition ?? '',
+      action: targetRule?.action ?? '',
+    };
+
+    const trinityConfig: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: false,
+      ...options.trinityConfig,
+    };
+    const telemetry: TrinityTelemetry = {
+      chainMode: 'trinity',
+      dreamerPassed: true,
+      philosopherPassed: true,
+      scribePassed: true,
+      candidateCount: 1,
+      selectedCandidateIndex: 0,
+      stageFailures: [],
+      usedStubs: false,
+    };
+
+    const artificerOutput = await runArtificerAsync(
+      artificerInput,
+      ruleContext,
+      options.runtimeAdapter,
+      telemetry,
+      trinityConfig
+    );
+
+    if (!artificerOutput) {
+      // DD-04 design: "No candidate is better than a bad candidate"
+      // LLM failure = no valid output, so skip candidate generation entirely
+      return {
+        status: 'skipped',
+        reason: 'parse_failed',
+        ruleResolution,
+        validationFailures: ['Artificer LLM call failed or returned unparseable output.'],
+        ruleId: ruleResolution.ruleId,
+      };
+    }
+
+    return processArtificerOutput(
+      artificerOutput,
+      ruleResolution,
+      validationFailures,
+      stateDir,
+      workspaceDir,
+      artifact,
+      selectedPrincipleId,
+      selectedSessionId,
+      false
+    );
+  }
+
+  if (options.artificerOutputOverride !== undefined) {
+    const overrideParsed = parseArtificerOutput(options.artificerOutputOverride);
+    return processArtificerOutput(
+      overrideParsed,
+      ruleResolution,
+      validationFailures,
+      stateDir,
+      workspaceDir,
+      artifact,
+      selectedPrincipleId,
+      selectedSessionId,
+      false
+    );
+  }
+
+  const stubParsed = buildDefaultArtificerOutput(
+    ruleResolution.ruleId,
+    artifact,
+    artifact.sourceSnapshotRef,
+    sourcePainIds,
+    sourceGateBlockIds
+  );
+  return processArtificerOutput(
+    stubParsed,
+    ruleResolution,
+    validationFailures,
+    stateDir,
+    workspaceDir,
+    artifact,
+    selectedPrincipleId,
+    selectedSessionId,
+    true
+  );
+}
+
+  
+  
 function maybePersistArtificerCandidate(
   workspaceDir: string,
   stateDir: string,
@@ -638,51 +880,17 @@ function maybePersistArtificerCandidate(
           sourceGateBlockIds
         );
 
-  if (!parsedArtificer) {
-    return {
-      status: 'validation_failed',
-      reason: 'parse_failed',
-      ruleResolution,
-      validationFailures: ['Artificer output could not be parsed.'],
-      ruleId: ruleResolution.ruleId,
-    };
-  }
-
-  if (parsedArtificer.ruleId !== ruleResolution.ruleId) {
-    return {
-      status: 'validation_failed',
-      reason: 'rule_mismatch',
-      ruleResolution,
-      validationFailures: [
-        `Resolved rule ${ruleResolution.ruleId} did not match candidate rule ${parsedArtificer.ruleId}.`,
-      ],
-      ruleId: ruleResolution.ruleId,
-    };
-  }
-
-  const validation = validateRuleImplementationCandidate(parsedArtificer.candidateSource);
-  if (!validation.passed) {
-    return {
-      status: 'validation_failed',
-      reason: 'validator_rejected',
-      ruleResolution,
-      validationFailures: validation.failures.map((failure) => failure.message),
-      ruleId: ruleResolution.ruleId,
-    };
-  }
-
-  const persisted = persistCodeCandidate(
-    workspaceDir,
+  return processArtificerOutput(
+    parsedArtificer,
+    ruleResolution,
+    validationFailures,
     stateDir,
+    workspaceDir,
     artifact,
     selectedPrincipleId,
     selectedSessionId,
-    parsedArtificer
+    true
   );
-  return {
-    ...persisted,
-    ruleResolution,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1528,7 +1736,7 @@ async function executeNocturnalReflectionWithAdapter(
     warn(`[nocturnal-service] Failed to append behavioral artifact lineage: ${String(err)}`);
   }
 
-  diagnostics.artificer = maybePersistArtificerCandidate(
+  diagnostics.artificer = await maybePersistArtificerCandidateAsync(
     workspaceDir,
     stateDir,
     selectedPrincipleId,

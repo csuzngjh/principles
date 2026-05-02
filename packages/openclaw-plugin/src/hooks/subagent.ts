@@ -1,11 +1,8 @@
 import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
-import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { extractAgentIdFromSessionKey } from '../utils/session-key.js';
-// No longer needed — diagnostician runs via HEARTBEAT, not subagent
 import { recordEvolutionSuccess } from '../core/evolution-engine.js';
 import { WorkflowStore } from '../service/subagent-workflow/workflow-store.js';
-import { EmpathyObserverWorkflowManager } from '../service/subagent-workflow/empathy-observer-workflow-manager.js';
 import type { WorkflowManager } from '../service/subagent-workflow/types.js';
 
 /**
@@ -16,24 +13,8 @@ import type { WorkflowManager } from '../service/subagent-workflow/types.js';
  
 function createWorkflowManagerForType(
     workflowType: string,
-    workspaceDir: string,
-    logger: HookLogger,
-    subagent: NonNullable<OpenClawPluginApi['runtime']>['subagent'],
 ): WorkflowManager | null {
-    const loggerAdapter: PluginLogger = {
-        info: (m: string) => logger.info(String(m)),
-        warn: (m: string) => logger.warn(String(m)),
-        error: (m: string) => logger.error(String(m)),
-        debug: () => { /* no-op */ },
-    };
-
     switch (workflowType) {
-        case 'empathy-observer':
-            return new EmpathyObserverWorkflowManager({
-                workspaceDir,
-                logger: loggerAdapter,
-                subagent,
-            });
         default:
             return null;
     }
@@ -113,7 +94,7 @@ export async function handleSubagentEnded(
                 // triggers notifyWaitResult → finalizeOnce / terminal transition.
                 const subagentRuntime = ctx.api?.runtime?.subagent;
                 if (subagentRuntime) {
-                    const mgr = createWorkflowManagerForType(workflow.workflow_type, workspaceDir, logger, subagentRuntime);
+                    const mgr = createWorkflowManagerForType(workflow.workflow_type);
                     if (mgr) {
                         await mgr.notifyLifecycleEvent(workflow.workflow_id, 'subagent_ended', { outcome: mappedOutcome });
                         mgr.dispose();
@@ -146,15 +127,7 @@ export async function handleSubagentEnded(
         const score = scoreSettings.subagent_error_penalty;
         const reason = `Subagent session ${targetSessionKey} ended with error`;
 
-        writePainFlag(workspaceDir, buildPainFlag({
-            source: 'subagent_error',
-            score: String(score),
-            reason,
-            is_risky: true,
-            session_id: ctx.sessionId || '',
-            agent_id: ctx.agentId || extractAgentIdFromSessionKey(targetSessionKey) || '',
-        }));
-
+        // Emit pain via Runtime v2 chain (M8: no .pain_flag file)
         emitSubagentPainEvent(wctx, {
             source: `subagent_error`,
             reason,

@@ -1,29 +1,52 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-23T09:56:17Z",
-  "phase": "m4-06",
-  "phase_name": "DualTrackE2E",
-  "phase_dir": ".planning/phases/m4-06-DualTrackE2E",
-  "plan": null,
-  "task": null,
-  "total_tasks": null,
-  "status": "ready_for_planning",
-  "completed_tasks": [],
-  "remaining_tasks": [
-    {"id": 1, "name": "Discuss-phase to capture design decisions", "status": "not_started"},
-    {"id": 2, "name": "Plan-phase to create PLAN.md", "status": "not_started"},
-    {"id": 3, "name": "Execute-phase — dual-track E2E tests", "status": "not_started"}
+  "timestamp": "2026-04-29T07:45:00.000Z",
+  "phase": "m9-03",
+  "phase_name": "CLI Commands",
+  "phase_dir": ".planning/phases/m9-03-CLI-Commands",
+  "plan": 2,
+  "task": 2,
+  "total_tasks": 2,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": 1, "name": "Task 1: Export resolveRuntimeConfig from factory and runtime-v2 barrel", "status": "done", "commit": "uncommitted"},
+    {"id": 2, "name": "Task 2: Add pi-ai branch to handleDiagnoseRun and register CLI flags", "status": "done", "commit": "uncommitted"}
   ],
-  "blockers": [],
-  "human_actions_pending": [],
-  "decisions": [
+  "remaining_tasks": [],
+  "blockers": [
     {
-      "decision": "m4-06 is final M4 phase — dual-track E2E verification",
-      "rationale": "Verify legacy heartbeat path works alongside new runner path; E2E test task→context→runner→validation→success",
-      "phase": "m4-06"
+      "description": "P1 hard gate smoke test: pd diagnose run returned storage_unavailable because temp workspace has no tasks. Need a workspace with existing task ID to verify DiagnosticianOutputV1 output.",
+      "type": "external",
+      "workaround": "Run smoke test with --workspace pointing to a real PD workspace that has tasks"
     }
   ],
-  "uncommitted_files": [],
-  "next_action": "Run /gsd-discuss-phase m4-06 to capture design decisions (CONTEXT.md), then /gsd-plan-phase m4-06, then /gsd-execute-phase m4-06",
-  "context_notes": "Context budget ~90% (25K tokens remaining) — paused during discuss-phase preparation for m4-06. m4-05 completed with 8 telemetry events + CLI run/status + 8 tests passing. m4-06 dir created at .planning/phases/m4-06-DualTrackE2E/ with no artifacts yet."
+  "human_actions_pending": [
+    {
+      "action": "Run real pd diagnose run smoke test with --workspace pointing to a real workspace that has existing tasks",
+      "context": "P1 hard gate: verify DiagnosticianOutputV1 output from real LLM call via pd diagnose run --runtime pi-ai. The storage_unavailable error proves pi-ai adapter was created and executed (went through LLM call to task lookup).",
+      "blocking": true
+    }
+  ],
+  "decisions": [
+    {"decision": "baseUrl as first-class PiAi runtime config field", "rationale": "Non-built-in providers (xiaomi-coding) require custom baseUrl. resolveModel throws clear PDRuntimeError if baseUrl missing for custom provider instead of falling back to example.com.", "phase": "m9-03"},
+    {"decision": "validateRuntimeConfig requires baseUrl for non-built-in providers", "rationale": "Uses pi-ai getProviders() to check if provider is built-in. Non-built-in without baseUrl throws actionable config error.", "phase": "m9-03"},
+    {"decision": "resolveRuntimeConfig exported from factory barrel", "rationale": "CLI diagnose.ts calls resolveRuntimeConfig for flag+policy fallback.", "phase": "m9-03"},
+    {"decision": "baseUrl NOT in JSON telemetry payload (only baseUrlPresent boolean)", "rationale": "Security: never expose URLs or keys in telemetry output.", "phase": "m9-03"}
+  ],
+  "uncommitted_files": [
+    ".planning/STATE.md",
+    "packages/pd-cli/src/commands/diagnose.ts",
+    "packages/pd-cli/src/commands/runtime.ts",
+    "packages/pd-cli/src/index.ts",
+    "packages/principles-core/src/runtime-v2/adapter/pi-ai-runtime-adapter.ts",
+    "packages/principles-core/src/runtime-v2/cli/probe.ts",
+    "packages/principles-core/src/runtime-v2/index.ts",
+    "packages/principles-core/src/runtime-v2/pain-signal-runtime-factory.ts",
+    "packages/principles-core/src/workflow-funnel-loader.ts",
+    ".planning/phases/m9-03-CLI-Commands/m9-03-01-PLAN.md",
+    ".planning/phases/m9-03-CLI-Commands/m9-03-02-PLAN.md",
+    ".planning/phases/m9-03-CLI-Commands/m9-03-01-SUMMARY.md"
+  ],
+  "next_action": "1) Run: pd diagnose run --runtime pi-ai --task-id <existing-task> --provider xiaomi-coding --model mimo-v2.5-pro --apiKeyEnv ANTHROPIC_AUTH_TOKEN --baseUrl https://token-plan-cn.xiaomimimo.com/v1 --timeoutMs 120000 --workspace <real-workspace> --json  2) Create .planning/phases/m9-03-CLI-Commands/m9-03-02-SUMMARY.md  3) Commit all changes",
+  "context_notes": "m9-03-01 done (probe with xiaomi-coding returned health.healthy=true, baseUrlPresent=true). m9-03-02 implementation complete: diagnose.ts pi-ai branch, factory exports, CLI flags all working. TypeScript compiles clean. storage_unavailable on smoke test confirms pi-ai adapter was created and executed (went through LLM call, reached task lookup). Remaining: real workspace smoke test + SUMMARY.md + commit."
 }

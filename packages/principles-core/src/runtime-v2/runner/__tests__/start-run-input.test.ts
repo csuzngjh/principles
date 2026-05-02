@@ -10,9 +10,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
+import { DiagnosticianPromptBuilder } from '../../diagnostician-prompt-builder.js';
 import { StartRunInputSchema } from '../../runtime-protocol.js';
-import type { StartRunInput, ContextItem } from '../../runtime-protocol.js';
-import type { DiagnosticianInvocationInput } from '../../diagnostician-output.js';
+import type { StartRunInput } from '../../runtime-protocol.js';
 import type { DiagnosticianContextPayload } from '../../context-payload.js';
 
 /** Mirrors DiagnosticianRunner.invokeRuntime() construction logic exactly. */
@@ -21,19 +21,14 @@ function buildStartRunInput(
   taskId: string,
   timeoutMs: number,
 ): StartRunInput {
-  const invocationInput: DiagnosticianInvocationInput = {
-    agentId: 'diagnostician',
-    taskId,
-    context,
-    outputSchemaRef: 'diagnostician-output-v1',
-    timeoutMs,
-  };
+  const builder = new DiagnosticianPromptBuilder();
+  const { message } = builder.buildPrompt(context);
 
   return {
-    agentSpec: { agentId: 'diagnostician', schemaVersion: 'v1' },
+    agentSpec: { agentId: 'main', schemaVersion: 'v1' },
     taskRef: { taskId },
-    inputPayload: invocationInput,
-    contextItems: [{ role: 'system', content: JSON.stringify(invocationInput) }],
+    inputPayload: message,
+    contextItems: [],
     outputSchemaRef: 'diagnostician-output-v1',
     timeoutMs,
   };
@@ -62,8 +57,8 @@ describe('StartRunInput construction from invokeRuntime()', () => {
     expect(Value.Check(StartRunInputSchema, input)).toBe(true);
   });
 
-  it('agentSpec field is { agentId: "diagnostician", schemaVersion: "v1" }', () => {
-    expect(input.agentSpec).toEqual({ agentId: 'diagnostician', schemaVersion: 'v1' });
+it('agentSpec field is { agentId: "main", schemaVersion: "v1" }', () => {
+    expect(input.agentSpec).toEqual({ agentId: 'main', schemaVersion: 'v1' });
   });
 
   it('taskRef field is { taskId: "<taskId>" }', () => {
@@ -74,21 +69,14 @@ describe('StartRunInput construction from invokeRuntime()', () => {
     expect(input.outputSchemaRef).toBe('diagnostician-output-v1');
   });
 
-  it('inputPayload is a DiagnosticianInvocationInput with agentId="diagnostician"', () => {
-    const payload = input.inputPayload as DiagnosticianInvocationInput;
-    expect(payload.agentId).toBe('diagnostician');
+  it('inputPayload is a JSON string containing taskId and diagnosticInstruction', () => {
+    const payload = JSON.parse(input.inputPayload as string);
     expect(payload.taskId).toBe(taskId);
-    expect(payload.outputSchemaRef).toBe('diagnostician-output-v1');
-    expect(payload.timeoutMs).toBe(timeoutMs);
+    expect(payload.diagnosticInstruction).toBeDefined();
+    expect(payload.diagnosticInstruction.length).toBeGreaterThan(100);
   });
 
-  it('contextItems is an array with at least one system-role entry containing JSON-stringified invocation input', () => {
-    expect(input.contextItems.length).toBeGreaterThanOrEqual(1);
-    const systemItem = input.contextItems.find((item: ContextItem) => item.role === 'system');
-    expect(systemItem).toBeDefined();
-    if (!systemItem) return;
-    const parsed = JSON.parse(systemItem.content);
-    expect(parsed.agentId).toBe('diagnostician');
-    expect(parsed.taskId).toBe(taskId);
+  it('contextItems is empty (instruction is embedded in inputPayload)', () => {
+    expect(input.contextItems).toHaveLength(0);
   });
 });

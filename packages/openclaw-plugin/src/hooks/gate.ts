@@ -41,11 +41,11 @@ export function handleBeforeToolCall(
   const wctx = WorkspaceContext.fromHookContext(ctx);
 
   // 2. Resolve the target file path
-  let filePath = event.params.file_path || event.params.path || event.params.file || event.params.target;
+  let filePath = event.params?.file_path || event.params?.path || event.params?.file || event.params?.target;
 
   // Heuristic for bash mutation detection
   if (isBash && !filePath) {
-    const command = String(event.params.command || event.params.args || '');
+    const command = String(event.params?.command || event.params?.args || '');
     const mutationMatch = /(?:>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|<>]+)/.exec(command);
 
     if (mutationMatch) {
@@ -67,7 +67,7 @@ export function handleBeforeToolCall(
       action: {
         toolName: event.toolName,
         normalizedPath: relPath,
-        paramsSummary: _extractParamsSummary(event.params),
+        paramsSummary: _extractParamsSummary(event.params ?? {}),
       },
       workspace: {
         isRiskPath: false, // Rule Host determines risk dynamically
@@ -83,7 +83,7 @@ export function handleBeforeToolCall(
         epTier: _getEpTier(wctx.workspaceDir),
       },
       derived: {
-        estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params }),
+        estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params ?? {} }),
         bashRisk: _getBashRisk(event),
       },
     };
@@ -227,7 +227,7 @@ function _getEpTier(workspaceDir: string): number {
 function _getBashRisk(event: PluginHookBeforeToolCallEvent): 'safe' | 'normal' | 'dangerous' | 'unknown' {
   if (!BASH_TOOLS_SET.has(event.toolName)) return 'unknown';
   try {
-    const command = String(event.params.command || event.params.args || '');
+    const command = String(event.params?.command || event.params?.args || '');
     const isDangerous = /\brm\s+-rf\b|\bchmod\b|\bchown\b|>\s*\/dev\//.test(command);
     if (isDangerous) return 'dangerous';
     const isMutation = /(?:>|>>|sed|rm|mv|mkdir|touch|cp|npm|yarn|pnpm|pip|cargo)/.test(command);

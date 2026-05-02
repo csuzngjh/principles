@@ -102,27 +102,4 @@ export interface PDTaskSpec {
  * These are reconciled on plugin startup. Adding a new task here
  * automatically creates the corresponding cron job on next restart.
  */
-export const BUILTIN_PD_TASKS: PDTaskSpec[] = [
-  {
-    id: 'empathy-optimizer',
-    name: 'PD Empathy Optimizer',
-    description:
-      'Analyzes recent user messages to discover new frustration expressions and optimize keyword weights.',
-    enabled: true,
-    version: '1.0.1', // Bumped to force cron job settings update
-    schedule: {
-      kind: 'every',
-      everyMs: 5 * 60 * 1000, // 5 minutes (testing); increase to 6h once stable
-    },
-    agentId: 'main',
-    execution: {
-      promptTemplate: 'empathy-optimizer',
-      timeoutSeconds: 300, // 5 min — needs time to scan events.jsonl
-      lightContext: true,
-      toolsAllow: ['read_file', 'write_file', 'search_file_content'],
-    },
-    delivery: {
-      mode: 'none',
-    },
-  },
-];
+export const BUILTIN_PD_TASKS: PDTaskSpec[] = [];

@@ -10,10 +10,10 @@ pre-commit:
       stage_fixed: true
 
 pre-push:
-  parallel: true
+  parallel: false
   commands:
     protect-main:
       run: node scripts/protect-branch.cjs
-    lint:
-      # Block lint errors from being pushed (warnings are allowed but should be fixed)
-      run: npx eslint packages/openclaw-plugin/src
+    verify-merge:
+      # Canonical merge gate. Keep this in sync with the required CI check.
+      run: npm run verify:merge

@@ -1,37 +1,103 @@
 # Milestones
 
-## Current: PD Runtime v2 — M2 Task/Run State Core (Started: 2026-04-22)
+## v2.6 M7 — Principle Candidate Intake (Shipped: 2026-04-27)
+
+**Phases completed:** 5 phases (m7-01 through m7-05), 9 plans
+**Key accomplishments:**
+- CandidateIntakeService: consumes pending candidates, idempotent ledger entry writing
+- pd candidate intake CLI: --candidate-id, --workspace, --json, --dry-run
+- PrincipleTreeLedgerAdapter: 11-field → 18+ field expansion, in-memory idempotency Map
+- E2E traceability: candidate → artifact → task/run → ledger entry link
+- 6 E2E tests + 45 unit tests + 11 CLI integration tests all passing
+
+**Baseline (Frozen):**
+- v2.0 M1: Foundation Contracts — SHIPPED 2026-04-21 (PR #392)
+- v2.1 M2: Task/Run State Core — SHIPPED 2026-04-22 (PR #393)
+- v2.2 M3: History Retrieval + Context Build — SHIPPED 2026-04-23 (PR #394)
+- v2.3 M4: Diagnostician Runner v2 — SHIPPED 2026-04-23 (PR #395, #396)
+- v2.4 M5: Unified Commit + Principle Candidate Intake — SHIPPED 2026-04-24 (PR #398)
+- v2.5 M6: Production Runtime Adapter: OpenClaw CLI Diagnostician — SHIPPED 2026-04-25
+
+**Next:** v2.7 M8 — Pain Signal → Principle Single Path Cutover
+
+---
+
+## v2.7 M8 — Pain Signal → Principle Single Path Cutover (In Progress)
+
+**Goal:** 把痛苦信号到原则账本的端到端链路切到 Runtime v2，删除旧 diagnostician 执行链路。
+
+**Pipeline (single path):**
+pain → PD task/run store → DiagnosticianRunner → OpenClawCliRuntimeAdapter → DiagnosticianOutputV1 → SqliteDiagnosticianCommitter → principle_candidates → CandidateIntakeService → PrincipleTreeLedger probation entry
+
+**Constraints:**
+- Legacy deletion 只针对旧诊断执行路径，不删除无关的 evolution-worker 功能
+- M8 成功标准：链路终点必须是 PrincipleTreeLedger probation entry
+- Candidate intake 是 happy path 的一部分
+
+**Non-goals:** 不保留旧诊断开关、不做 legacy fallback
+
+**Depends on:** M7
+
+**Plans:** TBD
+
+---
+
+## PD Runtime v2 — M5 Unified Commit + Principle Candidate Intake (Shipped: 2026-04-24)
 
 **Goal:**
 
-- Introduce explicit PD-owned task and run truth with lease semantics
-- Replace marker-file and heartbeat-based completion inference with deterministic state layer
-- Build store abstractions, lease lifecycle, retry metadata, and crash recovery
+- diagnostician output -> diagnosis artifact -> principle candidate -> task resultRef，全链路在 SQLite .pd/state.db 内原子完成
+- DiagnosticianCommitter 接口隔离，runner 只依赖 Committer
+- commit 失败 = artifact_commit_failed，不能"任务成功但 candidate 缺失"
+- E2E 硬门槛：task→run→output→artifact→candidate→resultRef 全链路可追溯
 
 **Exit criteria:**
 
-1. Diagnostician-like tasks can be leased and recovered without marker-file truth
-2. Run records exist independently of legacy heartbeat flow
-3. Concurrent lease acquisition is safe
-4. Crash recovery correctly re-enqueues expired lease tasks
-5. All new types align with M1 contracts
-6. Telemetry events emitted for all state transitions
-7. Test coverage >= 80%
+1. Every succeeded diagnostician task has a committed artifact in state.db
+2. Principle candidates from recommendations are registered in state.db
+3. Commit and candidate registration are atomic (single SQLite transaction)
+4. Commit failure prevents task from reaching succeeded status
+5. CLI can list candidates and show artifact details via fixed commands
+6. Telemetry events cover all commit and candidate operations
+7. E2E test verifies: idempotency, failure path, full traceability, candidate list visibility
+8. Test coverage >= 80% for new code
+9. No "task succeeded but candidate missing" state is possible
+10. resultRef format is `commit://<commitId>`
 
-**Non-goals (M3-M9 scope):**
+**Non-goals (M6-M9 scope):**
 
-- Context retrieval (M3)
-- Diagnostician runner (M4)
-- Commit flow (M5)
+- Principle promotion / gating (M6+)
+- Active principle injection (M6+)
 - OpenClaw adapter demotion (M6)
+- Multi-runtime adapter suite (M8)
 
 **GSD files:**
 
-- `.planning/milestones/pd-runtime-v2-m2/REQUIREMENTS.md`
-- `.planning/milestones/pd-runtime-v2-m2/ROADMAP.md`
-- `.planning/phases/m2-task-run-state-core/CONTEXT.md`
+- `.planning/milestones/pd-runtime-v2-m5/REQUIREMENTS.md`
+- `.planning/milestones/pd-runtime-v2-m5/ROADMAP.md`
 
-**Canonical docs:** `docs/pd-runtime-v2/` (README, roadmap, governance, conflict-table)
+**Baseline (Frozen):**
+
+- M1 Foundation Contracts — SHIPPED 2026-04-21 (PR #392)
+- M2 Task/Run State Core — SHIPPED 2026-04-22 (PR #393)
+- M3 History Retrieval + Context Build — SHIPPED 2026-04-23 (PR #394)
+- M4 Diagnostician Runner v2 — SHIPPED 2026-04-23 (PR #395, #396)
+
+**Canonical docs:** `docs/pd-runtime-v2/`
+
+---
+
+## PD Runtime v2 — M4 Diagnostician Runner v2 (Shipped: 2026-04-23)
+
+**Phases completed:** 6 phases (m4-01 through m4-06)
+**Key accomplishments:**
+- DiagnosticianRunner with explicit runner-driven execution lifecycle
+- TestDoubleRuntimeAdapter as first PDRuntimeAdapter consumer
+- DiagnosticianOutputV1 validation (schema + semantic checks)
+- Lease/retry/recovery integration with M2 DefaultLeaseManager
+- Telemetry events for all runner state transitions
+- `pd diagnose run/status` CLI commands
+- Dual-track verification: legacy heartbeat path still works alongside new runner
 
 ---
 

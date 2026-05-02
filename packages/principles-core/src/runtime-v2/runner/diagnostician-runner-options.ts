@@ -15,6 +15,11 @@ export interface DiagnosticianRunnerOptions {
   readonly owner: string;
   /** RuntimeKind value for lease/run record creation. */
   readonly runtimeKind: string;
+  /**
+   * Agent ID passed to the runtime adapter (default: 'diagnostician').
+   * Allows CLI to forward --agent flag through to openclaw agent invocation.
+   */
+  readonly agentId?: string;
 }
 
 /** Resolved options with defaults applied. */
@@ -24,6 +29,7 @@ export interface ResolvedDiagnosticianRunnerOptions {
   readonly defaultMaxAttempts: number;
   readonly owner: string;
   readonly runtimeKind: string;
+  readonly agentId: string;
 }
 
 /** Default option values. */
@@ -31,6 +37,7 @@ export const DEFAULT_RUNNER_OPTIONS: Readonly<Omit<ResolvedDiagnosticianRunnerOp
   pollIntervalMs: 5_000,
   timeoutMs: 300_000,
   defaultMaxAttempts: 3,
+  agentId: 'main',
 } as const;
 
 /** Resolve options by applying defaults. */
@@ -41,5 +48,6 @@ export function resolveRunnerOptions(options: DiagnosticianRunnerOptions): Resol
     defaultMaxAttempts: options.defaultMaxAttempts ?? DEFAULT_RUNNER_OPTIONS.defaultMaxAttempts,
     owner: options.owner,
     runtimeKind: options.runtimeKind,
+    agentId: options.agentId ?? DEFAULT_RUNNER_OPTIONS.agentId,
   };
 }

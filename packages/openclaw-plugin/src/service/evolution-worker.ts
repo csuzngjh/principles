@@ -12,25 +12,22 @@ import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
-import { addDiagnosticianTask, completeDiagnosticianTask, requeueDiagnosticianTask } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import type { PrincipleEvaluability } from '../types/principle-tree-schema.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
-import { validatePainSignal, type PainSignalValidationResult } from '../core/pain-signal.js';
 
 // Re-export queue I/O (extracted to queue-io.ts)
 export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock, requireQueueLock } from './queue-io.js';
 export { enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
 export { EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './queue-io.js';
-import { saveEvolutionQueue, requireQueueLock, hasPendingTask, enqueueSleepReflectionTask, enqueueKeywordOptimizationTask, createEvolutionTaskId } from './queue-io.js';
+import { saveEvolutionQueue, requireQueueLock, hasPendingTask, enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
 import type { RecentPainContext } from './queue-io.js';
 export type { RecentPainContext } from './queue-io.js';
 import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
 import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
-import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
 import {
     createNocturnalTrajectoryExtractor,
@@ -41,7 +38,6 @@ import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-con
 import { PrincipleCompiler } from '../core/principle-compiler/index.js';
 import { loadLedger, updatePrinciple } from '../core/principle-tree-ledger.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
-import { readPainFlagContract } from '../core/pain.js';
 import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
 import { findRecentDuplicateTask } from './evolution-dedup.js';
 import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
@@ -51,7 +47,6 @@ import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import { classifyFailure, type ClassifiableTaskKind } from './failure-classifier.js';
 import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from './cooldown-strategy.js';
 import { reconcileStartup } from './startup-reconciler.js';
-import { clearPainFlag } from '../core/pain-lifecycle.js';
 import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
@@ -99,13 +94,15 @@ export type { WatchdogResult };
 let timeoutId: NodeJS.Timeout | null = null;
 
 /**
- * Queue V2 Schema - Supports multiple task kinds while preserving pain_diagnosis semantics.
+ * Queue V2 Schema - Supports background evolution task kinds.
  *
  * taskKind semantics:
- * - pain_diagnosis: User-adjacent, triggers HEARTBEAT, injects into user prompts
  * - sleep_reflection: Background-only, never injects into user prompts, no HEARTBEAT
+ * - keyword_optimization: Background-only, updates empathy keyword rules
  *
- * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
+ * Pain diagnosis is Runtime v2 only: after_tool_call / pd pain record ->
+ * PainSignalBridge -> DiagnosticianRunner. EvolutionWorker does not read
+ * .pain_flag or process pain_diagnosis queue items.
  */
 /** @deprecated Use PDTaskStatus from '@principles/core/runtime-v2'. M2 migration will replace this. */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
@@ -119,7 +116,7 @@ export interface EvolutionQueueItem {
     source: string;
     traceId?: string;           // Trace ID for linking events across the evolution lifecycle
     
-    // Legacy fields (still used for pain_diagnosis)
+    // Legacy fields kept for existing queue records and background task metadata.
     task?: string;
     score: number;
     reason: string;
@@ -308,294 +305,6 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
         }
         return false;
     });
-}
-
-interface ParsedPainValues {
-    score: number; source: string; reason: string; preview: string;
-    traceId: string; sessionId: string; agentId: string;
-    painEventId?: number;
-}
-
- 
- 
-async function doEnqueuePainTask(
-    wctx: WorkspaceContext, logger: PluginLogger, painFlagPath: string,
-    result: WorkerStatusReport['pain_flag'], v: ParsedPainValues,
-): Promise<WorkerStatusReport['pain_flag']> {
-    result.exists = true;
-    result.score = v.score;
-    result.source = v.source;
-
-    if (v.score < 30) {
-        result.skipped_reason = `score_too_low (${v.score} < 30)`;
-        if (logger) logger.info(`[PD:EvolutionWorker] Pain flag score too low: ${v.score} (source=${v.source})`);
-        return result;
-    }
-
-    // Validate pain signal through TypeBox schema before enqueuing.
-    // Malformed signals are logged and skipped — they never enter the queue.
-    const signalInput = {
-        source: v.source,
-        score: v.score,
-        timestamp: new Date().toISOString(),
-        reason: v.reason,
-        sessionId: v.sessionId ?? undefined,
-        agentId: v.agentId ?? undefined,
-        traceId: v.traceId ?? undefined,
-        triggerTextPreview: v.preview,
-    };
-    const validation: PainSignalValidationResult = validatePainSignal(signalInput);
-    if (!validation.valid) {
-        result.skipped_reason = `invalid_pain_signal (${validation.errors.join('; ')})`;
-        if (logger) logger.warn(`[PD:EvolutionWorker] Pain signal validation failed, skipping enqueue: ${validation.errors.join('; ')}`);
-        SystemLogger.log(wctx.workspaceDir, 'PAIN_SIGNAL_INVALID', `Validation errors: ${validation.errors.join('; ')} | source=${v.source} score=${v.score}`);
-        clearPainFlag(wctx.workspaceDir);
-        return result;
-    }
-
-    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-    const releaseLock = await requireQueueLock(queuePath, logger, 'checkPainFlag');
-    try {
-        let queue: EvolutionQueueItem[] = [];
-        if (fs.existsSync(queuePath)) {
-            try { queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch { /* corrupted queue, treat as empty — safe fallback */ }
-        }
-        const now = Date.now();
-        const dup = findRecentDuplicateTask(queue, v.source, v.preview, now, v.reason);
-        if (dup) {
-            fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${dup.id}\n`, 'utf8');
-            result.enqueued = true;
-            result.skipped_reason = 'duplicate';
-            if (logger) logger.info(`[PD:EvolutionWorker] Duplicate pain task skipped for source=${v.source} preview=${v.preview || 'N/A'}`);
-            clearPainFlag(wctx.workspaceDir);
-            return result;
-        }
-
-        const taskId = createEvolutionTaskId(v.source, v.score, v.preview, v.reason, now);
-        const nowIso = new Date(now).toISOString();
-        const effectiveTraceId = v.traceId || taskId;
-
-        queue.push({
-            id: taskId, taskKind: 'pain_diagnosis',
-            priority: v.score >= 70 ? 'high' : v.score >= 40 ? 'medium' : 'low',
-            score: v.score, source: v.source, reason: v.reason,
-            trigger_text_preview: v.preview, timestamp: nowIso, enqueued_at: nowIso,
-            status: 'pending', session_id: v.sessionId || undefined,
-            agent_id: v.agentId || undefined, traceId: effectiveTraceId,
-            retryCount: 0, maxRetries: 3,
-            painEventId: v.painEventId,
-        });
-
-        saveEvolutionQueue(queuePath, queue);
-        fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
-        result.enqueued = true;
-
-        if (logger) logger.info(`[PD:EvolutionWorker] Enqueued pain task ${taskId} (score=${v.score})`);
-
-        const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
-        evoLogger.logQueued({
-            traceId: effectiveTraceId,
-            taskId,
-            score: v.score,
-            source: v.source,
-            reason: v.reason,
-        });
-
-        wctx.trajectory?.recordEvolutionTask?.({
-            taskId,
-            traceId: effectiveTraceId,
-            source: v.source,
-            reason: v.reason,
-            score: v.score,
-            status: 'pending',
-            enqueuedAt: nowIso,
-        });
-    } finally { releaseLock(); }
-    clearPainFlag(wctx.workspaceDir);
-    return result;
-}
-
-async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Promise<WorkerStatusReport['pain_flag']> {
-    const result: WorkerStatusReport['pain_flag'] = { exists: false, score: null, source: null, enqueued: false, skipped_reason: null };
-    try {
-        const painFlagPath = wctx.resolve('PAIN_FLAG');
-        if (!fs.existsSync(painFlagPath)) return result;
-
-        const rawPain = fs.readFileSync(painFlagPath, 'utf8');
-        const contract = readPainFlagContract(wctx.workspaceDir);
-
-        if (contract.status === 'valid') {
-            const score = parseInt(contract.data.score ?? '0', 10) || 0;
-            const source = contract.data.source ?? 'unknown';
-            const reason = contract.data.reason ?? 'Systemic pain detected';
-            const preview = contract.data.trigger_text_preview ?? '';
-            const isQueued = contract.data.status === 'queued';
-            const traceId = contract.data.trace_id ?? '';
-            const sessionId = contract.data.session_id ?? '';
-            const agentId = contract.data.agent_id ?? '';
-            const painEventIdRaw = contract.data.pain_event_id;
-            const painEventId = painEventIdRaw ? parseInt(painEventIdRaw, 10) : undefined;
-
-            result.exists = true;
-            result.score = score;
-            result.source = source;
-            result.enqueued = isQueued;
-
-            if (isQueued) {
-                result.skipped_reason = 'already_queued';
-                if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${score}, source=${source})`);
-                clearPainFlag(wctx.workspaceDir, painEventId);
-                return result;
-            }
-
-            if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
-            return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
-                score, source, reason, preview, traceId, sessionId, agentId, painEventId,
-            });
-        }
-
-        if (contract.status === 'invalid' && (contract.format === 'kv' || contract.format === 'json' || contract.format === 'invalid_json')) {
-            result.exists = true;
-            result.skipped_reason = `invalid_pain_flag (${contract.missingFields.join(', ') || contract.format})`;
-            if (logger) logger.warn(`[PD:EvolutionWorker] Invalid pain flag skipped: ${result.skipped_reason}`);
-            clearPainFlag(wctx.workspaceDir);
-            return result;
-        }
-
-        // Try JSON format first (pain skill structured output)
-        // The file may have 'status: queued' and 'task_id: xxx' appended after the JSON object.
-        // Extract just the JSON portion by finding the last '}' and parsing up to that point.
-        let parsedAsJson = false;
-        try {
-            const jsonEndIdx = rawPain.lastIndexOf('}');
-            const jsonPortion = jsonEndIdx >= 0 ? rawPain.slice(0, jsonEndIdx + 1) : rawPain;
-            const jsonPain = JSON.parse(jsonPortion);
-
-            // Detect if this is a pain flag JSON object: has any of the known pain flag fields
-            const isPainJson = typeof jsonPain === 'object' && jsonPain !== null && (
-                jsonPain.pain_score !== undefined ||
-                jsonPain.score !== undefined ||
-                jsonPain.source !== undefined ||
-                jsonPain.reason !== undefined ||
-                jsonPain.session_id !== undefined ||
-                jsonPain.agent_id !== undefined
-            );
-
-            if (isPainJson) {
-                parsedAsJson = true;
-                // Score resolution: pain_score > score > default 50
-                const jsonScore = typeof jsonPain.pain_score === 'number' ? jsonPain.pain_score :
-                                  typeof jsonPain.score === 'number' ? jsonPain.score : 50;
-                const jsonSource = jsonPain.source || 'human';
-                const jsonReason = jsonPain.reason || jsonPain.requested_action || 'Systemic pain detected';
-                const jsonPreview = (jsonPain.symptoms || []).slice(0, 2).join('; ');
-
-                // Check if already queued by looking for 'status: queued' in the full file
-                const alreadyQueued = rawPain.includes('status: queued');
-                if (alreadyQueued) {
-                    result.exists = true;
-                    result.score = jsonScore;
-                    result.source = jsonSource;
-                    result.enqueued = true;
-                    result.skipped_reason = 'already_queued';
-                    if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${jsonScore}, source=${jsonSource})`);
-                    clearPainFlag(wctx.workspaceDir, jsonPain.pain_event_id ? parseInt(jsonPain.pain_event_id, 10) : undefined);
-                    return result;
-                }
-
-                return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
-                    score: jsonScore, source: jsonSource, reason: jsonReason,
-                    preview: jsonPreview, traceId: '',
-                    sessionId: jsonPain.session_id || '',
-                    agentId: jsonPain.agent_id || '',
-                    painEventId: jsonPain.pain_event_id ? parseInt(jsonPain.pain_event_id, 10) : undefined,
-                });
-            }
-        } catch { /* Not JSON — fall through to KV/Markdown parsing */ }
-
-        // If we successfully parsed JSON but it didn't match pain flag fields,
-        // don't fall through to KV parsing — it's not a valid pain flag
-        if (parsedAsJson) {
-            if (logger) logger.warn('[PD:EvolutionWorker] Pain flag parsed as JSON but missing all expected fields — ignoring');
-            result.skipped_reason = 'invalid_json_format';
-            return result;
-        }
-
-        const lines = rawPain.split('\n');
-
-        let score = 0;
-        let source = 'unknown';
-        let reason = 'Systemic pain detected';
-        let preview = '';
-        let isQueued = false;
-        let traceId = '';
-        let sessionId = '';
-        let agentId = '';
-        let painEventId: number | undefined;
-
-        for (const line of lines) {
-            // KV format: "key: value"
-            if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
-            if (line.startsWith('source:')) source = line.split(':', 2)[1].trim();
-            if (line.startsWith('reason:')) reason = line.slice('reason:'.length).trim();
-            if (line.startsWith('trigger_text_preview:')) preview = line.slice('trigger_text_preview:'.length).trim();
-            if (line.startsWith('status: queued')) isQueued = true;
-            if (line.startsWith('trace_id:')) traceId = line.split(':', 2)[1].trim();
-            if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
-            if (line.startsWith('agent_id:')) agentId = line.slice('agent_id:'.length).trim();
-            if (line.startsWith('pain_event_id:')) {
-                const raw = line.slice('pain_event_id:'.length).trim();
-                painEventId = parseInt(raw, 10) || undefined;
-            }
-
-            // Key=Value fallback format: "key=value" (pain skill manual output)
-            // Handles both uppercase (Source=X) and lowercase (source=x) variants
-            if (line.startsWith('Source=') || line.startsWith('source=')) source = line.includes('Source=') ? line.slice('Source='.length).trim() : line.slice('source='.length).trim();
-            if (line.startsWith('Reason=') || line.startsWith('reason=')) reason = line.includes('Reason=') ? line.slice('Reason='.length).trim() : line.slice('reason='.length).trim();
-            if (line.startsWith('Score=') || line.startsWith('score=')) {
-                const scoreStr = line.includes('Score=') ? line.slice('Score='.length).trim() : line.slice('score='.length).trim();
-                score = parseInt(scoreStr, 10) || 0;
-            }
-            if (line.startsWith('Time=') || line.startsWith('time=')) {
-                const timeStr = line.includes('Time=') ? line.slice('Time='.length).trim() : line.slice('time='.length).trim();
-                preview = `Human intervention at ${timeStr}`;
-            }
-
-            // Markdown format support (pain skill writes **Source**: xxx format)
-            const mdSource = /\*\*Source\*\*:\s*(.+)/.exec(line);
-            if (mdSource) source = mdSource[1].trim();
-            const mdReason = /\*\*Reason\*\*:\s*(.+)/.exec(line);
-            if (mdReason) reason = mdReason[1].trim();
-            const mdTime = /\*\*Time\*\*:\s*(.+)/.exec(line);
-            if (mdTime) preview = `Human intervention at ${mdTime[1].trim()}`;
-        }
-
-        // Markdown format has no score — default to 50 for human intervention
-        if (score === 0 && source !== 'unknown') score = 50;
-
-        result.exists = true;
-        result.score = score;
-        result.source = source;
-        result.enqueued = isQueued;
-
-        if (isQueued) {
-            result.skipped_reason = 'already_queued';
-            if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${score}, source=${source})`);
-            return result;
-        }
-
-        if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
-
-        return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
-            score, source, reason, preview,
-            traceId, sessionId, agentId, painEventId,
-        });
-
-    } catch (err) {
-        if (logger) logger.warn(`[PD:EvolutionWorker] Error processing pain flag: ${String(err)}`);
-        result.skipped_reason = `error: ${String(err)}`;
-    }
-    return result;
 }
 
 /**
@@ -793,6 +502,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         // V2: Migrate queue to current schema if needed
         let queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
 
+        // Runtime v2 owns pain diagnosis. Drop legacy pain_diagnosis queue items so
+        // EvolutionWorker cannot revive the old .pain_flag -> prompt path.
+        const beforeLegacyPainDrop = queue.length;
+        queue = queue.filter((item) => item.taskKind !== 'pain_diagnosis');
+        if (queue.length < beforeLegacyPainDrop) {
+            logger?.info?.(`[PD:EvolutionWorker] Dropped ${beforeLegacyPainDrop - queue.length} legacy pain_diagnosis queue item(s); use PainSignalBridge/pd pain record`);
+        }
+
         // Validate queue items — filter out malformed entries before processing.
         // Malformed items are logged + skipped; they never crash the evolution cycle.
         const beforeValidation = queue.length;
@@ -804,7 +521,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             if (!item.status || typeof item.status !== 'string') errors.push('missing/invalid status');
             if (!item.taskKind || typeof item.taskKind !== 'string') errors.push('missing/invalid taskKind');
             else {
-                const validTaskKinds = ['pain_diagnosis', 'sleep_reflection', 'model_eval', 'keyword_optimization'];
+                const validTaskKinds = ['sleep_reflection', 'model_eval', 'keyword_optimization'];
                 if (!validTaskKinds.includes(item.taskKind)) {
                     errors.push(`invalid taskKind value '${item.taskKind}' (expected one of: ${validTaskKinds.join(', ')})`);
                 }
@@ -822,7 +539,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             logger?.info?.(`[PD:EvolutionWorker] Filtered ${beforeValidation - queue.length} malformed queue item(s)`);
         }
 
-        let queueChanged = rawQueue.some(isLegacyQueueItem) || queue.length < beforeValidation;
+        let queueChanged = rawQueue.some(isLegacyQueueItem) || queue.length < beforeLegacyPainDrop || queue.length < beforeValidation;
 
         // Guard: Skip keyword_optimization if one is already pending/in-progress (CORR-08)
         if (hasPendingTask(queue, 'keyword_optimization')) {
@@ -890,7 +607,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             stateDir: wctx.stateDir,
                             logger: api?.logger || logger,
                              
-                            runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api!),
+                            runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
                             subagent: api?.runtime?.subagent,
                         });
                         try {
@@ -910,606 +627,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             }
         }
 
-        // Check in_progress tasks for completion (only pain_diagnosis gets HEARTBEAT treatment)
-        // Diagnostician runs via HEARTBEAT (main session LLM), not as a subagent.
-        // Marker file detection is the ONLY completion path for HEARTBEAT diagnostics.
-        for (const task of queue.filter(t => t.status === 'in_progress' && t.taskKind === 'pain_diagnosis')) {
-            const startedAt = new Date(task.started_at || task.timestamp);
 
-            // Condition 1: Check for marker file (created by diagnostician on completion)
-            const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
-            if (fs.existsSync(completeMarker)) {
-                if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected`);
-
-                let principlesGenerated = 0;
-                // C: Track report success for event recording
-                // FIX: Use reportParsed flag so reportSuccess=false when JSON is missing/garbled
-                let reportSuccess = false;
-                let reportParsed = false;
-                // Create principle from the diagnostician's JSON report.
-                const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
-                if (fs.existsSync(reportPath)) {
-                    try {
-                        const raw = fs.readFileSync(reportPath, 'utf8');
-                        if (!raw || raw.trim().length === 0) {
-                            throw new Error('Report file is empty');
-                        }
-                        const reportData = JSON.parse(raw);
-                        if (!reportData) {
-                            throw new Error('JSON parsed but content is null/undefined');
-                        }
-                        // Report is valid JSON — mark as parsed
-                        reportParsed = true;
-
-                        // FIX: Validate phase completeness before accepting the report
-                        // A report missing critical phases is considered failed (not silently accepted).
-                        // The diagnostician must produce all 4 diagnostic phases.
-                        const phases = reportData?.phases || reportData?.diagnosis_report?.phases || {};
-                        const requiredPhases = [
-                            'evidence_gathering',
-                            'causal_chain',
-                            'root_cause_classification',
-                            'principle_extraction',
-                        ];
-                        const presentPhases = requiredPhases.filter(p =>
-                            phases && Object.keys(phases).length > 0 && phases[p]
-                        );
-                        if (presentPhases.length < requiredPhases.length) {
-                            const missing = requiredPhases.filter(p => !phases[p]);
-                            if (logger) logger.warn(`[PD:EvolutionWorker] Report for task ${task.id} incomplete — missing phases: ${missing.join(', ')} (present: ${presentPhases.length}/${requiredPhases.length})`);
-                            // PD-FUNNEL-1.1: Record incomplete_fields event BEFORE retry so funnel can see it.
-                            // The phase-completeness check requeues incomplete reports with continue; without
-                            // this record the funnel would have no signal for JSON-present-but-incomplete cases.
-                            if (eventLog) {
-                                eventLog.recordDiagnosticianReport({
-                                    taskId: task.id,
-                                    reportPath,
-                                    category: 'incomplete_fields',
-                                });
-                            }
-                            // Treat as retryable failure: don't mark success, let retry logic kick in
-                            reportParsed = false;
-                            // Also delete the incomplete marker so next heartbeat re-runs the diagnostician
-                            try { fs.unlinkSync(completeMarker); } catch { /* ignore if already gone */ }
-                            task.status = 'pending';
-                            task.resolution = undefined;
-                            queueChanged = true;
-                            continue;
-                        }
-
-                        // ── Step 3: Noise Classification Filter ──
-                        // Skip principle creation for low-value noise categories that don't represent
-                        // systemic failures or behavioral issues worth encoding as principles.
-                        const classification = reportData?.classification;
-                        const noiseCategories: Record<string, boolean> = {
-                            'development_transient': true, // CRLF drift, duplicate match, self-resolved dev issues
-                            'user_error': true,           // User mistakes, wrong file, bad input
-                        };
-                        if (classification?.category && noiseCategories[classification.category]) {
-                            if (logger) logger.info(`[PD:EvolutionWorker] Skipping principle for noise category "${classification.category}" — pain was ${classification.severity || 'low'} severity, not a systemic failure`);
-                            task.status = 'completed';
-                            task.completed_at = new Date().toISOString();
-                            task.resolution = 'noise_classified';
-                        } else {
-                        // Check ALL known nesting paths — matches subagent.ts parseDiagnosticianReport
-                        const principle = reportData?.principle
-                            || reportData?.phases?.principle_extraction?.principle
-                            || reportData?.diagnosis_report?.principle
-                            || reportData?.diagnosis_report?.phases?.principle_extraction?.principle;
-                        if (principle?.trigger_pattern && principle?.action) {
-                            // Check for duplicate principle (diagnostician may output existing principle)
-                            if (principle.duplicate === true) {
-                                logger.info(`[PD:EvolutionWorker] Diagnostician marked principle as duplicate: ${principle.duplicate_of || 'unknown'} — skipping creation for task ${task.id}`);
-                                task.status = 'completed';
-                                task.completed_at = new Date().toISOString();
-                                task.resolution = 'marker_detected';
-                            } else {
-                                // ── Server-side dedup guard (defense against LLM ignoring duplicate check) ──
-                                const existingPrinciples = wctx.evolutionReducer.getActivePrinciples();
-                                let serverDuplicate: string | null = null;
-                                if (existingPrinciples.length > 0) {
-                                    const newTrigger = (principle.trigger_pattern || '').toLowerCase();
-                                    const newAbstracted = (principle.abstracted_principle || '').toLowerCase();
-                                    for (const ep of existingPrinciples) {
-                                        const epTrigger = (ep.trigger || '').toLowerCase();
-                                        const epAbstracted = (ep.abstractedPrinciple || '').toLowerCase();
-                                        const epText = (ep.text || '').toLowerCase();
-
-                                        // Check 1: abstracted principle overlap (>70% keyword match)
-                                        const newKeywords = newAbstracted.split(/\s+/).filter((w: string) => w.length > 3);
-                                        const epKeywords = epAbstracted.split(/\s+/).filter((w: string) => w.length > 3);
-                                        if (newKeywords.length > 0 && epKeywords.length > 0) {
-                                            const overlap = newKeywords.filter((k: string) => epKeywords.includes(k)).length;
-                                            const overlapRatio = overlap / Math.max(newKeywords.length, epKeywords.length);
-                                            if (overlapRatio > 0.7) {
-                                                serverDuplicate = ep.id;
-                                                break;
-                                            }
-                                        }
-
-                                        // Check 2: trigger pattern contains same key terms
-                                        if (newTrigger.length > 10 && epTrigger.length > 10) {
-                                            const sharedTerms = newTrigger.split(/[\s|\\.+*?()[\]{}^$-]+/).filter((t: string) => t.length > 3);
-                                            if (sharedTerms.length > 0 && sharedTerms.every((t: string) => epTrigger.includes(t))) {
-                                                serverDuplicate = ep.id;
-                                                break;
-                                            }
-                                        }
-
-                                        // Check 3: text overlap (LLM often reuses text from existing principle)
-                                        if (epText.length > 20 && newTrigger.length > 20) {
-                                            const sharedPhrases = epText.split(/\s+/).filter(w => w.length > 5);
-                                            const matchCount = sharedPhrases.filter(w => newTrigger.includes(w)).length;
-                                            if (matchCount >= 3) {
-                                                serverDuplicate = ep.id;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if (serverDuplicate) {
-                                    logger.info(`[PD:EvolutionWorker] Server-side dedup: new principle overlaps with existing ${serverDuplicate} — skipping creation for task ${task.id}`);
-                                    task.status = 'completed';
-                                    task.completed_at = new Date().toISOString();
-                                    task.resolution = 'marker_detected';
-                                } else {
-                                    logger.info(`[PD:EvolutionWorker] Creating principle from report for task ${task.id}`);
-                                    const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
-                                        painId: task.painEventId !== undefined ? String(task.painEventId) : task.id,
-                                        painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
-                                        triggerPattern: principle.trigger_pattern,
-                                        action: principle.action,
-                                        source: task.source || 'heartbeat_diagnostician',
-                                        // #212: Default to weak_heuristic so principles are auto-evaluable
-                                        // without requiring full detectorMetadata from the diagnostician.
-                                        evaluability: principle.evaluability || 'weak_heuristic',
-                                        // Review fix: Accept both snake_case and camelCase from LLM output
-                                        detectorMetadata: principle.detector_metadata || principle.detectorMetadata,
-                                        abstractedPrinciple: principle.abstracted_principle,
-                                        coreAxiomId: principle.core_axiom_id || principle.coreAxiomId,
-                                    });
-                                    if (principleId) {
-                                        logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
-                                        principlesGenerated = 1;
-                                        // C: Record principle_candidate_created event for observability
-                                        if (eventLog) {
-                                            eventLog.recordPrincipleCandidate({
-                                                principleId,
-                                                taskId: task.id,
-                                                source: 'diagnostician',
-                                            });
-                                        }
-                                    } else {
-                                        logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id} (may be duplicate or blacklisted)`);
-                                    }
-                                    task.status = 'completed';
-                                    task.completed_at = new Date().toISOString();
-                                    task.resolution = 'marker_detected';
-                                }
-                            }
-                        } else {
-                            logger.warn(`[PD:EvolutionWorker] Diagnostician report for task ${task.id} missing principle fields — diagnostician did not produce a principle`);
-                        }
-                        }
-                    } catch (err) {
-                        logger.warn(`[PD:EvolutionWorker] Failed to parse diagnostician report for task ${task.id}: ${String(err)}`);
-                    }
-                    // FIX: Only mark success if JSON was actually parsed and non-empty
-                    // If JSON was missing, garbled, or empty — reportSuccess stays false
-                    reportSuccess = reportParsed;
-                } else {
-                    // ── #366: Marker exists but JSON report missing — retry logic ──
-                    // Do NOT mark completed yet. Re-inject the task for the next heartbeat cycle.
-                    // Read retry count from marker file content.
-                    const MAX_REPORT_MISSING_RETRIES = 3;
-                    let markerRetries = 0;
-                    try {
-                        const markerContent = fs.readFileSync(completeMarker, 'utf8');
-                        const match = markerContent.match(/report_missing_retries:(\d+)/);
-                        if (match) markerRetries = parseInt(match[1], 10);
-                    } catch { /* marker may not be readable, use 0 */ }
-
-                    if (markerRetries < MAX_REPORT_MISSING_RETRIES) {
-                        // Re-inject: keep task in queue (don't mark completed), update marker with incremented count
-                        const newRetries = markerRetries + 1;
-                        if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id}: marker found but report missing — re-queuing (retry ${newRetries}/${MAX_REPORT_MISSING_RETRIES})`);
-                        // FIX: Update store's reportMissingRetries BEFORE deleting the marker.
-                        // This ensures the store's retry count is persisted even if the
-                        // diagnostician session crashes before re-adding the task.
-                        await requeueDiagnosticianTask(wctx.stateDir, task.id, MAX_REPORT_MISSING_RETRIES);
-                        // Also update the task in the main queue to keep it alive
-                        task.status = 'pending';
-                        task.resolution = undefined;
-                        queueChanged = true;
-                        // Delete the marker so the next heartbeat sees no marker
-                        // and re-processes the task as a fresh diagnostician run.
-                        try {
-                            fs.unlinkSync(completeMarker);
-                        } catch { /* ignore if already deleted */ }
-                        // Skip the completion/unlink block below — task is still pending
-                        continue;
-                    } else {
-                        // Max retries reached — accept that no report was produced
-                        if (logger) logger.warn(`[PD:EvolutionWorker] Task ${task.id}: max retries (${MAX_REPORT_MISSING_RETRIES}) reached — marking as failed_max_retries`);
-                        task.status = 'completed';
-                        task.completed_at = new Date().toISOString();
-                        task.resolution = 'failed_max_retries';
-                    }
-                }
-
-                // Only reached if JSON existed or max retries reached:
-                task.status = task.status || 'completed';
-                task.completed_at = task.completed_at || new Date().toISOString();
-                if (!task.resolution) task.resolution = 'marker_detected';
-                try {
-                    fs.unlinkSync(completeMarker);
-                } catch { /* marker may have been deleted already, not critical */ }
-
-                // #190: Clean up diagnostician report file after processing
-                try {
-                    const cleanupReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
-                    if (fs.existsSync(cleanupReportPath)) fs.unlinkSync(cleanupReportPath);
-                } catch { /* report may not exist, not critical */ }
-
-                // FIX (#187): Remove the task from the diagnostician task store
-                await completeDiagnosticianTask(wctx.stateDir, task.id);
-
-                // C: Record diagnostician_report event for observability
-                if (eventLog) {
-                    // Map to three-state category:
-                    // - reportSuccess=true → 'success' (JSON exists, parsed, principle found)
-                    // - reportSuccess=false, reportParsed=true → 'incomplete_fields' (JSON existed but principle missing)
-                    // - reportSuccess=false, reportParsed=false → 'missing_json' (JSON never existed)
-                    const reportCategory: 'success' | 'missing_json' | 'incomplete_fields' =
-                        reportSuccess ? 'success' : reportParsed ? 'incomplete_fields' : 'missing_json';
-                    eventLog.recordDiagnosticianReport({
-                        taskId: task.id,
-                        reportPath,
-                        category: reportCategory,
-                    });
-                }
-
-                // Log to EvolutionLogger
-                const durationMs = task.started_at
-                    ? Date.now() - new Date(task.started_at).getTime()
-                    : undefined;
-                evoLogger.logCompleted({
-                    traceId: task.traceId || task.id,
-                    taskId: task.id,
-                    resolution: task.resolution as 'marker_detected' | 'auto_completed_timeout' | 'manual' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'diagnostician_timeout',
-                    durationMs,
-                    principlesGenerated,
-                });
-
-                // Record task completion in event stats
-                eventLog.recordEvolutionTaskCompleted({
-                    taskId: task.id,
-                    taskType: task.source || 'unknown',
-                    reason: task.reason || '',
-                });
-
-                // Update evolution_tasks table
-                wctx.trajectory?.updateEvolutionTask?.(task.id, {
-                    status: 'completed',
-                    completedAt: task.completed_at,
-                    resolution: task.resolution as 'marker_detected' | 'auto_completed_timeout' | 'manual' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'diagnostician_timeout',
-                });
-
-                wctx.trajectory?.recordTaskOutcome({
-                    sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
-                    taskId: task.id,
-                    outcome: 'ok',
-                    summary: `Task ${task.id} completed — ${principlesGenerated} principle(s) generated (${task.resolution}).`
-                });
-                queueChanged = true;
-                continue;
-            }
-
-            const age = Date.now() - startedAt.getTime();
-            if (age > timeout) {
-                const timeoutMinutes = Math.round(timeout / 60000);
-
-                const timeoutCompleteMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
-                const timeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
-
-                let principlesGenerated = 0;
-
-
-                if (fs.existsSync(timeoutCompleteMarker) && fs.existsSync(timeoutReportPath)) {
-                    if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} timed out but marker found — creating principle anyway`);
-                    try {
-                        const reportData = JSON.parse(fs.readFileSync(timeoutReportPath, 'utf8'));
-                        const principle = reportData?.principle
-                            || reportData?.phases?.principle_extraction?.principle
-                            || reportData?.diagnosis_report?.principle
-                            || reportData?.diagnosis_report?.phases?.principle_extraction?.principle;
-                        if (principle?.trigger_pattern && principle?.action) {
-                            if (principle.duplicate === true) {
-                                logger.info(`[PD:EvolutionWorker] Diagnostician marked principle as duplicate: ${principle.duplicate_of || 'unknown'} — skipping for task ${task.id}`);
-                            } else {
-                                const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
-                                    painId: task.painEventId !== undefined ? String(task.painEventId) : task.id,
-                                    painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
-                                    triggerPattern: principle.trigger_pattern,
-                                    action: principle.action,
-                                    source: task.source || 'heartbeat_diagnostician',
-                                    // #212: Default to weak_heuristic so principles are auto-evaluable.
-                                    evaluability: principle.evaluability || 'weak_heuristic',
-                                    // Review fix: Accept both snake_case and camelCase from LLM output
-                                    detectorMetadata: principle.detector_metadata || principle.detectorMetadata,
-                                    abstractedPrinciple: principle.abstracted_principle,
-                                        coreAxiomId: principle.core_axiom_id || principle.coreAxiomId,
-                                    });
-                                if (principleId) {
-                                    logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from late marker for task ${task.id}`);
-                                    principlesGenerated = 1;
-                                }
-                            }
-                        }
-                    } catch (err) {
-                        logger.warn(`[PD:EvolutionWorker] Failed to parse late diagnostician report for task ${task.id}: ${String(err)}`);
-                    }
-                    try { fs.unlinkSync(completeMarker); } catch { /* marker may not exist, not critical */ }
-                    // #190: Clean up diagnostician report file
-                    try {
-                        const lateReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
-                        if (fs.existsSync(lateReportPath)) fs.unlinkSync(lateReportPath);
-                    } catch { /* report may not exist, not critical */ }
-                    task.resolution = principlesGenerated > 0 ? 'late_marker_principle_created' : 'late_marker_no_principle';
-                } else {
-                    if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
-                    // #190: Clean up diagnostician report file even on timeout (may have been written late)
-                    try {
-                        const autoTimeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
-                        if (fs.existsSync(autoTimeoutReportPath)) fs.unlinkSync(autoTimeoutReportPath);
-                    } catch { /* report may not exist, not critical */ }
-                    task.resolution = 'auto_completed_timeout';
-                }
-
-                // Critical: mark task as completed so it doesn't get re-processed
-                task.status = 'completed';
-                task.completed_at = new Date().toISOString();
-
-                // Log to EvolutionLogger - use task.resolution, not hardcoded value
-                evoLogger.logCompleted({
-                    traceId: task.traceId || task.id,
-                    taskId: task.id,
-                    resolution: task.resolution,
-                    durationMs: age,
-                    principlesGenerated,
-                });
-
-                // Record task completion in event stats (for timeout path too)
-                eventLog.recordEvolutionTaskCompleted({
-                    taskId: task.id,
-                    taskType: task.source || 'unknown',
-                    reason: task.reason || '',
-                });
-
-                // Update evolution_tasks table - use task.resolution, not hardcoded value
-                wctx.trajectory?.updateEvolutionTask?.(task.id, {
-                    status: 'completed',
-                    completedAt: task.completed_at,
-                    resolution: task.resolution,
-                });
-
-                wctx.trajectory?.recordTaskOutcome({
-                    sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
-                    taskId: task.id,
-                    outcome: 'timeout',
-                    summary: `Task ${task.id} completed — ${principlesGenerated} principle(s) generated (${task.resolution}).`
-                });
-                queueChanged = true;
-            }
-        }
-
-        // V2: Process pain_diagnosis tasks FIRST (quick, inside lock),
-        // then sleep_reflection tasks (slow, lock released during execution).
-        // This order ensures pain tasks are never starved by long-running
-        // nocturnal reflection — sleep_reflection can safely return early
-        // because pain_diagnosis has already been handled.
-        const pendingTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'pain_diagnosis');
-
-        if (pendingTasks.length > 0) {
-            // V2: Also sort by priority within same score
-            const priorityWeight = { high: 3, medium: 2, low: 1 };
-            const [highestScoreTask] = pendingTasks.sort((a, b) => {
-                const scoreDiff = b.score - a.score;
-                if (scoreDiff !== 0) return scoreDiff;
-                return (priorityWeight[b.priority] || 2) - (priorityWeight[a.priority] || 2);
-            });
-            const nowIso = new Date().toISOString();
-
-            const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
-                  `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
-
-            // Prepare diagnostician task content
-            // FIX (#187): Write diagnostician tasks to .state/diagnostician_tasks.json
-            // instead of HEARTBEAT.md. HEARTBEAT.md is a shared file that gets overwritten
-            // by the main session heartbeat, causing a race condition where the diagnostician
-            // task prompt is lost. The task store is in .state/ which is not modified by
-            // the main session.
-            const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
-            const reportFilePath = path.join(wctx.stateDir, `.diagnostician_report_${highestScoreTask.id}.json`);
-
-            let existingPrinciplesRef = '';
-            try {
-                const activePrinciples = wctx.evolutionReducer.getActivePrinciples();
-                if (activePrinciples.length > 0) {
-                    // Include all principles up to 20 — enough for duplicate detection
-                    // without overwhelming the context window
-                    const maxPrinciples = 20;
-                    const included = activePrinciples.length > maxPrinciples
-                        ? activePrinciples.slice(-maxPrinciples)
-                        : activePrinciples;
-                    const lines = included.map((p) => {
-                        let line = `### ${p.id}: ${p.text}`;
-                        if (p.priority && p.priority !== 'P1') line += ` [${p.priority}]`;
-                        if (p.scope === 'domain' && p.domain) line += ` (domain: ${p.domain})`;
-                        return line;
-                    });
-                    existingPrinciplesRef = `\n**Existing Principles for Duplicate Detection** (showing ${included.length}/${activePrinciples.length}):\n${lines.join('\n')}`;
-
-                    // Also inject suggested rules from existing principles (if any)
-                    const rulesByPrinciple = included.filter((p) => p.suggestedRules?.length);
-                    if (rulesByPrinciple.length > 0) {
-                        const ruleLines = rulesByPrinciple.flatMap((p) =>
-                            (p.suggestedRules ?? []).map((r) => `- [${p.id}] **${r.name}**: ${r.action} (type: ${r.type}, enforce: ${r.enforcement})`),
-                        );
-                        existingPrinciplesRef += `\n\n**Suggested Rules from Existing Principles**:\n${ruleLines.join('\n')}`;
-                    }
-                }
-            } catch (err) {
-                // #184: Log warning instead of silently swallowing — diagnostician needs
-                // existing principles context for duplicate detection.
-                logger?.warn?.(`[PD:EvolutionWorker] Failed to load active principles for duplicate detection: ${String(err)}`);
-            }
-
-            // ── Context Enrichment (CTX-01): Dual-path strategy ──
-            // P1: OpenClaw built-in tools (sessions_history) - safe, visibility-limited
-            // P2: JSONL direct read - fallback when tools fail or session not visible
-            // The diagnostician skill implements both paths (Phase 0 protocol).
-            //
-            // Here we pre-extract JSONL context as backup and inject tool instructions.
-
-            let contextSection = '';
-            if (highestScoreTask.session_id && highestScoreTask.agent_id) {
-                try {
-                    const { extractRecentConversation, extractFailedToolContext } = await import('../core/pain-context-extractor.js');
-                    const conversation = await extractRecentConversation(highestScoreTask.session_id, highestScoreTask.agent_id, 5);
-                    
-                    if (conversation) {
-                        contextSection = `\n## Recent Conversation Context (pre-extracted JSONL fallback)\n\n${conversation}\n`;
-                        
-                        // Also try to extract failed tool context if this is a tool failure
-                        if (highestScoreTask.source === 'tool_failure') {
-                            const toolMatch = /Tool ([\w-]+) failed/.exec(highestScoreTask.reason);
-                            const fileMatch = /on (.+?)(?=\s*Error:|$)/i.exec(highestScoreTask.reason);
-                            if (toolMatch) {
-                                const toolContext = await extractFailedToolContext(
-                                    highestScoreTask.session_id,
-                                    highestScoreTask.agent_id,
-                                    toolMatch[1],
-                                    fileMatch?.[1]?.trim(),
-                                );
-                                if (toolContext) {
-                                    contextSection += `\n## Failed Tool Call Context\n\n${toolContext}\n`;
-                                }
-                            }
-                        }
-                    }
-                    if (logger) {
-                        const turns = contextSection ? contextSection.split('\n').filter(l => l.startsWith('[User]') || l.startsWith('[Assistant]')).length : 0;
-                        logger?.debug?.(`[PD:EvolutionWorker] Pre-extracted ${turns} conversation turns for task ${highestScoreTask.id}`);
-                    }
-                } catch (e) {
-                    if (logger) logger.warn(`[PD:EvolutionWorker] Failed to extract conversation context for task ${highestScoreTask.id}: ${String(e)}. Diagnostician will use P1 tools or fallback.`);
-                }
-            }
-
-            const heartbeatContent = [
-                `## Evolution Task [ID: ${highestScoreTask.id}]`,
-                ``,
-                `**Pain Score**: ${highestScoreTask.score}`,
-                `**Source**: ${highestScoreTask.source}`,
-                `**Reason**: ${highestScoreTask.reason}`,
-                `**Trigger**: "${highestScoreTask.trigger_text_preview || 'N/A'}"`,
-                `**Queued At**: ${highestScoreTask.enqueued_at || nowIso}`,
-                `**Session ID**: ${highestScoreTask.session_id || 'N/A'}`,
-                `**Agent ID**: ${highestScoreTask.agent_id || 'main'}`,
-                ``,
-                `## Available Tools for Context Search (P1 - Preferred)`,
-                ``,
-                `1. **sessions_history** — Get full message history (requires sessionKey)`,
-                `2. **sessions_list** — List sessions (searches metadata only, NOT message content)`,
-                `3. **read_file / search_file_content** — Search codebase`,
-                ``,
-                `**P1 SOP**: sessions_history(sessionKey="agent:${highestScoreTask.agent_id || 'main'}:run:${highestScoreTask.session_id || 'N/A'}", limit=30)`,
-                highestScoreTask.session_id === 'N/A' || !highestScoreTask.session_id ? `\n\n**⚠️ IMPORTANT**: session_id is N/A — P1 sessions_history tool CANNOT be used. You MUST rely on P2 pre-extracted context below, the pain reason, and your own reasoning. Do NOT hallucinate session details.` : '',
-                ``,
-                `## Pre-extracted Context (P2 - JSONL Fallback)`,
-                `If OpenClaw tools cannot access the session (visibility limits),`,
-                `use this pre-extracted context below:`,
-                contextSection || `*(No JSONL context available — use P1 tools first)*`,
-                ``,
-                `---`,
-                ``,
-                `## Diagnostician Protocol`,
-                ``,
-                `You MUST use the **pd-diagnostician** skill for this task.`,
-                `Read the full skill definition and follow the protocol EXACTLY as specified: Phase 0 (context extraction, optional) → Phase 1 (Evidence) → Phase 2 (Causal Chain) → Phase 3 (Classification) → Phase 4 (Principle Extraction).`,
-                `The skill defines the complete output contract — your JSON report MUST match the format specified in the skill.`,
-                ``,
-                `---`,
-                ``,
-                `After completing the analysis:`,
-                `1. Write your JSON diagnosis report to: ${reportFilePath}`,
-                `   The JSON structure MUST match the output format defined in the pd-diagnostician skill.`,
-                `2. Mark the task complete by creating a marker file: ${markerFilePath}`,
-                `   The marker file should contain: "diagnostic_completed: <timestamp>\\noutcome: <summary>"`,
-                `3. After writing both files, reply with "DIAGNOSTICIAN_DONE: ${highestScoreTask.id}"`,
-                existingPrinciplesRef,
-            ].join('\n');
-
-            // FIX (#187): Write to diagnostician_tasks.json instead of HEARTBEAT.md
-            // HEARTBEAT.md is a shared file that gets overwritten by the main session
-            // heartbeat, causing a race condition. The task store is in .state/ and is
-            // not modified by the main session.
-            try {
-                await addDiagnosticianTask(wctx.stateDir, highestScoreTask.id, heartbeatContent);
-                if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to diagnostician_tasks.json for task ${highestScoreTask.id}`);
-
-                // C: Record diagnosis_task_written event for observability
-                if (eventLog) {
-                    eventLog.recordDiagnosisTask({
-                        taskId: highestScoreTask.id,
-                        painEventId: highestScoreTask.painEventId !== undefined ? String(highestScoreTask.painEventId) : undefined,
-                        sessionId: highestScoreTask.session_id,
-                    });
-                }
-
-                // Task store write succeeded, now mark task as in_progress
-                highestScoreTask.task = taskDescription;
-                highestScoreTask.status = 'in_progress';
-                highestScoreTask.started_at = nowIso;
-                delete highestScoreTask.completed_at;
-                // Use placeholder so marker path can correlate task (no subagent spawned for HEARTBEAT)
-                // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
-                highestScoreTask.assigned_session_key = `heartbeat:diagnostician:${highestScoreTask.id}`;
-                queueChanged = true;
-
-                // Log to EvolutionLogger
-                evoLogger.logStarted({
-                    traceId: highestScoreTask.traceId || highestScoreTask.id,
-                    taskId: highestScoreTask.id,
-                });
-
-                // Update evolution_tasks table
-                wctx.trajectory?.updateEvolutionTask?.(highestScoreTask.id, {
-                    status: 'in_progress',
-                    startedAt: nowIso,
-                });
-
-                if (eventLog) {
-                    eventLog.recordEvolutionTask({
-                        taskId: highestScoreTask.id,
-                        taskType: highestScoreTask.source,
-                        reason: highestScoreTask.reason
-                    });
-                }
-            } catch (heartbeatErr) {
-                // Diagnostician task store write failed - keep task as pending for next cycle retry
-                if (logger) logger.error(`[PD:EvolutionWorker] Failed to write diagnostician task for task ${highestScoreTask.id}: ${String(heartbeatErr)}. Task will remain pending for next cycle.`);
-                SystemLogger.log(wctx.workspaceDir, 'DIAGNOSTICIAN_TASK_WRITE_FAILED', `Task ${highestScoreTask.id} diagnostician task write failed: ${String(heartbeatErr)}`);
-            }
-        }
-
-        // Phase 2.4: Process sleep_reflection tasks AFTER pain_diagnosis.
+        // Phase 2.4: Process sleep_reflection tasks.
         // Claim tasks inside the lock, execute reflection outside the lock,
         // then re-acquire the lock to write results. This prevents the long-running
         // nocturnal reflection from blocking all other queue consumers.
-        // Safe to return early here because pain_diagnosis was already handled above.
 
         // FIX: Also poll in_progress tasks that were started in a previous cycle.
         // Previously only 'pending' tasks were filtered, so an in_progress task from
@@ -1641,14 +763,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         snapshotData = snapshotValidation.snapshot;
                     }
 
-                    if (!api) {
+                    if (!api?.runtime) {
                         sleepTask.status = 'failed';
                         sleepTask.completed_at = new Date().toISOString();
                         sleepTask.resolution = 'failed_max_retries';
-                        sleepTask.lastError = 'No API available to create NocturnalWorkflowManager';
+                        sleepTask.lastError = 'No API runtime available to create NocturnalWorkflowManager';
                         sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
                         sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} skipped: no API`);
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} skipped: no API runtime`);
                         continue;
                     }
 
@@ -1656,7 +778,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         workspaceDir: wctx.workspaceDir,
                         stateDir: wctx.stateDir,
                         logger: api.logger,
-                        runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
+                        runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
                         subagent: api.runtime.subagent,
                     });
 
@@ -1846,7 +968,6 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 }
             } catch { /* classification errors are non-blocking */ }
 
-            // Safe to return — pain_diagnosis was already processed above.
             // keyword_optimization tasks are deferred to the next heartbeat cycle.
             // Running both in the same cycle causes stale queue overwrite and
             // double lock release (lock was released at line ~1703).
@@ -2053,20 +1174,6 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             saveEvolutionQueue(queuePath, queue);
         }
 
-        // Pipeline observability: log stage-level summary at end of cycle
-        const pendingPain = queue.filter((t) => t.status === 'pending' && t.taskKind === 'pain_diagnosis').length;
-        const inProgressPain = queue.filter((t) => t.status === 'in_progress' && t.taskKind === 'pain_diagnosis').length;
-        if (inProgressPain > 0) {
-            const stuck = queue
-                .filter((t) => t.status === 'in_progress' && t.taskKind === 'pain_diagnosis')
-                .map((t) => `${t.id} (since ${t.started_at || 'unknown'})`);
-            logger?.info?.(`[PD:EvolutionWorker] Pipeline: ${inProgressPain} pain_diagnosis task(s) in_progress — awaiting agent response: ${stuck.join(', ')}`);
-        }
-        if (pendingPain > 0) {
-            logger?.info?.(`[PD:EvolutionWorker] Pipeline: ${pendingPain} pain_diagnosis task(s) pending — HEARTBEAT.md will trigger next cycle`);
-        }
-        const painCompleted = queue.filter((t) => t.status === 'completed' && t.taskKind === 'pain_diagnosis').length;
-        logger?.info?.(`[PD:EvolutionWorker] Pipeline summary: pain_completed=${painCompleted} pain_pending=${pendingPain} pain_in_progress=${inProgressPain}`);
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error processing evolution queue: ${String(err)}`);
     } finally {
@@ -2388,36 +1495,9 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     }
                 }
 
-                const painCheckResult = await checkPainFlag(wctx, logger);
-                cycleResult.pain_flag = painCheckResult;
-
                 const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
                 cycleResult.queue = queueResult.queue;
                 if (queueResult.errors) cycleResult.errors.push(...queueResult.errors);
-
-                // If pain flag was enqueued AND processEvolutionQueue wrote HEARTBEAT.md
-                // with a diagnostician task, immediately trigger a heartbeat to start
-                // the diagnostician without waiting for the next 15-minute interval.
-                // Must run AFTER processEvolutionQueue — HEARTBEAT.md must be written first.
-                if (painCheckResult.enqueued) {
-                    const canTrigger = !!api?.runtime?.system?.runHeartbeatOnce;
-                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — runHeartbeatOnce available: ${canTrigger} (api=${!!api}, runtime=${!!api?.runtime}, system=${!!api?.runtime?.system})`);
-                    if (canTrigger) {
-                        try {
-                            const hbResult = await api.runtime.system.runHeartbeatOnce({
-                                reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
-                            });
-                            logger.info(`[PD:EvolutionWorker] Immediate heartbeat result: status=${hbResult.status}${hbResult.status === 'ran' ? ` duration=${hbResult.durationMs}ms` : ''}${hbResult.status === 'skipped' || hbResult.status === 'failed' ? ` reason=${hbResult.reason}` : ''}`);
-                            if (hbResult.status === 'skipped' || hbResult.status === 'failed') {
-                                logger.warn(`[PD:EvolutionWorker] Immediate heartbeat was ${hbResult.status} (${hbResult.reason}). Diagnostician will start on next regular heartbeat cycle.`);
-                            }
-                        } catch (hbErr) {
-                            logger.warn(`[PD:EvolutionWorker] Failed to trigger immediate heartbeat: ${String(hbErr)}. Diagnostician will start on next regular heartbeat cycle.`);
-                        }
-                    } else {
-                        logger.warn(`[PD:EvolutionWorker] runHeartbeatOnce not available. Diagnostician will start on next regular heartbeat cycle.`);
-                    }
-                }
 
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
@@ -2430,32 +1510,24 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     const subagentRuntime = api?.runtime?.subagent;
                     const agentSession = api?.runtime?.agent?.session;
                     if (subagentRuntime) {
-                        const empathyMgr = new EmpathyObserverWorkflowManager({
-                            workspaceDir: wctx.workspaceDir,
-                            logger: api.logger,
-                            subagent: subagentRuntime,
-                            agentSession,
-                        });
                         let swept = 0;
-                        try {
-                            swept += await empathyMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS);
-                        } finally {
-                            empathyMgr.dispose();
-                        }
 
-                        // #183 + #188: Sweep Nocturnal workflows too (with gateway-safe fallback)
-                        try {
-                            const nocturnalMgr = new NocturnalWorkflowManager({
-                                workspaceDir: wctx.workspaceDir,
-                                stateDir: wctx.stateDir,
-                                logger: api.logger,
-                                runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
-                                subagent: api.runtime.subagent,
-                            });
-                            swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime, agentSession);
-                            nocturnalMgr.dispose();
-                        } catch (noctSweepErr) {
-                            logger?.warn?.(`[PD:EvolutionWorker] Nocturnal sweep failed: ${String(noctSweepErr)}`);
+                        // Sweep Nocturnal workflows (with gateway-safe fallback)
+                        // EmpathyObserverWorkflowManager sweep removed — M8: superseded by Runtime v2
+                        if (api?.runtime) {
+                            try {
+                                const nocturnalMgr = new NocturnalWorkflowManager({
+                                    workspaceDir: wctx.workspaceDir,
+                                    stateDir: wctx.stateDir,
+                                    logger: api.logger,
+                                    runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
+                                    subagent: api.runtime.subagent,
+                                });
+                                swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime, agentSession);
+                                nocturnalMgr.dispose();
+                            } catch (noctSweepErr) {
+                                logger?.warn?.(`[PD:EvolutionWorker] Nocturnal sweep failed: ${String(noctSweepErr)}`);
+                            }
                         }
 
                         if (swept > 0) {
@@ -2529,7 +1601,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     logger?.warn?.(`[PD:EvolutionWorker] Startup reconciliation failed (non-blocking): ${String(reconErr)}`);
                 }
 
-                await checkPainFlag(wctx, logger);
                 // Use the same pipeline as regular cycles (includes purge + observability)
                 const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
                 if (queueResult.errors.length > 0) {

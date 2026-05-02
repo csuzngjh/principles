@@ -18,7 +18,7 @@
 
 - **项目最高战略**: `./memory/STRATEGY.md`
 - **项目物理计划**: `./PLAN.md`
-- **痛觉反射信号**: `./.state/.pain_flag`
+- **痛觉反射信号**: Runtime V2 `PainSignalBridge`（手动触发使用 `pd pain record`；`.state/.pain_flag` 仅为 legacy compatibility）
 - **系统能力快照**: `./.state/SYSTEM_CAPABILITIES.json`
 
 ---
@@ -63,7 +63,7 @@
 
 ### 心跳时应该检查（轮流执行）：
 
-- **痛觉与进化**: 检查 `.pain_flag`、`EVOLUTION_QUEUE.json`
+- **痛觉与进化**: 检查 Runtime V2 诊断（`pd pain record`、candidate、ledger）和 `EVOLUTION_QUEUE.json`；`.pain_flag` 仅为 legacy compatibility
 - **战略对齐**: 对比 `CURRENT_FOCUS.md`，确保未偏离重点
 - **环境健康**: 检查工具链状态、项目根目录整洁度
 

@@ -1,8 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
+import type { PluginHookLlmOutputEvent, PluginHookAgentContext, TokenUsage } from '../openclaw-sdk.js';
 import { trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
-import { recordAndWritePainFlag } from '../core/pain.js';
 import { normalizeSeverity } from '../core/empathy-types.js';
 import { ControlUiDatabase } from '../core/control-ui-db.js';
 import { DetectionService } from '../core/detection-service.js';
@@ -10,6 +9,8 @@ import { detectThinkingModelMatches, deriveThinkingScenarios } from '../core/thi
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+import { emitPainDetectedEvent } from './pain.js';
+import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 
 export interface EmpathySignal {
     detected: boolean;
@@ -148,7 +149,12 @@ export function handleLlmOutput(
     const {eventLog} = wctx;
 
     // Track this turn in the core session memory
-    const state = trackLlmOutput(ctx.sessionId, event.usage, config, ctx.workspaceDir, ctx.sessionKey, ctx.trigger);
+    const trigger = (event as { trigger?: string }).trigger ?? undefined;
+    const usage = event.usage as TokenUsage | undefined;
+    const sessionId = (ctx as { sessionId?: string }).sessionId ?? 'unknown';
+    const workspaceDir = (ctx as { workspaceDir?: string }).workspaceDir;
+    const sessionKey = (ctx as { sessionKey?: string }).sessionKey ?? 'unknown';
+    const state = trackLlmOutput(sessionId, usage, config, workspaceDir, sessionKey, trigger);
 
     // We need actual assistant text to analyze
     if (!event.assistantTexts || event.assistantTexts.length === 0) return;
@@ -160,9 +166,9 @@ export function handleLlmOutput(
     try {
         assistantTurnId = wctx.trajectory?.recordAssistantTurn?.({
             sessionId: ctx.sessionId,
-            runId: event.runId,
-            provider: event.provider,
-            model: event.model,
+            runId: event.runId ?? 'unknown',
+            provider: event.provider ?? 'unknown',
+            model: event.model ?? 'unknown',
             rawText: text,
             sanitizedText: sanitizeAssistantText(text),
             usageJson: event.usage || {},
@@ -227,32 +233,23 @@ export function handleLlmOutput(
         matchedReason = `Agent is stuck in low-output loops (${state.stuckLoops} consecutive turns with tiny output but huge context), indicating cognitive paralysis.`;
     }
 
-    // If a pain threshold is crossed, write the autonomous pain flag
+    // If a semantic pain threshold is crossed, only valuable episodes enter Runtime v2.
+    // Lower-signal detections remain in the event log/GFI layer for accumulation.
     const painTriggerThreshold = config.get('thresholds.pain_trigger') || 30;
     if (painScore >= painTriggerThreshold) {
-        // Inject the actual text snippet that triggered this for the diagnostician to read later
-        const snippet = text.length > 200 ? text.substring(0, 100) + '...' + text.substring(text.length - 100) : text;
-
-        try {
-            recordAndWritePainFlag(wctx, {
-                sessionId: ctx.sessionId || 'unknown',
-                source,
-                score: painScore,
-                reason: matchedReason,
-                severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
-                origin: 'system_infer',
-            }, {
-                source,
-                score: String(painScore),
-                reason: matchedReason,
-                is_risky: false,
-                trigger_text_preview: snippet,
-                session_id: ctx.sessionId || '',
-                agent_id: ctx.agentId || '',
-            });
-        } catch (e) {
-            ctx.logger?.warn?.(`[PD:LLM] Failed to write pain flag: ${String(e)}`);
-        }
+        const gate = evaluatePainDiagnosticGate({
+            source: source === 'llm_paralysis' ? 'llm_paralysis' : 'semantic',
+            score: painScore,
+            currentGfi: state.currentGfi,
+            consecutiveErrors: state.consecutiveErrors,
+            sessionId: ctx.sessionId || 'unknown',
+            errorHash: source,
+            thresholds: {
+                painTrigger: painTriggerThreshold,
+                highSeverity: config.get('severity_thresholds.high') || 70,
+                semanticPain: Math.max(painTriggerThreshold, 60),
+            },
+        });
 
         eventLog.recordPainSignal(ctx.sessionId, {
             score: painScore,
@@ -260,6 +257,24 @@ export function handleLlmOutput(
             reason: matchedReason,
             isRisky: false
         });
+
+        if (gate.shouldDiagnose) {
+            emitPainDetectedEvent(wctx, {
+                ts: new Date().toISOString(),
+                type: 'pain_detected',
+                data: {
+                    painId: `llm_${Date.now()}`,
+                    painType: 'user_frustration' as const,
+                    source,
+                    reason: `${matchedReason}; diagnosticGate=${gate.reason}`,
+                    score: painScore,
+                    sessionId: ctx.sessionId || 'unknown',
+                    agentId: ctx.agentId,
+                },
+            });
+        } else {
+            ctx.logger?.info?.(`[PD:LLM] Pain signal recorded without Runtime V2 diagnosis: ${gate.detail}`);
+        }
     }
 
     // ═══ Thinking OS: Mental Model Usage Tracking ═══
@@ -268,8 +283,8 @@ export function handleLlmOutput(
     trackThinkingModelUsage({
         text,
         wctx,
-        sessionId: ctx.sessionId,
-        runId: event.runId,
+        sessionId: ctx.sessionId ?? 'unknown',
+        runId: event.runId ?? 'unknown',
         assistantTurnId,
         createdAt,
         logger: ctx.logger,

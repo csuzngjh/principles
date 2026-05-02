@@ -16,17 +16,33 @@ const ROUTE_PREFIX = '/plugins/principles';
 const API_PREFIX = `${ROUTE_PREFIX}/api`;
 const ASSETS_PREFIX = `${ROUTE_PREFIX}/assets`;
 
-function json(res: ServerResponse, statusCode: number, payload: unknown): void {
-  const body = JSON.stringify(payload, null, 2);
-  res.statusCode = statusCode;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.end(body);
+function sendJson(res: unknown, statusCode: number, payload: unknown): void {
+  const r = res as { statusCode?: number; setHeader: (n: string, v: string) => void; end: (b?: string) => void };
+  r.statusCode = statusCode;
+  r.setHeader('Content-Type', 'application/json; charset=utf-8');
+  r.end(JSON.stringify(payload, null, 2));
 }
 
-function text(res: ServerResponse, statusCode: number, body: string): void {
-  res.statusCode = statusCode;
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.end(body);
+function sendText(res: unknown, statusCode: number, body: string): void {
+  const r = res as { statusCode?: number; setHeader: (n: string, v: string) => void; end: (b?: string) => void };
+  r.statusCode = statusCode;
+  r.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  r.end(body);
+}
+
+function serveFile(res: unknown, filePath: string): boolean {
+  const r = res as { statusCode?: number; setHeader: (n: string, v: string) => void; end: (b?: string) => void };
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return false;
+  }
+  r.statusCode = 200;
+  r.setHeader('Content-Type', contentTypeFor(filePath));
+  const stream = fs.createReadStream(filePath);
+  stream.on('error', () => {
+    try { r.end(); } catch { /* ignore */ }
+  });
+  stream.pipe(res as unknown as NodeJS.WritableStream);
+  return true;
 }
 
 function contentTypeFor(filePath: string): string {
@@ -76,21 +92,6 @@ function safeStaticPath(rootDir: string, requestPath: string): string | null {
   return target;
 }
 
-function serveFile(res: ServerResponse, filePath: string): boolean {
-  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    return false;
-  }
-  res.statusCode = 200;
-  res.setHeader('Content-Type', contentTypeFor(filePath));
-  const stream = fs.createReadStream(filePath);
-  stream.on('error', () => {
-    res.statusCode = 500;
-    res.end('Internal Server Error');
-  });
-  stream.pipe(res);
-  return true;
-}
-
 function createService(api: OpenClawPluginApi): ControlUiQueryService {
   const workspaceDir = resolveRequiredWorkspaceDir(api, { agentId: 'main' }, { source: 'principles_console.control_ui', fallbackAgentId: 'main' });
   return new ControlUiQueryService(workspaceDir);
@@ -108,7 +109,7 @@ function handleApiRoute(
    
    
   if (!validateGatewayAuth(req)) {
-    json(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
+    sendJson(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
     return true;
   }
 
@@ -118,7 +119,7 @@ function handleApiRoute(
     service = createService(api);
   } catch (error) {
     api.logger.warn(`[PD:ControlUI] Failed to resolve workspace for ${pathname}: ${String(error)}`);
-    json(res, 500, { error: 'internal_error', message: String(error) });
+    sendJson(res, 500, { error: 'internal_error', message: String(error) });
     return true;
   }
   const url = new URL(req.url || pathname, 'http://127.0.0.1');
@@ -127,11 +128,11 @@ function handleApiRoute(
   const done = (fn: () => unknown): boolean => {
     try {
       const payload = fn();
-      json(res, 200, payload);
+      sendJson(res, 200, payload);
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] API request failed for ${pathname}: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       service.dispose();
@@ -221,15 +222,15 @@ function handleApiRoute(
           syncEnabled: body.syncEnabled as boolean | undefined,
         });
         const configs = centralDb.getWorkspaceConfigs();
-        json(res, 200, configs.find(c => c.workspaceName === workspaceName));
+        sendJson(res, 200, configs.find(c => c.workspaceName === workspaceName));
         return true;
       } catch (error) {
         if (error instanceof Error && error.message === 'invalid_json') {
-          json(res, 400, { error: 'bad_request', message: 'Request body must be valid JSON.' });
+          sendJson(res, 400, { error: 'bad_request', message: 'Request body must be valid JSON.' });
           return true;
         }
         api.logger.warn(`[PD:ControlUI] Workspace config update failed: ${String(error)}`);
-        json(res, 500, { error: 'internal_error', message: String(error) });
+        sendJson(res, 500, { error: 'internal_error', message: String(error) });
         return true;
       }
     })();
@@ -242,20 +243,20 @@ function handleApiRoute(
         const name = typeof body.name === 'string' ? body.name : '';
         const workspacePath = typeof body.path === 'string' ? body.path : '';
         if (!name || !workspacePath) {
-          json(res, 400, { error: 'bad_request', message: 'name and path are required.' });
+          sendJson(res, 400, { error: 'bad_request', message: 'name and path are required.' });
           return true;
         }
         const centralDb = getCentralDatabase();
         centralDb.addCustomWorkspace(name, workspacePath);
-        json(res, 201, { success: true, workspace: name });
+        sendJson(res, 201, { success: true, workspace: name });
         return true;
       } catch (error) {
         if (error instanceof Error && error.message === 'invalid_json') {
-          json(res, 400, { error: 'bad_request', message: 'Request body must be valid JSON.' });
+          sendJson(res, 400, { error: 'bad_request', message: 'Request body must be valid JSON.' });
           return true;
         }
         api.logger.warn(`[PD:ControlUI] Add workspace failed: ${String(error)}`);
-        json(res, 500, { error: 'internal_error', message: String(error) });
+        sendJson(res, 500, { error: 'internal_error', message: String(error) });
         return true;
       }
     })();
@@ -278,14 +279,14 @@ function handleApiRoute(
     try {
       const detail = service.getSampleDetail(decodeURIComponent(sampleDetailMatch[1]));
       if (!detail) {
-        json(res, 404, { error: 'not_found', message: 'Sample not found.' });
+        sendJson(res, 404, { error: 'not_found', message: 'Sample not found.' });
         return true;
       }
-      json(res, 200, detail);
+      sendJson(res, 200, detail);
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] API request failed for ${pathname}: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       service.dispose();
@@ -301,7 +302,7 @@ function handleApiRoute(
           ? body.decision
           : null;
         if (!decision) {
-          json(res, 400, { error: 'bad_request', message: 'decision must be approved or rejected' });
+          sendJson(res, 400, { error: 'bad_request', message: 'decision must be approved or rejected' });
           return true;
         }
         const record = service.reviewSample(
@@ -309,15 +310,15 @@ function handleApiRoute(
           decision,
           typeof body.note === 'string' ? body.note : undefined,
         );
-        json(res, 200, record);
+        sendJson(res, 200, record);
         return true;
       } catch (error) {
         if (error instanceof Error && error.message === 'invalid_json') {
-          json(res, 400, { error: 'bad_request', message: 'Request body must be valid JSON.' });
+          sendJson(res, 400, { error: 'bad_request', message: 'Request body must be valid JSON.' });
           return true;
         }
         api.logger.warn(`[PD:ControlUI] Review request failed for ${pathname}: ${String(error)}`);
-        json(res, 500, { error: 'internal_error', message: String(error) });
+        sendJson(res, 500, { error: 'internal_error', message: String(error) });
         return true;
       } finally {
         service.dispose();
@@ -334,14 +335,14 @@ function handleApiRoute(
     try {
       const detail = service.getThinkingModelDetail(decodeURIComponent(thinkingDetailMatch[1]));
       if (!detail) {
-        json(res, 404, { error: 'not_found', message: 'Thinking model not found.' });
+        sendJson(res, 404, { error: 'not_found', message: 'Thinking model not found.' });
         return true;
       }
-      json(res, 200, detail);
+      sendJson(res, 200, detail);
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] API request failed for ${pathname}: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       service.dispose();
@@ -394,14 +395,14 @@ function handleApiRoute(
     try {
       const trace = evoService.getTrace(decodeURIComponent(evolutionTraceMatch[1]));
       if (!trace) {
-        json(res, 404, { error: 'not_found', message: 'Evolution trace not found.' });
+        sendJson(res, 404, { error: 'not_found', message: 'Evolution trace not found.' });
         return true;
       }
-      json(res, 200, trace);
+      sendJson(res, 200, trace);
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] Evolution trace request failed for ${pathname}: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       evoService.dispose();
@@ -417,11 +418,11 @@ function handleApiRoute(
   if (pathname === `${API_PREFIX}/overview/health` && method === 'GET') {
     const hs = healthService();
     try {
-      json(res, 200, hs.getOverviewHealth());
+      sendJson(res, 200, hs.getOverviewHealth());
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] Health overview failed: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       hs.dispose();
@@ -431,11 +432,11 @@ function handleApiRoute(
   if (pathname === `${API_PREFIX}/evolution/principles` && method === 'GET') {
     const hs = healthService();
     try {
-      json(res, 200, hs.getEvolutionPrinciples());
+      sendJson(res, 200, hs.getEvolutionPrinciples());
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] Evolution principles failed: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       hs.dispose();
@@ -445,11 +446,11 @@ function handleApiRoute(
   if (pathname === `${API_PREFIX}/feedback/gfi` && method === 'GET') {
     const hs = healthService();
     try {
-      json(res, 200, hs.getFeedbackGfi());
+      sendJson(res, 200, hs.getFeedbackGfi());
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] Feedback GFI failed: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       hs.dispose();
@@ -460,11 +461,11 @@ function handleApiRoute(
     const hs = healthService();
     try {
       const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
-      json(res, 200, hs.getFeedbackEmpathyEvents(limit));
+      sendJson(res, 200, hs.getFeedbackEmpathyEvents(limit));
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] Feedback empathy events failed: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       hs.dispose();
@@ -475,11 +476,11 @@ function handleApiRoute(
     const hs = healthService();
     try {
       const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
-      json(res, 200, hs.getFeedbackGateBlocks(limit));
+      sendJson(res, 200, hs.getFeedbackGateBlocks(limit));
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] Feedback gate blocks failed: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       hs.dispose();
@@ -489,11 +490,11 @@ function handleApiRoute(
   if (pathname === `${API_PREFIX}/gate/stats` && method === 'GET') {
     const hs = healthService();
     try {
-      json(res, 200, hs.getGateStats());
+      sendJson(res, 200, hs.getGateStats());
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] Gate stats failed: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       hs.dispose();
@@ -504,11 +505,11 @@ function handleApiRoute(
     const hs = healthService();
     try {
       const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
-      json(res, 200, hs.getGateBlocks(limit));
+      sendJson(res, 200, hs.getGateBlocks(limit));
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] Gate blocks failed: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       hs.dispose();
@@ -520,7 +521,7 @@ function handleApiRoute(
       const mode = url.searchParams.get('mode') === 'redacted' ? 'redacted' : 'raw';
       const result = service.exportCorrections(mode);
       if (!fs.existsSync(result.filePath)) {
-        json(res, 404, { error: 'not_found', message: 'Export file not found.' });
+        sendJson(res, 404, { error: 'not_found', message: 'Export file not found.' });
         return true;
       }
       res.statusCode = 200;
@@ -535,7 +536,7 @@ function handleApiRoute(
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] Export request failed for ${pathname}: ${String(error)}`);
-      json(res, 500, { error: 'internal_error', message: String(error) });
+      sendJson(res, 500, { error: 'internal_error', message: String(error) });
       return true;
     } finally {
       service.dispose();
@@ -543,7 +544,7 @@ function handleApiRoute(
   }
 
   service.dispose();
-  json(res, 404, { error: 'not_found', message: 'Unknown Principles Console API route.' });
+  sendJson(res, 404, { error: 'not_found', message: 'Unknown Principles Console API route.' });
   return true;
 }
 
@@ -598,12 +599,13 @@ export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawP
     path: ROUTE_PREFIX,
     auth: 'plugin',
     match: 'prefix',
-     
-    async handler(req, res) {
-      if (!api.rootDir) { text(res, 500, 'Plugin rootDir not available'); return true; }
-      const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');
+
+    async handler(req: unknown, res: unknown) {
+      const httpReq = req as { url?: string; method?: string };
+      if (!api.rootDir) { sendText(res, 500, 'Plugin rootDir not available'); return true; }
+      const url = new URL(httpReq.url || ROUTE_PREFIX, 'http://127.0.0.1');
       const {pathname} = url;
-      const method = (req.method || 'GET').toUpperCase();
+      const method = (httpReq.method || 'GET').toUpperCase();
 
       // Skip API routes - they'll be handled by the API route
       if (pathname.startsWith(API_PREFIX)) {
@@ -613,25 +615,25 @@ export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawP
       // Serve assets
       if (pathname.startsWith(ASSETS_PREFIX)) {
         if (method !== 'GET' && method !== 'HEAD') {
-          text(res, 405, 'Method Not Allowed');
+          sendText(res, 405, 'Method Not Allowed');
           return true;
         }
         const assetPath = safeStaticPath(api.rootDir, pathname);
         if (!assetPath || !serveFile(res, assetPath)) {
-          text(res, 404, 'Asset Not Found');
+          sendText(res, 404, 'Asset Not Found');
         }
         return true;
       }
 
       // Serve index.html for the main route
       if (method !== 'GET' && method !== 'HEAD') {
-        text(res, 405, 'Method Not Allowed');
+        sendText(res, 405, 'Method Not Allowed');
         return true;
       }
 
       const indexPath = path.join(api.rootDir, 'dist', 'web', 'index.html');
       if (!serveFile(res, indexPath)) {
-        text(res, 503, 'Principles Console UI is not built yet.');
+        sendText(res, 503, 'Principles Console UI is not built yet.');
       }
       return true;
     },
@@ -642,10 +644,11 @@ export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawP
     path: API_PREFIX,
     auth: 'gateway',
     match: 'prefix',
-    async handler(req, res) {
-      const url = new URL(req.url || API_PREFIX, 'http://127.0.0.1');
+    async handler(req: unknown, res: unknown) {
+      const httpReq = req as { url?: string; method?: string };
+      const url = new URL(httpReq.url || API_PREFIX, 'http://127.0.0.1');
       const {pathname} = url;
-      return handleApiRoute(api, pathname, req, res);
+      return handleApiRoute(api, pathname, req as IncomingMessage, res as ServerResponse);
     },
   };
 
@@ -661,12 +664,13 @@ export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPl
     path: ROUTE_PREFIX,
     auth: 'plugin',
     match: 'prefix',
-     
-    async handler(req, res) {
-      if (!api.rootDir) { text(res, 500, 'Plugin rootDir not available'); return true; }
-      const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');
+
+    async handler(req: unknown, res: unknown) {
+      const httpReq = req as { url?: string; method?: string };
+      if (!api.rootDir) { sendText(res, 500, 'Plugin rootDir not available'); return true; }
+      const url = new URL(httpReq.url || ROUTE_PREFIX, 'http://127.0.0.1');
       const {pathname} = url;
-      const method = (req.method || 'GET').toUpperCase();
+      const method = (httpReq.method || 'GET').toUpperCase();
 
       if (!pathname.startsWith(ROUTE_PREFIX)) {
         return false;
@@ -674,34 +678,34 @@ export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPl
 
       // For API routes, check auth manually
       if (pathname.startsWith(API_PREFIX)) {
-        if (!validateGatewayAuth(req)) {
-          json(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
+        if (!validateGatewayAuth(req as IncomingMessage)) {
+          sendJson(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
           return true;
         }
-        return handleApiRoute(api, pathname, req, res);
+        return handleApiRoute(api, pathname, req as IncomingMessage, res as ServerResponse);
       }
 
       // Static files - no auth required
       if (pathname.startsWith(ASSETS_PREFIX)) {
         if (method !== 'GET' && method !== 'HEAD') {
-          text(res, 405, 'Method Not Allowed');
+          sendText(res, 405, 'Method Not Allowed');
           return true;
         }
         const assetPath = safeStaticPath(api.rootDir, pathname);
         if (!assetPath || !serveFile(res, assetPath)) {
-          text(res, 404, 'Asset Not Found');
+          sendText(res, 404, 'Asset Not Found');
         }
         return true;
       }
 
       if (method !== 'GET' && method !== 'HEAD') {
-        text(res, 405, 'Method Not Allowed');
+        sendText(res, 405, 'Method Not Allowed');
         return true;
       }
 
       const indexPath = path.join(api.rootDir, 'dist', 'web', 'index.html');
       if (!serveFile(res, indexPath)) {
-        text(res, 503, 'Principles Console UI is not built yet.');
+        sendText(res, 503, 'Principles Console UI is not built yet.');
       }
       return true;
     },

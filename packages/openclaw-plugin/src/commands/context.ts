@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
-import { atomicWriteFileSync } from '../utils/io.js';
+import { atomicWriteFileSync, normalizeCommandArgs } from '../utils/io.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
 import { loadContextInjectionConfig } from '../hooks/prompt.js';
@@ -305,7 +305,7 @@ function showHelp(isZh: boolean): string {
      
 export function handleContextCommand(ctx: PluginCommandContext): PluginCommandResult {
     const workspaceDir = getWorkspaceDir(ctx);
-    const args = (ctx.args || '').trim().split(/\s+/);
+    const args = normalizeCommandArgs(ctx.args).trim().split(/\s+/);
     const subCommand = args[0]?.toLowerCase() || 'status';
     const value = args[1]?.toLowerCase() || '';
     
