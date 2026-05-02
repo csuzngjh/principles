@@ -390,10 +390,13 @@ export function rankCandidates(
     details: `Received ${candidates.length} candidates and ${judgments.length} judgments`,
   });
 
+  // Pre-index judgments for O(1) lookup
+  const judgmentMap = new Map(judgments.map((j) => [j.candidateIndex, j]));
+
   // Score each candidate
   const scored: ScoredCandidate[] = [];
   for (const candidate of candidates) {
-    const judgment = judgments.find((j) => j.candidateIndex === candidate.candidateIndex);
+    const judgment = judgmentMap.get(candidate.candidateIndex);
     if (!judgment) {
       trace.push({
         step: `Candidate ${candidate.candidateIndex}`,
@@ -438,9 +441,10 @@ export function rankCandidates(
   // Assign ranks
   let currentRank = 1;
   let currentAggregate = -1;
-  for (const candidate of scored) {
+  for (let i = 0; i < scored.length; i++) {
+    const candidate = scored[i];
     if (candidate.scores.aggregate !== currentAggregate) {
-      currentRank = scored.indexOf(candidate) + 1;
+      currentRank = i + 1;
       currentAggregate = candidate.scores.aggregate;
     }
     candidate.rank = currentRank;
