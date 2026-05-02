@@ -390,10 +390,22 @@ export function rankCandidates(
     details: `Received ${candidates.length} candidates and ${judgments.length} judgments`,
   });
 
+  // Pre-index judgments to avoid O(N) per-candidate lookup
+  const judgmentMap = new Map<number, PhilosopherJudgment>();
+  for (const j of judgments) {
+    if (judgmentMap.has(j.candidateIndex)) {
+      trace.push({
+        step: 'Input Validation',
+        details: `Duplicate candidateIndex ${j.candidateIndex} in judgments — last wins`,
+      });
+    }
+    judgmentMap.set(j.candidateIndex, j);
+  }
+
   // Score each candidate
   const scored: ScoredCandidate[] = [];
   for (const candidate of candidates) {
-    const judgment = judgments.find((j) => j.candidateIndex === candidate.candidateIndex);
+    const judgment = judgmentMap.get(candidate.candidateIndex);
     if (!judgment) {
       trace.push({
         step: `Candidate ${candidate.candidateIndex}`,
@@ -437,11 +449,17 @@ export function rankCandidates(
 
   // Assign ranks
   let currentRank = 1;
-  let currentAggregate = -1;
-  for (const candidate of scored) {
-    if (candidate.scores.aggregate !== currentAggregate) {
-      currentRank = scored.indexOf(candidate) + 1;
-      currentAggregate = candidate.scores.aggregate;
+  let lastThresholdPassed: boolean | null = null;
+  let lastAggregate: number | null = null;
+  for (let i = 0; i < scored.length; i++) {
+    const candidate = scored[i];
+    if (
+      candidate.thresholdPassed !== lastThresholdPassed ||
+      candidate.scores.aggregate !== lastAggregate
+    ) {
+      currentRank = i + 1;
+      lastThresholdPassed = candidate.thresholdPassed;
+      lastAggregate = candidate.scores.aggregate;
     }
     candidate.rank = currentRank;
   }
