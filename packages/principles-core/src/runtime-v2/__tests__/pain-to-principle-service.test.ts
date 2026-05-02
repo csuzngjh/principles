@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PDRuntimeError, PD_ERROR_CATEGORIES, FAILURE_CATEGORY_MAP } from '../error-categories.js';
-import type { PainSignalBridgeResult } from '../pain-signal-bridge.js';
+import type { PainSignalBridgeResult, PainDetectedData } from '../pain-signal-bridge.js';
 import type { RecordPainSignalObservabilityOptions, PainSignalObservabilityResult } from '../pain-signal-observability.js';
 import type { PainSignalRuntimeFactoryOptions } from '../pain-signal-runtime-factory.js';
 
@@ -18,12 +18,13 @@ let mockBridgeResult: PainSignalBridgeResult = {
 let mockBridgeError: Error | null = null;
 let observabilityCalled = false;
 let mockObservabilityWarnings: string[] = [];
+let lastPainDetectedData: PainDetectedData | null = null;
 
 vi.mock('../pain-signal-runtime-factory.js', () => ({
   createPainSignalBridge: vi.fn(async (_opts: PainSignalRuntimeFactoryOptions) => ({
-    onPainDetected: vi.fn(async (data: { taskId?: string }) => {
+    onPainDetected: vi.fn(async (data: PainDetectedData) => {
+      lastPainDetectedData = data;
       if (mockBridgeError) throw mockBridgeError;
-      // Use taskId from input if provided, otherwise from mock result
       return { ...mockBridgeResult, taskId: data.taskId ?? mockBridgeResult.taskId };
     }),
   })),
@@ -63,6 +64,7 @@ describe('PainToPrincipleService', () => {
     mockBridgeError = null;
     observabilityCalled = false;
     mockObservabilityWarnings = [];
+    lastPainDetectedData = null;
     service = new PainToPrincipleService(makeOpts());
   });
 
@@ -79,6 +81,32 @@ describe('PainToPrincipleService', () => {
     expect(r.observabilityWarnings).toEqual([]);
     expect(r.latencyMs).toBeGreaterThanOrEqual(0);
     expect(r.failureCategory).toBeUndefined();
+  });
+
+  // 1b. Full input contract: all PainDetectedData fields passed to bridge
+  it('recordPain passes complete PainDetectedData to bridge', async () => {
+    await service.recordPain({
+      painId: 'pain-002',
+      painType: 'subagent_error',
+      source: 'auto',
+      reason: 'timeout',
+      score: 80,
+      sessionId: 'sess-1',
+      agentId: 'agent-1',
+      taskId: 'custom-task',
+      traceId: 'trace-1',
+    });
+    expect(lastPainDetectedData).toEqual({
+      painId: 'pain-002',
+      painType: 'subagent_error',
+      source: 'auto',
+      reason: 'timeout',
+      score: 80,
+      sessionId: 'sess-1',
+      agentId: 'agent-1',
+      taskId: 'custom-task',
+      traceId: 'trace-1',
+    });
   });
 
   // 2. Bridge returns failed with errorCategory → FAILURE_CATEGORY_MAP
@@ -172,6 +200,7 @@ describe('PainToPrincipleService error classification parity', () => {
     vi.clearAllMocks();
     observabilityCalled = false;
     mockObservabilityWarnings = [];
+    lastPainDetectedData = null;
     service = new PainToPrincipleService(makeOpts());
   });
 

@@ -10,9 +10,19 @@
 import { createPainSignalBridge } from './pain-signal-runtime-factory.js';
 import { recordPainSignalObservability } from './pain-signal-observability.js';
 import { FAILURE_CATEGORY_MAP } from './error-categories.js';
+import { createDiagnosticianTaskId } from './pain-signal-bridge.js';
 import type { PainDetectedData, PainSignalBridgeResult } from './pain-signal-bridge.js';
 import { PDRuntimeError } from './error-categories.js';
 import type { LedgerAdapter } from './candidate-intake.js';
+
+export type FailureCategory =
+  | 'runtime_unavailable'
+  | 'config_missing'
+  | 'runtime_timeout'
+  | 'output_invalid'
+  | 'artifact_missing'
+  | 'ledger_write_failed'
+  | 'candidate_missing';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -26,7 +36,7 @@ export interface PainToPrincipleServiceOptions {
 
 export interface PainToPrincipleInput {
   painId: string;
-  painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  painType: PainDetectedData['painType'];
   source: string;
   reason: string;
   score?: number;
@@ -47,15 +57,15 @@ export interface PainToPrincipleOutput {
   ledgerEntryIds: string[];
   message?: string;
   observabilityWarnings: string[];
-  failureCategory?: string;
+  failureCategory?: FailureCategory;
   latencyMs: number;
 }
 
 // ── Error classification ───────────────────────────────────────────────────
 
-function classifyFromBridge(result: PainSignalBridgeResult): string | undefined {
+function classifyFromBridge(result: PainSignalBridgeResult): FailureCategory | undefined {
   if (result.errorCategory) {
-    return FAILURE_CATEGORY_MAP[result.errorCategory] ?? 'runtime_unavailable';
+    return (FAILURE_CATEGORY_MAP[result.errorCategory] as FailureCategory) ?? 'runtime_unavailable';
   }
   if (result.status === 'failed') {
     if (result.candidateIds.length === 0) return 'candidate_missing';
@@ -64,12 +74,12 @@ function classifyFromBridge(result: PainSignalBridgeResult): string | undefined 
   return undefined;
 }
 
-function classifyFromError(err: unknown): string {
+function classifyFromError(err: unknown): FailureCategory {
   if (err instanceof PDRuntimeError && err.category) {
-    return FAILURE_CATEGORY_MAP[err.category] ?? 'runtime_unavailable';
+    return (FAILURE_CATEGORY_MAP[err.category] as FailureCategory) ?? 'runtime_unavailable';
   }
   const msg = err instanceof Error ? err.message : String(err);
-  if (/api[_\s]?key|not found in env|XIAOMI_KEY|OPENROUTER|missing required/i.test(msg)) return 'config_missing';
+  if (/api[_\s]?key|not found in env|missing required/i.test(msg)) return 'config_missing';
   if (/timeout|timed[_\s]?out/i.test(msg)) return 'runtime_timeout';
   if (/output.*invalid|validation.*fail/i.test(msg)) return 'output_invalid';
   return 'runtime_unavailable';
@@ -87,7 +97,7 @@ export class PainToPrincipleService {
   async recordPain(input: PainToPrincipleInput): Promise<PainToPrincipleOutput> {
     const startTime = Date.now();
     const {painId} = input;
-    const taskId = input.taskId ?? `diagnosis_${painId}`;
+    const taskId = input.taskId ?? createDiagnosticianTaskId(painId);
 
     const painData: PainDetectedData = {
       painId,
@@ -101,17 +111,6 @@ export class PainToPrincipleService {
       traceId: input.traceId,
     };
 
-    // Observability (optional, best-effort)
-    let observabilityWarnings: string[] = [];
-    if (input.recordObservability !== false) {
-      const obs = recordPainSignalObservability({
-        workspaceDir: this.opts.workspaceDir,
-        stateDir: this.opts.stateDir,
-        data: painData,
-      });
-      observabilityWarnings = obs.warnings;
-    }
-
     try {
       const bridge = await createPainSignalBridge({
         workspaceDir: this.opts.workspaceDir,
@@ -122,6 +121,17 @@ export class PainToPrincipleService {
       });
 
       const bridgeResult = await bridge.onPainDetected(painData);
+
+      let observabilityWarnings: string[] = [];
+      if (input.recordObservability !== false) {
+        const obs = recordPainSignalObservability({
+          workspaceDir: this.opts.workspaceDir,
+          stateDir: this.opts.stateDir,
+          data: painData,
+        });
+        observabilityWarnings = obs.warnings;
+      }
+
       const latencyMs = Date.now() - startTime;
 
       return {
@@ -138,6 +148,20 @@ export class PainToPrincipleService {
         latencyMs,
       };
     } catch (err: unknown) {
+      let observabilityWarnings: string[] = [];
+      if (input.recordObservability !== false) {
+        try {
+          const obs = recordPainSignalObservability({
+            workspaceDir: this.opts.workspaceDir,
+            stateDir: this.opts.stateDir,
+            data: painData,
+          });
+          observabilityWarnings = obs.warnings;
+        } catch {
+          // Observability is best-effort; swallow errors on failure path
+        }
+      }
+
       const latencyMs = Date.now() - startTime;
       return {
         status: 'failed',
