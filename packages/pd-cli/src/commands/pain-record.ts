@@ -4,26 +4,16 @@
  * Usage:
  *   pd pain record --reason <text> [--score N] [--source manual] [--workspace <path>] [--json]
  *
- * Flow:
- *   PainDetectedData → PainSignalBridge.onPainDetected()
- *   → DiagnosticianRunner.run() → CandidateIntakeService.intake()
- *   → PrincipleTreeLedger probation entry
- *
- * Output:
- *   JSON: { painId, taskId, runId, artifactId, candidateIds, ledgerEntryIds }
- *   Text: Human-readable summary
- *   Exit: non-0 on failure
+ * Delegates to PainToPrincipleService (core) for bridge creation, observability,
+ * error classification, and latency measurement.
  */
 
 import {
-  createPainSignalBridge,
+  PainToPrincipleService,
   PrincipleTreeLedgerAdapter,
-  recordPainSignalObservability,
   resolveRuntimeConfig,
-  FAILURE_CATEGORY_MAP,
 } from '@principles/core/runtime-v2';
-import { PDRuntimeError } from '@principles/core/runtime-v2';
-import type { PainSignalBridgeResult } from '@principles/core/runtime-v2';
+import type { PainToPrincipleOutput } from '@principles/core/runtime-v2';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
@@ -49,6 +39,66 @@ interface PainRecordResult {
   latencyMs?: number;
 }
 
+async function formatConfigDiagnostic(stateDir: string, errMsg: string): Promise<void> {
+  const config = resolveRuntimeConfig(stateDir);
+  const missing: string[] = [];
+  if (!config.provider) missing.push('provider');
+  if (!config.model) missing.push('model');
+  if (!config.apiKeyEnv) missing.push('apiKeyEnv');
+  if (config.provider) {
+    try {
+      const { getProviders } = await import('@mariozechner/pi-ai');
+      const knownProviders = getProviders();
+      if (!knownProviders.includes(config.provider as KnownProvider) && !config.baseUrl) {
+        missing.push('baseUrl');
+      }
+    } catch {
+      // pi-ai may not be available
+    }
+  }
+
+  console.error('Error: Pain signal bridge initialization failed\n');
+
+  if (missing.length > 0) {
+    console.error('  Missing configuration:');
+    for (const m of missing) {
+      console.error(`    - ${m}`);
+    }
+    console.error('');
+  }
+
+  if (config.provider || config.model || config.apiKeyEnv || config.baseUrl) {
+    console.error('  Current workflow policy (pd-runtime-v2-diagnosis):');
+    console.error(`    runtimeKind: ${config.runtimeKind}`);
+    if (config.provider) console.error(`    provider:    ${config.provider}`);
+    if (config.model) console.error(`    model:       ${config.model}`);
+    if (config.apiKeyEnv) console.error(`    apiKeyEnv:   ${config.apiKeyEnv}`);
+    if (config.baseUrl) console.error(`    baseUrl:     ${config.baseUrl}`);
+    console.error('');
+  }
+
+  console.error('  To diagnose and configure your runtime, run:');
+  console.error('    pd runtime probe --runtime pi-ai --provider <name> --model <id> --apiKeyEnv <name>');
+  console.error('');
+  console.error(`  Details: ${errMsg}`);
+}
+
+function serviceOutputToResult(out: PainToPrincipleOutput): PainRecordResult {
+  return {
+    painId: out.painId,
+    taskId: out.taskId,
+    runId: out.runId,
+    artifactId: out.artifactId,
+    candidateIds: out.candidateIds,
+    ledgerEntryIds: out.ledgerEntryIds,
+    status: out.status,
+    message: out.message,
+    observabilityWarnings: out.observabilityWarnings.length > 0 ? out.observabilityWarnings : undefined,
+    failureCategory: out.failureCategory,
+    latencyMs: out.latencyMs,
+  };
+}
+
 export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   if (!opts.reason) {
     console.error('Error: --reason <text> is required');
@@ -64,146 +114,35 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const stateDir = `${workspaceDir}/.state`;
 
-  const painId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  const taskId = `diagnosis_${painId}`;
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
+  const service = new PainToPrincipleService({
+    workspaceDir,
+    stateDir,
+    ledgerAdapter,
+    owner: 'pd-cli',
+    autoIntakeEnabled: true,
+  });
 
-  let bridge = undefined;
-  try {
-    bridge = await createPainSignalBridge({
-      workspaceDir,
-      stateDir,
-      ledgerAdapter,
-      owner: 'pd-cli',
-      autoIntakeEnabled: true,
-    });
-  } catch (err) {
-    const isRuntimeUnavailable =
-      err instanceof PDRuntimeError && err.category === 'runtime_unavailable';
+  const painId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-    if (isRuntimeUnavailable || (err instanceof Error && /missing required fields|not found in env|api key/i.test(err.message))) {
-      // Show diagnostic info for config/env failures
-      const config = resolveRuntimeConfig(stateDir);
-      const missing: string[] = [];
-      if (!config.provider) missing.push('provider');
-      if (!config.model) missing.push('model');
-      if (!config.apiKeyEnv) missing.push('apiKeyEnv');
-      if (config.provider) {
-        try {
-          const { getProviders } = await import('@mariozechner/pi-ai');
-          const knownProviders = getProviders();
-          if (!knownProviders.includes(config.provider as KnownProvider) && !config.baseUrl) {
-            missing.push('baseUrl');
-          }
-        } catch {
-          // pi-ai may not be available
-        }
-      }
-
-      console.error('Error: Pain signal bridge initialization failed\n');
-
-      if (missing.length > 0) {
-        console.error('  Missing configuration:');
-        for (const m of missing) {
-          console.error(`    - ${m}`);
-        }
-        console.error('');
-      }
-
-      if (config.provider || config.model || config.apiKeyEnv || config.baseUrl) {
-        console.error('  Current workflow policy (pd-runtime-v2-diagnosis):');
-        console.error(`    runtimeKind: ${config.runtimeKind}`);
-        if (config.provider) console.error(`    provider:    ${config.provider}`);
-        if (config.model) console.error(`    model:       ${config.model}`);
-        if (config.apiKeyEnv) console.error(`    apiKeyEnv:   ${config.apiKeyEnv}`);
-        if (config.baseUrl) console.error(`    baseUrl:     ${config.baseUrl}`);
-        console.error('');
-      }
-
-      console.error('  To diagnose and configure your runtime, run:');
-      console.error('    pd runtime probe --runtime pi-ai --provider <name> --model <id> --apiKeyEnv <name>');
-      console.error('');
-
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(`  Details: ${errMsg}`);
-      process.exit(1);
-    }
-
-    // Unknown error — re-throw for generic handling
-    throw err;
-  }
-
-  const painData = {
+  // Service never throws — all errors surfaced via result
+  const out = await service.recordPain({
     painId,
-    taskId,
-    painType: 'user_frustration' as const,
+    painType: 'user_frustration',
     source: opts.source ?? 'manual',
     reason: opts.reason,
     score: opts.score ?? 80,
     sessionId: 'cli',
     agentId: 'pd-cli',
-  };
-
-  const observability = recordPainSignalObservability({
-    workspaceDir,
-    stateDir,
-    data: painData,
   });
 
-  function classifyResult(br: PainSignalBridgeResult): string | undefined {
-    if (br.errorCategory) {
-      return FAILURE_CATEGORY_MAP[br.errorCategory] ?? 'runtime_unavailable';
-    }
-    if (br.status === 'failed') {
-      if (br.candidateIds.length === 0) return 'candidate_missing';
-      if (br.ledgerEntryIds.length === 0) return 'ledger_write_failed';
-    }
-    return undefined;
+  const result = serviceOutputToResult(out);
+
+  // Config init failure → show diagnostic guidance
+  if (result.status !== 'succeeded' && result.failureCategory === 'config_missing') {
+    await formatConfigDiagnostic(stateDir, result.message ?? 'configuration error');
+    process.exit(1);
   }
-
-  function classifyCatch(err: unknown): string | undefined {
-    if (err instanceof PDRuntimeError && err.category) {
-      return FAILURE_CATEGORY_MAP[err.category] ?? 'runtime_unavailable';
-    }
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/api[_\s]?key|not found in env|XIAOMI_KEY|OPENROUTER|missing required/i.test(msg)) return 'config_missing';
-    if (/timeout|timed[_\s]?out/i.test(msg)) return 'runtime_timeout';
-    if (/output.*invalid|validation.*fail/i.test(msg)) return 'output_invalid';
-    return 'runtime_unavailable';
-  }
-
-  const startTime = Date.now();
-  const result = await (async (): Promise<PainRecordResult> => {
-    const bridgeResult = await bridge.onPainDetected(painData);
-    const latencyMs = Date.now() - startTime;
-
-    return {
-      painId: bridgeResult.painId,
-      taskId: bridgeResult.taskId,
-      runId: bridgeResult.runId,
-      artifactId: bridgeResult.artifactId,
-      candidateIds: bridgeResult.candidateIds,
-      ledgerEntryIds: bridgeResult.ledgerEntryIds,
-      status: bridgeResult.status,
-      message: bridgeResult.message,
-      observabilityWarnings: observability.warnings.length > 0 ? observability.warnings : undefined,
-      failureCategory: classifyResult(bridgeResult),
-      latencyMs,
-    };
-  })().catch((err: unknown) => {
-    const latencyMs = Date.now() - startTime;
-    return {
-      painId,
-      taskId,
-      status: 'failed' as const,
-      candidateIds: [],
-      ledgerEntryIds: [],
-      message: err instanceof Error ? err.message : String(err),
-      observabilityWarnings: observability.warnings.length > 0 ? observability.warnings : undefined,
-      failureCategory: classifyCatch(err),
-      latencyMs,
-    };
-  });
 
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
