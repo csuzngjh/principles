@@ -190,7 +190,7 @@ export async function getHistoryVersions(focusPath: string, count: number = FULL
   try {
     allFiles = await fs.promises.readdir(historyDir);
   } catch (err: unknown) {
-    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (typeof err === 'object' && err !== null && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
       return [];
     }
     throw err;

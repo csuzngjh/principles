@@ -170,7 +170,9 @@ describe('focus-history', () => {
 
   describe('getHistoryVersions', () => {
     it('should return empty array if no history', async () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      const err = new Error('ENOENT: no such file or directory') as NodeJS.ErrnoException;
+      err.code = 'ENOENT';
+      vi.mocked(fs.promises.readdir).mockRejectedValue(err);
 
       const result = await getHistoryVersions(mockFocusPath, 3);
 
@@ -198,7 +200,9 @@ describe('focus-history', () => {
     });
 
     it('should return empty array if readdir throws ENOENT', async () => {
-      vi.mocked(fs.promises.readdir).mockRejectedValue({ code: 'ENOENT' });
+      const err = new Error('ENOENT') as NodeJS.ErrnoException;
+      err.code = 'ENOENT';
+      vi.mocked(fs.promises.readdir).mockRejectedValue(err);
 
       const result = await getHistoryVersions(mockFocusPath, 3);
 
