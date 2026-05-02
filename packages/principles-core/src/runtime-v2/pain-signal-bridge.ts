@@ -65,7 +65,7 @@ export interface PainSignalBridgeOptions {
   autoIntakeEnabled?: boolean;
 }
 
-function createDiagnosticianTaskId(painId: string): string {
+export function createDiagnosticianTaskId(painId: string): string {
   return `diagnosis_${painId}`;
 }
 
