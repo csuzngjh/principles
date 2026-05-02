@@ -918,7 +918,7 @@ ${taskBlocks}${processingNote}
             projectContextContent = extractSummary(finalContent, 30);
           } else {
             // Full mode: current version + recent history (3 versions)
-            const historyVersions = getHistoryVersions(focusPath, 3);
+            const historyVersions = await getHistoryVersions(focusPath, 3);
             if (historyVersions.length > 0) {
               const historySections = historyVersions.map((v, i) =>
                 `\n---\n\n**历史版本 v${historyVersions.length - i}**\n\n${v}`

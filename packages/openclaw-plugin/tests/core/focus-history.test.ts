@@ -25,6 +25,11 @@ vi.mock('fs', () => ({
   writeFileSync: vi.fn(),
   statSync: vi.fn(),
   unlinkSync: vi.fn(),
+  promises: {
+    readdir: vi.fn(),
+    stat: vi.fn(),
+    readFile: vi.fn(),
+  }
 }));
 
 describe('focus-history', () => {
@@ -164,26 +169,29 @@ describe('focus-history', () => {
   });
 
   describe('getHistoryVersions', () => {
-    it('should return empty array if no history', () => {
+    it('should return empty array if no history', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
 
-      const result = getHistoryVersions(mockFocusPath, 3);
+      const result = await getHistoryVersions(mockFocusPath, 3);
 
       expect(result).toEqual([]);
     });
 
-    it('should return history versions sorted by mtime', () => {
+    it('should return history versions sorted by mtime', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readdirSync).mockReturnValue([
+      // fs.promises.readdir mock
+      vi.mocked(fs.promises.readdir).mockResolvedValue([
         'CURRENT_FOCUS.v1.2026-03-10.md',
         'CURRENT_FOCUS.v2.2026-03-11.md',
       ] as any);
-      vi.mocked(fs.statSync)
-        .mockReturnValueOnce({ mtime: new Date('2026-03-10') } as any)
-        .mockReturnValueOnce({ mtime: new Date('2026-03-11') } as any);
-      vi.mocked(fs.readFileSync).mockReturnValue('history content');
+      // fs.promises.stat mock
+      vi.mocked(fs.promises.stat)
+        .mockResolvedValueOnce({ mtime: new Date('2026-03-10') } as any)
+        .mockResolvedValueOnce({ mtime: new Date('2026-03-11') } as any);
+      // fs.promises.readFile mock
+      vi.mocked(fs.promises.readFile).mockResolvedValue('history content');
 
-      const result = getHistoryVersions(mockFocusPath, 3);
+      const result = await getHistoryVersions(mockFocusPath, 3);
 
       expect(result.length).toBe(2);
       expect(result[0]).toBe('history content');
