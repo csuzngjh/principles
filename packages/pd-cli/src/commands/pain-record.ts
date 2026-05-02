@@ -152,8 +152,13 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
 
   // Config init failure → show diagnostic guidance
   if (result.status !== 'succeeded' && result.failureCategory === 'config_missing') {
-    await formatConfigDiagnostic(stateDir, result.message ?? 'configuration error');
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      await formatConfigDiagnostic(stateDir, result.message ?? 'configuration error');
+    }
     process.exit(1);
+    return;
   }
 
   if (opts.json) {
