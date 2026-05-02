@@ -89,20 +89,21 @@ export class PainToPrincipleService {
     const {painId} = input;
     const taskId = input.taskId ?? `diagnosis_${painId}`;
 
+    const painData: PainDetectedData = {
+      painId,
+      painType: input.painType,
+      source: input.source,
+      reason: input.reason,
+      score: input.score,
+      sessionId: input.sessionId,
+      agentId: input.agentId,
+      taskId,
+      traceId: input.traceId,
+    };
+
     // Observability (optional, best-effort)
     let observabilityWarnings: string[] = [];
     if (input.recordObservability !== false) {
-      const painData: PainDetectedData = {
-        painId,
-        painType: input.painType,
-        source: input.source,
-        reason: input.reason,
-        score: input.score,
-        sessionId: input.sessionId,
-        agentId: input.agentId,
-        taskId,
-        traceId: input.traceId,
-      };
       const obs = recordPainSignalObservability({
         workspaceDir: this.opts.workspaceDir,
         stateDir: this.opts.stateDir,
@@ -119,18 +120,6 @@ export class PainToPrincipleService {
         owner: this.opts.owner,
         autoIntakeEnabled: this.opts.autoIntakeEnabled,
       });
-
-      const painData: PainDetectedData = {
-        painId,
-        painType: input.painType,
-        source: input.source,
-        reason: input.reason,
-        score: input.score,
-        sessionId: input.sessionId,
-        agentId: input.agentId,
-        taskId,
-        traceId: input.traceId,
-      };
 
       const bridgeResult = await bridge.onPainDetected(painData);
       const latencyMs = Date.now() - startTime;
