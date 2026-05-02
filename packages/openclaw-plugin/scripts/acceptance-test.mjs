@@ -122,8 +122,8 @@ function main() {
   const painHookSource = join(__dirname, '..', 'src', 'hooks', 'pain.ts');
   if (existsSync(painHookSource)) {
     const painContent = readFileSync(painHookSource, 'utf-8');
-    assert(painContent.includes('createPainSignalBridge'), 'pain.ts uses createPainSignalBridge from runtime-v2');
-    assert(!painContent.includes('recordAndWritePainFlag'), 'pain.ts no longer calls recordAndWritePainFlag');
+    assert(painContent.includes('PainToPrincipleService'), 'pain.ts uses PainToPrincipleService from runtime-v2');
+    assert(!painContent.includes('createPainSignalBridge'), 'pain.ts no longer imports createPainSignalBridge');
   }
 
   // 2.2 Verify write_pain_flag tool is NOT registered in index.ts

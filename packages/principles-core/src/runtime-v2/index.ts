@@ -199,18 +199,25 @@ export type { PromptInput, PromptBuildResult } from './diagnostician-prompt-buil
 export { run, status, candidateList, candidateShow, artifactShow, probeRuntime } from './cli/index.js';
 export type { DiagnoseRunOptions, DiagnoseStatusOptions, DiagnoseStatusResult, CandidateListOptions, CandidateShowOptions, ArtifactShowOptions, ProbeOptions, ProbeResult } from './cli/index.js';
 
-// Pain signal bridge (M8)
+// Pain signal bridge (M8) — INTERNAL: PainSignalBridge is a core implementation detail.
+// CLI/plugin consumers MUST use PainToPrincipleService (write) and PainChainReadModel (read).
 export {
+  /** @deprecated Internal implementation detail — use PainToPrincipleService instead */
   PainSignalBridge,
 } from './pain-signal-bridge.js';
 export type {
+  /** @deprecated Use PainToPrincipleServiceOptions instead */
   PainSignalBridgeOptions,
   PainDetectedData,
+  /** @deprecated Use PainToPrincipleOutput instead */
   PainSignalBridgeResult,
+  /** @deprecated Internal — use PainToPrincipleOutput.status */
   PainSignalBridgeStatus,
 } from './pain-signal-bridge.js';
+/** @deprecated Internal implementation detail — observability is handled by PainToPrincipleService */
 export { recordPainSignalObservability } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
+/** @deprecated Internal factory — use PainToPrincipleService constructor instead */
 export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfig, validateRuntimeConfig, type PainSignalRuntimeFactoryOptions, type RuntimeConfig } from './pain-signal-runtime-factory.js';
 
 // Pain-to-Principle service facade (PRI-12)

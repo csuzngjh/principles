@@ -138,7 +138,7 @@ describe('pd pain record', () => {
     expect(jsonOutput.artifactId).toBe('art-001');
     expect(jsonOutput.candidateIds).toEqual(['c1']);
     expect(jsonOutput.ledgerEntryIds).toEqual(['l1']);
-    expect(jsonOutput.observabilityWarnings).toBeUndefined();
+    expect(jsonOutput.observabilityWarnings).toEqual([]);
     expect(jsonOutput.latencyMs).toBe(42);
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
@@ -205,7 +205,7 @@ describe('pd pain record', () => {
     await handlePainRecord({ reason: 'test pain' });
 
     const allErrorOutput = errorSpy.mock.calls.map(c => c.join(' ')).join('\n');
-    expect(allErrorOutput).toContain('configuration issue');
+    expect(allErrorOutput).toContain('Error: Pain signal failed');
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     errorSpy.mockRestore();
