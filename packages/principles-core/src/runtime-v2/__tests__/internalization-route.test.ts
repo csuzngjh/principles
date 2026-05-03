@@ -43,6 +43,16 @@ describe('decideInternalizationRoute', () => {
     expect(decision.missingFields).toContain('abstractedPrinciple');
   });
 
+  it('principle with whitespace-only abstractedPrinciple maps to principle-ledger, ready=false', async () => {
+    const { decideInternalizationRoute } = await import('../internalization/internalization-route.js');
+    const rec = makeRecommendation({ kind: 'principle', abstractedPrinciple: '   ' });
+    const decision = decideInternalizationRoute(rec);
+
+    expect(decision.route).toBe('principle-ledger');
+    expect(decision.ready).toBe(false);
+    expect(decision.missingFields).toContain('abstractedPrinciple');
+  });
+
   // ── rule ───────────────────────────────────────────────────────────────────
 
   it('rule with triggerPattern and action maps to rule-candidate, ready=true', async () => {

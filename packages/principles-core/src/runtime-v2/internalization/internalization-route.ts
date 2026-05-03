@@ -55,7 +55,7 @@ export function decideInternalizationRoute(
   if (route === 'deferred' && recommendation.kind !== 'defer') {
     return {
       ready: false,
-      route: 'deferred',
+      route,
       missingFields: [],
       reason: `Unrecognized recommendation kind "${recommendation.kind}" — deferred to safe default.`,
       nextAction: 'Review diagnostician output for unsupported recommendation kind.',
@@ -66,7 +66,7 @@ export function decideInternalizationRoute(
   if (recommendation.kind === 'defer') {
     return {
       ready: false,
-      route: 'deferred',
+      route,
       missingFields: [],
       reason: 'Recommendation explicitly deferred — no internalization action required.',
       nextAction: 'No action needed. Re-evaluate if context changes.',
@@ -76,12 +76,12 @@ export function decideInternalizationRoute(
   // principle: requires abstractedPrinciple
   if (recommendation.kind === 'principle') {
     const missingFields: string[] = [];
-    if (!recommendation.abstractedPrinciple) {
+    if (!recommendation.abstractedPrinciple?.trim()) {
       missingFields.push('abstractedPrinciple');
     }
     return {
       ready: missingFields.length === 0,
-      route: 'principle-ledger',
+      route,
       missingFields,
       reason: missingFields.length > 0
         ? `Principle recommendation incomplete: missing ${missingFields.join(', ')}.`
@@ -95,15 +95,15 @@ export function decideInternalizationRoute(
   // rule: requires triggerPattern + action
   if (recommendation.kind === 'rule') {
     const missingFields: string[] = [];
-    if (!recommendation.triggerPattern) {
+    if (!recommendation.triggerPattern?.trim()) {
       missingFields.push('triggerPattern');
     }
-    if (!recommendation.action) {
+    if (!recommendation.action?.trim()) {
       missingFields.push('action');
     }
     return {
       ready: missingFields.length === 0,
-      route: 'rule-candidate',
+      route,
       missingFields,
       reason: missingFields.length > 0
         ? `Rule recommendation incomplete: missing ${missingFields.join(', ')}.`
@@ -118,7 +118,7 @@ export function decideInternalizationRoute(
   if (recommendation.kind === 'implementation') {
     return {
       ready: true,
-      route: 'implementation-candidate',
+      route,
       missingFields: [],
       reason: 'Implementation recommendation ready for candidate pipeline.',
       nextAction: 'Proceed with implementation-candidate intake and compilation.',
@@ -129,7 +129,7 @@ export function decideInternalizationRoute(
   if (recommendation.kind === 'prompt') {
     return {
       ready: true,
-      route: 'prompt-injection-candidate',
+      route,
       missingFields: [],
       reason: 'Prompt recommendation ready for injection candidate pipeline.',
       nextAction: 'Proceed with prompt-injection-candidate intake.',
@@ -139,7 +139,7 @@ export function decideInternalizationRoute(
   // Exhaustive fallback — TypeScript ensures this is unreachable for valid kinds
   return {
     ready: false,
-    route: 'deferred',
+    route,
     missingFields: [],
     reason: `Unhandled recommendation kind "${recommendation.kind}" — deferred to safe default.`,
     nextAction: 'Review diagnostician output for unsupported recommendation kind.',
