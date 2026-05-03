@@ -100,14 +100,10 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
         now,
       );
 
-      // 2c. Extract and insert principle candidates
+      // 2c. Extract and insert all recommendations (principle + rule + implementation + prompt + defer)
       let candidateCount = 0;
-      const principleRecommendations = input.output.recommendations.filter(
-        (r) => r.kind === 'principle',
-      );
-
-      for (let i = 0; i < principleRecommendations.length; i++) {
-        const rec = principleRecommendations[i];
+      for (let i = 0; i < input.output.recommendations.length; i++) {
+        const rec = input.output.recommendations[i];
         if (!rec) continue;
 
         // Application-layer guard against pathological inputs
@@ -128,8 +124,9 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
         db.prepare(`
           INSERT INTO principle_candidates
             (candidate_id, artifact_id, task_id, source_run_id, title, description,
-             confidence, source_recommendation_json, idempotency_key, status, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             confidence, source_recommendation_json, idempotency_key, status, created_at,
+             recommendation_kind, trigger_pattern, action, abstracted_principle)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           candidateId,
           artifactId,
@@ -142,6 +139,10 @@ export class SqliteDiagnosticianCommitter implements DiagnosticianCommitter {
           candidateIdemKey,
           'pending',
           now,
+          rec.kind,
+          rec.triggerPattern ?? null,
+          rec.action ?? null,
+          rec.abstractedPrinciple ?? null,
         );
         candidateCount++;
       }

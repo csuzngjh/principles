@@ -182,6 +182,10 @@ export class SqliteConnection {
         status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL,
         consumed_at TEXT,
+        recommendation_kind TEXT NOT NULL DEFAULT 'principle',
+        trigger_pattern TEXT,
+        action TEXT,
+        abstracted_principle TEXT,
         FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE,
         FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
         FOREIGN KEY (source_run_id) REFERENCES runs(run_id) ON DELETE CASCADE
@@ -189,6 +193,7 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_candidates_status ON principle_candidates(status);
       CREATE INDEX IF NOT EXISTS idx_candidates_source_run_id ON principle_candidates(source_run_id);
       CREATE INDEX IF NOT EXISTS idx_candidates_task_id ON principle_candidates(task_id);
+      CREATE INDEX IF NOT EXISTS idx_candidates_recommendation_kind ON principle_candidates(recommendation_kind);
     `);
   }
 
