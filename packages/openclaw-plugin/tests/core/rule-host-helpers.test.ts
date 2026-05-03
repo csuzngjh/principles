@@ -101,7 +101,7 @@ describe('createRuleHostHelpers', () => {
     const helpers = createRuleHostHelpers(makeInput({
       evolution: { epTier: 4 },
     }));
-    expect(helpers.getCurrentEpiTier()).toBe(4);
+    expect(helpers.getEpTier()).toBe(4);
   });
 
   it('all helpers should be pure functions with no side effects', () => {
@@ -115,6 +115,6 @@ describe('createRuleHostHelpers', () => {
     expect(helpers.getBashRisk()).toBe(helpers.getBashRisk());
     expect(helpers.hasPlanFile()).toBe(helpers.hasPlanFile());
     expect(helpers.getPlanStatus()).toBe(helpers.getPlanStatus());
-    expect(helpers.getCurrentEpiTier()).toBe(helpers.getCurrentEpiTier());
+    expect(helpers.getEpTier()).toBe(helpers.getEpTier());
   });
 });

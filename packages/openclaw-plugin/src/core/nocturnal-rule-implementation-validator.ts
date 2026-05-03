@@ -49,7 +49,7 @@ const HELPER_NAMES: (keyof RuleHostHelpers)[] = [
   'getBashRisk',
   'hasPlanFile',
   'getPlanStatus',
-  'getCurrentEpiTier',
+  'getEpTier',
 ];
 
 function createValidationInput(): RuleHostInput {
