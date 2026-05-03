@@ -11,11 +11,13 @@
  *   - Consistency and latency statistics
  *
  * Requirements:
- *   - MINIMAX_API_KEY environment variable
- *   - Built pd-cli (npx pd must be resolvable)
+ *   - MINIMAX_CN_API_KEY environment variable
+ *   - Built pd-cli (packages/pd-cli/dist/index.js must exist)
  */
 
-import { execSync, execFileSync } from 'child_process';
+import { execFileSync } from 'child_process';
+import { fileURLToPath } from 'node:url';
+import { existsSync } from 'fs';
 import * as path from 'path';
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
@@ -72,11 +74,29 @@ function error(msg) {
   console.error(`[${now()}] ERROR: ${msg}`);
 }
 
+// ── Cross-platform pd CLI invocation ──────────────────────────────────────────
+
+function findPdCliPath() {
+  // Resolve relative to this script's location: scripts/uat/ → packages/pd-cli/dist/
+  // Use import.meta.url (ESM) instead of __filename (CJS)
+  const currentFile = fileURLToPath(import.meta.url);
+  const scriptDir = path.dirname(currentFile);
+  const repoRoot = path.resolve(scriptDir, '..', '..');
+  const cliPath = path.join(repoRoot, 'packages', 'pd-cli', 'dist', 'index.js');
+  if (!existsSync(cliPath)) {
+    throw new Error(`pd CLI not found at ${cliPath} — run: npm run build --workspace=@principles/pd-cli`);
+  }
+  return cliPath;
+}
+
 function pd(args, workspace, timeoutMs = 300_000) {
+  // Arguments: subcommand args first, then --workspace and path at the end
+  // Correct: pd pain record ... --workspace <path>
   const fullArgs = [...args, '--workspace', workspace];
+  const cliPath = findPdCliPath();
   const env = { ...process.env };
   try {
-    return execFileSync('npx', ['pd', ...fullArgs], {
+    return execFileSync(process.execPath, [cliPath, ...fullArgs], {
       encoding: 'utf8',
       timeout: timeoutMs,
       env,
@@ -106,11 +126,11 @@ async function main() {
   log('');
 
   // 1. Check environment
-  if (!process.env.MINIMAX_API_KEY) {
-    error('MINIMAX_API_KEY environment variable not set');
+  if (!process.env.MINIMAX_CN_API_KEY) {
+    error('MINIMAX_CN_API_KEY environment variable not set');
     process.exit(1);
   }
-  log('✓ MINIMAX_API_KEY is set');
+  log('✓ MINIMAX_CN_API_KEY is set');
 
   // 2. Runtime probe
   log('Probing runtime...');
