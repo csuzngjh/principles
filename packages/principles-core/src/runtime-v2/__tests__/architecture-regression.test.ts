@@ -110,6 +110,31 @@ describe('openclaw-plugin pain hook integration', () => {
     expect(src).toContain('PainToPrincipleService');
     expect(src).not.toContain('createPainSignalBridge');
   });
+
+  // PRI-29: emitPainDetectedEvent → PainToPrincipleService service contract
+  it('pain.ts emitPainDetectedEvent calls PainToPrincipleService.recordPain on pain_detected', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const painHookPath = resolve(
+      __dirname,
+      '../../../openclaw-plugin/src/hooks/pain.ts',
+    );
+    if (!existsSync(painHookPath)) {
+      return;
+    }
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(painHookPath, 'utf-8');
+    // Must call service.recordPain() inside emitPainDetectedEvent
+    expect(src).toMatch(/service\.recordPain\(/);
+    // Must log PAIN_SERVICE_FAILED for failure results
+    expect(src).toMatch(/PAIN_SERVICE_FAILED/);
+    // Must log PAIN_SERVICE_SKIPPED for skipped results
+    expect(src).toMatch(/PAIN_SERVICE_SKIPPED/);
+    // Must log PAIN_SERVICE_ERROR for exceptions
+    expect(src).toMatch(/PAIN_SERVICE_ERROR/);
+    // Must NOT use legacy createPainSignalBridge
+    expect(src).not.toMatch(/createPainSignalBridge/);
+  });
 });
 
 // ── pd-cli command boundary guards ─────────────────────────────────────────
