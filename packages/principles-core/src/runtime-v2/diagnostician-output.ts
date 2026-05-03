@@ -40,9 +40,9 @@ export type RecommendationKind = Static<typeof RecommendationKindSchema>;
 export const DiagnosticianRecommendationSchema = Type.Object({
   kind: RecommendationKindSchema,
   description: Type.String({ minLength: 1 }),
-  /** Trigger pattern (regex/keywords) — required when kind is 'principle' */
+  /** Trigger pattern (regex/keywords) — required when kind is 'rule' */
   triggerPattern: Type.Optional(Type.String()),
-  /** Action to take when pattern matches — required when kind is 'principle' */
+  /** Action to take when pattern matches — required when kind is 'rule' */
   action: Type.Optional(Type.String()),
   /** Highly abstracted principle (≤200 chars) — required when kind is 'principle'
    * @see MAX_ABSTRACTED_PRINCIPLE_CHARS in runner/default-validator.ts

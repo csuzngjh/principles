@@ -283,7 +283,7 @@ describe('recommendations shape', () => {
 
   it('all valid RecommendationKind values pass', async () => {
     const validator = new DefaultDiagnosticianValidator();
-    const kinds = ['rule', 'implementation', 'prompt', 'defer'] as const;
+    const kinds = ['implementation', 'prompt', 'defer'] as const;
     for (const kind of kinds) {
       const result = await validator.validate(
         makeValidOutput({
@@ -293,14 +293,20 @@ describe('recommendations shape', () => {
       );
       assertValid(result);
     }
-    // principle kind requires triggerPattern/action/abstractedPrinciple
+    // rule requires triggerPattern + action
+    const ruleResult = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'rule', description: 'Block unsafe paths', triggerPattern: '^\\.\\./', action: 'Reject path traversal' }],
+      }),
+      'task-001',
+    );
+    assertValid(ruleResult);
+    // principle requires abstractedPrinciple (triggerPattern/action optional)
     const principleResult = await validator.validate(
       makeValidOutput({
         recommendations: [{
           kind: 'principle',
           description: 'Validate tool arguments before execution',
-          triggerPattern: 'tool.*argument',
-          action: 'Use schema validation',
           abstractedPrinciple: 'Validate inputs before execution',
         }],
       }),
@@ -317,8 +323,6 @@ describe('recommendations shape', () => {
         recommendations: [{
           kind: 'principle',
           description: 'Validate tool arguments before execution',
-          triggerPattern: 'tool.*argument',
-          action: 'Use schema validation',
           abstractedPrinciple: longPrinciple,
         }],
       }),
@@ -335,8 +339,6 @@ describe('recommendations shape', () => {
         recommendations: [{
           kind: 'principle',
           description: 'Validate tool arguments before execution',
-          triggerPattern: 'tool.*argument',
-          action: 'Use schema validation',
           abstractedPrinciple: tooLongPrinciple,
         }],
       }),
@@ -354,14 +356,144 @@ describe('recommendations shape', () => {
         recommendations: [{
           kind: 'principle',
           description: 'Validate tool arguments before execution',
-          triggerPattern: 'tool.*argument',
-          action: 'Use schema validation',
           abstractedPrinciple: principle41,
         }],
       }),
       'task-001',
     );
     assertValid(result);
+  });
+});
+
+// ── PRI-31: Recommendation taxonomy calibration ─────────────────────────────
+
+describe('recommendation taxonomy calibration (PRI-31)', () => {
+  // principle: only abstractedPrinciple required
+  it('principle without abstractedPrinciple fails', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'principle', description: 'Use immutable data' }],
+      }),
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('abstractedPrinciple'))).toBe(true);
+  });
+
+  it('principle without triggerPattern passes (not required)', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'principle', description: 'Use immutable data', abstractedPrinciple: 'Prefer immutability' }],
+      }),
+      'task-001',
+    );
+    assertValid(result);
+  });
+
+  it('principle without action passes (not required)', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'principle', description: 'Use immutable data', abstractedPrinciple: 'Prefer immutability' }],
+      }),
+      'task-001',
+    );
+    assertValid(result);
+  });
+
+  it('principle with abstractedPrinciple only passes', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'principle', description: 'Use immutable data', abstractedPrinciple: 'Prefer immutability' }],
+      }),
+      'task-001',
+    );
+    assertValid(result);
+  });
+
+  // rule: triggerPattern + action required
+  it('rule without triggerPattern fails', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'rule', description: 'Block unsafe paths', action: 'Reject path traversal' }],
+      }),
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('triggerPattern'))).toBe(true);
+  });
+
+  it('rule without action fails', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'rule', description: 'Block unsafe paths', triggerPattern: '^\\.\\./' }],
+      }),
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('action'))).toBe(true);
+  });
+
+  it('rule with triggerPattern and action passes', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'rule', description: 'Block unsafe paths', triggerPattern: '^\\.\\./', action: 'Reject path traversal' }],
+      }),
+      'task-001',
+    );
+    assertValid(result);
+  });
+
+  // implementation, prompt, defer: no additional required fields
+  it('implementation minimal (kind+description) passes', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'implementation', description: 'Add try-catch around async call' }],
+      }),
+      'task-001',
+    );
+    assertValid(result);
+  });
+
+  it('prompt minimal (kind+description) passes', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'prompt', description: 'Inject SOP for file operations' }],
+      }),
+      'task-001',
+    );
+    assertValid(result);
+  });
+
+  it('defer minimal (kind+description) passes', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'defer', description: 'Insufficient evidence to determine root cause' }],
+      }),
+      'task-001',
+    );
+    assertValid(result);
+  });
+
+  it('principle abstractedPrinciple over 200 chars fails (taxonomy)', async () => {
+    const validator = new DefaultDiagnosticianValidator();
+    const result = await validator.validate(
+      makeValidOutput({
+        recommendations: [{ kind: 'principle', description: 'Abstract', abstractedPrinciple: 'x'.repeat(201) }],
+      }),
+      'task-001',
+    );
+    assertInvalid(result, 'output_invalid', 1);
+    expect(result.errors.some((e) => e.includes('abstractedPrinciple') && e.includes('200'))).toBe(true);
   });
 });
 
