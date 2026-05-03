@@ -307,7 +307,7 @@ export async function retryNetworkRequest<T>(
 }
 
 // =========================================================================
-// Dynamic Timeout Support (from dynamic-timeout.ts)
+// Dynamic Timeout Support
 // =========================================================================
 
 /** Minimum samples needed before trusting learned timeout values */
