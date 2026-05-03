@@ -124,18 +124,8 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
         if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
         detailErrors.push(msg);
       }
-      // Principle recommendations require structural fields (triggerPattern, action, abstractedPrinciple)
+      // Principle: only abstractedPrinciple required (triggerPattern/action optional)
       if (rec.kind === 'principle') {
-        if (!rec.triggerPattern || rec.triggerPattern.trim() === '') {
-          const msg = 'recommendations[].triggerPattern is required when kind is "principle"';
-          if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
-          detailErrors.push(msg);
-        }
-        if (!rec.action || rec.action.trim() === '') {
-          const msg = 'recommendations[].action is required when kind is "principle"';
-          if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
-          detailErrors.push(msg);
-        }
         if (!rec.abstractedPrinciple || rec.abstractedPrinciple.trim() === '') {
           const msg = 'recommendations[].abstractedPrinciple is required when kind is "principle"';
           if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
@@ -143,6 +133,19 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
         }
         if (rec.abstractedPrinciple && rec.abstractedPrinciple.length > MAX_ABSTRACTED_PRINCIPLE_CHARS) {
           const msg = `recommendations[].abstractedPrinciple must be ${MAX_ABSTRACTED_PRINCIPLE_CHARS} characters or fewer`;
+          if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
+          detailErrors.push(msg);
+        }
+      }
+      // Rule: triggerPattern + action required (deterministic constraint)
+      if (rec.kind === 'rule') {
+        if (!rec.triggerPattern || rec.triggerPattern.trim() === '') {
+          const msg = 'recommendations[].triggerPattern is required when kind is "rule"';
+          if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
+          detailErrors.push(msg);
+        }
+        if (!rec.action || rec.action.trim() === '') {
+          const msg = 'recommendations[].action is required when kind is "rule"';
           if (!isVerbose) return buildResult(false, '1 field invalid: recommendations', [msg]);
           detailErrors.push(msg);
         }
