@@ -194,4 +194,62 @@ describe('DiagnosticianPromptBuilder', () => {
       expect(parsed).not.toHaveProperty('workspaceDir');
     });
   });
+
+  // ── PRI-31: Recommendation taxonomy in prompt ────────────────────────────
+
+  describe('recommendation taxonomy in prompt (PRI-31)', () => {
+    it('prompt contains all 5 taxonomy kinds', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const instruction = result.promptInput.diagnosticInstruction;
+      expect(instruction).toContain('"principle"');
+      expect(instruction).toContain('"rule"');
+      expect(instruction).toContain('"implementation"');
+      expect(instruction).toContain('"prompt"');
+      expect(instruction).toContain('"defer"');
+    });
+
+    it('prompt states rule requires triggerPattern+action', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const instruction = result.promptInput.diagnosticInstruction;
+      expect(instruction).toMatch(/rule.*triggerPattern/i);
+      expect(instruction).toMatch(/rule.*action/i);
+    });
+
+    it('prompt states principle requires abstractedPrinciple', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const instruction = result.promptInput.diagnosticInstruction;
+      expect(instruction).toMatch(/principle.*abstractedPrinciple/i);
+    });
+
+    it('prompt does NOT say "Extract ONE highly abstracted principle"', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const instruction = result.promptInput.diagnosticInstruction;
+      expect(instruction).not.toContain('Extract ONE highly abstracted principle');
+    });
+
+    it('prompt output example is a full DiagnosticianOutputV1 object', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const instruction = result.promptInput.diagnosticInstruction;
+      // Must include top-level DiagnosticianOutputV1 fields in the output format
+      expect(instruction).toContain('"valid"');
+      expect(instruction).toContain('"diagnosisId"');
+      expect(instruction).toContain('"confidence"');
+    });
+
+    it('prompt does not show principle as the only detailed example', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const instruction = result.promptInput.diagnosticInstruction;
+      // All 5 kinds should appear in the taxonomy definitions
+      const taxonomyBlock = (/TAXONOMY[\s\S]*?OUTPUT FORMAT/.exec(instruction))?.[0] ?? '';
+      expect(taxonomyBlock).toContain('"rule"');
+      expect(taxonomyBlock).toContain('"principle"');
+      expect(taxonomyBlock).toContain('"implementation"');
+    });
+  });
 });

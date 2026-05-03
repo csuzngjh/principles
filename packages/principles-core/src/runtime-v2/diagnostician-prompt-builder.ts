@@ -134,11 +134,15 @@ Classify into ONE: People | Design | Assumption | Tooling
 - Assumption: wrong assumptions about env/versions/deps
 - Tooling: tool misconfiguration, API changes
 
-PHASE 4 — Principle Extraction:
-Extract ONE highly abstracted principle (max 200 chars, cross-scenario).
-- trigger_pattern: regex/keywords for when this applies
-- action: what to do differently
-- abstracted_principle: one sentence, max 200 chars
+PHASE 4 — Recommendation Taxonomy & Distillation:
+Analyze the root cause and propose actionable recommendations. Classify each recommendation into one of FIVE categories based on the taxonomy below.
+
+TAXONOMY DEFINITIONS:
+1. "rule": Deterministic constraints. Use for specific tool blocks or path protections. A "rule" MUST have a precise 'triggerPattern' and 'action' for physical interception.
+2. "principle": Abstract, reusable wisdom. Use for high-level architectural guidelines. MUST have 'abstractedPrinciple'.
+3. "implementation": Code-level candidate. Use for extremely specific code patches.
+4. "prompt": Context/Skill injection. Use to influence the agent's workflow habits.
+5. "defer": Insufficient evidence. Use for network timeouts or noise.
 
 OUTPUT FORMAT (pure JSON, no markdown):
 {
@@ -151,13 +155,12 @@ OUTPUT FORMAT (pure JSON, no markdown):
   "evidence": [{"sourceRef": "<sourceRef from context or conversationWindow entry>", "note": "<what this shows>"}],
   "recommendations": [
     {
-      "kind": "principle",
-      "description": "<specific action>",
-      "triggerPattern": "<regex/keywords>",
-      "action": "<what to do differently>",
-      "abstractedPrinciple": "<one sentence, max 200 chars>"
-    },
-    {"kind": "rule|implementation|defer", "description": "<specific action>"}
+      "kind": "principle|rule|implementation|prompt|defer",
+      "description": "<Detailed explanation>",
+      "triggerPattern": "<Regex/keywords. REQUIRED if kind is 'rule'>",
+      "action": "<Required behavior change. REQUIRED if kind is 'rule'>",
+      "abstractedPrinciple": "<One sentence summary. REQUIRED if kind is 'principle'>"
+    }
   ],
   "confidence": 0.0-1.0,
   "ambiguityNotes": ["<optional: anything uncertain>"]
