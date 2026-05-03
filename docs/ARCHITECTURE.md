@@ -223,3 +223,4 @@ packages/create-principles-disciple/
 
 - [USER_GUIDE.md](./USER_GUIDE.md) - Usage documentation
 - [EVOLUTION_POINTS_GUIDE.md](./EVOLUTION_POINTS_GUIDE.md) - Evolution system details
+- [Runtime v2 Principle Lifecycle Review](./runtime-v2-principle-lifecycle-review.md) - Non-destructive pruning audit workflow (report → explain → review)
