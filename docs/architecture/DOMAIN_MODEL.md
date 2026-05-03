@@ -1,61 +1,312 @@
 # PD 核心领域模型与通用语言 (Ubiquitous Language)
 
 > **文档状态**: 强制执行 (LOCKED-ONTOLOGY)
-> **最后更新**: 2026-05-02
-> **背景**: 本文档是对 `docs/architecture-governance/PRINCIPLE-TREE-ARCHITECTURE.md` 的具象化与工程化约定，旨在消除日常开发中的语义分裂。
+> **最后更新**: 2026-05-03
+> **背景**: 本文档是对 `docs/architecture-governance/PRINCIPLE-TREE-ARCHITECTURE.md` 的具象化与工程化约定，旨在消除日常开发中的语义分裂，并为后续 Runtime V2、Principle Lifecycle、RuleHost、Pruning 等重构提供统一领域语言。
 
 ---
 
-## 1. 核心三层进化模型 (The 3-Tier Evolution Hierarchy)
+## 0. 设计目标
 
-在 PD 系统中，知识的内化必须严格遵循“原则 -> 规则 -> 实现”的三层降维结构。任何代码变量命名、UI 展示和 Linear Issue 描述必须使用以下标准术语。
+PD 的管理核心不是“规则库”，而是 **Principle-led evolution**：系统从 Pain 中提炼高泛化 Principle，再将 Principle 逐步转译成更可验证、更可执行、更低上下文成本的 Rule 与 Implementation。
 
-### 1.1 原则 (Principle) - 树根
-*   **英文名**: `Principle` / `LedgerPrinciple`
-*   **语义定义**: 高维智慧、价值观、哲学指导。它描述了“为什么（Why）”和“大方向（What）”。
-*   **数据载体**: 自然语言（通常存在 Prompt 中）。
-*   **示例**: `P_001` - "保持代码库的原子性，不要混合多个任务的修改。"
-*   **生命周期**: 由 `Diagnostician` (诊断者) 从痛点中提炼。属于 **L1 软内化资产**。
+本文档用于约束：
 
-### 1.2 规则 (Rule) - 树干
-*   **英文名**: `Rule` / `LedgerRule`
-*   **语义定义**: 原则在特定边界下的**契约化表达**。它是一组可验证的触发条件和预期行为。
-*   **数据载体**: 结构化元数据 (JSON Schema)。包含 `triggerCondition` 和 `enforcement`。
-*   **示例**: `R_001_A` - "在 `packages/core` 目录下执行 write 工具时，必须确保当前只有一个 task 在进行。"
-*   **关系约束**: 一个 Principle 可以衍生出多个 Rules (1:N)。
+- 代码命名、接口命名、文件命名
+- Linear issue 与 milestone 描述
+- PR / review 中的架构判断
+- Runtime V2 输出 schema 与 prompt taxonomy
+- 后续 core / SDK / CLI / plugin 边界重构
 
-### 1.3 实现 (Implementation) - 树叶
-*   **英文名**: `Implementation` / `CodeCandidate`
-*   **语义定义**: 规则的具体**物理执行肌肉**。它是大模型或人类编写的真实代码。
-*   **数据载体**: JavaScript 沙盒代码 (`.js`)，包含 `meta` 和 `evaluate()` 函数。
-*   **示例**: `IMPL_001_A_v1` - 一段通过正则表达式检查传入参数并返回 `{ decision: 'block' }` 的代码。
-*   **关系约束**: 一个 Rule 可以有多个 Implementations 候选，但同一时间只能有一个是 `active` 的。属于 **L2 硬内化资产**。
+任何新增术语如果会替代或混淆本文术语，必须先更新本文档，再进入代码实现。
 
 ---
 
-## 2. 系统动力学与流量词汇 (System Dynamics Flow)
+## 1. Principle 与 Rule 的光谱模型
 
-为了配合 PD 的系统动力学（SD）监控，以下术语用于描述系统运行时的动态行为：
+`Principle` 与 `Rule` 不是互相替代的对象，而是同一条知识内化光谱的两端。
 
-*   **痛点 (Pain / Pain Signal)**：Agent 在执行任务时遭遇的具体挫败（报错、超时、人类负面反馈）。它是驱动进化的**原始输入流量**。
-*   **诊断 (Diagnosis)**：寻找痛点根因的分析过程。
-*   **分类 (Taxonomy)**：`Diagnostician` 将学到的经验划分为 `principle`、`rule` 或 `defer` 的决策动作。**分类精度**决定了软硬转换的效率。
-*   **内化 (Internalization)**：将“文字原则”转化为“硬逻辑代码”的整个流水线作业（从 L1 向 L2 的转移）。
-*   **剪枝 (Pruning)**：当 L2 的硬实现（Implementation）生效后，将 L1 的软原则从系统 Prompt 中物理剔除的行为。这是实现**系统减压**的最终动作。
+```text
+Principle  <------------------------------------------>  Rule
+高泛化                                                  高实操
+低可测试                                                高可测试
+Why / What                                             When / Where / How
+适合注入 Prompt / Skill / SOP                          适合绑定工具、场景、Hook、测试
+跨场景复用                                              场景特化
+价值观 / 架构判断 / 管理核心                            可验证契约 / 执行边界 / 操作规则
+```
+
+### 1.1 Principle 是管理核心
+
+**Principle** 是 PD 项目的最高层管理对象。它是高度抽象、跨场景、可泛化的经验或价值判断，用来说明“为什么要这样做”和“在大方向上应该避免什么”。
+
+Principle 的实操性天然较弱，因此它不应该直接承担所有自动化拦截、测试、执行或模型训练职责。它负责提供方向、约束和优先级。
+
+### 1.2 Rule 是 Principle 的具象化投影
+
+**Rule** 是 Principle 在具体上下文中的可验证表达。它把 Principle 绑定到明确场景、问题、工具、Skill、SOP 或 workflow 上，从而提升实操性。
+
+一个 Rule 必须回答：
+
+- 它对应哪个 Principle？
+- 它面向什么场景？
+- 它解决什么问题？
+- 它绑定哪些工具、Skill、SOP 或 workflow？
+- 它如何被测试、验证或观测？
+- 它触发后是 log、warn、requireApproval 还是 block？
+
+Rule 的泛化性弱于 Principle，但可测试性与可执行性更强。
 
 ---
 
-## 3. 状态机规范 (State Machine Ontology)
+## 2. 核心三层进化模型
 
-在描述规则或实现的生命周期时，**严禁使用** `needs_training`、`pending` 等模糊词汇，必须使用以下标准生命周期状态：
+在 PD 系统中，知识的内化遵循：
 
-1.  **Candidate (候选)**：新生成的代码实现，尚未经过安全校验，静置在库中。
-2.  **Probation (试用/影子模式)**：通过了静态安全校验，正在系统中运行，但不阻断真实操作（仅记录命中率）。
-3.  **Active (激活/实装)**：正式生效的规则或实现，具备物理拦截能力（如触发 `block` 或 `requireApproval`）。
-4.  **Archived (归档)**：因历史原因保留，但不再参与任何运算。
-5.  **Deprecated (废弃)**：规则或原则已被更优的逻辑替代，正式退出舞台。
+```text
+Pain Signal -> Diagnosis -> Recommendation -> Principle -> Rule -> Implementation
+```
+
+其中 `Principle -> Rule -> Implementation` 是 Principle Tree 的主干结构。
+
+### 2.1 Principle - 树根
+
+- **英文名**: `Principle` / `LedgerPrinciple`
+- **语义定义**: 高维智慧、价值观、架构判断、管理核心。
+- **数据载体**: 自然语言为主，可被注入 Prompt、Skill、SOP 或文档。
+- **主要职责**:
+  - 描述系统应该遵循的抽象方向
+  - 聚合多个场景下反复出现的经验
+  - 为 Rule 和 Implementation 提供战略父节点
+  - 支撑 pruning / lifecycle review 的价值判断
+- **示例**: `P_001` - “保持代码库的原子性，不要混合多个任务的修改。”
+- **代码映射**:
+  - `packages/openclaw-plugin/src/types/principle-tree-schema.ts` 中的 `Principle`
+  - `packages/openclaw-plugin/src/core/principle-tree-ledger.ts` 中的 `LedgerPrinciple`
+
+### 2.2 Principle 的类别与层级
+
+Principle 必须具备层级感。后续命名和 issue 描述应优先使用以下分类：
+
+| 类型 | 含义 | 示例 |
+| --- | --- | --- |
+| `Core Principle` | 跨项目、跨工具、跨场景的核心原则，类似系统宪法 | “不要在未知状态下执行破坏性操作” |
+| `Domain Principle` | 面向某个业务域或工程域的原则 | “Runtime V2 的写侧入口必须由 core 拥有” |
+| `Scenario Principle` | 面向具体 workflow、工具、SOP 的原则 | “执行 pruning 前必须先生成 explain evidence” |
+
+现有代码中可映射到：
+
+- `PrincipleScope = 'general' | 'domain'`
+- `domain?: string`
+- `priority: 'P0' | 'P1' | 'P2'`
+- `conflictsWithPrincipleIds`
+- `supersedesPrincipleId`
+- `ruleIds`
+
+后续如需表达父子层级，优先新增显式关系字段，而不是发明 `Law`、`Guideline`、`Doctrine` 等新实体。
+
+### 2.3 Rule - 树干
+
+- **英文名**: `Rule` / `LedgerRule`
+- **语义定义**: Principle 在特定边界下的契约化表达，是可验证、可测试、可观测的行为约束。
+- **数据载体**: 结构化元数据。至少包含 parent principle、trigger、context binding、validation、enforcement。
+- **关系约束**: 一个 Principle 可以衍生多个 Rules；一个 Rule 必须归属于一个 Principle。
+- **代码映射**:
+  - `packages/openclaw-plugin/src/types/principle-tree-schema.ts` 中的 `Rule`
+  - `packages/openclaw-plugin/src/core/principle-tree-ledger.ts` 中的 `LedgerRule`
+
+Rule 不等于 Implementation。Rule 是“契约”，Implementation 是“承载这个契约的具体机制”。
+
+### 2.4 Rule Context Binding
+
+Rule 必须绑定上下文，否则无法测试与执行。后续 Rule 模型和 issue 描述应尽量包含：
+
+| 绑定维度 | 含义 | 示例 |
+| --- | --- | --- |
+| `principleId` | 父 Principle | `P_runtime_v2_boundary` |
+| `scenario` | 适用场景 | `runtime-v2-pain-record` |
+| `problem` | 解决的问题类型 | `architecture-regression` |
+| `tool` | 相关工具 | `apply_patch`, `git`, `pd-cli` |
+| `skill` | 相关 Skill | `tdd`, `gsd-execute-phase` |
+| `sop` / `workflow` | 相关流程 | `PR review`, `UAT`, `pruning review` |
+| `triggerCondition` | 触发条件 | “plugin imports createPainSignalBridge” |
+| `validationSpec` | 如何验证 | “architecture-regression.test fails” |
+| `enforcement` | 触发后动作 | `log`, `warn`, `requireApproval`, `block` |
+
+现有 `RuleType` 可承载多种路线：
+
+- `hook`
+- `gate`
+- `skill`
+- `lora`
+- `test`
+- `prompt`
+
+### 2.5 Implementation - 树叶
+
+- **英文名**: `Implementation`
+- **语义定义**: Rule 的具体承载物，可以是代码、Prompt、Skill、Hook、Tool、Test、LoRA 等。
+- **关系约束**: 一个 Rule 可以有多个 Implementation 候选；同一 Rule 同一时间最多一个 `active` Implementation。
+- **代码映射**:
+  - `packages/openclaw-plugin/src/types/principle-tree-schema.ts` 中的 `Implementation`
+  - `packages/openclaw-plugin/src/core/code-implementation-storage.ts`
+  - `packages/openclaw-plugin/src/core/rule-host.ts`
+  - `packages/openclaw-plugin/src/core/rule-host-types.ts`
+
+避免把 `Implementation` 简化为 “JS 代码”。代码只是 Implementation 的一种类型。
 
 ---
 
-> **架构师批注**: 
-> 任何开发者在提交 PR 时，若发现新增的接口或变量名未包含上述领域词汇（例如发明了 `Law`、`Guideline`、`ConstraintCode` 等非标准词汇），请在 Code Review 阶段主动拦截并要求重构。
+## 3. 三类内化路线
+
+Principle 可以通过不同路线影响系统行为。不要把内化只理解为生成代码。
+
+### 3.1 Prompt / Skill / SOP 内化
+
+- **目标**: 影响 LLM 的思考方式、注意事项、流程习惯。
+- **载体**:
+  - system prompt
+  - Skill 文档
+  - SOP / runbook
+  - prompt injection context
+- **适合对象**:
+  - 高抽象 Principle
+  - 难以确定性测试但值得提醒的经验
+  - 需要人类或 LLM 判断的流程约束
+- **风险**:
+  - 上下文成本高
+  - 遵循不稳定
+  - 难以证明生效
+
+### 3.2 Code / Hook / Tool 内化
+
+- **目标**: 通过确定性逻辑影响或拦截 agent 行为。
+- **载体**:
+  - RuleHost implementation
+  - OpenClaw hook
+  - custom tool
+  - CLI guard
+  - test / architecture regression guard
+- **适合对象**:
+  - 可检测、可验证、可重复触发的 Rule
+  - 高风险路径
+  - 已有足够 evidence 的流程约束
+- **风险**:
+  - 误拦截
+  - 与真实 workflow 不匹配
+  - 需要回滚和 shadow/probation
+
+### 3.3 Model Parameter / LoRA 内化
+
+- **目标**: 通过模型参数或偏好学习改变默认行为倾向。
+- **载体**:
+  - LoRA
+  - fine-tuned checkpoint
+  - preference model
+  - classifier / reranker
+- **适合对象**:
+  - 大量样本支持的行为模式
+  - Prompt 成本过高但 deterministic rule 又不适合的软行为
+- **风险**:
+  - 可解释性弱
+  - 回滚与评估成本高
+  - 需要严格 eval 和 shadow validation
+
+---
+
+## 4. 系统动力学与流量词汇
+
+- **Pain / Pain Signal**: Agent 在执行任务时遭遇的具体挫败，例如报错、超时、人类负面反馈。它是进化的原始输入流量。
+- **Diagnosis**: 寻找 Pain 根因的分析过程。
+- **Recommendation**: Diagnostician 输出的建议项。合法 `kind` 包括 `principle`、`rule`、`implementation`、`prompt`、`defer`。
+- **Taxonomy**: 将 Recommendation 正确分类为 principle/rule/implementation/prompt/defer 的动作。分类精度决定软硬转换效率。
+- **Internalization**: 将 Principle 通过 Prompt、Code、Model 等路线转化为更低上下文成本、更稳定的行为约束。
+- **Pruning Signal**: 系统发现某个 Principle 可能可降级、隐藏、归档或需要复审的只读信号。
+- **Pruning Review**: 人类或 operator 对 Pruning Signal 的审计记录。当前通过 `.state/pruning_reviews.jsonl` 记录。
+- **Pruning Action**: 未来真正改变 Principle/Rule/Implementation 生命周期或 Prompt 注入状态的动作。它必须另开 issue，并需要 dry-run、人类确认、rollback plan。
+
+严禁把 `Pruning Review` 当成 `Pruning Action`。当前 `archive-candidate` 只是审计意图，不是实际归档动作。
+
+---
+
+## 5. 状态机规范
+
+状态必须绑定具体 aggregate。不要跨对象复用同一个词导致误解。
+
+### 5.1 Principle / Rule / Implementation 生命周期
+
+| 状态 | 含义 |
+| --- | --- |
+| `candidate` | 新生成，尚未通过充分验证 |
+| `probation` | 试用/影子模式，通过基础校验但不强拦截 |
+| `active` | 正式生效，参与 prompt、规则执行或模型行为 |
+| `archived` | 因历史原因保留，但不参与运算 |
+| `deprecated` | 被更优对象替代，正式退出主路径 |
+
+### 5.2 Runtime V2 Candidate Intake 状态
+
+Runtime V2 的 `principle_candidates` 表可使用 `pending`、`consumed` 等 intake 状态。这些状态只描述 candidate ingestion，不是 Principle/Rule/Implementation 的生命周期状态。
+
+因此“严禁 pending”只适用于 Principle Tree lifecycle 命名，不适用于数据库 intake 阶段。
+
+### 5.3 Pruning Review 状态
+
+Pruning Review 是 append-only audit log，不改变实体生命周期。当前合法 decision：
+
+- `keep`
+- `defer`
+- `archive-candidate`
+
+这些 decision 不是实体状态，不得直接解释为 ledger mutation。
+
+---
+
+## 6. 当前代码映射
+
+| 领域概念 | 当前主要位置 | 说明 |
+| --- | --- | --- |
+| Pain Signal | `packages/principles-core/src/runtime-v2/pain-to-principle-service.ts` | Runtime V2 写侧统一入口 |
+| Pain Chain Read Model | `packages/principles-core/src/runtime-v2/pain-chain-read-model.ts` | pain -> task -> run -> candidate -> ledger 读侧 |
+| Principle | `packages/openclaw-plugin/src/types/principle-tree-schema.ts` | 当前仍在 plugin types 中定义 |
+| LedgerPrinciple | `packages/openclaw-plugin/src/core/principle-tree-ledger.ts` | ledger 文件中的 Principle |
+| Rule / LedgerRule | `packages/openclaw-plugin/src/types/principle-tree-schema.ts`, `principle-tree-ledger.ts` | Principle 的可验证投影 |
+| Implementation | `packages/openclaw-plugin/src/types/principle-tree-schema.ts` | Rule 的承载物 |
+| Code Implementation Asset | `packages/openclaw-plugin/src/core/code-implementation-storage.ts` | code implementation 的文件资产 |
+| RuleHost | `packages/openclaw-plugin/src/core/rule-host.ts` | code implementation 的执行宿主 |
+| RuleHostInput/Result | `packages/openclaw-plugin/src/core/rule-host-types.ts` | active implementation 的执行契约 |
+| Pruning Signal | `packages/principles-core/src/runtime-v2/pruning-read-model.ts` | non-destructive read model |
+| Pruning Review | `packages/principles-core/src/runtime-v2/pruning-review-log.ts` | append-only audit log |
+| Diagnostician Recommendation | `packages/principles-core/src/runtime-v2/diagnostician-output.ts` | recommendation taxonomy schema |
+
+---
+
+## 7. 后续重构方向
+
+本文档不要求一次性迁移所有代码。推荐顺序：
+
+1. 先让本文档成为 LOCKED ontology，并在 ADR/ARCHITECTURE/Linear 模板中引用。
+2. 在 architecture regression test 中保护本文档存在，并防止新增非标准术语绕开 ontology。
+3. 将 Principle/Rule/Implementation 的 canonical type 逐步迁入 `@principles/core` 或明确由 core re-export。
+4. 将 RuleHost / Lifecycle read model 的领域逻辑与 OpenClaw adapter 边界拆清楚。
+5. 对 Prompt、Code、Model 三类 internalization route 分别建立 read model、review workflow 与 activation guard。
+
+---
+
+## 8. 命名禁区
+
+除非先更新本文档，否则不要新增下列替代词作为核心领域实体：
+
+- `Law`
+- `Guideline`
+- `Doctrine`
+- `ConstraintCode`
+- `PolicyRule`（除非明确是 Rule 的子类型）
+- `WisdomItem`
+- `MemoryRule`
+
+如果只是 UI 文案或外部说明可以使用自然语言同义词，但代码、schema、Linear issue title 和 ADR 必须使用本文标准术语。
+
+---
+
+> **架构师批注**:
+> Principle 是 PD 的管理核心；Rule 是 Principle 的实操化投影；Implementation 是 Rule 的行为承载物。后续所有重构都应减少这三者之间的语义混淆，而不是新增一套平行概念。
