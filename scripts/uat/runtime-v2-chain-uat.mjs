@@ -11,7 +11,7 @@
  *   - Consistency and latency statistics
  *
  * Requirements:
- *   - XIAOMI_KEY environment variable
+ *   - MINIMAX_API_KEY environment variable
  *   - Built pd-cli (npx pd must be resolvable)
  */
 
@@ -106,11 +106,11 @@ async function main() {
   log('');
 
   // 1. Check environment
-  if (!process.env.XIAOMI_KEY) {
-    error('XIAOMI_KEY environment variable not set');
+  if (!process.env.MINIMAX_API_KEY) {
+    error('MINIMAX_API_KEY environment variable not set');
     process.exit(1);
   }
-  log('✓ XIAOMI_KEY is set');
+  log('✓ MINIMAX_API_KEY is set');
 
   // 2. Runtime probe
   log('Probing runtime...');

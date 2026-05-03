@@ -1,0 +1,281 @@
+/**
+ * pd runtime uat CLI unit tests.
+ * Tests parseUatArgs, computeUatSummary, shouldExitWithError.
+ * Integration tests with real pd calls are done manually via
+ *   node scripts/uat/runtime-v2-chain-uat.mjs --workspace <path> --count 2 --json
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// ── Mock child_process before importing the module under test ────────────────
+
+const { mockExecFileSync } = vi.hoisted(() => {
+  return { mockExecFileSync: vi.fn() };
+});
+
+vi.mock('child_process', () => ({
+  execFileSync: mockExecFileSync,
+}));
+
+// ── Import after mock setup ─────────────────────────────────────────────────
+
+import {
+  parseUatArgs,
+  computeUatSummary,
+  shouldExitWithError,
+  type PainRecordResult,
+} from '../../src/commands/runtime-uat.js';
+
+// ── parseUatArgs ─────────────────────────────────────────────────────────────
+
+describe('parseUatArgs', () => {
+  it('defaults count to 5 when not provided', () => {
+    const result = parseUatArgs([]);
+    expect(result.count).toBe(5);
+  });
+
+  it('parses --count', () => {
+    const result = parseUatArgs(['--count', '10']);
+    expect(result.count).toBe(10);
+  });
+
+  it('parses --workspace', () => {
+    const result = parseUatArgs(['--workspace', '/tmp/ws']);
+    expect(result.workspace).toBe('/tmp/ws');
+  });
+
+  it('parses --min-success-rate', () => {
+    const result = parseUatArgs(['--min-success-rate', '0.8']);
+    expect(result.minSuccessRate).toBe(0.8);
+  });
+
+  it('parses -w as alias for --workspace', () => {
+    const result = parseUatArgs(['-w', '/custom/path']);
+    expect(result.workspace).toBe('/custom/path');
+  });
+
+  it('clamps count to [1, 50]', () => {
+    expect(parseUatArgs(['--count', '1']).count).toBe(1);
+    expect(parseUatArgs(['--count', '50']).count).toBe(50);
+  });
+});
+
+// ── computeUatSummary ────────────────────────────────────────────────────────
+
+describe('computeUatSummary', () => {
+  const ws = '/tmp/test-workspace';
+
+  it('computes successRate correctly', () => {
+    const results: PainRecordResult[] = [
+      makeResult(1, 'succeeded', ['c1'], ['l1']),
+      makeResult(2, 'succeeded', ['c2'], ['l2']),
+      makeResult(3, 'failed', ['c3'], ['l3']),
+    ];
+    const summary = computeUatSummary(results, ws);
+    expect(summary.successRate).toBeCloseTo(0.67, 2);
+    expect(summary.successful).toBe(2);
+    expect(summary.failed).toBe(1);
+  });
+
+  it('computes failuresByCategory from failureCategory field', () => {
+    const results: PainRecordResult[] = [
+      { ...makeResult(1, 'failed', [], []), failureCategory: 'runtime_unavailable' },
+      { ...makeResult(2, 'failed', [], []), failureCategory: 'runtime_unavailable' },
+      { ...makeResult(3, 'failed', [], []), failureCategory: 'output_invalid' },
+    ];
+    const summary = computeUatSummary(results, ws);
+    expect(summary.failuresByCategory).toEqual({
+      runtime_unavailable: 2,
+      output_invalid: 1,
+    });
+  });
+
+  it('ledgerConsistencyOk true when all audits are ok', () => {
+    const results: PainRecordResult[] = [
+      makeResult(1, 'succeeded', ['c1'], ['l1'], 100, 'ok'),
+      makeResult(2, 'succeeded', ['c2'], ['l2'], 100, 'ok'),
+    ];
+    const summary = computeUatSummary(results, ws);
+    expect(summary.ledgerConsistencyOk).toBe(true);
+  });
+
+  it('ledgerConsistencyOk false when any audit fails', () => {
+    const results: PainRecordResult[] = [
+      makeResult(1, 'succeeded', ['c1'], ['l1'], 100, 'ok'),
+      makeResult(2, 'succeeded', ['c2'], ['l2'], 100, 'error'),
+    ];
+    const summary = computeUatSummary(results, ws);
+    expect(summary.ledgerConsistencyOk).toBe(false);
+  });
+
+  it('allHaveCandidates false when any candidateIds empty', () => {
+    const results: PainRecordResult[] = [
+      makeResult(1, 'succeeded', ['c1'], ['l1']),
+      makeResult(2, 'succeeded', [], ['l2']),
+    ];
+    const summary = computeUatSummary(results, ws);
+    expect(summary.allHaveCandidates).toBe(false);
+  });
+
+  it('allHaveLedger false when any ledgerEntryIds empty', () => {
+    const results: PainRecordResult[] = [
+      makeResult(1, 'succeeded', ['c1'], ['l1']),
+      makeResult(2, 'succeeded', ['c2'], []),
+    ];
+    const summary = computeUatSummary(results, ws);
+    expect(summary.allHaveLedger).toBe(false);
+  });
+
+  it('p50LatencyMs and p95LatencyMs computed from wallTimeMs', () => {
+    const results: PainRecordResult[] = [
+      makeResult(1, 'succeeded', ['c1'], ['l1'], 100),
+      makeResult(2, 'succeeded', ['c2'], ['l2'], 200),
+      makeResult(3, 'succeeded', ['c3'], ['l3'], 300),
+      makeResult(4, 'succeeded', ['c4'], ['l4'], 400),
+    ];
+    const summary = computeUatSummary(results, ws);
+    expect(summary.p50LatencyMs).toBeDefined();
+    expect(summary.p95LatencyMs).toBeDefined();
+    expect(summary.p50LatencyMs).toBeLessThanOrEqual(summary.p95LatencyMs!);
+  });
+
+  it('includes perRun in summary', () => {
+    const results: PainRecordResult[] = [makeResult(1, 'succeeded', ['c1'], ['l1'])];
+    const summary = computeUatSummary(results, ws);
+    expect(summary.perRun).toHaveLength(1);
+    expect(summary.perRun[0].iteration).toBe(1);
+  });
+
+  it('generatedAt is ISO string', () => {
+    const summary = computeUatSummary([], ws);
+    expect(summary.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
+});
+
+// ── shouldExitWithError ─────────────────────────────────────────────────────
+
+describe('shouldExitWithError', () => {
+  const ws = '/tmp/test-workspace';
+
+  it('returns false when all checks pass and minSuccessRate=1.0', () => {
+    const summary = makeSummary(ws, 5, 5, true, true, true);
+    expect(shouldExitWithError(summary, 1.0)).toBe(false);
+  });
+
+  it('returns true when successRate below threshold', () => {
+    const summary = makeSummary(ws, 5, 3, true, true, true);
+    expect(shouldExitWithError(summary, 1.0)).toBe(true);
+    expect(shouldExitWithError(summary, 0.5)).toBe(false);
+  });
+
+  it('returns true when ledgerConsistencyOk is false', () => {
+    const summary = makeSummary(ws, 5, 5, false, true, true);
+    expect(shouldExitWithError(summary, 1.0)).toBe(true);
+  });
+
+  it('returns true when allHaveCandidates is false', () => {
+    const summary = makeSummary(ws, 5, 5, true, false, true);
+    expect(shouldExitWithError(summary, 1.0)).toBe(true);
+  });
+
+  it('returns true when allHaveLedger is false', () => {
+    const summary = makeSummary(ws, 5, 5, true, true, false);
+    expect(shouldExitWithError(summary, 1.0)).toBe(true);
+  });
+
+  it('default minSuccessRate is 1.0', () => {
+    const summary = makeSummary(ws, 5, 5, true, true, true);
+    expect(shouldExitWithError(summary)).toBe(false);
+    expect(shouldExitWithError(summary, 1.0)).toBe(false);
+  });
+});
+
+// ── handleRuntimeUat guard rails ─────────────────────────────────────────────
+// Real execFileSync integration is tested manually via:
+//   node scripts/uat/runtime-v2-chain-uat.mjs --workspace <path> --count 2 --json
+
+describe('handleRuntimeUat', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExecFileSync.mockReset();
+  });
+
+  it('exits 1 when --workspace is missing', async () => {
+    const { handleRuntimeUat } = await import('../../src/commands/runtime-uat.js');
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code: number) => {
+      throw new Error(`exit:${code}`);
+    }) as (code: number) => never);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(handleRuntimeUat({})).rejects.toThrow('exit:1');
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('--workspace'));
+
+    exitSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('exits 1 when MINIMAX_API_KEY is not set', async () => {
+    delete process.env.MINIMAX_API_KEY;
+    const { handleRuntimeUat } = await import('../../src/commands/runtime-uat.js');
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code: number) => {
+      throw new Error(`exit:${code}`);
+    }) as (code: number) => never);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(handleRuntimeUat({ workspace: '/tmp/test-ws' })).rejects.toThrow('exit:1');
+    exitSpy.mockRestore();
+  });
+});
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function makeResult(
+  iteration: number,
+  status: string,
+  candidateIds: string[],
+  ledgerEntryIds: string[],
+  wallTimeMs = 1000,
+  auditStatus = 'ok',
+  failureCategory?: string,
+): PainRecordResult {
+  return {
+    iteration,
+    painId: status === 'succeeded' ? `pain-${iteration}` : undefined,
+    taskId: status === 'succeeded' ? `task-${iteration}` : undefined,
+    runId: status === 'succeeded' ? `run-${iteration}` : undefined,
+    artifactId: status === 'succeeded' ? `art-${iteration}` : undefined,
+    candidateIds,
+    ledgerEntryIds,
+    status,
+    failureCategory,
+    wallTimeMs,
+    auditStatus,
+  };
+}
+
+function makeSummary(
+  workspace: string,
+  totalRuns: number,
+  successful: number,
+  ledgerConsistencyOk: boolean,
+  allHaveCandidates: boolean,
+  allHaveLedger: boolean,
+): import('../../src/commands/runtime-uat.js').UatSummary {
+  const results: PainRecordResult[] = Array.from({ length: totalRuns }, (_, i) =>
+    makeResult(i + 1, i < successful ? 'succeeded' : 'failed', ['c1'], ['l1'])
+  );
+  return {
+    generatedAt: new Date().toISOString(),
+    workspace,
+    totalRuns,
+    successful,
+    failed: totalRuns - successful,
+    successRate: Number((successful / totalRuns).toFixed(2)),
+    p50LatencyMs: 500,
+    p95LatencyMs: 900,
+    failuresByCategory: {},
+    ledgerConsistencyOk,
+    allHaveCandidates,
+    allHaveLedger,
+    perRun: results,
+  };
+}
