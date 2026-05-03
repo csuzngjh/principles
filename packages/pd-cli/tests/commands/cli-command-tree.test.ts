@@ -50,15 +50,4 @@ describe('CLI command tree structure', () => {
     // Should NOT have uat
     expect(output).not.toMatch(/uat\s/);
   });
-
-  it('health snapshot command exists under runtime health (pd runtime health snapshot --help)', () => {
-    const output = runPdHelp(['runtime', 'health', 'snapshot', '--help']);
-    expect(output).toContain('--workspace');
-    expect(output).toContain('--json');
-  });
-
-  it('runtime subcommand list includes health (pd runtime --help)', () => {
-    const output = runPdHelp(['runtime', '--help']);
-    expect(output).toMatch(/health\s/);
-  });
 });

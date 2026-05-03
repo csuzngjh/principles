@@ -28,7 +28,7 @@ import type {
 import { RuntimeDirectDriver, type RunParams } from './runtime-direct-driver.js';
 import { WorkflowStore } from './workflow-store.js';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
-import { computeDynamicTimeout, computeRetrySchedule, MAX_TIMEOUT_RETRIES } from './dynamic-timeout.js';
+import { computeDynamicTimeout, computeRetrySchedule, MAX_TIMEOUT_RETRIES } from '../../utils/retry.js';
 
 // ── Constructor Options ────────────────────────────────────────────────────────
 
