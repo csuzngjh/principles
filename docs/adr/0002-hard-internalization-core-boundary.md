@@ -5,6 +5,12 @@
 **Issues:** PRI-41, PRI-42, PRI-43, PRI-44, PRI-45, PRI-46, PRI-47
 **Supersedes:** ADR-0001 Deferred section ("No RuleHost / PrincipleCompiler move")
 
+## Context (extends ADR-0001)
+
+ADR-0001 drew the first architectural boundary: `PainToPrincipleService` stays in the plugin; all other runtime-v2 services moved to `@principles/core`. This ADR draws the second boundary: where does rule-internalization logic live after the runtime cutover?
+
+ADR-0001 explicitly deferred the RuleHost / PrincipleCompiler question ("No move in this phase"). ADR-0002 answers that deferred question with a data-driven inventory and a staged migration order.
+
 ## Problem Statement
 
 After ADR-0001 established pain-to-principle service boundaries, domain-heavy logic for rule execution, code compilation, lifecycle metrics, and internalization routing still lives in `openclaw-plugin`. These modules contain 70-100% pure domain logic with zero OpenClaw SDK dependency, yet they are inaccessible to `pd-cli` or future non-OpenClaw hosts.
@@ -47,6 +53,8 @@ Specific symptoms:
 | `principle-lifecycle-service.ts` | `openclaw-plugin/src/core/principle-internalization/` | 169 | 40% | `principle-tree-ledger`, `lifecycle-read-model`, `lifecycle-metrics`, `deprecated-readiness`, `internalization-routing-policy` |
 
 ### D. OpenClaw-Specific (Stay in Plugin)
+
+> ⚠️ Note: `compiler.ts` and `ledger-registrar.ts` also appear in Section B with a "Pure Domain" percentage. Both listings are correct — Section B shows how much pure domain logic each file contains; this section shows how much infrastructure (filesystem/OpenClaw) each file ultimately requires. Files land in this section when their infrastructure dependency prevents extraction.
 
 | File | Path | Lines | OpenClaw % | Reason to Keep |
 |------|------|-------|------------|----------------|
@@ -96,28 +104,56 @@ Specific symptoms:
 
 ## Proposed Adapter Interfaces
 
+> All adapter methods follow the same error contract: on failure they **throw** a descriptive `Error`. Callers (plugin orchestration layer) are responsible for try/catch and rollback. Implementations guarantee atomicity within a single call — no partial state on error.
+
 ```typescript
 // ── Storage: load active implementations ──
 interface RuleHostStorage {
+  /**
+   * @throws Error if stateDir is invalid or ledger unreadable
+   */
   loadActiveImplementations(stateDir: string): Promise<Implementation[]>;
+  /**
+   * @throws Error if implId not found or source file unreadable
+   */
   loadImplementationSource(stateDir: string, implId: string): Promise<string>;
 }
 
 // ── Runtime: compile and execute rule code ──
 interface RuleHostRuntime {
+  /**
+   * Compiles and evaluates rule source against input.
+   * @throws Error if source is invalid, vm fails, or execution times out
+   * @returns Promise<RuleHostResult> with matched/error field populated
+   */
   compile(source: string, input: RuleHostInput): Promise<RuleHostResult>;
 }
 
 // ── Ledger: principle tree CRUD ──
 interface LedgerAccess {
+  /**
+   * @throws Error if stateDir unreadable
+   */
   loadLedger(stateDir: string): Promise<PrincipleTree>;
+  /**
+   * @throws Error on write failure — caller must handle rollback
+   */
   updatePrinciple(stateDir: string, id: string, patch: Partial<Principle>): Promise<void>;
+  /**
+   * @throws Error on write failure — caller must handle rollback
+   */
   updateRule(stateDir: string, principleId: string, ruleId: string, patch: Partial<Rule>): Promise<void>;
 }
 
-// ── Datasource: replay and lineage evidence ──
+// ── Datasource: replay and lineage evidence (read-only, no error recovery needed) ──
 interface LifecycleDatasource {
+  /**
+   * @returns undefined if no report exists for implId (not an error)
+   */
   loadReplayReport(stateDir: string, implId: string): Promise<ReplayReport | undefined>;
+  /**
+   * @throws Error if stateDir or lineage store is inaccessible
+   */
   listLineageRecords(stateDir: string, kind: string): Promise<ArtifactLineageRecord[]>;
 }
 ```
@@ -139,6 +175,8 @@ packages/principles-core/src/runtime-v2/internalization/
 ```
 
 ## Execution Order
+
+> Milestone mapping: **M4** = "Core Internalization Boundary", **M5** = "RuleHost Adapter Thinning", **M6** = "Operator Visibility". PRI-47 is post-milestone cleanup.
 
 Dependencies drive a strict order. Each issue builds on the previous.
 
@@ -170,6 +208,8 @@ M4            M4            M5            M5            M6            post-bound
 PRI-39 is explicitly **not** in the critical path. Per PRI-47, store directory restructuring should only proceed after PRI-42 and PRI-45 land. Moving store files before core/plugin boundaries stabilize risks merge conflicts and rework.
 
 ## Architecture Guards
+
+> ⚠️ The following test names are **placeholders for future implementation**. Implement each as a real test in `packages/principles-core/src/__tests__/architecture-regression.test.ts` when PRI-N lands. Until then, these serve as an explicit checklist, not a passing test suite.
 
 After migration, add architecture regression tests:
 
