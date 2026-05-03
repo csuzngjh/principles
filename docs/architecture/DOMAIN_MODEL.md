@@ -303,6 +303,7 @@ Pruning Review 是 append-only audit log，不改变实体生命周期。当前�
 - `PolicyRule`（除非明确是 Rule 的子类型）
 - `WisdomItem`
 - `MemoryRule`
+- `PendingPrinciple`（请严格区分是业务生命周期的 `candidate` 还是数据摄入阶段的 `pending` 状态，见 5.2 节）
 
 如果只是 UI 文案或外部说明可以使用自然语言同义词，但代码、schema、Linear issue title 和 ADR 必须使用本文标准术语。
 
@@ -310,3 +311,4 @@ Pruning Review 是 append-only audit log，不改变实体生命周期。当前�
 
 > **架构师批注**:
 > Principle 是 PD 的管理核心；Rule 是 Principle 的实操化投影；Implementation 是 Rule 的行为承载物。后续所有重构都应减少这三者之间的语义混淆，而不是新增一套平行概念。
+e 的行为承载物。后续所有重构都应减少这三者之间的语义混淆，而不是新增一套平行概念。
