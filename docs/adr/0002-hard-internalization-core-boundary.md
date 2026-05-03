@@ -31,39 +31,39 @@ Specific symptoms:
 | `rule-host-helpers.ts` | `openclaw-plugin/src/core/` | 39 | 100% | `rule-host-types` |
 | `nocturnal-rule-implementation-validator.ts` | `openclaw-plugin/src/core/` | 246 | 90% | `rule-host-types`, `rule-host-helpers`, `rule-implementation-runtime` |
 | `rule-host.ts` | `openclaw-plugin/src/core/` | 254 | 70% | `fs`, `principle-tree-ledger`, `code-implementation-storage`, `rule-implementation-runtime` |
-| `rule-implementation-runtime.ts` | `openclaw-plugin/src/core/` | 39 | 50% | `node:vm` polyfill |
+| `rule-implementation-runtime.ts` | `openclaw-plugin/src/core/` | 38 | 50% | `node:vm` polyfill |
 
 ### B. Principle Compiler
 
 | File | Path | Lines | Pure Domain | Dependencies |
 |------|------|-------|-------------|--------------|
-| `template-generator.ts` | `openclaw-plugin/src/core/principle-compiler/` | 109 | 100% | None |
-| `code-validator.ts` | `openclaw-plugin/src/core/principle-compiler/` | 121 | 70% | `node:vm`, `rule-implementation-runtime` |
-| `compiler.ts` | `openclaw-plugin/src/core/principle-compiler/` | 243 | 40% | `reflection-context`, `trajectory`, `code-implementation-storage` |
-| `ledger-registrar.ts` | `openclaw-plugin/src/core/principle-compiler/` | 117 | 30% | `principle-tree-ledger` |
+| `template-generator.ts` | `openclaw-plugin/src/core/principle-compiler/` | 108 | 100% | None |
+| `code-validator.ts` | `openclaw-plugin/src/core/principle-compiler/` | 120 | 70% | `node:vm`, `rule-implementation-runtime` |
+| `compiler.ts` | `openclaw-plugin/src/core/principle-compiler/` | 242 | 40% | `reflection-context`, `trajectory`, `code-implementation-storage` |
+| `ledger-registrar.ts` | `openclaw-plugin/src/core/principle-compiler/` | 116 | 30% | `principle-tree-ledger` |
 
 ### C. Principle Internalization
 
 | File | Path | Lines | Pure Domain | Dependencies |
 |------|------|-------|-------------|--------------|
-| `lifecycle-metrics.ts` | `openclaw-plugin/src/core/principle-internalization/` | 153 | 100% | `lifecycle-read-model` (types only) |
-| `internalization-routing-policy.ts` | `openclaw-plugin/src/core/principle-internalization/` | 209 | 100% | `lifecycle-read-model` (types), `lifecycle-metrics` |
-| `deprecated-readiness.ts` | `openclaw-plugin/src/core/principle-internalization/` | 94 | 100% | `lifecycle-read-model` (types), `lifecycle-metrics` |
-| `lifecycle-read-model.ts` | `openclaw-plugin/src/core/principle-internalization/` | 244 | 80% | `principle-tree-ledger`, `replay-engine`, `nocturnal-artifact-lineage` |
-| `principle-lifecycle-service.ts` | `openclaw-plugin/src/core/principle-internalization/` | 169 | 40% | `principle-tree-ledger`, `lifecycle-read-model`, `lifecycle-metrics`, `deprecated-readiness`, `internalization-routing-policy` |
+| `lifecycle-metrics.ts` | `openclaw-plugin/src/core/principle-internalization/` | 152 | 100% | `lifecycle-read-model` (types only) |
+| `internalization-routing-policy.ts` | `openclaw-plugin/src/core/principle-internalization/` | 208 | 100% | `lifecycle-read-model` (types), `lifecycle-metrics` |
+| `deprecated-readiness.ts` | `openclaw-plugin/src/core/principle-internalization/` | 93 | 100% | `lifecycle-read-model` (types), `lifecycle-metrics` |
+| `lifecycle-read-model.ts` | `openclaw-plugin/src/core/principle-internalization/` | 243 | 80% | `principle-tree-ledger`, `replay-engine`, `nocturnal-artifact-lineage` |
+| `principle-lifecycle-service.ts` | `openclaw-plugin/src/core/principle-internalization/` | 168 | 40% | `principle-tree-ledger`, `lifecycle-read-model`, `lifecycle-metrics`, `deprecated-readiness`, `internalization-routing-policy` |
 
 ### D. OpenClaw-Specific (Stay in Plugin)
 
-> ⚠️ Note: `compiler.ts` and `ledger-registrar.ts` also appear in Section B with a "Pure Domain" percentage. Both listings are correct — Section B shows how much pure domain logic each file contains; this section shows how much infrastructure (filesystem/OpenClaw) each file ultimately requires. Files land in this section when their infrastructure dependency prevents extraction.
+> ⚠️ Note: `compiler.ts` and `ledger-registrar.ts` also appear in Section B with a "Pure Domain" percentage. Both listings are correct — Section B shows how much pure domain logic each file contains; this section shows the infrastructure dependency percentage (fs, OpenClaw SDK, or VM). "0%" here means "fully infrastructure-bound / not moving to core", as distinct from "0% OpenClaw SDK dependency" in Section B.
 
 | File | Path | Lines | OpenClaw % | Reason to Keep |
 |------|------|-------|------------|----------------|
 | `gate.ts` | `openclaw-plugin/src/hooks/` | 239 | 60% | OpenClaw hook lifecycle |
-| `code-implementation-storage.ts` | `openclaw-plugin/src/core/` | 245 | 0% | Filesystem I/O bound |
-| `principle-tree-ledger.ts` | `openclaw-plugin/src/core/` | 739 | 0% | Filesystem persistence |
-| `replay-engine.ts` | `openclaw-plugin/src/core/` | 599 | 0% | Filesystem + VM I/O |
-| `compiler.ts` | `openclaw-plugin/src/core/principle-compiler/` | 243 | 0% | Orchestration with I/O |
-| `ledger-registrar.ts` | `openclaw-plugin/src/core/principle-compiler/` | 117 | 0% | Ledger I/O |
+| `code-implementation-storage.ts` | `openclaw-plugin/src/core/` | 244 | 0% | Filesystem I/O bound |
+| `principle-tree-ledger.ts` | `openclaw-plugin/src/core/` | 738 | 0% | Filesystem persistence |
+| `replay-engine.ts` | `openclaw-plugin/src/core/` | 598 | 0% | Filesystem + VM I/O |
+| `compiler.ts` | `openclaw-plugin/src/core/principle-compiler/` | 242 | 0% | Orchestration with I/O |
+| `ledger-registrar.ts` | `openclaw-plugin/src/core/principle-compiler/` | 116 | 0% | Ledger I/O |
 
 ## Migration Classification
 
@@ -74,10 +74,10 @@ Specific symptoms:
 | RuleHost types | `rule-host-types.ts` | 86 | `runtime-v2/internalization/rule-host-contracts.ts` |
 | RuleHost helpers | `rule-host-helpers.ts` | 39 | `runtime-v2/internalization/rule-host-helpers.ts` |
 | Rule validation | `nocturnal-rule-implementation-validator.ts` | 246 | `runtime-v2/internalization/rule-validator.ts` |
-| Template generation | `template-generator.ts` | 109 | `runtime-v2/internalization/template-generator.ts` |
-| Lifecycle metrics | `lifecycle-metrics.ts` | 153 | `runtime-v2/internalization/lifecycle-metrics.ts` |
-| Routing policy | `internalization-routing-policy.ts` | 209 | `runtime-v2/internalization/routing-policy.ts` |
-| Deprecated readiness | `deprecated-readiness.ts` | 94 | `runtime-v2/internalization/readiness.ts` |
+| Template generation | `template-generator.ts` | 108 | `runtime-v2/internalization/template-generator.ts` |
+| Lifecycle metrics | `lifecycle-metrics.ts` | 152 | `runtime-v2/internalization/lifecycle-metrics.ts` |
+| Routing policy | `internalization-routing-policy.ts` | 208 | `runtime-v2/internalization/routing-policy.ts` |
+| Deprecated readiness | `deprecated-readiness.ts` | 93 | `runtime-v2/internalization/readiness.ts` |
 
 **Total pure domain logic to extract: ~936 lines**
 
@@ -119,8 +119,14 @@ interface RuleHostStorage {
   loadImplementationSource(stateDir: string, implId: string): Promise<string>;
 }
 
-// ── Runtime: compile and execute rule code ──
+// ── Runtime: VM sandbox + rule evaluation ──
 interface RuleHostRuntime {
+  /**
+   * Loads a rule implementation module into an isolated VM context.
+   * Used internally by code-validator.ts and nocturnal-rule-implementation-validator.ts.
+   * @throws Error if source is invalid or vm creation fails
+   */
+  loadModule(source: string, filename: string): RuleImplementationModuleExports;
   /**
    * Compiles and evaluates rule source against input.
    * @throws Error if source is invalid, vm fails, or execution times out
@@ -188,7 +194,7 @@ M4            M4            M5            M5            M6            post-bound
 | Order | Issue | Scope | Risk | Depends On |
 |-------|-------|-------|------|------------|
 | 1 | **PRI-42** | Extract RuleHost contract types + helpers to core | Low | PRI-41 (this ADR) |
-| 2 | **PRI-43** | Define core `InternalizationRoute` model (maps `RecommendationKind` → route) | Low | PRI-31 taxonomy |
+| 2 | **PRI-43** | Extract `InternalizationRoute` model — move `recommendInternalizationRoute` from plugin to core; this function's only dependency on PRI-31 is the `RecommendationKind` type (already in core via `diagnostician-output.ts`) | Low | none (type already in core) |
 | 3 | **PRI-44** | Extract pure PrincipleCompiler components (template-gen, validation) | Medium | PRI-41, PRI-43 |
 | 4 | **PRI-45** | Thin OpenClaw RuleHost adapter around core contracts | Medium | PRI-42 |
 | 5 | **PRI-46** | Add operator CLI inspect commands for internalization readiness | Low | PRI-43 |
@@ -197,7 +203,7 @@ M4            M4            M5            M5            M6            post-bound
 ### Dependency Rationale
 
 - **PRI-42 first**: Zero-risk pure type extraction. Unblocks PRI-45.
-- **PRI-43 second**: Builds on PRI-31's 5-kind taxonomy. Pure model, no I/O. Unblocks PRI-46.
+- **PRI-43 second**: Pure model extraction — `recommendInternalizationRoute` is fully self-contained and has no plugin dependencies. The only PRI-31 dependency is the `RecommendationKind` type, which already lives in `diagnostician-output.ts` (core). Unblocks PRI-46.
 - **PRI-44 third**: Template generation and validation depend on rule-host contracts from PRI-42.
 - **PRI-45 fourth**: Thins the plugin adapter. Requires PRI-42 contracts in core.
 - **PRI-46 fifth**: CLI visibility. Requires PRI-43 route model.
