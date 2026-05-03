@@ -1,11 +1,11 @@
-import { createRuleHostHelpers, type RuleHostHelpers } from './rule-host-helpers.js';
+import { createRuleHostHelpers, type RuleHostHelpers } from '@principles/core/runtime-v2';
 import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import type {
   RuleHostDecision,
   RuleHostInput,
   RuleHostMeta,
   RuleHostResult,
-} from './rule-host-types.js';
+} from '@principles/core/runtime-v2';
 
 export interface RuleImplementationValidationFailure {
   code:
@@ -49,7 +49,7 @@ const HELPER_NAMES: (keyof RuleHostHelpers)[] = [
   'getBashRisk',
   'hasPlanFile',
   'getPlanStatus',
-  'getCurrentEpiTier',
+  'getEpTier',
 ];
 
 function createValidationInput(): RuleHostInput {

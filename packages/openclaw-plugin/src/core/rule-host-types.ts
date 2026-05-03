@@ -1,86 +1,14 @@
 /**
- * Rule Host Types — Execution contracts for hosted code implementations
+ * Rule Host Types — Re-exported from @principles/core (PRI-42)
  *
- * PURPOSE: Define the constrained interface through which active code
- * implementations are executed. Implementations receive a frozen snapshot
- * of context and return one of three decisions.
- *
- * TRUST BOUNDARY:
- *   - RuleHostInput is a frozen snapshot — no live workspace handles
- *   - Implementations execute in a constrained vm context with minimal helpers
- *   - No filesystem, process, require, dynamic import, eval, or network access
+ * Canonical definitions moved to:
+ *   packages/principles-core/src/runtime-v2/internalization/rule-host-contracts.ts
  */
 
-// ---------------------------------------------------------------------------
-// Input: Frozen snapshot provided to implementations
-// ---------------------------------------------------------------------------
-
-export interface RuleHostInput {
-  action: {
-    toolName: string;
-    normalizedPath: string | null;
-    paramsSummary: Record<string, unknown>;
-  };
-  workspace: {
-    isRiskPath: boolean;
-    planStatus: 'NONE' | 'DRAFT' | 'READY' | 'UNKNOWN';
-    hasPlanFile: boolean;
-  };
-  session: {
-    sessionId?: string;
-    currentGfi: number;
-    recentThinking: boolean;
-  };
-  evolution: {
-    epTier: number;
-  };
-  derived: {
-    estimatedLineChanges: number;
-    bashRisk: 'safe' | 'normal' | 'dangerous' | 'unknown';
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Decision: Limited to three outcomes
-// ---------------------------------------------------------------------------
-
-export type RuleHostDecision = 'allow' | 'block' | 'requireApproval';
-
-// ---------------------------------------------------------------------------
-// Meta: Exported by each implementation for identification
-// ---------------------------------------------------------------------------
-
-export interface RuleHostMeta {
-  name: string;
-  version: string;
-  ruleId: string;
-  coversCondition: string;
-}
-
-// ---------------------------------------------------------------------------
-// Result: Structured output from a single implementation evaluation
-// ---------------------------------------------------------------------------
-
-export interface RuleHostResult {
-  decision: RuleHostDecision;
-  matched: boolean;
-  reason: string;
-  diagnostics?: Record<string, unknown>;
-  /** C: Rule ID that produced this result (for observability events) */
-  ruleId?: string;
-  /** C: Principle ID that this rule implements (for observability events) */
-  principleId?: string;
-}
-
-// ---------------------------------------------------------------------------
-// LoadedImplementation: A successfully loaded active implementation
-// ---------------------------------------------------------------------------
-
-export interface LoadedImplementation {
-  implId: string;
-  ruleId: string;
-  meta: RuleHostMeta;
-   
-  evaluate: (_input: RuleHostInput) => RuleHostResult;
-   
-}
+export type {
+  RuleHostInput,
+  RuleHostDecision,
+  RuleHostMeta,
+  RuleHostResult,
+  LoadedImplementation,
+} from '@principles/core/runtime-v2';
