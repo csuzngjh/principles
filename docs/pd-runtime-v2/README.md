@@ -54,3 +54,7 @@ They should be treated as the canonical working set for:
 - context retrieval standardization
 
 They should not be diluted by unrelated tactical fixes or isolated feature requests.
+
+## Lifecycle Review
+
+The [principle lifecycle review workflow](../../runtime-v2-principle-lifecycle-review.md) documents the non-destructive audit system for principle health signals (PRI-23/24/25/26).
