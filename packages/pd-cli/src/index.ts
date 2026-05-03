@@ -325,6 +325,22 @@ traceCmd
     await handleTraceShow({ painId: opts.painId, workspace: opts.workspace, json: opts.json });
   });
 
+runtimeCmd
+  .command('uat')
+  .description('Runtime V2 chain UAT baseline runner')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--count <n>', 'Number of iterations (default: 5, max: 50)', parseInt)
+  .option('--min-success-rate <rate>', 'Minimum success rate threshold (default: 1.0)', parseFloat)
+  .option('--json', 'Output machine-readable JSON summary')
+  .action(async (opts) => {
+    await handleRuntimeUat({
+      workspace: opts.workspace,
+      count: opts.count,
+      minSuccessRate: opts.minSuccessRate,
+      json: opts.json,
+    });
+  });
+
 const pruningCmd = runtimeCmd
   .command('pruning')
   .description('Non-destructive pruning metrics and health signals');
@@ -364,22 +380,6 @@ pruningCmd
       note: opts.note,
       reviewer: opts.reviewer,
       workspace: opts.workspace,
-      json: opts.json,
-    });
-  });
-
-pruningCmd
-  .command('uat')
-  .description('Runtime V2 chain UAT baseline runner')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--count <n>', 'Number of iterations (default: 5, max: 50)', parseInt)
-  .option('--min-success-rate <rate>', 'Minimum success rate threshold (default: 1.0)', parseFloat)
-  .option('--json', 'Output machine-readable JSON summary')
-  .action(async (opts) => {
-    await handleRuntimeUat({
-      workspace: opts.workspace,
-      count: opts.count,
-      minSuccessRate: opts.minSuccessRate,
       json: opts.json,
     });
   });
