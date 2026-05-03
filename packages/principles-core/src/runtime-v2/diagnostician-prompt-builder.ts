@@ -155,8 +155,8 @@ OUTPUT FORMAT (pure JSON, no markdown):
   "evidence": [{"sourceRef": "<sourceRef from context or conversationWindow entry>", "note": "<what this shows>"}],
   "recommendations": [
     {
-      "kind": "principle|rule|implementation|prompt|defer",
-      "description": "<Detailed explanation>",
+      "kind": "rule",
+      "description": "<Detailed explanation of the rule>",
       "triggerPattern": "<Regex/keywords. REQUIRED if kind is 'rule'>",
       "action": "<Required behavior change. REQUIRED if kind is 'rule'>",
       "abstractedPrinciple": "<One sentence summary. REQUIRED if kind is 'principle'>"
