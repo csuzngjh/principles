@@ -71,9 +71,55 @@ describe('Runtime V2 pain entrypoint guard', () => {
     expect(source).toMatch(/emitPainDetectedEvent\(wctx,\s*\{/);
     expect(source).toMatch(/type:\s*'pain_detected'/);
     expect(source).toMatch(/PainToPrincipleService/);
-    expect(source).not.toMatch(/createPainSignalBridge/);
+    // Verify it calls createPainToPrincipleService (the factory function inside pain.ts)
+    expect(source).toMatch(/createPainToPrincipleService\(/);
+    // Verify it does NOT call createPainSignalBridge (legacy factory)
+    expect(source).not.toMatch(/createPainSignalBridge\(/);
     expect(source).not.toMatch(/writePainFlag|recordAndWritePainFlag/);
     expect(source).not.toMatch(/writeFileSync\s*\([^)]*painFlagPath/s);
     expect(source).not.toMatch(/atomicWriteFileSync\s*\([^)]*painFlagPath/s);
+  });
+
+  // PRI-29: emitPainDetectedEvent → PainToPrincipleService service contract guards
+  it('pain.ts constructs PainToPrincipleService with workspaceDir and stateDir from wctx', () => {
+    const source = read('packages/openclaw-plugin/src/hooks/pain.ts');
+
+    // Must construct PrincipleTreeLedgerAdapter with wctx.stateDir
+    expect(source).toMatch(/new PrincipleTreeLedgerAdapter\(\{\s*stateDir:\s*wctx\.stateDir\s*\}\)/);
+
+    // Must construct PainToPrincipleService with wctx properties
+    expect(source).toMatch(/new PainToPrincipleService\(\{/);
+    expect(source).toMatch(/workspaceDir:\s*wctx\.workspaceDir/);
+    expect(source).toMatch(/stateDir:\s*wctx\.stateDir/);
+    expect(source).toMatch(/owner:\s*['"]openclaw-plugin['"]/);
+    expect(source).toMatch(/autoIntakeEnabled:\s*true/);
+  });
+
+  it('pain.ts passes recordObservability: true to service.recordPain', () => {
+    const source = read('packages/openclaw-plugin/src/hooks/pain.ts');
+
+    expect(source).toMatch(/recordObservability:\s*true/);
+  });
+
+  it('pain.ts logs PAIN_SERVICE_FAILED for failed status with failureCategory', () => {
+    const source = read('packages/openclaw-plugin/src/hooks/pain.ts');
+
+    expect(source).toMatch(/PAIN_SERVICE_FAILED/);
+    // Must include failureCategory in the log payload
+    expect(source).toMatch(/failureCategory:\s*result\.failureCategory/);
+  });
+
+  it('pain.ts logs PAIN_SERVICE_SKIPPED for skipped status', () => {
+    const source = read('packages/openclaw-plugin/src/hooks/pain.ts');
+
+    expect(source).toMatch(/PAIN_SERVICE_SKIPPED/);
+  });
+
+  it('pain.ts logs PAIN_SERVICE_ERROR for exceptions', () => {
+    const source = read('packages/openclaw-plugin/src/hooks/pain.ts');
+
+    expect(source).toMatch(/PAIN_SERVICE_ERROR/);
+    // Must include "recordPain threw" in the error message
+    expect(source).toMatch(/recordPain threw:/);
   });
 });
