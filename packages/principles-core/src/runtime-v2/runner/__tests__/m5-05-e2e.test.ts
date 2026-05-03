@@ -323,22 +323,22 @@ describe('E2E m5-05', () => {
 
       // First commit
       const result1 = await committer.commit({ runId, taskId, output, idempotencyKey });
-      expect(result1.candidateCount).toBe(2);
+      expect(result1.candidateCount).toBe(3); // 2 principles + 1 rule
       const firstCommitId = result1.commitId;
 
       // Second commit with same taskId+runId — idempotency should return same result
       const result2 = await committer.commit({ runId, taskId, output, idempotencyKey });
       expect(result2.commitId).toBe(firstCommitId); // E2EV-02 assertion 1: same commitId (D-09)
-      expect(result2.candidateCount).toBe(2);
+      expect(result2.candidateCount).toBe(3);
 
       // E2EV-02 assertion 2: only one artifact row exists
       const artifactCount = db.prepare('SELECT COUNT(*) as cnt FROM artifacts WHERE task_id = ?').get(taskId) as { cnt: number };
       expect(artifactCount.cnt).toBe(1);
 
-      // E2EV-02 assertion 3: only 2 candidate rows (no duplicates on re-commit)
+      // E2EV-02 assertion 3: only 3 candidate rows (no duplicates on re-commit)
       const artifactRow = db.prepare('SELECT artifact_id FROM artifacts WHERE task_id = ?').get(taskId) as { artifact_id: string };
       const candidateCount = db.prepare('SELECT COUNT(*) as cnt FROM principle_candidates WHERE artifact_id = ?').get(artifactRow.artifact_id) as { cnt: number };
-      expect(candidateCount.cnt).toBe(2);
+      expect(candidateCount.cnt).toBe(3);
     });
   });
 

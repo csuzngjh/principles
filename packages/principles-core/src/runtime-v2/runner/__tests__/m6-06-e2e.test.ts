@@ -270,11 +270,11 @@ describe('E2E m6-06 — OpenClawCliRuntimeAdapter + FakeCliProcessRunner', () =>
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       const artifactId = artifactRow!.artifact_id;
 
-      // E2EV-02 assertion 5: >= 2 candidate rows exist (from kind='principle' recommendations)
+      // E2EV-02 assertion 5: >= 3 candidate rows exist (all recommendation kinds)
       const candidateRows = db.prepare(
         'SELECT * FROM principle_candidates WHERE artifact_id = ? AND status = ?',
       ).all(artifactId, PENDING_STATUS) as { candidate_id: string; description: string }[];
-      expect(candidateRows).toHaveLength(2);
+      expect(candidateRows).toHaveLength(3);
       expect(candidateRows.every((c) => c.description.length > 0)).toBe(true);
 
       // E2EV-02 assertion 6: commit row links task to artifact with status === 'committed'
@@ -456,7 +456,7 @@ describe('E2E m6-06 — OpenClawCliRuntimeAdapter + FakeCliProcessRunner', () =>
         'SELECT * FROM principle_candidates WHERE artifact_id = ? AND status = ?',
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       ).all(artifactRow!.artifact_id, PENDING_STATUS) as { candidate_id: string }[];
-      expect(candidateRows).toHaveLength(2);
+      expect(candidateRows).toHaveLength(3); // 2 principles + 1 rule
 
       // E2EV-03 assertion 5: output.payload.diagnosisId matches committed output
       expect(result.output).toBeDefined();
