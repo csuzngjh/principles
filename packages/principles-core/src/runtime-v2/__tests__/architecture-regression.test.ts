@@ -96,16 +96,13 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
 
 describe('openclaw-plugin pain hook integration', () => {
   it('pain.ts uses PainToPrincipleService (not createPainSignalBridge)', async () => {
-    const { existsSync } = await import('node:fs');
+    const { existsSync, readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const painHookPath = resolve(
       __dirname,
-      '../../../openclaw-plugin/src/hooks/pain.ts',
+      '../../../../openclaw-plugin/src/hooks/pain.ts',
     );
-    if (!existsSync(painHookPath)) {
-      return;
-    }
-    const { readFileSync } = await import('node:fs');
+    expect(existsSync(painHookPath)).toBe(true);
     const src = readFileSync(painHookPath, 'utf-8');
     expect(src).toContain('PainToPrincipleService');
     expect(src).not.toContain('createPainSignalBridge');
@@ -113,16 +110,13 @@ describe('openclaw-plugin pain hook integration', () => {
 
   // PRI-29: emitPainDetectedEvent → PainToPrincipleService service contract
   it('pain.ts emitPainDetectedEvent calls PainToPrincipleService.recordPain on pain_detected', async () => {
-    const { existsSync } = await import('node:fs');
+    const { existsSync, readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const painHookPath = resolve(
       __dirname,
-      '../../../openclaw-plugin/src/hooks/pain.ts',
+      '../../../../openclaw-plugin/src/hooks/pain.ts',
     );
-    if (!existsSync(painHookPath)) {
-      return;
-    }
-    const { readFileSync } = await import('node:fs');
+    expect(existsSync(painHookPath)).toBe(true);
     const src = readFileSync(painHookPath, 'utf-8');
     // Must call service.recordPain() inside emitPainDetectedEvent
     expect(src).toMatch(/service\.recordPain\(/);
@@ -141,16 +135,13 @@ describe('openclaw-plugin pain hook integration', () => {
 
 describe('pd-cli command boundaries', () => {
   it('pain-record.ts does not import createPainSignalBridge or recordPainSignalObservability', async () => {
-    const { existsSync } = await import('node:fs');
+    const { existsSync, readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const cmdPath = resolve(
       __dirname,
-      '../../../pd-cli/src/commands/pain-record.ts',
+      '../../../../pd-cli/src/commands/pain-record.ts',
     );
-    if (!existsSync(cmdPath)) {
-      return;
-    }
-    const { readFileSync } = await import('node:fs');
+    expect(existsSync(cmdPath)).toBe(true);
     const src = readFileSync(cmdPath, 'utf-8');
     expect(src).toContain('PainToPrincipleService');
     expect(src).not.toContain('createPainSignalBridge');
@@ -158,16 +149,13 @@ describe('pd-cli command boundaries', () => {
   });
 
   it('runtime-health-snapshot.ts uses OperatorHealthReadModel (public API)', async () => {
-    const { existsSync } = await import('node:fs');
+    const { existsSync, readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const cmdPath = resolve(
       __dirname,
-      '../../../pd-cli/src/commands/runtime-health-snapshot.ts',
+      '../../../../pd-cli/src/commands/runtime-health-snapshot.ts',
     );
-    if (!existsSync(cmdPath)) {
-      return;
-    }
-    const { readFileSync } = await import('node:fs');
+    expect(existsSync(cmdPath)).toBe(true);
     const src = readFileSync(cmdPath, 'utf-8');
     expect(src).toContain('OperatorHealthReadModel');
     expect(src).not.toContain('auditCandidateLedgerConsistency');

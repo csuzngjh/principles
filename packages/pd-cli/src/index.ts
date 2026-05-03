@@ -26,6 +26,7 @@ import { handleRuntimeProbe } from './commands/runtime.js';
 import { handleFlowShow } from './commands/flow.js';
 import { handleTraceShow } from './commands/trace.js';
 import { handlePruningReport, handlePruningExplain, handlePruningReview } from './commands/runtime-pruning.js';
+import { handleRuntimeHealthSnapshot } from './commands/runtime-health-snapshot.js';
 import { handleRuntimeUat } from './commands/runtime-uat.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
@@ -339,6 +340,19 @@ runtimeCmd
       minSuccessRate: opts.minSuccessRate,
       json: opts.json,
     });
+  });
+
+const runtimeHealthCmd = runtimeCmd
+  .command('health')
+  .description('Runtime V2 health inspection');
+
+runtimeHealthCmd
+  .command('snapshot')
+  .description('Operator health snapshot combining chain, ledger, and pruning status')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeHealthSnapshot({ workspace: opts.workspace, json: opts.json });
   });
 
 const pruningCmd = runtimeCmd

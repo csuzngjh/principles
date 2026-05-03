@@ -10,8 +10,8 @@
 
 PRI-29 aimed to validate the real OpenClaw `after_tool_call` hook → Runtime V2 pain→principle chain. While architecture guards confirm the code path is correct, real environment validation encountered infrastructure gaps that prevent conclusive end-to-end testing.
 
-**Verdict:** **GATED** — Real auto-trigger path cannot be validated due to:
-1. PRI-28 health snapshot command not available in deployed CLI
+**Verdict:** **BLOCKED** — Real auto-trigger path cannot be validated due to:
+1. ~~PRI-28 health snapshot command not available~~ ✅ **RESTORED** (was PR #452 regression; files now restored)
 2. MINIMAX_API_KEY environment variable not configured
 3. No deterministic way to trigger controlled tool failures via gateway
 
@@ -120,18 +120,11 @@ Expected evidence (if auto-trigger worked):
 
 ## Root Cause Analysis
 
-### Issue 1: PRI-28 Health Snapshot Command Missing
+### Issue 1: PRI-28 Health Snapshot Command Missing ~~(RESTORED)~~
 
-**Expected:** `pd runtime health snapshot --workspace <path> --json`
-**Actual:** Command not found in deployed CLI
+**Root Cause:** PR #452 (`a1279336`) deleted `dynamic-timeout.ts` and accidentally removed all PRI-28 files in the same commit (58bae54a was not an ancestor — PR #451 and #452 were merged in different order than expected).
 
-**Investigation:**
-- PR #451 (commit 58bae54a) claims to add this command
-- Source code check shows no `handleRuntimeHealthSnapshot` in `pd-cli/src/commands/`
-- `packages/pd-cli/src/index.ts` has no `runtimeHealthCmd` registration
-- `pd health` exists at top level but this is PRI-28's old placement, not the `runtime health snapshot` subcommand
-
-**Likely Cause:** PR #451 was merged but the CLI command registration may have been lost in a subsequent PR or merge conflict.
+**Status:** ✅ **RESOLVED** — `runtime-health-snapshot.ts` source file and test restored from PR #451 history, command tree re-registered in `pd-cli/src/index.ts`, guard vulnerability fixed.
 
 ### Issue 2: MINIMAX_API_KEY Not Configured
 
@@ -175,11 +168,10 @@ Expected evidence (if auto-trigger worked):
 
 ### Required (Blockers for PRI-29 completion)
 
-1. **Restore `pd runtime health snapshot` command**
-   - Investigate why PR #451's command registration is missing
-   - Verify `packages/pd-cli/src/commands/runtime-health-snapshot.ts` exists
-   - Verify `packages/pd-cli/src/index.ts` registers the command correctly
-   - Create PR if needed
+1. **~~Restore `pd runtime health snapshot` command~~** ✅ **RESOLVED**
+   - Files restored from PR #451 history
+   - Command re-registered in `pd-cli/src/index.ts`
+   - Guard vulnerability fixed
 
 2. **Configure MINIMAX_API_KEY for testing**
    - Set in environment or OpenClaw config
