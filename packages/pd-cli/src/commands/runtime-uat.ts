@@ -10,11 +10,12 @@
  *   - Consistency and latency statistics with threshold-based exit
  *
  * Requirements:
- *   - MINIMAX_API_KEY environment variable
- *   - Built pd-cli (npx pd must be resolvable)
+ *   - MINIMAX_CN_API_KEY environment variable
+ *   - Built pd-cli (node packages/pd-cli/dist/index.js must be resolvable)
  */
 import { execFileSync } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -105,12 +106,22 @@ export function percentile(arr: number[], p: number): number | undefined {
   return sorted[Math.max(0, idx)];
 }
 
-// ── Core UAT runner ───────────────────────────────────────────────────────────
+// ── Cross-platform pd CLI invocation ─────────────────────────────────────────
+
+function findPdCliPath(): string {
+  // Resolve path relative to this file's location in dist/commands/
+  // dist/commands/runtime-uat.js → dist/index.js
+  const distDir = path.dirname(__filename);
+  const cliPath = path.resolve(distDir, '..', 'index.js');
+  if (fs.existsSync(cliPath)) return cliPath;
+  throw new Error(`pd CLI not found at ${cliPath} — run: npm run build --workspace=@principles/pd-cli`);
+}
 
 function pd(args: string[], workspace: string, timeoutMs = 300_000): string {
-  const fullArgs = [...args, '--workspace', workspace];
+  const fullArgs = ['--workspace', workspace, ...args];
+  const cliPath = findPdCliPath();
   try {
-    return execFileSync('npx', ['pd', ...fullArgs], {
+    return execFileSync(process.execPath, [cliPath, ...fullArgs], {
       encoding: 'utf8',
       timeout: timeoutMs,
       env: { ...process.env },
@@ -118,7 +129,7 @@ function pd(args: string[], workspace: string, timeoutMs = 300_000): string {
     });
   } catch (err: unknown) {
     if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'ENOENT') {
-      throw new Error('pd CLI not found — run: npm run build --workspace=@principles/pd-cli', { cause: err });
+      throw new Error(`pd CLI not found at ${cliPath} — run: npm run build --workspace=@principles/pd-cli`, { cause: err });
     }
     if (err && typeof err === 'object' && 'stdout' in err) {
       return String((err as { stdout: unknown }).stdout);
@@ -264,9 +275,9 @@ export async function handleRuntimeUat(opts: UatOptions): Promise<void> {
 
   console.error(`[${new Date().toISOString()}] Runtime V2 Chain UAT — workspace: ${workspace}, count: ${count}`);
 
-  // Check MINIMAX_API_KEY
-  if (!process.env.MINIMAX_API_KEY) {
-    console.error('Error: MINIMAX_API_KEY environment variable not set');
+  // Check MINIMAX_CN_API_KEY
+  if (!process.env.MINIMAX_CN_API_KEY) {
+    console.error('Error: MINIMAX_CN_API_KEY environment variable not set');
     process.exit(1);
   }
 
