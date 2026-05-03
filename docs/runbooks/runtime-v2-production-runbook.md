@@ -127,7 +127,7 @@ Run multiple iterations to establish a reliability baseline.
 pd runtime uat --workspace "D:\.openclaw\workspace" --count 3 --min-success-rate 1 --json
 ```
 
-### 4.2 Standalone Script
+### 4.2 Direct dist CLI invocation
 
 ```bash
 node packages/pd-cli/dist/index.js runtime uat --workspace "D:\.openclaw\workspace" --count 3
@@ -137,10 +137,17 @@ node packages/pd-cli/dist/index.js runtime uat --workspace "D:\.openclaw\workspa
 
 | Field | Meaning |
 |-------|---------|
-| `successCount` / `totalCount` | Iterations that reached `status=succeeded` |
-| `successRate` | successCount / totalCount |
-| `latencyMs` p50 / p95 | Chain completion latency distribution |
-| `failuresByCategory` | Breakdown of failure types |
+| `totalRuns` | Total iterations run |
+| `successful` | Iterations with `status=succeeded` |
+| `failed` | Iterations with `status=failed`, `script_error`, or `parse_error` |
+| `successRate` | successful / totalRuns |
+| `p50LatencyMs` | 50th percentile chain completion latency (ms) |
+| `p95LatencyMs` | 95th percentile chain completion latency (ms) |
+| `failuresByCategory` | Breakdown of failure types (key = category, value = count) |
+| `ledgerConsistencyOk` | All runs have matching ledger entries (`true`/`false`) |
+| `allHaveCandidates` | All runs produced candidate IDs (`true`/`false`) |
+| `allHaveLedger` | All runs produced ledger entry IDs (`true`/`false`) |
+| `perRun` | Per-iteration detail array |
 
 **Pass threshold:** `successRate >= min-success-rate` (default 1.0 = 100%)
 
@@ -178,12 +185,14 @@ pd runtime health snapshot --workspace "D:\.openclaw\workspace" --json
 | Field | Description |
 |-------|-------------|
 | `overallStatus` | `healthy` \| `degraded` \| `error` |
-| `painChain.lastSuccessfulChain` | Timestamp of last succeeded chain |
-| `painChain.consecutiveFailures` | Failed iterations since last success |
+| `painChain.lastSuccessfulChain` | Last `PainChainTrace` with `status=succeeded`, or `null` |
+| `painChain.failureCategory` | Category of last failed chain, or `null` |
 | `candidateLedger.auditStatus` | `ok` \| `degraded` \| `error` |
-| `candidateLedger.missingLedgerEntryIds` | Candidates without ledger entries |
+| `candidateLedger.orphanCandidateCount` | Candidates in DB not referenced by any ledger entry |
+| `candidateLedger.missingLedgerCount` | Ledger entries referencing non-existent candidates |
 | `pruning.watchCount` | Principles flagged for review |
 | `pruning.reviewCount` | Principles with operator decisions recorded |
+| `pruning.orphanDerivedCandidateCount` | Derived candidates orphaned from their parent principle |
 | `recommendedActions` | Array of suggested operator actions |
 
 ### 5.2 Interpreting Status
@@ -217,7 +226,7 @@ pd candidate audit --workspace "D:\.openclaw\workspace" --json
 | Category | Meaning | First Debug Step |
 |----------|---------|------------------|
 | `runtime_unavailable` | Diagnostician or provider not accessible | Check `MINIMAX_CN_API_KEY`, provider config |
-| `config_missing` | Required config not found | Verify workspace state.db exists |
+| `config_missing` | Required config not found | Verify `.pd/state.db` exists; run `pd runtime probe --runtime pi-ai --workspace "<workspace>" --json` |
 | `output_invalid` | Runtime returned malformed response | Check OpenClaw logs for error details |
 | `candidate_missing` | Pain reached Diagnostician but no candidate created | Run `pd candidate audit` |
 | `ledger_write_failed` | Candidate created but ledger entry missing | Run `pd candidate audit` — check missingLedgerEntryIds |
@@ -227,7 +236,7 @@ pd candidate audit --workspace "D:\.openclaw\workspace" --json
 
 ```
 health snapshot error
-  → Check workspace/state.db/config exists
+  → Check .pd/state.db exists
 
 UAT reports runtime_unavailable
   → Verify MINIMAX_CN_API_KEY is set
@@ -279,7 +288,7 @@ Manual pain record fully validated:
 
 ## 8. Pruning Review Workflow
 
-The pruning review system is **non-destructive** — it only appends audit records, never modifies the principle ledger or `state.db`.
+The pruning review system is **non-destructive** — it only appends audit records, never modifies the principle ledger or `.pd/state.db`.
 
 Reference: [`docs/runtime-v2-principle-lifecycle-review.md`](../runtime-v2-principle-lifecycle-review.md)
 
@@ -367,13 +376,13 @@ START: Something is wrong with Runtime V2
 │
 ├─ pd runtime health snapshot → error
 │   → Check workspace path exists
-│   → Check .state/state.db exists
-│   → Check .state/config.json exists
+│   → Check .pd/state.db exists
+│   → Run pd runtime probe --runtime pi-ai --workspace "<workspace>" --json
 │
 ├─ pd runtime uat fails with runtime_unavailable
 │   → Verify MINIMAX_CN_API_KEY is set
 │   → Verify MINIMAX_CN_API_KEY is correct (not MINIMAX_API_KEY)
-│   → Check provider config in config.json
+│   → Run pd runtime probe --runtime pi-ai --workspace "<workspace>" --json
 │
 ├─ pd runtime trace show shows candidate_missing
 │   → Run pd candidate audit
@@ -385,7 +394,6 @@ START: Something is wrong with Runtime V2
 │
 ├─ pd runtime health snapshot shows degraded
 │   → Review recommendedActions array
-│   → Check consecutiveFailures count
 │
 └─ PRI-40 Track B: no pain_detected events in logs
     → Check OpenClaw logs for PAIN_GATE_REJECTED (may be normal)
