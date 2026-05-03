@@ -25,14 +25,14 @@ import {
   listImplementationsByLifecycleState,
 } from './principle-tree-ledger.js';
 import { loadEntrySource } from './code-implementation-storage.js';
-import { createRuleHostHelpers } from './rule-host-helpers.js';
+import { createRuleHostHelpers } from '@principles/core/runtime-v2';
 import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import type {
   RuleHostInput,
   RuleHostResult,
   RuleHostMeta,
   LoadedImplementation,
-} from './rule-host-types.js';
+} from '@principles/core/runtime-v2';
 import type { Implementation } from '../types/principle-tree-schema.js';
 
 export interface RuleHostLogger {

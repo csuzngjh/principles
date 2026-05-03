@@ -15,7 +15,7 @@ import { normalizePath, planStatus } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
-import type { RuleHostInput } from '../core/rule-host-types.js';
+import type { RuleHostInput } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { getSession, hasRecentThinking } from '../core/session-tracker.js';
