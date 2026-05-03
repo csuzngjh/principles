@@ -304,7 +304,11 @@ describe('ArtifactRegistrySchema', () => {
     expect(names).toContain('status');
     expect(names).toContain('created_at');
     expect(names).toContain('consumed_at');
-    expect(columns).toHaveLength(12);
+    expect(names).toContain('recommendation_kind');
+    expect(names).toContain('trigger_pattern');
+    expect(names).toContain('action');
+    expect(names).toContain('abstracted_principle');
+    expect(columns).toHaveLength(16);
   });
 
   it('all three tables created idempotently on re-open', () => {
@@ -349,7 +353,7 @@ describe('ArtifactRegistrySchema', () => {
         "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' AND tbl_name IN ('artifacts','commits','principle_candidates')"
       )
       .all() as { name: string }[];
-    expect(indexes).toHaveLength(8);
+    expect(indexes).toHaveLength(9);
     const indexNames = indexes.map((i) => i.name);
     expect(indexNames).toContain('idx_artifacts_task_id');
     expect(indexNames).toContain('idx_artifacts_run_id');
@@ -359,6 +363,7 @@ describe('ArtifactRegistrySchema', () => {
     expect(indexNames).toContain('idx_candidates_status');
     expect(indexNames).toContain('idx_candidates_source_run_id');
     expect(indexNames).toContain('idx_candidates_task_id');
+    expect(indexNames).toContain('idx_candidates_recommendation_kind');
   });
 
   it('deleting run cascades to artifacts, commits, and candidates', async () => {

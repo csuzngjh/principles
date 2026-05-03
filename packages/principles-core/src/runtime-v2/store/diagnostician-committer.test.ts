@@ -4,7 +4,7 @@
  * COMT-01 through COMT-06 coverage:
  * - COMT-01: DiagnosticianCommitter interface
  * - COMT-02: Transaction-wrapped commit (artifact + commit + candidates)
- * - COMT-03: Extract kind='principle' recommendations
+ * - COMT-03: Extract all recommendation kinds (principle + rule + implementation + prompt + defer)
  * - COMT-04: Idempotent re-commit via UNIQUE constraints
  * - COMT-05: Failure returns PDRuntimeError{artifact_commit_failed}
  * - COMT-06: CommitResult returns {commitId, artifactId, candidateCount}
@@ -95,7 +95,7 @@ describe('SqliteDiagnosticianCommitter', () => {
 
     expect(result).toHaveProperty('commitId');
     expect(result).toHaveProperty('artifactId');
-    expect(result.candidateCount).toBe(2); // 2 principle recommendations
+    expect(result.candidateCount).toBe(3); // 2 principle + 1 rule = 3 total recommendations
     expect(result.commitId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
@@ -141,14 +141,15 @@ describe('SqliteDiagnosticianCommitter', () => {
     const candidates = db
       .prepare('SELECT * FROM principle_candidates WHERE artifact_id = ? ORDER BY created_at')
       .all(result.artifactId) as Record<string, unknown>[];
-    expect(candidates).toHaveLength(2);
+    expect(candidates).toHaveLength(3); // 2 principles + 1 rule
     expect(candidates[0]?.description).toBe('Use immutable data structures');
-    expect(candidates[1]?.description).toBe('Prefer composition over inheritance');
+    expect(candidates[1]?.description).toBe('Always validate input');
+    expect(candidates[2]?.description).toBe('Prefer composition over inheritance');
   });
 
-  // ── COMT-03: Extract kind='principle' recommendations ────────────────────
+  // ── COMT-03: Extract all recommendation kinds ─────────────────────────────────
 
-  it('commit extracts only kind=principle recommendations as candidates', async () => {
+  it('commit extracts ALL recommendation kinds as candidates', async () => {
     await createTaskAndRun('task-extract-1', 'run-extract-1');
 
     const input: CommitInput = {
@@ -157,7 +158,7 @@ describe('SqliteDiagnosticianCommitter', () => {
       output: makeOutput({
         recommendations: [
           { kind: 'principle', description: 'Principle 1' },
-          { kind: 'rule', description: 'Rule 1' },
+          { kind: 'rule', description: 'Rule 1', triggerPattern: '^src/', action: 'block' },
           { kind: 'implementation', description: 'Impl 1' },
           { kind: 'principle', description: 'Principle 2' },
           { kind: 'prompt', description: 'Prompt 1' },
@@ -172,15 +173,43 @@ describe('SqliteDiagnosticianCommitter', () => {
     const db = connection.getDb();
 
     const candidates = db
-      .prepare('SELECT * FROM principle_candidates WHERE artifact_id = ?')
+      .prepare('SELECT * FROM principle_candidates WHERE artifact_id = ? ORDER BY created_at')
       .all(result.artifactId) as Record<string, unknown>[];
 
-    expect(candidates).toHaveLength(3);
+    // All 7 recommendations are stored (principle + rule + implementation + prompt + defer)
+    expect(candidates).toHaveLength(7);
     expect(candidates.map((c) => c.description)).toEqual([
       'Principle 1',
+      'Rule 1',
+      'Impl 1',
       'Principle 2',
+      'Prompt 1',
+      'Defer 1',
       'Principle 3',
     ]);
+
+    // Verify recommendation_kind column is populated
+    const kinds = candidates.map((c) => c.recommendation_kind);
+    expect(kinds).toEqual([
+      'principle',
+      'rule',
+      'implementation',
+      'principle',
+      'prompt',
+      'defer',
+      'principle',
+    ]);
+
+    // Verify rule-specific fields
+    const ruleCandidate = candidates.find((c) => c.description === 'Rule 1');
+    expect(ruleCandidate?.trigger_pattern).toBe('^src/');
+    expect(ruleCandidate?.action).toBe('block');
+    expect(ruleCandidate?.recommendation_kind).toBe('rule');
+
+    // Verify principle-specific fields
+    const principleCandidate = candidates.find((c) => c.description === 'Principle 1');
+    expect(principleCandidate?.abstracted_principle).toBeNull(); // no abstractedPrinciple provided
+    expect(principleCandidate?.recommendation_kind).toBe('principle');
   });
 
   // ── COMT-04: Idempotent re-commit ─────────────────────────────────────────

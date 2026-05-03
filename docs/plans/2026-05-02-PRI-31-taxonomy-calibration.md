@@ -16,29 +16,27 @@
 
 ---
 
-## 2. 四象限分类学定义 (The Recommendation Taxonomy)
+## 2. 五象限分类学定义 (The Recommendation Taxonomy)
 
-开发人员在修改 Prompt 和编写测试用例时，必须严格贯彻以下 4 种分类：
+开发人员在修改 Prompt 和编写测试用例时，必须严格贯彻以下 5 种分类：
 
 1.  **`principle` (抽象经验)**
     *   **适用场景**：高维度的架构思维、价值观、跨组件的通用指导。
     *   **特征**：无法用单一正则表达式拦截，需要 LLM 思考才能应用。
-    *   **示例**：“不要绕过 Runtime v2 的公共 API 直接调用底层服务。”
 
 2.  **`rule` (可检测约束)**
     *   **适用场景**：明确的、确定性的、基于路径或工具的拦截策略。
-    *   **特征**：**必须**伴随明确的 `triggerPattern`（如正则、路径、特定的工具名），不依赖 LLM 即可做字符串匹配。
-    *   **示例**：“禁止在 `packages/core` 外调用 `createPainSignalBridge`。”
+    *   **特征**：**必须**伴随明确的 `triggerPattern` 和 `action`，不依赖 LLM 即可做物理拦截。
 
 3.  **`implementation` (代码实现候选)**
-    *   **适用场景**：极其具体的、明确的代码级修复建议（通常针对单一文件）。
-    *   **特征**：可以直接转换为补丁（Patch）或沙盒脚本。
-    *   **示例**：“在 `prompt-builder.ts` 第 150 行添加缺失的 JSON 闭合括号。”
+    *   **适用场景**：极其具体的、明确的代码级修复建议（针对单一文件）。
 
-4.  **`defer` (证据不足/挂起)**
-    *   **适用场景**：网络波动超时、偶发的未知报错、信息不足以得出结论。
-    *   **特征**：仅记录，不产生任何防范建议。
-    *   **示例**：“API 偶尔返回 502 Bad Gateway。”
+4.  **`prompt` (提示词注入)**
+    *   **适用场景**：特定工作流、SOP 或 Skill 的提示词内化对象。
+    *   **特征**：用于影响大模型的思考方式，而非代码物理拦截。
+
+5.  **`defer` (证据不足/挂起)**
+    *   **适用场景**：信息不足以得出结论。仅记录，不产生防范建议。
 
 ---
 
@@ -46,30 +44,12 @@
 
 开发人员**必须先写测试**，确保大模型输出校验器（Validator）能正确处理平权结构，再修改 Prompt。
 
-在 `packages/principles-core/src/runtime-v2/runner/default-validator.ts` 及其相关测试文件中，需新增以下 4 个 Fixture/Eval 测试：
+在 `packages/principles-core/src/runtime-v2/runner/default-validator.ts` 及其相关测试文件中，需做以下修改：
+1. 允许做最小 validator 语义增强：`rule` 必须有 `triggerPattern` 和 `action`；`principle` 继续要求 `abstractedPrinciple`。
+2. 更新现有 `rule` fixture，避免没有 `triggerPattern` 的弱语义样例存在。
 
-### Fixture A: 架构边界问题 (Architecture Boundary Issue)
-*   **模拟输入 (Pain)**：Agent 试图使用 `write` 工具直接修改了 `packages/openclaw-plugin/src/core/pain.ts`，引入了直接调用 `createPainSignalBridge` 的反模式代码。
-*   **期望输出类型**：`[principle, rule]`
-*   **期望逻辑**：
-    *   `principle`: "应保持架构边界隔离，通过防腐层调用核心能力。"
-    *   `rule` (带 triggerPattern): "当工具为 `write` 且路径匹配 `packages/openclaw-plugin/.*` 时，检查是否包含 `createPainSignalBridge`。"
-
-### Fixture B: 明确的可检测重复错误 (Repeated Detectable Error)
-*   **模拟输入 (Pain)**：Agent 尝试运行一个 Node.js 脚本，但由于缺少 `.env` 文件导致抛出 `Missing environment variables`。
-*   **期望输出类型**：`[rule]`
-*   **期望逻辑**：
-    *   `rule` (带 triggerPattern): "当工具为 `bash` 且执行 `node` 命令前，必须验证存在 `.env` 文件或相关环境变量。" (不再强行塞一个 principle 凑数)。
-
-### Fixture C: 明确的代码修复机会 (Clear Code-level Fix)
-*   **模拟输入 (Pain)**：TSC 编译报错 `Property 'xyz' does not exist on type 'ABC'`，且日志明确指出了是第 42 行少了一个属性定义。
-*   **期望输出类型**：`[implementation]`
-*   **期望逻辑**：直接建议修改 `ABC` 的接口定义代码。
-
-### Fixture D: 证据不足 (Insufficient Evidence)
-*   **模拟输入 (Pain)**：一次 `bash` 执行了 `npm install`，卡住了 300 秒然后 Timeout。没有其他异常日志。
-*   **期望输出类型**：`[defer]`
-*   **期望逻辑**：不做过度推断，直接挂起。
+### Fixture 示例场景
+... (保留原 A, B, C, D 逻辑)
 
 ---
 
@@ -77,30 +57,38 @@
 
 修改 `packages/principles-core/src/runtime-v2/diagnostician-prompt-builder.ts`。
 
-**修改要求**：
-1.  **打破排序特权**：移除 `recommendations` 数组中第一个必须是 `principle` 且带有详尽字段的模板。
-2.  **属性平权**：将模板修改为一个泛型的对象说明。明确指出 `triggerPattern` 并非只有 `principle` 独享，而是当选择 `rule` 时**极其重要**的字段。
-3.  **不修改 Schema**：绝对不要修改 `DiagnosticianOutputV1Schema` 的 Zod 定义（不改表结构），只改发给大模型的字符串（改填写指南）。
+**最终版 Prompt 图纸 (Copy-Paste Ready)**：
+开发人员请直接将原 `PHASE 4` 的内容替换为以下模板（注意要求返回完整 DiagnosticianOutputV1 对象）：
 
-例如（仅供开发参考，非最终代码）：
-```json
+```typescript
+`PHASE 4 — Recommendation Taxonomy & Distillation
+Analyze the root cause and propose actionable recommendations. You MUST classify each recommendation into one of FIVE specific categories (kind) based on the taxonomy below.
+
+TAXONOMY DEFINITIONS:
+1. "rule": Deterministic constraints. Use for specific tool blocks or path protections. A "rule" MUST have a precise 'triggerPattern' (e.g., regex "^src/core/") and 'action' for physical interception.
+2. "principle": Abstract, reusable wisdom. Use for high-level architectural guidelines. MUST have 'abstractedPrinciple'.
+3. "implementation": Code-level candidate. Use for extremely specific code patches.
+4. "prompt": Context/Skill injection. Use to influence the agent's workflow habits.
+5. "defer": Insufficient evidence. Use for network timeouts or noise.
+
+OUTPUT FORMAT (JSON):
+Return a FULL DiagnosticianOutputV1 JSON object. The 'recommendations' array MUST use this flattened structure:
 "recommendations": [
   {
-    "kind": "principle|rule|implementation|defer",
-    "description": "<具体建议>",
-    "triggerPattern": "<正则/关键词。注：若 kind 为 rule，强烈建议提供物理拦截的 triggerPattern>",
-    "action": "<期望的行为>",
-    "abstractedPrinciple": "<如果是 principle 才填>"
+    "kind": "rule",
+    "description": "<Detailed explanation>",
+    "triggerPattern": "<Regex/keywords. REQUIRED if kind is 'rule'>",
+    "action": "<Required behavior change. REQUIRED if kind is 'rule'>",
+    "abstractedPrinciple": "<One sentence summary. REQUIRED if kind is 'principle'>"
   }
-]
+]`
 ```
 
 ---
 
 ## 5. 验收标准 (Acceptance Criteria)
 
-1.  `prompt-builder tests` 必须包含对四象限 Taxonomy 的断言。
-2.  `diagnostician output validator` 测试保持 100% 绿灯。
+1.  `prompt-builder tests` 验证 prompt 包含完整的 5 类分类定义和完整的 JSON 输出格式。
+2.  `diagnostician output validator` 测试覆盖这 5 类推荐。
 3.  现有所有的 Runtime V2 E2E 测试不得遭到破坏。
-4.  在控制台或注释中，明确声明 Diagnostician 仅负责**推荐分类 (recommendation taxonomy)**，绝不直接执行突变 (No Execution)。
-5.  **绝对红线**：不碰 `RuleHost`、不改 `Ledger` 数据结构、不引入自动剪枝。本任务仅聚焦于“大脑”的输出调优。
+4.  保留 prompt kind，绝不强迫分类，依靠模型语义判断。
