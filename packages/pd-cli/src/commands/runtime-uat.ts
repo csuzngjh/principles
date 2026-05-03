@@ -10,7 +10,7 @@
  *   - Consistency and latency statistics with threshold-based exit
  *
  * Requirements:
- *   - XIAOMI_KEY environment variable
+ *   - MINIMAX_API_KEY environment variable
  *   - Built pd-cli (npx pd must be resolvable)
  */
 import { execFileSync } from 'child_process';
