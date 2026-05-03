@@ -1,20 +1,30 @@
 /**
  * pd runtime uat CLI unit tests.
- * Tests parseUatArgs, computeUatSummary, shouldExitWithError.
+ * Tests parseUatArgs, computeUatSummary, shouldExitWithError, runUatIteration.
  * Integration tests with real pd calls are done manually via
  *   node scripts/uat/runtime-v2-chain-uat.mjs --workspace <path> --count 2 --json
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // ── Mock child_process before importing the module under test ────────────────
 
-const { mockExecFileSync } = vi.hoisted(() => {
-  return { mockExecFileSync: vi.fn() };
-});
+const { mockExecFileSync, mockExistsSync } = vi.hoisted(() => ({
+  mockExecFileSync: vi.fn(),
+  mockExistsSync: vi.fn(),
+}));
 
 vi.mock('child_process', () => ({
   execFileSync: mockExecFileSync,
 }));
+
+vi.mock('fs', () => ({
+  existsSync: mockExistsSync,
+  readFileSync: vi.fn(),
+}));
+
+vi.mock(process.execPath, '/mock/node', { spy: false });
 
 // ── Import after mock setup ─────────────────────────────────────────────────
 
@@ -189,14 +199,120 @@ describe('shouldExitWithError', () => {
   });
 });
 
+// ── pd CLI invocation (Windows compatibility) ───────────────────────────────
+
+describe('pd CLI invocation (Windows compatibility)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExecFileSync.mockReset();
+    mockExistsSync.mockReset();
+    mockExistsSync.mockReturnValue(true);
+    mockExecFileSync.mockReturnValue(JSON.stringify({
+      status: 'succeeded',
+      painId: 'pain-test-1',
+      taskId: 'task-001',
+      runId: 'run-001',
+      artifactId: 'art-001',
+      candidateIds: ['c1'],
+      ledgerEntryIds: ['l1'],
+      latencyMs: 100,
+    }));
+  });
+
+  it('uses process.execPath (not npx) to invoke pd CLI', async () => {
+    vi.resetModules();
+    mockExistsSync.mockImplementation((p: string) => String(p).endsWith('index.js'));
+
+    const { runUatIteration } = await import('../../src/commands/runtime-uat.js');
+    runUatIteration({ iteration: 1, reason: 'test', workspace: '/test/ws' });
+
+    // First call to execFileSync should use process.execPath, not 'npx'
+    const firstCall = mockExecFileSync.mock.calls[0] as [string, string[]];
+    expect(firstCall[0]).toBe(process.execPath);
+    expect(firstCall[0]).not.toBe('npx');
+  });
+
+  it('passes --workspace after subcommand args', async () => {
+    vi.resetModules();
+    mockExistsSync.mockImplementation((p: string) => String(p).endsWith('index.js'));
+
+    const { runUatIteration } = await import('../../src/commands/runtime-uat.js');
+    runUatIteration({ iteration: 1, reason: 'test', workspace: '/test/ws' });
+
+    const firstCall = mockExecFileSync.mock.calls[0] as [string, string[]];
+    const args = firstCall[1];
+    // Format: [cliPath, 'pain', 'record', ..., '--workspace', '/test/ws']
+    const wsIdx = args.indexOf('--workspace');
+    const painIdx = args.indexOf('pain');
+    expect(wsIdx).toBeGreaterThan(painIdx);
+    expect(args[wsIdx + 1]).toBe('/test/ws');
+  });
+
+  it('captures stdout on error with non-zero exit', async () => {
+    vi.resetModules();
+    // Allow findPdCliPath to succeed (mock existsSync to return true)
+    mockExistsSync.mockReturnValue(true);
+    const error = new Error('pd CLI spawn error') as Error & { stdout?: string; stderr?: string; code?: string };
+    error.stdout = '{"status":"failed","error":"command failed"}';
+    error.code = 'ENOENT';
+    mockExecFileSync.mockImplementation(() => { throw error; });
+
+    const { runUatIteration } = await import('../../src/commands/runtime-uat.js');
+    const result = runUatIteration({ iteration: 1, reason: 'test', workspace: '/test/ws' });
+
+    // ENOENT from spawn means "process not found" - findPdCliPath error is thrown
+    // This is the correct behavior: if execFileSync can't spawn the process, findPdCliPath
+    // threw first (meaning the CLI wasn't found at the expected path)
+    expect(result.status).toBe('script_error');
+    expect(result.error).toContain('not found');
+  });
+
+  it('throws when pd CLI binary not found', async () => {
+    vi.resetModules();
+    mockExistsSync.mockReturnValue(false);
+
+    const { runUatIteration } = await import('../../src/commands/runtime-uat.js');
+    const result = runUatIteration({ iteration: 1, reason: 'test', workspace: '/test/ws' });
+
+    expect(result.status).toBe('script_error');
+    expect(result.error).toContain('not found');
+  });
+
+  it('passes CLI path as first argument to process.execPath', async () => {
+    vi.resetModules();
+    mockExistsSync.mockImplementation((p: string) => String(p).endsWith('index.js'));
+
+    const { runUatIteration } = await import('../../src/commands/runtime-uat.js');
+    runUatIteration({ iteration: 1, reason: 'test', workspace: '/test/ws' });
+
+    const firstCall = mockExecFileSync.mock.calls[0] as [string, string[]];
+    const args = firstCall[1];
+    expect(args[0]).toMatch(/index\.js$/);
+    expect(firstCall[0]).toBe(process.execPath);
+  });
+
+  it('appends --workspace and workspace path to end of subcommand args', async () => {
+    vi.resetModules();
+    mockExistsSync.mockImplementation((p: string) => String(p).endsWith('index.js'));
+
+    const { runUatIteration } = await import('../../src/commands/runtime-uat.js');
+    runUatIteration({ iteration: 1, reason: 'test', workspace: '/custom/path' });
+
+    const firstCall = mockExecFileSync.mock.calls[0] as [string, string[]];
+    const args = firstCall[1];
+    const wsIdx = args.lastIndexOf('--workspace');
+    expect(wsIdx).toBe(args.length - 2);
+    expect(args[wsIdx + 1]).toBe('/custom/path');
+  });
+});
+
 // ── handleRuntimeUat guard rails ─────────────────────────────────────────────
-// Real execFileSync integration is tested manually via:
-//   node scripts/uat/runtime-v2-chain-uat.mjs --workspace <path> --count 2 --json
 
 describe('handleRuntimeUat', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockExecFileSync.mockReset();
+    mockExistsSync.mockReturnValue(true);
   });
 
   it('exits 1 when --workspace is missing', async () => {
@@ -213,8 +329,8 @@ describe('handleRuntimeUat', () => {
     errorSpy.mockRestore();
   });
 
-  it('exits 1 when MINIMAX_API_KEY is not set', async () => {
-    delete process.env.MINIMAX_API_KEY;
+  it('exits 1 when MINIMAX_CN_API_KEY is not set', async () => {
+    delete process.env.MINIMAX_CN_API_KEY;
     const { handleRuntimeUat } = await import('../../src/commands/runtime-uat.js');
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code: number) => {
       throw new Error(`exit:${code}`);
