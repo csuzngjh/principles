@@ -65,7 +65,7 @@ describe('internalization contracts (PRI-42)', () => {
       expect(helpers.getBashRisk()).toBe('normal');
       expect(helpers.hasPlanFile()).toBe(true);
       expect(helpers.getPlanStatus()).toBe('DRAFT');
-      expect(helpers.getCurrentEpiTier()).toBe(2);
+      expect(helpers.getEpTier()).toBe(2);
     });
 
     it('helpers cannot be modified (frozen)', async () => {

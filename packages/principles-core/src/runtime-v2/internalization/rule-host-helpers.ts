@@ -19,7 +19,7 @@ export interface RuleHostHelpers {
   getBashRisk(): 'safe' | 'normal' | 'dangerous' | 'unknown';
   hasPlanFile(): boolean;
   getPlanStatus(): 'NONE' | 'DRAFT' | 'READY' | 'UNKNOWN';
-  getCurrentEpiTier(): number;
+  getEpTier(): number;
 }
 
 /**
@@ -34,6 +34,6 @@ export function createRuleHostHelpers(input: RuleHostInput): RuleHostHelpers {
     getBashRisk: () => input.derived.bashRisk,
     hasPlanFile: () => input.workspace.hasPlanFile,
     getPlanStatus: () => input.workspace.planStatus,
-    getCurrentEpiTier: () => input.evolution.epTier,
+    getEpTier: () => input.evolution.epTier,
   });
 }
