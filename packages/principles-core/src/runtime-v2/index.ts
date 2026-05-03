@@ -241,3 +241,11 @@ export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOpti
 // Pruning review audit log (PRI-24)
 export { appendPruningReview, listPruningReviews } from './pruning-review-log.js';
 export type { PruningReviewDecision, PruningReviewRecord, AppendPruningReviewInput } from './pruning-review-log.js';
+
+// Candidate audit (PRI-28)
+export { auditCandidateLedgerConsistency } from './candidate-audit.js';
+export type { CandidateAuditResult } from './candidate-audit.js';
+
+// Operator health snapshot (PRI-28)
+export { OperatorHealthReadModel } from './operator-health-read-model.js';
+export type { OperatorHealthSnapshot, OperatorHealthReadModelOptions, OverallHealthStatus } from './operator-health-read-model.js';
