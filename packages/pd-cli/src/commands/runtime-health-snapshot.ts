@@ -83,13 +83,13 @@ export async function handleRuntimeHealthSnapshot(opts: HealthSnapshotOptions): 
     if (opts.json) {
       console.log(JSON.stringify(snapshot, null, 2));
     } else {
-      console.error(formatTextOutput(snapshot));
+      console.log(formatTextOutput(snapshot));
     }
 
     if (snapshot.overallStatus !== 'healthy') {
       console.error('');
       console.error(`FAIL: overallStatus=${snapshot.overallStatus}`);
-      process.exit(1);
+      process.exitCode = 1;
     }
   } finally {
     await model.close();

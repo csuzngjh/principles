@@ -53,6 +53,7 @@ function setupConsumedRows(rows: { candidate_id: string }[]) {
 
 describe('auditCandidateLedgerConsistency', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 

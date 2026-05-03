@@ -52,6 +52,7 @@ export class OperatorHealthReadModel {
   private readonly injectedPainChainReadModel: PainChainReadModel | undefined;
   private readonly injectedPruningReadModel: PruningReadModel | undefined;
   private ownedPainChainReadModel: PainChainReadModel | null = null;
+  private ownedPruningReadModel: PruningReadModel | null = null;
 
   constructor(opts: OperatorHealthReadModelOptions) {
     this.workspaceDir = opts.workspaceDir;
@@ -95,6 +96,10 @@ export class OperatorHealthReadModel {
     const pruningReadModel = this.injectedPruningReadModel
       ?? new PruningReadModel({ workspaceDir: this.workspaceDir });
 
+    if (!this.injectedPruningReadModel) {
+      this.ownedPruningReadModel = pruningReadModel;
+    }
+
     try {
       const summary = pruningReadModel.getHealthSummary();
       ({ watchCount, reviewCount, orphanDerivedCandidateCount } = summary);
@@ -119,6 +124,10 @@ export class OperatorHealthReadModel {
     // ── Build recommendedActions ──────────────────────────────────────────
     if (!dbExists) {
       recommendedActions.push('Initialize workspace with `pd pain record`.');
+    }
+
+    if (audit.status === 'error' && dbExists) {
+      recommendedActions.push('Candidate audit failed — check DB integrity with `pd candidate audit --workspace <path>`.');
     }
 
     if (audit.status === 'degraded') {
@@ -152,6 +161,10 @@ export class OperatorHealthReadModel {
     if (this.ownedPainChainReadModel) {
       await this.ownedPainChainReadModel.close();
       this.ownedPainChainReadModel = null;
+    }
+    // PruningReadModel uses better-sqlite3 readonly — close to release file handle
+    if (this.ownedPruningReadModel) {
+      this.ownedPruningReadModel = null;
     }
   }
 }

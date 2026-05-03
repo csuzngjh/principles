@@ -108,7 +108,7 @@ describe('handleRuntimeHealthSnapshot', () => {
 
     await handleRuntimeHealthSnapshot({ workspace: WS, json: false });
 
-    const allOutput = consoleErrorSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
     expect(allOutput).toContain('HEALTHY');
     expect(allOutput).toContain('No actions recommended');
   });
@@ -138,7 +138,7 @@ describe('handleRuntimeHealthSnapshot', () => {
     expect(jsonOutput.recommendedActions).toContain(
       'Run `pd candidate audit --workspace <path> --json` for details.',
     );
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     exitSpy.mockRestore();
   });
@@ -222,7 +222,7 @@ describe('handleRuntimeHealthSnapshot', () => {
     const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(jsonOutput.overallStatus).toBe('error');
     expect(jsonOutput.candidateLedger.auditStatus).toBe('error');
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(process.exitCode).toBe(1);
 
     exitSpy.mockRestore();
   });
