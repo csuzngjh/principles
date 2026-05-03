@@ -232,7 +232,7 @@ describe('pd CLI invocation (Windows compatibility)', () => {
     expect(firstCall[0]).not.toBe('npx');
   });
 
-  it('passes --workspace before subcommand args', async () => {
+  it('passes --workspace after subcommand args', async () => {
     vi.resetModules();
     mockExistsSync.mockImplementation((p: string) => String(p).endsWith('index.js'));
 
@@ -241,10 +241,10 @@ describe('pd CLI invocation (Windows compatibility)', () => {
 
     const firstCall = mockExecFileSync.mock.calls[0] as [string, string[]];
     const args = firstCall[1];
-    // Format: [cliPath, '--workspace', '/test/ws', 'pain', 'record', ...]
+    // Format: [cliPath, 'pain', 'record', ..., '--workspace', '/test/ws']
     const wsIdx = args.indexOf('--workspace');
     const painIdx = args.indexOf('pain');
-    expect(wsIdx).toBeLessThan(painIdx);
+    expect(wsIdx).toBeGreaterThan(painIdx);
     expect(args[wsIdx + 1]).toBe('/test/ws');
   });
 
@@ -276,6 +276,33 @@ describe('pd CLI invocation (Windows compatibility)', () => {
 
     expect(result.status).toBe('script_error');
     expect(result.error).toContain('not found');
+  });
+
+  it('passes CLI path as first argument to process.execPath', async () => {
+    vi.resetModules();
+    mockExistsSync.mockImplementation((p: string) => String(p).endsWith('index.js'));
+
+    const { runUatIteration } = await import('../../src/commands/runtime-uat.js');
+    runUatIteration({ iteration: 1, reason: 'test', workspace: '/test/ws' });
+
+    const firstCall = mockExecFileSync.mock.calls[0] as [string, string[]];
+    const args = firstCall[1];
+    expect(args[0]).toMatch(/index\.js$/);
+    expect(firstCall[0]).toBe(process.execPath);
+  });
+
+  it('appends --workspace and workspace path to end of subcommand args', async () => {
+    vi.resetModules();
+    mockExistsSync.mockImplementation((p: string) => String(p).endsWith('index.js'));
+
+    const { runUatIteration } = await import('../../src/commands/runtime-uat.js');
+    runUatIteration({ iteration: 1, reason: 'test', workspace: '/custom/path' });
+
+    const firstCall = mockExecFileSync.mock.calls[0] as [string, string[]];
+    const args = firstCall[1];
+    const wsIdx = args.lastIndexOf('--workspace');
+    expect(wsIdx).toBe(args.length - 2);
+    expect(args[wsIdx + 1]).toBe('/custom/path');
   });
 });
 

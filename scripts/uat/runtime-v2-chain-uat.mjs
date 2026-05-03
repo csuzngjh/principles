@@ -16,9 +16,9 @@
  */
 
 import { execFileSync } from 'child_process';
+import { fileURLToPath } from 'node:url';
 import { existsSync } from 'fs';
 import * as path from 'path';
-import * as fs from 'fs';
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -78,7 +78,9 @@ function error(msg) {
 
 function findPdCliPath() {
   // Resolve relative to this script's location: scripts/uat/ → packages/pd-cli/dist/
-  const scriptDir = path.dirname(process.platform === 'win32' ? __filename.replace(/\\/g, '/') : __filename);
+  // Use import.meta.url (ESM) instead of __filename (CJS)
+  const currentFile = fileURLToPath(import.meta.url);
+  const scriptDir = path.dirname(currentFile);
   const repoRoot = path.resolve(scriptDir, '..', '..');
   const cliPath = path.join(repoRoot, 'packages', 'pd-cli', 'dist', 'index.js');
   if (!existsSync(cliPath)) {
@@ -88,7 +90,9 @@ function findPdCliPath() {
 }
 
 function pd(args, workspace, timeoutMs = 300_000) {
-  const fullArgs = ['--workspace', workspace, ...args];
+  // Arguments: subcommand args first, then --workspace and path at the end
+  // Correct: pd pain record ... --workspace <path>
+  const fullArgs = [...args, '--workspace', workspace];
   const cliPath = findPdCliPath();
   const env = { ...process.env };
   try {

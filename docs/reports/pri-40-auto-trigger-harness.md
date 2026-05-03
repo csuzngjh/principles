@@ -3,7 +3,7 @@
 **Status:** Track A ✅ PASS | Track B ⏸️ BLOCKED (gateway unavailable)
 **Date:** 2026-05-03
 **Issue:** [PRI-40](https://linear.app/principlesdisciple/issue/PRI-40/pri-29b-deterministic-openclaw-auto-trigger-harness)
-**PR:** #457 (follow-up report fix)
+**PR:** #458 (Windows compatibility fix: npx pd → process.execPath + path resolution)
 
 ---
 
