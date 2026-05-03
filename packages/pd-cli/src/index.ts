@@ -26,6 +26,7 @@ import { handleRuntimeProbe } from './commands/runtime.js';
 import { handleFlowShow } from './commands/flow.js';
 import { handleTraceShow } from './commands/trace.js';
 import { handlePruningReport, handlePruningExplain, handlePruningReview } from './commands/runtime-pruning.js';
+import { handleRuntimeUat } from './commands/runtime-uat.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
@@ -363,6 +364,22 @@ pruningCmd
       note: opts.note,
       reviewer: opts.reviewer,
       workspace: opts.workspace,
+      json: opts.json,
+    });
+  });
+
+pruningCmd
+  .command('uat')
+  .description('Runtime V2 chain UAT baseline runner')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--count <n>', 'Number of iterations (default: 5, max: 50)', parseInt)
+  .option('--min-success-rate <rate>', 'Minimum success rate threshold (default: 1.0)', parseFloat)
+  .option('--json', 'Output machine-readable JSON summary')
+  .action(async (opts) => {
+    await handleRuntimeUat({
+      workspace: opts.workspace,
+      count: opts.count,
+      minSuccessRate: opts.minSuccessRate,
       json: opts.json,
     });
   });
