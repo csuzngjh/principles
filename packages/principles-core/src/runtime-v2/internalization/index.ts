@@ -18,3 +18,7 @@ export type {
 // Helpers
 export type { RuleHostHelpers } from './rule-host-helpers.js';
 export { createRuleHostHelpers } from './rule-host-helpers.js';
+
+// Internalization route model (PRI-43)
+export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization-route.js';
+export { decideInternalizationRoute } from './internalization-route.js';
