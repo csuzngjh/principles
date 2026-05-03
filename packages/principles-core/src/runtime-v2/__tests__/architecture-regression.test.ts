@@ -1,5 +1,5 @@
 /**
- * Architecture regression guard — verifies critical PRI-12/13/14/15/16
+ * Architecture regression guard — verifies critical PRI-12/13/14/15/16/28
  * module boundaries are present and exportable.
  *
  * Add entries here whenever a new service/read-model boundary is established.
@@ -16,6 +16,9 @@ const REQUIRED_SOURCE_FILES = [
   'pain-signal-observability.ts',
   'pruning-read-model.ts',
   'pruning-review-log.ts',
+  // PRI-28
+  'operator-health-read-model.ts',
+  'candidate-audit.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -23,6 +26,9 @@ const REQUIRED_TEST_FILES = [
   'pain-chain-read-model.test.ts',
   'pruning-read-model.test.ts',
   'pruning-review-log.test.ts',
+  // PRI-28
+  'operator-health-read-model.test.ts',
+  'candidate-audit.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -72,6 +78,9 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     // PRI-13 → factory
     'resolveRuntimeConfig',
     'validateRuntimeConfig',
+    // PRI-28
+    'OperatorHealthReadModel',
+    'auditCandidateLedgerConsistency',
   ];
 
   for (const name of REQUIRED_EXPORTS) {
@@ -121,6 +130,23 @@ describe('pd-cli command boundaries', () => {
     expect(src).toContain('PainToPrincipleService');
     expect(src).not.toContain('createPainSignalBridge');
     expect(src).not.toContain('recordPainSignalObservability');
+  });
+
+  it('runtime-health-snapshot.ts uses OperatorHealthReadModel (public API)', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const cmdPath = resolve(
+      __dirname,
+      '../../../pd-cli/src/commands/runtime-health-snapshot.ts',
+    );
+    if (!existsSync(cmdPath)) {
+      return;
+    }
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(cmdPath, 'utf-8');
+    expect(src).toContain('OperatorHealthReadModel');
+    expect(src).not.toContain('auditCandidateLedgerConsistency');
+    expect(src).not.toContain('../candidate-audit');
   });
 
   it.skip('trace.ts does not import RuntimeStateManager or loadLedger', async () => {
