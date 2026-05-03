@@ -388,7 +388,7 @@ The generated code runs in a sandboxed RuleHost. It MUST:
 - helpers.getBashRisk() — 'normal'|'high'|'critical': bash command risk level
 - helpers.hasPlanFile() — boolean: whether a plan file exists
 - helpers.getPlanStatus() — 'DRAFT'|'READY'|string: plan status
-- helpers.getCurrentEpiTier() — number: current evolution tier
+- helpers.getEpTier() — number: current evolution tier
 
 ### FORBIDDEN APIs (will cause validation rejection):
 - eval(), Function(), import(), require()

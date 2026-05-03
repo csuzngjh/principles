@@ -249,3 +249,14 @@ export type { CandidateAuditResult } from './candidate-audit.js';
 // Operator health snapshot (PRI-28)
 export { OperatorHealthReadModel } from './operator-health-read-model.js';
 export type { OperatorHealthSnapshot, OperatorHealthReadModelOptions, OverallHealthStatus } from './operator-health-read-model.js';
+
+// Internalization contracts (PRI-42)
+export type {
+  RuleHostInput,
+  RuleHostDecision,
+  RuleHostMeta,
+  RuleHostResult,
+  LoadedImplementation,
+} from './internalization/rule-host-contracts.js';
+export type { RuleHostHelpers } from './internalization/rule-host-helpers.js';
+export { createRuleHostHelpers } from './internalization/rule-host-helpers.js';

@@ -19,6 +19,10 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-28
   'operator-health-read-model.ts',
   'candidate-audit.ts',
+  // PRI-42
+  'internalization/rule-host-contracts.ts',
+  'internalization/rule-host-helpers.ts',
+  'internalization/index.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -128,6 +132,124 @@ describe('openclaw-plugin pain hook integration', () => {
     expect(src).toMatch(/PAIN_SERVICE_ERROR/);
     // Must NOT use legacy createPainSignalBridge
     expect(src).not.toMatch(/createPainSignalBridge/);
+  });
+});
+
+// ── PRI-42: Internalization boundary guards ──────────────────────────────────
+
+describe('PRI-42 internalization boundary', () => {
+  const CONTRACT_TYPES = [
+    'RuleHostInput',
+    'RuleHostResult',
+    'RuleHostDecision',
+    'RuleHostMeta',
+    'LoadedImplementation',
+  ];
+
+  it('core internalization has zero openclaw-plugin imports', async () => {
+    const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+    const { resolve, join } = await import('node:path');
+    const intDir = resolve(__dirname, '..', 'internalization');
+    expect(existsSync(intDir)).toBe(true);
+
+    const files = readdirSync(intDir).filter((f) => f.endsWith('.ts'));
+    for (const file of files) {
+      const src = readFileSync(join(intDir, file), 'utf-8');
+      expect(src).not.toContain('openclaw-plugin');
+      expect(src).not.toContain('../../../openclaw-plugin');
+    }
+  });
+
+  it('plugin does not re-define RuleHost contract types locally', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const typesPath = resolve(
+      __dirname,
+      '../../../../openclaw-plugin/src/core/rule-host-types.ts',
+    );
+    expect(existsSync(typesPath)).toBe(true);
+    const src = readFileSync(typesPath, 'utf-8');
+
+    // After PRI-42, rule-host-types.ts should re-export from core, not define interfaces
+    for (const typeName of CONTRACT_TYPES) {
+      expect(src).toContain(typeName);
+      expect(src).toContain("from '@principles/core/runtime-v2'");
+    }
+  });
+
+  it('plugin does not re-define RuleHostHelpers locally', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const helpersPath = resolve(
+      __dirname,
+      '../../../../openclaw-plugin/src/core/rule-host-helpers.ts',
+    );
+    expect(existsSync(helpersPath)).toBe(true);
+    const src = readFileSync(helpersPath, 'utf-8');
+
+    // After PRI-42, rule-host-helpers.ts should re-export from core, not define interface
+    expect(src).toContain('RuleHostHelpers');
+    expect(src).toContain('createRuleHostHelpers');
+    expect(src).toContain("from '@principles/core/runtime-v2'");
+  });
+
+  it('plugin rule-host.ts imports contracts from core barrel', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const ruleHostPath = resolve(
+      __dirname,
+      '../../../../openclaw-plugin/src/core/rule-host.ts',
+    );
+    expect(existsSync(ruleHostPath)).toBe(true);
+    const src = readFileSync(ruleHostPath, 'utf-8');
+
+    // Must import from @principles/core/runtime-v2, not local rule-host-types
+    expect(src).toContain('@principles/core/runtime-v2');
+    expect(src).not.toContain("from './rule-host-types.js'");
+  });
+
+  it('plugin gate.ts imports RuleHostInput from core barrel', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const gatePath = resolve(
+      __dirname,
+      '../../../../openclaw-plugin/src/hooks/gate.ts',
+    );
+    expect(existsSync(gatePath)).toBe(true);
+    const src = readFileSync(gatePath, 'utf-8');
+
+    expect(src).toContain('@principles/core/runtime-v2');
+    expect(src).not.toContain("from '../core/rule-host-types.js'");
+  });
+
+  it('plugin replay-engine.ts imports contracts from core barrel', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const replayPath = resolve(
+      __dirname,
+      '../../../../openclaw-plugin/src/core/replay-engine.ts',
+    );
+    expect(existsSync(replayPath)).toBe(true);
+    const src = readFileSync(replayPath, 'utf-8');
+
+    expect(src).toContain('@principles/core/runtime-v2');
+    expect(src).not.toContain("from './rule-host-types.js'");
+    expect(src).not.toContain("from './rule-host-helpers.js'");
+  });
+
+  it('plugin nocturnal-rule-implementation-validator.ts imports contracts from core barrel', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const validatorPath = resolve(
+      __dirname,
+      '../../../../openclaw-plugin/src/core/nocturnal-rule-implementation-validator.ts',
+    );
+    expect(existsSync(validatorPath)).toBe(true);
+    const src = readFileSync(validatorPath, 'utf-8');
+
+    expect(src).toContain('@principles/core/runtime-v2');
+    expect(src).not.toContain("from './rule-host-types.js'");
+    expect(src).not.toContain("from './rule-host-helpers.js'");
   });
 });
 
