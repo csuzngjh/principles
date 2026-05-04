@@ -92,4 +92,13 @@ describe('buildMaskedPrincipleSet', () => {
     const result = buildMaskedPrincipleSet(reviews);
     expect(result).toEqual(new Set(['P1']));
   });
+
+  it('LWW: identical timestamps — last record in iteration order wins', () => {
+    const reviews = [
+      makeReview({ reviewId: 'rv-1', decision: 'archive-candidate', reviewedAt: '2026-05-01T00:00:00.000Z' }),
+      makeReview({ reviewId: 'rv-2', decision: 'keep', reviewedAt: '2026-05-01T00:00:00.000Z' }),
+    ];
+    const result = buildMaskedPrincipleSet(reviews);
+    expect(result).toEqual(new Set()); // rv-2 wins (last in iteration)
+  });
 });
