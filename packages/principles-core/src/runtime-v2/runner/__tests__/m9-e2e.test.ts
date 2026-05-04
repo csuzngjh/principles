@@ -14,7 +14,7 @@ import { SqliteHistoryQuery } from '../../store/sqlite-history-query.js';
 import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { DiagnosticianRunner } from '../diagnostician-runner.js';
 import { PassThroughValidator } from '../diagnostician-validator.js';
-import { SqliteDiagnosticianCommitter } from '../../store/diagnostician-committer.js';
+import { SqliteDiagnosticianCommitter } from '../../store/commit/diagnostician-committer.js';
 import type { SqliteConnection } from '../../store/sqlite-connection.js';
 import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
 import type { PDRuntimeAdapter } from '../../runtime-protocol.js';

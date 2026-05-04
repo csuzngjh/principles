@@ -15,7 +15,7 @@ import { PainSignalBridge } from './pain-signal-bridge.js';
 import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import { DiagnosticianRunner } from './runner/diagnostician-runner.js';
 import { CandidateIntakeService } from './candidate-intake-service.js';
-import { SqliteDiagnosticianCommitter } from './store/diagnostician-committer.js';
+import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
 import { SqliteContextAssembler } from './store/sqlite-context-assembler.js';
 import { SqliteHistoryQuery } from './store/sqlite-history-query.js';
 import { SqliteConnection } from './store/sqlite-connection.js';

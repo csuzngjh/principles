@@ -3,8 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { SqliteConnection } from './sqlite-connection.js';
-import { SqliteTaskStore } from './sqlite-task-store.js';
-import { SqliteRunStore } from './sqlite-run-store.js';
+import { SqliteTaskStore } from './task/sqlite-task-store.js';
+import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { DefaultLeaseManager } from './lease-manager.js';
 
 describe('ConcurrentLeaseConflict', () => {

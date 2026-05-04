@@ -18,16 +18,16 @@
  * ```
  */
 import type { SqliteConnection } from './sqlite-connection.js';
-import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task-store.js';
-import type { RunStore, RunRecord } from './run-store.js';
+import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task/task-store.js';
+import type { RunStore, RunRecord } from './run/run-store.js';
 import type { LeaseManager, AcquireLeaseOptions } from './lease-manager.js';
 import type { RetryPolicy, RetryPolicyConfig } from './retry-policy.js';
 import type { RecoverySweep } from './recovery-sweep.js';
 import type { PDErrorCategory } from '../error-categories.js';
 import type { TaskRecord } from '../task-status.js';
 import { storeEmitter, type StoreEventEmitter } from './event-emitter.js';
-import { SqliteTaskStore } from './sqlite-task-store.js';
-import { SqliteRunStore } from './sqlite-run-store.js';
+import { SqliteTaskStore } from './task/sqlite-task-store.js';
+import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { SqliteConnection as SqliteConnectionClass } from './sqlite-connection.js';
 import { DefaultLeaseManager } from './lease-manager.js';
 import { DefaultRetryPolicy } from './retry-policy.js';

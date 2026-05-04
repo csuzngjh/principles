@@ -29,7 +29,7 @@
  *   It provides the transformation logic that adapters can use if needed.
  */
 import type { TaskRecord, PDTaskStatus } from '../task-status.js';
-import type { TaskStore } from './task-store.js';
+import type { TaskStore } from './task/task-store.js';
 
 export interface MigrationResult {
   migrated: number;

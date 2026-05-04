@@ -5,9 +5,9 @@
  * Validates every row read with TypeBox Value.Check().
  */
 import { Value } from '@sinclair/typebox/value';
-import { TaskRecordSchema, type TaskRecord, type PDTaskStatus } from '../task-status.js';
-import { PDRuntimeError } from '../error-categories.js';
-import type { SqliteConnection } from './sqlite-connection.js';
+import { TaskRecordSchema, type TaskRecord, type PDTaskStatus } from '../../task-status.js';
+import { PDRuntimeError } from '../../error-categories.js';
+import type { SqliteConnection } from '../sqlite-connection.js';
 import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task-store.js';
 
 export class SqliteTaskStore implements TaskStore {
