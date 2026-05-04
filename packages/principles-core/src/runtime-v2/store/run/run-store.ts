@@ -7,8 +7,8 @@
  * All run persistence goes through this interface, enabling
  * swap between SQLite (default) and test doubles.
  */
-import type { RunHandle, RunExecutionStatus } from '../runtime-protocol.js';
-import type { PDErrorCategory } from '../error-categories.js';
+import type { RunHandle, RunExecutionStatus } from '../../runtime-protocol.js';
+import type { PDErrorCategory } from '../../error-categories.js';
 
 export interface RunRecord extends RunHandle {
   taskId: string;

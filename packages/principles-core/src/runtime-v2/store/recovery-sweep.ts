@@ -13,7 +13,7 @@
  * Source: PD Runtime Protocol SPEC v1, Section 12 (Task lease recovery)
  * Source: Diagnostician v2 Detailed Design, Section 8 (Stale task detection)
  */
-import type { TaskStore } from './task-store.js';
+import type { TaskStore } from './task/task-store.js';
 import type { LeaseManager } from './lease-manager.js';
 import type { RetryPolicy } from './retry-policy.js';
 import type { PDTaskStatus, TaskRecord } from '../task-status.js';

@@ -15,7 +15,7 @@ import type { ContextAssembler } from '../../store/context-assembler.js';
 import type { PDRuntimeAdapter, RunHandle } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { DiagnosticianValidator } from '../diagnostician-validator.js';
-import type { DiagnosticianCommitter } from '../../store/diagnostician-committer.js';
+import type { DiagnosticianCommitter } from '../../store/commit/diagnostician-committer.js';
 import type { DiagnosticianContextPayload } from '../../context-payload.js';
 import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
 import type { TaskRecord } from '../../task-status.js';

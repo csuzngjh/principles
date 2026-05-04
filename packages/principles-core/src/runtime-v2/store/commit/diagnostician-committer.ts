@@ -11,9 +11,9 @@
 import { Value } from '@sinclair/typebox/value';
 import { randomUUID } from 'crypto';
 import type BetterSqlite3 from 'better-sqlite3';
-import type { SqliteConnection } from './sqlite-connection.js';
-import { PDRuntimeError } from '../error-categories.js';
-import { DiagnosticianOutputV1Schema, type DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import type { SqliteConnection } from '../sqlite-connection.js';
+import { PDRuntimeError } from '../../error-categories.js';
+import { DiagnosticianOutputV1Schema, type DiagnosticianOutputV1 } from '../../diagnostician-output.js';
 
 // ── Public Types ─────────────────────────────────────────────────────────────
 

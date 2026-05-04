@@ -32,7 +32,7 @@ import type { PDErrorCategory } from '../error-categories.js';
 import type { DiagnosticianRunnerOptions, ResolvedDiagnosticianRunnerOptions } from './diagnostician-runner-options.js';
 import type { DiagnosticianValidator } from './diagnostician-validator.js';
 import type { RunnerResult } from './runner-result.js';
-import type { DiagnosticianCommitter, CommitResult } from '../store/diagnostician-committer.js';
+import type { DiagnosticianCommitter, CommitResult } from '../store/commit/diagnostician-committer.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { RunnerPhase } from './runner-phase.js';

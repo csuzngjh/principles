@@ -396,3 +396,65 @@ describe('PRI-45 RuleHost adapter boundary', () => {
     expect(src).toMatch(/return mergeDecisions\(/);
   });
 });
+
+// ── PRI-47: Store layer modularization Phase 1 ──────────────────────────────
+
+describe('PRI-47 store modularization', () => {
+  it('store/task/index.ts exists and re-exports TaskStore + SqliteTaskStore', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'task', 'index.ts');
+    expect(existsSync(indexPath)).toBe(true);
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('TaskStore');
+    expect(src).toContain('SqliteTaskStore');
+  });
+
+  it('store/run/index.ts exists and re-exports RunStore + SqliteRunStore', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'run', 'index.ts');
+    expect(existsSync(indexPath)).toBe(true);
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('RunStore');
+    expect(src).toContain('SqliteRunStore');
+  });
+
+  it('store/commit/index.ts exists and re-exports DiagnosticianCommitter', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'commit', 'index.ts');
+    expect(existsSync(indexPath)).toBe(true);
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('DiagnosticianCommitter');
+  });
+
+  it('moved files are NOT in root store/ directory', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const storeDir = resolve(__dirname, '..', 'store');
+    // These files should have been moved to subdirectories
+    expect(existsSync(resolve(storeDir, 'task-store.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'sqlite-task-store.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'run-store.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'sqlite-run-store.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'diagnostician-committer.ts'))).toBe(false);
+  });
+
+  it('barrel still exports all store symbols', async () => {
+    const mod = (await import('../index.js')) as Record<string, unknown>;
+    const storeSymbols = [
+      'SqliteTaskStore', 'SqliteRunStore', 'SqliteConnection',
+      'SqliteTrajectoryLocator', 'SqliteHistoryQuery', 'SqliteContextAssembler',
+      'SqliteDiagnosticianCommitter',
+      'ResilientContextAssembler', 'ResilientHistoryQuery',
+      'DefaultLeaseManager', 'DefaultRetryPolicy', 'DefaultRecoverySweep',
+      'StoreEventEmitter', 'storeEmitter',
+      'RuntimeStateManager', 'EvolutionQueueItemMigrator',
+      'DEFAULT_HISTORY_PAGE_SIZE', 'MAX_HISTORY_PAGE_SIZE', 'DEFAULT_TIME_WINDOW_MS',
+    ];
+    for (const sym of storeSymbols) {
+      expect(mod).toHaveProperty(sym);
+    }
+  });
+});
