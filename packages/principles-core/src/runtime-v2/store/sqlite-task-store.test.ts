@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { SqliteConnection } from './sqlite-connection.js';
-import { SqliteTaskStore } from './sqlite-task-store.js';
+import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import type { TaskRecord, PDTaskStatus } from '../task-status.js';
 
 function makeTaskInput(overrides: Partial<Omit<TaskRecord, 'createdAt' | 'updatedAt'>> = {}): Omit<TaskRecord, 'createdAt' | 'updatedAt'> {

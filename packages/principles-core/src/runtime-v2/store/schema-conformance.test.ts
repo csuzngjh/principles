@@ -5,8 +5,8 @@ import * as path from 'path';
 import * as os from 'os';
 import type Database from 'better-sqlite3';
 import { SqliteConnection } from './sqlite-connection.js';
-import { SqliteTaskStore } from './sqlite-task-store.js';
-import { SqliteRunStore } from './sqlite-run-store.js';
+import { SqliteTaskStore } from './task/sqlite-task-store.js';
+import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { TaskRecordSchema, type PDTaskStatus } from '../task-status.js';
 import { RunRecordSchema, type RunExecutionStatus } from '../runtime-protocol.js';
 

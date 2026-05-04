@@ -10,8 +10,8 @@
  */
 import { randomUUID, createHash } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
-import type { TaskStore } from './task-store.js';
-import type { RunStore } from './run-store.js';
+import type { TaskStore } from './task/task-store.js';
+import type { RunStore } from './run/run-store.js';
 import type { HistoryQuery } from './history-query.js';
 import type { ContextAssembler } from './context-assembler.js';
 import {

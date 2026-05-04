@@ -13,8 +13,8 @@
  */
 import { PDRuntimeError } from '../error-categories.js';
 import type { TaskRecord } from '../task-status.js';
-import type { TaskStore } from './task-store.js';
-import type { RunStore } from './run-store.js';
+import type { TaskStore } from './task/task-store.js';
+import type { RunStore } from './run/run-store.js';
 import type { SqliteConnection } from './sqlite-connection.js';
 import { storeEmitter, type StoreEventEmitter } from './event-emitter.js';
 

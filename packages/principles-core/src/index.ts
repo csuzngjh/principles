@@ -199,11 +199,11 @@ export type {
   TaskStore,
   TaskStoreFilter,
   TaskStoreUpdatePatch,
-} from './runtime-v2/store/task-store.js';
+} from './runtime-v2/store/task/task-store.js';
 export type {
   RunStore,
   RunRecord,
-} from './runtime-v2/store/run-store.js';
+} from './runtime-v2/store/run/run-store.js';
 export type { TrajectoryLocator } from './runtime-v2/store/trajectory-locator.js';
 
 // Lease & Recovery

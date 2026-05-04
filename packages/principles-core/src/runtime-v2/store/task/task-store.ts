@@ -4,8 +4,8 @@
  * All task persistence goes through this interface, enabling
  * swap between SQLite (default) and test doubles.
  */
-import type { TaskRecord } from '../task-status.js';
-import type { PDTaskStatus } from '../task-status.js';
+import type { TaskRecord } from '../../task-status.js';
+import type { PDTaskStatus } from '../../task-status.js';
 
 export interface TaskStoreFilter {
   status?: PDTaskStatus;
