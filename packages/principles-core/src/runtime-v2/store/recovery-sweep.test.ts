@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { SqliteConnection } from './sqlite-connection.js';
-import { SqliteTaskStore } from './sqlite-task-store.js';
+import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import { DefaultLeaseManager } from './lease-manager.js';
 import { DefaultRetryPolicy } from './retry-policy.js';
 import { DefaultRecoverySweep } from './recovery-sweep.js';

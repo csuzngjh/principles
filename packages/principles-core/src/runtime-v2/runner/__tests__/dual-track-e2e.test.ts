@@ -23,7 +23,7 @@ import { SqliteHistoryQuery } from '../../store/sqlite-history-query.js';
 import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { DiagnosticianRunner } from '../diagnostician-runner.js';
 import { PassThroughValidator } from '../diagnostician-validator.js';
-import type { DiagnosticianCommitter } from '../../store/diagnostician-committer.js';
+import type { DiagnosticianCommitter } from '../../store/commit/diagnostician-committer.js';
 import type {
   DiagnosticianValidator,
   DiagnosticianValidationResult,

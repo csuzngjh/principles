@@ -5,9 +5,9 @@
  * Validates every row read with TypeBox Value.Check().
  */
 import { Value } from '@sinclair/typebox/value';
-import { RunRecordSchema, type RunRecord, type RunExecutionStatus } from '../runtime-protocol.js';
-import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
-import type { SqliteConnection } from './sqlite-connection.js';
+import { RunRecordSchema, type RunRecord, type RunExecutionStatus } from '../../runtime-protocol.js';
+import { PDRuntimeError, type PDErrorCategory } from '../../error-categories.js';
+import type { SqliteConnection } from '../sqlite-connection.js';
 import type { RunStore } from './run-store.js';
 
 export class SqliteRunStore implements RunStore {

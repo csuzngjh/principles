@@ -114,13 +114,13 @@ export type {
 export { CandidateIntakeService, CandidateIntakeServiceOptions } from './candidate-intake-service.js';
 
 // Store
-export { SqliteTaskStore } from './store/sqlite-task-store.js';
-export { SqliteRunStore } from './store/sqlite-run-store.js';
+export { SqliteTaskStore } from './store/task/sqlite-task-store.js';
+export { SqliteRunStore } from './store/run/sqlite-run-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
 export { SqliteTrajectoryLocator } from './store/sqlite-trajectory-locator.js';
 export { SqliteHistoryQuery } from './store/sqlite-history-query.js';
 export { SqliteContextAssembler } from './store/sqlite-context-assembler.js';
-export { SqliteDiagnosticianCommitter } from './store/diagnostician-committer.js';
+export { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
 export { ResilientContextAssembler } from './store/resilient-context-assembler.js';
 export { ResilientHistoryQuery } from './store/resilient-history-query.js';
 export type {
@@ -138,17 +138,17 @@ export type {
   TaskStore,
   TaskStoreFilter,
   TaskStoreUpdatePatch,
-} from './store/task-store.js';
+} from './store/task/task-store.js';
 export type {
   RunStore,
   RunRecord,
-} from './store/run-store.js';
+} from './store/run/run-store.js';
 export type { TrajectoryLocator } from './store/trajectory-locator.js';
 export type {
   DiagnosticianCommitter,
   CommitInput,
   CommitResult,
-} from './store/diagnostician-committer.js';
+} from './store/commit/diagnostician-committer.js';
 
 // Lease & Recovery
 export { DefaultLeaseManager } from './store/lease-manager.js';
