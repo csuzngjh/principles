@@ -237,7 +237,32 @@ describe('handleCandidateRoute', () => {
     expect(parsed.reason).toContain('deferred');
   });
 
-  // ── 7. Candidate not found ──────────────────────────────────────────────
+  // ── 7. Unknown kind routes to deferred ──────────────────────────────────
+
+  it('unknown recommendation kind routes to deferred', async () => {
+    mockStateManager.getCandidate.mockResolvedValue(mockCandidate({
+      sourceRecommendationJson: JSON.stringify({
+        kind: 'unknown_nonsense',
+        description: 'Bad kind',
+      }),
+    }));
+    (decideInternalizationRoute as ReturnType<typeof vi.fn>).mockReturnValue({
+      ready: false,
+      route: 'deferred',
+      missingFields: [],
+      reason: 'Unrecognized recommendation kind "unknown_nonsense" — deferred to safe default.',
+      nextAction: 'Review diagnostician output for unsupported recommendation kind.',
+    });
+
+    await handleCandidateRoute({ candidateId: 'cand-005b', workspace: '/tmp/ws', json: true });
+
+    const parsed = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    expect(parsed.route).toBe('deferred');
+    expect(parsed.ready).toBe(false);
+    expect(parsed.recommendationKind).toBe('unknown_nonsense');
+  });
+
+  // ── 8. Candidate not found ──────────────────────────────────────────────
 
   it('candidate not found exits 1 with error message', async () => {
     mockStateManager.getCandidate.mockResolvedValue(null);

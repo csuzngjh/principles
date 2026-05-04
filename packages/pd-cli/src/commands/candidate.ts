@@ -492,20 +492,22 @@ export async function handleCandidateRoute(opts: CandidateRouteOptions): Promise
     let recommendation: { kind: string; description: string; triggerPattern?: string; action?: string; abstractedPrinciple?: string } | undefined = undefined;
     let usedFallback = false;
 
-    try {
-      const parsed = JSON.parse(candidate.sourceRecommendationJson);
-      if (parsed?.kind) {
-        recommendation = {
-          kind: parsed.kind,
-          description: parsed.description ?? candidate.description,
-          triggerPattern: parsed.triggerPattern,
-          action: parsed.action,
-          abstractedPrinciple: parsed.abstractedPrinciple,
-        };
-      } else {
-        throw new Error('missing kind');
-      }
-    } catch {
+    if (candidate.sourceRecommendationJson) {
+      try {
+        const parsed = JSON.parse(candidate.sourceRecommendationJson);
+        if (parsed?.kind) {
+          recommendation = {
+            kind: parsed.kind,
+            description: parsed.description ?? candidate.description,
+            triggerPattern: parsed.triggerPattern,
+            action: parsed.action,
+            abstractedPrinciple: parsed.abstractedPrinciple,
+          };
+        }
+      } catch { /* fall through to column fallback */ }
+    }
+
+    if (!recommendation) {
       const row = stateManager.connection.getDb().prepare(
         'SELECT recommendation_kind, trigger_pattern, action, abstracted_principle FROM principle_candidates WHERE candidate_id = ?',
       ).get(opts.candidateId) as
