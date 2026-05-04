@@ -23,6 +23,8 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/rule-host-contracts.ts',
   'internalization/rule-host-helpers.ts',
   'internalization/index.ts',
+  // PRI-43
+  'internalization/internalization-route.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -85,6 +87,8 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     // PRI-28
     'OperatorHealthReadModel',
     'auditCandidateLedgerConsistency',
+    // PRI-43
+    'decideInternalizationRoute',
   ];
 
   for (const name of REQUIRED_EXPORTS) {
