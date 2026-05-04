@@ -427,6 +427,8 @@ describe('PRI-47 store modularization', () => {
     expect(existsSync(indexPath)).toBe(true);
     const src = readFileSync(indexPath, 'utf-8');
     expect(src).toContain('DiagnosticianCommitter');
+    expect(src).toContain('CommitInput');
+    expect(src).toContain('CommitResult');
   });
 
   it('moved files are NOT in root store/ directory', async () => {
