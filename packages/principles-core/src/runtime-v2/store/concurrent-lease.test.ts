@@ -5,7 +5,7 @@ import * as os from 'os';
 import { SqliteConnection } from './sqlite-connection.js';
 import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
-import { DefaultLeaseManager } from './lease-manager.js';
+import { DefaultLeaseManager } from './lifecycle/lease-manager.js';
 
 describe('ConcurrentLeaseConflict', () => {
   let tmpdir: string;

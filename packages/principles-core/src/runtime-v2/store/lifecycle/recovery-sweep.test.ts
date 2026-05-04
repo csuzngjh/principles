@@ -7,12 +7,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { SqliteConnection } from './sqlite-connection.js';
-import { SqliteTaskStore } from './task/sqlite-task-store.js';
+import { SqliteConnection } from '../sqlite-connection.js';
+import { SqliteTaskStore } from '../task/sqlite-task-store.js';
 import { DefaultLeaseManager } from './lease-manager.js';
 import { DefaultRetryPolicy } from './retry-policy.js';
 import { DefaultRecoverySweep } from './recovery-sweep.js';
-import type { TaskRecord } from '../task-status.js';
+import type { TaskRecord } from '../../task-status.js';
 
 function makeTaskInput(taskId: string, overrides: Partial<Omit<TaskRecord, 'createdAt' | 'updatedAt'>> = {}): Omit<TaskRecord, 'createdAt' | 'updatedAt'> {
   return {

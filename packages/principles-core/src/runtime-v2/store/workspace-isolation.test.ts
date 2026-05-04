@@ -14,9 +14,9 @@ import * as os from 'os';
 import { SqliteConnection } from './sqlite-connection.js';
 import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
-import { SqliteTrajectoryLocator } from './sqlite-trajectory-locator.js';
-import { SqliteHistoryQuery } from './sqlite-history-query.js';
-import { SqliteContextAssembler } from './sqlite-context-assembler.js';
+import { SqliteTrajectoryLocator } from './trajectory/sqlite-trajectory-locator.js';
+import { SqliteHistoryQuery } from './history/sqlite-history-query.js';
+import { SqliteContextAssembler } from './context/sqlite-context-assembler.js';
 import type { TaskRecord, PDTaskStatus, DiagnosticianTaskRecord } from '../task-status.js';
 import type { RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
 

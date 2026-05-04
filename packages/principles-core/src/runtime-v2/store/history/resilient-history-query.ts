@@ -8,8 +8,8 @@
  * Non-cursor queries pass through unchanged (already graceful).
  */
 import type { HistoryQuery, HistoryQueryOptions } from './history-query.js';
-import type { HistoryQueryResult } from '../context-payload.js';
-import type { StoreEventEmitter } from './event-emitter.js';
+import type { HistoryQueryResult } from '../../context-payload.js';
+import type { StoreEventEmitter } from '../event-emitter.js';
 
 export class ResilientHistoryQuery implements HistoryQuery {
   constructor(

@@ -117,23 +117,23 @@ export { CandidateIntakeService, CandidateIntakeServiceOptions } from './candida
 export { SqliteTaskStore } from './store/task/sqlite-task-store.js';
 export { SqliteRunStore } from './store/run/sqlite-run-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
-export { SqliteTrajectoryLocator } from './store/sqlite-trajectory-locator.js';
-export { SqliteHistoryQuery } from './store/sqlite-history-query.js';
-export { SqliteContextAssembler } from './store/sqlite-context-assembler.js';
+export { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-locator.js';
+export { SqliteHistoryQuery } from './store/history/sqlite-history-query.js';
+export { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
 export { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
-export { ResilientContextAssembler } from './store/resilient-context-assembler.js';
-export { ResilientHistoryQuery } from './store/resilient-history-query.js';
+export { ResilientContextAssembler } from './store/context/resilient-context-assembler.js';
+export { ResilientHistoryQuery } from './store/history/resilient-history-query.js';
 export type {
   HistoryQuery,
   HistoryQueryCursorData,
   HistoryQueryOptions,
-} from './store/history-query.js';
-export type { ContextAssembler } from './store/context-assembler.js';
+} from './store/history/history-query.js';
+export type { ContextAssembler } from './store/context/context-assembler.js';
 export {
   DEFAULT_HISTORY_PAGE_SIZE,
   MAX_HISTORY_PAGE_SIZE,
   DEFAULT_TIME_WINDOW_MS,
-} from './store/history-query.js';
+} from './store/history/history-query.js';
 export type {
   TaskStore,
   TaskStoreFilter,
@@ -143,7 +143,7 @@ export type {
   RunStore,
   RunRecord,
 } from './store/run/run-store.js';
-export type { TrajectoryLocator } from './store/trajectory-locator.js';
+export type { TrajectoryLocator } from './store/trajectory/trajectory-locator.js';
 export type {
   DiagnosticianCommitter,
   CommitInput,
@@ -151,12 +151,12 @@ export type {
 } from './store/commit/diagnostician-committer.js';
 
 // Lease & Recovery
-export { DefaultLeaseManager } from './store/lease-manager.js';
-export type { LeaseManager, AcquireLeaseOptions } from './store/lease-manager.js';
-export { DefaultRetryPolicy } from './store/retry-policy.js';
-export type { RetryPolicy, RetryPolicyConfig } from './store/retry-policy.js';
-export { DefaultRecoverySweep } from './store/recovery-sweep.js';
-export type { RecoverySweep, RecoveryResult } from './store/recovery-sweep.js';
+export { DefaultLeaseManager } from './store/lifecycle/lease-manager.js';
+export type { LeaseManager, AcquireLeaseOptions } from './store/lifecycle/lease-manager.js';
+export { DefaultRetryPolicy } from './store/lifecycle/retry-policy.js';
+export type { RetryPolicy, RetryPolicyConfig } from './store/lifecycle/retry-policy.js';
+export { DefaultRecoverySweep } from './store/lifecycle/recovery-sweep.js';
+export type { RecoverySweep, RecoveryResult } from './store/lifecycle/recovery-sweep.js';
 
 // Event emitter
 export { StoreEventEmitter, storeEmitter } from './store/event-emitter.js';

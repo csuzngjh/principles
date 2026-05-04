@@ -5,8 +5,8 @@ import * as os from 'os';
 import { SqliteConnection } from './sqlite-connection.js';
 import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
-import { DefaultRecoverySweep } from './recovery-sweep.js';
-import { DefaultRetryPolicy } from './retry-policy.js';
+import { DefaultRecoverySweep } from './lifecycle/recovery-sweep.js';
+import { DefaultRetryPolicy } from './lifecycle/retry-policy.js';
 
 describe('IdempotentStateTransitions', () => {
   let tmpdir: string;
