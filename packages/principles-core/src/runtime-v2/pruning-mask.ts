@@ -47,6 +47,15 @@ let cachedMask: Set<string> | null = null;
 let cachedAt = 0;
 let cachedWorkspaceDir = '';
 
+/**
+ * Returns a cached mask of principle IDs to exclude from injection.
+ * Reads the review log from disk only once per TTL window (default 60s).
+ *
+ * @param workspaceDir - Workspace root directory
+ * @param ttlMs        - Time-to-live in milliseconds (default 60_000)
+ * @returns Set of principle IDs with latest decision = archive-candidate
+ * @throws Propagates I/O errors from listPruningReviews so callers can degrade safely
+ */
 export function getCachedMaskedPrincipleSet(
   workspaceDir: string,
   ttlMs = DEFAULT_TTL_MS,
@@ -62,6 +71,10 @@ export function getCachedMaskedPrincipleSet(
   return cachedMask;
 }
 
+/**
+ * Clears the pruning mask cache.
+ * Primarily useful for tests that need deterministic I/O timing.
+ */
 export function clearPruningMaskCache(): void {
   cachedMask = null;
   cachedAt = 0;
