@@ -8,7 +8,7 @@
 
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { PruningReadModel, appendPruningReview } from '@principles/core/runtime-v2';
+import { PruningReadModel, appendPruningReview, listPruningReviews, buildMaskedPrincipleSet } from '@principles/core/runtime-v2';
 import type { PruningReviewDecision } from '@principles/core/runtime-v2';
 
 interface PruningReportOptions {
@@ -207,4 +207,83 @@ export function handlePruningExplain(opts: PruningExplainOptions): void {
   }
   console.log('');
   console.log('NOTE: This report is read-only. No principles are modified or deleted.');
+}
+
+// ── Pruning rollback ──────────────────────────────────────────────────────────
+
+export interface PruningRollbackOptions {
+  principleId: string;
+  note?: string;
+  reviewer?: string;
+  workspace?: string;
+  json?: boolean;
+}
+
+export function handlePruningRollback(opts: PruningRollbackOptions): void {
+  const workspaceDir = opts.workspace
+    ? path.resolve(opts.workspace)
+    : resolveWorkspaceDir();
+
+  const reviews = listPruningReviews(workspaceDir, { principleId: opts.principleId });
+  if (reviews.length === 0) {
+    if (opts.json) {
+      console.log(JSON.stringify({ error: `No reviews found for principle: '${opts.principleId}'` }));
+    } else {
+      console.error(`Error: No reviews found for principle: '${opts.principleId}'`);
+    }
+    process.exit(1);
+    return;
+  }
+
+  const maskedIds = buildMaskedPrincipleSet(reviews);
+  if (!maskedIds.has(opts.principleId)) {
+    if (opts.json) {
+      console.log(JSON.stringify({ error: `Principle '${opts.principleId}' is not currently masked (latest decision is not archive-candidate)` }));
+    } else {
+      console.error(`Error: Principle '${opts.principleId}' is not currently masked (latest decision is not archive-candidate)`);
+    }
+    process.exit(1);
+    return;
+  }
+
+  const model = new PruningReadModel({ workspaceDir });
+  const signals = model.getPrincipleSignals();
+  const signal = signals.find((s) => s.principleId === opts.principleId);
+
+  if (!signal) {
+    if (opts.json) {
+      console.log(JSON.stringify({ error: `Principle not found in pruning signals: '${opts.principleId}'` }));
+    } else {
+      console.error(`Error: Principle not found in pruning signals: '${opts.principleId}'`);
+    }
+    process.exit(1);
+    return;
+  }
+
+  const record = appendPruningReview(workspaceDir, {
+    principleId: opts.principleId,
+    decision: 'keep',
+    note: opts.note ?? 'Rollback: restore principle injection',
+    reviewer: opts.reviewer,
+    signalSnapshot: signal,
+  });
+
+  if (opts.json) {
+    console.log(JSON.stringify({
+      reviewId: record.reviewId,
+      principleId: record.principleId,
+      decision: record.decision,
+      reviewer: record.reviewer,
+      reviewedAt: record.reviewedAt,
+    }));
+    return;
+  }
+
+  console.log(`reviewId: ${record.reviewId}`);
+  console.log(`principleId: ${record.principleId}`);
+  console.log(`decision: ${record.decision}`);
+  console.log(`reviewer: ${record.reviewer}`);
+  console.log(`reviewedAt: ${record.reviewedAt}`);
+  console.log('');
+  console.log('Principle has been restored to injection.');
 }

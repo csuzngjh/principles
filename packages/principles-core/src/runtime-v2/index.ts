@@ -277,6 +277,9 @@ export type { ValidationResult } from './internalization/rule-code-validator.js'
 export { checkForbiddenPatterns } from './internalization/rule-code-validator.js';
 export type { CompileResult } from './internalization/compile-result.js';
 
+// Pruning mask — builds masked principle set from review log (PRI-48)
+export { buildMaskedPrincipleSet } from './pruning-mask.js';
+
 // Decision merge and adapter interface (PRI-45)
 export type { DecisionMergeLogger, RuleHostLogger } from './internalization/rule-host-evaluator.js';
 export { mergeDecisions } from './internalization/rule-host-evaluator.js';

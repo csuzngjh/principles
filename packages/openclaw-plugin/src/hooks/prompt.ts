@@ -11,6 +11,7 @@ import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
+import { listPruningReviews, buildMaskedPrincipleSet } from '@principles/core/runtime-v2';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
@@ -704,13 +705,29 @@ ${heartbeatChecklist}
     const allActive = reducer.getActivePrinciples();
     const allProbation = reducer.getProbationPrinciples();
 
+    // Pruning mask: exclude principles whose latest review is archive-candidate
+    let maskedIds = new Set<string>();
+    try {
+      const reviews = listPruningReviews(workspaceDir);
+      maskedIds = buildMaskedPrincipleSet(reviews);
+    } catch (err) {
+      // Safe degradation: if review log unreadable, inject all principles
+      logger?.info?.(`[PD:Pruning] Failed to read review log — all principles injected: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Budget-aware selection: prioritize P0>P1>P2 and recency
-    const activeSelection = selectPrinciplesForInjection(allActive, DEFAULT_PRINCIPLE_BUDGET);
+    const activeSelection = selectPrinciplesForInjection(
+      allActive.filter(p => !maskedIds.has(p.id)),
+      DEFAULT_PRINCIPLE_BUDGET,
+    );
     const active = activeSelection.selected;
 
     // Probation principles get a smaller sub-budget (1000 chars)
     const probationBudget = 1000;
-    const probationSelection = selectPrinciplesForInjection(allProbation, probationBudget);
+    const probationSelection = selectPrinciplesForInjection(
+      allProbation.filter(p => !maskedIds.has(p.id)),
+      probationBudget,
+    );
     const probation = probationSelection.selected;
 
     if (activeSelection.wasTruncated || probationSelection.wasTruncated) {
