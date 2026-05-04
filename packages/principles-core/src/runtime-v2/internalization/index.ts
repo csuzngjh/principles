@@ -33,3 +33,10 @@ export { checkForbiddenPatterns } from './rule-code-validator.js';
 
 // Compile result (PRI-44)
 export type { CompileResult } from './compile-result.js';
+
+// Decision merge (PRI-45)
+export type { DecisionMergeLogger } from './rule-host-evaluator.js';
+export { mergeDecisions } from './rule-host-evaluator.js';
+
+// Adapter interface (PRI-45)
+export type { RuleHostImplementationProvider } from './rule-host-adapter.js';

@@ -26,6 +26,7 @@ import {
 } from './principle-tree-ledger.js';
 import { loadEntrySource } from './code-implementation-storage.js';
 import { createRuleHostHelpers } from '@principles/core/runtime-v2';
+import { mergeDecisions } from '@principles/core/runtime-v2';
 import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import type {
   RuleHostInput,
@@ -62,63 +63,8 @@ export class RuleHost {
      
   evaluate(input: RuleHostInput): RuleHostResult | undefined {
     try {
-      // Load active code implementations from the ledger
       const activeImpls = this._loadActiveCodeImplementations();
-
-      if (activeImpls.length === 0) {
-        return undefined;
-      }
-
-      // Merge decisions from all active implementations
-       
-       
-      let blocked: RuleHostResult | undefined;
-      const approvals: RuleHostResult[] = [];
-
-      for (const impl of activeImpls) {
-        try {
-          const result = impl.evaluate(input);
-
-          if (!result.matched) {
-            continue;
-          }
-
-          if (result.decision === 'block') {
-            blocked = result;
-            break; // Short-circuit on block
-          }
-
-          if (result.decision === 'requireApproval') {
-            approvals.push(result);
-          }
-          // 'allow' is implicit — no action needed
-        } catch (evalError: unknown) {
-          // Individual implementation error: log and continue (D-08)
-          this.logger.warn?.(
-            `[RuleHost] Implementation ${impl.implId} evaluation failed: ${String(evalError)}`
-          );
-        }
-      }
-
-      if (blocked) {
-        return blocked;
-      }
-
-      if (approvals.length > 0) {
-        // Merge multiple requireApproval results
-        return {
-          decision: 'requireApproval',
-          matched: true,
-          reason: approvals.map((a) => a.reason).join('; '),
-          diagnostics: approvals.reduce<Record<string, unknown>>(
-            (acc, a) => ({ ...acc, ...a.diagnostics }),
-            {}
-          ),
-        };
-      }
-
-      // All implementations returned allow or matched=false — no opinion
-      return undefined;
+      return mergeDecisions(activeImpls, input, this.logger);
     } catch (hostError: unknown) {
       // Conservative degradation: log and return undefined (D-08)
       this.logger.warn?.(
