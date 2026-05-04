@@ -29,6 +29,9 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/template-generator.ts',
   'internalization/rule-code-validator.ts',
   'internalization/compile-result.ts',
+  // PRI-45
+  'internalization/rule-host-evaluator.ts',
+  'internalization/rule-host-adapter.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -96,6 +99,8 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     // PRI-44
     'generateFromTemplate',
     'checkForbiddenPatterns',
+    // PRI-45
+    'mergeDecisions',
   ];
 
   for (const name of REQUIRED_EXPORTS) {
@@ -348,5 +353,46 @@ describe('pd-cli command boundaries', () => {
 
   it.skip('trace.ts does not import RuntimeStateManager or loadLedger', async () => {
     // TODO: Enable this guard once trace.ts is migrated to PainChainReadModel.
+  });
+});
+
+// ── PRI-45: RuleHost adapter boundary ────────────────────────────────────────
+
+describe('PRI-45 RuleHost adapter boundary', () => {
+  it('core rule-host-evaluator.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'rule-host-evaluator.ts'), 'utf-8');
+    expect(src).not.toContain('node:vm');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('core rule-host-adapter.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'rule-host-adapter.ts'), 'utf-8');
+    expect(src).not.toContain('node:vm');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('plugin rule-host.ts imports mergeDecisions from core barrel', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/rule-host.ts'
+    ), 'utf-8');
+    expect(src).toContain('mergeDecisions');
+    expect(src).toContain('@principles/core/runtime-v2');
+  });
+
+  it('plugin rule-host.ts evaluate method delegates to mergeDecisions', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/rule-host.ts'
+    ), 'utf-8');
+    expect(src).toMatch(/return mergeDecisions\(/);
   });
 });
