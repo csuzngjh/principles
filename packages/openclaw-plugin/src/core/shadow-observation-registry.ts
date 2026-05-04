@@ -30,11 +30,10 @@
  *   - Observations are retained until cleanup removes expired entries
  */
 
-import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { withLock } from '../utils/file-lock.js';
-import { atomicWriteFileSync } from '../utils/io.js';
+import { JsonFileStore } from './file-store.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -170,22 +169,23 @@ export interface ShadowRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// Registry Path
+// Registry Path & Store
 // ---------------------------------------------------------------------------
+
+let _store: Map<string, JsonFileStore<ShadowRegistry>> = new Map();
 
 function getRegistryPath(stateDir: string): string {
   return path.join(stateDir, SHADOW_REGISTRY_FILE);
 }
 
-/**
- * Ensure the registry directory exists.
- */
-function ensureRegistryDir(stateDir: string): void {
-  const registryPath = getRegistryPath(stateDir);
-  const dir = path.dirname(registryPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+function getStore(stateDir: string): JsonFileStore<ShadowRegistry> {
+  let store = _store.get(stateDir);
+  if (!store) {
+    const filePath = path.join(stateDir, SHADOW_REGISTRY_FILE);
+    store = new JsonFileStore<ShadowRegistry>(filePath, () => ({ observations: [], version: 1 }));
+    _store.set(stateDir, store);
   }
+  return store;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,44 +193,20 @@ function ensureRegistryDir(stateDir: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Read the registry from disk. Returns empty registry if missing.
- */
-function readRegistry(stateDir: string): ShadowRegistry {
-  const registryPath = getRegistryPath(stateDir);
-  if (!fs.existsSync(registryPath)) {
-    return { observations: [], version: 1 };
-  }
-  try {
-    const content = fs.readFileSync(registryPath, 'utf-8');
-    return JSON.parse(content) as ShadowRegistry;
-  } catch (err) {
-    console.warn(`[shadow-observation-registry] Registry corrupted at ${registryPath}, recovering with empty state: ${String(err)}`);
-    return { observations: [], version: 1 };
-  }
-}
-
-/**
- * Write the registry to disk atomically.
- */
-function writeRegistry(stateDir: string, registry: ShadowRegistry): void {
-  ensureRegistryDir(stateDir);
-  const registryPath = getRegistryPath(stateDir);
-  atomicWriteFileSync(registryPath, JSON.stringify(registry, null, 2));
-}
-
-/**
  * Execute a read-modify-write under an exclusive file lock.
  */
- 
 function withShadowRegistryLock<T>(
   stateDir: string,
   fn: (_registry: ShadowRegistry) => T
 ): T {
- 
-  const registryPath = getRegistryPath(stateDir);
-  return withLock(registryPath, () => {
-    const registry = readRegistry(stateDir);
-    return fn(registry);
+  const store = getStore(stateDir);
+  const filePath = getRegistryPath(stateDir);
+  // Re-create lock behavior using the store's mutate under a simple fs-based lock
+  return withLock(filePath, () => {
+    const registry = store.load();
+    const result = fn(registry);
+    store.save(registry);
+    return result;
   });
 }
 
@@ -276,7 +252,6 @@ export function recordShadowRouting(
 
   return withShadowRegistryLock(stateDir, (registry) => {
     registry.observations.push(observation);
-    writeRegistry(stateDir, registry);
     return observation;
   });
 }
@@ -326,7 +301,6 @@ export function completeShadowObservation(
       extra: {},
     };
 
-    writeRegistry(stateDir, registry);
     return observation;
   });
 }
@@ -369,7 +343,6 @@ export function completeShadowObservationByTask(
       extra: {},
     };
 
-    writeRegistry(stateDir, registry);
     return observation;
   });
 }
@@ -506,7 +479,6 @@ export function markObservationsUsedInGate(
         obs.usedInGate = true;
       }
     }
-    writeRegistry(stateDir, registry);
   });
 }
 
@@ -530,7 +502,6 @@ export function cleanupExpiredObservations(
       (o) => o.routedAt >= cutoff
     );
     removed = before - registry.observations.length;
-    writeRegistry(stateDir, registry);
   });
 
   return removed;
