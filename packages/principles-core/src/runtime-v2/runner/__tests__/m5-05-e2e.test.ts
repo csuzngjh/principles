@@ -266,8 +266,8 @@ describe('E2E m5-05', () => {
       // E2EV-01 assertion 5: candidates exist in DB (D-07)
       // Output has 2 kind='principle' recommendations → expect 2 candidate rows
       const candidateRows = db.prepare(
-        'SELECT * FROM principle_candidates WHERE artifact_id = ? AND status = ?',
-      ).all(artifactId, PENDING_STATUS) as { candidate_id: string; description: string }[];
+        'SELECT * FROM principle_candidates WHERE artifact_id = ? AND status = ? AND recommendation_kind = ?',
+      ).all(artifactId, PENDING_STATUS, 'principle') as { candidate_id: string; description: string }[];
       expect(candidateRows).toHaveLength(2);
       expect(candidateRows.every((c) => c.description.length > 0)).toBe(true);
 
