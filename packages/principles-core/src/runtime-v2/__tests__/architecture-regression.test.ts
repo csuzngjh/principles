@@ -25,6 +25,10 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/index.ts',
   // PRI-43
   'internalization/internalization-route.ts',
+  // PRI-44
+  'internalization/template-generator.ts',
+  'internalization/rule-code-validator.ts',
+  'internalization/compile-result.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -89,6 +93,9 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     'auditCandidateLedgerConsistency',
     // PRI-43
     'decideInternalizationRoute',
+    // PRI-44
+    'generateFromTemplate',
+    'checkForbiddenPatterns',
   ];
 
   for (const name of REQUIRED_EXPORTS) {
@@ -254,6 +261,57 @@ describe('PRI-42 internalization boundary', () => {
     expect(src).toContain('@principles/core/runtime-v2');
     expect(src).not.toContain("from './rule-host-types.js'");
     expect(src).not.toContain("from './rule-host-helpers.js'");
+  });
+});
+
+// ── PRI-44: Principle-compiler core boundary ──────────────────────────────────
+
+describe('PRI-44 principle-compiler core boundary', () => {
+  it('core template-generator.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'template-generator.ts'), 'utf-8');
+    expect(src).not.toContain('node:vm');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('core rule-code-validator.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'rule-code-validator.ts'), 'utf-8');
+    expect(src).not.toContain('node:vm');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('plugin template-generator.ts re-exports from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/principle-compiler/template-generator.ts'
+    ), 'utf-8');
+    expect(src).toContain('@principles/core/runtime-v2');
+    expect(src).toContain('generateFromTemplate');
+  });
+
+  it('plugin code-validator.ts imports checkForbiddenPatterns from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/principle-compiler/code-validator.ts'
+    ), 'utf-8');
+    expect(src).toContain('checkForbiddenPatterns');
+    expect(src).toContain('@principles/core/runtime-v2');
+  });
+
+  it('plugin compiler.ts imports CompileResult from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/principle-compiler/compiler.ts'
+    ), 'utf-8');
+    expect(src).toContain("import type { CompileResult } from '@principles/core/runtime-v2'");
   });
 });
 
