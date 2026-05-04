@@ -8,6 +8,7 @@
  * Pure function, zero I/O, zero side effects.
  */
 import type { PruningReviewRecord, PruningReviewDecision } from './pruning-review-log.js';
+import { listPruningReviews } from './pruning-review-log.js';
 
 export function buildMaskedPrincipleSet(
   reviews: PruningReviewRecord[],
@@ -36,4 +37,33 @@ export function buildMaskedPrincipleSet(
     }
   }
   return masked;
+}
+
+// ── TTL cache ────────────────────────────────────────────────────────────────
+
+const DEFAULT_TTL_MS = 60_000;
+
+let cachedMask: Set<string> | null = null;
+let cachedAt = 0;
+let cachedWorkspaceDir = '';
+
+export function getCachedMaskedPrincipleSet(
+  workspaceDir: string,
+  ttlMs = DEFAULT_TTL_MS,
+): Set<string> {
+  const now = Date.now();
+  if (cachedMask !== null && cachedWorkspaceDir === workspaceDir && (now - cachedAt) < ttlMs) {
+    return cachedMask;
+  }
+  const reviews = listPruningReviews(workspaceDir);
+  cachedMask = buildMaskedPrincipleSet(reviews);
+  cachedAt = now;
+  cachedWorkspaceDir = workspaceDir;
+  return cachedMask;
+}
+
+export function clearPruningMaskCache(): void {
+  cachedMask = null;
+  cachedAt = 0;
+  cachedWorkspaceDir = '';
 }

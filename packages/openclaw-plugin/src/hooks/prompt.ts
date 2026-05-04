@@ -11,7 +11,7 @@ import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { listPruningReviews, buildMaskedPrincipleSet } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet } from '@principles/core/runtime-v2';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
@@ -708,11 +708,15 @@ ${heartbeatChecklist}
     // Pruning mask: exclude principles whose latest review is archive-candidate
     let maskedIds = new Set<string>();
     try {
-      const reviews = listPruningReviews(workspaceDir);
-      maskedIds = buildMaskedPrincipleSet(reviews);
+      maskedIds = getCachedMaskedPrincipleSet(workspaceDir);
     } catch (err) {
       // Safe degradation: if review log unreadable, inject all principles
-      logger?.info?.(`[PD:Pruning] Failed to read review log — all principles injected: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (logger?.info) {
+        logger.info(`[PD:Pruning] Failed to read review log — all principles injected: ${msg}`);
+      } else {
+        console.error(`[PD:Pruning] Failed to read review log — all principles injected: ${msg}`);
+      }
     }
 
     // Budget-aware selection: prioritize P0>P1>P2 and recency
