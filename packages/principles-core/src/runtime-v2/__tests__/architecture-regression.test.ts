@@ -607,4 +607,15 @@ describe('PRI-47 store modularization Phase 2', () => {
       expect(mod).toHaveProperty(sym);
     }
   });
+
+  it('barrel exports Memory*Store test doubles', async () => {
+    const mod = (await import('../index.js')) as Record<string, unknown>;
+    const memoryStores = [
+      'MemoryTaskStore', 'MemoryRunStore', 'MemoryCommitStore',
+      'MemoryCandidateStore', 'MemoryArtifactStore',
+    ];
+    for (const sym of memoryStores) {
+      expect(mod).toHaveProperty(sym);
+    }
+  });
 });
