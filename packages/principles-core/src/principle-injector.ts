@@ -22,6 +22,8 @@ export interface InjectionContext {
   sessionId: string;
   /** Maximum characters allowed for injected principles */
   budgetChars: number;
+  /** Principle IDs to exclude from injection (e.g. pruned by audit). Undefined = no masking. */
+  maskedPrincipleIds?: Set<string>;
 }
 
 /**
@@ -95,9 +97,19 @@ export class DefaultPrincipleInjector implements PrincipleInjector {
       return [];
     }
 
+    // Apply masking filter before selection
+    const maskedIds = context.maskedPrincipleIds;
+    const unmasked = maskedIds && maskedIds.size > 0
+      ? principles.filter((p) => !maskedIds.has(p.id))
+      : principles;
+
+    if (unmasked.length === 0) {
+      return [];
+    }
+
     // Separate P0 from P1/P2
-    const p0Principles = principles.filter((p) => p.priority === 'P0');
-    const otherPrinciples = principles.filter((p) => p.priority !== 'P0');
+    const p0Principles = unmasked.filter((p) => p.priority === 'P0');
+    const otherPrinciples = unmasked.filter((p) => p.priority !== 'P0');
 
     // Pre-parse dates once to avoid repeated Date allocations during sort
     const p0WithEpoch = p0Principles.map((p) => ({

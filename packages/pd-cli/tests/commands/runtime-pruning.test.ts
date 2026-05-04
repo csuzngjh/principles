@@ -3,6 +3,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+type Never = never;
+
 const { MockPruningReadModel } = vi.hoisted(() => {
   class MockPruningReadModel {
     getPrincipleSignals() {
@@ -53,6 +55,8 @@ const { MockPruningReadModel } = vi.hoisted(() => {
 }, { validateType: false });
 
 const mockAppendPruningReview = vi.hoisted(() => vi.fn());
+const mockListPruningReviews = vi.hoisted(() => vi.fn());
+const mockBuildMaskedPrincipleSet = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/test-workspace'),
@@ -63,9 +67,11 @@ vi.mock('@principles/core/runtime-v2', () => ({
     return new MockPruningReadModel();
   }),
   appendPruningReview: mockAppendPruningReview,
+  listPruningReviews: mockListPruningReviews,
+  buildMaskedPrincipleSet: mockBuildMaskedPrincipleSet,
 }));
 
-import { handlePruningReport, handlePruningExplain, handlePruningReview } from '../../src/commands/runtime-pruning.js';
+import { handlePruningReport, handlePruningExplain, handlePruningReview, handlePruningRollback } from '../../src/commands/runtime-pruning.js';
 import { PruningReadModel } from '@principles/core/runtime-v2';
 
 // ── pd runtime pruning report ───────────────────────────────────────────────
@@ -310,6 +316,164 @@ describe('pd runtime pruning review', () => {
       principleId: 'p_watch',
       riskLevel: 'watch',
     });
+    consoleSpy.mockRestore();
+  });
+});
+
+// ── pd runtime pruning rollback ───────────────────────────────────────────────
+
+describe('pd runtime pruning rollback', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAppendPruningReview.mockReset();
+    mockAppendPruningReview.mockReturnValue({
+      reviewId: 'rollback-uuid-456',
+      principleId: 'p_watch',
+      decision: 'keep',
+      note: 'Rollback: restore principle injection',
+      reviewer: 'operator',
+      reviewedAt: '2026-05-04T00:00:00.000Z',
+      signalSnapshot: {
+        principleId: 'p_watch',
+        status: 'active',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        derivedCandidateIds: [],
+        derivedPainCount: 0,
+        matchedCandidateCount: 0,
+        recentCandidateCount: 0,
+        orphanCandidateCount: 0,
+        ageDays: 45,
+        riskLevel: 'watch',
+        reasons: ['watch: principle older than 30 days'],
+      },
+    });
+    mockListPruningReviews.mockReset();
+    mockBuildMaskedPrincipleSet.mockReset();
+  });
+
+  it('rollback --json writes keep record and outputs reviewId', () => {
+    mockListPruningReviews.mockReturnValueOnce([
+      {
+        reviewId: 'rv-1',
+        principleId: 'p_watch',
+        decision: 'archive-candidate',
+        note: 'pruning candidate',
+        reviewer: 'operator',
+        reviewedAt: '2026-05-01T00:00:00.000Z',
+        signalSnapshot: {
+          principleId: 'p_watch',
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          derivedCandidateIds: [],
+          derivedPainCount: 0,
+          matchedCandidateCount: 0,
+          recentCandidateCount: 0,
+          orphanCandidateCount: 0,
+          ageDays: 45,
+          riskLevel: 'watch',
+          reasons: ['watch: principle older than 30 days'],
+        },
+      },
+    ]);
+    mockBuildMaskedPrincipleSet.mockReturnValueOnce(new Set(['p_watch']));
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    handlePruningRollback({ principleId: 'p_watch', json: true });
+    expect(mockAppendPruningReview).toHaveBeenCalledTimes(1);
+    const callInput = mockAppendPruningReview.mock.calls[0]![1];
+    expect(callInput.principleId).toBe('p_watch');
+    expect(callInput.decision).toBe('keep');
+    const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.reviewId).toBe('rollback-uuid-456');
+    expect(output.decision).toBe('keep');
+    consoleSpy.mockRestore();
+  });
+
+  it('rollback exits 1 when no reviews found', () => {
+    mockListPruningReviews.mockReturnValueOnce([]);
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const processSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as (code: number) => never);
+    handlePruningRollback({ principleId: 'nonexistent', json: false });
+    expect(processSpy).toHaveBeenCalledWith(1);
+    consoleSpy.mockRestore();
+    processSpy.mockRestore();
+  });
+
+  it('rollback exits 1 when principle is not currently masked', () => {
+    mockListPruningReviews.mockReturnValueOnce([
+      {
+        reviewId: 'rv-1',
+        principleId: 'p_watch',
+        decision: 'keep',
+        note: 'looks fine',
+        reviewer: 'operator',
+        reviewedAt: '2026-05-01T00:00:00.000Z',
+        signalSnapshot: {
+          principleId: 'p_watch',
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          derivedCandidateIds: [],
+          derivedPainCount: 0,
+          matchedCandidateCount: 0,
+          recentCandidateCount: 0,
+          orphanCandidateCount: 0,
+          ageDays: 45,
+          riskLevel: 'watch',
+          reasons: [],
+        },
+      },
+    ]);
+    mockBuildMaskedPrincipleSet.mockReturnValueOnce(new Set());
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const processSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as (code: number) => never);
+    handlePruningRollback({ principleId: 'p_watch', json: false });
+    expect(processSpy).toHaveBeenCalledWith(1);
+    expect(mockAppendPruningReview).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+    processSpy.mockRestore();
+  });
+
+  it('rollback succeeds even when principle is not in pruning signals (degraded signalSnapshot)', () => {
+    // p_orphan has a review + mask but no live signal in MockPruningReadModel
+    mockListPruningReviews.mockReturnValueOnce([
+      {
+        reviewId: 'rv-1',
+        principleId: 'p_orphan',
+        decision: 'archive-candidate',
+        note: 'pruning candidate',
+        reviewer: 'operator',
+        reviewedAt: '2026-05-01T00:00:00.000Z',
+        signalSnapshot: {
+          principleId: 'p_orphan',
+          status: 'active',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          derivedCandidateIds: [],
+          derivedPainCount: 0,
+          matchedCandidateCount: 0,
+          recentCandidateCount: 0,
+          orphanCandidateCount: 0,
+          ageDays: 45,
+          riskLevel: 'watch',
+          reasons: [],
+        },
+      },
+    ]);
+    mockBuildMaskedPrincipleSet.mockReturnValueOnce(new Set(['p_orphan']));
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    handlePruningRollback({ principleId: 'p_orphan', json: true });
+    expect(mockAppendPruningReview).toHaveBeenCalledTimes(1);
+    const callInput = mockAppendPruningReview.mock.calls[0]![1];
+    // signal is undefined (p_orphan not in MockPruningReadModel) — real appendPruningReview applies fallback
+    expect(callInput.principleId).toBe('p_orphan');
+    expect(callInput.decision).toBe('keep');
+    expect(callInput.signalSnapshot).toBeUndefined();
     consoleSpy.mockRestore();
   });
 });

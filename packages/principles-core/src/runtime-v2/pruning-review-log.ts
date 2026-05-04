@@ -35,7 +35,11 @@ export interface AppendPruningReviewInput {
   decision: PruningReviewDecision;
   note?: string;
   reviewer?: string;
-  signalSnapshot: PruningReviewRecord['signalSnapshot'];
+  /**
+   * Snapshot of the principle's pruning signal at the time of review.
+   * Optional — rollback operations may not have a live signal available.
+   */
+  signalSnapshot?: PruningReviewRecord['signalSnapshot'];
 }
 
 // ── Validation ─────────────────────────────────────────────────────────────────
@@ -87,7 +91,20 @@ export function appendPruningReview(
     note: input.note ?? '',
     reviewer,
     reviewedAt,
-    signalSnapshot: input.signalSnapshot,
+    signalSnapshot: input.signalSnapshot ?? {
+      principleId: input.principleId,
+      status: 'active',
+      createdAt: reviewedAt,
+      updatedAt: reviewedAt,
+      derivedCandidateIds: [],
+      derivedPainCount: 0,
+      matchedCandidateCount: 0,
+      recentCandidateCount: 0,
+      orphanCandidateCount: 0,
+      ageDays: 0,
+      riskLevel: 'watch',
+      reasons: ['rollback: no signal snapshot available'],
+    },
   };
 
   const logPath = getLogPath(workspaceDir);
