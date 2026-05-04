@@ -22,3 +22,14 @@ export { createRuleHostHelpers } from './rule-host-helpers.js';
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization-route.js';
 export { decideInternalizationRoute } from './internalization-route.js';
+
+// Template generation (PRI-44)
+export type { PainPattern } from './template-generator.js';
+export { generateFromTemplate } from './template-generator.js';
+
+// Code validation (PRI-44)
+export type { ValidationResult } from './rule-code-validator.js';
+export { checkForbiddenPatterns } from './rule-code-validator.js';
+
+// Compile result (PRI-44)
+export type { CompileResult } from './compile-result.js';

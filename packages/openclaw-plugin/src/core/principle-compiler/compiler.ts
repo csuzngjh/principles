@@ -17,19 +17,10 @@ import { generateFromTemplate, type PainPattern } from './template-generator.js'
 import { registerCompiledRule } from './ledger-registrar.js';
 import { createImplementationAssetDir } from '../code-implementation-storage.js';
 import type { TrajectoryDatabase } from '../trajectory.js';
+import type { CompileResult } from '@principles/core/runtime-v2';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface CompileResult {
-  success: boolean;
-  principleId: string;
-  ruleId?: string;
-  implementationId?: string;
-  code?: string;
-  reason?: string;
-}
+// Re-export CompileResult from core
+export type { CompileResult } from '@principles/core/runtime-v2';
 
 // ---------------------------------------------------------------------------
 // Constants
