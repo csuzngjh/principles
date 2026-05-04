@@ -264,3 +264,10 @@ export { createRuleHostHelpers } from './internalization/rule-host-helpers.js';
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization/internalization-route.js';
 export { decideInternalizationRoute } from './internalization/internalization-route.js';
+
+// Principle compiler core contracts (PRI-44)
+export type { PainPattern } from './internalization/template-generator.js';
+export { generateFromTemplate } from './internalization/template-generator.js';
+export type { ValidationResult } from './internalization/rule-code-validator.js';
+export { checkForbiddenPatterns } from './internalization/rule-code-validator.js';
+export type { CompileResult } from './internalization/compile-result.js';
