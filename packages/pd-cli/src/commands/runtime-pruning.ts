@@ -248,17 +248,7 @@ export function handlePruningRollback(opts: PruningRollbackOptions): void {
 
   const model = new PruningReadModel({ workspaceDir });
   const signals = model.getPrincipleSignals();
-  const signal = signals.find((s) => s.principleId === opts.principleId);
-
-  if (!signal) {
-    if (opts.json) {
-      console.log(JSON.stringify({ error: `Principle not found in pruning signals: '${opts.principleId}'` }));
-    } else {
-      console.error(`Error: Principle not found in pruning signals: '${opts.principleId}'`);
-    }
-    process.exit(1);
-    return;
-  }
+  const signal = signals.find((s) => s.principleId === opts.principleId) ?? undefined;
 
   const record = appendPruningReview(workspaceDir, {
     principleId: opts.principleId,

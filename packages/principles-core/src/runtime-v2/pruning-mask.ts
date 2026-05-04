@@ -7,7 +7,7 @@
  *
  * Pure function, zero I/O, zero side effects.
  */
-import type { PruningReviewRecord } from './pruning-review-log.js';
+import type { PruningReviewRecord, PruningReviewDecision } from './pruning-review-log.js';
 
 export function buildMaskedPrincipleSet(
   reviews: PruningReviewRecord[],
@@ -17,7 +17,7 @@ export function buildMaskedPrincipleSet(
   }
 
   // LWW: track latest decision per principleId
-  const latest = new Map<string, { decision: string; reviewedAt: string }>();
+  const latest = new Map<string, { decision: PruningReviewDecision; reviewedAt: string }>();
 
   for (const r of reviews) {
     if (!r?.principleId || !r?.decision || !r?.reviewedAt) {
