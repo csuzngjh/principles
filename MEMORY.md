@@ -136,6 +136,22 @@
 - 后续创建 issue 时优先复制上述模板的 description。每个开发 issue 都应有 `Goal / Context / Must Read First / Scope / Non-Goals / TDD Requirements / Verification / Acceptance Criteria / Completion Comment Template`。AI prompt/eval 类 issue 用 PRI-34；架构回退类用 PRI-33；真实 UAT/可靠性用 PRI-35。
 - Linear 管理纪律：每 2-3 个 PR 或 milestone 边界用 PRI-36 模板写 status update；每个 PR 合并后在对应 issue 留事实型 comment（Merged PR、Changed files、Tests、Remaining risk、Follow-up）。
 
+## Hard Internalization Core Migration 当前事实 (2026-05-04)
+- 下一阶段主线是把硬内化 domain logic 从 `openclaw-plugin` 逐步迁到 `@principles/core`，让 plugin 只保留 OpenClaw adapter/hook/runtime 边界。Linear Project A 已拆为 M4/M5/M6。
+- `PRI-41` / PR #464 已合并：新增 ADR-0002 `docs/adr/0002-hard-internalization-core-boundary.md`，确认迁移顺序：`PRI-42 -> PRI-43 -> PRI-44 -> PRI-45 -> PRI-46 -> PRI-47`；`PRI-39` store modularization 明确不在 critical path。
+- `PRI-42` / PR #465 已合并：`RuleHostInput`、`RuleHostDecision`、`RuleHostMeta`、`RuleHostResult`、`LoadedImplementation` 与 `createRuleHostHelpers` 已迁到 `packages/principles-core/src/runtime-v2/internalization/` 并从 `@principles/core/runtime-v2` 导出；plugin 侧 `rule-host-types.ts` / `rule-host-helpers.ts` 现在只是 re-export。
+- `PRI-43` / PR #467 已合并：core 新增纯函数 `decideInternalizationRoute()`，将 `DiagnosticianRecommendation` 的 `principle/rule/implementation/prompt/defer` 映射为 `principle-ledger/rule-candidate/implementation-candidate/prompt-injection-candidate/deferred`，输出 `ready/missingFields/reason/nextAction`。这是纯模型，无 I/O、无 plugin dependency。
+- `PRI-46` / PR #468 已合并：CLI 新增 `pd candidate route --candidate-id <id> --workspace <path> [--json]`，只读展示 candidate 的 internalization route/readiness，复用 `decideInternalizationRoute()`，不写 DB/ledger、不触发 compiler。验证通过：core/pd-cli build、candidate-route tests、cli-command-tree、internalization-route tests、openclaw-plugin typecheck。
+- `PRI-44` / PR #469 已合并：提取纯 PrincipleCompiler 组件到 `@principles/core/runtime-v2/internalization/`：
+  - `template-generator.ts`（108 行纯模板生成逻辑）迁移到 `core/internalization/`
+  - `FORBIDDEN_PATTERNS` + `checkForbiddenPatterns()` 提取到 `rule-code-validator.ts`
+  - `CompileResult` 接口迁移到 `compile-result.ts`
+  - Plugin 文件变为 thin re-export：`template-generator.ts` 直接转发 core 导出，`code-validator.ts` 导入 core 的 `checkForbiddenPatterns`，`compiler.ts` 导入 core 的 `CompileResult` 类型
+  - 新增 14 个核心测试 + 5 个架构回归守卫（验证 core 无 infrastructure imports、plugin 正确引用 core）
+  - 修复 review 发现的问题：`inferToolName` 添加动词排除（`please read` / `could write`）、`\bglobal\b` 添加自然语言排除（`global rule` / `global scope`）、`compileAll` catch 添加 console.warn
+- 当前推荐下一步：执行 `PRI-45`（剩余 compiler/orchestration 边界清理）或 `PRI-47`（InternalizationRoute 应用到 intake flow）
+- `PRI-45` / PR #470 已合并：提取 `mergeDecisions()` 纯函数到 `@principles/core/runtime-v2/internalization/rule-host-evaluator.ts`，plugin `evaluate()` 从 65 行减到 12 行，仅保留基础设施（VM 加载、文件系统读取）；新增 12 个 TDD 测试 + 4 个架构回归守卫；修复 review 发现：RuleHostLogger 改为 re-export、空数组检查移到 try 外、diagnostics 合并使用 ruleId 前缀避免覆盖。
+
 ## Runtime v2 重构事实 (2026-04-26)
 - 当前方向：PD Runtime v2 已完成 M1-M5，M6 正在接入 `openclaw-cli` 作为第一个真实生产 runtime adapter。目标是摆脱 OpenClaw 插件 API / heartbeat / prompt hook / sessions_spawn / marker file，改成 `pd diagnose run --runtime openclaw-cli` 的显式执行链。
 - M3 已建立 PD-owned retrieval：`pd legacy import openclaw` 将 OpenClaw `.state/diagnostician_tasks.json` 和 `.state/trajectory.db` 导入 `workspace/.pd/state.db`；`pd trajectory locate`、`pd history query`、`pd context build` 可基于 PD-owned DB 工作。
