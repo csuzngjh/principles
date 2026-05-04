@@ -127,5 +127,21 @@ export function describeInjectorConformance(
         expect(typeof p.createdAt).toBe('string');
       }
     });
+
+    it('maskedPrincipleIds filters out specified principles', () => {
+      const principles = createTestPrinciples();
+      const masked = new Set(['P1-1']);
+      const ctx = createTestContext({ maskedPrincipleIds: masked });
+      const result = injector.getRelevantPrinciples(principles, ctx);
+      expect(result.some(p => p.id === 'P1-1')).toBe(false);
+      expect(result.some(p => p.id === 'P0-1')).toBe(true);
+    });
+
+    it('undefined maskedPrincipleIds does not filter', () => {
+      const principles = createTestPrinciples();
+      const ctx = createTestContext({ maskedPrincipleIds: undefined });
+      const result = injector.getRelevantPrinciples(principles, ctx);
+      expect(result.length).toBe(principles.length);
+    });
   });
 }
