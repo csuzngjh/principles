@@ -320,7 +320,86 @@ describe('PRI-44 principle-compiler core boundary', () => {
   });
 });
 
-// ── pd-cli command boundary guards ─────────────────────────────────────────
+// ── PRI-47: Store layer modularization Phase 3 ──────────────────────────────
+
+describe('PRI-47 store modularization Phase 3', () => {
+  it('store/candidate/index.ts exists and re-exports CandidateStore + SqliteCandidateStore + MemoryCandidateStore', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'candidate', 'index.ts');
+    expect(existsSync(indexPath)).toBe(true);
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('CandidateStore');
+    expect(src).toContain('SqliteCandidateStore');
+    expect(src).toContain('MemoryCandidateStore');
+  });
+
+  it('store/artifact/index.ts exists and re-exports ArtifactStore + SqliteArtifactStore + MemoryArtifactStore', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'artifact', 'index.ts');
+    expect(existsSync(indexPath)).toBe(true);
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('ArtifactStore');
+    expect(src).toContain('SqliteArtifactStore');
+    expect(src).toContain('MemoryArtifactStore');
+  });
+
+  it('store/commit/index.ts re-exports CommitStore + SqliteCommitStore + MemoryCommitStore', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'commit', 'index.ts');
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('CommitStore');
+    expect(src).toContain('SqliteCommitStore');
+    expect(src).toContain('MemoryCommitStore');
+  });
+
+  it('store/task/index.ts re-exports MemoryTaskStore', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'task', 'index.ts');
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('MemoryTaskStore');
+  });
+
+  it('store/run/index.ts re-exports MemoryRunStore', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'run', 'index.ts');
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('MemoryRunStore');
+  });
+
+  it('RuntimeStateManager has zero inline SQL (no db.prepare calls)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'store', 'runtime-state-manager.ts'), 'utf-8');
+    expect(src).not.toContain('db.prepare');
+  });
+
+  it('Memory*Store test double files exist', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const base = resolve(__dirname, '..', 'store');
+    expect(existsSync(resolve(base, 'task', 'memory-task-store.ts'))).toBe(true);
+    expect(existsSync(resolve(base, 'run', 'memory-run-store.ts'))).toBe(true);
+    expect(existsSync(resolve(base, 'commit', 'memory-commit-store.ts'))).toBe(true);
+    expect(existsSync(resolve(base, 'candidate', 'memory-candidate-store.ts'))).toBe(true);
+    expect(existsSync(resolve(base, 'artifact', 'memory-artifact-store.ts'))).toBe(true);
+  });
+
+  it('Phase 3 M5 types NOT defined inline in runtime-state-manager.ts', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'store', 'runtime-state-manager.ts'), 'utf-8');
+    // CommitRecord, CandidateRecord, ArtifactRecord, ArtifactWithCandidates should be re-exported from submodules
+    expect(src).not.toMatch(/^export interface CommitRecord/m);
+    expect(src).not.toMatch(/^export interface CandidateRecord/m);
+    expect(src).not.toMatch(/^export interface ArtifactRecord/m);
+    expect(src).not.toMatch(/^export interface ArtifactWithCandidates/m);
+  });
+});
 
 describe('pd-cli command boundaries', () => {
   it('pain-record.ts does not import createPainSignalBridge or recordPainSignalObservability', async () => {
@@ -525,6 +604,17 @@ describe('PRI-47 store modularization Phase 2', () => {
       'DEFAULT_HISTORY_PAGE_SIZE', 'MAX_HISTORY_PAGE_SIZE', 'DEFAULT_TIME_WINDOW_MS',
     ];
     for (const sym of storeSymbols) {
+      expect(mod).toHaveProperty(sym);
+    }
+  });
+
+  it('barrel exports Memory*Store test doubles', async () => {
+    const mod = (await import('../index.js')) as Record<string, unknown>;
+    const memoryStores = [
+      'MemoryTaskStore', 'MemoryRunStore', 'MemoryCommitStore',
+      'MemoryCandidateStore', 'MemoryArtifactStore',
+    ];
+    for (const sym of memoryStores) {
       expect(mod).toHaveProperty(sym);
     }
   });

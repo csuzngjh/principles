@@ -116,6 +116,11 @@ export { CandidateIntakeService, CandidateIntakeServiceOptions } from './candida
 // Store
 export { SqliteTaskStore } from './store/task/sqlite-task-store.js';
 export { SqliteRunStore } from './store/run/sqlite-run-store.js';
+export { MemoryTaskStore } from './store/task/memory-task-store.js';
+export { MemoryRunStore } from './store/run/memory-run-store.js';
+export { MemoryCommitStore } from './store/commit/memory-commit-store.js';
+export { MemoryCandidateStore } from './store/candidate/memory-candidate-store.js';
+export { MemoryArtifactStore } from './store/artifact/memory-artifact-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
 export { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-locator.js';
 export { SqliteHistoryQuery } from './store/history/sqlite-history-query.js';
