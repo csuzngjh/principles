@@ -8,12 +8,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
-import { DiagnosticianContextPayloadSchema } from '../context-payload.js';
+import { DiagnosticianContextPayloadSchema } from '../../context-payload.js';
 import { ResilientContextAssembler } from './resilient-context-assembler.js';
-import { StoreEventEmitter } from './event-emitter.js';
+import { StoreEventEmitter } from '../event-emitter.js';
 import type { ContextAssembler } from './context-assembler.js';
-import type { DiagnosticianContextPayload } from '../context-payload.js';
-import { PDRuntimeError } from '../error-categories.js';
+import type { DiagnosticianContextPayload } from '../../context-payload.js';
+import { PDRuntimeError } from '../../error-categories.js';
 
 function createFailingInner(error: Error): ContextAssembler {
   return {

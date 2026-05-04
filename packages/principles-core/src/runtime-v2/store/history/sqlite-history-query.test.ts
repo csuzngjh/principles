@@ -13,13 +13,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { Value } from '@sinclair/typebox/value';
-import { SqliteConnection } from './sqlite-connection.js';
-import { SqliteTaskStore } from './task/sqlite-task-store.js';
-import { SqliteRunStore } from './run/sqlite-run-store.js';
+import { SqliteConnection } from '../sqlite-connection.js';
+import { SqliteTaskStore } from '../task/sqlite-task-store.js';
+import { SqliteRunStore } from '../run/sqlite-run-store.js';
 import { SqliteHistoryQuery } from './sqlite-history-query.js';
 import type { HistoryQueryOptions } from './history-query.js';
-import { HistoryQueryResultSchema } from '../context-payload.js';
-import type { RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
+import { HistoryQueryResultSchema } from '../../context-payload.js';
+import type { RunRecord, RunExecutionStatus } from '../../runtime-protocol.js';
 
 function makeTaskInput(taskId: string) {
   return {

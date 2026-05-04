@@ -151,6 +151,8 @@
   - 修复 review 发现的问题：`inferToolName` 添加动词排除（`please read` / `could write`）、`\bglobal\b` 添加自然语言排除（`global rule` / `global scope`）、`compileAll` catch 添加 console.warn
 - 当前推荐下一步：执行 `PRI-45`（剩余 compiler/orchestration 边界清理）或 `PRI-47`（InternalizationRoute 应用到 intake flow）
 - `PRI-45` / PR #470 已合并：提取 `mergeDecisions()` 纯函数到 `@principles/core/runtime-v2/internalization/rule-host-evaluator.ts`，plugin `evaluate()` 从 65 行减到 12 行，仅保留基础设施（VM 加载、文件系统读取）；新增 12 个 TDD 测试 + 4 个架构回归守卫；修复 review 发现：RuleHostLogger 改为 re-export、空数组检查移到 try 外、diagnostics 合并使用 ruleId 前缀避免覆盖。
+- `PRI-47` store modularization Phase 1 / PR #471 已合并（2026-05-04）：task/run/commit 子目录 + barrel index.ts，41 个文件 import path 更新，5 个架构回归守卫。
+- `PRI-47` store modularization Phase 2 / PR #472（2026-05-04）：context/history/trajectory/lifecycle 子目录 + barrel index.ts，~30 个文件 import path 更新，5 个架构回归守卫；修复预存 test assertion：`sqlite-trajectory-locator.test.ts` expects `'pain_id_to_run_id_lookup'` but impl returns `'run_alias_lookup'`（已重命名，测试未同步）。
 
 ## Runtime v2 重构事实 (2026-04-26)
 - 当前方向：PD Runtime v2 已完成 M1-M5，M6 正在接入 `openclaw-cli` 作为第一个真实生产 runtime adapter。目标是摆脱 OpenClaw 插件 API / heartbeat / prompt hook / sessions_spawn / marker file，改成 `pd diagnose run --runtime openclaw-cli` 的显式执行链。

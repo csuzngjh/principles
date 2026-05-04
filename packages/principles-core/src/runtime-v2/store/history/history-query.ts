@@ -14,7 +14,7 @@
  * All history query operations go through this interface, enabling
  * swap between SQLite (default) and test doubles.
  */
-import type { HistoryQueryResult } from '../context-payload.js';
+import type { HistoryQueryResult } from '../../context-payload.js';
 
 /** Internal structure of the opaque cursor (encoded as base64 JSON). */
 export interface HistoryQueryCursorData {

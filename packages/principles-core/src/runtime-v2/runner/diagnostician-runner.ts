@@ -16,7 +16,7 @@
  *   - Persist RunnerPhase to TaskStore
  */
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import type { ContextAssembler } from '../store/context-assembler.js';
+import type { ContextAssembler } from '../store/context/context-assembler.js';
 import type {
   PDRuntimeAdapter,
   RunHandle,
