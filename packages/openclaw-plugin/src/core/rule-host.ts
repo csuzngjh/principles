@@ -36,6 +36,7 @@ import type {
 } from '@principles/core/runtime-v2';
 import type { Implementation } from '../types/principle-tree-schema.js';
 
+import type { RuleHostLogger } from '@principles/core/runtime-v2';
 export type { RuleHostLogger } from '@principles/core/runtime-v2';
 
 export class RuleHost {
