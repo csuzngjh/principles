@@ -25,24 +25,27 @@ export type InternalizationRouteKind =
 
 // ── Decision output ─────────────────────────────────────────────────────────
 
+/** Field name union — only these three fields can appear in missingFields */
+export type RouteMissingField = 'abstractedPrinciple' | 'triggerPattern' | 'action';
+
 export interface InternalizationRouteDecision {
   /** Whether this recommendation can enter its next internalization pipeline */
   ready: boolean;
   route: InternalizationRouteKind;
-  missingFields: string[];
+  /** Which required fields are missing for the recommendation to be ready */
+  missingFields: RouteMissingField[];
   reason: string;
   nextAction: string;
 }
 
 // ── Canonical kind-to-route mapping ─────────────────────────────────────────
 
-const KIND_ROUTE_MAP: Record<RecommendationKind, InternalizationRouteKind> = {
-  principle: 'principle-ledger',
-  rule: 'rule-candidate',
-  implementation: 'implementation-candidate',
-  prompt: 'prompt-injection-candidate',
-  defer: 'deferred',
-};
+const KIND_ROUTE_MAP = Object.create(null) as Record<RecommendationKind, InternalizationRouteKind>;
+KIND_ROUTE_MAP.principle = 'principle-ledger';
+KIND_ROUTE_MAP.rule = 'rule-candidate';
+KIND_ROUTE_MAP.implementation = 'implementation-candidate';
+KIND_ROUTE_MAP.prompt = 'prompt-injection-candidate';
+KIND_ROUTE_MAP.defer = 'deferred';
 
 // ── Pure decision function ──────────────────────────────────────────────────
 
@@ -75,9 +78,9 @@ export function decideInternalizationRoute(
 
   // principle: requires abstractedPrinciple
   if (recommendation.kind === 'principle') {
-    const missingFields: string[] = [];
+    const missingFields: RouteMissingField[] = [];
     if (!recommendation.abstractedPrinciple?.trim()) {
-      missingFields.push('abstractedPrinciple');
+      missingFields.push('abstractedPrinciple' as RouteMissingField);
     }
     return {
       ready: missingFields.length === 0,
@@ -94,12 +97,12 @@ export function decideInternalizationRoute(
 
   // rule: requires triggerPattern + action
   if (recommendation.kind === 'rule') {
-    const missingFields: string[] = [];
+    const missingFields: RouteMissingField[] = [];
     if (!recommendation.triggerPattern?.trim()) {
-      missingFields.push('triggerPattern');
+      missingFields.push('triggerPattern' as RouteMissingField);
     }
     if (!recommendation.action?.trim()) {
-      missingFields.push('action');
+      missingFields.push('action' as RouteMissingField);
     }
     return {
       ready: missingFields.length === 0,

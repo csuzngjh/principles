@@ -141,7 +141,8 @@ describe('decideInternalizationRoute', () => {
 
     expect(decision.route).toBe('deferred');
     expect(decision.ready).toBe(false);
-    expect(decision.reason).toBeTruthy();
+    expect(decision.reason).toContain('explicitly deferred');
+    expect(decision.nextAction).toContain('No action needed');
   });
 
   // ── defensive: unknown kind ────────────────────────────────────────────────
