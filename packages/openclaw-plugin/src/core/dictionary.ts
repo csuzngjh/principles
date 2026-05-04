@@ -1,7 +1,7 @@
  
 import * as fs from 'fs';
 import * as path from 'path';
-import { atomicWriteFileSync } from '../utils/io.js';
+import { JsonFileStore } from './file-store.js';
 
 export type RuleType = 'regex' | 'exact_match';
 
@@ -64,25 +64,31 @@ const DEFAULT_RULES: Record<string, PainRule> = {
 
 export class PainDictionary {
     private data: PainDictionaryData = { rules: {} };
-    private readonly filePath: string;
+    private readonly store: JsonFileStore<PainDictionaryData>;
     private readonly compiledRegex: Map<string, RegExp> = new Map();
 
     constructor(private readonly stateDir: string) {
-        this.filePath = path.join(stateDir, 'pain_dictionary.json');
+        const filePath = path.join(stateDir, 'pain_dictionary.json');
+        this.store = new JsonFileStore<PainDictionaryData>(filePath, () => ({ rules: { ...DEFAULT_RULES } }));
     }
 
     load(): void {
-        if (fs.existsSync(this.filePath)) {
-            try {
-                this.data = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
-            } catch {
-                console.error('[PD] Failed to parse pain_dictionary.json, using defaults.');
-                this.data = { rules: { ...DEFAULT_RULES } };
-            }
+        const filePath = path.join(this.stateDir, 'pain_dictionary.json');
+        const fileExisted = fs.existsSync(filePath);
+        const loaded = this.store.load();
+        // Check if we got real data (has at least one rule from file) or just defaults
+        const hasRules = loaded.rules && Object.keys(loaded.rules).length > 0;
+        if (hasRules) {
+            this.data = loaded;
         } else {
             this.data = { rules: { ...DEFAULT_RULES } };
-            console.log(`[PD:Dictionary] Dictionary not found at ${this.filePath}, creating with default rules`);
-            this.flush();
+            // Only overwrite if file didn't previously exist — preserve corrupt files
+            if (!fileExisted) {
+                console.log(`[PD:Dictionary] Dictionary not found, creating with default rules`);
+                this.flush();
+            } else {
+                console.warn(`[PD:Dictionary] Dictionary corrupt or empty, preserving file and using defaults`);
+            }
         }
         this.compile();
     }
@@ -152,14 +158,7 @@ export class PainDictionary {
     }
 
     flush(): void {
-        try {
-            if (!fs.existsSync(this.stateDir)) {
-                fs.mkdirSync(this.stateDir, { recursive: true });
-            }
-            atomicWriteFileSync(this.filePath, JSON.stringify(this.data, null, 2));
-        } catch (e) {
-            console.error('[PD] Failed to flush pain_dictionary.json:', e);
-        }
+        this.store.save(this.data);
     }
 
     getStats(): { totalRules: number; totalHits: number } {

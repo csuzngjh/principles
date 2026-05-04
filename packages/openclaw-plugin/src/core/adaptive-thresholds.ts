@@ -24,7 +24,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
-import { atomicWriteFileSync } from '../utils/io.js';
+import { JsonFileStore } from './file-store.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -163,19 +163,9 @@ export interface UpdateThresholdResult {
 }
 
 // ---------------------------------------------------------------------------
-// State Persistence
+// State Persistence (FileStore)
 // ---------------------------------------------------------------------------
 
-/**
- * Get the threshold state file path.
- */
-function getStatePath(stateDir: string): string {
-  return path.join(stateDir, THRESHOLD_STATE_FILE);
-}
-
-/**
- * Create default threshold persistence state.
- */
 function createDefaultState(): ThresholdPersistenceState {
   const now = new Date().toISOString();
   const thresholds: Record<ThresholdName, ThresholdState> = {} as Record<ThresholdName, ThresholdState>;
@@ -197,39 +187,53 @@ function createDefaultState(): ThresholdPersistenceState {
   };
 }
 
-/**
- * Read threshold state from disk (with locking).
- */
-function readState(stateDir: string): ThresholdPersistenceState | null {
-  const statePath = getStatePath(stateDir);
-  if (!fs.existsSync(statePath)) {
-    return null;
-  }
+let _store: Map<string, JsonFileStore<ThresholdPersistenceState>> = new Map();
 
+function getStore(stateDir: string): JsonFileStore<ThresholdPersistenceState> {
+  let store = _store.get(stateDir);
+  if (!store) {
+    const filePath = path.join(stateDir, THRESHOLD_STATE_FILE);
+    store = new JsonFileStore<ThresholdPersistenceState>(filePath, createDefaultState);
+    _store.set(stateDir, store);
+  }
+  return store;
+}
+
+/**
+ * Check if the state file exists on disk.
+ */
+function hasStateFile(stateDir: string): boolean {
+  const filePath = path.join(stateDir, THRESHOLD_STATE_FILE);
   try {
-    const content = fs.readFileSync(statePath, 'utf-8');
-    const parsed = JSON.parse(content) as ThresholdPersistenceState;
-    return parsed;
+    return fs.existsSync(filePath);
   } catch {
-    // Corrupted — return null to trigger default fallback
-    return null;
+    return false;
   }
 }
 
 /**
- * Write threshold state to disk (with locking).
+ * Check if loaded state is the default (not persisted) or a real saved state.
+ * A real saved state has version field set. A default factory output has version undefined.
+ * This is used to detect corruption (file existed but returned default).
  */
-function writeState(stateDir: string, state: ThresholdPersistenceState): void {
-  const statePath = getStatePath(stateDir);
-  const stateDirPath = path.dirname(statePath);
+function hasVersionField(state: ThresholdPersistenceState): boolean {
+  return state.version !== undefined;
+}
 
-  if (!fs.existsSync(stateDirPath)) {
-    fs.mkdirSync(stateDirPath, { recursive: true });
+/**
+ * Check if the file on disk is valid JSON (not corrupted).
+ * Returns true if file exists and is valid, false otherwise.
+ */
+function isFileValid(stateDir: string): boolean {
+  const filePath = path.join(stateDir, THRESHOLD_STATE_FILE);
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    if (!raw) return false;
+    JSON.parse(raw);
+    return true;
+  } catch {
+    return false;
   }
-
-  withLock(statePath, () => {
-    atomicWriteFileSync(statePath, JSON.stringify(state, null, 2));
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -243,19 +247,15 @@ function writeState(stateDir: string, state: ThresholdPersistenceState): void {
  * @returns LoadThresholdResult with current values and status
  */
 export function loadThresholdState(stateDir: string): LoadThresholdResult {
-  const rawState = readState(stateDir);
-
-  if (!rawState) {
-    return {
-      success: true,
-      thresholds: { ...DEFAULT_THRESHOLDS } as ThresholdValues,
-      usedDefaults: true,
-    };
-  }
+  const fileExisted = hasStateFile(stateDir);
+  const fileValid = fileExisted && isFileValid(stateDir);
+  const rawState = getStore(stateDir).load();
 
   // Validate and reconstruct threshold values
   const thresholds: Record<ThresholdName, number> = { ...DEFAULT_THRESHOLDS } as Record<ThresholdName, number>;
-  let usedDefaults = false;
+  // usedDefaults if file didn't exist OR file was corrupted
+  // Corruption is detected by checking if the on-disk file is valid JSON
+  let usedDefaults = !fileValid;
 
   for (const [name, defaultValue] of Object.entries(DEFAULT_THRESHOLDS)) {
     const key = name as ThresholdName;
@@ -268,7 +268,6 @@ export function loadThresholdState(stateDir: string): LoadThresholdResult {
       );
     } else {
       thresholds[key] = defaultValue;
-      usedDefaults = true;
     }
   }
 
@@ -307,67 +306,67 @@ export function updateThresholdState(
   newValue: number,
   reason: string
 ): UpdateThresholdResult {
-  // Read current state
-  let rawState = readState(stateDir);
-  if (!rawState) {
-    rawState = createDefaultState();
-  }
+  const store = getStore(stateDir);
+  const filePath = path.join(stateDir, THRESHOLD_STATE_FILE);
 
-  const currentState = rawState.thresholds[thresholdName];
-  if (!currentState) {
-    return {
-      success: false,
-      thresholds: { ...DEFAULT_THRESHOLDS } as ThresholdValues,
-      changed: false,
-      error: `Unknown threshold: ${thresholdName}`,
+  return withLock(filePath, () => {
+    let rawState = store.load();
+    if (!rawState.thresholds) {
+      rawState = createDefaultState();
+    }
+
+    const currentState = rawState.thresholds[thresholdName];
+    if (!currentState) {
+      return {
+        success: false,
+        thresholds: { ...DEFAULT_THRESHOLDS } as ThresholdValues,
+        changed: false,
+        error: `Unknown threshold: ${thresholdName}`,
+      } as UpdateThresholdResult;
+    }
+
+    const clampedValue = Math.max(
+      currentState.minValue,
+      Math.min(currentState.maxValue, newValue)
+    );
+
+    const delta = Math.abs(clampedValue - currentState.currentValue);
+    if (delta < MIN_ADJUSTMENT_TO_RECORD) {
+      return {
+        success: true,
+        thresholds: getEffectiveThresholds(stateDir),
+        changed: false,
+      } as UpdateThresholdResult;
+    }
+
+    let finalValue = clampedValue;
+    if (delta > MAX_ADJUSTMENT_PER_STEP) {
+      const direction = clampedValue > currentState.currentValue ? 1 : -1;
+      finalValue = currentState.currentValue + direction * MAX_ADJUSTMENT_PER_STEP;
+    }
+
+    const now = new Date().toISOString();
+    rawState.thresholds[thresholdName] = {
+      ...currentState,
+      currentValue: finalValue,
+      lastUpdatedAt: now,
+      adjustmentReason: reason,
+      adjustmentCount: currentState.adjustmentCount + 1,
     };
-  }
+    rawState.lastUpdatedAt = now;
 
-  // Calculate bounded new value
-  const clampedValue = Math.max(
-    currentState.minValue,
-    Math.min(currentState.maxValue, newValue)
-  );
+    store.save(rawState);
 
-  // Check if change is meaningful
-  const delta = Math.abs(clampedValue - currentState.currentValue);
-  if (delta < MIN_ADJUSTMENT_TO_RECORD) {
     return {
       success: true,
       thresholds: getEffectiveThresholds(stateDir),
-      changed: false,
-    };
-  }
-
-  // Enforce maximum step size for bounded, safe threshold adjustments
-  let finalValue = clampedValue;
-  if (delta > MAX_ADJUSTMENT_PER_STEP) {
-    const direction = clampedValue > currentState.currentValue ? 1 : -1;
-    finalValue = currentState.currentValue + direction * MAX_ADJUSTMENT_PER_STEP;
-  }
-
-  // Update state
-  const now = new Date().toISOString();
-  rawState.thresholds[thresholdName] = {
-    ...currentState,
-    currentValue: finalValue,
-    lastUpdatedAt: now,
-    adjustmentReason: reason,
-    adjustmentCount: currentState.adjustmentCount + 1,
-  };
-  rawState.lastUpdatedAt = now;
-
-  writeState(stateDir, rawState);
-
-  return {
-    success: true,
-    thresholds: getEffectiveThresholds(stateDir),
-    changed: true,
-    changedThreshold: thresholdName,
-    oldValue: currentState.currentValue,
-    newValue: finalValue,
-    reason,
-  };
+      changed: true,
+      changedThreshold: thresholdName,
+      oldValue: currentState.currentValue,
+      newValue: finalValue,
+      reason,
+    } as UpdateThresholdResult;
+  });
 }
 
 /**
@@ -377,7 +376,7 @@ export function updateThresholdState(
  */
 export function resetThresholdState(stateDir: string): void {
   const defaultState = createDefaultState();
-  writeState(stateDir, defaultState);
+  getStore(stateDir).save(defaultState);
 }
 
 /**
@@ -389,7 +388,14 @@ export function resetThresholdState(stateDir: string): void {
 export function getDetailedThresholdState(
   stateDir: string
 ): ThresholdPersistenceState | null {
-  return readState(stateDir);
+  if (!isFileValid(stateDir)) {
+    return null;
+  }
+  const state = getStore(stateDir).load();
+  if (!hasVersionField(state)) {
+    return null;
+  }
+  return state;
 }
 
 // ---------------------------------------------------------------------------
