@@ -20,18 +20,18 @@
 import type { SqliteConnection } from './sqlite-connection.js';
 import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task/task-store.js';
 import type { RunStore, RunRecord } from './run/run-store.js';
-import type { LeaseManager, AcquireLeaseOptions } from './lease-manager.js';
-import type { RetryPolicy, RetryPolicyConfig } from './retry-policy.js';
-import type { RecoverySweep } from './recovery-sweep.js';
+import type { LeaseManager, AcquireLeaseOptions } from './lifecycle/lease-manager.js';
+import type { RetryPolicy, RetryPolicyConfig } from './lifecycle/retry-policy.js';
+import type { RecoverySweep } from './lifecycle/recovery-sweep.js';
 import type { PDErrorCategory } from '../error-categories.js';
 import type { TaskRecord } from '../task-status.js';
 import { storeEmitter, type StoreEventEmitter } from './event-emitter.js';
 import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { SqliteConnection as SqliteConnectionClass } from './sqlite-connection.js';
-import { DefaultLeaseManager } from './lease-manager.js';
-import { DefaultRetryPolicy } from './retry-policy.js';
-import { DefaultRecoverySweep } from './recovery-sweep.js';
+import { DefaultLeaseManager } from './lifecycle/lease-manager.js';
+import { DefaultRetryPolicy } from './lifecycle/retry-policy.js';
+import { DefaultRecoverySweep } from './lifecycle/recovery-sweep.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
 

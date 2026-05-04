@@ -9,7 +9,7 @@
  * All trajectory locate operations go through this interface, enabling
  * swap between SQLite (default) and test doubles.
  */
-import type { TrajectoryLocateQuery, TrajectoryLocateResult } from '../context-payload.js';
+import type { TrajectoryLocateQuery, TrajectoryLocateResult } from '../../context-payload.js';
 
 export interface TrajectoryLocator {
   /**

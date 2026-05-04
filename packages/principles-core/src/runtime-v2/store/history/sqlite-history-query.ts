@@ -13,9 +13,9 @@ import {
   HistoryQueryResultSchema,
   type HistoryQueryEntry,
   type HistoryQueryResult,
-} from '../context-payload.js';
-import { PDRuntimeError } from '../error-categories.js';
-import type { SqliteConnection } from './sqlite-connection.js';
+} from '../../context-payload.js';
+import { PDRuntimeError } from '../../error-categories.js';
+import type { SqliteConnection } from '../sqlite-connection.js';
 import type {
   HistoryQuery,
   HistoryQueryCursorData,

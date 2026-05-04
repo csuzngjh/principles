@@ -14,16 +14,16 @@ import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
-import { SqliteConnection } from './sqlite-connection.js';
-import { SqliteTaskStore } from './task/sqlite-task-store.js';
-import { SqliteRunStore } from './run/sqlite-run-store.js';
-import { SqliteHistoryQuery } from './sqlite-history-query.js';
+import { SqliteConnection } from '../sqlite-connection.js';
+import { SqliteTaskStore } from '../task/sqlite-task-store.js';
+import { SqliteRunStore } from '../run/sqlite-run-store.js';
+import { SqliteHistoryQuery } from '../history/sqlite-history-query.js';
 import { SqliteContextAssembler } from './sqlite-context-assembler.js';
-import { DiagnosticianContextPayloadSchema } from '../context-payload.js';
-import type { DiagnosticianTaskRecord } from '../task-status.js';
-import type { TaskRecord } from '../task-status.js';
-import type { RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
-import type { TaskStore } from './task/task-store.js';
+import { DiagnosticianContextPayloadSchema } from '../../context-payload.js';
+import type { DiagnosticianTaskRecord } from '../../task-status.js';
+import type { TaskRecord } from '../../task-status.js';
+import type { RunRecord, RunExecutionStatus } from '../../runtime-protocol.js';
+import type { TaskStore } from '../task/task-store.js';
 
 // ── Mock TaskStore that returns DiagnosticianTaskRecord ──
 

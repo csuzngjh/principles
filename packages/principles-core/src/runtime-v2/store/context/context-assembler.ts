@@ -2,7 +2,7 @@
  * ContextAssembler -- abstract interface for context assembly operations.
  * Composes TaskStore + HistoryQuery + RunStore to assemble DiagnosticianContextPayload.
  */
-import type { DiagnosticianContextPayload } from '../context-payload.js';
+import type { DiagnosticianContextPayload } from '../../context-payload.js';
 
 export interface ContextAssembler {
   /**

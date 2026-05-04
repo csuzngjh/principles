@@ -13,11 +13,11 @@
  */
 import { randomUUID, createHash } from 'node:crypto';
 import type { ContextAssembler } from './context-assembler.js';
-import type { StoreEventEmitter } from './event-emitter.js';
+import type { StoreEventEmitter } from '../event-emitter.js';
 import {
   type DiagnosticianContextPayload,
-} from '../context-payload.js';
-import type { PDErrorCategory } from '../error-categories.js';
+} from '../../context-payload.js';
+import type { PDErrorCategory } from '../../error-categories.js';
 
 /** Options for emitting a degradation telemetry event. */
 interface DegradationEmitOptions {

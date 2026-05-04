@@ -11,9 +11,9 @@ import {
   type TrajectoryLocateQuery,
   type TrajectoryLocateResult,
   type TrajectoryCandidate,
-} from '../context-payload.js';
-import { PDRuntimeError } from '../error-categories.js';
-import type { SqliteConnection } from './sqlite-connection.js';
+} from '../../context-payload.js';
+import { PDRuntimeError } from '../../error-categories.js';
+import type { SqliteConnection } from '../sqlite-connection.js';
 import type { TrajectoryLocator } from './trajectory-locator.js';
 
 export class SqliteTrajectoryLocator implements TrajectoryLocator {

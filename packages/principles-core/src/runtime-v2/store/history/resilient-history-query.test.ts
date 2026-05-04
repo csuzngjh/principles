@@ -9,14 +9,14 @@ import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { SqliteConnection } from './sqlite-connection.js';
-import { SqliteTaskStore } from './task/sqlite-task-store.js';
-import { SqliteRunStore } from './run/sqlite-run-store.js';
+import { SqliteConnection } from '../sqlite-connection.js';
+import { SqliteTaskStore } from '../task/sqlite-task-store.js';
+import { SqliteRunStore } from '../run/sqlite-run-store.js';
 import { SqliteHistoryQuery } from './sqlite-history-query.js';
 import { ResilientHistoryQuery } from './resilient-history-query.js';
-import { StoreEventEmitter } from './event-emitter.js';
-import type { RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
-import type { TaskRecord, PDTaskStatus } from '../task-status.js';
+import { StoreEventEmitter } from '../event-emitter.js';
+import type { RunRecord, RunExecutionStatus } from '../../runtime-protocol.js';
+import type { TaskRecord, PDTaskStatus } from '../../task-status.js';
 
 interface TestFixture {
   tmpDir: string;

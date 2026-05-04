@@ -10,12 +10,12 @@ import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { SqliteConnection } from './sqlite-connection.js';
-import { SqliteTaskStore } from './task/sqlite-task-store.js';
-import { SqliteRunStore } from './run/sqlite-run-store.js';
+import { SqliteConnection } from '../sqlite-connection.js';
+import { SqliteTaskStore } from '../task/sqlite-task-store.js';
+import { SqliteRunStore } from '../run/sqlite-run-store.js';
 import { SqliteTrajectoryLocator } from './sqlite-trajectory-locator.js';
-import type { TrajectoryLocateQuery } from '../context-payload.js';
-import type { RunRecord, RunExecutionStatus } from '../runtime-protocol.js';
+import type { TrajectoryLocateQuery } from '../../context-payload.js';
+import type { RunRecord, RunExecutionStatus } from '../../runtime-protocol.js';
 
 function makeTaskInput(taskId: string) {
   return {
@@ -106,7 +106,7 @@ describe('SqliteTrajectoryLocator', () => {
       const candidate = firstCandidate(result);
       expect(candidate!.trajectoryRef).toBe('task-pain-1');
       expect(candidate!.confidence).toBe(0.95);
-      expect(candidate!.reasons).toContain('pain_id_to_run_id_lookup');
+      expect(candidate!.reasons).toContain('run_alias_lookup');
       expect(candidate!.sourceTypes).toContain('runs_table');
     });
 

@@ -13,8 +13,8 @@
  * Source: PD Runtime Protocol SPEC v1, Section 19 (Error categories and retry)
  * Source: Diagnostician v2 Detailed Design, Section 20 (Retry and backoff)
  */
-import type { TaskRecord } from '../task-status.js';
-import type { PDErrorCategory } from '../error-categories.js';
+import type { TaskRecord } from '../../task-status.js';
+import type { PDErrorCategory } from '../../error-categories.js';
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
