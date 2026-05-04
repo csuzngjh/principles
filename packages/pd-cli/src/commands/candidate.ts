@@ -7,6 +7,7 @@
  *   pd candidate intake --candidate-id <id> [--workspace <path>] [--json] [--dry-run]
  *   pd candidate audit --workspace <path> [--json]
  *   pd candidate repair --candidate-id <id> --workspace <path> [--json]
+ *   pd candidate route --candidate-id <id> --workspace <path> [--json]
  */
 import { randomUUID } from 'crypto';
 import * as path from 'path';
@@ -18,6 +19,7 @@ import {
   CandidateIntakeError,
   loadLedger,
   getLedgerFilePathPublic,
+  decideInternalizationRoute,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
@@ -454,6 +456,108 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
       console.error(`Repair failed: ${String(err)}`);
     }
     process.exit(1);
+  } finally {
+    await stateManager.close();
+  }
+}
+
+// ── Route (Internalization Inspection) ──────────────────────────────────────
+
+interface CandidateRouteOptions {
+  candidateId: string;
+  workspace?: string;
+  json?: boolean;
+}
+
+/**
+ * pd candidate route --candidate-id <id> --workspace <path> [--json]
+ *
+ * Read-only: shows which internalization pipeline route a candidate will enter,
+ * whether it's ready, and what fields are missing.
+ */
+export async function handleCandidateRoute(opts: CandidateRouteOptions): Promise<void> {
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+
+  try {
+    await stateManager.initialize();
+
+    const candidate = await stateManager.getCandidate(opts.candidateId);
+    if (!candidate) {
+      console.error(`Candidate not found: ${opts.candidateId}`);
+      process.exit(1);
+      return; // unreachable in production, needed for test mocks
+    }
+
+    let recommendation: { kind: string; description: string; triggerPattern?: string; action?: string; abstractedPrinciple?: string } | undefined = undefined;
+    let usedFallback = false;
+
+    if (candidate.sourceRecommendationJson) {
+      try {
+        const parsed = JSON.parse(candidate.sourceRecommendationJson);
+        if (parsed?.kind) {
+          recommendation = {
+            kind: parsed.kind,
+            description: parsed.description ?? candidate.description,
+            triggerPattern: parsed.triggerPattern,
+            action: parsed.action,
+            abstractedPrinciple: parsed.abstractedPrinciple,
+          };
+        }
+      } catch { /* fall through to column fallback */ }
+    }
+
+    if (!recommendation) {
+      const row = stateManager.connection.getDb().prepare(
+        'SELECT recommendation_kind, trigger_pattern, action, abstracted_principle FROM principle_candidates WHERE candidate_id = ?',
+      ).get(opts.candidateId) as
+        { recommendation_kind: string; trigger_pattern: string | null; action: string | null; abstracted_principle: string | null } | undefined;
+
+      if (row) {
+        recommendation = {
+          kind: row.recommendation_kind,
+          description: candidate.description,
+          triggerPattern: row.trigger_pattern ?? undefined,
+          action: row.action ?? undefined,
+          abstractedPrinciple: row.abstracted_principle ?? undefined,
+        };
+        usedFallback = true;
+      } else {
+        recommendation = {
+          kind: 'defer' as const,
+          description: candidate.description || 'No recommendation data available',
+        };
+      }
+    }
+
+    const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
+
+    const result = {
+      candidateId: opts.candidateId,
+      recommendationKind: recommendation.kind,
+      route: decision.route,
+      ready: decision.ready,
+      missingFields: decision.missingFields,
+      reason: decision.reason,
+      nextAction: decision.nextAction,
+      ...(usedFallback && { _meta: { source: 'column_fallback' } }),
+    };
+
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`\nCandidate Route: ${result.candidateId}\n`);
+      console.log(`  Kind:           ${result.recommendationKind}`);
+      console.log(`  Route:          ${result.route}`);
+      console.log(`  Ready:          ${result.ready}`);
+      console.log(`  Missing Fields: ${result.missingFields.length > 0 ? result.missingFields.join(', ') : '(none)'}`);
+      console.log(`  Reason:         ${result.reason}`);
+      console.log(`  Next Action:    ${result.nextAction}`);
+      if (usedFallback) {
+        console.log(`  Source:         column_fallback (source_recommendation_json unavailable)`);
+      }
+      console.log('');
+    }
   } finally {
     await stateManager.close();
   }

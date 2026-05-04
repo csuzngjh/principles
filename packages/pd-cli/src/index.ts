@@ -28,7 +28,7 @@ import { handleTraceShow } from './commands/trace.js';
 import { handlePruningReport, handlePruningExplain, handlePruningReview } from './commands/runtime-pruning.js';
 import { handleRuntimeHealthSnapshot } from './commands/runtime-health-snapshot.js';
 import { handleRuntimeUat } from './commands/runtime-uat.js';
-import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair } from './commands/candidate.js';
+import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
 const program = new Command();
@@ -451,6 +451,16 @@ candidateCmd
   .option('--json', 'Output as JSON')
   .action(async (opts) => {
     await handleCandidateRepair(opts);
+  });
+
+candidateCmd
+  .command('route')
+  .description('Show internalization route decision for a candidate')
+  .requiredOption('--candidate-id <id>', 'Candidate ID to inspect')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    await handleCandidateRoute(opts);
   });
 
 // ── Artifact inspection commands ────────────────────────────────────────────
