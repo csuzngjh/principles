@@ -19,6 +19,12 @@ export interface DecisionMergeLogger {
 }
 
 /**
+ * Alias for consumers that prefer the RuleHost naming convention.
+ * @deprecated Use DecisionMergeLogger instead.
+ */
+export type RuleHostLogger = DecisionMergeLogger;
+
+/**
  * Merge decisions from multiple loaded implementations.
  *
  * Rules:
@@ -33,10 +39,11 @@ export function mergeDecisions(
   input: RuleHostInput,
   logger?: DecisionMergeLogger,
 ): RuleHostResult | undefined {
+  if (!implementations || implementations.length === 0) {
+    return undefined;
+  }
+
   try {
-    if (implementations.length === 0) {
-      return undefined;
-    }
 
     let blocked: RuleHostResult | undefined = undefined;
     const approvals: RuleHostResult[] = [];
@@ -75,7 +82,14 @@ export function mergeDecisions(
         matched: true,
         reason: approvals.map((a) => a.reason).join('; '),
         diagnostics: approvals.reduce<Record<string, unknown>>(
-          (acc, a) => ({ ...acc, ...a.diagnostics }),
+          (acc, a, i) => {
+            const prefix = a.ruleId ?? `approval_${i}`;
+            const entries = Object.entries(a.diagnostics ?? {});
+            for (const [k, v] of entries) {
+              acc[`${prefix}_${k}`] = v;
+            }
+            return acc;
+          },
           {}
         ),
       };

@@ -273,6 +273,6 @@ export { checkForbiddenPatterns } from './internalization/rule-code-validator.js
 export type { CompileResult } from './internalization/compile-result.js';
 
 // Decision merge and adapter interface (PRI-45)
-export type { DecisionMergeLogger } from './internalization/rule-host-evaluator.js';
+export type { DecisionMergeLogger, RuleHostLogger } from './internalization/rule-host-evaluator.js';
 export { mergeDecisions } from './internalization/rule-host-evaluator.js';
 export type { RuleHostImplementationProvider } from './internalization/rule-host-adapter.js';

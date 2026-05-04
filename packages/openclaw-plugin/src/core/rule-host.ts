@@ -36,11 +36,7 @@ import type {
 } from '@principles/core/runtime-v2';
 import type { Implementation } from '../types/principle-tree-schema.js';
 
-export interface RuleHostLogger {
-   
-  warn?: (_message: string) => void;
-   
-}
+export type { RuleHostLogger } from '@principles/core/runtime-v2';
 
 export class RuleHost {
   private readonly stateDir: string;

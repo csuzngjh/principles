@@ -85,7 +85,7 @@ describe('mergeDecisions', () => {
   });
 
   // 5. Block short-circuits before later approvals
-  it('block short-circuits even if later impls would return requireApproval', async () => {
+  it('block takes precedence over earlier collected approvals', async () => {
     const { mergeDecisions } = await getModule();
     const impls = [
       makeImpl({
@@ -131,7 +131,7 @@ describe('mergeDecisions', () => {
     const result = mergeDecisions(impls, makeInput());
     expect(result?.decision).toBe('requireApproval');
     expect(result?.reason).toBe('risky path; sensitive content');
-    expect(result?.diagnostics).toEqual({ path: '/secrets', content: 'key' });
+    expect(result?.diagnostics).toEqual({ approval_0_path: '/secrets', approval_1_content: 'key' });
   });
 
   // 7. Allow results ignored
