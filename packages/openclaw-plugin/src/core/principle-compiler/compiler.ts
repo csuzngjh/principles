@@ -110,13 +110,20 @@ function extractPatterns(context: {
 /**
  * Infer tool name from text by checking for known tool names.
  * Returns the first matching known tool name, or null if none found.
+ *
+ * Uses negative lookbehind to avoid matching natural-language uses:
+ * - "please read the error" → read is a verb, not a tool reference
+ * - "could write to file" → write is a verb, not a tool reference
+ * Tool references in pain events typically appear near words like
+ * "tool", "call", "command", "failed", "via", "using", etc.
  */
 function inferToolName(text: string): string | null {
   const lower = text.toLowerCase();
   for (const tool of KNOWN_TOOLS) {
-    // Match as a standalone word to avoid false positives
+    // Match as a standalone word but exclude common natural-language patterns
     // e.g., "bash" in "bash" or "bash command" but not in "ambush"
-    const regex = new RegExp(`\\b${tool}\\b`);
+    // and not in "please read" or "could write" where it's a verb
+    const regex = new RegExp(`(?<!please |could |should |would )\\b${tool}\\b`);
     if (regex.test(lower)) {
       return tool;
     }
@@ -226,6 +233,8 @@ export class PrincipleCompiler {
       try {
         return this.compileOne(ctx.principle.id);
       } catch (e) {
+        // Log for operator visibility — catch-return is intentional for batch容错
+        console.warn(`[PrincipleCompiler] compileAll failed for ${ctx.principle.id}: ${(e as Error).message}`);
         return { success: false, principleId: ctx.principle.id, reason: `unhandled: ${(e as Error).message}` };
       }
     });

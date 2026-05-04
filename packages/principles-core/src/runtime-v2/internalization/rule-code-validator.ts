@@ -21,9 +21,10 @@ const FORBIDDEN_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\bfetch\s*\(/, label: 'fetch' },
   { pattern: /\beval\s*\(/, label: 'eval' },
   { pattern: /\bFunction\s*\(/, label: 'Function' },
-  { pattern: /\bprocess\b/, label: 'process' },
+  { pattern: /\bprocess\b(?![\w])/, label: 'process' },
   { pattern: /\bglobalThis\b/, label: 'globalThis' },
-  { pattern: /\bglobal\b/, label: 'global' },
+  // Only match bare "global" as identifier/global, not in comments like "// global rule" or "the global scope"
+  { pattern: /\bglobal\b(?![A-Za-z])/, label: 'global' },
   { pattern: /\bReflect\b/, label: 'Reflect' },
   { pattern: /\bProxy\b/, label: 'Proxy' },
   { pattern: /\bconstructor\b/, label: 'constructor' },
