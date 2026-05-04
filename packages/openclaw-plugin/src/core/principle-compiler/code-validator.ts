@@ -75,6 +75,9 @@ export function validateGeneratedCode(code: string): ValidationResult {
   }
 
   // --- Check 4: Return shape ---
+  // evaluate() throwing on mock input is acceptable — the function exists and has the
+  // right signature, it just can't handle our generic mock data.
+  // Track as a non-blocking warning so operators know the rule may be fragile.
   try {
     const result = (moduleExports.evaluate as (input: unknown) => unknown)(MOCK_INPUT);
     if (!result || typeof result !== 'object') {
