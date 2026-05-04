@@ -528,10 +528,6 @@ export async function handleCandidateRoute(opts: CandidateRouteOptions): Promise
       }
     }
 
-    if (!recommendation) {
-      recommendation = { kind: 'defer', description: candidate.description || 'No recommendation data available' };
-    }
-
     const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
 
     const result = {

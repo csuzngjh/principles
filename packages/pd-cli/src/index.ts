@@ -457,7 +457,7 @@ candidateCmd
   .command('route')
   .description('Show internalization route decision for a candidate')
   .requiredOption('--candidate-id <id>', 'Candidate ID to inspect')
-  .requiredOption('-w, --workspace <path>', 'Workspace directory')
+  .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output as JSON')
   .action(async (opts) => {
     await handleCandidateRoute(opts);

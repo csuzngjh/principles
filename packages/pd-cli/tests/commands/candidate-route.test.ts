@@ -163,7 +163,32 @@ describe('handleCandidateRoute', () => {
     expect(parsed.recommendationKind).toBe('principle');
   });
 
-  // ── 4. Prompt candidate ─────────────────────────────────────────────────
+  // ── 4. Implementation candidate ──────────────────────────────────────────
+
+  it('implementation candidate routes to implementation-candidate', async () => {
+    mockStateManager.getCandidate.mockResolvedValue(mockCandidate({
+      sourceRecommendationJson: JSON.stringify({
+        kind: 'implementation',
+        description: 'Auto-add error boundary to React components',
+      }),
+    }));
+    (decideInternalizationRoute as ReturnType<typeof vi.fn>).mockReturnValue({
+      ready: true,
+      route: 'implementation-candidate',
+      missingFields: [],
+      reason: 'Implementation recommendation ready for candidate pipeline.',
+      nextAction: 'Proceed with implementation-candidate intake and compilation.',
+    });
+
+    await handleCandidateRoute({ candidateId: 'cand-003b', workspace: '/tmp/ws', json: true });
+
+    const parsed = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    expect(parsed.route).toBe('implementation-candidate');
+    expect(parsed.ready).toBe(true);
+    expect(parsed.recommendationKind).toBe('implementation');
+  });
+
+  // ── 5. Prompt candidate ─────────────────────────────────────────────────
 
   it('prompt candidate routes to prompt-injection-candidate', async () => {
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate({
@@ -187,7 +212,7 @@ describe('handleCandidateRoute', () => {
     expect(parsed.ready).toBe(true);
   });
 
-  // ── 5. Defer candidate ──────────────────────────────────────────────────
+  // ── 6. Defer candidate ──────────────────────────────────────────────────
 
   it('defer candidate routes to deferred with ready=false', async () => {
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate({
@@ -212,7 +237,7 @@ describe('handleCandidateRoute', () => {
     expect(parsed.reason).toContain('deferred');
   });
 
-  // ── 6. Candidate not found ──────────────────────────────────────────────
+  // ── 7. Candidate not found ──────────────────────────────────────────────
 
   it('candidate not found exits 1 with error message', async () => {
     mockStateManager.getCandidate.mockResolvedValue(null);
@@ -223,7 +248,7 @@ describe('handleCandidateRoute', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
-  // ── 7. Malformed source_recommendation_json uses column fallback ────────
+  // ── 8. Malformed source_recommendation_json uses column fallback ────────
 
   it('malformed source_recommendation_json falls back to DB columns', async () => {
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate({
@@ -255,7 +280,7 @@ describe('handleCandidateRoute', () => {
     expect(parsed._meta?.source).toBe('column_fallback');
   });
 
-  // ── 8. Text output includes route/ready/missingFields ───────────────────
+  // ── 9. Text output includes route/ready/missingFields ───────────────────
 
   it('text output includes route, ready, and missingFields', async () => {
     mockStateManager.getCandidate.mockResolvedValue(mockCandidate());
