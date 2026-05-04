@@ -194,7 +194,7 @@ export type {
   HistoryQueryCursorData,
   HistoryQueryOptions,
 } from './runtime-v2/index.js';
-export type { ContextAssembler } from './runtime-v2/store/context-assembler.js';
+export type { ContextAssembler } from './runtime-v2/store/context/context-assembler.js';
 export type {
   TaskStore,
   TaskStoreFilter,
@@ -204,7 +204,7 @@ export type {
   RunStore,
   RunRecord,
 } from './runtime-v2/store/run/run-store.js';
-export type { TrajectoryLocator } from './runtime-v2/store/trajectory-locator.js';
+export type { TrajectoryLocator } from './runtime-v2/store/trajectory/trajectory-locator.js';
 
 // Lease & Recovery
 export { DefaultLeaseManager } from './runtime-v2/index.js';

@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { DefaultRetryPolicy } from './retry-policy.js';
-import type { TaskRecord } from '../task-status.js';
+import type { TaskRecord } from '../../task-status.js';
 
 describe('DefaultRetryPolicy', () => {
   const policy = new DefaultRetryPolicy({

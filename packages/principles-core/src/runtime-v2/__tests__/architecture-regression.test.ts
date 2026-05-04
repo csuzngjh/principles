@@ -431,16 +431,85 @@ describe('PRI-47 store modularization', () => {
     expect(src).toContain('CommitResult');
   });
 
-  it('moved files are NOT in root store/ directory', async () => {
+  it('Phase 1 moved files are NOT in root store/ directory', async () => {
     const { existsSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const storeDir = resolve(__dirname, '..', 'store');
-    // These files should have been moved to subdirectories
+    // Phase 1: These files should have been moved to subdirectories
     expect(existsSync(resolve(storeDir, 'task-store.ts'))).toBe(false);
     expect(existsSync(resolve(storeDir, 'sqlite-task-store.ts'))).toBe(false);
     expect(existsSync(resolve(storeDir, 'run-store.ts'))).toBe(false);
     expect(existsSync(resolve(storeDir, 'sqlite-run-store.ts'))).toBe(false);
     expect(existsSync(resolve(storeDir, 'diagnostician-committer.ts'))).toBe(false);
+  });
+});
+
+// ── PRI-47: Store layer modularization Phase 2 ──────────────────────────────
+
+describe('PRI-47 store modularization Phase 2', () => {
+  it('store/context/index.ts exists and re-exports ContextAssembler + implementations', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'context', 'index.ts');
+    expect(existsSync(indexPath)).toBe(true);
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('ContextAssembler');
+    expect(src).toContain('SqliteContextAssembler');
+    expect(src).toContain('ResilientContextAssembler');
+  });
+
+  it('store/history/index.ts exists and re-exports HistoryQuery + implementations', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'history', 'index.ts');
+    expect(existsSync(indexPath)).toBe(true);
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('HistoryQuery');
+    expect(src).toContain('SqliteHistoryQuery');
+    expect(src).toContain('ResilientHistoryQuery');
+  });
+
+  it('store/trajectory/index.ts exists and re-exports TrajectoryLocator + implementation', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'trajectory', 'index.ts');
+    expect(existsSync(indexPath)).toBe(true);
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('TrajectoryLocator');
+    expect(src).toContain('SqliteTrajectoryLocator');
+  });
+
+  it('store/lifecycle/index.ts exists and re-exports lease/retry/recovery', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'lifecycle', 'index.ts');
+    expect(existsSync(indexPath)).toBe(true);
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('LeaseManager');
+    expect(src).toContain('DefaultLeaseManager');
+    expect(src).toContain('DefaultRetryPolicy');
+    expect(src).toContain('DefaultRecoverySweep');
+  });
+
+  it('Phase 2 moved files are NOT in root store/ directory', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const storeDir = resolve(__dirname, '..', 'store');
+    // Phase 2: context
+    expect(existsSync(resolve(storeDir, 'context-assembler.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'sqlite-context-assembler.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'resilient-context-assembler.ts'))).toBe(false);
+    // Phase 2: history
+    expect(existsSync(resolve(storeDir, 'history-query.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'sqlite-history-query.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'resilient-history-query.ts'))).toBe(false);
+    // Phase 2: trajectory
+    expect(existsSync(resolve(storeDir, 'trajectory-locator.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'sqlite-trajectory-locator.ts'))).toBe(false);
+    // Phase 2: lifecycle
+    expect(existsSync(resolve(storeDir, 'lease-manager.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'retry-policy.ts'))).toBe(false);
+    expect(existsSync(resolve(storeDir, 'recovery-sweep.ts'))).toBe(false);
   });
 
   it('barrel still exports all store symbols', async () => {

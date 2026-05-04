@@ -11,12 +11,12 @@
  * Source: PD Runtime Protocol SPEC v1, Section 12 (Task lease protocol)
  * Source: Diagnostician v2 Detailed Design, Section 7-8 (Task queue, lease)
  */
-import { PDRuntimeError } from '../error-categories.js';
-import type { TaskRecord } from '../task-status.js';
-import type { TaskStore } from './task/task-store.js';
-import type { RunStore } from './run/run-store.js';
-import type { SqliteConnection } from './sqlite-connection.js';
-import { storeEmitter, type StoreEventEmitter } from './event-emitter.js';
+import { PDRuntimeError } from '../../error-categories.js';
+import type { TaskRecord } from '../../task-status.js';
+import type { TaskStore } from '../task/task-store.js';
+import type { RunStore } from '../run/run-store.js';
+import type { SqliteConnection } from '../sqlite-connection.js';
+import { storeEmitter, type StoreEventEmitter } from '../event-emitter.js';
 
 // ── Options ──────────────────────────────────────────────────────────────────
 

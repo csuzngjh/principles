@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { RuntimeStateManager } from '../../store/runtime-state-manager.js';
-import type { ContextAssembler } from '../../store/context-assembler.js';
+import type { ContextAssembler } from '../../store/context/context-assembler.js';
 import type { PDRuntimeAdapter, RunHandle } from '../../runtime-protocol.js';
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { DiagnosticianValidator } from '../diagnostician-validator.js';
