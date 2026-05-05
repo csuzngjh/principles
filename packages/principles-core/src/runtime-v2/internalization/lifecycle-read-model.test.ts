@@ -269,4 +269,180 @@ describe('buildLifecycleReadModel', () => {
     expect(p?.summary.activeImplementationCount).toBe(1);
     expect(p?.summary.disabledImplementationCount).toBe(1);
   });
+
+  it('computes durablePenaltyCount from disabled/archived implementations and disabledReason', () => {
+    const principle: LedgerPrinciple = {
+      id: 'p1', version: 1, text: 'Test', triggerPattern: 'test', action: 'test',
+      status: 'active', priority: 'P1', scope: 'general', evaluability: 'deterministic',
+      valueScore: 0, adherenceRate: 0, painPreventedCount: 0,
+      derivedFromPainIds: [], ruleIds: ['r1'], conflictsWithPrincipleIds: [],
+      createdAt: '', updatedAt: '',
+    };
+    const rule: LedgerRule = {
+      id: 'r1', principleId: 'p1', ruleIds: [], implementationIds: ['impl-disabled', 'impl-archived', 'impl-reason'],
+    };
+    const tree: LedgerTreeStore = {
+      principles: { p1: principle },
+      rules: { r1: rule },
+      implementations: {
+        'impl-disabled': { id: 'impl-disabled', ruleId: 'r1', lifecycleState: 'disabled' },
+        'impl-archived': { id: 'impl-archived', ruleId: 'r1', lifecycleState: 'archived' },
+        'impl-reason': { id: 'impl-reason', ruleId: 'r1', lifecycleState: 'active', disabledReason: 'broken' },
+      },
+      metrics: {},
+      lastUpdated: '2026-01-01T00:00:00Z',
+    };
+
+    const datasource = makeDatasource({ loadLedger: () => tree });
+    const result = buildLifecycleReadModel(datasource);
+
+    const [p] = result.principles;
+    const [r] = p?.rules ?? [];
+    expect(r).toBeDefined();
+    expect(r?.liveEvidence.durablePenaltyCount).toBe(3);
+  });
+
+  it('computes rollbackEvidenceCount from previousActive', () => {
+    const principle: LedgerPrinciple = {
+      id: 'p1', version: 1, text: 'Test', triggerPattern: 'test', action: 'test',
+      status: 'active', priority: 'P1', scope: 'general', evaluability: 'deterministic',
+      valueScore: 0, adherenceRate: 0, painPreventedCount: 0,
+      derivedFromPainIds: [], ruleIds: ['r1'], conflictsWithPrincipleIds: [],
+      createdAt: '', updatedAt: '',
+    };
+    const rule: LedgerRule = {
+      id: 'r1', principleId: 'p1', ruleIds: [], implementationIds: ['impl-rollback'],
+    };
+    const tree: LedgerTreeStore = {
+      principles: { p1: principle },
+      rules: { r1: rule },
+      implementations: {
+        'impl-rollback': { id: 'impl-rollback', ruleId: 'r1', lifecycleState: 'active', previousActive: 'impl-old' },
+      },
+      metrics: {},
+      lastUpdated: '2026-01-01T00:00:00Z',
+    };
+
+    const datasource = makeDatasource({ loadLedger: () => tree });
+    const result = buildLifecycleReadModel(datasource);
+
+    const [p] = result.principles;
+    const [r] = p?.rules ?? [];
+    expect(r).toBeDefined();
+    expect(r?.liveEvidence.rollbackEvidenceCount).toBe(1);
+    expect(r?.liveEvidence.hasRollbackEvidence).toBeUndefined();
+  });
+
+  it('sets hasPassingActiveImplementation based on passing report on active impl', () => {
+    const principle: LedgerPrinciple = {
+      id: 'p1', version: 1, text: 'Test', triggerPattern: 'test', action: 'test',
+      status: 'active', priority: 'P1', scope: 'general', evaluability: 'deterministic',
+      valueScore: 0, adherenceRate: 0, painPreventedCount: 0,
+      derivedFromPainIds: [], ruleIds: ['r1'], conflictsWithPrincipleIds: [],
+      createdAt: '', updatedAt: '',
+    };
+    const rule: LedgerRule = {
+      id: 'r1', principleId: 'p1', ruleIds: [], implementationIds: ['impl-active'],
+    };
+    const tree: LedgerTreeStore = {
+      principles: { p1: principle },
+      rules: { r1: rule },
+      implementations: {
+        'impl-active': { id: 'impl-active', ruleId: 'r1', lifecycleState: 'active' },
+      },
+      metrics: {},
+      lastUpdated: '2026-01-01T00:00:00Z',
+    };
+
+    const datasource = makeDatasource({
+      loadLedger: () => tree,
+      listReplayReports: (implId: string) => {
+        if (implId === 'impl-active') {
+          return [makeReplayReport({ implementationId: implId, overallDecision: 'pass' })];
+        }
+        return [];
+      },
+    });
+    const result = buildLifecycleReadModel(datasource);
+
+    const [p] = result.principles;
+    const [r] = p?.rules ?? [];
+    expect(r?.liveEvidence.hasPassingActiveImplementation).toBe(true);
+  });
+
+  it('hasPassingActiveImplementation is false when active impl has fail report', () => {
+    const principle: LedgerPrinciple = {
+      id: 'p1', version: 1, text: 'Test', triggerPattern: 'test', action: 'test',
+      status: 'active', priority: 'P1', scope: 'general', evaluability: 'deterministic',
+      valueScore: 0, adherenceRate: 0, painPreventedCount: 0,
+      derivedFromPainIds: [], ruleIds: ['r1'], conflictsWithPrincipleIds: [],
+      createdAt: '', updatedAt: '',
+    };
+    const rule: LedgerRule = {
+      id: 'r1', principleId: 'p1', ruleIds: [], implementationIds: ['impl-active'],
+    };
+    const tree: LedgerTreeStore = {
+      principles: { p1: principle },
+      rules: { r1: rule },
+      implementations: {
+        'impl-active': { id: 'impl-active', ruleId: 'r1', lifecycleState: 'active' },
+      },
+      metrics: {},
+      lastUpdated: '2026-01-01T00:00:00Z',
+    };
+
+    const datasource = makeDatasource({
+      loadLedger: () => tree,
+      listReplayReports: (implId: string) => {
+        if (implId === 'impl-active') {
+          return [makeReplayReport({ implementationId: implId, overallDecision: 'fail' })];
+        }
+        return [];
+      },
+    });
+    const result = buildLifecycleReadModel(datasource);
+
+    const [p] = result.principles;
+    const [r] = p?.rules ?? [];
+    expect(r?.liveEvidence.hasPassingActiveImplementation).toBe(false);
+  });
+
+  it('computes needsReviewImplementationIds from needs-review replay reports', () => {
+    const principle: LedgerPrinciple = {
+      id: 'p1', version: 1, text: 'Test', triggerPattern: 'test', action: 'test',
+      status: 'active', priority: 'P1', scope: 'general', evaluability: 'deterministic',
+      valueScore: 0, adherenceRate: 0, painPreventedCount: 0,
+      derivedFromPainIds: [], ruleIds: ['r1'], conflictsWithPrincipleIds: [],
+      createdAt: '', updatedAt: '',
+    };
+    const rule: LedgerRule = {
+      id: 'r1', principleId: 'p1', ruleIds: [], implementationIds: ['impl-review'],
+    };
+    const tree: LedgerTreeStore = {
+      principles: { p1: principle },
+      rules: { r1: rule },
+      implementations: {
+        'impl-review': { id: 'impl-review', ruleId: 'r1', lifecycleState: 'active' },
+      },
+      metrics: {},
+      lastUpdated: '2026-01-01T00:00:00Z',
+    };
+
+    const datasource = makeDatasource({
+      loadLedger: () => tree,
+      listReplayReports: (implId: string) => {
+        if (implId === 'impl-review') {
+          return [makeReplayReport({ implementationId: implId, overallDecision: 'needs-review' })];
+        }
+        return [];
+      },
+    });
+    const result = buildLifecycleReadModel(datasource);
+
+    const [p] = result.principles;
+    const [r] = p?.rules ?? [];
+    expect(r).toBeDefined();
+    expect(r?.replayEvidence.needsReviewImplementationIds).toEqual(['impl-review']);
+    expect(r?.replayEvidence.reportCount).toBe(1);
+  });
 });

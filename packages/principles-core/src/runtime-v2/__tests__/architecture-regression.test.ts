@@ -58,6 +58,8 @@ const REQUIRED_TEST_FILES = [
   // PRI-28
   'operator-health-read-model.test.ts',
   'candidate-audit.test.ts',
+  // PRI-56
+  'internalization/lifecycle-read-model.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
