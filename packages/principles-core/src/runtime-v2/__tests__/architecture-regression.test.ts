@@ -41,6 +41,8 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/lifecycle-types.ts',
   // PRI-52
   'internalization/lifecycle-metrics.ts',
+  // PRI-53
+  'internalization/deprecated-readiness.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -734,5 +736,38 @@ describe('PRI-52 lifecycle metrics', () => {
     expect(src).toContain("from '@principles/core/runtime-v2'");
     expect(src).toContain('computeRuleMetrics');
     expect(src).toContain('computePrincipleAdherence');
+  });
+});
+
+// ── PRI-53: Deprecated readiness extraction ──────────────────────────────────
+
+describe('PRI-53 deprecated readiness', () => {
+  it('core exports all readiness types/functions from barrel', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('DeprecatedReadinessStatus');
+    expect(src).toContain('DeprecatedReadinessAssessment');
+    expect(src).toContain('assessDeprecatedReadiness');
+  });
+
+  it('deprecated-readiness.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'deprecated-readiness.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('plugin deprecated-readiness.ts re-exports from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/deprecated-readiness.ts'
+    ), 'utf-8');
+    expect(src).toContain("from '@principles/core/runtime-v2'");
+    expect(src).toContain('assessDeprecatedReadiness');
+    expect(src).toContain('DeprecatedReadinessAssessment');
   });
 });
