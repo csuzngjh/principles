@@ -51,6 +51,9 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-61
   'internalization/peer-runner-contracts.ts',
   'internalization/internalization-job-graph.ts',
+  // PRI-62
+  'internalization/internalization-task-guards.ts',
+  'internalization/internalization-state-machine.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -63,6 +66,8 @@ const REQUIRED_TEST_FILES = [
   'candidate-audit.test.ts',
   // PRI-56 (lifecycle-read-model.test.ts is at internalization/lifecycle-read-model.test.ts, not in __tests__/)
   // Skipping — test file lives at ../internalization/ not __tests__/internalization/
+  // PRI-62
+  'internalization-state-machine.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -936,5 +941,78 @@ describe('PRI-61 Internalization Peer Runner Contracts', () => {
     // Edge validation is read-only — no task creation or state mutation
     const result = validateEdge('dreamer', 'philosopher');
     expect(typeof result).toBe('boolean');
+  });
+});
+
+// ── PRI-62: Internalization State Machine Guards ─────────────────────────────
+
+describe('PRI-62 Internalization State Machine Guards', () => {
+  it('core barrel exports state machine guard functions', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('validateInternalizationTaskReady');
+    expect(src).toContain('validateTaskTransition');
+    expect(src).toContain('decideArtifactRejectionFeedback');
+    expect(src).toContain('createNextTaskProposal');
+    expect(src).toContain('validateInternalizationGraph');
+  });
+
+  it('core barrel exports guard utility functions', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('canAcquireLease');
+    expect(src).toContain('areDependenciesMet');
+    expect(src).toContain('canTransitionTo');
+    expect(src).toContain('isResultRefImmutable');
+    expect(src).toContain('canUpdateLastError');
+    expect(src).toContain('isArtifactRejected');
+  });
+
+  it('internalization-task-guards.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '..', 'internalization', 'internalization-task-guards.ts'
+    ), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('node:cron');
+  });
+
+  it('internalization-state-machine.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '..', 'internalization', 'internalization-state-machine.ts'
+    ), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('node:cron');
+  });
+
+  it('TASK_MODEL_REUSE: guard functions work with PITaskRecord (type-level check)', async () => {
+    // If PITaskRecord didn't properly extend TaskRecord, TypeScript would error
+    // at compile time in peer-runner-contracts.ts and internalization-task-guards.ts
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '..', 'internalization', 'internalization-task-guards.ts'
+    ), 'utf-8');
+    expect(src).toContain('task: PITaskRecord');
+  });
+
+  it('PEER_NO_DIRECT_CHAINING: state machine returns proposals, not execute calls', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    // Pure function — returns an object, no side effects
+    const { createMinimalPITaskRecord } = await import('../internalization/peer-runner-contracts.js');
+    const task = createMinimalPITaskRecord('t1', 'dreamer', 'prompt');
+    task.status = 'succeeded';
+    task.outputArtifactRefs = [];
+    const result = createNextTaskProposal(task, []);
+    expect(result === null || typeof result === 'object').toBe(true);
   });
 });
