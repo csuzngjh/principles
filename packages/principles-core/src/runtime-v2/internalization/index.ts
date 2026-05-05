@@ -60,3 +60,7 @@ export { computeRuleMetrics, computePrincipleAdherence } from './lifecycle-metri
 // Deprecated readiness (PRI-53)
 export type { DeprecatedReadinessStatus, DeprecatedReadinessAssessment } from './deprecated-readiness.js';
 export { assessDeprecatedReadiness } from './deprecated-readiness.js';
+
+// Routing policy (PRI-54)
+export type { LifecycleRoute, LifecycleRouteEvidenceSummary, LifecycleRouteRecommendation } from './routing-policy.js';
+export { recommendLifecycleRoute } from './routing-policy.js';

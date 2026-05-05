@@ -43,6 +43,8 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/lifecycle-metrics.ts',
   // PRI-53
   'internalization/deprecated-readiness.ts',
+  // PRI-54
+  'internalization/routing-policy.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -769,5 +771,39 @@ describe('PRI-53 deprecated readiness', () => {
     expect(src).toContain("from '@principles/core/runtime-v2'");
     expect(src).toContain('assessDeprecatedReadiness');
     expect(src).toContain('DeprecatedReadinessAssessment');
+  });
+});
+
+// ── PRI-54: Routing policy extraction ──────────────────────────────────────────
+
+describe('PRI-54 routing policy', () => {
+  it('core exports all routing policy types/functions from barrel', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('LifecycleRoute');
+    expect(src).toContain('LifecycleRouteRecommendation');
+    expect(src).toContain('LifecycleRouteEvidenceSummary');
+    expect(src).toContain('recommendLifecycleRoute');
+  });
+
+  it('routing-policy.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'routing-policy.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('plugin internalization-routing-policy.ts re-exports from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/internalization-routing-policy.ts'
+    ), 'utf-8');
+    expect(src).toContain("from '@principles/core/runtime-v2'");
+    expect(src).toContain('recommendLifecycleRoute');
+    expect(src).toContain('LifecycleRouteRecommendation');
   });
 });
