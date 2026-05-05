@@ -31,8 +31,12 @@ function makeTask(overrides: Partial<TaskRecord> & { taskId: string; taskKind: s
     updatedAt: new Date().toISOString(),
     dependencyTaskIds: overrides.dependencyTaskIds ?? [],
     correlationId: overrides.correlationId,
+    channel: 'prompt' as TaskRecord['channel'],
+    timeoutMs: 300000,
+    inputArtifactRefs: [],
+    outputArtifactRefs: [],
     ...overrides,
-  };
+  } as TaskRecord;
 }
 
 function readAdapterSource(): string {
@@ -52,7 +56,7 @@ describe('Internalization Trigger Adapter', () => {
   };
 
   beforeEach(async () => {
-    mockLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
+    mockLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     mockProvider = { listTasks: vi.fn(), getTask: vi.fn() };
     const mod = await import('../../src/service/internalization-trigger-adapter.js');
     adapter = mod.createInternalizationTrigger(
@@ -67,16 +71,59 @@ describe('Internalization Trigger Adapter', () => {
       await expect(adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' })).resolves.not.toThrow();
     });
 
-    it('pending task with no deps → does not throw', async () => {
+    it('pending task with no deps → logs INTERNALIZATION_TRIGGER_WAKE with correct payload', async () => {
       const task = makeTask({ taskId: 'task-1', taskKind: 'dreamer', status: 'pending', dependencyTaskIds: [] });
       mockProvider.listTasks.mockResolvedValue([task]);
-      await expect(adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' })).resolves.not.toThrow();
+      await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_WAKE',
+        expect.objectContaining({ taskId: 'task-1', taskKind: 'dreamer', gateDecision: 'proceed' }),
+      );
     });
 
-    it('retry_wait task → does not throw', async () => {
+    it('retry_wait task → logs INTERNALIZATION_TRIGGER_WAKE', async () => {
       const task = makeTask({ taskId: 'task-retry', taskKind: 'philosopher', status: 'retry_wait', dependencyTaskIds: [] });
       mockProvider.listTasks.mockResolvedValue([task]);
-      await expect(adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' })).resolves.not.toThrow();
+      await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        '[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_WAKE',
+        expect.objectContaining({ taskId: 'task-retry', taskKind: 'philosopher' }),
+      );
+    });
+
+    it('task with unmet deps → logs INTERNALIZATION_TRIGGER_BLOCKED with gateDecision blocked', async () => {
+      const depTask = makeTask({ taskId: 'dep-1', taskKind: 'scribe', status: 'pending', dependencyTaskIds: [] });
+      const task = makeTask({ taskId: 'task-blocked', taskKind: 'dreamer', status: 'pending', dependencyTaskIds: ['dep-1'] });
+      mockProvider.listTasks.mockResolvedValue([task]);
+      mockProvider.getTask.mockResolvedValue(depTask);
+      await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        '[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_BLOCKED',
+        expect.objectContaining({ taskId: 'task-blocked', gateDecision: 'blocked', blockedBy: expect.any(Array) }),
+      );
+    });
+
+    it('task with failed dep → logs INTERNALIZATION_TRIGGER_BLOCKED with dependency_failed', async () => {
+      const depTask = makeTask({ taskId: 'dep-failed', taskKind: 'scribe', status: 'failed', dependencyTaskIds: [] });
+      const task = makeTask({ taskId: 'task-dep-failed', taskKind: 'dreamer', status: 'pending', dependencyTaskIds: ['dep-failed'] });
+      mockProvider.listTasks.mockResolvedValue([task]);
+      mockProvider.getTask.mockResolvedValue(depTask);
+      await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        '[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_BLOCKED',
+        expect.objectContaining({ taskId: 'task-dep-failed', gateDecision: 'dependency_failed' }),
+      );
+    });
+
+    it('task with missing dep → logs INTERNALIZATION_TRIGGER_BLOCKED (fail closed)', async () => {
+      const task = makeTask({ taskId: 'task-missing-dep', taskKind: 'dreamer', status: 'pending', dependencyTaskIds: ['nonexistent'] });
+      mockProvider.listTasks.mockResolvedValue([task]);
+      mockProvider.getTask.mockResolvedValue(null);
+      await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        '[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_BLOCKED',
+        expect.objectContaining({ taskId: 'task-missing-dep', gateDecision: 'blocked' }),
+      );
     });
   });
 

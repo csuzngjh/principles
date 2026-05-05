@@ -32,12 +32,24 @@ type TriggerWakeEvent = {
   taskId: string;
   taskKind: PeerRunnerKind;
   correlationId?: string;
+  gateDecision: 'proceed';
   timestamp: string;
 };
 
 type TriggerNoopEvent = {
   event: 'INTERNALIZATION_TRIGGER_NOOP';
   workspaceDir: string;
+  timestamp: string;
+};
+
+type TriggerBlockedEvent = {
+  event: 'INTERNALIZATION_TRIGGER_BLOCKED';
+  workspaceDir: string;
+  taskId: string;
+  taskKind: string;
+  gateDecision: 'blocked' | 'dependency_failed';
+  blockedBy?: string[];
+  failedDependencies?: string[];
   timestamp: string;
 };
 
@@ -49,7 +61,7 @@ type TriggerFailedEvent = {
   timestamp: string;
 };
 
-type LogEvent = TriggerWakeEvent | TriggerNoopEvent | TriggerFailedEvent;
+type LogEvent = TriggerWakeEvent | TriggerNoopEvent | TriggerFailedEvent | TriggerBlockedEvent;
 
 // ── Logger interface ─────────────────────────────────────────────────────────
 
@@ -104,6 +116,9 @@ function emitLog(
       break;
     case 'INTERNALIZATION_TRIGGER_NOOP':
       logger?.debug?.('[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_NOOP', meta);
+      break;
+    case 'INTERNALIZATION_TRIGGER_BLOCKED':
+      logger?.debug?.('[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_BLOCKED', meta);
       break;
     case 'INTERNALIZATION_TRIGGER_FAILED':
       logger?.error?.('[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_FAILED', meta);
@@ -200,11 +215,23 @@ export function createInternalizationTrigger(
             taskId: task.taskId,
             taskKind: task.taskKind,
             correlationId: task.correlationId,
+            gateDecision: gateResult.decision,
             timestamp: new Date().toISOString(),
           });
           hasReadyTask = true;
+        } else {
+          // blocked or dependency_failed — debug visibility for operators
+          emitLog(logger, {
+            event: 'INTERNALIZATION_TRIGGER_BLOCKED',
+            workspaceDir: ctx.workspaceDir,
+            taskId: task.taskId,
+            taskKind: task.taskKind,
+            gateDecision: gateResult.decision,
+            blockedBy: gateResult.decision === 'blocked' ? gateResult.blockedBy : undefined,
+            failedDependencies: gateResult.decision === 'dependency_failed' ? gateResult.failedDependencies : undefined,
+            timestamp: new Date().toISOString(),
+          });
         }
-        // 'blocked' and 'dependency_failed' → silent skip (no log, avoid noise)
       }
 
       // All candidates were blocked
