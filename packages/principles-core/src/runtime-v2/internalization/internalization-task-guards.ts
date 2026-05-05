@@ -1,0 +1,133 @@
+/**
+ * Internalization Task Guards (PRI-62)
+ *
+ * Pure Boolean guard functions that validate individual conditions
+ * for the Internalization Engine state machine.
+ *
+ * Key constraints (ADR-0003 Section 3.9):
+ *   - Terminal task states: succeeded and failed only
+ *   - resultRef is immutable only after status transitions to succeeded
+ *   - lastError can be updated during retry_wait and failed transitions
+ *   - dependencyTaskIds gating must fail closed
+ *
+ * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
+ */
+
+import type { PDTaskStatus, TaskRecord } from '../task-status.js';
+import type { PITaskRecord, PIArtifact } from './peer-runner-contracts.js';
+
+// ── Lease Acquisition Guards ─────────────────────────────────────────────────
+
+/**
+ * Returns true if the task status allows acquiring a lease.
+ *
+ * Only `pending` and `retry_wait` can be leased:
+ *   - pending: task is waiting for a runner to pick it up
+ *   - retry_wait: task is recovering after a transient failure
+ *
+ * Terminal states (succeeded/failed) are not leaseable.
+ * `leased` tasks already have an active lease and cannot be re-leased.
+ */
+export function canAcquireLease(task: PITaskRecord): boolean {
+  return task.status === 'pending' || task.status === 'retry_wait';
+}
+
+// ── Dependency Gate ───────────────────────────────────────────────────────────
+
+/**
+ * Returns true if ALL dependency tasks have reached succeeded state.
+ *
+ * Fail-closed: if ANY dependency is not found in the dependencies array,
+ * or is not in succeeded state, returns false.
+ *
+ * Empty dependencyTaskIds means no gating — returns true.
+ */
+export function areDependenciesMet(
+  task: PITaskRecord,
+  dependencies: readonly TaskRecord[],
+): boolean {
+  if (task.dependencyTaskIds.length === 0) {
+    return true;
+  }
+
+  const depMap = new Map(dependencies.map(d => [d.taskId, d]));
+
+  for (const depId of task.dependencyTaskIds) {
+    const dep = depMap.get(depId);
+    if (!dep || dep.status !== 'succeeded') {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// ── Status Transition Guards ─────────────────────────────────────────────────
+
+/**
+ * Returns true if a PDTaskStatus transition is valid per ADR-0003 Section 3.8.
+ *
+ * Valid transitions:
+ *   pending     → leased
+ *   leased      → succeeded
+ *   leased      → retry_wait
+ *   leased      → failed
+ *   leased      → pending   (lease release / force-expire — e.g. LeaseManager.releaseLease)
+ *   retry_wait  → pending   (recovery sweep resets)
+ *
+ * Terminal states (succeeded, failed) cannot transition to any other state.
+ */
+export function canTransitionTo(currentStatus: PDTaskStatus, newStatus: PDTaskStatus): boolean {
+  switch (currentStatus) {
+    case 'pending':
+      return newStatus === 'leased';
+    case 'leased':
+      return (
+        newStatus === 'succeeded' ||
+        newStatus === 'retry_wait' ||
+        newStatus === 'failed' ||
+        newStatus === 'pending'
+      );
+    case 'retry_wait':
+      return newStatus === 'pending';
+    case 'succeeded':
+    case 'failed':
+      return false;
+    default:
+      return false;
+  }
+}
+
+// ── Immutability Guards ─────────────────────────────────────────────────────
+
+/**
+ * Returns true if resultRef is now immutable (task reached succeeded).
+ *
+ * Per ADR-0003: resultRef becomes immutable after task enters succeeded state.
+ * Before succeeded, resultRef may still be set or updated.
+ */
+export function isResultRefImmutable(task: PITaskRecord): boolean {
+  return task.status === 'succeeded';
+}
+
+/**
+ * Returns true if lastError can be updated for this task.
+ *
+ * lastError can be updated during retry_wait and failed transitions.
+ * It is NOT updated during pending (no error yet) or succeeded (terminal).
+ */
+export function canUpdateLastError(task: PITaskRecord): boolean {
+  return task.status === 'retry_wait' || task.status === 'failed';
+}
+
+// ── Artifact Guards ──────────────────────────────────────────────────────────
+
+/**
+ * Returns true if the artifact has been rejected by the evaluator.
+ *
+ * Per ADR-0003 Section 3.7: rejected artifacts trigger a corrective feedback
+ * loop but do NOT directly set the source task to failed.
+ */
+export function isArtifactRejected(artifact: PIArtifact): boolean {
+  return artifact.validationStatus === 'rejected';
+}
