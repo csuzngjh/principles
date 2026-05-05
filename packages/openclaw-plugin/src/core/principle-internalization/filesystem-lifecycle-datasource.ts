@@ -3,7 +3,6 @@
  * PRI-56: Adapter that bridges core's datasource interface to plugin's filesystem I/O.
  */
 import type { LifecycleDatasource } from '@principles/core/runtime-v2';
-import type { LedgerTreeStore } from '@principles/core/runtime-v2/internalization';
 import { loadLedger } from '../principle-tree-ledger.js';
 import { listArtifactLineageRecords } from '../nocturnal-artifact-lineage.js';
 import { ReplayEngine } from '../replay-engine.js';
@@ -15,7 +14,7 @@ export class FilesystemLifecycleDatasource implements LifecycleDatasource {
   ) {}
 
   loadLedger() {
-    return loadLedger(this.stateDir).tree as unknown as import('@principles/core/runtime-v2').LedgerTreeStore;
+    return loadLedger(this.stateDir).tree as unknown as ReturnType<LifecycleDatasource['loadLedger']>;
   }
 
   listReplayReports(implementationId: string) {
