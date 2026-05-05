@@ -71,3 +71,40 @@ export type { LifecycleDatasource } from './lifecycle-datasource.js';
 export { buildLifecycleReadModel } from './lifecycle-read-model.js';
 // Ledger types needed by datasource implementations
 export type { LedgerTreeStore } from '../../principle-tree-ledger.js';
+
+// ── Peer Runner Contracts (PRI-61) ───────────────────────────────────────────
+
+export type {
+  InternalizationChannel,
+  PeerRunnerKind,
+  PIArtifactKind,
+  PIArtifactValidationStatus,
+  ArtifactRef,
+  LineageRef,
+  PIArtifact,
+  PITaskRecord,
+} from './peer-runner-contracts.js';
+
+export {
+  PEER_RUNNER_KINDS,
+  INTERNALIZATION_CHANNELS,
+  PI_ARTIFACT_KINDS,
+  isPeerRunnerKind,
+  isInternalizationChannel,
+  isPIArtifactKind,
+  isTerminalTaskStatus,
+  isValidPITaskRecord,
+  createMinimalPITaskRecord,
+} from './peer-runner-contracts.js';
+
+// ── Job Graph Topology (PRI-61) ────────────────────────────────────────────────
+
+export {
+  ALLOWED_EDGES,
+  MODEL_TRAINING_CHANNEL,
+  TRAINER_KIND,
+  validateEdge,
+  isAcyclic,
+  getAllowedSuccessors,
+  getAllowedPredecessors,
+} from './internalization-job-graph.js';

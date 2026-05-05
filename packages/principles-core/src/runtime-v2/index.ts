@@ -336,3 +336,40 @@ export { buildLifecycleReadModel } from './internalization/lifecycle-read-model.
 
 // Ledger domain types needed by plugin datasource implementations (PRI-56)
 export type { LedgerTreeStore } from '../principle-tree-ledger.js';
+
+// ── Internalization Peer Runner Contracts (PRI-61) ─────────────────────────
+
+export type {
+  InternalizationChannel,
+  PeerRunnerKind,
+  PIArtifactKind,
+  PIArtifactValidationStatus,
+  ArtifactRef,
+  LineageRef,
+  PIArtifact,
+  PITaskRecord,
+} from './internalization/peer-runner-contracts.js';
+
+export {
+  PEER_RUNNER_KINDS,
+  INTERNALIZATION_CHANNELS,
+  PI_ARTIFACT_KINDS,
+  isPeerRunnerKind,
+  isInternalizationChannel,
+  isPIArtifactKind,
+  isTerminalTaskStatus,
+  isValidPITaskRecord,
+  createMinimalPITaskRecord,
+} from './internalization/peer-runner-contracts.js';
+
+// ── Internalization Job Graph (PRI-61) ─────────────────────────────────────
+
+export {
+  ALLOWED_EDGES,
+  MODEL_TRAINING_CHANNEL,
+  TRAINER_KIND,
+  validateEdge,
+  isAcyclic,
+  getAllowedSuccessors,
+  getAllowedPredecessors,
+} from './internalization/internalization-job-graph.js';
