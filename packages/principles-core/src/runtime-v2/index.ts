@@ -317,3 +317,7 @@ export type {
   PrincipleLifecycleEvidence,
   LifecycleReadModel,
 } from './internalization/lifecycle-types.js';
+
+// Lifecycle metrics (PRI-52)
+export type { RuleMetricResult, PrincipleAdherenceResult } from './internalization/lifecycle-metrics.js';
+export { computeRuleMetrics, computePrincipleAdherence } from './internalization/lifecycle-metrics.js';
