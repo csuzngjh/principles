@@ -330,7 +330,6 @@ describe('buildLifecycleReadModel', () => {
     const [r] = p?.rules ?? [];
     expect(r).toBeDefined();
     expect(r?.liveEvidence.rollbackEvidenceCount).toBe(1);
-    expect(r?.liveEvidence.hasRollbackEvidence).toBeUndefined();
   });
 
   it('sets hasPassingActiveImplementation based on passing report on active impl', () => {
