@@ -45,6 +45,9 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/deprecated-readiness.ts',
   // PRI-54
   'internalization/routing-policy.ts',
+  // PRI-56
+  'internalization/lifecycle-datasource.ts',
+  'internalization/lifecycle-read-model.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -55,6 +58,8 @@ const REQUIRED_TEST_FILES = [
   // PRI-28
   'operator-health-read-model.test.ts',
   'candidate-audit.test.ts',
+  // PRI-56
+  'internalization/lifecycle-read-model.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -805,5 +810,56 @@ describe('PRI-54 routing policy', () => {
     expect(src).toContain("from '@principles/core/runtime-v2'");
     expect(src).toContain('recommendLifecycleRoute');
     expect(src).toContain('LifecycleRouteRecommendation');
+  });
+});
+
+// ── PRI-56: LifecycleDatasource adapter boundary ──────────────────────────────
+
+describe('PRI-56 LifecycleDatasource adapter boundary', () => {
+  it('core exports LifecycleDatasource + buildLifecycleReadModel from barrel', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('LifecycleDatasource');
+    expect(src).toContain('buildLifecycleReadModel');
+  });
+
+  it('lifecycle-datasource.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'lifecycle-datasource.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('lifecycle-read-model.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'lifecycle-read-model.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('plugin lifecycle-read-model.ts re-exports from core and provides FilesystemLifecycleDatasource', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/lifecycle-read-model.ts'
+    ), 'utf-8');
+    expect(src).toContain("from '@principles/core/runtime-v2'");
+    expect(src).toContain('buildLifecycleReadModel');
+    expect(src).toContain('FilesystemLifecycleDatasource');
+  });
+
+  it('plugin principle-lifecycle-service.ts delegates buildReadModel via datasource', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/principle-lifecycle-service.ts'
+    ), 'utf-8');
+    expect(src).toContain('FilesystemLifecycleDatasource');
+    expect(src).toContain('buildLifecycleReadModel');
   });
 });
