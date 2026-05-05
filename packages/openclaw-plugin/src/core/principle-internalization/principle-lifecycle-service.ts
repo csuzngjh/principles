@@ -6,6 +6,7 @@ import {
 } from '../principle-tree-ledger.js';
 import type { PrincipleValueMetrics } from '../../types/principle-tree-schema.js';
 import { buildLifecycleReadModel, type LifecycleReadModel, type PrincipleLifecycleEvidence } from './lifecycle-read-model.js';
+import { FilesystemLifecycleDatasource } from './filesystem-lifecycle-datasource.js';
 import {
   computePrincipleAdherence,
   computeRuleMetrics,
@@ -83,7 +84,8 @@ export class PrincipleLifecycleService {
   }
 
   buildReadModel(): LifecycleReadModel {
-    return buildLifecycleReadModel(this.workspaceDir, this.stateDir);
+    const datasource = new FilesystemLifecycleDatasource(this.workspaceDir, this.stateDir);
+    return buildLifecycleReadModel(datasource);
   }
 
   listAssessments(readModel = this.buildReadModel()): PrincipleLifecycleAssessment[] {

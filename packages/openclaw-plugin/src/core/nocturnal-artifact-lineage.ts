@@ -46,7 +46,8 @@ function readArtifactLineageRegistry(workspaceDir: string): ArtifactLineageRecor
   try {
     const content = fs.readFileSync(registryPath, 'utf-8');
     return JSON.parse(content) as ArtifactLineageRecord[];
-  } catch {
+  } catch (err) {
+    console.error(`[nocturnal-artifact-lineage] Failed to read lineage registry at ${registryPath}: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
