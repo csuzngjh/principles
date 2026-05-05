@@ -70,15 +70,28 @@ export interface TransitionValidation {
  */
 export type RejectionFeedbackAction = 'create_corrective_task' | 'escalate';
 
-export interface RejectionFeedbackResult {
-  action: RejectionFeedbackAction;
-  /** The runner kind to use for corrective task (if action is create_corrective_task) */
-  correctiveTaskKind?: PeerRunnerKind;
-  rejectedArtifactId: string;
-  sourceTaskId: string;
-  sourceTaskKind: PeerRunnerKind;
-  rejectionReason?: string;
-}
+/**
+ * Discriminated union for artifact rejection feedback.
+ *
+ * create_corrective_task: correctiveTaskKind is required
+ * escalate: correctiveTaskKind is absent
+ */
+export type RejectionFeedbackResult =
+  | {
+      action: 'create_corrective_task';
+      correctiveTaskKind: PeerRunnerKind;
+      rejectedArtifactId: string;
+      sourceTaskId: string;
+      sourceTaskKind: PeerRunnerKind;
+      rejectionReason?: string;
+    }
+  | {
+      action: 'escalate';
+      rejectedArtifactId: string;
+      sourceTaskId: string;
+      sourceTaskKind: PeerRunnerKind;
+      rejectionReason?: string;
+    };
 
 // ── Next Task Proposal Types ─────────────────────────────────────────────────
 

@@ -144,6 +144,15 @@ describe('areDependenciesMet', () => {
     // dep-2 does not exist in deps array
     expect(areDependenciesMet(makePITask({ dependencyTaskIds: ['dep-1', 'dep-2'] }), deps)).toBe(false);
   });
+
+  it('one dep succeeded, one dep in retry_wait returns false (fail closed)', async () => {
+    const { areDependenciesMet } = await import('../internalization/internalization-task-guards.js');
+    const deps = [
+      makeTask({ taskId: 'dep-1', status: 'succeeded' }),
+      makeTask({ taskId: 'dep-2', status: 'retry_wait' }),
+    ];
+    expect(areDependenciesMet(makePITask({ dependencyTaskIds: ['dep-1', 'dep-2'] }), deps)).toBe(false);
+  });
 });
 
 // ── canTransitionTo ──────────────────────────────────────────────────────────
@@ -308,7 +317,7 @@ describe('decideArtifactRejectionFeedback', () => {
     const task = makePITask({ taskKind: 'scribe', status: 'succeeded' });
     const result = decideArtifactRejectionFeedback(artifact, task);
     expect(result.action).toBe('create_corrective_task');
-    expect(result.correctiveTaskKind).toBe('scribe');
+    expect((result as { correctiveTaskKind: string }).correctiveTaskKind).toBe('scribe');
   });
 
   it('artificer artifact rejected → create corrective artificer task', async () => {
@@ -323,7 +332,7 @@ describe('decideArtifactRejectionFeedback', () => {
     const task = makePITask({ taskKind: 'artificer', status: 'succeeded' });
     const result = decideArtifactRejectionFeedback(artifact, task);
     expect(result.action).toBe('create_corrective_task');
-    expect(result.correctiveTaskKind).toBe('artificer');
+    expect((result as { correctiveTaskKind: string }).correctiveTaskKind).toBe('artificer');
   });
 
   it('other runner artifact rejected → escalate', async () => {
