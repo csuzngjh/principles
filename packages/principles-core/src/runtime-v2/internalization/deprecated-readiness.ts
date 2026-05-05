@@ -1,7 +1,6 @@
 import type { PrincipleLifecycleEvidence } from './lifecycle-types.js';
 import {
   computePrincipleAdherence,
-  computeRuleMetrics,
   type PrincipleAdherenceResult,
   type RuleMetricResult,
 } from './lifecycle-metrics.js';
@@ -63,28 +62,32 @@ export function assessDeprecatedReadiness(
   precomputedRuleMetrics?: Record<string, RuleMetricResult>,
   precomputedAdherence?: PrincipleAdherenceResult,
 ): DeprecatedReadinessAssessment {
-  const ruleMetrics = precomputedRuleMetrics ?? Object.fromEntries(
-    principle.rules.map((rule) => [rule.rule.id, computeRuleMetrics(rule)]),
-  );
-  const adherence = precomputedAdherence ?? computePrincipleAdherence(principle, ruleMetrics);
+  const adherence = precomputedAdherence
+    ?? computePrincipleAdherence(principle, precomputedRuleMetrics);
   const blockingReasons: string[] = [];
   const stableCoverageRatio =
     principle.rules.length > 0 ? adherence.stableRuleIds.length / principle.rules.length : 0;
 
+  const pushOnce = (reason: string) => {
+    if (!blockingReasons.includes(reason)) {
+      blockingReasons.push(reason);
+    }
+  };
+
   if (principle.rules.length === 0) {
-    blockingReasons.push('No material rules are attached to this principle yet.');
+    pushOnce('No material rules are attached to this principle yet.');
   }
   if (principle.summary.activeImplementationCount === 0) {
-    blockingReasons.push('No active lower-layer implementation is absorbing the principle.');
+    pushOnce('No active lower-layer implementation is absorbing the principle.');
   }
   if (adherence.averageRuleCoverage < DEPRECATION_MIN_COVERAGE) {
-    blockingReasons.push('Rule coverage is not yet stable enough to absorb the principle.');
+    pushOnce('Rule coverage is not yet stable enough to absorb the principle.');
   }
   if (adherence.averageFalsePositiveRate > DEPRECATION_MAX_FP_RATE) {
-    blockingReasons.push('False-positive rate remains too high for deprecation readiness.');
+    pushOnce('False-positive rate remains too high for deprecation readiness.');
   }
   if (adherence.repeatedErrorSignal > 0 || adherence.repeatedErrorReductionScore < DEPRECATION_MIN_ERROR_REDUCTION) {
-    blockingReasons.push('Repeated related errors have not fallen enough yet.');
+    pushOnce('Repeated related errors have not fallen enough yet.');
   }
 
   const score = clampScore(
