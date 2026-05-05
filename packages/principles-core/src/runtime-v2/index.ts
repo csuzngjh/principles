@@ -321,3 +321,7 @@ export type {
 // Lifecycle metrics (PRI-52)
 export type { RuleMetricResult, PrincipleAdherenceResult } from './internalization/lifecycle-metrics.js';
 export { computeRuleMetrics, computePrincipleAdherence } from './internalization/lifecycle-metrics.js';
+
+// Deprecated readiness (PRI-53)
+export type { DeprecatedReadinessStatus, DeprecatedReadinessAssessment } from './internalization/deprecated-readiness.js';
+export { assessDeprecatedReadiness } from './internalization/deprecated-readiness.js';
