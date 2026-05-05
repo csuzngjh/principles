@@ -82,36 +82,89 @@ All runners are peers — no main/sub hierarchy:
 | `trainer` | Coordinate model training pipeline |
 | `rollout_reviewer` | Gate artifact rollout to production |
 
-### 3.4 Task Contract
+### 3.4 Task Model — PITaskRecord Extends TaskRecord
+
+The internalization task model **reuses and extends** `TaskRecord` (from `runtime-v2/task-status.ts`). It does NOT define a separate standalone task store.
+
+**`TaskRecord` base fields** (reused as-is):
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `taskId` | string | Unique task identifier |
+| `taskKind` | string | Task kind (dreamer, philosopher, etc.) |
+| `status` | `PDTaskStatus` | `pending \| leased \| succeeded \| retry_wait \| failed` |
+| `leaseOwner` | string? | Current lease holder |
+| `leaseExpiresAt` | string? | Lease expiry timestamp |
+| `attemptCount` | number | Number of attempts made |
+| `maxAttempts` | number | Maximum attempts before forced failure |
+| `inputRef` | string? | Reference to task input data |
+| `resultRef` | string? | Reference to task result data (set on `succeeded`) |
+| `lastError` | `PDErrorCategory`? | Last error category |
+
+**`PITaskRecord` adds internalization metadata** (extends TaskRecord):
 
 ```typescript
-interface PITask {
+interface PITaskRecord extends TaskRecord {
   taskKind: 'dreamer' | 'philosopher' | 'scribe' | 'artificer'
-             | 'evaluator' | 'trainer' | 'rollout_reviewer'
-  taskId: string
+           | 'evaluator' | 'trainer' | 'rollout_reviewer'
+
   parentTaskId?: string
   dependencyTaskIds: string[]
-  agentRole: string
   channel: InternalizationChannel
+  correlationId?: string
+  timeoutMs: number
   inputArtifactRefs: ArtifactRef[]
   outputArtifactRefs: ArtifactRef[]
-  timeoutMs: number
-  leaseOwner?: string
-  status: TaskStatus
-  failureCategory?: FailureCategory
-  retryAfter?: Date
 }
-
-type TaskStatus =
-  | 'pending' | 'leased' | 'running'
-  | 'retry_wait' | 'succeeded' | 'failed' | 'cancelled'
 
 type InternalizationChannel =
   | 'prompt' | 'skill' | 'code_tool_hook'
   | 'model_training' | 'defer_archive'
 ```
 
-### 3.5 Artifact Contract
+**Critical rules:**
+- `status` uses `PDTaskStatus` — `running` is NOT a `PDTaskStatus`. `running` belongs to `RunExecutionStatus`
+- Terminal task states: `succeeded` and `failed` only. `retry_wait` is NOT terminal
+- `resultRef` is immutable only after status transitions to `succeeded`
+- `lastError` can be updated during `retry_wait` and `failed` transitions
+- Cancellation is a Run-level concern (`timed_out`/`cancelled` in `RunExecutionStatus`). Task-level `cancelled` is a future schema migration, out of scope for PRI-64
+
+### 3.5 Run Model — 1 Task : N Runs
+
+Every peer-runner execution attempt must create or update a `RunRecord` (from `runtime-v2/runtime-protocol.ts`):
+
+```text
+RuntimeArtifactRef fields (reused from runtime-protocol.ts):
+  artifactType: string
+  ref: string
+```
+
+```text
+RunRecord (from runtime-protocol.ts):
+  runId: string
+  runtimeKind: RuntimeKind         // e.g., 'pi-ai', 'openclaw'
+  startedAt: string
+  taskId: string                   // links back to PITaskRecord
+  attemptNumber: number
+  executionStatus: RunExecutionStatus
+  // RunExecutionStatus: queued | running | succeeded | failed | timed_out | cancelled
+  endedAt?: string
+  reason?: string
+  outputRef?: string
+  inputPayload?: string
+  outputPayload?: string
+  errorCategory?: PDErrorCategory
+```
+
+**Rules:**
+- 1 `PITaskRecord` : N `RunRecord` — each attempt gets a new RunRecord
+- Peer runners MUST use `PDRuntimeAdapter.startRun()` to initiate execution; they MUST NOT call LLM APIs directly
+- `resultRef` on PITaskRecord is set only after the RunRecord enters `succeeded` and validation passes
+- On permanent failure → `RuntimeStateManager.markTaskFailed()`
+- On transient failure → `RuntimeStateManager.markTaskRetryWait()`
+- Cancellation is a Run-level concern; Task-level `cancelled` state is a future schema migration
+
+### 3.6 Artifact Contract — PIArtifact
 
 ```typescript
 interface PIArtifact {
@@ -120,29 +173,104 @@ interface PIArtifact {
   sourceTaskId: string
   sourcePrincipleId?: string
   sourceRuleId?: string
-  lineageRefs: string[]
+  lineageRefs: LineageRef[]
   validationStatus: 'pending' | 'validated' | 'rejected'
+}
+
+interface LineageRef {
+  targetArtifactId: string
+  relation: 'parent' | 'derived_from' | 'validated_by'
+}
+
+interface ArtifactRef {
+  artifactType: string
+  ref: string  // reuses RuntimeArtifactRef
 }
 ```
 
-### 3.6 Allowed State Transitions
+**Idempotency:** Artifact writes keyed by `sourceTaskId + artifactKind`. Re-running a task with the same key overwrites the prior artifact.
 
+**FailureCategory reuse:** All error categories reuse `PDErrorCategory` from `runtime-v2/error-categories.js`. No custom error categories for internalization.
+
+### 3.7 Job Graph Topology
+
+**Allowed edges (v1):**
+
+```text
+dreamer → philosopher
+philosopher → scribe
+scribe → artificer
+artificer → evaluator
+evaluator → rollout_reviewer
+[any runner] → (model_training channel) → trainer
 ```
-pending → leased → running → succeeded
-                        ↘ failed
-          leased  → pending  (lease expired)
-          running → retry_wait → pending (retry trigger)
-          running → failed
-terminal: succeeded | failed | cancelled (immutable)
+
+**DAG rules:**
+1. **No cycles** — graph must be acyclic
+2. **Dependency gating** — a task with non-empty `dependencyTaskIds` must NOT be leased until ALL dependencies are in `succeeded` state
+3. **Dependency failure propagation** — if any dependency enters `failed`, the dependent task is NOT auto-failed; PRI-62 defines escalation policy
+4. **Fan-out/fan-in** — out of scope for v1
+
+**Rejection feedback loop:**
+- When an artifact's `validationStatus` becomes `rejected`, the state machine does NOT simply mark the task as `failed`
+- The rejection artifact and feedback are recorded
+- A new corrective task may be created (mechanism defined by PRI-62)
+- rejection != task failure
+
+### 3.8 Task State Transitions
+
+**Task level** (uses `PDTaskStatus`):
+
+```text
+pending → leased              (lease acquired)
+leased  → pending             (lease expired, recovered by sweep)
+leased  → succeeded           (task completed successfully)
+leased  → retry_wait         (transient error; retry scheduled by RetryPolicy)
+leased  → failed             (permanent error or max attempts exceeded)
+retry_wait → pending          (retry trigger fires; recovery sweep resets to pending)
 ```
 
-### 3.7 Architecture Guards
+**Terminal task states:** `succeeded` and `failed` only. `retry_wait` is NOT terminal.
 
-| Guard | Rule |
-|-------|------|
-| `CORE_NO_SCHEDULING` | `@principles/core` must not import `node:cron`, `setInterval`, or OpenClaw plugin |
-| `PLUGIN_NO_INLINE_EXECUTION` | Plugin trigger must not run long task inline in hook; must delegate to peer runner |
-| `PEER_NO_DIRECT_CHAINING` | Peer runner must not call next peer runner directly; must enqueue via SQLite |
+**Run level** (uses `RunExecutionStatus`):
+
+```text
+queued → running              (executor picked up)
+running → succeeded          (run completed successfully)
+running → failed             (run failed)
+running → timed_out          (timeout exceeded)
+running → cancelled          (cancel requested)
+```
+
+**Immutability rules:**
+- `resultRef` is immutable once task enters `succeeded`
+- `lastError` can be updated during `retry_wait` and `failed` transitions
+- Terminal task state (`succeeded`/`failed`) is immutable — no reversion to `pending` or `retry_wait`
+
+### 3.9 Architecture Guards
+
+| Guard ID | Rule | Enforced by |
+|----------|------|-------------|
+| `CORE_NO_SCHEDULING` | `@principles/core` must not import `openclaw-plugin`, `node:cron`, `node:fs` for scheduling | architecture-regression.test.ts |
+| `PLUGIN_NO_INLINE_EXECUTION` | Plugin trigger must not await long task inline in hook; must delegate to peer runner | architecture-regression.test.ts |
+| `PEER_NO_DIRECT_CHAINING` | Peer runner must not call next peer runner directly; must enqueue via `RuntimeStateManager.createTask()` | architecture-regression.test.ts |
+| `TASK_MODEL_REUSE` | Internalization task model must reuse `TaskRecord`/`RunRecord`, not define a second task store | architecture-regression.test.ts |
+| `RUNTIME_ADAPTER_ONLY` | Peer runners must invoke LLM via `PDRuntimeAdapter.startRun()`, not call LLM APIs directly | architecture-regression.test.ts |
+
+### 3.10 Relationship to DiagnosticianRunner
+
+The `DiagnosticianRunner` (in `runtime-v2/runner/diagnostician-runner.ts`) is the reference implementation of the peer runner pattern. PRI-61/62/63 must follow the same pattern:
+
+```text
+lease → build context → invoke runtime (PDRuntimeAdapter) → poll → fetch output → validate → succeed/fail
+```
+
+Key patterns to reuse:
+- `acquireLease()` before any work
+- `RuntimeStateManager.markTaskSucceeded()` / `markTaskFailed()` / `markTaskRetryWait()` for state transitions
+- `resolveStoreRunId()` to map adapter RunHandle to store RunRecord
+- `RetryPolicy.shouldRetry()` for retry decisions
+- `PermanentErrorCategory` set distinguishes permanent vs transient errors
 
 ## 4. Consequences
 
@@ -161,3 +289,7 @@ terminal: succeeded | failed | cancelled (immutable)
 - [x] 若通过，立即在 Linear 中冻结/作废 PRI-58~60。
 - [x] 规划新的 "Phase 3: Event-Driven Trinity Pipeline" 实施计划。
 - [x] 定义 Principle Internalization Engine 模块边界（PRI-64）。
+- [x] Align Section 3 task model with Runtime V2 TaskRecord/RunRecord (running is RunExecutionStatus, not PDTaskStatus).
+- [x] Add job graph topology (allowed edges, DAG rules, rejection feedback loop).
+- [x] Add 5 architecture guards including TASK_MODEL_REUSE and RUNTIME_ADAPTER_ONLY.
+- [x] Clarify retry_wait is NOT terminal; resultRef immutability only after succeeded; lastError updateable during retry/failure.
