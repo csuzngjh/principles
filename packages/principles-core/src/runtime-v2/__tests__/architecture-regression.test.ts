@@ -32,6 +32,13 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-45
   'internalization/rule-host-evaluator.ts',
   'internalization/rule-host-adapter.ts',
+  // PRI-51
+  'types/principle-enums.ts',
+  'types/principle-schema.ts',
+  'types/artifact-lineage.ts',
+  'types/replay-types.ts',
+  'types/index.ts',
+  'internalization/lifecycle-types.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -617,5 +624,79 @@ describe('PRI-47 store modularization Phase 2', () => {
     for (const sym of memoryStores) {
       expect(mod).toHaveProperty(sym);
     }
+  });
+});
+
+// ── PRI-51: Lifecycle type extraction ────────────────────────────────────────
+
+describe('PRI-51 lifecycle type extraction', () => {
+  const LIFECYCLE_TYPES = [
+    'LifecycleClassificationTotals',
+    'RuleReplayEvidence',
+    'RuleLiveEvidence',
+    'RuleLineageEvidence',
+    'ImplementationLifecycleEvidence',
+    'RuleLifecycleEvidence',
+    'PrincipleLifecycleEvidence',
+    'LifecycleReadModel',
+  ];
+
+  const ENUM_TYPES = [
+    'PrinciplePriority',
+    'PrincipleEvaluability',
+    'RuleType',
+    'RuleStatus',
+    'ImplementationLifecycleState',
+    'ImplementationType',
+    'SampleClassification',
+  ];
+
+  it('core exports all lifecycle types from barrel', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    for (const name of LIFECYCLE_TYPES) {
+      expect(src).toContain(name);
+    }
+  });
+
+  it('core exports all enum types from barrel', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    for (const name of ENUM_TYPES) {
+      expect(src).toContain(name);
+    }
+  });
+
+  it('lifecycle-types.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'lifecycle-types.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('plugin lifecycle-read-model.ts re-exports types from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/lifecycle-read-model.ts'
+    ), 'utf-8');
+    expect(src).toContain('@principles/core/runtime-v2');
+    expect(src).toContain('buildLifecycleReadModel');
+  });
+
+  it('plugin principle-tree-schema.ts re-exports enums from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/types/principle-tree-schema.ts'
+    ), 'utf-8');
+    expect(src).toContain("from '@principles/core/runtime-v2'");
+    // Should no longer define these locally
+    expect(src).not.toMatch(/^export type PrinciplePriority = /m);
+    expect(src).not.toMatch(/^export type RuleType = /m);
   });
 });

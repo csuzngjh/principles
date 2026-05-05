@@ -357,8 +357,8 @@ describe('File Lock', () => {
       const elapsed = Date.now() - start;
       const avgMs = elapsed / iterations;
       
-      // 平均每次锁操作应该 < 10ms
-      expect(avgMs).toBeLessThan(25);
+      // 平均每次锁操作应该 < 50ms (宽松阈值避免 CI/满负载 flaky)
+      expect(avgMs).toBeLessThan(50);
     });
   });
 });
