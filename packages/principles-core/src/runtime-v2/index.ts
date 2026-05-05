@@ -325,3 +325,7 @@ export { computeRuleMetrics, computePrincipleAdherence } from './internalization
 // Deprecated readiness (PRI-53)
 export type { DeprecatedReadinessStatus, DeprecatedReadinessAssessment } from './internalization/deprecated-readiness.js';
 export { assessDeprecatedReadiness } from './internalization/deprecated-readiness.js';
+
+// Lifecycle routing policy (PRI-54)
+export type { LifecycleRoute, LifecycleRouteEvidenceSummary, LifecycleRouteRecommendation } from './internalization/routing-policy.js';
+export { recommendLifecycleRoute } from './internalization/routing-policy.js';

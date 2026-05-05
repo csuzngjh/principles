@@ -17,8 +17,8 @@ import {
   type DeprecatedReadinessAssessment,
 } from './deprecated-readiness.js';
 import {
-  recommendInternalizationRoute,
-  type InternalizationRouteRecommendation,
+  recommendLifecycleRoute,
+  type LifecycleRouteRecommendation,
 } from './internalization-routing-policy.js';
 
 export interface RecomputedPrincipleLifecycle {
@@ -26,7 +26,7 @@ export interface RecomputedPrincipleLifecycle {
   ruleMetrics: Record<string, RuleMetricResult>;
   adherence: PrincipleAdherenceResult;
   deprecatedReadiness: DeprecatedReadinessAssessment;
-  routeRecommendation: InternalizationRouteRecommendation;
+  routeRecommendation: LifecycleRouteRecommendation;
 }
 
 export interface PrincipleLifecycleAssessment {
@@ -35,7 +35,7 @@ export interface PrincipleLifecycleAssessment {
   ruleMetrics: Record<string, RuleMetricResult>;
   adherence: PrincipleAdherenceResult;
   deprecatedReadiness: DeprecatedReadinessAssessment;
-  routeRecommendation: InternalizationRouteRecommendation;
+  routeRecommendation: LifecycleRouteRecommendation;
 }
 
      
@@ -100,7 +100,7 @@ export class PrincipleLifecycleService {
         ruleMetrics,
         adherence,
       );
-      const routeRecommendation = recommendInternalizationRoute(
+      const routeRecommendation = recommendLifecycleRoute(
         principleEvidence,
         ruleMetrics,
         adherence,
@@ -117,7 +117,7 @@ export class PrincipleLifecycleService {
     });
   }
 
-  listRouteRecommendations(readModel = this.buildReadModel()): InternalizationRouteRecommendation[] {
+  listRouteRecommendations(readModel = this.buildReadModel()): LifecycleRouteRecommendation[] {
     return this.listAssessments(readModel).map((assessment) => assessment.routeRecommendation);
   }
 

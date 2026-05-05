@@ -1,6 +1,6 @@
 import * as path from 'path';
 import type { EvolutionReducerImpl } from '../core/evolution-reducer.js';
-import type { InternalizationRouteRecommendation } from '../core/principle-internalization/internalization-routing-policy.js';
+import type { LifecycleRouteRecommendation } from '../core/principle-internalization/internalization-routing-policy.js';
 import { WorkflowFunnelLoader } from '../core/workflow-funnel-loader.js';
 import { resolvePdPath } from '../core/paths.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -33,7 +33,7 @@ function formatSources(
 }
 
 function formatRouteRecommendations(
-  recommendations: InternalizationRouteRecommendation[],
+  recommendations: LifecycleRouteRecommendation[],
   emptyLabel: string,
 ): string {
   if (recommendations.length === 0) {
@@ -57,7 +57,7 @@ function buildEnglishOutput(
   warnings: string[],
   stats: ReturnType<EvolutionReducerImpl['getStats']>,
   summary: ReturnType<typeof RuntimeSummaryService.getSummary>,
-  recommendations: InternalizationRouteRecommendation[],
+  recommendations: LifecycleRouteRecommendation[],
 ): string {
   const lines: string[] = [
     'Evolution Status',
@@ -129,7 +129,7 @@ function buildChineseOutput(
   warnings: string[],
   stats: ReturnType<EvolutionReducerImpl['getStats']>,
   summary: ReturnType<typeof RuntimeSummaryService.getSummary>,
-  recommendations: InternalizationRouteRecommendation[],
+  recommendations: LifecycleRouteRecommendation[],
 ): string {
   const lines: string[] = [
     '进化状态',
