@@ -178,6 +178,11 @@ describe('canTransitionTo', () => {
     expect(canTransitionTo('leased', 'failed')).toBe(true);
   });
 
+  it('leased → pending is valid (lease release / force-expire)', async () => {
+    const { canTransitionTo } = await import('../internalization/internalization-task-guards.js');
+    expect(canTransitionTo('leased', 'pending')).toBe(true);
+  });
+
   it('retry_wait → pending is valid (recovery sweep reset)', async () => {
     const { canTransitionTo } = await import('../internalization/internalization-task-guards.js');
     expect(canTransitionTo('retry_wait', 'pending')).toBe(true);
@@ -398,21 +403,36 @@ describe('createNextTaskProposal', () => {
     expect(result!.taskKind).toBe('rollout_reviewer');
   });
 
-  it('rollout_reviewer succeeded → trainer (can reach trainer via model_training channel)', async () => {
+  it('rollout_reviewer succeeded + model_training channel → trainer', async () => {
     const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
     const task = makePITask({
       taskId: 'rr-1',
       taskKind: 'rollout_reviewer',
       status: 'succeeded',
+      channel: 'model_training',
       outputArtifactRefs: [],
     });
     const result = createNextTaskProposal(task, []);
-    // rollout_reviewer has no direct ALLOWED_EDGES successors, but getAllowedSuccessors
-    // appends trainer as a reachable alternative (any runner can reach trainer
-    // via model_training channel)
+    // rollout_reviewer has no direct ALLOWED_EDGES successors.
+    // With model_training channel it can reach trainer (via getAllowedSuccessors filter).
     expect(result).not.toBeNull();
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(result!.taskKind).toBe('trainer');
+  });
+
+  it('rollout_reviewer succeeded + prompt channel → null (channel constraint blocks trainer)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'rr-1',
+      taskKind: 'rollout_reviewer',
+      status: 'succeeded',
+      channel: 'prompt',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    // rollout_reviewer → trainer requires model_training channel.
+    // With prompt channel, no valid successor exists → null.
+    expect(result).toBeNull();
   });
 
   it('dreamer succeeded → philosopher (first in ALLOWED_EDGES, channel passed through)', async () => {
@@ -432,6 +452,30 @@ describe('createNextTaskProposal', () => {
     // first element is philosopher (direct ALLOWED_EDGES successor)
     expect(r.taskKind).toBe('philosopher');
     expect(r.channel).toBe('model_training');
+  });
+
+  it('pending task → null (non-succeeded status must not generate proposal)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'dreamer-1',
+      taskKind: 'dreamer',
+      status: 'pending',
+      outputArtifactRefs: [{ artifactType: 'principle', ref: 'art-1' }],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).toBeNull();
+  });
+
+  it('failed task → null (non-succeeded status must not generate proposal)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'dreamer-1',
+      taskKind: 'dreamer',
+      status: 'failed',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).toBeNull();
   });
 });
 

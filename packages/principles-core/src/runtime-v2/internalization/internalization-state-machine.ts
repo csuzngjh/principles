@@ -284,33 +284,48 @@ export function decideArtifactRejectionFeedback(
  *   - evaluator → rollout_reviewer
  *   - Any runner (+ model_training channel) → trainer
  *
- * Returns null if the current task has no successors (e.g., rollout_reviewer
- * is a terminal node in the v1 chain).
+ * Requires currentTask.status === 'succeeded' — non-terminal tasks
+ * must not generate successor proposals (prevents pipeline乱序).
  *
- * Note: this only proposes the immediate next step — the Orchestrator
- * is responsible for enqueueing and tracking the full chain.
+ * Filters successors by channel constraint: a runner kind transition
+ * is only valid when validateEdge(fromKind, toKind, channel) is true.
+ * For example, rollout_reviewer → trainer requires channel === 'model_training'.
+ *
+ * Returns null if the task is not succeeded or no channel-valid
+ * successors exist.
  */
 export function createNextTaskProposal(
   currentTask: PITaskRecord,
   _artifacts: PIArtifact[],
   channel?: InternalizationChannel,
 ): NextTaskProposal | null {
-  const successors = getAllowedSuccessors(currentTask.taskKind);
-
-  if (successors.length === 0) {
+  if (currentTask.status !== 'succeeded') {
     return null;
   }
 
-  // V1: take the first successor (linear chain)
+  const effectiveChannel = channel ?? currentTask.channel;
+  const successors = getAllowedSuccessors(currentTask.taskKind);
+
+  // Filter to only channel-valid successors (M1: prevent invalid trainer proposal)
+  const validSuccessors = successors.filter(s =>
+    validateEdge(currentTask.taskKind, s, effectiveChannel),
+  );
+
+  if (validSuccessors.length === 0) {
+    return null;
+  }
+
+  // V1: take the first valid successor (linear chain)
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-  const nextKind = successors[0]!;
+  const nextKind = validSuccessors[0]!;
 
   return {
     taskKind: nextKind,
     parentTaskId: currentTask.taskId,
     dependencyTaskIds: [currentTask.taskId],
-    inputArtifactRefs: currentTask.outputArtifactRefs,
-    channel: channel ?? currentTask.channel,
+    // Defensive copy: prevent caller from mutating source task outputArtifactRefs (M2)
+    inputArtifactRefs: [...currentTask.outputArtifactRefs],
+    channel: effectiveChannel,
     correlationId: currentTask.correlationId,
   };
 }

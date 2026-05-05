@@ -68,11 +68,12 @@ export function areDependenciesMet(
  * Returns true if a PDTaskStatus transition is valid per ADR-0003 Section 3.8.
  *
  * Valid transitions:
- *   pending  → leased
- *   leased   → succeeded
- *   leased   → retry_wait
- *   leased   → failed
- *   retry_wait → pending  (recovery sweep resets)
+ *   pending     → leased
+ *   leased      → succeeded
+ *   leased      → retry_wait
+ *   leased      → failed
+ *   leased      → pending   (lease release / force-expire — e.g. LeaseManager.releaseLease)
+ *   retry_wait  → pending   (recovery sweep resets)
  *
  * Terminal states (succeeded, failed) cannot transition to any other state.
  */
@@ -81,12 +82,17 @@ export function canTransitionTo(currentStatus: PDTaskStatus, newStatus: PDTaskSt
     case 'pending':
       return newStatus === 'leased';
     case 'leased':
-      return newStatus === 'succeeded' || newStatus === 'retry_wait' || newStatus === 'failed';
+      return (
+        newStatus === 'succeeded' ||
+        newStatus === 'retry_wait' ||
+        newStatus === 'failed' ||
+        newStatus === 'pending'
+      );
     case 'retry_wait':
       return newStatus === 'pending';
     case 'succeeded':
     case 'failed':
-      return false; // Terminal states
+      return false;
     default:
       return false;
   }
