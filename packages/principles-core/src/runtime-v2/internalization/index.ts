@@ -64,3 +64,10 @@ export { assessDeprecatedReadiness } from './deprecated-readiness.js';
 // Routing policy (PRI-54)
 export type { LifecycleRoute, LifecycleRouteEvidenceSummary, LifecycleRouteRecommendation } from './routing-policy.js';
 export { recommendLifecycleRoute } from './routing-policy.js';
+
+// Lifecycle datasource adapter (PRI-56)
+export type { LifecycleDatasource } from './lifecycle-datasource.js';
+// Lifecycle read model builder (PRI-56)
+export { buildLifecycleReadModel } from './lifecycle-read-model.js';
+// Ledger types needed by datasource implementations
+export type { LedgerTreeStore } from '../../principle-tree-ledger.js';
