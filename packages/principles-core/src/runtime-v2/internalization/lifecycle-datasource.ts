@@ -11,5 +11,8 @@ import type { ArtifactLineageRecord } from '../types/artifact-lineage.js';
 export interface LifecycleDatasource {
   loadLedger(): LedgerTreeStore;
   listReplayReports(implementationId: string): ReplayReport[];
-  listLineageRecords(kind: string): ArtifactLineageRecord[];
+  /**
+   * @param kind - Must be 'behavioral-sample' or 'rule-implementation-candidate'
+   */
+  listLineageRecords(kind: 'behavioral-sample' | 'rule-implementation-candidate'): ArtifactLineageRecord[];
 }

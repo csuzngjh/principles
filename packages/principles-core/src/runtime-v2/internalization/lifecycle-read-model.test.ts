@@ -56,7 +56,7 @@ function makeDatasource(overrides: Partial<LifecycleDatasource> = {}): Lifecycle
   return {
     loadLedger: () => emptyTree,
     listReplayReports: () => [],
-    listLineageRecords: () => [],
+    listLineageRecords: (_kind: 'behavioral-sample' | 'rule-implementation-candidate') => [],
     ...overrides,
   };
 }
@@ -198,7 +198,7 @@ describe('buildLifecycleReadModel', () => {
     ];
     const datasource = makeDatasource({
       loadLedger: () => tree,
-      listLineageRecords: () => lineageRecords,
+      listLineageRecords: (_kind: 'behavioral-sample' | 'rule-implementation-candidate') => lineageRecords,
     });
     const result = buildLifecycleReadModel(datasource);
 
