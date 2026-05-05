@@ -241,7 +241,7 @@ export { loadLedger, getLedgerFilePathPublic } from '../principle-tree-ledger.js
 
 // Pruning read model (PRI-15)
 export { PruningReadModel } from './pruning-read-model.js';
-export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, PrincipleStatus } from './pruning-read-model.js';
+export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel } from './pruning-read-model.js';
 
 // Pruning review audit log (PRI-24)
 export { appendPruningReview, listPruningReviews } from './pruning-review-log.js';
@@ -287,6 +287,7 @@ export type { RuleHostImplementationProvider } from './internalization/rule-host
 
 // Principle tree domain types (PRI-51)
 export type {
+  PrincipleStatus,
   PrinciplePriority,
   PrincipleScope,
   PrincipleEvaluability,

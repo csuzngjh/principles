@@ -3,6 +3,7 @@
  */
 
 export type {
+  PrincipleStatus,
   PrinciplePriority,
   PrincipleScope,
   PrincipleEvaluability,
