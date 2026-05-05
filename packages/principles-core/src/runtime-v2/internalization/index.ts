@@ -108,3 +108,34 @@ export {
   getAllowedSuccessors,
   getAllowedPredecessors,
 } from './internalization-job-graph.js';
+
+// ── State Machine Guards (PRI-62) ────────────────────────────────────────────────
+
+export {
+  canAcquireLease,
+  areDependenciesMet,
+  canTransitionTo,
+  isResultRefImmutable,
+  canUpdateLastError,
+  isArtifactRejected,
+} from './internalization-task-guards.js';
+
+export type {
+  DependencyGateDecision,
+  DependencyGateResult,
+  TransitionValidation,
+  RejectionFeedbackAction,
+  RejectionFeedbackResult,
+  NextTaskProposal,
+  GraphErrorType,
+  GraphValidationError,
+  GraphValidationResult,
+} from './internalization-state-machine.js';
+
+export {
+  validateInternalizationTaskReady,
+  validateTaskTransition,
+  decideArtifactRejectionFeedback,
+  createNextTaskProposal,
+  validateInternalizationGraph,
+} from './internalization-state-machine.js';

@@ -1,0 +1,370 @@
+/**
+ * Internalization State Machine (PRI-62)
+ *
+ * Pure decision functions for the Internalization Engine state machine.
+ * These functions return structured proposals — they do NOT mutate store state,
+ * do NOT call PDRuntimeAdapter, and do NOT execute createTask.
+ *
+ * Orchestrator (future PRI-62 scope) is responsible for consuming these
+ * decisions and invoking RuntimeStateManager to apply transitions.
+ *
+ * Key design:
+ *   - Guard functions (task-guards.ts) validate individual conditions
+ *   - State machine functions compose guards into actionable decisions
+ *   - All functions are pure: same inputs → same outputs, no side effects
+ *
+ * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
+ */
+
+import type { PDTaskStatus, TaskRecord } from '../task-status.js';
+import type {
+  PITaskRecord,
+  PeerRunnerKind,
+  InternalizationChannel,
+  PIArtifact,
+  ArtifactRef,
+} from './peer-runner-contracts.js';
+import { getAllowedSuccessors, isAcyclic, validateEdge } from './internalization-job-graph.js';
+
+import {
+  canAcquireLease,
+  canTransitionTo,
+} from './internalization-task-guards.js';
+
+// ── Dependency Gate Types ─────────────────────────────────────────────────────
+
+/**
+ * Decision when evaluating if a task is ready to execute.
+ *
+ *   proceed:            All conditions met — task can be leased and executed
+ *   blocked:            Dependencies not yet satisfied — wait for them
+ *   dependency_failed:   At least one dependency has failed — escalate policy needed
+ */
+export type DependencyGateDecision = 'proceed' | 'blocked' | 'dependency_failed';
+
+export interface DependencyGateResult {
+  decision: DependencyGateDecision;
+  /** Whether the task is ready to execute (same as decision === 'proceed') */
+  ready: boolean;
+  /** Task IDs that are blocking execution (status != succeeded) */
+  blockedBy: string[];
+  /** Task IDs that have failed — for escalation policy decision */
+  failedDependencies: string[];
+}
+
+// ── Transition Validation Types ───────────────────────────────────────────────
+
+export interface TransitionValidation {
+  valid: boolean;
+  /** Human-readable reason if invalid */
+  reason?: string;
+}
+
+// ── Rejection Feedback Types ─────────────────────────────────────────────────
+
+/**
+ * Action to take when an artifact has been rejected.
+ *
+ *   create_corrective_task: Re-run the same or corrective runner kind
+ *   escalate:               Human review needed
+ */
+export type RejectionFeedbackAction = 'create_corrective_task' | 'escalate';
+
+export interface RejectionFeedbackResult {
+  action: RejectionFeedbackAction;
+  /** The runner kind to use for corrective task (if action is create_corrective_task) */
+  correctiveTaskKind?: PeerRunnerKind;
+  rejectedArtifactId: string;
+  sourceTaskId: string;
+  sourceTaskKind: PeerRunnerKind;
+  rejectionReason?: string;
+}
+
+// ── Next Task Proposal Types ─────────────────────────────────────────────────
+
+export interface NextTaskProposal {
+  taskKind: PeerRunnerKind;
+  parentTaskId: string;
+  dependencyTaskIds: string[];
+  inputArtifactRefs: ArtifactRef[];
+  channel: InternalizationChannel;
+  correlationId?: string;
+}
+
+// ── Graph Validation Types ───────────────────────────────────────────────────
+
+export type GraphErrorType = 'cycle' | 'disallowed_edge' | 'missing_dependency';
+
+export interface GraphValidationError {
+  type: GraphErrorType;
+  message: string;
+  taskId?: string;
+  fromKind?: string;
+  toKind?: string;
+}
+
+export interface GraphValidationResult {
+  valid: boolean;
+  errors: GraphValidationError[];
+}
+
+// ── Core Decision Functions ──────────────────────────────────────────────────
+
+/**
+ * Validates whether a task is ready to be leased and executed.
+ *
+ * Combines:
+ *   1. canAcquireLease — task status must be pending or retry_wait
+ *   2. areDependenciesMet — all dependencyTaskIds must be succeeded
+ *
+ * Note: dependency failure (dependency_failed) does NOT automatically fail
+ * the dependent task. The escalation policy (PRI-62 follow-up) decides
+ * how to handle dependency failures.
+ */
+export function validateInternalizationTaskReady(
+  task: PITaskRecord,
+  dependencies: readonly TaskRecord[],
+): DependencyGateResult {
+  const blockedBy: string[] = [];
+  const failedDependencies: string[] = [];
+
+  // Check if task status allows leasing
+  if (!canAcquireLease(task)) {
+    // Task is already leased, succeeded, or failed — blocked
+    return {
+      decision: 'blocked',
+      ready: false,
+      blockedBy: [],
+      failedDependencies: [],
+    };
+  }
+
+  // Collect dependency statuses
+  const depMap = new Map(dependencies.map(d => [d.taskId, d]));
+
+  for (const depId of task.dependencyTaskIds) {
+    const dep = depMap.get(depId);
+    if (!dep) {
+      // Dependency not found — fail closed
+      blockedBy.push(depId);
+    } else if (dep.status === 'succeeded') {
+      // OK
+    } else if (dep.status === 'failed') {
+      failedDependencies.push(depId);
+    } else {
+      blockedBy.push(depId);
+    }
+  }
+
+  // Determine decision
+  if (failedDependencies.length > 0) {
+    return {
+      decision: 'dependency_failed',
+      ready: false,
+      blockedBy,
+      failedDependencies,
+    };
+  }
+
+  if (blockedBy.length > 0) {
+    return {
+      decision: 'blocked',
+      ready: false,
+      blockedBy,
+      failedDependencies: [],
+    };
+  }
+
+  return {
+    decision: 'proceed',
+    ready: true,
+    blockedBy: [],
+    failedDependencies: [],
+  };
+}
+
+/**
+ * Validates whether a task status transition is permitted.
+ *
+ * Uses canTransitionTo internally and adds human-readable reasons
+ * for invalid transitions.
+ */
+export function validateTaskTransition(
+  task: PITaskRecord,
+  newStatus: PDTaskStatus,
+): TransitionValidation {
+  if (canTransitionTo(task.status, newStatus)) {
+    return { valid: true };
+  }
+
+  const reason = ((): string => {
+    if (task.status === 'succeeded' || task.status === 'failed') {
+      return `Terminal state: ${task.status} cannot transition to ${newStatus}`;
+    }
+    if (newStatus === 'succeeded' && task.status !== 'leased') {
+      return `Cannot transition directly to succeeded: task must be leased first (currently ${task.status})`;
+    }
+    if (task.status === 'pending' && newStatus !== 'leased') {
+      return `Pending task can only transition to leased (not ${newStatus})`;
+    }
+    return `Invalid transition from ${task.status} to ${newStatus}`;
+  })();
+
+  return { valid: false, reason };
+}
+
+/**
+ * Decides what action to take when an artifact has been rejected.
+ *
+ * Per ADR-0003 Section 3.7 rejection feedback loop:
+ *   - Artifact rejected ≠ task failed (they are separate concerns)
+ *   - Rejected artifacts can generate corrective task proposals
+ *   - Scribe/Artificer rejections → corrective task (re-run)
+ *   - Other runners → escalate for human review
+ *
+ * This function returns a proposal; the Orchestrator decides whether
+ * to act on it.
+ */
+export function decideArtifactRejectionFeedback(
+  artifact: PIArtifact,
+  task: PITaskRecord,
+): RejectionFeedbackResult {
+  const base = {
+    rejectedArtifactId: artifact.artifactId,
+    sourceTaskId: artifact.sourceTaskId,
+    sourceTaskKind: task.taskKind,
+  };
+
+  // Scribe rejections → re-run scribe to regenerate
+  if (task.taskKind === 'scribe') {
+    return {
+      ...base,
+      action: 'create_corrective_task',
+      correctiveTaskKind: 'scribe',
+    };
+  }
+
+  // Artificer rejections → re-run artificer to re-validate
+  if (task.taskKind === 'artificer') {
+    return {
+      ...base,
+      action: 'create_corrective_task',
+      correctiveTaskKind: 'artificer',
+    };
+  }
+
+  // All other runners → escalate for human review
+  return {
+    ...base,
+    action: 'escalate',
+  };
+}
+
+/**
+ * Proposes the next task in the pipeline after a task succeeds.
+ *
+ * Uses the job graph (getAllowedSuccessors) to determine valid next steps:
+ *   - dreamer → philosopher
+ *   - philosopher → scribe
+ *   - scribe → artificer
+ *   - artificer → evaluator
+ *   - evaluator → rollout_reviewer
+ *   - Any runner (+ model_training channel) → trainer
+ *
+ * Returns null if the current task has no successors (e.g., rollout_reviewer
+ * is a terminal node in the v1 chain).
+ *
+ * Note: this only proposes the immediate next step — the Orchestrator
+ * is responsible for enqueueing and tracking the full chain.
+ */
+export function createNextTaskProposal(
+  currentTask: PITaskRecord,
+  _artifacts: PIArtifact[],
+  channel?: InternalizationChannel,
+): NextTaskProposal | null {
+  const successors = getAllowedSuccessors(currentTask.taskKind);
+
+  if (successors.length === 0) {
+    return null;
+  }
+
+  // V1: take the first successor (linear chain)
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const nextKind = successors[0]!;
+
+  return {
+    taskKind: nextKind,
+    parentTaskId: currentTask.taskId,
+    dependencyTaskIds: [currentTask.taskId],
+    inputArtifactRefs: currentTask.outputArtifactRefs,
+    channel: channel ?? currentTask.channel,
+    correlationId: currentTask.correlationId,
+  };
+}
+
+/**
+ * Validates an entire task graph for structural correctness.
+ *
+ * Checks:
+ *   1. No cycles — uses isAcyclic() on extracted edges
+ *   2. All edges are in ALLOWED_EDGES (via validateEdge)
+ *   3. All dependencyTaskIds reference existing tasks (fail closed)
+ *
+ * Note: this does NOT check dependency status (use validateInternalizationTaskReady
+ * for that) — only structural validity.
+ */
+export function validateInternalizationGraph(tasks: PITaskRecord[]): GraphValidationResult {
+  const errors: GraphValidationError[] = [];
+  const taskMap = new Map(tasks.map(t => [t.taskId, t]));
+
+  // Build dependency edges for cycle detection
+  const edgesForCycle: (readonly [string, string])[] = [];
+  for (const task of tasks) {
+    for (const depId of task.dependencyTaskIds) {
+      const dep = taskMap.get(depId);
+      if (dep) {
+        edgesForCycle.push([depId, task.taskId]);
+      }
+    }
+  }
+
+  // Check 1: cycles (using isAcyclic on dependency edges)
+  if (!isAcyclic(edgesForCycle)) {
+    errors.push({
+      type: 'cycle',
+      message: 'Task graph contains a cycle — dependencies cannot be satisfied',
+    });
+  }
+
+  // Check 2: disallowed edges (using validateEdge on runner kind transitions)
+  for (const task of tasks) {
+    for (const depId of task.dependencyTaskIds) {
+      const dep = taskMap.get(depId);
+      if (!dep) {
+        errors.push({
+          type: 'missing_dependency',
+          message: `Task ${task.taskId} depends on ${depId} which does not exist in the graph`,
+          taskId: task.taskId,
+        });
+        continue;
+      }
+
+      // Use the current task's channel for edge validation
+      const edgeValid = validateEdge(dep.taskKind, task.taskKind, task.channel);
+      if (!edgeValid) {
+        errors.push({
+          type: 'disallowed_edge',
+          message: `Disallowed edge: ${dep.taskKind} → ${task.taskKind}`,
+          taskId: task.taskId,
+          fromKind: dep.taskKind,
+          toKind: task.taskKind,
+        });
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
