@@ -39,6 +39,8 @@ const REQUIRED_SOURCE_FILES = [
   'types/replay-types.ts',
   'types/index.ts',
   'internalization/lifecycle-types.ts',
+  // PRI-52
+  'internalization/lifecycle-metrics.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -698,5 +700,39 @@ describe('PRI-51 lifecycle type extraction', () => {
     // Should no longer define these locally
     expect(src).not.toMatch(/^export type PrinciplePriority = /m);
     expect(src).not.toMatch(/^export type RuleType = /m);
+  });
+});
+
+// ── PRI-52: Lifecycle metrics extraction ──────────────────────────────────────
+
+describe('PRI-52 lifecycle metrics', () => {
+  it('core exports all lifecycle metrics from barrel', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('RuleMetricResult');
+    expect(src).toContain('PrincipleAdherenceResult');
+    expect(src).toContain('computeRuleMetrics');
+    expect(src).toContain('computePrincipleAdherence');
+  });
+
+  it('lifecycle-metrics.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'lifecycle-metrics.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('plugin lifecycle-metrics.ts re-exports from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/lifecycle-metrics.ts'
+    ), 'utf-8');
+    expect(src).toContain("from '@principles/core/runtime-v2'");
+    expect(src).toContain('computeRuleMetrics');
+    expect(src).toContain('computePrincipleAdherence');
   });
 });
