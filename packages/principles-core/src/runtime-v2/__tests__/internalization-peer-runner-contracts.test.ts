@@ -415,6 +415,29 @@ describe('Job Graph', () => {
       expect(successors).toContain('rollout_reviewer');
       expect(successors).toContain(TRAINER_KIND);
     });
+
+    it('returns correct successors for artificer (including trainer)', async () => {
+      const { getAllowedSuccessors, TRAINER_KIND } = await import(
+        '../internalization/internalization-job-graph.js'
+      );
+
+      const successors = getAllowedSuccessors('artificer');
+
+      expect(successors).toContain('evaluator');
+      expect(successors).toContain(TRAINER_KIND);
+      expect(successors).not.toContain('scribe');
+    });
+
+    it('returns trainer for rollout_reviewer (via model_training channel)', async () => {
+      const { getAllowedSuccessors, TRAINER_KIND } = await import(
+        '../internalization/internalization-job-graph.js'
+      );
+
+      // Any non-trainer runner can reach trainer via model_training channel
+      const successors = getAllowedSuccessors('rollout_reviewer');
+      expect(successors).toContain(TRAINER_KIND);
+      expect(successors).not.toContain('rollout_reviewer');
+    });
   });
 
   // ── getAllowedPredecessors ───────────────────────────────────────────────
@@ -441,13 +464,27 @@ describe('Job Graph', () => {
       expect(preds).toEqual([]);
     });
 
-    it('returns multiple predecessors for trainer (any runner can reach it)', async () => {
+    it('returns [scribe] for artificer', async () => {
+      const { getAllowedPredecessors } = await import('../internalization/internalization-job-graph.js');
+
+      const preds = getAllowedPredecessors('artificer');
+      expect(preds).toEqual(['scribe']);
+    });
+
+    it('returns [evaluator] for rollout_reviewer', async () => {
+      const { getAllowedPredecessors } = await import('../internalization/internalization-job-graph.js');
+
+      const preds = getAllowedPredecessors('rollout_reviewer');
+      expect(preds).toEqual(['evaluator']);
+    });
+
+    it('returns empty array for trainer (reached via channel, not edges)', async () => {
       const { getAllowedPredecessors } = await import('../internalization/internalization-job-graph.js');
 
       const preds = getAllowedPredecessors('trainer');
-      // trainer can be reached from any runner via model_training channel
-      // but getAllowedPredecessors only checks direct edges, not channel
-      expect(Array.isArray(preds)).toBe(true);
+      // trainer has no predecessor edges in ALLOWED_EDGES
+      // it is reached via model_training channel from any runner
+      expect(preds).toEqual([]);
     });
   });
 
