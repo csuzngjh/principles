@@ -1,78 +1,35 @@
-import { loadLedger, type LedgerPrinciple, type LedgerRule } from '../principle-tree-ledger.js';
-import { listArtifactLineageRecords, type ArtifactLineageRecord } from '../nocturnal-artifact-lineage.js';
-import { ReplayEngine, type ClassificationSummary, type ReplayReport } from '../replay-engine.js';
-import type { Implementation, ImplementationLifecycleState } from '../../types/principle-tree-schema.js';
+// Re-export lifecycle types from core (PRI-51)
+export type {
+  LifecycleClassificationTotals,
+  RuleReplayEvidence,
+  RuleLiveEvidence,
+  RuleLineageEvidence,
+  ImplementationLifecycleEvidence,
+  RuleLifecycleEvidence,
+  PrincipleLifecycleEvidence,
+  LifecycleReadModel,
+} from '@principles/core/runtime-v2';
 
-export interface LifecycleClassificationTotals {
-  total: number;
-  passed: number;
-  failed: number;
-}
+// Import types for local use in builder and helpers
+import type {
+  LifecycleClassificationTotals,
+  RuleReplayEvidence,
+  RuleLiveEvidence,
+  RuleLineageEvidence,
+  ImplementationLifecycleEvidence,
+  RuleLifecycleEvidence,
+  PrincipleLifecycleEvidence,
+  LifecycleReadModel,
+  ReplayReport,
+  ClassificationSummary,
+  ArtifactLineageRecord,
+  Implementation,
+  ImplementationLifecycleState,
+} from '@principles/core/runtime-v2';
 
-export interface RuleReplayEvidence {
-  reportCount: number;
-  latestReports: ReplayReport[];
-  painNegative: LifecycleClassificationTotals;
-  successPositive: LifecycleClassificationTotals;
-  principleAnchor: LifecycleClassificationTotals;
-  passingImplementationIds: string[];
-  failingImplementationIds: string[];
-  needsReviewImplementationIds: string[];
-}
-
-export interface RuleLiveEvidence {
-  activeCount: number;
-  candidateCount: number;
-  disabledCount: number;
-  archivedCount: number;
-  durablePenaltyCount: number;
-  rollbackEvidenceCount: number;
-  hasActiveImplementation: boolean;
-  hasPassingActiveImplementation: boolean;
-}
-
-export interface RuleLineageEvidence {
-  records: ArtifactLineageRecord[];
-  distinctPainSignalCount: number;
-  distinctGateBlockCount: number;
-  repeatedErrorSignal: number;
-  latestCreatedAt?: string;
-}
-
-export interface ImplementationLifecycleEvidence {
-  implementation: Implementation;
-  latestReplayReport: ReplayReport | null;
-  replayHistoryCount: number;
-  lineageRecords: ArtifactLineageRecord[];
-}
-
-export interface RuleLifecycleEvidence {
-  rule: LedgerRule;
-  implementations: ImplementationLifecycleEvidence[];
-  replayEvidence: RuleReplayEvidence;
-  liveEvidence: RuleLiveEvidence;
-  lineageEvidence: RuleLineageEvidence;
-}
-
-export interface PrincipleLifecycleEvidence {
-  principle: LedgerPrinciple;
-  rules: RuleLifecycleEvidence[];
-  summary: {
-    replayReportCount: number;
-    activeImplementationCount: number;
-    candidateImplementationCount: number;
-    disabledImplementationCount: number;
-    archivedImplementationCount: number;
-    distinctPainSignalCount: number;
-    distinctGateBlockCount: number;
-    repeatedErrorSignal: number;
-  };
-}
-
-export interface LifecycleReadModel {
-  generatedAt: string;
-  principles: PrincipleLifecycleEvidence[];
-}
+import { loadLedger, type LedgerRule } from '../principle-tree-ledger.js';
+import { listArtifactLineageRecords } from '../nocturnal-artifact-lineage.js';
+import { ReplayEngine } from '../replay-engine.js';
 
 function toClassificationTotals(summary: ClassificationSummary[]): LifecycleClassificationTotals {
   return summary.reduce<LifecycleClassificationTotals>(

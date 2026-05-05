@@ -182,14 +182,14 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     const p = this.principles.get(principleId);
     if (!p || p.status === 'active' || p.status === 'deprecated') return;
 
-    const nextStatus: PrincipleStatus = p.status === 'candidate' ? 'probation' : 'active';
+    const toStatus = (p.status === 'candidate' ? 'probation' : p.status === 'probation' ? 'active' : p.status) as PrincipleStatus;
     const event: EvolutionLoopEvent = {
       ts: new Date().toISOString(),
       type: 'principle_promoted',
       data: {
         principleId,
         from: p.status,
-        to: nextStatus,
+        to: toStatus,
         reason,
         successCount: p.validation.successCount,
       },
