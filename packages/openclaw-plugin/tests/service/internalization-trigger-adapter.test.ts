@@ -2,7 +2,7 @@
  * Internalization Trigger Adapter - Unit Tests (PRI-63)
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import type { TaskRecord } from '@principles/core/runtime-v2';
@@ -169,6 +169,7 @@ describe('Internalization Trigger Adapter', () => {
 
   describe('start / stop', () => {
     beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
 
     it('start() returns a stop function', () => {
       mockProvider.listTasks.mockResolvedValue([]);

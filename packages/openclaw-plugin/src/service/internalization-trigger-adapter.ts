@@ -98,7 +98,6 @@ export interface InternalizationTriggerAdapter {
 
 interface AdapterState {
   intervalId: ReturnType<typeof setInterval> | null;
-  stopped: boolean;
 }
 
 // ── Log helper ────────────────────────────────────────────────────────────────
@@ -107,10 +106,9 @@ function emitLog(
   logger: TriggerLogger | undefined,
   event: LogEvent,
 ): void {
-  const meta = { ...event };
-  delete (meta as { event?: string }).event;
+  const { event: eventType, ...meta } = event;
 
-  switch (event.event) {
+  switch (eventType) {
     case 'INTERNALIZATION_TRIGGER_WAKE':
       logger?.info?.('[PD:InternalizationTrigger] INTERNALIZATION_TRIGGER_WAKE', meta);
       break;
@@ -145,7 +143,6 @@ export function createInternalizationTrigger(
 ): InternalizationTriggerAdapter {
   const state: AdapterState = {
     intervalId: null,
-    stopped: false,
   };
 
   // ── wake: single trigger cycle ─────────────────────────────────────────────
@@ -256,7 +253,8 @@ export function createInternalizationTrigger(
   // ── start: begin periodic wake cycles ─────────────────────────────────────
 
   function start(ctx: TriggerContext, intervalMs = 5 * 60 * 1000): () => void {
-    if (state.stopped) return () => {};
+    // Prevent re-entrancy: if already running, return existing stop
+    if (state.intervalId !== null) return stop;
 
     // Immediate first wake
     wake(ctx).catch(err => {
@@ -274,14 +272,12 @@ export function createInternalizationTrigger(
       });
     }, intervalMs);
 
-    // Return stop function
     return stop;
   }
 
   // ── stop: halt periodic wake ──────────────────────────────────────────────
 
   function stop(): void {
-    state.stopped = true;
     if (state.intervalId !== null) {
       clearInterval(state.intervalId);
       state.intervalId = null;
