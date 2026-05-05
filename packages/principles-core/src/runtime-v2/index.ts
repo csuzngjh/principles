@@ -284,3 +284,35 @@ export { buildMaskedPrincipleSet, getCachedMaskedPrincipleSet, clearPruningMaskC
 export type { DecisionMergeLogger, RuleHostLogger } from './internalization/rule-host-evaluator.js';
 export { mergeDecisions } from './internalization/rule-host-evaluator.js';
 export type { RuleHostImplementationProvider } from './internalization/rule-host-adapter.js';
+
+// Principle tree domain types (PRI-51)
+export type {
+  PrinciplePriority,
+  PrincipleScope,
+  PrincipleEvaluability,
+  RuleStatus,
+  RuleType,
+  ImplementationLifecycleState,
+  ImplementationType,
+  SampleClassification,
+  Principle,
+  Rule,
+  Implementation,
+  ArtifactKind,
+  ArtifactLineageRecord,
+  ReplayResult,
+  ClassificationSummary,
+  ReplayReport,
+} from './types/index.js';
+
+// Lifecycle read model types (PRI-51)
+export type {
+  LifecycleClassificationTotals,
+  RuleReplayEvidence,
+  RuleLiveEvidence,
+  RuleLineageEvidence,
+  ImplementationLifecycleEvidence,
+  RuleLifecycleEvidence,
+  PrincipleLifecycleEvidence,
+  LifecycleReadModel,
+} from './internalization/lifecycle-types.js';

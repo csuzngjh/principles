@@ -25,18 +25,30 @@
 import type { PrincipleStatus } from '../core/evolution-types.js';
 import type { PrincipleDetectorSpec } from '../core/evolution-types.js';
 
+// Import and re-export leaf types from core (PRI-51)
+import type {
+  PrinciplePriority,
+  PrincipleScope,
+  PrincipleEvaluability,
+  RuleStatus,
+  RuleType,
+  ImplementationLifecycleState,
+  ImplementationType,
+} from '@principles/core/runtime-v2';
+
+export type {
+  PrinciplePriority,
+  PrincipleScope,
+  PrincipleEvaluability,
+  RuleStatus,
+  RuleType,
+  ImplementationLifecycleState,
+  ImplementationType,
+} from '@principles/core/runtime-v2';
+
 // =========================================================================
 // 1. PRINCIPLE (Tree Root) — Highly abstract, cross-scenario, value-driven
 // =========================================================================
-
-export type PrinciplePriority = 'P0' | 'P1' | 'P2';
-
-export type PrincipleScope = 'general' | 'domain';
-
-export type PrincipleEvaluability =
-  | 'manual_only'        // Cannot be automatically evaluated
-  | 'deterministic'      // Clear yes/no evaluation criteria
-  | 'weak_heuristic';    // Fuzzy evaluation with confidence score
 
 export interface Principle {
   // Identity
@@ -86,20 +98,6 @@ export interface Principle {
 // 2. RULE (Tree Trunk) — Verifiable, actionable, principle-specific
 // =========================================================================
 
-export type RuleStatus =
-  | 'proposed'     // Suggested but not implemented
-  | 'implemented'  // Code/skill exists but not fully tested
-  | 'enforced'     // Actively enforced with monitoring
-  | 'retired';     // No longer needed (principle deprecated)
-
-export type RuleType =
-  | 'hook'         // Code hook (before/after tool call)
-  | 'gate'         // Pre-execution gate (block/warn)
-  | 'skill'        // LLM skill/instruction
-  | 'lora'         // Fine-tuned model weight
-  | 'test'         // Automated test case
-  | 'prompt'       // System prompt injection;
-
 export interface Rule {
   // Identity
   id: string;                     // e.g., "R_060_01"
@@ -136,14 +134,6 @@ export interface Rule {
 // =========================================================================
 // 3. IMPLEMENTATION (Tree Leaf) — Concrete, executable
 // =========================================================================
-
-export type ImplementationLifecycleState =
-  | 'candidate'    // Newly created, awaiting replay evaluation
-  | 'active'       // Currently active for this rule
-  | 'disabled'     // Manually disabled (e.g., regression)
-  | 'archived';    // Permanently archived
-
-export type ImplementationType = 'code' | 'skill' | 'lora' | 'test' | 'prompt';
 
 export interface Implementation {
   // Identity

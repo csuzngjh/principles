@@ -40,3 +40,15 @@ export { mergeDecisions } from './rule-host-evaluator.js';
 
 // Adapter interface (PRI-45)
 export type { RuleHostImplementationProvider } from './rule-host-adapter.js';
+
+// Lifecycle read model types (PRI-51)
+export type {
+  LifecycleClassificationTotals,
+  RuleReplayEvidence,
+  RuleLiveEvidence,
+  RuleLineageEvidence,
+  ImplementationLifecycleEvidence,
+  RuleLifecycleEvidence,
+  PrincipleLifecycleEvidence,
+  LifecycleReadModel,
+} from './lifecycle-types.js';
