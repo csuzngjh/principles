@@ -183,9 +183,10 @@ export class ReplayEngine {
           const content = fs.readFileSync(path.join(reportDir, file), 'utf-8');
           return JSON.parse(content) as ReplayReport;
         });
-    } catch {
-      return [];
-    }
+    } catch (err) {
+    console.warn(`[ReplayEngine] Failed to read reports in ${reportDir}: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
   }
 
   getLatestReport(implementationId: string): ReplayReport | null {

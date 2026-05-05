@@ -329,3 +329,10 @@ export { assessDeprecatedReadiness } from './internalization/deprecated-readines
 // Lifecycle routing policy (PRI-54)
 export type { LifecycleRoute, LifecycleRouteEvidenceSummary, LifecycleRouteRecommendation } from './internalization/routing-policy.js';
 export { recommendLifecycleRoute } from './internalization/routing-policy.js';
+
+// Lifecycle datasource adapter + read model builder (PRI-56)
+export type { LifecycleDatasource } from './internalization/lifecycle-datasource.js';
+export { buildLifecycleReadModel } from './internalization/lifecycle-read-model.js';
+
+// Ledger domain types needed by plugin datasource implementations (PRI-56)
+export type { LedgerTreeStore } from '../principle-tree-ledger.js';
