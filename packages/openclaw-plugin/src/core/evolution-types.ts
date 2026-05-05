@@ -218,7 +218,7 @@ export interface TierPromotionEvent {
 
 // ===== Evolution Loop Schema =====
 
-export type PrincipleStatus = 'candidate' | 'probation' | 'active' | 'deprecated';
+export type PrincipleStatus = 'candidate' | 'probation' | 'active' | 'deprecated' | 'archived';
 
 /**
  * Evaluability classification — determines whether a P_xxx principle can enter
@@ -423,8 +423,8 @@ export interface CandidateCreatedData {
 
 export interface PrinciplePromotedData {
   principleId: string;
-  from: 'candidate' | 'probation';
-  to: 'probation' | 'active';
+  from: PrincipleStatus;
+  to: PrincipleStatus;
   reason: string;
   successCount?: number;
 }

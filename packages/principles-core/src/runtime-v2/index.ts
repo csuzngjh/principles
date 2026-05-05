@@ -241,7 +241,7 @@ export { loadLedger, getLedgerFilePathPublic } from '../principle-tree-ledger.js
 
 // Pruning read model (PRI-15)
 export { PruningReadModel } from './pruning-read-model.js';
-export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, PrincipleStatus } from './pruning-read-model.js';
+export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel } from './pruning-read-model.js';
 
 // Pruning review audit log (PRI-24)
 export { appendPruningReview, listPruningReviews } from './pruning-review-log.js';
@@ -284,3 +284,36 @@ export { buildMaskedPrincipleSet, getCachedMaskedPrincipleSet, clearPruningMaskC
 export type { DecisionMergeLogger, RuleHostLogger } from './internalization/rule-host-evaluator.js';
 export { mergeDecisions } from './internalization/rule-host-evaluator.js';
 export type { RuleHostImplementationProvider } from './internalization/rule-host-adapter.js';
+
+// Principle tree domain types (PRI-51)
+export type {
+  PrincipleStatus,
+  PrinciplePriority,
+  PrincipleScope,
+  PrincipleEvaluability,
+  RuleStatus,
+  RuleType,
+  ImplementationLifecycleState,
+  ImplementationType,
+  SampleClassification,
+  Principle,
+  Rule,
+  Implementation,
+  ArtifactKind,
+  ArtifactLineageRecord,
+  ReplayResult,
+  ClassificationSummary,
+  ReplayReport,
+} from './types/index.js';
+
+// Lifecycle read model types (PRI-51)
+export type {
+  LifecycleClassificationTotals,
+  RuleReplayEvidence,
+  RuleLiveEvidence,
+  RuleLineageEvidence,
+  ImplementationLifecycleEvidence,
+  RuleLifecycleEvidence,
+  PrincipleLifecycleEvidence,
+  LifecycleReadModel,
+} from './internalization/lifecycle-types.js';
