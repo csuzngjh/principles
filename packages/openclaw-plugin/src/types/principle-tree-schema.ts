@@ -22,11 +22,11 @@
  *   - Track principle value ranking (pain prevented, adherence rate)
  */
 
-import type { PrincipleStatus } from '../core/evolution-types.js';
 import type { PrincipleDetectorSpec } from '../core/evolution-types.js';
 
-// Import and re-export leaf types from core (PRI-51)
+// Import core Principle and re-export leaf types from core (PRI-51)
 import type {
+  Principle as CorePrinciple,
   PrinciplePriority,
   PrincipleScope,
   PrincipleEvaluability,
@@ -50,48 +50,10 @@ export type {
 // 1. PRINCIPLE (Tree Root) — Highly abstract, cross-scenario, value-driven
 // =========================================================================
 
-export interface Principle {
-  // Identity
-  id: string;                     // e.g., "P_060"
-  version: number;                // Incremented on each update
-
-  // Core content
-  text: string;                   // One-line abstract principle statement
-  coreAxiomId?: string;           // Associated core axiom (e.g., "T-01")
-  triggerPattern: string;         // Regex/keywords for auto-matching pain signals
-  action: string;                 // What to do when triggered
-
-  // Status and lifecycle
-  status: PrincipleStatus;
-  priority: PrinciplePriority;
-  scope: PrincipleScope;
-  domain?: string;                // Required when scope === 'domain', e.g., "file_operations"
-  evaluability: PrincipleEvaluability;
-
-  // Value metrics (auto-calculated)
-  valueScore: number;             // pain_prevented_count × avg_pain_severity
-  adherenceRate: number;          // 0-100, percentage of times followed
-  painPreventedCount: number;     // Number of pain signals prevented by this principle
-  lastPainPreventedAt?: string;   // ISO timestamp of most recent prevention
-
-  // Relationships
-  derivedFromPainIds: string[];   // Source pain signal IDs
-  ruleIds: string[];              // Associated rule IDs (trunk connections)
-  conflictsWithPrincipleIds: string[];  // Conflicting principles
-  supersedesPrincipleId?: string; // If this replaces a deprecated principle
-
-  // Metadata
-  createdAt: string;              // ISO timestamp
-  updatedAt: string;              // ISO timestamp
-  deprecatedAt?: string;          // Set when status changes to 'deprecated'
-  deprecatedReason?: string;      // Why it was deprecated (e.g., "solidified into hook at src/hooks/file-safety.ts")
-
-  // Detector metadata (for auto-training eligibility)
+export interface Principle extends CorePrinciple {
+  // EXTENDS core.Principle (PRI-51) — plugin adds detectorMetadata
+  /** For auto-training eligibility (plugin-specific, not in core) */
   detectorMetadata?: PrincipleDetectorSpec;
-
-  // Compilation retry tracking (for runtime auto-trigger)
-  // undefined = not yet attempted or succeeded; 0 = queued; n >= 1 = retry attempt n
-  compilationRetryCount?: number;
 }
 
 // =========================================================================
