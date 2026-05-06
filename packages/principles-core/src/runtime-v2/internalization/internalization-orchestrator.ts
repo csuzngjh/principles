@@ -31,6 +31,8 @@ import { PDRuntimeError } from '../error-categories.js';
 export interface NoReadyTasksResult {
   decision: 'no_ready_tasks';
   inspectedCount: number;
+  /** Why no task could be leased: specific diagnosis */
+  reason: 'no_candidates' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_lease_conflict';
 }
 
 export interface BlockedResult {
@@ -156,13 +158,27 @@ export class InternalizationOrchestrator {
    */
   async wakeOnce(): Promise<WakeOnceResult> {
     const candidates = await this.findCandidates();
-    let inspectedCount = candidates.length;
+    const inspectedCount = candidates.length;
+
+    if (inspectedCount === 0) {
+      return {
+        decision: 'no_ready_tasks',
+        inspectedCount: 0,
+        reason: 'no_candidates',
+      };
+    }
+
+    let hydrationFailures = 0;
+    let blockedCount = 0;
+    let dependencyFailures = 0;
+    let leaseConflictCount = 0;
 
     for (const rawTask of candidates) {
       const piTask = hydratePITaskRecord(rawTask);
 
       if (!piTask) {
         // Hydration failed — invalid PI metadata, skip and try next candidate
+        hydrationFailures++;
         continue;
       }
 
@@ -174,11 +190,13 @@ export class InternalizationOrchestrator {
 
       if (gateResult.decision === 'blocked') {
         // Non-terminal — skip and try next candidate
+        blockedCount++;
         continue;
       }
 
       if (gateResult.decision === 'dependency_failed') {
         // Non-terminal — skip and try next candidate
+        dependencyFailures++;
         continue;
       }
 
@@ -208,6 +226,7 @@ export class InternalizationOrchestrator {
       } catch (error) {
         if (error instanceof PDRuntimeError && error.category === 'lease_conflict') {
           // Non-terminal — skip and try next candidate
+          leaseConflictCount++;
           continue;
         }
         // Re-throw with task context for correlation
@@ -220,9 +239,25 @@ export class InternalizationOrchestrator {
       }
     }
 
+    // All candidates exhausted — determine dominant failure mode for diagnosis
+    // Dominant mode: pick the failure type with the highest count; ties broken
+    // by specificity priority (hydration > dependency > blocked > lease).
+    // Hydration participates when it is the highest count (not just 100%).
+    const reason: NoReadyTasksResult['reason'] =
+      hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount && hydrationFailures >= leaseConflictCount
+        ? 'all_hydration_failed'
+        : dependencyFailures >= blockedCount && dependencyFailures >= leaseConflictCount
+          ? 'all_dependency_failed'
+          : blockedCount >= leaseConflictCount
+            ? 'all_blocked'
+            : leaseConflictCount > 0
+              ? 'all_lease_conflict'
+              : 'no_candidates';
+
     return {
       decision: 'no_ready_tasks',
       inspectedCount,
+      reason,
     };
   }
 
