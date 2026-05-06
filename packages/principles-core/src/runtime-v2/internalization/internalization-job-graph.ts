@@ -20,6 +20,9 @@ import type { InternalizationChannel, PeerRunnerKind } from './peer-runner-contr
  * Allowed edges in the job graph (v1).
  * Each tuple is [from, to] meaning from → to is a legal transition.
  *
+ * v1 policy B: trainer is terminal successor of rollout_reviewer only.
+ * Fan-out to trainer from arbitrary runners is future scope (v2+).
+ *
  * @see ADR-0003 Section 3.7
  */
 export const ALLOWED_EDGES: readonly (readonly [PeerRunnerKind, PeerRunnerKind])[] = [
@@ -28,11 +31,12 @@ export const ALLOWED_EDGES: readonly (readonly [PeerRunnerKind, PeerRunnerKind])
   ['scribe', 'artificer'] as const,
   ['artificer', 'evaluator'] as const,
   ['evaluator', 'rollout_reviewer'] as const,
+  ['rollout_reviewer', 'trainer'] as const,
 ] as const;
 
 /**
- * The channel required to reach the trainer runner.
- * Any runner can create a trainer task via this channel.
+ * The channel required for the rollout_reviewer → trainer transition.
+ * v1 policy B: trainer is terminal successor of rollout_reviewer only.
  */
 export const MODEL_TRAINING_CHANNEL: InternalizationChannel = 'model_training';
 
@@ -47,7 +51,8 @@ export const TRAINER_KIND: PeerRunnerKind = 'trainer';
  * Validates whether a transition from one runner to another is legal.
  *
  * For non-trainer targets: checks ALLOWED_EDGES
- * For trainer target: requires model_training channel
+ * For trainer target: requires model_training channel AND source must be rollout_reviewer
+ *   (v1 policy B: trainer is terminal successor of rollout_reviewer only)
  *
  * @param from - Source peer runner kind
  * @param to - Target peer runner kind
@@ -58,9 +63,9 @@ export function validateEdge(
   to: PeerRunnerKind,
   channel?: InternalizationChannel,
 ): boolean {
-  // Trainer can only be reached via model_training channel
+  // Trainer requires model_training channel AND rollout_reviewer source (v1 policy B)
   if (to === TRAINER_KIND) {
-    return channel === MODEL_TRAINING_CHANNEL;
+    return from === 'rollout_reviewer' && channel === MODEL_TRAINING_CHANNEL;
   }
 
   // Non-trainer targets: check allowed edges
@@ -145,20 +150,16 @@ export function isAcyclic(
 /**
  * Returns all allowed successor runner kinds for a given runner.
  *
+ * v1 policy B: returns only ALLOWED_EDGES successors.
+ * trainer is terminal v1 successor of rollout_reviewer only (no fan-out shortcut).
+ *
  * @param from - Source peer runner kind
  * @returns Array of allowed successor runner kinds
  */
 export function getAllowedSuccessors(from: PeerRunnerKind): PeerRunnerKind[] {
-  const direct = ALLOWED_EDGES
+  return ALLOWED_EDGES
     .filter(([f]) => f === from)
     .map(([, t]) => t);
-
-  // Any runner (except trainer) can reach trainer via model_training
-  if (from !== TRAINER_KIND && !direct.includes(TRAINER_KIND)) {
-    direct.push(TRAINER_KIND);
-  }
-
-  return direct;
 }
 
 /**

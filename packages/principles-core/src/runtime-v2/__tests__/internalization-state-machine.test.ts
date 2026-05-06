@@ -448,8 +448,7 @@ describe('createNextTaskProposal', () => {
     expect(result).not.toBeNull();
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const r = result!;
-    // getAllowedSuccessors returns ['philosopher', 'trainer'] for dreamer;
-    // first element is philosopher (direct ALLOWED_EDGES successor)
+    // getAllowedSuccessors returns ['philosopher'] for dreamer (v1 Policy B: trainer only via rollout_reviewer)
     expect(r.taskKind).toBe('philosopher');
     expect(r.channel).toBe('model_training');
   });
@@ -472,6 +471,149 @@ describe('createNextTaskProposal', () => {
       taskId: 'dreamer-1',
       taskKind: 'dreamer',
       status: 'failed',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).toBeNull();
+  });
+
+  // ── Policy B: model_training still follows full chain — trainer only after rollout_reviewer ─
+
+  it('philosopher + model_training → scribe (not trainer)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'phil-1',
+      taskKind: 'philosopher',
+      status: 'succeeded',
+      channel: 'model_training',
+      outputArtifactRefs: [{ artifactType: 'rule', ref: 'art-2' }],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).not.toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const r = result!;
+    expect(r.taskKind).toBe('scribe');
+    expect(r.taskKind).not.toBe('trainer');
+  });
+
+  it('scribe + model_training → artificer (not trainer)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'scribe-1',
+      taskKind: 'scribe',
+      status: 'succeeded',
+      channel: 'model_training',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).not.toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const r = result!;
+    expect(r.taskKind).toBe('artificer');
+    expect(r.taskKind).not.toBe('trainer');
+  });
+
+  it('artificer + model_training → evaluator (not trainer)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'art-1',
+      taskKind: 'artificer',
+      status: 'succeeded',
+      channel: 'model_training',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).not.toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const r = result!;
+    expect(r.taskKind).toBe('evaluator');
+    expect(r.taskKind).not.toBe('trainer');
+  });
+
+  it('evaluator + model_training → rollout_reviewer (not trainer)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'eval-1',
+      taskKind: 'evaluator',
+      status: 'succeeded',
+      channel: 'model_training',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).not.toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const r = result!;
+    expect(r.taskKind).toBe('rollout_reviewer');
+    expect(r.taskKind).not.toBe('trainer');
+  });
+
+  it('dreamer + model_training → philosopher (not trainer)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'dreamer-1',
+      taskKind: 'dreamer',
+      status: 'succeeded',
+      channel: 'model_training',
+      outputArtifactRefs: [{ artifactType: 'training_data', ref: 'td-1' }],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).not.toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const r = result!;
+    expect(r.taskKind).toBe('philosopher');
+    expect(r.taskKind).not.toBe('trainer');
+    expect(r.channel).toBe('model_training');
+  });
+
+  it('rollout_reviewer + model_training → trainer (terminal v1 successor)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'rr-1',
+      taskKind: 'rollout_reviewer',
+      status: 'succeeded',
+      channel: 'model_training',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).not.toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(result!.taskKind).toBe('trainer');
+  });
+
+  it('rollout_reviewer + skill → null (non-model_training channel, no valid successor)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'rr-1',
+      taskKind: 'rollout_reviewer',
+      status: 'succeeded',
+      channel: 'skill',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    // rollout_reviewer has no non-model_training successors; skill channel blocks trainer
+    expect(result).toBeNull();
+  });
+
+  it('rollout_reviewer + code_tool_hook → null (non-model_training channel, no valid successor)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'rr-1',
+      taskKind: 'rollout_reviewer',
+      status: 'succeeded',
+      channel: 'code_tool_hook',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).toBeNull();
+  });
+
+  it('rollout_reviewer + prompt → null (explicit)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'rr-1',
+      taskKind: 'rollout_reviewer',
+      status: 'succeeded',
+      channel: 'prompt',
       outputArtifactRefs: [],
     });
     const result = createNextTaskProposal(task, []);
@@ -601,6 +743,20 @@ describe('isArtifactRejected', () => {
       validationStatus: 'pending' as const,
     };
     expect(isArtifactRejected(artifact)).toBe(false);
+  });
+// ── Policy B: model_training still follows full chain — trainer only after rollout_reviewer ─
+
+  it('rollout_reviewer + defer_archive → null (non-model_training channel)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'rr-1',
+      taskKind: 'rollout_reviewer',
+      status: 'succeeded',
+      channel: 'defer_archive',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).toBeNull();
   });
 });
 
