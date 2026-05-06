@@ -448,8 +448,7 @@ describe('createNextTaskProposal', () => {
     expect(result).not.toBeNull();
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const r = result!;
-    // getAllowedSuccessors returns ['philosopher', 'trainer'] for dreamer;
-    // first element is philosopher (direct ALLOWED_EDGES successor)
+    // getAllowedSuccessors returns ['philosopher'] for dreamer (v1 Policy B: trainer only via rollout_reviewer)
     expect(r.taskKind).toBe('philosopher');
     expect(r.channel).toBe('model_training');
   });
@@ -744,6 +743,20 @@ describe('isArtifactRejected', () => {
       validationStatus: 'pending' as const,
     };
     expect(isArtifactRejected(artifact)).toBe(false);
+  });
+// ── Policy B: model_training still follows full chain — trainer only after rollout_reviewer ─
+
+  it('rollout_reviewer + defer_archive → null (non-model_training channel)', async () => {
+    const { createNextTaskProposal } = await import('../internalization/internalization-state-machine.js');
+    const task = makePITask({
+      taskId: 'rr-1',
+      taskKind: 'rollout_reviewer',
+      status: 'succeeded',
+      channel: 'defer_archive',
+      outputArtifactRefs: [],
+    });
+    const result = createNextTaskProposal(task, []);
+    expect(result).toBeNull();
   });
 });
 

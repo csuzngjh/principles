@@ -227,18 +227,19 @@ describe('Job Graph', () => {
   // ── validateEdge ──────────────────────────────────────────────────────────
 
   describe('validateEdge', () => {
-    it('returns true for all ALLOWED_EDGES', async () => {
+    it('returns true for all non-trainer ALLOWED_EDGES (channel-free edges)', async () => {
       const { validateEdge } = await import('../internalization/internalization-job-graph.js');
 
-      const allowedEdges = [
+      const nonTrainerEdges = [
         ['dreamer', 'philosopher'] as const,
         ['philosopher', 'scribe'] as const,
         ['scribe', 'artificer'] as const,
         ['artificer', 'evaluator'] as const,
         ['evaluator', 'rollout_reviewer'] as const,
+        // Note: rollout_reviewer→trainer requires model_training channel (tested separately)
       ];
 
-      for (const [from, to] of allowedEdges) {
+      for (const [from, to] of nonTrainerEdges) {
         expect(validateEdge(from, to)).toBe(true);
       }
     });
