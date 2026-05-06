@@ -54,6 +54,8 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-62
   'internalization/internalization-task-guards.ts',
   'internalization/internalization-state-machine.ts',
+  // PRI-65
+  'internalization/pitask-metadata.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -68,6 +70,8 @@ const REQUIRED_TEST_FILES = [
   // Skipping — test file lives at ../internalization/ not __tests__/internalization/
   // PRI-62
   'internalization-state-machine.test.ts',
+  // PRI-65
+  'pitask-metadata.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [

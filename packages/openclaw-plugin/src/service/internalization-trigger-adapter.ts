@@ -19,7 +19,7 @@ import type { TaskRecord } from '@principles/core/runtime-v2';
 import {
   validateInternalizationTaskReady,
   isPeerRunnerKind,
-  isValidPITaskRecord,
+  hydratePITaskRecord,
   type PITaskRecord,
   type PeerRunnerKind,
 } from '@principles/core/runtime-v2';
@@ -165,15 +165,17 @@ export function createInternalizationTrigger(
       const pendingTasks = await provider.listTasks({ status: 'pending' });
       const retryWaitTasks = await provider.listTasks({ status: 'retry_wait' });
 
-      // Filter to only PeerRunner tasks (ignore diagnostician etc.)
-      const pendingPITasks = pendingTasks.filter(
-        (t): t is PITaskRecord =>
-          isPeerRunnerKind(t.taskKind) && isValidPITaskRecord(t),
-      );
-      const retryWaitPITasks = retryWaitTasks.filter(
-        (t): t is PITaskRecord =>
-          isPeerRunnerKind(t.taskKind) && isValidPITaskRecord(t),
-      );
+      // Filter to only PeerRunner tasks, then hydrate PI metadata from diagnosticJson.
+      // Tasks without valid PI metadata in diagnosticJson return null and are filtered out.
+      const pendingPITasks = pendingTasks
+        .filter(t => isPeerRunnerKind(t.taskKind))
+        .map(t => hydratePITaskRecord(t))
+        .filter((t): t is PITaskRecord => t !== null);
+
+      const retryWaitPITasks = retryWaitTasks
+        .filter(t => isPeerRunnerKind(t.taskKind))
+        .map(t => hydratePITaskRecord(t))
+        .filter((t): t is PITaskRecord => t !== null);
 
       const candidateTasks = [...pendingPITasks, ...retryWaitPITasks];
 
@@ -253,8 +255,14 @@ export function createInternalizationTrigger(
   // ── start: begin periodic wake cycles ─────────────────────────────────────
 
   function start(ctx: TriggerContext, intervalMs = 5 * 60 * 1000): () => void {
-    // Prevent re-entrancy: if already running, return existing stop
-    if (state.intervalId !== null) return stop;
+    // Prevent re-entrancy: if already running, warn and return existing stop
+    if (state.intervalId !== null) {
+      logger?.warn?.('[PD:InternalizationTrigger] start() called while already running — returning existing stop', {
+        workspaceDir: ctx.workspaceDir,
+        stateDir: ctx.stateDir,
+      });
+      return stop;
+    }
 
     // Immediate first wake
     wake(ctx).catch(err => {
