@@ -128,6 +128,22 @@ describe('parsePITaskMetadata', () => {
     expect(parsePITaskMetadata('{"other": "data"}')).toBeNull();
   });
 
+  it('JSON.parse result is not an object (null/number/string/array) → returns null', () => {
+    expect(parsePITaskMetadata('null')).toBeNull();
+    expect(parsePITaskMetadata('123')).toBeNull();
+    expect(parsePITaskMetadata('"foo"')).toBeNull();
+    expect(parsePITaskMetadata('[]')).toBeNull();
+    // pi_metadata present but top-level value is array (not object)
+    expect(parsePITaskMetadata('{"pi_metadata": []}')).toBeNull();
+  });
+
+  it('dependencyTaskIds with non-string elements → returns null', () => {
+    const meta = {
+      pi_metadata: { ...makeMetadata({ channel: 'prompt' }), dependencyTaskIds: ['dep-1', 123, null] },
+    };
+    expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
+  });
+
   it('invalid channel → returns null', () => {
     const meta = { pi_metadata: { ...makeMetadata(), channel: 'invalid_channel' as InternalizationChannel } };
     expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
@@ -136,6 +152,24 @@ describe('parsePITaskMetadata', () => {
   it('missing required fields → returns null', () => {
     const meta = { pi_metadata: { channel: 'prompt' } }; // missing timeoutMs, arrays
     expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
+  });
+
+  it('parentTaskId explicitly null → returns null (fail closed)', () => {
+    const meta = { pi_metadata: { ...makeMetadata({ channel: 'prompt' }), parentTaskId: null as unknown as string } };
+    expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
+  });
+
+  it('correlationId explicitly null → returns null (fail closed)', () => {
+    const meta = { pi_metadata: { ...makeMetadata({ channel: 'defer_archive' }), correlationId: null as unknown as string } };
+    expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
+  });
+
+  it('timeoutMs is 0, negative, NaN, or Infinity → returns null', () => {
+    const validMeta = makeMetadata({ channel: 'prompt' });
+    expect(parsePITaskMetadata(JSON.stringify({ pi_metadata: { ...validMeta, timeoutMs: 0 } }))).toBeNull();
+    expect(parsePITaskMetadata(JSON.stringify({ pi_metadata: { ...validMeta, timeoutMs: -1 } }))).toBeNull();
+    expect(parsePITaskMetadata(JSON.stringify({ pi_metadata: { ...validMeta, timeoutMs: NaN } }))).toBeNull();
+    expect(parsePITaskMetadata(JSON.stringify({ pi_metadata: { ...validMeta, timeoutMs: Infinity } }))).toBeNull();
   });
 
   it('inputArtifactRefs with invalid element → returns null', () => {
