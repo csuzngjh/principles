@@ -19,7 +19,7 @@ import type { TaskRecord } from '@principles/core/runtime-v2';
 import {
   validateInternalizationTaskReady,
   isPeerRunnerKind,
-  isValidPITaskRecord,
+  hydratePITaskRecord,
   type PITaskRecord,
   type PeerRunnerKind,
 } from '@principles/core/runtime-v2';
@@ -165,15 +165,17 @@ export function createInternalizationTrigger(
       const pendingTasks = await provider.listTasks({ status: 'pending' });
       const retryWaitTasks = await provider.listTasks({ status: 'retry_wait' });
 
-      // Filter to only PeerRunner tasks (ignore diagnostician etc.)
-      const pendingPITasks = pendingTasks.filter(
-        (t): t is PITaskRecord =>
-          isPeerRunnerKind(t.taskKind) && isValidPITaskRecord(t),
-      );
-      const retryWaitPITasks = retryWaitTasks.filter(
-        (t): t is PITaskRecord =>
-          isPeerRunnerKind(t.taskKind) && isValidPITaskRecord(t),
-      );
+      // Filter to only PeerRunner tasks, then hydrate PI metadata from diagnosticJson.
+      // Tasks without valid PI metadata in diagnosticJson return null and are filtered out.
+      const pendingPITasks = pendingTasks
+        .filter(t => isPeerRunnerKind(t.taskKind))
+        .map(t => hydratePITaskRecord(t))
+        .filter((t): t is PITaskRecord => t !== null);
+
+      const retryWaitPITasks = retryWaitTasks
+        .filter(t => isPeerRunnerKind(t.taskKind))
+        .map(t => hydratePITaskRecord(t))
+        .filter((t): t is PITaskRecord => t !== null);
 
       const candidateTasks = [...pendingPITasks, ...retryWaitPITasks];
 

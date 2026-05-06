@@ -404,3 +404,15 @@ export {
   createNextTaskProposal,
   validateInternalizationGraph,
 } from './internalization/internalization-state-machine.js';
+
+// ── PITask Persistence & Hydration (PRI-65) ──────────────────────────────────
+
+export type { PITaskMetadata } from './internalization/pitask-metadata.js';
+
+export {
+  PI_METADATA_KEY,
+  serializePITaskMetadata,
+  parsePITaskMetadata,
+  hydratePITaskRecord,
+  createPITaskDiagnosticJson,
+} from './internalization/pitask-metadata.js';
