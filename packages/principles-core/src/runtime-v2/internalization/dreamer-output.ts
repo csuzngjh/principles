@@ -87,6 +87,11 @@ export interface DreamerValidator {
 
 /**
  * Pass-through validator — accepts all output (initial scope).
+ *
+ * @deprecated Temporary implementation. Real DreamerValidator with schema
+ *   validation, candidate count (1-5), confidence range (0..1), and
+ *   riskLevel validation must be implemented in a future PRI-67 follow-up.
+ *   When a real validator rejects output, DreamerRunner retries via retryOrFail.
  */
 export class PassThroughDreamerValidator implements DreamerValidator {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this

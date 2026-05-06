@@ -23,7 +23,6 @@
  *   9. markTaskSucceeded with 'dreamer://' + storeRunId
  *
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
- * @see DiagnosticianRunner (reference implementation)
  */
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type {
@@ -35,9 +34,9 @@ import type {
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DreamerOutput, DreamerValidator } from './dreamer-output.js';
 import type { TaskRecord } from '../task-status.js';
-import type { PDErrorCategory } from '../error-categories.js';
+import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
-import { PDRuntimeError } from '../error-categories.js';
+import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 
 // ── Result Types ─────────────────────────────────────────────────────────────
@@ -262,7 +261,16 @@ export class DreamerRunner {
    * from dependencyTaskIds via stateManager.getTask(). The predecessor's
    * resultRef/outputArtifactRefs become the Dreamer's input context.
    *
-   * Returns contextHash for telemetry and result tracking.
+   * Degradation semantics (intentional partial failure):
+   *   - If ALL dependencies fail → builds empty context (continues, not fail-closed)
+   *   - If SOME dependencies fail → builds partial context + emits dreamer_context_partial
+   *   - Only fulfilled results contribute contextRefs
+   *
+   * This is a deliberate design choice: Dreamer can produce output with partial
+   * context, whereas the host layer's task-ready validation is fail-closed.
+   * Partial context is reported via telemetry.
+   *
+   * @see hydratePITaskRecord (PRI-65) for fail-closed PI metadata access
    */
   private async buildContext(taskId: string): Promise<{ contextHash: string }> {
     // Get the task to read dependencyTaskIds
@@ -271,7 +279,8 @@ export class DreamerRunner {
       throw new PDRuntimeError('input_invalid', `Task ${taskId} not found`);
     }
 
-    const deps = (task as unknown as { dependencyTaskIds?: string[] }).dependencyTaskIds ?? [];
+    const piTask = hydratePITaskRecord(task);
+    const deps = piTask?.dependencyTaskIds ?? [];
 
     // Resolve each dependency and collect result refs
     const contextRefs: string[] = [];
@@ -290,9 +299,9 @@ export class DreamerRunner {
           if (result.value.resultRef) {
             contextRefs.push(result.value.resultRef);
           }
-          const pi = result.value as unknown as { outputArtifactRefs?: { ref: string }[] };
-          if (pi.outputArtifactRefs) {
-            contextRefs.push(...pi.outputArtifactRefs.map((a) => a.ref));
+          const depPiTask = result.value ? hydratePITaskRecord(result.value) : null;
+          if (depPiTask?.outputArtifactRefs) {
+            contextRefs.push(...depPiTask.outputArtifactRefs.map((a) => a.ref));
           }
         }
       }
@@ -317,12 +326,11 @@ export class DreamerRunner {
    */
   private static hashContextRefs(refs: readonly string[]): string {
     if (refs.length === 0) return 'empty';
-    // Simple deterministic hash using JSON stringify + char codes
+    // Simple deterministic hash via DJB2-style accumulator
     // Not cryptographic — only used for observability
     const str = refs.join('|');
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
-       
       hash = (Math.imul(31, hash) + str.charCodeAt(i)) | 0;
     }
     return `ctx-${Math.abs(hash).toString(16)}`;
@@ -330,9 +338,6 @@ export class DreamerRunner {
 
   private async resolveStoreRunId(taskId: string): Promise<string> {
     const runs = await this.stateManager.getRunsByTask(taskId);
-    if (runs.length === 0) {
-      throw new PDRuntimeError('execution_failed', `No run records found for task ${taskId} after lease acquisition`);
-    }
     const latestRun = runs[runs.length - 1];
     if (!latestRun) {
       throw new PDRuntimeError('execution_failed', `No run records found for task ${taskId} after lease acquisition`);
