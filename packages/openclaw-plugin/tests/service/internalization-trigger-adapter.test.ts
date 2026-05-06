@@ -1,11 +1,16 @@
 /**
- * Internalization Trigger Adapter - Unit Tests (PRI-63)
+ * Internalization Trigger Adapter - Unit Tests (PRI-63/65)
+ *
+ * PRI-65: Updated to use diagnosticJson for PI metadata, simulating
+ * real SqliteTaskStore behavior where PI fields live inside diagnosticJson.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import type { TaskRecord } from '@principles/core/runtime-v2';
+import { createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
+import type { InternalizationChannel, ArtifactRef } from '@principles/core/runtime-v2';
 
 type MockLogger = {
   debug?: (msg: string, meta?: Record<string, unknown>) => void;
@@ -19,23 +24,52 @@ interface MockProvider {
   getTask: ReturnType<typeof vi.fn>;
 }
 
+/** Create a base TaskRecord (no PI metadata). Provider returns this from SQLite. */
 function makeTask(overrides: Partial<TaskRecord> & { taskId: string; taskKind: string }): TaskRecord {
   return {
     taskId: overrides.taskId,
     taskKind: overrides.taskKind,
     status: overrides.status ?? 'pending',
-    resultRef: undefined,
-    lastError: undefined,
+    createdAt: overrides.createdAt ?? new Date().toISOString(),
+    updatedAt: overrides.updatedAt ?? new Date().toISOString(),
     attemptCount: 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    dependencyTaskIds: overrides.dependencyTaskIds ?? [],
-    correlationId: overrides.correlationId,
-    channel: 'prompt' as TaskRecord['channel'],
-    timeoutMs: 300000,
-    inputArtifactRefs: [],
-    outputArtifactRefs: [],
+    maxAttempts: 3,
+    leaseOwner: undefined,
+    leaseExpiresAt: undefined,
+    lastError: undefined,
+    inputRef: undefined,
+    resultRef: undefined,
     ...overrides,
+  } as TaskRecord;
+}
+
+/** Create a TaskRecord with PI metadata stored in diagnosticJson (simulates SqliteTaskStore). */
+function makePITask(
+  taskId: string,
+  taskKind: string,
+  channel: InternalizationChannel,
+  options?: {
+    status?: TaskRecord['status'];
+    dependencyTaskIds?: string[];
+    parentTaskId?: string;
+    correlationId?: string;
+    timeoutMs?: number;
+    inputArtifactRefs?: ArtifactRef[];
+    outputArtifactRefs?: ArtifactRef[];
+  },
+): TaskRecord {
+  const meta = {
+    dependencyTaskIds: options?.dependencyTaskIds ?? [],
+    channel,
+    timeoutMs: options?.timeoutMs ?? 300000,
+    inputArtifactRefs: options?.inputArtifactRefs ?? [],
+    outputArtifactRefs: options?.outputArtifactRefs ?? [],
+    parentTaskId: options?.parentTaskId,
+    correlationId: options?.correlationId,
+  };
+  return {
+    ...makeTask({ taskId, taskKind, status: options?.status ?? 'pending' }),
+    diagnosticJson: createPITaskDiagnosticJson(meta),
   } as TaskRecord;
 }
 
@@ -72,7 +106,7 @@ describe('Internalization Trigger Adapter', () => {
     });
 
     it('pending task with no deps → logs INTERNALIZATION_TRIGGER_WAKE with correct payload', async () => {
-      const task = makeTask({ taskId: 'task-1', taskKind: 'dreamer', status: 'pending', dependencyTaskIds: [] });
+      const task = makePITask('task-1', 'dreamer', 'prompt', { status: 'pending', dependencyTaskIds: [] });
       mockProvider.listTasks.mockResolvedValue([task]);
       await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -82,7 +116,7 @@ describe('Internalization Trigger Adapter', () => {
     });
 
     it('retry_wait task → logs INTERNALIZATION_TRIGGER_WAKE', async () => {
-      const task = makeTask({ taskId: 'task-retry', taskKind: 'philosopher', status: 'retry_wait', dependencyTaskIds: [] });
+      const task = makePITask('task-retry', 'philosopher', 'prompt', { status: 'retry_wait', dependencyTaskIds: [] });
       mockProvider.listTasks.mockResolvedValue([task]);
       await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -92,8 +126,8 @@ describe('Internalization Trigger Adapter', () => {
     });
 
     it('task with unmet deps → logs INTERNALIZATION_TRIGGER_BLOCKED with gateDecision blocked', async () => {
-      const depTask = makeTask({ taskId: 'dep-1', taskKind: 'scribe', status: 'pending', dependencyTaskIds: [] });
-      const task = makeTask({ taskId: 'task-blocked', taskKind: 'dreamer', status: 'pending', dependencyTaskIds: ['dep-1'] });
+      const depTask = makePITask('dep-1', 'scribe', 'prompt', { status: 'pending', dependencyTaskIds: [] });
+      const task = makePITask('task-blocked', 'dreamer', 'prompt', { status: 'pending', dependencyTaskIds: ['dep-1'] });
       mockProvider.listTasks.mockResolvedValue([task]);
       mockProvider.getTask.mockResolvedValue(depTask);
       await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
@@ -104,8 +138,8 @@ describe('Internalization Trigger Adapter', () => {
     });
 
     it('task with failed dep → logs INTERNALIZATION_TRIGGER_BLOCKED with dependency_failed', async () => {
-      const depTask = makeTask({ taskId: 'dep-failed', taskKind: 'scribe', status: 'failed', dependencyTaskIds: [] });
-      const task = makeTask({ taskId: 'task-dep-failed', taskKind: 'dreamer', status: 'pending', dependencyTaskIds: ['dep-failed'] });
+      const depTask = makePITask('dep-failed', 'scribe', 'prompt', { status: 'failed', dependencyTaskIds: [] });
+      const task = makePITask('task-dep-failed', 'dreamer', 'prompt', { status: 'pending', dependencyTaskIds: ['dep-failed'] });
       mockProvider.listTasks.mockResolvedValue([task]);
       mockProvider.getTask.mockResolvedValue(depTask);
       await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
@@ -116,7 +150,7 @@ describe('Internalization Trigger Adapter', () => {
     });
 
     it('task with missing dep → logs INTERNALIZATION_TRIGGER_BLOCKED (fail closed)', async () => {
-      const task = makeTask({ taskId: 'task-missing-dep', taskKind: 'dreamer', status: 'pending', dependencyTaskIds: ['nonexistent'] });
+      const task = makePITask('task-missing-dep', 'dreamer', 'prompt', { status: 'pending', dependencyTaskIds: ['nonexistent'] });
       mockProvider.listTasks.mockResolvedValue([task]);
       mockProvider.getTask.mockResolvedValue(null);
       await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
@@ -151,7 +185,7 @@ describe('Internalization Trigger Adapter', () => {
   describe('wake — fire and forget', () => {
     it('wake() returns in < 200ms even with many tasks', async () => {
       const manyTasks = Array.from({ length: 20 }, (_, i) =>
-        makeTask({ taskId: `task-${i}`, taskKind: 'dreamer', status: 'pending', dependencyTaskIds: [] }),
+        makePITask(`task-${i}`, 'dreamer', 'prompt', { status: 'pending', dependencyTaskIds: [] }),
       );
       mockProvider.listTasks.mockResolvedValue(manyTasks);
       const start = Date.now();
@@ -160,7 +194,7 @@ describe('Internalization Trigger Adapter', () => {
     });
 
     it('wake() calls only read methods', async () => {
-      const task = makeTask({ taskId: 'task-readonly', taskKind: 'scribe', status: 'pending', dependencyTaskIds: [] });
+      const task = makePITask('task-readonly', 'scribe', 'prompt', { status: 'pending', dependencyTaskIds: [] });
       mockProvider.listTasks.mockResolvedValue([task]);
       await adapter.wake({ workspaceDir: '/test', stateDir: '/test/.state' });
       expect(mockProvider.listTasks).toHaveBeenCalled();
@@ -197,6 +231,21 @@ describe('Internalization Trigger Adapter', () => {
 
     it('does import @principles/core/runtime-v2', () => {
       expect(readAdapterSource()).toContain('@principles/core/runtime-v2');
+    });
+
+    it('imports hydratePITaskRecord from core (not own JSON.parse)', () => {
+      const src = readAdapterSource();
+      expect(src).toContain('hydratePITaskRecord');
+      // Must not contain ad-hoc JSON.parse for PI metadata
+      expect(src).not.toMatch(/JSON\.parse.*diagnosticJson/);
+    });
+
+    it('does NOT use isValidPITaskRecord directly on raw provider tasks', () => {
+      // The adapter now uses hydratePITaskRecord instead of isValidPITaskRecord
+      // to determine if a task is a valid PI task.
+      // isValidPITaskRecord checks top-level fields which don't exist on persisted tasks.
+      const src = readAdapterSource();
+      expect(src).not.toMatch(/isValidPITaskRecord\s*\(\s*t\s*\)/);
     });
   });
 });
