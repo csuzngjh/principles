@@ -152,17 +152,15 @@ OUTPUT FORMAT (pure JSON, no markdown):
   "summary": "<one line root cause summary>",
   "rootCause": "<Design|People|Assumption|Tooling>: <specific root cause>",
   "violatedPrinciples": [{"rationale": "<why this principle was violated>"}],
-  "evidence": [{"sourceRef": "<sourceRef from context or conversationWindow entry>", "note": "<what this shows>"}],
+  "evidence": [{"sourceRef": "<sourceRef from context>", "note": "<what this shows>"}],
   "recommendations": [
-    {
-      "kind": "rule",
-      "description": "<Detailed explanation of the rule>",
-      "triggerPattern": "<Regex/keywords. REQUIRED if kind is 'rule'>",
-      "action": "<Required behavior change. REQUIRED if kind is 'rule'>",
-      "abstractedPrinciple": "<One sentence summary. REQUIRED if kind is 'principle'>"
-    }
+    {"kind": "principle", "description": "<high-level guideline>", "abstractedPrinciple": "<one sentence, <=200 chars>"},
+    {"kind": "rule", "description": "<deterministic constraint>", "triggerPattern": "<regex/keywords>", "action": "<what to do>"},
+    {"kind": "implementation", "description": "<specific code change>"},
+    {"kind": "prompt", "description": "<workflow habit change>"},
+    {"kind": "defer", "description": "<why evidence is insufficient>"}
   ],
-  "confidence": 0.0-1.0,
+  "confidence": 0.85,
   "ambiguityNotes": ["<optional: anything uncertain>"]
 }
 
@@ -170,7 +168,10 @@ CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text)
 - Do NOT read files, call tools, or write to any database
 - rootCause MUST include category prefix: "Design: ..." or "People: ..." etc.
-- confidence is a number 0.0-1.0
+- confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
+- kind MUST be one of: "principle", "rule", "implementation", "prompt", "defer" (lowercase only)
+- "principle" kind: MUST include abstractedPrinciple (<=200 chars)
+- "rule" kind: MUST include triggerPattern AND action
 - All evidence must reference sourceRef identifiers or conversationWindow entries from the context payload
 `;
 

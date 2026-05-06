@@ -20,7 +20,7 @@ import { Value } from '@sinclair/typebox/value';
 // ---------------------------------------------------------------------------
 
 /**
- * The 30 telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation + 8 M4 diagnostician + 3 M5 commit + 6 M6 runtime adapter.
+ * The 30+ telemetry event types: 3 core evolution + 8 M2 state transition + 1 M3 degradation + 8 M4 diagnostician + 3 M5 commit + 7 M6 runtime adapter.
  *
  * Core evolution events (aligned with EvolutionHook methods):
  * - pain_detected -> EvolutionStage 'pain_detected'
@@ -57,6 +57,7 @@ import { Value } from '@sinclair/typebox/value';
  * - runtime_invocation_failed — runtime invocation failed
  * - output_validation_succeeded — output validation passed
  * - output_validation_failed — output validation failed
+ * - output_repair_attempted — PRI-71 schema repair attempted (bounded by maxRepairAttempts)
  */
 export const TelemetryEventType = Type.Union([
   Type.Literal('pain_detected'),
@@ -96,6 +97,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('runtime_invocation_failed'),
   Type.Literal('output_validation_succeeded'),
   Type.Literal('output_validation_failed'),
+  Type.Literal('output_repair_attempted'),
   // PRI-67: Dreamer runner events
   Type.Literal('dreamer_task_leased'),
   Type.Literal('dreamer_context_built'),

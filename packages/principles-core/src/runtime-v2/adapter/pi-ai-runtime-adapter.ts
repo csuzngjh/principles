@@ -21,6 +21,7 @@ import { PDRuntimeError } from '../error-categories.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
+import { attemptStructuredOutputRepair } from './structured-output-repair.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -404,24 +405,65 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       const text = extractAssistantTextOrThrow(response, signal);
 
       // Parse response — handles prose-wrapped and code-fenced JSON
-      const parsed = extractJsonObject(text);
-      if (!parsed) {
+      let validatedOutput: unknown = extractJsonObject(text);
+      if (!validatedOutput) {
         throw new PDRuntimeError('output_invalid', 'No valid JSON found in LLM response');
       }
 
       // Validate with DiagnosticianOutputV1Schema
-      if (!Value.Check(DiagnosticianOutputV1Schema, parsed)) {
-        throw new PDRuntimeError(
-          'output_invalid',
-          'LLM output does not match DiagnosticianOutputV1 schema',
-        );
+      if (!Value.Check(DiagnosticianOutputV1Schema, validatedOutput)) {
+        // PRI-71: Attempt structured output repair before throwing
+        let repairSucceeded = false;
+
+        if (input.outputSchemaRef === 'diagnostician-output-v1') {
+          const schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, validatedOutput)]
+            .map(e => ({ path: e.path, message: e.message, value: e.value }));
+
+          if (schemaErrors.length > 0) {
+            const repairResult = await attemptStructuredOutputRepair<Record<string, unknown>>(
+              validatedOutput,
+              schemaErrors,
+              {
+                llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey }),
+                schemaCheck: (value: unknown) => Value.Check(DiagnosticianOutputV1Schema, value),
+              },
+            );
+
+            this.eventEmitter.emitTelemetry({
+              eventType: 'output_repair_attempted',
+              traceId: input.taskRef?.taskId ?? runId,
+              timestamp: new Date().toISOString(),
+              sessionId: 'pi-ai-adapter',
+              agentId: 'pi-ai-adapter',
+              payload: {
+                runId,
+                runtimeKind: 'pi-ai',
+                repaired: repairResult.repaired,
+                attemptsUsed: repairResult.attemptsUsed,
+                repairSummary: repairResult.repairSummary,
+              },
+            });
+
+            if (repairResult.repaired && repairResult.output) {
+              validatedOutput = repairResult.output;
+              repairSucceeded = true;
+            }
+          }
+        }
+
+        if (!repairSucceeded) {
+          throw new PDRuntimeError(
+            'output_invalid',
+            'LLM output does not match DiagnosticianOutputV1 schema',
+          );
+        }
       }
 
       // Update run state to succeeded
       const endedAt = new Date().toISOString();
       runState.status = 'succeeded';
       runState.endedAt = endedAt;
-      runState.output = { runId, payload: parsed };
+      runState.output = { runId, payload: validatedOutput };
 
       // Emit runtime_invocation_succeeded telemetry
       this.eventEmitter.emitTelemetry({
@@ -523,6 +565,37 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   }
 
   // ── Private helpers ──
+
+  /**
+   * Make a single LLM call for output repair (PRI-71).
+   * Returns extracted text response or null if no content.
+   * Reuses same provider/model/apiKey as the original call.
+   */
+  private async repairLLMCall(
+    model: ReturnType<typeof resolveModel>,
+    prompt: string,
+    options: { signal: AbortSignal; apiKey: string },
+  ): Promise<string | null> {
+    const repairMessage: UserMessage = {
+      role: 'user',
+      content: prompt,
+      timestamp: Date.now(),
+    };
+    const repairContext: Context = { messages: [repairMessage] };
+
+    const response = await complete(model, repairContext, {
+      signal: options.signal,
+      apiKey: options.apiKey,
+      timeoutMs: this.config.timeoutMs ?? 300_000,
+      maxRetries: 0,
+    });
+
+    try {
+      return extractAssistantTextOrThrow(response, options.signal);
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * Call pi-ai complete() with retry and exponential backoff.
