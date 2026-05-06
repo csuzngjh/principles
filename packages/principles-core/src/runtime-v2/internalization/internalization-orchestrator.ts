@@ -241,9 +241,10 @@ export class InternalizationOrchestrator {
 
     // All candidates exhausted — determine dominant failure mode for diagnosis
     // Dominant mode: pick the failure type with the highest count; ties broken
-    // by specificity order (hydration > dependency > blocked > lease).
+    // by specificity priority (hydration > dependency > blocked > lease).
+    // Hydration participates when it is the highest count (not just 100%).
     const reason: NoReadyTasksResult['reason'] =
-      hydrationFailures >= inspectedCount
+      hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount && hydrationFailures >= leaseConflictCount
         ? 'all_hydration_failed'
         : dependencyFailures >= blockedCount && dependencyFailures >= leaseConflictCount
           ? 'all_dependency_failed'
