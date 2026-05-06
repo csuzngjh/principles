@@ -155,7 +155,6 @@ export {
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
 
 export type {
-  WakeOnceDecision,
   WakeOnceResult,
   NoReadyTasksResult,
   BlockedResult,
@@ -170,4 +169,4 @@ export type {
   InternalizationOrchestratorDeps,
 } from './internalization-orchestrator.js';
 
-export { InternalizationOrchestrator } from './internalization-orchestrator.js';
+export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalization-orchestrator.js';

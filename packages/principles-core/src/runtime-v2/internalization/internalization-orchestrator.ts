@@ -28,15 +28,6 @@ import { PDRuntimeError } from '../error-categories.js';
 
 // ── Result Types ─────────────────────────────────────────────────────────────
 
-export type WakeOnceDecision =
-  | 'no_ready_tasks'
-  | 'blocked'
-  | 'dependency_failed'
-  | 'leased'
-  | 'would_lease'
-  | 'lease_conflict'
-  | 'invalid_task_metadata';
-
 export interface NoReadyTasksResult {
   decision: 'no_ready_tasks';
   inspectedCount: number;
@@ -81,6 +72,17 @@ export interface InvalidTaskMetadataResult {
   taskId: string;
   taskKind: string;
 }
+
+// Const array for runtime exhaustiveness checking (used in switch statements)
+export const WAKE_ONCE_DECISIONS = [
+  'no_ready_tasks',
+  'blocked',
+  'dependency_failed',
+  'leased',
+  'would_lease',
+  'lease_conflict',
+  'invalid_task_metadata',
+] as const;
 
 export type WakeOnceResult =
   | NoReadyTasksResult
@@ -215,7 +217,13 @@ export class InternalizationOrchestrator {
             conflictReason: error.message,
           };
         }
-        throw error;
+        // Re-throw with task context for correlation
+        const pdError = error instanceof PDRuntimeError ? error : new PDRuntimeError('runtime_unavailable', String(error));
+        throw new PDRuntimeError(
+          pdError.category ?? 'runtime_unavailable',
+          `wakeOnce lease acquisition failed for task ${piTask.taskId}: ${pdError.message}`,
+          { cause: error }
+        );
       }
     }
 
@@ -250,6 +258,11 @@ export class InternalizationOrchestrator {
       return null;
     }
 
+    // Guard against non-PI task kinds (would cause getAllowedSuccessors to return undefined)
+    if (!isPeerRunnerKind(piTask.taskKind)) {
+      return null;
+    }
+
     if (piTask.status !== 'succeeded') {
       return null;
     }
@@ -274,12 +287,15 @@ export class InternalizationOrchestrator {
    * Filters to only PeerRunnerKind taskKinds and hydrates to PITaskRecord.
    */
   private async findCandidates(): Promise<TaskRecord[]> {
-    const [pendingTasks, retryWaitTasks] = await Promise.all([
-      this.stateManager.listTasks({ status: 'pending' }),
-      this.stateManager.listTasks({ status: 'retry_wait' }),
-    ]);
-
-    const allCandidates = [...pendingTasks, ...retryWaitTasks];
+    const allCandidates: TaskRecord[] = [];
+    try {
+      const pending = await this.stateManager.listTasks({ status: 'pending' });
+      const retryWait = await this.stateManager.listTasks({ status: 'retry_wait' });
+      allCandidates.push(...pending, ...retryWait);
+    } catch (error) {
+      if (error instanceof PDRuntimeError) throw error;
+      throw new PDRuntimeError('runtime_unavailable', 'findCandidates failed', { cause: error });
+    }
 
     // Filter to PeerRunnerKind tasks only (skip diagnostician, etc.)
     const peerTasks = allCandidates.filter(t => isPeerRunnerKind(t.taskKind));
@@ -297,13 +313,14 @@ export class InternalizationOrchestrator {
       return [];
     }
 
-    const results = await Promise.all(
-      depIds.map(async (depId) => {
-        const task = await this.stateManager.getTask(depId);
-        return task ?? null;
-      })
+    // Use allSettled so one bad depId doesn't kill the entire resolution
+    const results = await Promise.allSettled(
+      depIds.map(depId => this.stateManager.getTask(depId))
     );
 
-    return results.filter((t): t is TaskRecord => t !== null);
+    return results
+      .filter((r): r is PromiseFulfilledResult<TaskRecord | null> => r.status === 'fulfilled')
+      .map(r => r.value)
+      .filter((t): t is TaskRecord => t !== null);
   }
 }

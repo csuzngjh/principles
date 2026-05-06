@@ -304,6 +304,56 @@ describe('InternalizationOrchestrator', () => {
       expect(proposal.taskKind).toBe('philosopher');
     });
 
+    // ── Test 7b: no_ready_tasks when candidate list is empty ─────────────────
+
+    it('no_ready_tasks returns inspectedCount=0 when both pending and retry_wait are empty', async () => {
+      mockStateManager.listTasks.mockResolvedValue([]);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('no_ready_tasks');
+      expect((result as { inspectedCount: number }).inspectedCount).toBe(0);
+      expect(mockStateManager.acquireLease).not.toHaveBeenCalled();
+    });
+
+    // ── Test 7c: proposeNextTask returns null when task not found ────────────
+
+    it('proposeNextTask returns null when task does not exist', async () => {
+      mockStateManager.getTask.mockResolvedValue(null);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.proposeNextTask('nonexistent-task');
+      expect(result).toBeNull();
+    });
+
+    // ── Test 7d: proposeNextTask returns null for non-PI task kind ──────────
+
+    it('proposeNextTask returns null when taskKind is not a PeerRunnerKind', async () => {
+      const rawTask = makeRawTask({
+        taskId: 'diag-task',
+        taskKind: 'diagnostician', // not a PeerRunnerKind
+        status: 'succeeded',
+      });
+      mockStateManager.getTask.mockResolvedValue(rawTask);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.proposeNextTask('diag-task');
+      expect(result).toBeNull();
+    });
+
     // ── Test 8: architecture guard — no forbidden imports ────────────────────
 
     it('orchestrator source has zero forbidden imports (no openclaw-plugin, scheduling, or runtime adapter)', async () => {
