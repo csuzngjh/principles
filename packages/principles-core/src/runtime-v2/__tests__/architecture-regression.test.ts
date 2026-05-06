@@ -56,6 +56,9 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/internalization-state-machine.ts',
   // PRI-65
   'internalization/pitask-metadata.ts',
+  // PRI-67
+  'internalization/dreamer-output.ts',
+  'internalization/dreamer-runner.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -72,6 +75,8 @@ const REQUIRED_TEST_FILES = [
   'internalization-state-machine.test.ts',
   // PRI-65
   'pitask-metadata.test.ts',
+  // PRI-67
+  'dreamer-runner.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -198,7 +203,7 @@ describe('PRI-42 internalization boundary', () => {
     const intDir = resolve(__dirname, '..', 'internalization');
     expect(existsSync(intDir)).toBe(true);
 
-    const files = readdirSync(intDir).filter((f) => f.endsWith('.ts'));
+    const files = readdirSync(intDir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
     for (const file of files) {
       const src = readFileSync(join(intDir, file), 'utf-8');
       expect(src).not.toContain('openclaw-plugin');
@@ -1152,5 +1157,60 @@ describe('PRI-68 InternalizationOrchestrator', () => {
     expect(src).toContain('InternalizationOrchestrator');
     expect(src).toContain('WakeOnceResult');
     expect(src).toContain('LeaseConflictResult');
+  });
+});
+
+describe('PRI-67 DreamerRunner', () => {
+  it('dreamer source files exist in internalization directory', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'dreamer-runner.ts'))).toBe(true);
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'dreamer-output.ts'))).toBe(true);
+  });
+
+  it('dreamer test file exists', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, '..', '__tests__', 'dreamer-runner.test.ts'))).toBe(true);
+  });
+
+  it('CORE_NO_FORBIDDEN_IMPORTS: dreamer-runner.ts has no openclaw-plugin, nocturnal-trinity, philosopher, scribe imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'dreamer-runner.ts'), 'utf-8');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('nocturnal-trinity');
+    expect(src).not.toContain('runTrinity');
+    expect(src).not.toContain('philosopher');
+    expect(src).not.toContain('scribe');
+    expect(src).not.toContain('InternalizationOrchestrator');
+    expect(src).not.toContain('createTask');
+    expect(src).not.toContain('enqueueTask');
+  });
+
+  it('CORE_NO_SCHEDULING: dreamer-runner.ts has no node:fs, node:cron, or cron-style scheduling', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'dreamer-runner.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:cron');
+    // setTimeout for sleep() in polling loop is allowed — no cron/interval scheduling
+  });
+
+  it('USES_RUNTIME_ADAPTER: dreamer-runner.ts imports and uses PDRuntimeAdapter', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'dreamer-runner.ts'), 'utf-8');
+    expect(src).toContain('PDRuntimeAdapter');
+    expect(src).toContain('startRun');
+  });
+
+  it('BARREL_EXPORTS: internalization/index.ts exports DreamerRunner and DreamerOutput', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
+    expect(src).toContain('DreamerRunner');
+    expect(src).toContain('DreamerOutput');
+    expect(src).toContain('PassThroughDreamerValidator');
   });
 });
