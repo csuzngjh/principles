@@ -1,0 +1,409 @@
+/**
+ * InternalizationOrchestrator — Unit Tests (PRI-68)
+ *
+ * TDD: Tests written first to define the expected behavior of the
+ * core-owned InternalizationOrchestrator skeleton.
+ *
+ * The orchestrator consumes hydrated PITaskRecords, applies state-machine
+ * decisions, acquires leases through RuntimeStateManager, and proposes
+ * successor tasks — WITHOUT executing LLM calls or calling PDRuntimeAdapter.
+ *
+ * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import type { TaskRecord } from '../task-status.js';
+import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
+import { PDRuntimeError } from '../error-categories.js';
+
+// ── Test helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Creates a raw TaskRecord (as returned by SqliteTaskStore) with valid
+ * PI metadata in diagnosticJson, so hydratePITaskRecord() succeeds.
+ */
+function makeRawTask(overrides: {
+  taskId?: string;
+  taskKind?: string;
+  status?: string;
+  diagnosticJson?: string;
+  dependencyTaskIds?: string[];
+  channel?: string;
+  timeoutMs?: number;
+  inputArtifactRefs?: { artifactType: string; ref: string }[];
+  outputArtifactRefs?: { artifactType: string; ref: string }[];
+  parentTaskId?: string;
+  correlationId?: string;
+  attemptCount?: number;
+  maxAttempts?: number;
+  createdAt?: string;
+  updatedAt?: string;
+} = {}): TaskRecord {
+  const {
+    taskId = 'task-1',
+    taskKind = 'dreamer',
+    status = 'pending',
+    dependencyTaskIds = [],
+    channel = 'prompt',
+    timeoutMs = 60000,
+    inputArtifactRefs = [],
+    outputArtifactRefs = [],
+    parentTaskId,
+    correlationId,
+    attemptCount = 0,
+    maxAttempts = 3,
+    createdAt = new Date().toISOString(),
+    updatedAt = new Date().toISOString(),
+  } = overrides;
+
+  const piMetadata: Record<string, unknown> = {
+    dependencyTaskIds,
+    channel,
+    timeoutMs,
+    inputArtifactRefs,
+    outputArtifactRefs,
+  };
+  if (parentTaskId !== undefined) piMetadata.parentTaskId = parentTaskId;
+  if (correlationId !== undefined) piMetadata.correlationId = correlationId;
+
+  const diagnosticJson = JSON.stringify({ pi_metadata: piMetadata });
+
+  return {
+    taskId,
+    taskKind,
+    status: status as TaskRecord['status'],
+    createdAt,
+    updatedAt,
+    attemptCount,
+    maxAttempts,
+    diagnosticJson,
+  } as unknown as TaskRecord;
+}
+
+/**
+ * Mock interface for the subset of RuntimeStateManager used by the orchestrator.
+ * Uses ReturnType<typeof vi.fn> so TypeScript knows .mockResolvedValue() exists.
+ */
+interface MockStateManager {
+  listTasks: ReturnType<typeof vi.fn>;
+  getTask: ReturnType<typeof vi.fn>;
+  acquireLease: ReturnType<typeof vi.fn>;
+}
+
+/**
+ * Creates a mock RuntimeStateManager with vi.fn() spies.
+ */
+function createMockStateManager(): MockStateManager {
+  return {
+    listTasks: vi.fn(),
+    getTask: vi.fn(),
+    acquireLease: vi.fn(),
+  };
+}
+
+// ── Architecture Guard Helper ─────────────────────────────────────────────────
+
+function moduleHasNoForbiddenImports(modulePath: string): Promise<boolean> {
+  const src = readFileSync(resolve(__dirname, '..', modulePath), 'utf-8');
+  return Promise.resolve(
+    !src.includes('openclaw-plugin') &&
+    !src.includes('PDRuntimeAdapter') &&
+    !src.includes('startRun') &&
+    !src.includes('DiagnosticianRunner') &&
+    !src.includes('node:cron') &&
+    !src.includes('setInterval') &&
+    !src.includes('setTimeout')
+  );
+}
+
+// ── Import after defining helpers (tests run against real module) ──────────────
+
+// NOTE: We dynamically import the module under test so that the file must
+// exist first (TDD constraint). All tests below are designed to FAIL until
+// the source file is created.
+
+describe('InternalizationOrchestrator', () => {
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+  let mockStateManager: ReturnType<typeof createMockStateManager>;
+   
+   
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports,@typescript-eslint/init-declarations
+  let OrchestratorClass: typeof import('../internalization/internalization-orchestrator.js').InternalizationOrchestrator;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockStateManager = createMockStateManager();
+    // Dynamic import ensures source file must exist (TDD)
+    const mod = await import('../internalization/internalization-orchestrator.js');
+    OrchestratorClass = mod.InternalizationOrchestrator;
+  });
+
+  // ── Test 1: pending PI task + no deps → leased ─────────────────────────────
+
+  describe('wakeOnce — lease acquisition', () => {
+    it('pending PI task with no dependencies acquires lease and returns leased decision', async () => {
+      const rawTask = makeRawTask({ taskId: 'pi-task-1', taskKind: 'dreamer', status: 'pending' });
+      // findCandidates calls listTasks twice (pending, then retry_wait)
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([rawTask])   // pending → found
+        .mockResolvedValueOnce([]);          // retry_wait → skipped
+      mockStateManager.acquireLease.mockResolvedValue({ ...rawTask, status: 'leased' });
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('leased');
+      expect((result as { taskId: string }).taskId).toBe('pi-task-1');
+      expect(mockStateManager.acquireLease).toHaveBeenCalledOnce();
+      expect(mockStateManager.acquireLease).toHaveBeenCalledWith({
+        taskId: 'pi-task-1',
+        owner: 'test-owner',
+        runtimeKind: 'dreamer',
+      });
+    });
+
+    // ── Test 2: pending blocked → retry_wait leasable ─────────────────────────
+
+    it('blocked pending task is skipped; retry_wait candidate acquires lease', async () => {
+      const blockedTask = makeRawTask({
+        taskId: 'pi-task-2',
+        taskKind: 'philosopher',
+        status: 'pending',
+        dependencyTaskIds: ['dep-task-1'],
+      });
+      const retryableTask = makeRawTask({ taskId: 'retry-task', taskKind: 'dreamer', status: 'retry_wait' });
+      const depTask = makeRawTask({ taskId: 'dep-task-1', status: 'pending', taskKind: 'dreamer' });
+
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([blockedTask])    // pending → blocked (continues)
+        .mockResolvedValueOnce([retryableTask]);  // retry_wait → leasable
+      mockStateManager.getTask.mockResolvedValue(depTask);
+      mockStateManager.acquireLease.mockResolvedValue({ ...retryableTask, status: 'leased' });
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('leased');
+      expect((result as { taskId: string }).taskId).toBe('retry-task');
+      expect(mockStateManager.acquireLease).toHaveBeenCalledWith({
+        taskId: 'retry-task',
+        owner: 'test-owner',
+        runtimeKind: 'dreamer',
+      });
+    });
+
+    // ── Test 3: pending failed dep → skips to next pending (leasable) ─────────
+
+    it('pending task with failed dependency is skipped; next pending task acquires lease', async () => {
+      const failedDepTask = makeRawTask({
+        taskId: 'pi-task-3',
+        taskKind: 'scribe',
+        status: 'pending',
+        dependencyTaskIds: ['failed-dep'],
+      });
+      const leasableTask = makeRawTask({ taskId: 'good-task', taskKind: 'artificer', status: 'pending' });
+      const failedDep = makeRawTask({ taskId: 'failed-dep', status: 'failed', taskKind: 'dreamer' });
+
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([failedDepTask, leasableTask])  // pending: first is failed-dep, second is leasable
+        .mockResolvedValueOnce([]);
+      mockStateManager.getTask.mockResolvedValue(failedDep);
+      mockStateManager.acquireLease.mockResolvedValue({ ...leasableTask, status: 'leased' });
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'artificer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('leased');
+      expect((result as { taskId: string }).taskId).toBe('good-task');
+    });
+
+    // ── Test 4: invalid metadata → skips to next pending (leasable) ───────────
+
+    it('task with invalid PI metadata is skipped; next pending task acquires lease', async () => {
+      const invalidTask = {
+        ...makeRawTask({ taskId: 'bad-task', taskKind: 'scribe' }),
+        diagnosticJson: '{}', // missing pi_metadata key
+      } as TaskRecord;
+      const leasableTask = makeRawTask({ taskId: 'good-task', taskKind: 'artificer', status: 'pending' });
+
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([invalidTask, leasableTask])  // pending: first invalid, second leasable
+        .mockResolvedValueOnce([]);
+      mockStateManager.acquireLease.mockResolvedValue({ ...leasableTask, status: 'leased' });
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'artificer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('leased');
+      expect((result as { taskId: string }).taskId).toBe('good-task');
+    });
+
+    // ── Test 5: lease conflict → skips to retry_wait (leasable) ─────────────────
+
+    it('lease conflict on pending task is skipped; retry_wait task acquires lease', async () => {
+      const conflictTask = makeRawTask({ taskId: 'conflict-task', taskKind: 'artificer', status: 'pending' });
+      const retryableTask = makeRawTask({ taskId: 'retry-task', taskKind: 'dreamer', status: 'retry_wait' });
+
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([conflictTask])   // pending → lease conflict (continues)
+        .mockResolvedValueOnce([retryableTask]);  // retry_wait → leasable
+      mockStateManager.acquireLease
+        .mockRejectedValueOnce(new PDRuntimeError('lease_conflict', 'Task conflict-task is already leased'))
+        .mockResolvedValueOnce({ ...retryableTask, status: 'leased' });
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('leased');
+      expect((result as { taskId: string }).taskId).toBe('retry-task');
+    });
+
+    // ── Test 6: dryRun=true → would_lease (no actual lease) ─────────────────
+
+    it('dryRun=true returns would_lease without acquiring the lease', async () => {
+      const rawTask = makeRawTask({ taskId: 'dryrun-task', taskKind: 'evaluator', status: 'pending' });
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([rawTask])
+        .mockResolvedValueOnce([]);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'evaluator', dryRun: true }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('would_lease');
+      expect((result as { taskId: string }).taskId).toBe('dryrun-task');
+      expect(mockStateManager.acquireLease).not.toHaveBeenCalled();
+    });
+
+    // ── Test 6b: pending empty → retry_wait recovery ──────────────────────────
+
+    it('retry_wait task acquires lease when pending queue is empty', async () => {
+      const retryTask = makeRawTask({ taskId: 'retry-task', taskKind: 'dreamer', status: 'retry_wait' });
+
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([])             // pending → empty
+        .mockResolvedValueOnce([retryTask]);   // retry_wait → has candidate
+      mockStateManager.acquireLease.mockResolvedValue({ ...retryTask, status: 'leased' });
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('leased');
+      expect((result as { taskId: string }).taskId).toBe('retry-task');
+    });
+
+    // ── Test 7: succeeded task → proposeNextTask → proposal_created ──────────
+
+    it('succeeded task can generate a next-task proposal without creating the task', async () => {
+      const succeededTask = makeRawTask({
+        taskId: 'succeeded-dreamer',
+        taskKind: 'dreamer',
+        status: 'succeeded',
+        outputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-1' }],
+      });
+      mockStateManager.getTask.mockResolvedValue(succeededTask);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'philosopher' }
+      );
+
+      const result = await orchestrator.proposeNextTask('succeeded-dreamer');
+
+      expect(result).not.toBeNull();
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      expect(result!.decision).toBe('proposal_created');
+      expect((result as { proposal: unknown }).proposal).toBeDefined();
+      // V1 chain: dreamer → philosopher
+      const {proposal} = (result as { proposal: { taskKind: string } });
+      expect(proposal.taskKind).toBe('philosopher');
+    });
+
+    // ── Test 7b: no_ready_tasks when candidate list is empty ─────────────────
+
+    it('no_ready_tasks returns inspectedCount=0 when both pending and retry_wait are empty', async () => {
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('no_ready_tasks');
+      expect((result as { inspectedCount: number }).inspectedCount).toBe(0);
+      expect(mockStateManager.acquireLease).not.toHaveBeenCalled();
+    });
+
+    // ── Test 7c: proposeNextTask returns null when task not found ────────────
+
+    it('proposeNextTask returns null when task does not exist', async () => {
+      mockStateManager.getTask.mockResolvedValue(null);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.proposeNextTask('nonexistent-task');
+      expect(result).toBeNull();
+    });
+
+    // ── Test 7d: proposeNextTask returns null for non-PI task kind ──────────
+
+    it('proposeNextTask returns null when taskKind is not a PeerRunnerKind', async () => {
+      const rawTask = makeRawTask({
+        taskId: 'diag-task',
+        taskKind: 'diagnostician', // not a PeerRunnerKind
+        status: 'succeeded',
+      });
+      mockStateManager.getTask.mockResolvedValue(rawTask);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.proposeNextTask('diag-task');
+      expect(result).toBeNull();
+    });
+
+    // ── Test 8: architecture guard — no forbidden imports ────────────────────
+
+    it('orchestrator source has zero forbidden imports (no openclaw-plugin, scheduling, or runtime adapter)', async () => {
+      const clean = await moduleHasNoForbiddenImports('internalization/internalization-orchestrator.ts');
+      expect(clean).toBe(true);
+    });
+  });
+});

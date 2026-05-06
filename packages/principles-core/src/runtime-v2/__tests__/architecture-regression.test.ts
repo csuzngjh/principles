@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Architecture regression guard — verifies critical PRI-12/13/14/15/16/28
  * module boundaries are present and exportable.
  *
@@ -908,7 +908,7 @@ describe('PRI-61 Internalization Peer Runner Contracts', () => {
     expect(src).not.toContain('node:fs');
     expect(src).not.toContain('node:path');
     expect(src).not.toContain('openclaw-plugin');
-    expect(src).not.toContain('node:cron');
+        expect(src).not.toContain('node:cron');
   });
 
   it('internalization-job-graph.ts has zero infrastructure imports', async () => {
@@ -920,7 +920,7 @@ describe('PRI-61 Internalization Peer Runner Contracts', () => {
     expect(src).not.toContain('node:fs');
     expect(src).not.toContain('node:path');
     expect(src).not.toContain('openclaw-plugin');
-    expect(src).not.toContain('node:cron');
+        expect(src).not.toContain('node:cron');
   });
 
   it('TASK_MODEL_REUSE: PITaskRecord extends TaskRecord (type-level check)', async () => {
@@ -983,7 +983,7 @@ describe('PRI-62 Internalization State Machine Guards', () => {
     expect(src).not.toContain('node:fs');
     expect(src).not.toContain('node:path');
     expect(src).not.toContain('openclaw-plugin');
-    expect(src).not.toContain('node:cron');
+        expect(src).not.toContain('node:cron');
   });
 
   it('internalization-state-machine.ts has zero infrastructure imports', async () => {
@@ -995,7 +995,7 @@ describe('PRI-62 Internalization State Machine Guards', () => {
     expect(src).not.toContain('node:fs');
     expect(src).not.toContain('node:path');
     expect(src).not.toContain('openclaw-plugin');
-    expect(src).not.toContain('node:cron');
+        expect(src).not.toContain('node:cron');
   });
 
   it('TASK_MODEL_REUSE: guard functions work with PITaskRecord (type-level check)', async () => {
@@ -1108,5 +1108,49 @@ describe('PRI-63 Internalization Dumb Trigger Adapter', () => {
     // setInterval is used in start() to trigger wake() periodically — this is plugin responsibility
     // Core state machine should NOT use setInterval (CORE_NO_SCHEDULING)
     expect(src).not.toContain('node:cron');
+  });
+});
+
+describe('PRI-68 InternalizationOrchestrator', () => {
+  it('orchestrator source file exists in internalization directory', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'internalization-orchestrator.ts'))).toBe(true);
+  });
+
+  it('orchestrator test file exists', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, '..', '__tests__', 'internalization-orchestrator.test.ts'))).toBe(true);
+  });
+
+  it('CORE_NO_SCHEDULING: orchestrator has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'internalization-orchestrator.ts'), 'utf-8');
+    expect(src).not.toContain('openclaw-plugin');
+        expect(src).not.toContain('node:cron');
+    expect(src).not.toContain('setInterval');
+    expect(src).not.toContain('setTimeout');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+  });
+
+  it('CORE_NO_RUNTIME_ADAPTER: orchestrator does not import PDRuntimeAdapter or startRun', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'internalization-orchestrator.ts'), 'utf-8');
+    expect(src).not.toContain('PDRuntimeAdapter');
+    expect(src).not.toContain('startRun');
+    expect(src).not.toContain('DiagnosticianRunner');
+  });
+
+  it('BARREL_EXPORTS: internalization/index.ts exports InternalizationOrchestrator and result types', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('InternalizationOrchestrator');
+    expect(src).toContain('WakeOnceResult');
+    expect(src).toContain('LeaseConflictResult');
   });
 });

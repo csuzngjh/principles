@@ -416,3 +416,22 @@ export {
   hydratePITaskRecord,
   createPITaskDiagnosticJson,
 } from './internalization/pitask-metadata.js';
+
+// ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
+
+export type {
+  WakeOnceResult,
+  NoReadyTasksResult,
+  BlockedResult,
+  DependencyFailedResult,
+  LeasedResult,
+  WouldLeaseResult,
+  LeaseConflictResult,
+  InvalidTaskMetadataResult,
+  ProposalCreatedResult,
+  ProposeNextTaskResult,
+  InternalizationOrchestratorOptions,
+  InternalizationOrchestratorDeps,
+} from './internalization/internalization-orchestrator.js';
+
+export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalization/internalization-orchestrator.js';
