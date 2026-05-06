@@ -1,14 +1,18 @@
 /**
  * DreamerRunner unit tests (PRI-67).
  *
- * 7 scenarios:
+ * Test scenarios:
  *   1. Happy path: full lifecycle succeeds with valid DreamerOutput
  *   2. Runtime method call order: startRun → pollRun → fetchOutput in sequence
  *   3. Invalid output: validation fails → retried, no accepted artifact
  *   4. Runtime failure: pollRun returns 'failed' → retried
+ *   4b. Timeout handling: pollRun returns 'running' → timeout → retried
  *   5. Lease conflict: acquireLease throws lease_conflict → non-mutating result
  *   6. Source guard: no forbidden imports (openclaw-plugin, nocturnal-trinity, etc.)
+ *   6b. Source guard: no scheduling infrastructure
  *   7. No direct task creation: no createTask/enqueueTask calls
+ *   7b. Result does not contain next task — only artifact/proposal
+ *   7c. Validation failure with permanent error → markTaskFailed
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';

@@ -110,6 +110,9 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_cancel_run_failed'),
   Type.Literal('dreamer_mark_succeeded_failed'),
   Type.Literal('dreamer_update_output_failed'),
+  Type.Literal('dreamer_context_partial'),
+  Type.Literal('dreamer_mark_failed_error'),
+  Type.Literal('dreamer_mark_retry_error'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

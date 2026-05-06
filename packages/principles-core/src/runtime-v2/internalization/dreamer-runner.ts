@@ -275,12 +275,18 @@ export class DreamerRunner {
 
     // Resolve each dependency and collect result refs
     const contextRefs: string[] = [];
+    const rejectedDeps: string[] = [];
     if (deps.length > 0) {
       const results = await Promise.allSettled(
         deps.map((depId) => this.stateManager.getTask(depId)),
       );
-      for (const result of results) {
-        if (result.status === 'fulfilled' && result.value) {
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        const depId = deps[i];
+        if (!result || depId === undefined) continue;
+        if (result.status === 'rejected') {
+          rejectedDeps.push(depId);
+        } else if (result.status === 'fulfilled' && result.value) {
           if (result.value.resultRef) {
             contextRefs.push(result.value.resultRef);
           }
@@ -290,6 +296,13 @@ export class DreamerRunner {
           }
         }
       }
+    }
+
+    if (rejectedDeps.length > 0) {
+      this.emitDreamerEvent('dreamer_context_partial', taskId, {
+        rejectedCount: rejectedDeps.length,
+        rejectedDeps,
+      });
     }
 
     // Compute context hash from collected refs
@@ -317,9 +330,12 @@ export class DreamerRunner {
 
   private async resolveStoreRunId(taskId: string): Promise<string> {
     const runs = await this.stateManager.getRunsByTask(taskId);
+    if (runs.length === 0) {
+      throw new PDRuntimeError('execution_failed', `No run records found for task ${taskId} after lease acquisition`);
+    }
     const latestRun = runs[runs.length - 1];
     if (!latestRun) {
-      throw new PDRuntimeError('execution_failed', `No run record found for task ${taskId} after lease acquisition`);
+      throw new PDRuntimeError('execution_failed', `No run records found for task ${taskId} after lease acquisition`);
     }
     return latestRun.runId;
   }
@@ -349,16 +365,19 @@ export class DreamerRunner {
       await this.sleep(this.resolvedOptions.pollIntervalMs);
     }
 
-    // Timeout — cancel gracefully, preserve timeout error
+    // Timeout — cancel gracefully, preserve timeout error with cancel status
+    let cancelFailed = false;
     try {
       await this.runtimeAdapter.cancelRun(runHandle.runId);
     } catch (cancelErr) {
+      cancelFailed = true;
       this.emitDreamerEvent('dreamer_cancel_run_failed', runHandle.runId, {
         runId: runHandle.runId,
         errorMessage: cancelErr instanceof Error ? cancelErr.message : String(cancelErr),
       });
     }
-    throw new PDRuntimeError('timeout', `Run ${runHandle.runId} timed out after ${this.resolvedOptions.timeoutMs}ms`);
+    const cancelNote = cancelFailed ? ' (cancelRun also failed)' : '';
+    throw new PDRuntimeError('timeout', `Run ${runHandle.runId} timed out after ${this.resolvedOptions.timeoutMs}ms${cancelNote}`);
   }
 
   private async fetchAndParseOutput(runId: string): Promise<DreamerOutput> {
@@ -514,7 +533,22 @@ export class DreamerRunner {
   private async retryOrFail(ctx: FailureContext): Promise<DreamerRunnerResult> {
     // Check if error is permanent (never retry)
     if (this.isPermanentError(ctx.errorCategory)) {
-      await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory);
+      try {
+        await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory);
+      } catch (stateErr) {
+        this.emitDreamerEvent('dreamer_mark_failed_error', ctx.taskId, {
+          errorCategory: 'storage_unavailable',
+          attemptCount: ctx.task.attemptCount,
+          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+        });
+        return {
+          status: 'failed',
+          taskId: ctx.taskId,
+          errorCategory: 'storage_unavailable',
+          failureReason: `State manager error: ${ctx.failureReason}`,
+          attemptCount: ctx.task.attemptCount,
+        };
+      }
       this.emitDreamerEvent('dreamer_task_failed', ctx.taskId, {
         errorCategory: ctx.errorCategory,
         attemptCount: ctx.task.attemptCount,
@@ -533,7 +567,22 @@ export class DreamerRunner {
     // Check retry policy
     const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
     if (shouldRetry) {
-      await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory);
+      try {
+        await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory);
+      } catch (stateErr) {
+        this.emitDreamerEvent('dreamer_mark_retry_error', ctx.taskId, {
+          errorCategory: 'storage_unavailable',
+          attemptCount: ctx.task.attemptCount,
+          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+        });
+        return {
+          status: 'failed',
+          taskId: ctx.taskId,
+          errorCategory: 'storage_unavailable',
+          failureReason: `State manager error: ${ctx.failureReason}`,
+          attemptCount: ctx.task.attemptCount,
+        };
+      }
       this.emitDreamerEvent('dreamer_task_retried', ctx.taskId, {
         errorCategory: ctx.errorCategory,
         attemptCount: ctx.task.attemptCount,
@@ -549,7 +598,22 @@ export class DreamerRunner {
     }
 
     // Max attempts exceeded
-    await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded');
+    try {
+      await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded');
+    } catch (stateErr) {
+      this.emitDreamerEvent('dreamer_mark_failed_error', ctx.taskId, {
+        errorCategory: 'storage_unavailable',
+        attemptCount: ctx.task.attemptCount,
+        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
+      });
+      return {
+        status: 'failed',
+        taskId: ctx.taskId,
+        errorCategory: 'storage_unavailable',
+        failureReason: `State manager error: ${ctx.failureReason}`,
+        attemptCount: ctx.task.attemptCount,
+      };
+    }
     this.emitDreamerEvent('dreamer_task_failed', ctx.taskId, {
       errorCategory: 'max_attempts_exceeded',
       attemptCount: ctx.task.attemptCount,
@@ -568,7 +632,7 @@ export class DreamerRunner {
   // ── Error classification ──────────────────────────────────────────────────
 
   private readonly PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set(
-    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing'] as const),
+    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled'] as const),
   );
 
   private isPermanentError(category: PDErrorCategory): boolean {
