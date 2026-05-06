@@ -240,18 +240,18 @@ export class InternalizationOrchestrator {
     }
 
     // All candidates exhausted — determine dominant failure mode for diagnosis
-    let reason: NoReadyTasksResult['reason'] = 'no_candidates' as NoReadyTasksResult['reason'];
-    if (hydrationFailures === inspectedCount) {
-      reason = 'all_hydration_failed';
-    } else if (blockedCount > 0 && blockedCount + hydrationFailures === inspectedCount) {
-      reason = 'all_blocked';
-    } else if (dependencyFailures > 0 && dependencyFailures + blockedCount + hydrationFailures === inspectedCount) {
-      reason = 'all_dependency_failed';
-    } else if (leaseConflictCount > 0 && leaseConflictCount + blockedCount + dependencyFailures + hydrationFailures === inspectedCount) {
-      reason = 'all_lease_conflict';
-    } else {
-      // All failure modes were non-blocking (already skipped), fall through to no_candidates
-    }
+    // Dominant mode: pick the failure type with the highest count; ties broken
+    // by specificity order (hydration > dependency > blocked > lease).
+    const reason: NoReadyTasksResult['reason'] =
+      hydrationFailures >= inspectedCount
+        ? 'all_hydration_failed'
+        : dependencyFailures >= blockedCount && dependencyFailures >= leaseConflictCount
+          ? 'all_dependency_failed'
+          : blockedCount >= leaseConflictCount
+            ? 'all_blocked'
+            : leaseConflictCount > 0
+              ? 'all_lease_conflict'
+              : 'no_candidates';
 
     return {
       decision: 'no_ready_tasks',
