@@ -366,6 +366,117 @@ describe('InternalizationOrchestrator', () => {
       expect(mockStateManager.acquireLease).not.toHaveBeenCalled();
     });
 
+    // ── Test 7e: no_ready_tasks reason = all_hydration_failed ──────────────
+
+    it('no_ready_tasks reason=all_hydration_failed when every candidate has invalid PI metadata', async () => {
+      // Two tasks with invalid metadata (missing pi_metadata key)
+      const invalidTask1 = { ...makeRawTask({ taskId: 'bad-1', taskKind: 'dreamer' }), diagnosticJson: '{}' } as TaskRecord;
+      const invalidTask2 = { ...makeRawTask({ taskId: 'bad-2', taskKind: 'philosopher' }), diagnosticJson: '{}' } as TaskRecord;
+
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([invalidTask1, invalidTask2])
+        .mockResolvedValueOnce([]);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('no_ready_tasks');
+      const r = result as { inspectedCount: number; reason: string };
+      expect(r.inspectedCount).toBe(2);
+      expect(r.reason).toBe('all_hydration_failed');
+    });
+
+    // ── Test 7f: no_ready_tasks reason = all_blocked ───────────────────────
+
+    it('no_ready_tasks reason=all_blocked when every candidate is blocked by incomplete dependencies', async () => {
+      // Both tasks blocked by a dependency that is in a non-terminal state (pending)
+      const blockedTask1 = makeRawTask({ taskId: 'blocked-1', taskKind: 'dreamer', dependencyTaskIds: ['dep-1'] });
+      const blockedTask2 = makeRawTask({ taskId: 'blocked-2', taskKind: 'philosopher', dependencyTaskIds: ['dep-2'] });
+      // dep-1 is pending (non-terminal) → validateInternalizationTaskReady returns 'blocked'
+      // dep-2 is also pending → same result
+      const pendingDep = makeRawTask({ taskId: 'dep-1', status: 'pending', taskKind: 'dreamer' });
+      const pendingDep2 = makeRawTask({ taskId: 'dep-2', status: 'pending', taskKind: 'philosopher' });
+
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([blockedTask1, blockedTask2])
+        .mockResolvedValueOnce([]);
+      mockStateManager.getTask
+        .mockResolvedValueOnce(pendingDep)   // dep-1 exists, pending → non-terminal
+        .mockResolvedValueOnce(pendingDep2); // dep-2 exists, pending → non-terminal
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('no_ready_tasks');
+      const r = result as { inspectedCount: number; reason: string };
+      expect(r.inspectedCount).toBe(2);
+      expect(r.reason).toBe('all_blocked');
+    });
+
+    // ── Test 7g: no_ready_tasks reason = all_lease_conflict ───────────────
+
+    it('no_ready_tasks reason=all_lease_conflict when every candidate lease acquisition fails with conflict', async () => {
+      const task1 = makeRawTask({ taskId: 'task-1', taskKind: 'dreamer', status: 'pending' });
+      const task2 = makeRawTask({ taskId: 'task-2', taskKind: 'philosopher', status: 'retry_wait' });
+
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([task1])
+        .mockResolvedValueOnce([task2]);
+      // Both lease attempts fail with lease_conflict
+      mockStateManager.acquireLease
+        .mockRejectedValueOnce(new PDRuntimeError('lease_conflict', 'Already leased'))
+        .mockRejectedValueOnce(new PDRuntimeError('lease_conflict', 'Already leased'));
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('no_ready_tasks');
+      const r = result as { inspectedCount: number; reason: string };
+      expect(r.inspectedCount).toBe(2);
+      expect(r.reason).toBe('all_lease_conflict');
+    });
+
+    // ── Test 7h: no_ready_tasks reason = all_dependency_failed ──────────
+
+    it('no_ready_tasks reason=all_dependency_failed when every candidate has failed dependencies', async () => {
+      // Both tasks have dependencies that resolve to 'failed' status → dependency_failed gate
+      const depFailedTask1 = makeRawTask({ taskId: 'dep-fail-1', taskKind: 'dreamer', dependencyTaskIds: ['failed-dep-a'] });
+      const depFailedTask2 = makeRawTask({ taskId: 'dep-fail-2', taskKind: 'philosopher', dependencyTaskIds: ['failed-dep-b'] });
+      const failedDepA = makeRawTask({ taskId: 'failed-dep-a', status: 'failed', taskKind: 'dreamer' });
+      const failedDepB = makeRawTask({ taskId: 'failed-dep-b', status: 'failed', taskKind: 'dreamer' });
+
+      mockStateManager.listTasks
+        .mockResolvedValueOnce([depFailedTask1, depFailedTask2])
+        .mockResolvedValueOnce([]);
+      mockStateManager.getTask
+        .mockResolvedValueOnce(failedDepA)
+        .mockResolvedValueOnce(failedDepB);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.wakeOnce();
+
+      expect(result.decision).toBe('no_ready_tasks');
+      const r = result as { inspectedCount: number; reason: string };
+      expect(r.inspectedCount).toBe(2);
+      expect(r.reason).toBe('all_dependency_failed');
+    });
+
     // ── Test 7c: proposeNextTask returns null when task not found ────────────
 
     it('proposeNextTask returns null when task does not exist', async () => {
