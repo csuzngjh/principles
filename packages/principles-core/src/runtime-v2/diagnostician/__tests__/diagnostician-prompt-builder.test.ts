@@ -252,4 +252,47 @@ describe('DiagnosticianPromptBuilder', () => {
       expect(taxonomyBlock).toContain('"implementation"');
     });
   });
+
+  // ── PRI-71: Prompt clarity for structured output compliance ────────────────
+
+  describe('prompt clarity for structured output compliance (PRI-71)', () => {
+    it('explicitly states kind values must be lowercase', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const instruction = result.promptInput.diagnosticInstruction;
+      expect(instruction).toMatch(/lowercase/i);
+      expect(instruction).toMatch(/kind.*"principle".*"rule".*"implementation".*"prompt".*"defer"/s);
+    });
+
+    it('explicitly states confidence must be a number, not a string or percentage', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const instruction = result.promptInput.diagnosticInstruction;
+      expect(instruction).toMatch(/confidence.*number/i);
+      expect(instruction).toMatch(/NOT.*string.*NOT.*percentage/i);
+    });
+
+    it('shows separate recommendation examples per kind (5 distinct objects)', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const instruction = result.promptInput.diagnosticInstruction;
+      // Should have 5 distinct recommendation objects in the OUTPUT FORMAT example
+      const recMatches = instruction.match(/"kind":\s*"(principle|rule|implementation|prompt|defer)"/g);
+      expect(recMatches).toHaveLength(5);
+      // Each kind should appear exactly once in the recommendations example
+      const kinds = (recMatches ?? []).map(m => /"kind":\s*"(.*?)"/.exec(m)?.[1] ?? '');
+      expect(new Set(kinds).size).toBe(5);
+    });
+
+    it('uses a concrete numeric confidence value in the example (not range notation)', () => {
+      const builder = new DiagnosticianPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_PAYLOAD);
+      const instruction = result.promptInput.diagnosticInstruction;
+      // Should contain a concrete decimal like 0.85 in the OUTPUT FORMAT section
+      const outputFormat = (/OUTPUT FORMAT[\s\S]*?CONSTRAINTS/.exec(instruction))?.[0] ?? '';
+      expect(outputFormat).toMatch(/"confidence":\s*0\.\d+/);
+      // Should NOT use range notation like 0.0-1.0 in the JSON example
+      expect(outputFormat).not.toMatch(/"confidence":\s*0\.0-1\.0/);
+    });
+  });
 });

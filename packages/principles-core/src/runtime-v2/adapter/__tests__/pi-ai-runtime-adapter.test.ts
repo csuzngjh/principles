@@ -605,10 +605,19 @@ describe('PiAiRuntimeAdapter', () => {
   // ── fetchArtifacts() ──
 
   describe('fetchArtifacts()', () => {
-    it('returns empty array', async () => {
+    it('returns empty array for a run that was started', async () => {
       const adapter = makeAdapter();
-      const artifacts = await adapter.fetchArtifacts('any-run-id');
+      const input = makeStartRunInput({ taskRef: { taskId: 'test-run-id' } });
+      const handle = await adapter.startRun(input);
+      const artifacts = await adapter.fetchArtifacts(handle.runId);
       expect(artifacts).toEqual([]);
+    });
+
+    it('throws for an unknown runId', async () => {
+      const adapter = makeAdapter();
+      await expect(adapter.fetchArtifacts('unknown-run-id')).rejects.toThrow(
+        "Run 'unknown-run-id' not found",
+      );
     });
   });
 
@@ -721,6 +730,150 @@ describe('PiAiRuntimeAdapter', () => {
       // After completion, pollRun should return succeeded
       const status = await adapter.pollRun(handle.runId);
       expect(status.status).toBe('succeeded');
+    });
+  });
+
+  // ── startRun() output repair (PRI-71) ──
+
+  describe('startRun() output repair (PRI-71)', () => {
+    /** Invalid output with string confidence and wrong-case kind. */
+    const INVALID_DIAGNOSIS = {
+      valid: true,
+      diagnosisId: 'diag-repair-1',
+      taskId: 'task-repair-1',
+      summary: 'Test repair',
+      rootCause: 'Test root cause',
+      violatedPrinciples: [],
+      evidence: [],
+      recommendations: [{ kind: 'Rule', description: 'Fix casing' }],
+      confidence: '85%',
+    };
+
+    /** Make a startRunInput with diagnostician output schema ref. */
+    function makeDiagnosticianInput(overrides: Partial<StartRunInput> = {}): StartRunInput {
+      return makeStartRunInput({
+        outputSchemaRef: 'diagnostician-output-v1',
+        taskRef: { taskId: 'task-repair-1' },
+        ...overrides,
+      });
+    }
+
+    it('repairs confidence "85%" to 0.85 via second LLM call', async () => {
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeDiagnosticianInput());
+
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ confidence: 0.9 });
+    });
+
+    it('repair fails — still throws output_invalid after repair attempt', async () => {
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
+        category: 'output_invalid',
+      });
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips repair for non-diagnostician outputSchemaRef', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ valid: true, missing: 'fields' })));
+
+      const adapter = makeAdapter();
+      await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
+        category: 'output_invalid',
+      });
+      // Only 1 call — no repair attempted because outputSchemaRef is undefined
+      expect(mockComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips repair for non-JSON output (no schema errors to report)', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('Not JSON at all'));
+
+      const adapter = makeAdapter();
+      await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
+        category: 'output_invalid',
+      });
+      expect(mockComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it('emits output_repair_attempted telemetry on repair attempt', async () => {
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      await adapter.startRun(makeDiagnosticianInput());
+
+      const repairEvent = findTelemetryEvent('output_repair_attempted');
+      expect(repairEvent).toBeDefined();
+      const payload = repairEvent?.payload as Record<string, unknown>;
+      expect(payload.repaired).toBe(true);
+      expect(payload.attemptsUsed).toBe(1);
+    });
+
+    it('emits output_repair_attempted with repaired=false on failure', async () => {
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      try { await adapter.startRun(makeDiagnosticianInput()); } catch { /* expected */ }
+
+      const repairEvent = findTelemetryEvent('output_repair_attempted');
+      expect(repairEvent).toBeDefined();
+      const payload = repairEvent?.payload as Record<string, unknown>;
+      expect(payload.repaired).toBe(false);
+    });
+
+    it('reuses same provider/model for repair call', async () => {
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      await adapter.startRun(makeDiagnosticianInput());
+
+      // Both calls should use same model
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+      const [model1] = mockComplete.mock.calls[0] as [unknown];
+      const [model2] = mockComplete.mock.calls[1] as [unknown];
+      expect(model1).toEqual(model2);
+    });
+
+    it('repair call includes the repair prompt with schema errors', async () => {
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      await adapter.startRun(makeDiagnosticianInput());
+
+      // Second call's context should contain the repair prompt
+      const [, context] = mockComplete.mock.calls[1] as [unknown, { messages: { content: string }[] }];
+      const repairMessage = context.messages[0]?.content ?? '';
+      expect(repairMessage).toContain('schema');
+      expect(repairMessage).toContain('confidence');
+    });
+
+    it('repair budget exhausted — maxRepairAttempts=1, no infinite loop', async () => {
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
+        category: 'output_invalid',
+      });
+      // 1 original + 1 repair = 2 calls total (not infinite)
+      expect(mockComplete).toHaveBeenCalledTimes(2);
     });
   });
 });
