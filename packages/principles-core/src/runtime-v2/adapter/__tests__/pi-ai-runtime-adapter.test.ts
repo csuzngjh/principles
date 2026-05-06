@@ -605,10 +605,19 @@ describe('PiAiRuntimeAdapter', () => {
   // ── fetchArtifacts() ──
 
   describe('fetchArtifacts()', () => {
-    it('returns empty array', async () => {
+    it('returns empty array for a run that was started', async () => {
       const adapter = makeAdapter();
-      const artifacts = await adapter.fetchArtifacts('any-run-id');
+      const input = makeStartRunInput({ taskRef: { taskId: 'test-run-id' } });
+      const handle = await adapter.startRun(input);
+      const artifacts = await adapter.fetchArtifacts(handle.runId);
       expect(artifacts).toEqual([]);
+    });
+
+    it('throws for an unknown runId', async () => {
+      const adapter = makeAdapter();
+      await expect(adapter.fetchArtifacts('unknown-run-id')).rejects.toThrow(
+        "Run 'unknown-run-id' not found",
+      );
     });
   });
 
