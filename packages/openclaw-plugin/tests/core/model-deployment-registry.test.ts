@@ -66,7 +66,6 @@ function rmdir(dir: string): void {
  */
 function setupDeployableReaderCheckpoint(tmpDir: string): { runId: string; checkpointId: string } {
   const run = registerTrainingRun(tmpDir, {
-    experimentId: 'mock-experiment-id',
     targetModelFamily: 'claude-reader-latest',
     datasetFingerprint: 'sha256-reader-001',
     exportId: 'export-reader',
@@ -109,7 +108,6 @@ function setupDeployableReaderCheckpoint(tmpDir: string): { runId: string; check
  */
 function setupDeployableEditorCheckpoint(tmpDir: string): { runId: string; checkpointId: string } {
   const run = registerTrainingRun(tmpDir, {
-    experimentId: 'mock-experiment-id',
     targetModelFamily: 'gpt-editor-v4',
     datasetFingerprint: 'sha256-editor-001',
     exportId: 'export-editor',
@@ -151,7 +149,6 @@ function setupDeployableEditorCheckpoint(tmpDir: string): { runId: string; check
  */
 function setupNonDeployableCheckpoint(tmpDir: string): { runId: string; checkpointId: string } {
   const run = registerTrainingRun(tmpDir, {
-    experimentId: 'mock-experiment-id',
     targetModelFamily: 'claude-reader-latest',
     datasetFingerprint: 'sha256-abc',
     exportId: 'export-abc',
@@ -283,7 +280,6 @@ describe('ModelDeploymentRegistry bindCheckpointToWorkerProfile', () => {
 
     // Set up a second reader checkpoint
     const run2 = registerTrainingRun(tmpDir, {
-      experimentId: 'mock-experiment-id',
       targetModelFamily: 'claude-reader-latest',
       datasetFingerprint: 'sha256-reader-002',
       exportId: 'export-reader-2',
@@ -568,7 +564,6 @@ describe('ModelDeploymentRegistry rollbackDeployment', () => {
 
     // Set up ck2
     const run2 = registerTrainingRun(tmpDir, {
-      experimentId: 'mock-experiment-id',
       targetModelFamily: 'claude-reader-latest',
       datasetFingerprint: 'sha256-reader-002',
       exportId: 'export-reader-2',
@@ -624,8 +619,8 @@ describe('ModelDeploymentRegistry rollbackDeployment', () => {
 
   it('rollback fails when previous checkpoint no longer exists', () => {
     const { checkpointId: ck1 } = setupDeployableReaderCheckpoint(tmpDir);
+
     const run2 = registerTrainingRun(tmpDir, {
-      experimentId: 'mock-experiment-id',
       targetModelFamily: 'claude-reader-latest',
       datasetFingerprint: 'sha256-reader-002',
       exportId: 'export-reader-2',
@@ -682,7 +677,6 @@ describe('ModelDeploymentRegistry rollbackDeployment', () => {
     const { checkpointId: ck1 } = setupDeployableReaderCheckpoint(tmpDir);
 
     const run2 = registerTrainingRun(tmpDir, {
-      experimentId: 'mock-experiment-id',
       targetModelFamily: 'claude-reader-latest',
       datasetFingerprint: 'sha256-reader-002',
       exportId: 'export-reader-2',
