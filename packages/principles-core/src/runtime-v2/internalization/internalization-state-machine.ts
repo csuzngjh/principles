@@ -282,7 +282,7 @@ export function decideArtifactRejectionFeedback(
  *   - scribe → artificer
  *   - artificer → evaluator
  *   - evaluator → rollout_reviewer
- *   - Any runner (+ model_training channel) → trainer
+ *   - rollout_reviewer → trainer (model_training channel only, v1 terminal successor)
  *
  * Requires currentTask.status === 'succeeded' — non-terminal tasks
  * must not generate successor proposals (prevents pipeline乱序).
