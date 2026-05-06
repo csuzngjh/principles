@@ -1,0 +1,281 @@
+/**
+ * Structured output repair module unit tests.
+ *
+ * Tests the reusable, runtime-agnostic schema repair loop:
+ *   formatRepairPrompt — generates bounded repair prompts from schema errors
+ *   attemptStructuredOutputRepair — bounded repair loop with LLM callback
+ *
+ * No pi-ai imports — the repair module is fully decoupled via callbacks.
+ */
+import { describe, it, expect } from 'vitest';
+import {
+  formatRepairPrompt,
+  attemptStructuredOutputRepair,
+  DEFAULT_REPAIR_CONFIG,
+} from '../structured-output-repair.js';
+import type {
+  SchemaValidationError,
+  RepairConfig,
+  RepairLLMCaller,
+} from '../structured-output-repair.js';
+
+// ── Fixtures ──
+
+const SAMPLE_ERRORS: readonly SchemaValidationError[] = [
+  { path: '/confidence', message: 'Expected number, got string', value: '85%' },
+  { path: '/recommendations/0/kind', message: 'Expected "principle" | "rule" | "implementation" | "prompt" | "defer", got "Rule"', value: 'Rule' },
+];
+
+const SAMPLE_INVALID_JSON = {
+  valid: true,
+  diagnosisId: 'diag-1',
+  taskId: 'task-1',
+  summary: 'Test',
+  rootCause: 'Test cause',
+  violatedPrinciples: [],
+  evidence: [],
+  recommendations: [{ kind: 'Rule', description: 'Fix casing', confidence: '85%' }],
+  confidence: '85%',
+};
+
+const VALID_REPAIRED_JSON = {
+  valid: true,
+  diagnosisId: 'diag-1',
+  taskId: 'task-1',
+  summary: 'Test',
+  rootCause: 'Test cause',
+  violatedPrinciples: [],
+  evidence: [],
+  recommendations: [{ kind: 'rule', description: 'Fix casing' }],
+  confidence: 0.85,
+};
+
+// ── formatRepairPrompt ──
+
+describe('formatRepairPrompt', () => {
+  it('includes raw JSON and error list in the prompt', () => {
+    const prompt = formatRepairPrompt(SAMPLE_INVALID_JSON, SAMPLE_ERRORS);
+
+    expect(prompt).toContain('"confidence": "85%"');
+    expect(prompt).toContain('/confidence');
+    expect(prompt).toContain('Expected number, got string');
+    expect(prompt).toContain('/recommendations/0/kind');
+    expect(prompt).toMatch(/corrected.*JSON/i);
+  });
+
+  it('truncates raw JSON when exceeding maxRawOutputChars', () => {
+    const largeJson = { data: 'x'.repeat(5000) };
+    const config: RepairConfig = { maxRawOutputChars: 200 };
+    const prompt = formatRepairPrompt(largeJson, SAMPLE_ERRORS, config);
+
+    // Raw JSON section should be truncated
+    const jsonSection = (/PREVIOUS OUTPUT[\s\S]*?SCHEMA ERRORS/.exec(prompt))?.[0] ?? '';
+    expect(jsonSection.length).toBeLessThan(5000);
+    expect(prompt).toContain('...[truncated]');
+  });
+
+  it('limits error count to maxErrorsInPrompt', () => {
+    const manyErrors: SchemaValidationError[] = Array.from({ length: 20 }, (_, i) => ({
+      path: `/field/${i}`,
+      message: `Error ${i}`,
+      value: null,
+    }));
+    const config: RepairConfig = { maxErrorsInPrompt: 5 };
+    const prompt = formatRepairPrompt({}, manyErrors, config);
+
+    // Should include only first 5 errors
+    for (let i = 0; i < 5; i++) {
+      expect(prompt).toContain(`/field/${i}`);
+    }
+    expect(prompt).not.toContain('/field/5');
+  });
+
+  it('truncates individual error messages to maxErrorChars', () => {
+    const longErrors: SchemaValidationError[] = [{
+      path: '/test',
+      message: 'x'.repeat(500),
+      value: null,
+    }];
+    const config: RepairConfig = { maxErrorChars: 100 };
+    const prompt = formatRepairPrompt({}, longErrors, config);
+
+    // Error message should be truncated — the original 500-char string should not appear in full
+    const errorLine = prompt.split('\n').find(l => l.includes('/test')) ?? '';
+    expect(errorLine.length).toBeLessThan(500);
+  });
+});
+
+// ── attemptStructuredOutputRepair ──
+
+describe('attemptStructuredOutputRepair', () => {
+  it('returns repaired=true when LLM returns valid fixed JSON', async () => {
+    const llmCaller: RepairLLMCaller = async () => JSON.stringify(VALID_REPAIRED_JSON);
+    const schemaCheck = (v: unknown): boolean => {
+      // Minimal check: confidence must be number, recommendations[0].kind must be lowercase
+      const obj = v as Record<string, unknown>;
+      return typeof obj.confidence === 'number'
+        && typeof obj.recommendations === 'object';
+    };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck },
+    );
+
+    expect(result.repaired).toBe(true);
+    expect(result.output).toBeDefined();
+    expect(result.attemptsUsed).toBe(1);
+    expect((result.output as Record<string, unknown>).confidence).toBe(0.85);
+  });
+
+  it('returns repaired=false when LLM returns still-invalid JSON', async () => {
+    const llmCaller: RepairLLMCaller = async () => JSON.stringify(SAMPLE_INVALID_JSON);
+    const schemaCheck = (_v: unknown): boolean => false; // always invalid
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.output).toBeNull();
+    expect(result.attemptsUsed).toBe(1);
+  });
+
+  it('returns repaired=false when LLM returns null (no JSON)', async () => {
+    const llmCaller: RepairLLMCaller = async () => null;
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => true },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.output).toBeNull();
+    expect(result.attemptsUsed).toBe(1);
+  });
+
+  it('returns repaired=false when llmCaller throws', async () => {
+    const llmCaller: RepairLLMCaller = async () => { throw new Error('LLM unavailable'); };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => true },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.output).toBeNull();
+  });
+
+  it('skips repair when maxRepairAttempts=0', async () => {
+    let callerInvoked = false;
+    const llmCaller: RepairLLMCaller = async () => { callerInvoked = true; return '{}'; };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => true },
+      { maxRepairAttempts: 0 },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.attemptsUsed).toBe(0);
+    expect(callerInvoked).toBe(false);
+  });
+
+  it('uses default maxRepairAttempts=1 (single attempt)', async () => {
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async () => { callCount++; return JSON.stringify(SAMPLE_INVALID_JSON); };
+
+    await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => false },
+    );
+
+    expect(callCount).toBe(1);
+  });
+
+  it('repairSummary contains bounded error information', async () => {
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller: async () => null, schemaCheck: () => false },
+    );
+
+    expect(result.repairSummary).toContain('2 errors');
+    expect(result.repairSummary).toContain('/confidence');
+  });
+
+  it('schemaCheck is called on repaired output before returning success', async () => {
+    let schemaCheckCalled = false;
+    const llmCaller: RepairLLMCaller = async () => JSON.stringify(VALID_REPAIRED_JSON);
+    const schemaCheck = (v: unknown): boolean => {
+      schemaCheckCalled = true;
+      const obj = v as Record<string, unknown>;
+      return typeof obj.confidence === 'number';
+    };
+
+    await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck },
+    );
+
+    expect(schemaCheckCalled).toBe(true);
+  });
+
+  it('does not call llmCaller when schemaErrors is empty', async () => {
+    let callerInvoked = false;
+    const llmCaller: RepairLLMCaller = async () => { callerInvoked = true; return '{}'; };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      [],
+      { llmCaller, schemaCheck: () => true },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.attemptsUsed).toBe(0);
+    expect(callerInvoked).toBe(false);
+  });
+
+  it('respects maxRepairAttempts > 1 for multiple attempts', async () => {
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async () => {
+      callCount++;
+      // Fail first, succeed second
+      if (callCount < 2) return JSON.stringify(SAMPLE_INVALID_JSON);
+      return JSON.stringify(VALID_REPAIRED_JSON);
+    };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: (v) => {
+        const obj = v as Record<string, unknown>;
+        return typeof obj.confidence === 'number';
+      } },
+      { maxRepairAttempts: 2 },
+    );
+
+    expect(result.repaired).toBe(true);
+    expect(result.attemptsUsed).toBe(2);
+    expect(result.output).toBeDefined();
+  });
+});
+
+// ── DEFAULT_REPAIR_CONFIG ──
+
+describe('DEFAULT_REPAIR_CONFIG', () => {
+  it('has sensible defaults', () => {
+    expect(DEFAULT_REPAIR_CONFIG.maxRepairAttempts).toBe(1);
+    expect(DEFAULT_REPAIR_CONFIG.maxErrorsInPrompt).toBe(10);
+    expect(DEFAULT_REPAIR_CONFIG.maxErrorChars).toBe(200);
+    expect(DEFAULT_REPAIR_CONFIG.maxRawOutputChars).toBe(2000);
+  });
+});

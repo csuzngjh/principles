@@ -18,9 +18,11 @@ import { getModel, getProviders, complete } from '@mariozechner/pi-ai';
 import type { KnownProvider, Context, UserMessage, AssistantMessage, Model } from '@mariozechner/pi-ai';
 import { Value } from '@sinclair/typebox/value';
 import { PDRuntimeError } from '../error-categories.js';
+import { extractJsonObject } from './json-extractor.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
+import { attemptStructuredOutputRepair } from './structured-output-repair.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -164,39 +166,6 @@ function extractAssistantTextOrThrow(
   }
 
   return textContent.text;
-}
-
-/**
- * Balanced-bracket JSON extraction from LLM output.
- * Handles prose-wrapped and code-fenced JSON (```json ... ```).
- * Returns the parsed object, or null if no valid JSON found.
- */
-function extractJsonObject(text: string): unknown | null {
-  // Try code-fenced JSON first: ```json ... ``` or ``` ... ```
-  const fencedMatch = /```(?:json)?\s*\n?([\s\S]*?)\n?```/.exec(text);
-  if (fencedMatch) {
-    const [, fencedContent] = fencedMatch;
-    if (fencedContent) {
-      try { return JSON.parse(fencedContent.trim()); } catch { /* fall through */ }
-    }
-  }
-
-  // Balanced-bracket scan for first top-level {...}
-  let depth = 0;
-  let start = -1;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === '{') {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === '}') {
-      depth--;
-      if (depth === 0 && start >= 0) {
-        try { return JSON.parse(text.slice(start, i + 1)); } catch { start = -1; }
-      }
-    }
-  }
-  return null;
 }
 
 /** Internal run state for one-shot pattern. */
@@ -404,24 +373,83 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       const text = extractAssistantTextOrThrow(response, signal);
 
       // Parse response — handles prose-wrapped and code-fenced JSON
-      const parsed = extractJsonObject(text);
-      if (!parsed) {
+      let validatedOutput: unknown = extractJsonObject(text);
+      if (!validatedOutput) {
         throw new PDRuntimeError('output_invalid', 'No valid JSON found in LLM response');
       }
 
       // Validate with DiagnosticianOutputV1Schema
-      if (!Value.Check(DiagnosticianOutputV1Schema, parsed)) {
-        throw new PDRuntimeError(
-          'output_invalid',
-          'LLM output does not match DiagnosticianOutputV1 schema',
-        );
+      if (!Value.Check(DiagnosticianOutputV1Schema, validatedOutput)) {
+        // PRI-71: Attempt structured output repair before throwing
+        let repairSucceeded = false;
+        let schemaErrors: { path: string; message: string; value: unknown }[] = [];
+
+        if (input.outputSchemaRef === 'diagnostician-output-v1') {
+          schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, validatedOutput)]
+            .map(e => ({ path: e.path, message: e.message, value: e.value }));
+
+          if (schemaErrors.length > 0) {
+            const repairResult = await attemptStructuredOutputRepair<Record<string, unknown>>(
+              validatedOutput,
+              schemaErrors,
+              {
+                llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey }),
+                schemaCheck: (value: unknown) => Value.Check(DiagnosticianOutputV1Schema, value),
+              },
+            );
+
+            this.eventEmitter.emitTelemetry({
+              eventType: 'output_repair_attempted',
+              traceId: input.taskRef?.taskId ?? runId,
+              timestamp: new Date().toISOString(),
+              sessionId: 'pi-ai-adapter',
+              agentId: 'pi-ai-adapter',
+              payload: {
+                runId,
+                runtimeKind: 'pi-ai',
+                repaired: repairResult.repaired,
+                attemptsUsed: repairResult.attemptsUsed,
+                repairSummary: repairResult.repairSummary,
+              },
+            });
+
+            if (repairResult.repaired && repairResult.output) {
+              validatedOutput = repairResult.output;
+              repairSucceeded = true;
+            }
+          }
+        }
+
+        if (!repairSucceeded) {
+          // Emit telemetry for repair failure even when skipped paths are not hit above
+          if (schemaErrors.length > 0) {
+            this.eventEmitter.emitTelemetry({
+              eventType: 'output_repair_attempted',
+              traceId: input.taskRef?.taskId ?? runId,
+              timestamp: new Date().toISOString(),
+              sessionId: 'pi-ai-adapter',
+              agentId: 'pi-ai-adapter',
+              payload: {
+                runId,
+                runtimeKind: 'pi-ai',
+                repaired: false,
+                attemptsUsed: 0,
+                repairSummary: `Repair skipped: schemaErrors exist but repair was not attempted (outputSchemaRef=${input.outputSchemaRef})`,
+              },
+            });
+          }
+          throw new PDRuntimeError(
+            'output_invalid',
+            'LLM output does not match DiagnosticianOutputV1 schema',
+          );
+        }
       }
 
       // Update run state to succeeded
       const endedAt = new Date().toISOString();
       runState.status = 'succeeded';
       runState.endedAt = endedAt;
-      runState.output = { runId, payload: parsed };
+      runState.output = { runId, payload: validatedOutput };
 
       // Emit runtime_invocation_succeeded telemetry
       this.eventEmitter.emitTelemetry({
@@ -523,6 +551,53 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   }
 
   // ── Private helpers ──
+
+  /**
+   * Make a single LLM call for output repair (PRI-71).
+   * Returns extracted text response or null if no content.
+   * Reuses same provider/model/apiKey as the original call.
+   *
+   * Uses an independent AbortSignal (fixed 60s timeout) to avoid the repair
+   * call immediately timing out when the original call consumed most of the
+   * original timeout budget (e.g., 5min original → 4m50s elapsed → 10s left).
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- REPAIR_TIMEOUT_MS is a constant; this method is intentionally stateless
+  private async repairLLMCall(
+    model: ReturnType<typeof resolveModel>,
+    prompt: string,
+    options: { signal: AbortSignal; apiKey: string },
+  ): Promise<string | null> {
+    const REPAIR_TIMEOUT_MS = 60_000;
+    const repairSignal = AbortSignal.timeout(REPAIR_TIMEOUT_MS);
+
+    const repairMessage: UserMessage = {
+      role: 'user',
+      content: prompt,
+      timestamp: Date.now(),
+    };
+    const repairContext: Context = { messages: [repairMessage] };
+
+    const response = await complete(model, repairContext, {
+      signal: repairSignal,
+      apiKey: options.apiKey,
+      timeoutMs: REPAIR_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+
+    // extractAssistantTextOrThrow throws:
+    //   - output_invalid: no text content in response
+    //   - timeout: aborted/timed out (caller's signal or pi-ai internal)
+    //   - execution_failed: provider error (non-timeout)
+    // We only swallow output_invalid, letting timeout/execution_failed propagate.
+    try {
+      return extractAssistantTextOrThrow(response, options.signal);
+    } catch (err) {
+      if (err instanceof PDRuntimeError && err.category === 'output_invalid') {
+        return null;
+      }
+      throw err;
+    }
+  }
 
   /**
    * Call pi-ai complete() with retry and exponential backoff.
