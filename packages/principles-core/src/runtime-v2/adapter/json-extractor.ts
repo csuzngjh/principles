@@ -2,11 +2,9 @@
  * Balanced-bracket JSON extraction from LLM output.
  *
  * Handles prose-wrapped and code-fenced JSON (```json ... ```).
- * This is a shared utility — kept in adapter/ rather than runtime-v2/ to avoid
- * creating a new top-level directory for one small function.
- *
- * Duplicated here and in pi-ai-runtime-adapter.ts to avoid adapter importing
- * from repair module (which needs to stay runtime-agnostic).
+ * Shared utility imported by both pi-ai-runtime-adapter.ts and
+ * structured-output-repair.ts — kept in adapter/ to avoid a new
+ * top-level directory for one small function.
  */
 
 /**

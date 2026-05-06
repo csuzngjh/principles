@@ -95,7 +95,7 @@ export function formatRepairPrompt(
     : 0;
 
   return [
-    'Your previous JSON output had schema validation errors. Fix ALL errors and return the complete corrected JSON object.',
+    'This is a schema validation repair loop. Your previous JSON output still has errors. Fix ALL remaining errors and return the complete corrected JSON object.',
     '',
     'PREVIOUS OUTPUT:',
     rawJson,

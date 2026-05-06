@@ -556,12 +556,20 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
    * Make a single LLM call for output repair (PRI-71).
    * Returns extracted text response or null if no content.
    * Reuses same provider/model/apiKey as the original call.
+   *
+   * Uses an independent AbortSignal (fixed 60s timeout) to avoid the repair
+   * call immediately timing out when the original call consumed most of the
+   * original timeout budget (e.g., 5min original → 4m50s elapsed → 10s left).
    */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- REPAIR_TIMEOUT_MS is a constant; this method is intentionally stateless
   private async repairLLMCall(
     model: ReturnType<typeof resolveModel>,
     prompt: string,
     options: { signal: AbortSignal; apiKey: string },
   ): Promise<string | null> {
+    const REPAIR_TIMEOUT_MS = 60_000;
+    const repairSignal = AbortSignal.timeout(REPAIR_TIMEOUT_MS);
+
     const repairMessage: UserMessage = {
       role: 'user',
       content: prompt,
@@ -570,18 +578,20 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     const repairContext: Context = { messages: [repairMessage] };
 
     const response = await complete(model, repairContext, {
-      signal: options.signal,
+      signal: repairSignal,
       apiKey: options.apiKey,
-      timeoutMs: this.config.timeoutMs ?? 300_000,
+      timeoutMs: REPAIR_TIMEOUT_MS,
       maxRetries: 0,
     });
 
+    // extractAssistantTextOrThrow throws:
+    //   - output_invalid: no text content in response
+    //   - timeout: aborted/timed out (caller's signal or pi-ai internal)
+    //   - execution_failed: provider error (non-timeout)
+    // We only swallow output_invalid, letting timeout/execution_failed propagate.
     try {
       return extractAssistantTextOrThrow(response, options.signal);
     } catch (err) {
-      // Let timeout/execution_failed propagate (fail fast — the LLM call itself is broken).
-      // Return null only when the LLM returned no text content, so the repair loop can
-      // treat this as a null response and retry or bail out gracefully.
       if (err instanceof PDRuntimeError && err.category === 'output_invalid') {
         return null;
       }

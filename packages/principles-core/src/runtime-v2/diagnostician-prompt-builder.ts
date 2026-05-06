@@ -164,6 +164,8 @@ OUTPUT FORMAT (pure JSON, no markdown):
   "ambiguityNotes": ["<optional: anything uncertain>"]
 }
 
+IMPORTANT: The examples above are ILLUSTRATIVE ONLY. Your recommendations MUST be based on the actual root cause analysis and evidence in this context — do not copy the example text verbatim.
+
 CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text)
 - Do NOT read files, call tools, or write to any database
