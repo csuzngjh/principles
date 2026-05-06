@@ -238,7 +238,7 @@ describe('bootstrap-rules', () => {
 
     // Regression test for Issue #356
     it('T-01..T-10 as deterministic — no crash on fresh workspace', () => {
-      const trainingStates = [
+      const trainingStates: LegacyPrincipleTrainingState[] = [
         { principleId: 'T-01', evaluability: 'deterministic', applicableOpportunityCount: 0, observedViolationCount: 0, complianceRate: 1, violationTrend: 0, generatedSampleCount: 0, approvedSampleCount: 0, includedTrainRunIds: [], deployedCheckpointIds: [], internalizationStatus: 'needs_training' },
         { principleId: 'T-02', evaluability: 'deterministic', applicableOpportunityCount: 0, observedViolationCount: 0, complianceRate: 1, violationTrend: 0, generatedSampleCount: 0, approvedSampleCount: 0, includedTrainRunIds: [], deployedCheckpointIds: [], internalizationStatus: 'needs_training' },
       ];

@@ -67,6 +67,7 @@ describe('ModelTrainingRegistry registerTrainingRun', () => {
 
   it('registers a new training run', () => {
     const run = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-abc123',
       exportId: 'export-001',
@@ -87,6 +88,7 @@ describe('ModelTrainingRegistry registerTrainingRun', () => {
 
   it('persists the run to disk', () => {
     const run = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'claude-3',
       datasetFingerprint: 'sha256-def456',
       exportId: 'export-002',
@@ -102,6 +104,7 @@ describe('ModelTrainingRegistry registerTrainingRun', () => {
 
   it('generates unique trainRunIds', () => {
     const run1 = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-abc',
       exportId: 'e1',
@@ -109,6 +112,7 @@ describe('ModelTrainingRegistry registerTrainingRun', () => {
       configFingerprint: 'c1',
     });
     const run2 = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-def',
       exportId: 'e2',
@@ -130,6 +134,7 @@ describe('ModelTrainingRegistry run status transitions', () => {
   beforeEach(() => {
     tmpDir = makeTmpDir();
     runId = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-abc',
       exportId: 'exp-1',
@@ -186,6 +191,7 @@ describe('ModelTrainingRegistry run status transitions', () => {
     // BeforeEach already created runId as pending
     // Create run2 (also pending by default)
     const run2 = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-def',
       exportId: 'exp-2',
@@ -208,6 +214,7 @@ describe('ModelTrainingRegistry run status transitions', () => {
   it('listTrainingRuns filters by targetModelFamily', () => {
     // Register gpt-4 and claude-3 runs using the tmpDir from beforeEach
     const gpt4Run = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-a',
       exportId: 'e1',
@@ -215,6 +222,7 @@ describe('ModelTrainingRegistry run status transitions', () => {
       configFingerprint: 'c1',
     });
     registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'claude-3',
       datasetFingerprint: 'sha256-b',
       exportId: 'e2',
@@ -244,6 +252,7 @@ describe('ModelTrainingRegistry registerCheckpoint', () => {
   beforeEach(() => {
     tmpDir = makeTmpDir();
     runId = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-abc',
       exportId: 'exp-1',
@@ -345,6 +354,7 @@ describe('ModelTrainingRegistry attachEvalSummary', () => {
   beforeEach(() => {
     tmpDir = makeTmpDir();
     const run = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-abc',
       exportId: 'exp-1',
@@ -464,6 +474,7 @@ describe('ModelTrainingRegistry deployability gating', () => {
   beforeEach(() => {
     tmpDir = makeTmpDir();
     const run = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-abc',
       exportId: 'exp-1',
@@ -614,6 +625,7 @@ describe('ModelTrainingRegistry deployability gating', () => {
   it('listDeployableCheckpoints returns only deployable checkpoints', () => {
     // Create another run and checkpoint
     const run2 = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-def',
       exportId: 'exp-2',
@@ -661,6 +673,7 @@ describe('ModelTrainingRegistry lineage tracing', () => {
   beforeEach(() => {
     tmpDir = makeTmpDir();
     const run = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-full',
       exportId: 'exp-full',
@@ -743,6 +756,7 @@ describe('ModelTrainingRegistry stats', () => {
 
   it('counts runs in each status', () => {
     const run1 = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-a',
       exportId: 'e1',
@@ -750,6 +764,7 @@ describe('ModelTrainingRegistry stats', () => {
       configFingerprint: 'c1',
     });
     const run2 = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-b',
       exportId: 'e2',
@@ -757,6 +772,7 @@ describe('ModelTrainingRegistry stats', () => {
       configFingerprint: 'c1',
     });
     const run3 = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-c',
       exportId: 'e3',
@@ -779,6 +795,7 @@ describe('ModelTrainingRegistry stats', () => {
 
   it('counts passing vs failing evals', () => {
     const run = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-abc',
       exportId: 'exp-1',
@@ -838,6 +855,7 @@ describe('ModelTrainingRegistry persistence', () => {
 
   it('getFullRegistry returns all record types', () => {
     const run = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-abc',
       exportId: 'exp-1',
@@ -870,6 +888,7 @@ describe('ModelTrainingRegistry persistence', () => {
   it('registry persists across module re-invocations', () => {
     // This test verifies the registry is written to disk
     const run = registerTrainingRun(tmpDir, {
+      experimentId: 'mock-experiment-id',
       targetModelFamily: 'gpt-4',
       datasetFingerprint: 'sha256-abc',
       exportId: 'exp-1',
