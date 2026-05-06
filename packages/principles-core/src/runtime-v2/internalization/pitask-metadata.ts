@@ -73,6 +73,20 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
 /** Alias for serializePITaskMetadata — explicit name for adapter/consumer use. */
 export const createPITaskDiagnosticJson = serializePITaskMetadata;
 
+// ── ArtifactRef validation ─────────────────────────────────────────────────────
+
+/**
+ * Validates a value is a valid ArtifactRef { artifactType: string, ref: string }.
+ * artifactType is accepted as any string — runtime validation of PIArtifactKind
+ * is the caller's responsibility when creating the record.
+ */
+function isValidArtifactRef(value: unknown): value is ArtifactRef {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return typeof r.artifactType === 'string' && r.artifactType.trim() !== '' &&
+    typeof r.ref === 'string' && r.ref.trim() !== '';
+}
+
 // ── Parsing ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -109,6 +123,14 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
   if (typeof m.timeoutMs !== 'number') return null;
   if (!Array.isArray(m.inputArtifactRefs)) return null;
   if (!Array.isArray(m.outputArtifactRefs)) return null;
+
+  // Validate each ArtifactRef element
+  for (const ref of m.inputArtifactRefs) {
+    if (!isValidArtifactRef(ref)) return null;
+  }
+  for (const ref of m.outputArtifactRefs) {
+    if (!isValidArtifactRef(ref)) return null;
+  }
 
   // Optional fields: if present, must be non-empty strings
   if (m.parentTaskId !== undefined && m.parentTaskId !== null) {

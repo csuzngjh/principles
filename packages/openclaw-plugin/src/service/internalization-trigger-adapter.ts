@@ -255,8 +255,14 @@ export function createInternalizationTrigger(
   // ── start: begin periodic wake cycles ─────────────────────────────────────
 
   function start(ctx: TriggerContext, intervalMs = 5 * 60 * 1000): () => void {
-    // Prevent re-entrancy: if already running, return existing stop
-    if (state.intervalId !== null) return stop;
+    // Prevent re-entrancy: if already running, warn and return existing stop
+    if (state.intervalId !== null) {
+      logger?.warn?.('[PD:InternalizationTrigger] start() called while already running — returning existing stop', {
+        workspaceDir: ctx.workspaceDir,
+        stateDir: ctx.stateDir,
+      });
+      return stop;
+    }
 
     // Immediate first wake
     wake(ctx).catch(err => {

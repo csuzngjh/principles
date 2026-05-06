@@ -29,8 +29,9 @@ function createTempDir(): string {
 function cleanupDir(dir: string): void {
   try {
     fs.rmSync(dir, { recursive: true, force: true });
-  } catch {
-    // ignore cleanup errors
+  } catch (err) {
+    // Report but don't throw — cleanup failure shouldn't fail the test
+    console.error('[pitask-metadata.test] cleanupDir failed:', dir, err);
   }
 }
 
@@ -134,6 +135,26 @@ describe('parsePITaskMetadata', () => {
 
   it('missing required fields → returns null', () => {
     const meta = { pi_metadata: { channel: 'prompt' } }; // missing timeoutMs, arrays
+    expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
+  });
+
+  it('inputArtifactRefs with invalid element → returns null', () => {
+    const meta = {
+      pi_metadata: {
+        ...makeMetadata({ channel: 'prompt' }),
+        inputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-1' }, { artifactType: 123, ref: 'bad' }],
+      },
+    };
+    expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
+  });
+
+  it('outputArtifactRefs with invalid element → returns null', () => {
+    const meta = {
+      pi_metadata: {
+        ...makeMetadata({ channel: 'prompt' }),
+        outputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-2' }, { artifactType: 'rule', ref: '' }],
+      },
+    };
     expect(parsePITaskMetadata(JSON.stringify(meta))).toBeNull();
   });
 
