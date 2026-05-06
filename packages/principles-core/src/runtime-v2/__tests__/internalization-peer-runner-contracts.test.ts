@@ -227,18 +227,19 @@ describe('Job Graph', () => {
   // ── validateEdge ──────────────────────────────────────────────────────────
 
   describe('validateEdge', () => {
-    it('returns true for all ALLOWED_EDGES', async () => {
+    it('returns true for all non-trainer ALLOWED_EDGES (channel-free edges)', async () => {
       const { validateEdge } = await import('../internalization/internalization-job-graph.js');
 
-      const allowedEdges = [
+      const nonTrainerEdges = [
         ['dreamer', 'philosopher'] as const,
         ['philosopher', 'scribe'] as const,
         ['scribe', 'artificer'] as const,
         ['artificer', 'evaluator'] as const,
         ['evaluator', 'rollout_reviewer'] as const,
+        // Note: rollout_reviewer→trainer requires model_training channel (tested separately)
       ];
 
-      for (const [from, to] of allowedEdges) {
+      for (const [from, to] of nonTrainerEdges) {
         expect(validateEdge(from, to)).toBe(true);
       }
     });
@@ -266,28 +267,33 @@ describe('Job Graph', () => {
       expect(validateEdge('philosopher', 'evaluator')).toBe(false);
     });
 
-    it('requires model_training channel for trainer target', async () => {
+    it('requires model_training channel for rollout_reviewer → trainer transition', async () => {
       const { validateEdge, MODEL_TRAINING_CHANNEL } = await import(
         '../internalization/internalization-job-graph.js'
       );
 
-      // Without channel, trainer is not reachable
-      expect(validateEdge('dreamer', 'trainer')).toBe(false);
-      expect(validateEdge('scribe', 'trainer')).toBe(false);
+      // Without channel, trainer is not reachable from any runner
+      expect(validateEdge('rollout_reviewer', 'trainer')).toBe(false);
 
-      // With model_training channel, trainer is reachable from any runner
-      expect(validateEdge('dreamer', 'trainer', MODEL_TRAINING_CHANNEL)).toBe(true);
-      expect(validateEdge('philosopher', 'trainer', MODEL_TRAINING_CHANNEL)).toBe(true);
-      expect(validateEdge('scribe', 'trainer', MODEL_TRAINING_CHANNEL)).toBe(true);
-      expect(validateEdge('artificer', 'trainer', MODEL_TRAINING_CHANNEL)).toBe(true);
+      // Only rollout_reviewer + model_training channel reaches trainer
+      expect(validateEdge('rollout_reviewer', 'trainer', MODEL_TRAINING_CHANNEL)).toBe(true);
+
+      // Other runners with model_training channel CANNOT reach trainer in v1
+      expect(validateEdge('dreamer', 'trainer', MODEL_TRAINING_CHANNEL)).toBe(false);
+      expect(validateEdge('philosopher', 'trainer', MODEL_TRAINING_CHANNEL)).toBe(false);
+      expect(validateEdge('scribe', 'trainer', MODEL_TRAINING_CHANNEL)).toBe(false);
+      expect(validateEdge('artificer', 'trainer', MODEL_TRAINING_CHANNEL)).toBe(false);
+      expect(validateEdge('evaluator', 'trainer', MODEL_TRAINING_CHANNEL)).toBe(false);
     });
 
     it('rejects trainer with non-model_training channel', async () => {
       const { validateEdge } = await import('../internalization/internalization-job-graph.js');
 
-      expect(validateEdge('dreamer', 'trainer', 'prompt')).toBe(false);
-      expect(validateEdge('dreamer', 'trainer', 'skill')).toBe(false);
-      expect(validateEdge('dreamer', 'trainer', 'defer_archive')).toBe(false);
+      // rollout_reviewer + non-model_training channels cannot reach trainer
+      expect(validateEdge('rollout_reviewer', 'trainer', 'prompt')).toBe(false);
+      expect(validateEdge('rollout_reviewer', 'trainer', 'skill')).toBe(false);
+      expect(validateEdge('rollout_reviewer', 'trainer', 'defer_archive')).toBe(false);
+      expect(validateEdge('rollout_reviewer', 'trainer', 'code_tool_hook')).toBe(false);
     });
   });
 
@@ -373,14 +379,15 @@ describe('Job Graph', () => {
 
   describe('getAllowedSuccessors', () => {
     it('returns correct successors for dreamer', async () => {
-      const { getAllowedSuccessors, TRAINER_KIND } = await import(
+      const { getAllowedSuccessors } = await import(
         '../internalization/internalization-job-graph.js'
       );
 
       const successors = getAllowedSuccessors('dreamer');
 
       expect(successors).toContain('philosopher');
-      expect(successors).toContain(TRAINER_KIND);
+      // trainer is only reached after rollout_reviewer in v1 (Policy B)
+      expect(successors).not.toContain('trainer');
       expect(successors).not.toContain('scribe');
       expect(successors).not.toContain('artificer');
     });
@@ -392,20 +399,21 @@ describe('Job Graph', () => {
       expect(successors).not.toContain('trainer');
     });
 
-    it('returns correct successors for scribe (including trainer)', async () => {
-      const { getAllowedSuccessors, TRAINER_KIND } = await import(
+    it('returns correct successors for scribe (linear chain only)', async () => {
+      const { getAllowedSuccessors } = await import(
         '../internalization/internalization-job-graph.js'
       );
 
       const successors = getAllowedSuccessors('scribe');
 
       expect(successors).toContain('artificer');
-      expect(successors).toContain(TRAINER_KIND);
+      // trainer only via rollout_reviewer in v1
+      expect(successors).not.toContain('trainer');
       expect(successors).not.toContain('philosopher');
       expect(successors).not.toContain('dreamer');
     });
 
-    it('returns correct successors for evaluator', async () => {
+    it('returns correct successors for evaluator (rollout_reviewer only, no trainer shortcut)', async () => {
       const { getAllowedSuccessors, TRAINER_KIND } = await import(
         '../internalization/internalization-job-graph.js'
       );
@@ -413,10 +421,11 @@ describe('Job Graph', () => {
       const successors = getAllowedSuccessors('evaluator');
 
       expect(successors).toContain('rollout_reviewer');
-      expect(successors).toContain(TRAINER_KIND);
+      // v1 policy B: trainer only via rollout_reviewer, not as shortcut from evaluator
+      expect(successors).not.toContain(TRAINER_KIND);
     });
 
-    it('returns correct successors for artificer (including trainer)', async () => {
+    it('returns correct successors for artificer (evaluator only, no trainer shortcut)', async () => {
       const { getAllowedSuccessors, TRAINER_KIND } = await import(
         '../internalization/internalization-job-graph.js'
       );
@@ -424,16 +433,15 @@ describe('Job Graph', () => {
       const successors = getAllowedSuccessors('artificer');
 
       expect(successors).toContain('evaluator');
-      expect(successors).toContain(TRAINER_KIND);
+      expect(successors).not.toContain(TRAINER_KIND);
       expect(successors).not.toContain('scribe');
     });
 
-    it('returns trainer for rollout_reviewer (via model_training channel)', async () => {
+    it('returns [trainer] for rollout_reviewer (terminal v1 successor via model_training)', async () => {
       const { getAllowedSuccessors, TRAINER_KIND } = await import(
         '../internalization/internalization-job-graph.js'
       );
 
-      // Any non-trainer runner can reach trainer via model_training channel
       const successors = getAllowedSuccessors('rollout_reviewer');
       expect(successors).toContain(TRAINER_KIND);
       expect(successors).not.toContain('rollout_reviewer');
@@ -478,25 +486,24 @@ describe('Job Graph', () => {
       expect(preds).toEqual(['evaluator']);
     });
 
-    it('returns empty array for trainer (reached via channel, not edges)', async () => {
+    it('returns [rollout_reviewer] for trainer (v1 terminal predecessor)', async () => {
       const { getAllowedPredecessors } = await import('../internalization/internalization-job-graph.js');
 
       const preds = getAllowedPredecessors('trainer');
-      // trainer has no predecessor edges in ALLOWED_EDGES
-      // it is reached via model_training channel from any runner
-      expect(preds).toEqual([]);
+      // v1 policy B: trainer is terminal successor of rollout_reviewer only
+      expect(preds).toEqual(['rollout_reviewer']);
     });
   });
 
   // ── ALLOWED_EDGES constant ───────────────────────────────────────────────
 
   describe('ALLOWED_EDGES', () => {
-    it('has exactly 5 edges', async () => {
+    it('has exactly 6 edges (v1 linear chain + rollout_reviewer→trainer)', async () => {
       const { ALLOWED_EDGES } = await import('../internalization/internalization-job-graph.js');
-      expect(ALLOWED_EDGES).toHaveLength(5);
+      expect(ALLOWED_EDGES).toHaveLength(6);
     });
 
-    it('covers dreamer→philosopher→scribe→artificer→evaluator→rollout_reviewer chain', async () => {
+    it('covers dreamer→philosopher→scribe→artificer→evaluator→rollout_reviewer→trainer chain', async () => {
       const { ALLOWED_EDGES } = await import('../internalization/internalization-job-graph.js');
 
       const edgeSet = new Set(ALLOWED_EDGES.map(([f, t]) => `${f}→${t}`));
@@ -506,6 +513,7 @@ describe('Job Graph', () => {
       expect(edgeSet.has('scribe→artificer')).toBe(true);
       expect(edgeSet.has('artificer→evaluator')).toBe(true);
       expect(edgeSet.has('evaluator→rollout_reviewer')).toBe(true);
+      expect(edgeSet.has('rollout_reviewer→trainer')).toBe(true);
     });
 
     it('is readonly (cannot be modified)', async () => {
@@ -513,7 +521,7 @@ describe('Job Graph', () => {
 
       // ReadonlyArray<...> means the outer array reference is immutable at TypeScript level
       expect(Array.isArray(ALLOWED_EDGES)).toBe(true);
-      expect(ALLOWED_EDGES).toHaveLength(5);
+      expect(ALLOWED_EDGES).toHaveLength(6);
 
       // Verify each edge is a readonly tuple
       for (const edge of ALLOWED_EDGES) {
@@ -524,7 +532,7 @@ describe('Job Graph', () => {
       // Verify edges are in expected order
       const edgeStrings = ALLOWED_EDGES.map(([f, t]) => `${f}→${t}`);
       expect(edgeStrings[0]).toBe('dreamer→philosopher');
-      expect(edgeStrings[4]).toBe('evaluator→rollout_reviewer');
+      expect(edgeStrings[5]).toBe('rollout_reviewer→trainer');
     });
   });
 });

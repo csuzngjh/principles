@@ -194,7 +194,7 @@ interface ArtifactRef {
 
 ### 3.7 Job Graph Topology
 
-**Allowed edges (v1):**
+**Allowed edges (v1 policy B — trainer is terminal successor of rollout_reviewer only):**
 
 ```text
 dreamer → philosopher
@@ -202,8 +202,13 @@ philosopher → scribe
 scribe → artificer
 artificer → evaluator
 evaluator → rollout_reviewer
-[any runner] → (model_training channel) → trainer
+rollout_reviewer → trainer (model_training channel only)
 ```
+
+**v1 policy B notes:**
+- Training is only proposed after a successful rollout review — training must be based on evaluated, production-ready artifacts, not arbitrary intermediate runner outputs.
+- Fan-out to trainer from arbitrary runners (dreamer/philosopher/scribe/artificer/evaluator) is **future scope (v2+)**.
+- Fan-in to trainer (multiple paths merging into trainer) is **future scope (v2+)**.
 
 **DAG rules:**
 1. **No cycles** — graph must be acyclic
