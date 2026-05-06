@@ -39,11 +39,9 @@ dist/
 # TypeScript build artifacts
 **/tsconfig.tsbuildinfo
 
-# Temp review files
-pr.txt
-pr.diff
-pr_diff.txt
-pr_files.txt
+# Temp/Scripts
+update_readmes.py
+
 
 # OpenClaw Plugin Build & Links
 packages/openclaw-plugin/dist/
