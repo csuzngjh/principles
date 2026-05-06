@@ -63,37 +63,9 @@ export interface RepairCallbacks {
   readonly schemaCheck: (value: unknown) => boolean;
 }
 
-/**
- * Extract JSON object from text (handles prose-wrapped and code-fenced JSON).
- * Duplicated from pi-ai-runtime-adapter to keep this module pi-ai-free.
- */
-function extractJsonObject(text: string): unknown | null {
-  // Try code-fenced JSON first
-  const fencedMatch = /```(?:json)?\s*\n?([\s\S]*?)\n?```/.exec(text);
-  if (fencedMatch) {
-    const [, fencedContent] = fencedMatch;
-    if (fencedContent) {
-      try { return JSON.parse(fencedContent.trim()); } catch { /* fall through */ }
-    }
-  }
-
-  // Balanced-bracket scan
-  let depth = 0;
-  let start = -1;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === '{') {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === '}') {
-      depth--;
-      if (depth === 0 && start >= 0) {
-        try { return JSON.parse(text.slice(start, i + 1)); } catch { start = -1; }
-      }
-    }
-  }
-  return null;
-}
+// Re-export from json-extractor so callers can use a single import path
+export { extractJsonObject } from './json-extractor.js';
+import { extractJsonObject } from './json-extractor.js';
 
 /**
  * Format TypeBox schema errors into a bounded, human-readable repair prompt.
@@ -170,12 +142,13 @@ export async function attemptStructuredOutputRepair<T>(
     let rawResponse: string | null;
     try {
       rawResponse = await callbacks.llmCaller(prompt);
-    } catch {
+    } catch (err: unknown) {
+      const errorDetail = err instanceof Error ? err.message : String(err);
       return {
         repaired: false,
         output: null,
         attemptsUsed: attempt + 1,
-        repairSummary: `Repair failed at attempt ${attempt + 1}: llmCaller threw exception. ${errorSummary}`,
+        repairSummary: `Repair failed at attempt ${attempt + 1}: llmCaller threw "${errorDetail}". ${errorSummary}`,
       };
     }
 

@@ -18,6 +18,7 @@ import { getModel, getProviders, complete } from '@mariozechner/pi-ai';
 import type { KnownProvider, Context, UserMessage, AssistantMessage, Model } from '@mariozechner/pi-ai';
 import { Value } from '@sinclair/typebox/value';
 import { PDRuntimeError } from '../error-categories.js';
+import { extractJsonObject } from './json-extractor.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
@@ -165,39 +166,6 @@ function extractAssistantTextOrThrow(
   }
 
   return textContent.text;
-}
-
-/**
- * Balanced-bracket JSON extraction from LLM output.
- * Handles prose-wrapped and code-fenced JSON (```json ... ```).
- * Returns the parsed object, or null if no valid JSON found.
- */
-function extractJsonObject(text: string): unknown | null {
-  // Try code-fenced JSON first: ```json ... ``` or ``` ... ```
-  const fencedMatch = /```(?:json)?\s*\n?([\s\S]*?)\n?```/.exec(text);
-  if (fencedMatch) {
-    const [, fencedContent] = fencedMatch;
-    if (fencedContent) {
-      try { return JSON.parse(fencedContent.trim()); } catch { /* fall through */ }
-    }
-  }
-
-  // Balanced-bracket scan for first top-level {...}
-  let depth = 0;
-  let start = -1;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === '{') {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === '}') {
-      depth--;
-      if (depth === 0 && start >= 0) {
-        try { return JSON.parse(text.slice(start, i + 1)); } catch { start = -1; }
-      }
-    }
-  }
-  return null;
 }
 
 /** Internal run state for one-shot pattern. */
@@ -414,9 +382,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       if (!Value.Check(DiagnosticianOutputV1Schema, validatedOutput)) {
         // PRI-71: Attempt structured output repair before throwing
         let repairSucceeded = false;
+        let schemaErrors: { path: string; message: string; value: unknown }[] = [];
 
         if (input.outputSchemaRef === 'diagnostician-output-v1') {
-          const schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, validatedOutput)]
+          schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, validatedOutput)]
             .map(e => ({ path: e.path, message: e.message, value: e.value }));
 
           if (schemaErrors.length > 0) {
@@ -452,6 +421,23 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         }
 
         if (!repairSucceeded) {
+          // Emit telemetry for repair failure even when skipped paths are not hit above
+          if (schemaErrors.length > 0) {
+            this.eventEmitter.emitTelemetry({
+              eventType: 'output_repair_attempted',
+              traceId: input.taskRef?.taskId ?? runId,
+              timestamp: new Date().toISOString(),
+              sessionId: 'pi-ai-adapter',
+              agentId: 'pi-ai-adapter',
+              payload: {
+                runId,
+                runtimeKind: 'pi-ai',
+                repaired: false,
+                attemptsUsed: 0,
+                repairSummary: `Repair skipped: schemaErrors exist but repair was not attempted (outputSchemaRef=${input.outputSchemaRef})`,
+              },
+            });
+          }
           throw new PDRuntimeError(
             'output_invalid',
             'LLM output does not match DiagnosticianOutputV1 schema',
@@ -592,8 +578,14 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
     try {
       return extractAssistantTextOrThrow(response, options.signal);
-    } catch {
-      return null;
+    } catch (err) {
+      // Let timeout/execution_failed propagate (fail fast — the LLM call itself is broken).
+      // Return null only when the LLM returned no text content, so the repair loop can
+      // treat this as a null response and retry or bail out gracefully.
+      if (err instanceof PDRuntimeError && err.category === 'output_invalid') {
+        return null;
+      }
+      throw err;
     }
   }
 
