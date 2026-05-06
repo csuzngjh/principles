@@ -73,7 +73,12 @@ export interface InvalidTaskMetadataResult {
   taskKind: string;
 }
 
-// Const array for runtime exhaustiveness checking (used in switch statements)
+/**
+ * Runtime decision labels for WakeOnceResult — used by host layers for
+ * logging, metrics bucketing, and switch-statement exhaustiveness checks.
+ * @experimental — consumed at runtime only; not used by the TypeScript
+ * type system (discriminated union handles compile-time exhaustiveness).
+ */
 export const WAKE_ONCE_DECISIONS = [
   'no_ready_tasks',
   'blocked',
@@ -126,6 +131,9 @@ export class InternalizationOrchestrator {
   private readonly stateManager: RuntimeStateManager;
 
   constructor(deps: InternalizationOrchestratorDeps, options: InternalizationOrchestratorOptions) {
+    if (!options.owner || !options.runtimeKind) {
+      throw new PDRuntimeError('input_invalid', 'InternalizationOrchestrator requires non-empty owner and runtimeKind');
+    }
     this.stateManager = deps.stateManager;
     this.owner = options.owner;
     this.runtimeKind = options.runtimeKind;
@@ -154,12 +162,8 @@ export class InternalizationOrchestrator {
       const piTask = hydratePITaskRecord(rawTask);
 
       if (!piTask) {
-        // Hydration failed — invalid PI metadata
-        return {
-          decision: 'invalid_task_metadata',
-          taskId: rawTask.taskId,
-          taskKind: rawTask.taskKind,
-        };
+        // Hydration failed — invalid PI metadata, skip and try next candidate
+        continue;
       }
 
       // Resolve all dependency records
@@ -169,21 +173,13 @@ export class InternalizationOrchestrator {
       const gateResult = validateInternalizationTaskReady(piTask, dependencies);
 
       if (gateResult.decision === 'blocked') {
-        return {
-          decision: 'blocked',
-          taskId: piTask.taskId,
-          taskKind: piTask.taskKind,
-          blockedBy: gateResult.blockedBy,
-        };
+        // Non-terminal — skip and try next candidate
+        continue;
       }
 
       if (gateResult.decision === 'dependency_failed') {
-        return {
-          decision: 'dependency_failed',
-          taskId: piTask.taskId,
-          taskKind: piTask.taskKind,
-          failedDependencies: gateResult.failedDependencies,
-        };
+        // Non-terminal — skip and try next candidate
+        continue;
       }
 
       // gateResult.decision === 'proceed'
@@ -211,11 +207,8 @@ export class InternalizationOrchestrator {
         };
       } catch (error) {
         if (error instanceof PDRuntimeError && error.category === 'lease_conflict') {
-          return {
-            decision: 'lease_conflict',
-            taskId: piTask.taskId,
-            conflictReason: error.message,
-          };
+          // Non-terminal — skip and try next candidate
+          continue;
         }
         // Re-throw with task context for correlation
         const pdError = error instanceof PDRuntimeError ? error : new PDRuntimeError('runtime_unavailable', String(error));
@@ -240,6 +233,10 @@ export class InternalizationOrchestrator {
    *
    * Does NOT create the task — the caller decides whether to persist
    * the proposal via RuntimeStateManager.createTask().
+   *
+   * Note: existingTasks is hardcoded to [] — the host layer is responsible
+   * for deduplicating proposals against tasks already in the queue before
+   * calling createTask().
    *
    * Returns null if:
    *   - Task not found
