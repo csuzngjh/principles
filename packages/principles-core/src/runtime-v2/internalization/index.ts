@@ -152,6 +152,30 @@ export {
   createPITaskDiagnosticJson,
 } from './pitask-metadata.js';
 
+// ── Dreamer Peer Runner (PRI-67) ───────────────────────────────────────────────
+
+export type {
+  DreamerCandidate,
+  DreamerOutput,
+  DreamerValidationResult,
+  DreamerValidator,
+} from './dreamer-output.js';
+
+export { PassThroughDreamerValidator } from './dreamer-output.js';
+
+export type {
+  DreamerRunnerResult,
+  DreamerRunnerOptions,
+  ResolvedDreamerRunnerOptions,
+} from './dreamer-runner.js';
+
+export {
+  resolveDreamerRunnerOptions,
+  DEFAULT_DREAMER_RUNNER_OPTIONS,
+} from './dreamer-runner.js';
+
+export { DreamerRunner } from './dreamer-runner.js';
+
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
 
 export type {

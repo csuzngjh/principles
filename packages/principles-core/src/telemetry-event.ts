@@ -96,6 +96,20 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('runtime_invocation_failed'),
   Type.Literal('output_validation_succeeded'),
   Type.Literal('output_validation_failed'),
+  // PRI-67: Dreamer runner events
+  Type.Literal('dreamer_task_leased'),
+  Type.Literal('dreamer_context_built'),
+  Type.Literal('dreamer_run_started'),
+  Type.Literal('dreamer_run_failed'),
+  Type.Literal('dreamer_output_invalid'),
+  Type.Literal('dreamer_output_validated'),
+  Type.Literal('dreamer_task_succeeded'),
+  Type.Literal('dreamer_task_retried'),
+  Type.Literal('dreamer_task_failed'),
+  Type.Literal('dreamer_candidate_generated'),
+  Type.Literal('dreamer_cancel_run_failed'),
+  Type.Literal('dreamer_mark_succeeded_failed'),
+  Type.Literal('dreamer_update_output_failed'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
