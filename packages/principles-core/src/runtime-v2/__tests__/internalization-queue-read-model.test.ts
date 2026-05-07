@@ -9,7 +9,7 @@
  *   - ready tasks collected correctly
  *   - dominance: hydration > dependency_failed > blocked
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { InternalizationQueueReadModel } from '../internalization-queue-read-model.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
@@ -98,15 +98,22 @@ function createSm(
 
 describe('InternalizationQueueReadModel.getSnapshot', () => {
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+  let model: InternalizationQueueReadModel;
+
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  afterEach(async () => {
+    await model?.close();
   });
 
   // ── P0: Empty queue → no_candidates ─────────────────────────────────────
 
   it('pure empty store: no tasks at all → no_candidates, inspectedCount=0', async () => {
     const sm = createSm([], [], () => null);
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.pendingCount).toBe(0);
@@ -114,7 +121,6 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
     expect(snap.readyTasks).toEqual([]);
     expect(snap.noReadyTasks?.reason).toBe('no_candidates');
     expect(snap.noReadyTasks?.inspectedCount).toBe(0);
-    await model.close();
   });
 
   it('non-PI tasks only → counts=0, no_candidates (PI queue is empty)', async () => {
@@ -126,14 +132,13 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
       [],
       () => null,
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.pendingCount).toBe(0);
     expect(snap.retryWaitCount).toBe(0);
     expect(snap.noReadyTasks?.reason).toBe('no_candidates');
     expect(snap.noReadyTasks?.inspectedCount).toBe(0);
-    await model.close();
   });
 
   // ── P1: pendingCount / retryWaitCount exclude non-PI tasks ──────────────
@@ -150,12 +155,11 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
       ],
       () => null,
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.pendingCount).toBe(1);   // pi1 only
     expect(snap.retryWaitCount).toBe(1); // pi2 only
-    await model.close();
   });
 
   // ── P2: Invalid metadata ─────────────────────────────────────────────────
@@ -171,14 +175,13 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
       [],
       () => null,
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.invalidMetadataCount).toBe(1);
     expect(snap.sampleInvalidTaskIds).toContain('bad1');
     expect(snap.readyTasks.find(t => t.taskId === 'good1')).toBeTruthy();
     expect(snap.noReadyTasks).toBeNull();
-    await model.close();
   });
 
   it('no pi_metadata at all → hydration failure, noReadyTasks=null (good tasks exist)', async () => {
@@ -192,14 +195,30 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
       [],
       () => null,
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.invalidMetadataCount).toBe(1);
     expect(snap.sampleInvalidTaskIds).toContain('bad2');
     expect(snap.readyTasks.find(t => t.taskId === 'good1')).toBeTruthy();
     expect(snap.noReadyTasks).toBeNull();
-    await model.close();
+  });
+
+  it('all PI tasks have invalid metadata → all_hydration_failed', async () => {
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'bad1', taskKind: 'dreamer', status: 'pending', diagnosticJson: '{bad' }),
+        makeTask({ taskId: 'bad2', taskKind: 'scribe', status: 'pending', diagnosticJson: '{}' }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    const snap = await model.getSnapshot();
+
+    expect(snap.invalidMetadataCount).toBe(2);
+    expect(snap.readyTasks).toEqual([]);
+    expect(snap.noReadyTasks?.reason).toBe('all_hydration_failed');
   });
 
   // ── P3: Blocked tasks ──────────────────────────────────────────────────
@@ -210,12 +229,9 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
         makeTask({ taskId: 'blocked_1', taskKind: 'philosopher', status: 'pending', dependencyTaskIds: ['missing_dep'] }),
       ],
       [],
-      (id) => {
-        if (id === 'missing_dep') return null; // not found → blocked
-        return null;
-      },
+      () => null,
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.blockedSummary.count).toBe(1);
@@ -223,7 +239,6 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
     expect(blockedSample?.taskId).toBe('blocked_1');
     expect(blockedSample?.blockedBy).toContain('missing_dep');
     expect(snap.noReadyTasks?.reason).toBe('all_blocked');
-    await model.close();
   });
 
   // ── P4: Dependency failed ───────────────────────────────────────────────
@@ -240,14 +255,13 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
         return null;
       },
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.dependencyFailedSummary.count).toBe(1);
     const [depFailedSample] = snap.dependencyFailedSummary.samples;
     expect(depFailedSample?.taskId).toBe('waiting');
     expect(snap.noReadyTasks?.reason).toBe('all_dependency_failed');
-    await model.close();
   });
 
   // ── P5: Ready tasks ────────────────────────────────────────────────────
@@ -260,12 +274,11 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
       [],
       () => null,
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.readyTasks).toContainEqual({ taskId: 'ready_1', taskKind: 'dreamer', channel: 'prompt' });
     expect(snap.noReadyTasks).toBeNull();
-    await model.close();
   });
 
   it('ready tasks collected from both pending and retry_wait', async () => {
@@ -278,12 +291,11 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
       ],
       () => null,
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.readyTasks.map(t => t.taskId).sort()).toEqual(['ready_p', 'ready_r']);
     expect(snap.noReadyTasks).toBeNull();
-    await model.close();
   });
 
   // ── P6: Counts aggregation ──────────────────────────────────────────────
@@ -298,14 +310,13 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
       [],
       () => null,
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.countsByTaskKind.dreamer).toBe(2);
     expect(snap.countsByTaskKind.philosopher).toBe(1);
     expect(snap.countsByChannel.prompt).toBe(2);
     expect(snap.countsByChannel.skill).toBe(1);
-    await model.close();
   });
 
   // ── P7: Dominance ─────────────────────────────────────────────────────
@@ -325,14 +336,13 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
         return null;
       },
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.invalidMetadataCount).toBe(1);
     expect(snap.blockedSummary.count).toBe(1);
     expect(snap.dependencyFailedSummary.count).toBe(1);
     expect(snap.noReadyTasks?.reason).toBe('all_hydration_failed');
-    await model.close();
   });
 
   it('dependency_failed dominates over blocked when both present and hydration=0', async () => {
@@ -349,13 +359,12 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
         return null;
       },
     );
-    const model = new InternalizationQueueReadModel(sm);
+    model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
     expect(snap.dependencyFailedSummary.count).toBe(1);
     expect(snap.blockedSummary.count).toBe(1);
     expect(snap.noReadyTasks?.reason).toBe('all_dependency_failed');
-    await model.close();
   });
 
 });
