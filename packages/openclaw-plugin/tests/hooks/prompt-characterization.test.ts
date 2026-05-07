@@ -152,12 +152,16 @@ vi.mock('../../src/core/local-worker-routing.js', () => ({
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function makeMinimalEvent() {
+function makeMinimalEvent(overrides: {
+  trigger?: string;
+  sessionId?: string;
+} = {}) {
+  const { trigger = 'heartbeat', sessionId = 'test-session-123' } = overrides;
   return {
     prompt: 'hello world',
     messages: [],
-    trigger: 'heartbeat',
-    sessionId: 'test-session-123',
+    trigger,
+    sessionId,
   } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
 }
 
@@ -185,7 +189,7 @@ describe('Attitude directive — GFI thresholds', () => {
   // Ensure appendParts is non-empty so attitudeDirective is included in appendSystemContext.
   beforeEach(async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
-    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValue({
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
@@ -261,7 +265,7 @@ describe('Correction cue detection', () => {
   it('detects "不是这个" and records user turn', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const recordUserTurn = vi.fn();
-    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValue({
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn },
@@ -291,7 +295,7 @@ describe('Correction cue detection', () => {
   it('detects "you are wrong" (English correction cue)', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const recordUserTurn = vi.fn();
-    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValue({
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn },
@@ -321,7 +325,7 @@ describe('Correction cue detection', () => {
   it('does not detect correction cue in non-user trigger', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const recordUserTurn = vi.fn();
-    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValue({
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn },
