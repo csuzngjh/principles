@@ -28,6 +28,8 @@ import { handleTraceShow } from './commands/trace.js';
 import { handlePruningReport, handlePruningExplain, handlePruningReview, handlePruningRollback } from './commands/runtime-pruning.js';
 import { handleRuntimeHealthSnapshot } from './commands/runtime-health-snapshot.js';
 import { handleRuntimeUat } from './commands/runtime-uat.js';
+import { handleRuntimeInternalizationQueue } from './commands/runtime-internalization-queue.js';
+import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-internalization-wake-once.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
@@ -353,6 +355,29 @@ runtimeHealthCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeHealthSnapshot({ workspace: opts.workspace, json: opts.json });
+  });
+
+const internalizationCmd = runtimeCmd
+  .command('internalization')
+  .description('Internalization Engine operator visibility');
+
+internalizationCmd
+  .command('queue')
+  .description('Show PI task queue health snapshot')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeInternalizationQueue({ workspace: opts.workspace, json: opts.json });
+  });
+
+internalizationCmd
+  .command('wake-once')
+  .description('Dry-run lease evaluation for the next leasable PI task')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Evaluate lease without acquiring (required)', false)
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeInternalizationWakeOnce({ workspace: opts.workspace, dryRun: opts.dryRun, json: opts.json });
   });
 
 const pruningCmd = runtimeCmd

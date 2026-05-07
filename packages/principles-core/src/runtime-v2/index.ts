@@ -435,3 +435,14 @@ export type {
 } from './internalization/internalization-orchestrator.js';
 
 export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalization/internalization-orchestrator.js';
+
+// ── Internalization Queue Read Model (PRI-73) ──────────────────────────────
+
+export { InternalizationQueueReadModel } from './internalization-queue-read-model.js';
+export type {
+  InternalizationQueueSnapshot,
+  NoReadyTasksDiagnosis,
+  ReadyTask,
+  BlockedSample,
+  DependencyFailedSample,
+} from './internalization-queue-read-model.js';
