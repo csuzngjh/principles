@@ -19,6 +19,7 @@
 export interface RoutingInput {
   taskIntent?: string;
   taskDescription?: string;
+  /** @deprecated Not used by classifyTaskKind; reserved for future extensions. */
   requestedTools?: string[];
   requestedFiles?: string[];
   expectedOutputShape?: string;
@@ -75,6 +76,17 @@ export const HIGH_ENTROPY_KEYWORDS = [
   'architecture', 'system_design', 'high_level', 'blueprint',
   'thinking', 'reasoning', '思考', '分析', '设计',
 ] as const;
+
+/**
+ * Complexity hint values that trigger high_entropy_disallowed.
+ * Extracted to a constant to keep classifyTaskKind readable.
+ */
+const COMPLEXITY_HINTS = ['multi_step', 'cross_file', 'ambiguous', 'requires_planning', 'open_ended', 'unclear'] as const;
+
+/**
+ * Maximum number of files for a bounded edit before it becomes high-entropy.
+ */
+const MAX_BOUNDED_EDIT_FILES = 4;
 
 // ---------------------------------------------------------------------------
 // Keyword Matching Helpers
@@ -146,7 +158,7 @@ export function classifyTaskKind(input: RoutingInput): RoutingClassification {
   const descIsEditor = containsKeyword(taskDescription, EDITOR_KEYWORDS);
 
   if (intentIsEditor && (descIsEditor || !taskDescription)) {
-    if (uniqueFiles.length >= 4) {
+    if (uniqueFiles.length >= MAX_BOUNDED_EDIT_FILES) {
       return 'high_entropy_disallowed';
     }
     return 'editor_eligible';
@@ -198,7 +210,7 @@ export function buildReason(
       const uniqueFiles = input.requestedFiles
         ? [...new Set(input.requestedFiles.filter((f) => f.trim().length > 0))]
         : [];
-      const isLargeScaleEdit = uniqueFiles.length >= 4;
+      const isLargeScaleEdit = uniqueFiles.length >= MAX_BOUNDED_EDIT_FILES;
       if (isLargeScaleEdit) {
         return `Task "${taskIntent || taskDescription || '(unnamed)'}" is blocked as high_entropy_disallowed. ` +
           `Editing ${uniqueFiles.length} files simultaneously exceeds the bounded-scope limit for local-editor. ` +
@@ -242,14 +254,20 @@ export function buildBlockers(
       const uniqueFiles = input.requestedFiles
         ? [...new Set(input.requestedFiles.filter((f) => f.trim().length > 0))]
         : [];
-      const isLargeScaleEdit = uniqueFiles.length >= 4;
-      return [
-        isLargeScaleEdit
-          ? `large-scale multi-file edit detected (${uniqueFiles.length} files): scope too broad for local-editor`
-          : 'task contains high-entropy keywords (design/plan/architect/investigate)',
-        'complexity hint indicates multi-step or open-ended work',
-        'main agent required for full reasoning and judgment',
-      ];
+      const isLargeScaleEdit = uniqueFiles.length >= MAX_BOUNDED_EDIT_FILES;
+      const triggeredByComplexityHint =
+        input.complexityHints?.some((h) => (COMPLEXITY_HINTS as readonly string[]).includes(h)) ?? false;
+      const blockers: string[] = [];
+      if (isLargeScaleEdit) {
+        blockers.push(`large-scale multi-file edit detected (${uniqueFiles.length} files): scope too broad for local-editor`);
+      } else {
+        blockers.push('task contains high-entropy keywords (design/plan/architect/investigate)');
+      }
+      if (triggeredByComplexityHint) {
+        blockers.push('complexity hint indicates multi-step or open-ended work');
+      }
+      blockers.push('main agent required for full reasoning and judgment');
+      return blockers;
     }
     case 'ambiguous_scope':
       return [

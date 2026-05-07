@@ -291,9 +291,22 @@ describe('buildBlockers', () => {
     expect(blockers).toEqual([]);
   });
 
-  it('high_entropy_disallowed → 3 blockers', () => {
+  it('high_entropy_disallowed → 2 blockers (keyword trigger, no complexity hint)', () => {
     const blockers = buildBlockers('high_entropy_disallowed', {});
+    expect(blockers).toHaveLength(2);
+    expect(blockers.some(b => b.includes('high-entropy keywords'))).toBe(true);
+    expect(blockers.some(b => b.includes('main agent'))).toBe(true);
+  });
+
+  it('high_entropy_disallowed with complexity hint → 3 blockers', () => {
+    const blockers = buildBlockers('high_entropy_disallowed', {
+      taskIntent: 'edit',
+      complexityHints: ['multi_step'],
+    });
     expect(blockers).toHaveLength(3);
+    expect(blockers.some(b => b.includes('high-entropy keywords'))).toBe(true);
+    expect(blockers.some(b => b.includes('complexity hint'))).toBe(true);
+    expect(blockers.some(b => b.includes('main agent'))).toBe(true);
   });
 
   it('high_entropy_disallowed with large-scale edit → large-scale blocker', () => {
