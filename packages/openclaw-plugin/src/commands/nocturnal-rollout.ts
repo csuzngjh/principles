@@ -662,10 +662,8 @@ ${lines.join('\n')}`,
       const routingInput: RoutingInput = {
         taskIntent: intentArg || undefined,
         taskDescription: descriptionArg || undefined,
-        requestedTools: toolsArg ? toolsArg.split(',').map((t) => t.trim()) : undefined,
         requestedFiles: filesArg ? filesArg.split(',').map((f) => f.trim()) : undefined,
         expectedOutputShape: outputArg || undefined,
-        complexityHints: complexityArg ? complexityArg.split(',').map((c) => c.trim()) : undefined,
         targetProfile: parseProfile(profileArg),
       };
 

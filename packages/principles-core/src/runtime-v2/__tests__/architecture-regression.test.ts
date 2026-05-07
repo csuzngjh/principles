@@ -60,7 +60,7 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/dreamer-output.ts',
   'internalization/dreamer-runner.ts',
   // PRI-75 Phase 3
-  'prompt-builder/routing-guidance.ts',
+  '../prompt-builder/routing-guidance.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -80,7 +80,7 @@ const REQUIRED_TEST_FILES = [
   // PRI-67
   'dreamer-runner.test.ts',
   // PRI-75 Phase 3
-  'prompt-builder/__tests__/routing-guidance.test.ts',
+  '../../prompt-builder/__tests__/routing-guidance.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
