@@ -442,6 +442,7 @@ export { InternalizationQueueReadModel } from './internalization-queue-read-mode
 export type {
   InternalizationQueueSnapshot,
   NoReadyTasksDiagnosis,
+  QueueNoReadyTasksReason,
   ReadyTask,
   BlockedSample,
   DependencyFailedSample,

@@ -28,6 +28,16 @@ function formatTextOutput(snap: InternalizationQueueSnapshot): string {
 
   lines.push(`  ready: ${snap.readyTasks.length}`);
 
+  const taskKinds = Object.entries(snap.countsByTaskKind);
+  if (taskKinds.length > 0) {
+    lines.push(`  by_kind: ${taskKinds.map(([k, v]) => `${k}=${v}`).join(', ')}`);
+  }
+
+  const channels = Object.entries(snap.countsByChannel);
+  if (channels.length > 0) {
+    lines.push(`  by_channel: ${channels.map(([k, v]) => `${k}=${v}`).join(', ')}`);
+  }
+
   if (snap.blockedSummary.count > 0) {
     lines.push(`  blocked: ${snap.blockedSummary.count}`);
     for (const s of snap.blockedSummary.samples.slice(0, 3)) {

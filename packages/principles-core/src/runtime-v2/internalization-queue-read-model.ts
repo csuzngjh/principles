@@ -40,8 +40,10 @@ export interface ReadyTask {
   channel: InternalizationChannel;
 }
 
+export type QueueNoReadyTasksReason = 'no_candidates' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed';
+
 export interface NoReadyTasksDiagnosis {
-  reason: 'no_candidates' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_lease_conflict';
+  reason: QueueNoReadyTasksReason;
   inspectedCount: number;
 }
 
@@ -141,7 +143,7 @@ export class InternalizationQueueReadModel {
     let noReadyTasks: InternalizationQueueSnapshot['noReadyTasks'] = null;
 
     if (readyTasks.length === 0) {
-      const reason: NoReadyTasksDiagnosis['reason'] =
+      const reason: QueueNoReadyTasksReason =
         hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount
           ? 'all_hydration_failed'
           : dependencyFailures >= blockedCount
