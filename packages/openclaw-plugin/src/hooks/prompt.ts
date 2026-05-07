@@ -20,6 +20,12 @@ import {
 } from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
+import {
+  buildAttitudeDirective,
+  detectCorrectionCue as coreDetectCorrectionCue,
+  extractMessageContent,
+  isMinimalTrigger,
+} from '@principles/core/prompt-builder';
 
 // ---------------------------------------------------------------------------
 // Static file cache — avoids re-reading rarely-changing files every message
@@ -114,43 +120,7 @@ interface PromptHookApi {
 }
 
 function getTextContent(message: unknown): string {
-  if (!message || typeof message !== 'object') return '';
-  const record = message as { content?: unknown };
-  if (typeof record.content === 'string') return record.content;
-  if (Array.isArray(record.content)) {
-    return record.content
-      .filter((part: unknown) => part && typeof part === 'object' && (part as { type?: unknown }).type === 'text')
-      .map((part) => String((part as { text?: unknown }).text ?? ''))
-      .join('\n')
-      .trim();
-  }
-  return '';
-}
-
-function detectCorrectionCue(text: string): string | null {
-  const normalized = text
-    .trim()
-    .toLowerCase()
-    .replace(/[.,!?;:，。！？；：]/g, '');
-  const cues = [
-    '不是这个',
-    '不对',
-    '错了',
-    '搞错了',
-    '理解错了',
-    '你理解错了',
-    '重新来',
-    '再试一次',
-    'you are wrong',
-    'wrong file',
-    'not this',
-    'redo',
-    'try again',
-    'again',
-    'please redo',
-    'please try again',
-  ];
-  return cues.find((cue) => normalized.includes(cue)) ?? null;
+  return extractMessageContent(message);
 }
 
 /**
@@ -309,7 +279,8 @@ export async function handleBeforePromptBuild(
   }
 
   const wctx = WorkspaceContext.fromHookContext(ctx);
-  const { trigger, sessionId, api } = ctx;
+  const { trigger, sessionId } = ctx as { trigger: string | undefined; sessionId: string | undefined };
+  const api = ctx.api;
   if (sessionId) {
     wctx.trajectory?.recordSession?.({ sessionId });
   }
@@ -339,7 +310,7 @@ export async function handleBeforePromptBuild(
         }
       } catch (learnerErr) {
         // Fallback to hardcoded detection if learner fails — log for observability
-        correctionCue = detectCorrectionCue(userText);
+        correctionCue = coreDetectCorrectionCue(userText);
         logger?.warn?.(`[PD:Prompt] CorrectionCueLearner.match() failed (${String(learnerErr)}), fallback=${correctionCue ? `matched="${correctionCue}"` : 'no-match'}`);
       }
       let referencesAssistantTurnId: number | null = null;
@@ -368,7 +339,7 @@ export async function handleBeforePromptBuild(
   const contextConfig = loadContextInjectionConfig(workspaceDir);
 
   // Minimal mode: heartbeat and subagents skip most context to reduce tokens
-  const isMinimalMode = trigger === "heartbeat" || trigger === "cron" || sessionId?.includes(":subagent:") === true;
+  const isMinimalMode = isMinimalTrigger(trigger as string | undefined, sessionId as string | undefined);
 
   const session = sessionId ? getSession(sessionId) : undefined;
 
@@ -571,40 +542,9 @@ ${heartbeatChecklist}
   }
 
   // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
-   
-   
-  let attitudeDirective: string;
+
   const currentGfi = session?.currentGfi || 0;
-  
-  if (currentGfi >= 70) {
-    attitudeDirective = `
-### 【SYSTEM_MODE: HUMBLE_RECOVERY】
-**CURRENT STATUS**: Severe system friction / User frustration detected (GFI: ${currentGfi.toFixed(0)}).
-**BEHAVIORAL OVERRIDE**:
-- You have failed to meet expectations. Humility is your primary directive.
-- **STOP** aggressive file modifications.
-- **START** every response with a sincere, non-defensive apology.
-- **ACTION**: Explain why you failed, and propose a highly cautious recovery plan.
-`;
-  } else if (currentGfi >= 40) {
-    attitudeDirective = `
-### 【SYSTEM_MODE: CONCILIATORY】
-**CURRENT STATUS**: Moderate friction detected (GFI: ${currentGfi.toFixed(0)}).
-**BEHAVIORAL OVERRIDE**:
-- User is frustrated. Be more explanatory and cautious.
-- Before executing any tool, clearly state what you intend to do and **WAIT** for implicit or explicit user consent.
-- Avoid technical jargon; focus on the business/project value of your changes.
-`;
-  } else {
-    attitudeDirective = `
-### 【SYSTEM_MODE: EFFICIENT】
-**CURRENT STATUS**: System healthy (GFI: ${currentGfi.toFixed(0)}).
-**BEHAVIORAL OVERRIDE**:
-- Maintain peak efficiency.
-- Be concise. Prefer action over long explanations.
-- Follow the "Principles > Directives" rule strictly.
-`;
-  }
+  const attitudeDirective = buildAttitudeDirective(currentGfi);
 
   // ──── 7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context ────
   // NOTE: Principles is ALWAYS injected (not configurable)

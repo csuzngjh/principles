@@ -193,3 +193,13 @@
 - 13 个单元测试覆盖：empty queue、non-PI 过滤、hydration failure、blocked、dependency_failed、ready tasks、counts 聚合、dominance 逻辑
 - JSDoc 已更新：明确所有 counts 只统计 PI peer-runner 任务
 - 当前最后 blocker：修 OpenClaw CLI runtime last-mile，使 `node packages/pd-cli/dist/index.js runtime probe --runtime openclaw-cli --openclaw-local --agent main --workspace D:/.openclaw/workspace --json` 能稳定成功；然后重跑 m8-03 UAT。不要再改 PainSignalBridge/CandidateIntake/ledger 主业务链路，除非 UAT 证明它们有缺陷。
+
+## Architecture Docs Alignment Before PRI-75 (2026-05-07)
+
+- 架构文档对齐任务已完成并核查：`docs/architecture/DOMAIN_MODEL.md` 是最高本体事实源；`PD_SYSTEM_ARCHITECTURE.md` 是目标架构蓝图；`PD_System_Dynamics_Model.md` 是战略/系统动力学分析，不得覆盖 ontology。
+- 关键修正：
+  - `Pruning Review` 只能是 append-only / read-side audit，不执行 ledger mutation；真正 lifecycle mutation 必须叫 `Pruning Action`，并要求 dry-run、人类确认、rollback plan。
+  - Core 层被明确拆成 `Pure Domain Model` 与 `Core Runtime SDK`。`core` 不依赖 OpenClaw host，但可以拥有 Runtime V2 store/read-model/service/adapter contract，例如 `RuntimeStateManager`、`PainToPrincipleService`、`PainChainReadModel`、`InternalizationOrchestrator`。
+  - Internalization 路线统一为三类：Prompt/Skill/SOP、Code/Hook/Tool、Model Parameter/LoRA；不要恢复旧的 SkillFactory-only L3 表述。
+- 核查中修复了 Mermaid fence 破损、尾部乱码、trailing whitespace，并整理为单一提交 `37dd24ba docs(architecture): align ontology and system blueprint`。
+- 下一步推荐执行 Linear `PRI-75 Prompt Injection SDK Migration Phase 1`：基于 PR #502 Phase 0 inventory，把 5 个零依赖 prompt 构建纯函数迁到 `@principles/core/src/prompt-builder/`，plugin 只保留 OpenClaw I/O 和适配。
