@@ -655,12 +655,14 @@ ${lines.join('\n')}`,
       const descriptionArg = parts.find((p) => p.startsWith('--description='))?.slice('--description='.length) ?? '';
       const filesArg = parts.find((p) => p.startsWith('--files='))?.slice('--files='.length) ?? '';
       const outputArg = parts.find((p) => p.startsWith('--output='))?.slice('--output='.length) ?? '';
+      const complexityArg = parts.find((p) => p.startsWith('--complexity='))?.slice('--complexity='.length) ?? '';
 
       const routingInput: RoutingInput = {
         taskIntent: intentArg || undefined,
         taskDescription: descriptionArg || undefined,
         requestedFiles: filesArg ? filesArg.split(',').map((f) => f.trim()) : undefined,
         expectedOutputShape: outputArg || undefined,
+        complexityHints: complexityArg ? complexityArg.split(',').map((c) => c.trim()) : undefined,
         targetProfile: parseProfile(profileArg),
       };
 

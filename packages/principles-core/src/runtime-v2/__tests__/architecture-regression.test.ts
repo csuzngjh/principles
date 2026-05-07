@@ -59,7 +59,7 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-67
   'internalization/dreamer-output.ts',
   'internalization/dreamer-runner.ts',
-  // PRI-75 Phase 3
+  // PRI-74 (follow-up to PRI-75 Phase 3)
   '../prompt-builder/routing-guidance.ts',
 ] as const;
 
@@ -79,7 +79,7 @@ const REQUIRED_TEST_FILES = [
   'pitask-metadata.test.ts',
   // PRI-67
   'dreamer-runner.test.ts',
-  // PRI-75 Phase 3
+  // PRI-74 (follow-up to PRI-75 Phase 3)
   '../../prompt-builder/__tests__/routing-guidance.test.ts',
 ];
 
@@ -1219,9 +1219,9 @@ describe('PRI-67 DreamerRunner', () => {
   });
 });
 
-// ── PRI-75: Prompt-builder core boundary ────────────────────────────────────
+// ── PRI-75/PRI-74: Prompt-builder core boundary ─────────────────────────────────
 
-describe('PRI-75 prompt-builder core boundary', () => {
+describe('PRI-75/PRI-74 prompt-builder core boundary', () => {
   const files = [
     'prompt-builder/index.ts',
     'prompt-builder/attitude-directive.ts',
@@ -1231,6 +1231,8 @@ describe('PRI-75 prompt-builder core boundary', () => {
     'prompt-builder/size-guard.ts',
     'prompt-builder/types.ts',
     'prompt-builder/principle-selection.ts',
+    // PRI-74
+    'prompt-builder/routing-guidance.ts',
   ];
 
   for (const file of files) {
@@ -1245,7 +1247,7 @@ describe('PRI-75 prompt-builder core boundary', () => {
     });
   }
 
-  it('prompt-builder/index.ts exports all 8 functions', async () => {
+  it('prompt-builder/index.ts exports all 13 functions', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '../..', 'prompt-builder/index.ts'), 'utf-8');
@@ -1259,6 +1261,12 @@ describe('PRI-75 prompt-builder core boundary', () => {
     expect(src).toContain('formatPrinciple');
     expect(src).toContain('selectPrinciplesForInjection');
     expect(src).toContain('DEFAULT_PRINCIPLE_BUDGET');
+    // PRI-74 routing guidance
+    expect(src).toContain('classifyTaskKind');
+    expect(src).toContain('buildReason');
+    expect(src).toContain('buildBlockers');
+    expect(src).toContain('computeCombinedText');
+    expect(src).toContain('containsKeyword');
   });
 
   it('principle-selection.ts does not import EvolutionReducer or WorkspaceContext', async () => {
@@ -1300,5 +1308,49 @@ describe('PRI-75 prompt-builder core boundary', () => {
     expect(src).not.toMatch(/<reflection_log>\[\\s\\S\]\*?<\/reflection_log>/);
     // Must NOT have the old multi-line fallback block with attitudeDirective interpolation
     expect(src).not.toMatch(/## 【CONTEXT SECTIONS】\n\n\[WARNING: Context sections stripped/);
+  });
+});
+
+// ── PRI-74: Routing guidance thin-adapter boundary ───────────────────────────
+
+describe('PRI-74 routing guidance thin-adapter boundary', () => {
+  it('prompt-builder/routing-guidance.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../..', 'prompt-builder/routing-guidance.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('plugin local-worker-routing.ts imports classifyTaskKind/buildReason/buildBlockers from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/local-worker-routing.ts'
+    ), 'utf-8');
+    expect(src).toContain('@principles/core/prompt-builder');
+    expect(src).toContain('classifyTaskKind');
+    expect(src).toContain('buildReason');
+    expect(src).toContain('buildBlockers');
+  });
+
+  it('plugin local-worker-routing.ts does NOT have inline keyword arrays or classifyTaskKind implementation', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/local-worker-routing.ts'
+    ), 'utf-8');
+    // Must NOT re-define the keyword constants locally
+    expect(src).not.toMatch(/READER_KEYWORDS\s*=/);
+    expect(src).not.toMatch(/EDITOR_KEYWORDS\s*=/);
+    expect(src).not.toMatch(/HIGH_ENTROPY_KEYWORDS\s*=/);
+    // Must NOT have inline classifyTaskKind function body
+    expect(src).not.toMatch(/export\s+function\s+classifyTaskKind/);
+    // Must delegate to coreClassifyTaskKind
+    expect(src).toContain('coreClassifyTaskKind');
+    expect(src).toContain('coreBuildReason');
+    expect(src).toContain('coreBuildBlockers');
   });
 });

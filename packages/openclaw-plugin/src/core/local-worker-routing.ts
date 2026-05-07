@@ -2,9 +2,9 @@
  * Local Worker Routing Policy — Task Classification and Routing Decisions
  * ======================================================================
  *
- * Phase: PRI-75 Prompt Injection SDK Migration Phase 3
+ * Phase: PRI-74 Routing Guidance Migration (follow-up to PRI-75 Prompt Injection SDK Migration)
  *
- * This file is now a THIN ADAPTER.
+ * This file is a THIN ADAPTER.
  * Pure classification logic lives in @principles/core/prompt-builder/routing-guidance.ts.
  * This file handles I/O (deployment registry, promotion state) and combines
  * pure classification with deployment checks.
