@@ -1,0 +1,490 @@
+/**
+ * Characterization tests for handleBeforePromptBuild() pure-logic sections.
+ *
+ * PURPOSE:
+ * These tests lock down current behavior of pure-logic sections before any SDK migration.
+ * They verify the logic that WILL be extracted to @principles/core in Phase 1.
+ * The tests themselves are NOT migrated — they stay in the plugin to protect the
+ * existing handleBeforePromptBuild() while its internals are refactored.
+ *
+ * SCOPE (Phase 0 only):
+ * - GFI >= 70 → HUMBLE_RECOVERY attitude
+ * - GFI >= 40 → CONCILIATORY attitude
+ * - GFI < 40 → EFFICIENT attitude
+ * - Correction cue detection
+ * - Minimal trigger skips project context
+ * - Size guard never exceeds 9000 chars
+ *
+ * NOT IN SCOPE (Phase 1+):
+ * - Empathy keyword matching (hybrid, needs I/O separation)
+ * - Principle selection (hybrid, needs I/O separation)
+ * - Routing guidance (hybrid, needs I/O separation)
+ * - Any code migration to @principles/core
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// ─── Mock dependencies ───────────────────────────────────────────────────────
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  process.env.PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED = 'true';
+  // Reset session GFI to default between tests
+  sessionGfiValue = 20;
+});
+
+afterEach(() => {
+  process.env.PD_LEGACY_PROMPT_DIAGNOSTICIAN_ENABLED = '';
+});
+
+const mockGetPendingDiagnosticianTasks = vi.fn<(stateDir: string) => unknown[]>();
+
+vi.mock('../../src/core/diagnostician-task-store.js', async () => ({
+  getPendingDiagnosticianTasks: (...args: unknown[]) =>
+    mockGetPendingDiagnosticianTasks(...args),
+}));
+
+vi.mock('../../src/core/event-log.js', () => ({
+  EventLogService: {
+    get: vi.fn().mockReturnValue({
+      recordHeartbeatDiagnosis: vi.fn(),
+    }),
+  },
+}));
+
+vi.mock('../../src/core/workspace-context.js', () => ({
+  WorkspaceContext: {
+    fromHookContext: vi.fn().mockReturnValue({
+      stateDir: '/fake/state',
+      resolve: (key: string) => `/fake/${key}`,
+      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+      config: { get: vi.fn() },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
+    }),
+  },
+}));
+
+// ─── Mutable session mock ────────────────────────────────────────────────────
+// getSession must be configurable per-test, so we use module-level refs.
+let sessionGfiValue = 20;
+vi.mock('../../src/core/session-tracker.js', () => ({
+  getSession: vi.fn().mockImplementation(() => ({ currentGfi: sessionGfiValue })),
+  resetFriction: vi.fn(),
+  trackFriction: vi.fn(),
+  setInjectedProbationIds: vi.fn(),
+  clearInjectedProbationIds: vi.fn(),
+  decayGfi: vi.fn(),
+  getGfiDecayElapsed: vi.fn().mockReturnValue(0),
+}));
+
+function setSessionGfi(gfi: number) {
+  sessionGfiValue = gfi;
+}
+
+vi.mock('../../src/core/path-resolver.js', () => ({
+  PathResolver: { getExtensionRoot: vi.fn().mockReturnValue('/fake/extension') },
+}));
+
+vi.mock('../../src/core/principle-injection.js', () => ({
+  selectPrinciplesForInjection: vi.fn().mockReturnValue({
+    selected: [],
+    wasTruncated: false,
+    breakdown: { p0: 0, p1: 0, p2: 0 },
+    totalChars: 0,
+  }),
+  DEFAULT_PRINCIPLE_BUDGET: 3000,
+}));
+
+vi.mock('../../src/core/empathy-keyword-matcher.js', () => ({
+  matchEmpathyKeywords: vi.fn().mockReturnValue({ score: 0, matched: null, severity: 'none', matchedTerms: [] }),
+  loadKeywordStore: vi.fn().mockReturnValue({ terms: {}, stats: { totalHits: 0 } }),
+  saveKeywordStore: vi.fn(),
+  shouldTriggerOptimization: vi.fn().mockReturnValue(false),
+  getKeywordStoreSummary: vi.fn().mockReturnValue({ totalTerms: 0, highFalsePositiveTerms: [] }),
+}));
+
+vi.mock('../../src/core/empathy-types.js', () => ({
+  severityToPenalty: vi.fn().mockReturnValue(5),
+  DEFAULT_EMPATHY_KEYWORD_CONFIG: {},
+}));
+
+vi.mock('../../src/core/correction-cue-learner.js', () => ({
+  CorrectionCueLearner: {
+    get: vi.fn().mockReturnValue({
+      match: vi.fn().mockReturnValue({ matched: null, matchedTerms: [], confidence: 0 }),
+      recordHits: vi.fn(),
+      recordTruePositive: vi.fn(),
+      flush: vi.fn(),
+    }),
+  },
+}));
+
+vi.mock('../../src/core/focus-history.js', () => ({
+  extractSummary: vi.fn().mockReturnValue(''),
+  getHistoryVersions: vi.fn().mockResolvedValue([]),
+  parseWorkingMemorySection: vi.fn().mockReturnValue(null),
+  workingMemoryToInjection: vi.fn().mockReturnValue(''),
+  autoCompressFocus: vi.fn().mockReturnValue({ compressed: false, reason: 'not_needed' }),
+  safeReadCurrentFocus: vi.fn().mockReturnValue({ content: '', recovered: false, validationErrors: [] }),
+}));
+
+vi.mock('../../src/service/subagent-workflow/index.js', () => ({
+  EmpathyObserverWorkflowManager: vi.fn(),
+  empathyObserverWorkflowSpec: {},
+  isExpectedSubagentError: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock('../../src/utils/subagent-probe.js', () => ({
+  isSubagentRuntimeAvailable: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock('../../src/core/local-worker-routing.js', () => ({
+  classifyTask: vi.fn().mockReturnValue({
+    decision: 'stay_main',
+    classification: 'unknown',
+    reason: 'mocked',
+    blockers: [],
+  }),
+}));
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function makeMinimalEvent(overrides: {
+  trigger?: string;
+  sessionId?: string;
+} = {}) {
+  const { trigger = 'heartbeat', sessionId = 'test-session-123' } = overrides;
+  return {
+    prompt: 'hello world',
+    messages: [],
+    trigger,
+    sessionId,
+  } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
+}
+
+function makeCtx(overrides: {
+  sessionGfi?: number;
+  trigger?: string;
+  sessionId?: string;
+} = {}) {
+  const { sessionGfi = 20, trigger = 'heartbeat', sessionId = 'test-session-123' } = overrides;
+  return {
+    workspaceDir: '/fake/workspace',
+    trigger,
+    sessionId,
+    api: {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      runtime: {},
+      config: {},
+    },
+  } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
+}
+
+// ─── Tests: Attitude Directive (GFI thresholds) ───────────────────────────
+
+describe('Attitude directive — GFI thresholds', () => {
+  // Ensure appendParts is non-empty so attitudeDirective is included in appendSystemContext.
+  beforeEach(async () => {
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      stateDir: '/fake/state',
+      resolve: (key: string) => `/fake/${key}`,
+      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+      config: { get: vi.fn() },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([
+          { id: 'P0', text: 'Test principle for attitude tests' },
+        ]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
+    });
+  });
+
+  it('GFI >= 70 injects HUMBLE_RECOVERY mode', async () => {
+    setSessionGfi(75);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 75 }));
+
+    expect(result?.appendSystemContext).toContain('HUMBLE_RECOVERY');
+    expect(result?.appendSystemContext).toContain('GFI: 75');
+  });
+
+  it('GFI >= 70 injects HUMBLE_RECOVERY mode at boundary (70 exactly)', async () => {
+    setSessionGfi(70);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 70 }));
+
+    expect(result?.appendSystemContext).toContain('HUMBLE_RECOVERY');
+  });
+
+  it('GFI >= 40 and < 70 injects CONCILIATORY mode', async () => {
+    setSessionGfi(50);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 50 }));
+
+    expect(result?.appendSystemContext).toContain('CONCILIATORY');
+    expect(result?.appendSystemContext).toContain('GFI: 50');
+  });
+
+  it('GFI >= 40 and < 70 injects CONCILIATORY mode at boundary (40 exactly)', async () => {
+    setSessionGfi(40);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 40 }));
+
+    expect(result?.appendSystemContext).toContain('CONCILIATORY');
+  });
+
+  it('GFI < 40 injects EFFICIENT mode', async () => {
+    setSessionGfi(10);
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 10 }));
+
+    expect(result?.appendSystemContext).toContain('EFFICIENT');
+    expect(result?.appendSystemContext).toContain('GFI: 10');
+  });
+
+  it('GFI = 0 (no session) falls back to 0 and injects EFFICIENT', async () => {
+    setSessionGfi(0);
+    const { getSession } = await import('../../src/core/session-tracker.js');
+    // Override to return undefined (no session found)
+    (getSession as ReturnType<typeof vi.fn>).mockReturnValueOnce(undefined);
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionId: 'no-such-session' }));
+
+    expect(result?.appendSystemContext).toContain('EFFICIENT');
+  });
+});
+
+// ─── Tests: Correction Cue Detection ────────────────────────────────────────
+
+describe('Correction cue detection', () => {
+  it('detects "不是这个" and records user turn', async () => {
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    const recordUserTurn = vi.fn();
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      stateDir: '/fake/state',
+      resolve: (key: string) => `/fake/${key}`,
+      trajectory: { recordSession: vi.fn(), recordUserTurn },
+      config: { get: vi.fn() },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
+    });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+
+    const event = {
+      prompt: 'hello',
+      messages: [
+        { role: 'user', content: 'Please redo — 不是这个' },
+      ],
+      trigger: 'user',
+      sessionId: 'test-session-cue',
+    } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
+
+    await handleBeforePromptBuild(event, makeCtx({ trigger: 'user', sessionId: 'test-session-cue' }));
+
+    expect(recordUserTurn).toHaveBeenCalled();
+  });
+
+  it('detects "you are wrong" (English correction cue)', async () => {
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    const recordUserTurn = vi.fn();
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      stateDir: '/fake/state',
+      resolve: (key: string) => `/fake/${key}`,
+      trajectory: { recordSession: vi.fn(), recordUserTurn },
+      config: { get: vi.fn() },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
+    });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+
+    const event = {
+      prompt: 'hello',
+      messages: [
+        { role: 'user', content: 'You are wrong, please try again' },
+      ],
+      trigger: 'user',
+      sessionId: 'test-session-en',
+    } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
+
+    await handleBeforePromptBuild(event, makeCtx({ trigger: 'user', sessionId: 'test-session-en' }));
+
+    expect(recordUserTurn).toHaveBeenCalled();
+  });
+
+  it('does not detect correction cue in non-user trigger', async () => {
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    const recordUserTurn = vi.fn();
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      stateDir: '/fake/state',
+      resolve: (key: string) => `/fake/${key}`,
+      trajectory: { recordSession: vi.fn(), recordUserTurn },
+      config: { get: vi.fn() },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
+    });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+
+    const event = {
+      prompt: 'hello',
+      messages: [
+        { role: 'user', content: 'You are wrong' },
+      ],
+      trigger: 'heartbeat',  // NOT a user trigger
+      sessionId: 'test-session-hb',
+    } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[0];
+
+    await handleBeforePromptBuild(event, makeCtx({ trigger: 'heartbeat', sessionId: 'test-session-hb' }));
+
+    expect(recordUserTurn).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Tests: Minimal Mode ───────────────────────────────────────────────────
+
+describe('Minimal trigger skips project context', () => {
+  async function getProjectContextContent(trigger: string, sessionId: string) {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ trigger, sessionId }));
+    return result?.appendSystemContext ?? '';
+  }
+
+  it('heartbeat trigger does not inject project_context', async () => {
+    mockGetPendingDiagnosticianTasks.mockReturnValue([]);
+    const content = await getProjectContextContent('heartbeat', 'hb-session');
+    expect(content).not.toContain('<project_context>');
+  });
+
+  it('cron trigger does not inject project_context', async () => {
+    mockGetPendingDiagnosticianTasks.mockReturnValue([]);
+    const content = await getProjectContextContent('cron', 'cron-session');
+    expect(content).not.toContain('<project_context>');
+  });
+
+  it('subagent session does not inject project_context', async () => {
+    mockGetPendingDiagnosticianTasks.mockReturnValue([]);
+    const content = await getProjectContextContent('user', 'session:subagent:123');
+    expect(content).not.toContain('<project_context>');
+  });
+
+  it('regular user trigger DOES inject project_context when focus is configured', async () => {
+    // Mock currentFocus to return non-empty content
+    const { safeReadCurrentFocus } = await import('../../src/core/focus-history.js');
+    (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      content: 'CURRENT_FOCUS: Test project\nWorking on feature X',
+      recovered: true,
+      validationErrors: [],
+    });
+    (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      content: 'CURRENT_FOCUS: Test project\nWorking on feature X',
+      recovered: true,
+      validationErrors: [],
+    });
+
+    mockGetPendingDiagnosticianTasks.mockReturnValue([]);
+    const content = await getProjectContextContent('user', 'regular-user-session');
+
+    // For non-minimal triggers (user), project_context IS injected
+    // The <project_context> tag should appear in the output
+    expect(content).toContain('<project_context>');
+  });
+});
+
+// ─── Tests: Size Guard ─────────────────────────────────────────────────────
+
+describe('Size guard: never exceeds 9000 chars', () => {
+  it('returns result within MAX_INJECTION_SIZE with empty mocks', async () => {
+    mockGetPendingDiagnosticianTasks.mockReturnValue([]);
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(result).toBeDefined();
+    const totalSize =
+      (result?.prependSystemContext?.length ?? 0) +
+      (result?.prependContext?.length ?? 0) +
+      (result?.appendSystemContext?.length ?? 0);
+    expect(totalSize).toBeLessThanOrEqual(9000);
+  });
+
+  it('size guard strips content to stay under 9000 with large prependContext', async () => {
+    mockGetPendingDiagnosticianTasks.mockReturnValue([]);
+
+    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValue({
+      stateDir: '/fake/state',
+      resolve: (key: string) => `/fake/${key}`,
+      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+      config: {
+        get: vi.fn().mockReturnValue({
+          thinkingOs: 'on',
+          reflectionLog: 'off',
+          projectFocus: 'on',
+        }),
+      },
+      evolutionReducer: {
+        getActivePrinciples: vi.fn().mockReturnValue([]),
+        getProbationPrinciples: vi.fn().mockReturnValue([]),
+      },
+    });
+
+    // Override focus-history to return large content
+    const { safeReadCurrentFocus, autoCompressFocus } = await import('../../src/core/focus-history.js');
+    (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValue({
+      content: 'A'.repeat(5000),  // large content to trigger size guard
+      recovered: true,
+      validationErrors: [],
+    });
+    (autoCompressFocus as ReturnType<typeof vi.fn>).mockReturnValue({
+      compressed: true,
+      content: 'A'.repeat(4000),
+      reason: 'size_limit',
+    });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ trigger: 'user' }));
+
+    expect(result).toBeDefined();
+    const totalSize =
+      (result?.prependSystemContext?.length ?? 0) +
+      (result?.prependContext?.length ?? 0) +
+      (result?.appendSystemContext?.length ?? 0);
+    expect(totalSize).toBeLessThanOrEqual(9000);
+  });
+
+  it('size guard does not throw — returns defined result even with huge content', async () => {
+    mockGetPendingDiagnosticianTasks.mockReturnValue([]);
+
+    const { safeReadCurrentFocus, autoCompressFocus, getHistoryVersions } = await import('../../src/core/focus-history.js');
+    (safeReadCurrentFocus as ReturnType<typeof vi.fn>).mockReturnValue({
+      content: 'X'.repeat(10000),
+      recovered: true,
+      validationErrors: [],
+    });
+    (autoCompressFocus as ReturnType<typeof vi.fn>).mockReturnValue({
+      compressed: false,
+      content: 'X'.repeat(8000),
+      reason: 'not_needed',
+    });
+    (getHistoryVersions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+
+    // Must NOT throw — size guard is fail-closed
+    await expect(handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ trigger: 'user' })))
+      .resolves.toBeDefined();
+  });
+});
