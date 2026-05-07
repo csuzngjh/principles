@@ -18,25 +18,12 @@
  * Phase: PRI-75 Prompt Injection SDK Migration Phase 1
  */
 
-import type { SizeGuardOptions } from './types.js';
+import type { SizeGuardOptions, TruncateResult } from './types.js';
 
 const DEFAULT_BUDGET = 9000;
 
-export interface TruncateResult {
-  prependSystemContext: string;
-  prependContext: string;
-  appendSystemContext: string;
-  /** Whether any content was stripped */
-  truncated: boolean;
-  truncationLog: string[];
-}
-
 /**
  * Truncates the combined prompt injection to fit within budget.
- *
- * Architecture: 3 data params (prependSystemContext, prependContext, appendSystemContext)
- * + 1 optional config param (options). The 3 data params are kept separate to allow
- * exact-content replacement and proper fallback behavior (preserving prepend*).
  *
  * Receives the three prompt components separately (prependSystemContext,
  * prependContext, appendSystemContext) to allow exact-content replacement and

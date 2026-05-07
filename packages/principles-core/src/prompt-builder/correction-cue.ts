@@ -25,6 +25,10 @@ const CORRECTION_CUES = [
 
 /**
  * Detects if text contains a correction/cue phrase.
+ *
+ * Uses substring matching — may produce false positives for short cues
+ * like 'again' (e.g., "once again" would match).
+ *
  * Returns the matched cue string, or null if none detected.
  */
 export function detectCorrectionCue(text: string): string | null {

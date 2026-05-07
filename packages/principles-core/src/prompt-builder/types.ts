@@ -4,6 +4,7 @@
  * Phase: PRI-75 Prompt Injection SDK Migration Phase 1
  */
 
+/*** @alpha Reserved for Phase 2 — selectPrinciplesForInjection will use PromptInjectionPart[] */
 export interface PromptInjectionPart {
   id: string;
   content: string;
