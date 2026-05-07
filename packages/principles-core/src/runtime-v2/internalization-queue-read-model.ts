@@ -9,6 +9,8 @@
  *   - ready task list
  *   - no_ready_tasks diagnosis
  *
+ * All counts and aggregations are scoped to PI peer-runner tasks only
+ * (excludes diagnostician, evaluator_janitor, and other non-peer-runner kinds).
  * This is a READ-ONLY model — it never acquires leases or mutates state.
  *
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
