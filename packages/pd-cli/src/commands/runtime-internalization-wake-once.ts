@@ -54,6 +54,7 @@ export async function handleRuntimeInternalizationWakeOnce(opts: WakeOnceOptions
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
 
   const stateManager = new RuntimeStateManager({ workspaceDir });
+  await stateManager.initialize();
 
   try {
     const orchestrator = new InternalizationOrchestrator(

@@ -16,7 +16,7 @@ vi.mock('../../src/resolve-workspace.js', () => ({
 
 vi.mock('@principles/core/runtime-v2', () => ({
   RuntimeStateManager: vi.fn().mockImplementation(function () {
-    return { close: mockClose };
+    return { initialize: vi.fn().mockResolvedValue(undefined), close: mockClose };
   }),
   InternalizationQueueReadModel: vi.fn().mockImplementation(function () {
     return { getSnapshot: mockGetSnapshot, close: mockClose };
@@ -37,7 +37,6 @@ function emptySnapshot() {
     sampleInvalidTaskIds: [],
     blockedSummary: { count: 0, samples: [] },
     dependencyFailedSummary: { count: 0, samples: [] },
-    leaseConflictSummary: { count: 0, sampleTaskIds: [] },
     readyTasks: [],
     noReadyTasks: { reason: 'no_candidates', inspectedCount: 0 },
   };

@@ -53,6 +53,7 @@ export async function handleRuntimeInternalizationQueue(opts: QueueOptions): Pro
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
 
   const stateManager = new RuntimeStateManager({ workspaceDir });
+  await stateManager.initialize();
 
   try {
     const readModel = new InternalizationQueueReadModel(stateManager);
