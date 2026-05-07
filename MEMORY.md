@@ -154,6 +154,18 @@
 - `PRI-47` store modularization Phase 1 / PR #471 已合并（2026-05-04）：task/run/commit 子目录 + barrel index.ts，41 个文件 import path 更新，5 个架构回归守卫。
 - `PRI-47` store modularization Phase 2 / PR #472（2026-05-04）：context/history/trajectory/lifecycle 子目录 + barrel index.ts，~30 个文件 import path 更新，5 个架构回归守卫；修复预存 test assertion：`sqlite-trajectory-locator.test.ts` expects `'pain_id_to_run_id_lookup'` but impl returns `'run_alias_lookup'`（已重命名，测试未同步）。
 
+## Runtime V2 / Internalization 当前事实 (2026-05-06)
+- 真实 OpenClaw workspace `D:\.openclaw\workspace\carverter` 暴露出 Runtime V2 pain diagnosis 的结构化输出稳定性问题：`pd pain record` 可以创建 pain/task，但 MiniMax provider/model 可能返回可解析 JSON 后无法通过 `DiagnosticianOutputV1Schema`，错误为 `[output_invalid] LLM output does not match DiagnosticianOutputV1 schema`，任务进入 `retry_wait`。
+- 关键判断：这不是简单配置问题，也不应通过降低 schema 解决。正确方向是保留 fail-closed，同时给 schema-invalid JSON 一次 bounded repair loop：用 `Value.Errors(...)` 生成精简 schema error feedback，让同一模型修正完整 JSON；修复失败仍拒绝进入 artifact/candidate/ledger。
+- `PRI-71 Harden structured LLM output validation with schema repair loop` 已完成并合并到 main：PR #500，commit `8abd8517`。它解决 Runtime V2 structured output repair loop，目标是让 Diagnostician/pain->principle 链路在 MiniMax 等模型产生 schema-invalid JSON 时可 bounded repair，同时保留 fail-closed。
+- `PRI-71` 的架构原则仍然是当前事实：不得降低 `DiagnosticianOutputV1Schema`，不得接受 invalid output 入 ledger；只对“JSON parsed but schema invalid”做 repair；timeout/runtime_unavailable/execution_failed 不进入 repair。
+- `PRI-65/66/68` review 修复已核查通过：
+  - `PITaskRecord` 扩展字段通过 `diagnosticJson.pi_metadata` 持久化，`hydratePITaskRecord()` 从 `TaskRecord` 水合，OpenClaw trigger adapter 不再依赖 top-level 临时字段。
+  - `model_training` 采用 Policy B：完整 peer chain 走到 `rollout_reviewer` 后，只有 `model_training` channel 才能进入 `trainer`；不是任意 runner 直接 fan-out 到 trainer。
+  - `InternalizationOrchestrator.wakeOnce()` 现在返回 `no_ready_tasks.reason`，可区分 `no_candidates`、`all_hydration_failed`、`all_blocked`、`all_dependency_failed`、`all_lease_conflict`。
+- 2026-05-06 核查测试通过：`internalization-orchestrator.test.ts` + `pitask-metadata.test.ts` + `internalization-state-machine.test.ts` 共 114 passed；OpenClaw internalization trigger tests 27 passed；`npm run build --workspace=@principles/core` 通过；`npm run typecheck:openclaw-plugin` 通过。
+- 下一阶段优先级：先验收 `PRI-71` 在真实 `carverter` workspace 的效果，再推进 operator 可观测性和下一批 peer runner/internalization engine。不要再把 `PRI-71` 当待办规划。
+
 ## Runtime v2 重构事实 (2026-04-26)
 - 当前方向：PD Runtime v2 已完成 M1-M5，M6 正在接入 `openclaw-cli` 作为第一个真实生产 runtime adapter。目标是摆脱 OpenClaw 插件 API / heartbeat / prompt hook / sessions_spawn / marker file，改成 `pd diagnose run --runtime openclaw-cli` 的显式执行链。
 - M3 已建立 PD-owned retrieval：`pd legacy import openclaw` 将 OpenClaw `.state/diagnostician_tasks.json` 和 `.state/trajectory.db` 导入 `workspace/.pd/state.db`；`pd trajectory locate`、`pd history query`、`pd context build` 可基于 PD-owned DB 工作。
