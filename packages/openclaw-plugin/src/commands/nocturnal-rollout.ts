@@ -648,7 +648,8 @@ ${lines.join('\n')}`,
     }
 
     // ── Route ───────────────────────────────────────────────────────────────
-    // Execute a routing decision for a task. Records shadow observation if routing to shadow.
+    // Execute a routing decision for a task. Returns routing verdict with
+    // classification, reason, blockers, and deployment check info.
     if (subcommand === 'route') {
       // Parse routing input arguments
       const intentArg = parts.find((p) => p.startsWith('--intent='))?.slice('--intent='.length) ?? '';

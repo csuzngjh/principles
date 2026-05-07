@@ -14,11 +14,14 @@
  *   - I/O: getDeployment, isRoutingEnabledForProfile, isCheckpointDeployable, getPromotionState → plugin
  *
  * TASK CLASSIFICATION TAXONOMY:
- *   reader_eligible      — clearly suitable for local-reader
- *   editor_eligible     — clearly suitable for local-editor
- *   high_entropy_disallowed — high-complexity tasks that must stay on main agent
- *   ambiguous_scope     — tasks that are unclear and need main-agent judgment
- *   deployment_unavailable — no enabled deployment exists for the target profile
+ *   Pure-classification output from classifyTaskKind() in @principles/core/prompt-builder/routing-guidance.ts:
+ *     reader_eligible      — clearly suitable for local-reader
+ *     editor_eligible     — clearly suitable for local-editor
+ *     high_entropy_disallowed — high-complexity tasks that must stay on main agent
+ *     ambiguous_scope     — tasks that are unclear and need main-agent judgment
+ *   Plugin layer adds I/O-bound categories via deployment checks in classifyTask():
+ *     profile_mismatch    — target profile incompatible with task classification
+ *     deployment_unavailable — no enabled deployment exists for the target profile
  *
  * FAIL-CLOSED PRINCIPLE:
  *   - When in doubt → stay_main
