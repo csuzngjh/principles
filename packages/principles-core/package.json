@@ -54,6 +54,10 @@
       "types": "./dist/trajectory-store.d.ts",
       "default": "./dist/trajectory-store.js"
     },
+    "./prompt-builder": {
+      "types": "./dist/prompt-builder/index.d.ts",
+      "default": "./dist/prompt-builder/index.js"
+    },
     "./evolution-store": {
       "types": "./dist/evolution-store.d.ts",
       "default": "./dist/evolution-store.js"

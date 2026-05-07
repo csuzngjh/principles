@@ -1214,3 +1214,47 @@ describe('PRI-67 DreamerRunner', () => {
     expect(src).toContain('PassThroughDreamerValidator');
   });
 });
+
+// ── PRI-75: Prompt-builder core boundary ────────────────────────────────────
+
+describe('PRI-75 prompt-builder core boundary', () => {
+  const files = [
+    'prompt-builder/index.ts',
+    'prompt-builder/attitude-directive.ts',
+    'prompt-builder/correction-cue.ts',
+    'prompt-builder/message-extraction.ts',
+    'prompt-builder/minimal-trigger.ts',
+    'prompt-builder/size-guard.ts',
+    'prompt-builder/types.ts',
+  ];
+
+  for (const file of files) {
+    it(`${file} has zero infrastructure imports`, async () => {
+      const { readFileSync } = await import('node:fs');
+      const { resolve } = await import('node:path');
+      const src = readFileSync(resolve(__dirname, '../..', file), 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('node:process');
+      expect(src).not.toContain('openclaw-plugin');
+    });
+  }
+
+  it('prompt-builder/index.ts exports all 5 functions', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../..', 'prompt-builder/index.ts'), 'utf-8');
+    expect(src).toContain('buildAttitudeDirective');
+    expect(src).toContain('detectCorrectionCue');
+    expect(src).toContain('extractMessageContent');
+    expect(src).toContain('isMinimalTrigger');
+    expect(src).toContain('truncateInjectionToBudget');
+  });
+
+  it('plugin prompt.ts imports from @principles/core/prompt-builder', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../../../../openclaw-plugin/src/hooks/prompt.ts'), 'utf-8');
+    expect(src).toContain('@principles/core/prompt-builder');
+  });
+});
