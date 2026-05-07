@@ -1226,6 +1226,7 @@ describe('PRI-75 prompt-builder core boundary', () => {
     'prompt-builder/minimal-trigger.ts',
     'prompt-builder/size-guard.ts',
     'prompt-builder/types.ts',
+    'prompt-builder/principle-selection.ts',
   ];
 
   for (const file of files) {
@@ -1240,15 +1241,40 @@ describe('PRI-75 prompt-builder core boundary', () => {
     });
   }
 
-  it('prompt-builder/index.ts exports all 5 functions', async () => {
+  it('prompt-builder/index.ts exports all 8 functions', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '../..', 'prompt-builder/index.ts'), 'utf-8');
+    // Phase 1
     expect(src).toContain('buildAttitudeDirective');
     expect(src).toContain('detectCorrectionCue');
     expect(src).toContain('extractMessageContent');
     expect(src).toContain('isMinimalTrigger');
     expect(src).toContain('truncateInjectionToBudget');
+    // Phase 2
+    expect(src).toContain('formatPrinciple');
+    expect(src).toContain('selectPrinciplesForInjection');
+    expect(src).toContain('DEFAULT_PRINCIPLE_BUDGET');
+  });
+
+  it('principle-selection.ts does not import EvolutionReducer or WorkspaceContext', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../..', 'prompt-builder/principle-selection.ts'), 'utf-8');
+    expect(src).not.toContain('EvolutionReducer');
+    expect(src).not.toContain('WorkspaceContext');
+  });
+
+  it('plugin principle-injection.ts is a thin re-export of core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../../../../openclaw-plugin/src/core/principle-injection.ts'), 'utf-8');
+    // Must re-export from core
+    expect(src).toContain('@principles/core/prompt-builder');
+    // Must NOT contain inline selectPrinciplesForInjection implementation
+    expect(src).not.toMatch(/function selectPrinciplesForInjection/i);
+    // Must NOT contain priority sorting logic
+    expect(src).not.toMatch(/PRIORITY_ORDER/i);
   });
 
   it('plugin prompt.ts imports from @principles/core/prompt-builder', async () => {
