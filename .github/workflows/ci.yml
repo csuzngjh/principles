@@ -155,6 +155,10 @@ jobs:
       - name: Build dependencies
         run: npm run build
 
+      - name: Build production artifacts
+        working-directory: packages/openclaw-plugin
+        run: npm run build:production
+
       - name: Run tests with coverage
         working-directory: packages/openclaw-plugin
         run: npm run test:coverage
