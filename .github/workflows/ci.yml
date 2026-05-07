@@ -149,8 +149,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install dependencies
-        working-directory: packages/openclaw-plugin
+      - name: Install root dependencies
         run: npm install --include=dev
 
       - name: Build dependencies
