@@ -7,6 +7,7 @@
  * Phase: PRI-75 Prompt Injection SDK Migration Phase 1 (attitude/correction/minimal/size)
  *        PRI-75 Prompt Injection SDK Migration Phase 2 (principle selection)
  *        PRI-75 Prompt Injection SDK Migration Phase 3 (routing guidance)
+ *        PRI-74 Routing Guidance Migration (follow-up to PRI-75 Phase 3)
  */
 
 // Types

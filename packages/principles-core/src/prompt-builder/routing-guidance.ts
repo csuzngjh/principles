@@ -1,7 +1,7 @@
 /**
  * Routing Guidance — Task Classification Pure Logic
  *
- * Phase: PRI-75 Prompt Injection SDK Migration Phase 3
+ * Phase: PRI-74 Routing Guidance Migration (follow-up to PRI-75 Prompt Injection SDK Migration)
  *
  * Pure functions for classifying task intent and building routing guidance.
  * No I/O dependencies — suitable for any host.
