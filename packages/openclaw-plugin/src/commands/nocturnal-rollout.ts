@@ -648,19 +648,22 @@ ${lines.join('\n')}`,
     }
 
     // ── Route ───────────────────────────────────────────────────────────────
-    // Execute a routing decision for a task. Records shadow observation if routing to shadow.
+    // Execute a routing decision for a task. Returns routing verdict with
+    // classification, reason, blockers, and deployment check info.
     if (subcommand === 'route') {
       // Parse routing input arguments
       const intentArg = parts.find((p) => p.startsWith('--intent='))?.slice('--intent='.length) ?? '';
       const descriptionArg = parts.find((p) => p.startsWith('--description='))?.slice('--description='.length) ?? '';
       const filesArg = parts.find((p) => p.startsWith('--files='))?.slice('--files='.length) ?? '';
       const outputArg = parts.find((p) => p.startsWith('--output='))?.slice('--output='.length) ?? '';
+      const complexityArg = parts.find((p) => p.startsWith('--complexity='))?.slice('--complexity='.length) ?? '';
 
       const routingInput: RoutingInput = {
         taskIntent: intentArg || undefined,
         taskDescription: descriptionArg || undefined,
         requestedFiles: filesArg ? filesArg.split(',').map((f) => f.trim()) : undefined,
         expectedOutputShape: outputArg || undefined,
+        complexityHints: complexityArg ? complexityArg.split(',').map((c) => c.trim()) : undefined,
         targetProfile: parseProfile(profileArg),
       };
 
