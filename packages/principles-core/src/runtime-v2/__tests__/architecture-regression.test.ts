@@ -1257,4 +1257,18 @@ describe('PRI-75 prompt-builder core boundary', () => {
     const src = readFileSync(resolve(__dirname, '../../../../openclaw-plugin/src/hooks/prompt.ts'), 'utf-8');
     expect(src).toContain('@principles/core/prompt-builder');
   });
+
+  it('plugin prompt.ts uses core truncateInjectionToBudget, not inline priority stripping', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../../../../openclaw-plugin/src/hooks/prompt.ts'), 'utf-8');
+    // Must call the core function
+    expect(src).toMatch(/truncateInjectionToBudget\s*\(/);
+    // Must NOT have inline priority stripping comment markers (old step comments)
+    expect(src).not.toMatch(/\/\/ Step \d+.*strip (project_context|thinking_os|evolution_principles|reflection_log)/i);
+    // Must NOT have inline regex-based fallback context block (the strip-by-regex pattern)
+    expect(src).not.toMatch(/<reflection_log>\[\\s\\S\]\*?<\/reflection_log>/);
+    // Must NOT have the old multi-line fallback block with attitudeDirective interpolation
+    expect(src).not.toMatch(/## 【CONTEXT SECTIONS】\n\n\[WARNING: Context sections stripped/);
+  });
 });
