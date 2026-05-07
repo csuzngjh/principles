@@ -62,8 +62,9 @@ const PRIORITY_ORDER: Record<PrinciplePriority, number> = {
  * Secondary: recency (newer createdAt first).
  */
 function comparePrinciples(a: InjectablePrinciple, b: InjectablePrinciple): number {
-  const priorityA = PRIORITY_ORDER[a.priority ?? 'P1'] ?? 99;
-  const priorityB = PRIORITY_ORDER[b.priority ?? 'P1'] ?? 99;
+  const INVALID_PRIORITY_RANK = 99;
+  const priorityA = PRIORITY_ORDER[a.priority ?? 'P1'] ?? INVALID_PRIORITY_RANK;
+  const priorityB = PRIORITY_ORDER[b.priority ?? 'P1'] ?? INVALID_PRIORITY_RANK;
 
   if (priorityA !== priorityB) {
     return priorityA - priorityB;

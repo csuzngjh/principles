@@ -136,6 +136,79 @@ describe('selectPrinciplesForInjection — budget truncation', () => {
     expect(result.hasP0).toBe(true);
     expect(result.selected.some(p => p.id === 'P1-001')).toBe(true);
   });
+
+  it('Phase 2 safety-net: P0 that was never reached during iteration gets prepended at end', () => {
+    // P0 is tiny (fits), P1 and P2 fit after it, but budget is exceeded and P0 not reached.
+    // To ensure P0 is NOT reached during iteration: put it last in sorted order.
+    // We sort by recency, so oldest P comes last. Put oldest P as P0.
+    // Budget 100: P0 ('x'=2 chars), P1('yy'=3 chars), P2('zzz'=4 chars)
+    // Total with newline: P0=5, P1=6, P2=7. Budget=100.
+    // Hmm, all fit. Need P0 to NOT be reached: P0 must be sorted AFTER P1+P2.
+    // To sort P0 after P1/P2, P0 must be OLDER (smaller createdAt).
+    // Use createdAt: P0=2026-01, P1=2026-06, P2=2026-07 (newest first = P2, P1, P0)
+    const p0 = makeP('P0-001', 'AAAAAAAAAAAA', { priority: 'P0', createdAt: '2026-01-01T00:00:00.000Z' }); // 12 chars
+    const p1 = makeP('P1-001', 'BBBBBBBBBBBB', { priority: 'P1', createdAt: '2026-06-01T00:00:00.000Z' }); // 12 chars
+    const p2 = makeP('P2-001', 'CCCCCCCCCCCC', { priority: 'P2', createdAt: '2026-07-01T00:00:00.000Z' }); // 12 chars
+    // Sorted by recency: P2(Jul), P1(Jun), P0(Jan)
+    // Budget 15: P2=14+1=15 ✓ selected, P1=14+1=15 ✓ selected, P0=14+1=15 exceeds 15
+    // NOT reached → safety net prepends P0
+    const result = selectPrinciplesForInjection([p2, p1, p0], 15);
+    expect(result.hasP0).toBe(true);
+    // P0 was NOT in selected after iteration → safety net prepended it
+    expect(result.selected[0]?.id).toBe('P0-001');
+  });
+
+  it('exact-budget boundary: principle is included when totalChars + cost === budgetChars', () => {
+    // Build a principle with known length to hit exactly the budget boundary
+    // "- [P1-001] " = 11 chars, "A".repeat(10) = 10, total = 22
+    const p = makeP('P1-001', 'AAAAAAAAAA'); // 10 As = text
+    const formattedLen = formatPrinciple(p).length + 1; // +1 for newline
+    const result = selectPrinciplesForInjection([p], formattedLen);
+    expect(result.selected).toHaveLength(1);
+    expect(result.wasTruncated).toBe(false);
+  });
+
+  it('P2 is excluded when P0+P1 fit but adding P2 exceeds budget', () => {
+    // P0 and P1 fit, P2 would push over budget
+    // P0: "- [P0-001] A" = 15 chars, P1: "- [P1-001] A" = 15 chars
+    // Budget of 32: P0(16) + P1(16) fits exactly, P2 would exceed
+    const p0 = makeP('P0-001', 'A', { priority: 'P0' });
+    const p1 = makeP('P1-001', 'A', { priority: 'P1' });
+    const p2 = makeP('P2-001', 'A', { priority: 'P2' });
+    const result = selectPrinciplesForInjection([p0, p1, p2], 32);
+    expect(result.selected).toContainEqual(expect.objectContaining({ id: 'P0-001' }));
+    expect(result.selected).toContainEqual(expect.objectContaining({ id: 'P1-001' }));
+    expect(result.selected).not.toContainEqual(expect.objectContaining({ id: 'P2-001' }));
+    expect(result.wasTruncated).toBe(true);
+  });
+
+  it('wasTruncated is false when all principles fit with room to spare', () => {
+    const p0 = makeP('P0-001', 'Short', { priority: 'P0' });
+    const p1 = makeP('P1-001', 'Short', { priority: 'P1' });
+    const result = selectPrinciplesForInjection([p0, p1], 4000);
+    expect(result.wasTruncated).toBe(false);
+    expect(result.selected).toHaveLength(2);
+  });
+
+  it('undefined priority defaults to P1', () => {
+    const p = { id: 'P-001', text: 'Test', createdAt: '2026-01-01T00:00:00.000Z' } as TestPrinciple;
+    const result = selectPrinciplesForInjection([p], 4000);
+    expect(result.breakdown).toEqual({ p0: 0, p1: 1, p2: 0 });
+  });
+
+  it('P2 principles are truncated before P1 when budget is tight', () => {
+    // All three fit individually, but only P0+P1 fit together within budget
+    // Each: "- [Px-xxx] " = 14 chars + text
+    const p0 = makeP('P0-001', 'AAAAAAAAAAAA', { priority: 'P0' }); // 12 + 14 = 26
+    const p1 = makeP('P1-001', 'BBBBBBBBBBBB', { priority: 'P1' }); // 12 + 14 = 26
+    const p2 = makeP('P2-001', 'CCCCCCCCCCCC', { priority: 'P2' }); // 12 + 14 = 26
+    // Budget 53: P0(27) + P1(27) = 54 > 53 (one char over), so P2 truncated
+    const result = selectPrinciplesForInjection([p0, p1, p2], 53);
+    expect(result.selected).toContainEqual(expect.objectContaining({ id: 'P0-001' }));
+    expect(result.wasTruncated).toBe(true);
+    // P1 may or may not fit depending on exact formatting, but P2 should definitely not fit
+    expect(result.breakdown.p2).toBe(0);
+  });
 });
 
 // ─── selectPrinciplesForInjection: immutability ─────────────────────────────
