@@ -12,6 +12,7 @@ import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingM
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
 import { getCachedMaskedPrincipleSet } from '@principles/core/runtime-v2';
+import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
@@ -880,110 +881,34 @@ ${attitudeDirective}
   }
 
   // ──── 8. SIZE GUARD ────
-  // Hard cap for OpenClaw prompt injection. OpenClaw's actual platform limit is
-  // approximately 10 000 characters. We use 9 000 here to leave ~1 000 chars of
-  // headroom for the user's message, tool call delimiters, and encoding overhead.
-  // IMPORTANT: PD must never treat the platform's upper bound as its own safe
-  // working limit. Always keep a margin.
-  const totalSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
-  const MAX_INJECTION_SIZE = 9000;
-
-  if (totalSize > MAX_INJECTION_SIZE) {
-    const originalSize = totalSize;
-    const truncationLog: string[] = [];
-
-    // Deterministically remove low-priority context blocks in priority order.
-    // In diagnostician-priority mode we aggressively strip everything except
-    // the task block and minimum behavioral constraints.
-    const inDiagMode = pendingDiagTaskCount > 0;
-
-    // Step 1 — strip project_context (largest, lowest priority) — always in diag mode,
-    // only strip in normal mode if we are already over limit
-    if (projectContextContent && appendSystemContext.includes('<project_context>')) {
-      appendSystemContext = appendSystemContext.replace(
-        `<project_context>\n${projectContextContent}\n</project_context>`,
-        '<project_context>\n[stripped: project_context]\n</project_context>'
-      );
-      truncationLog.push('project_context');
+  // Delegates to @principles/core/prompt-builder/truncateInjectionToBudget
+  // which handles priority stripping: project_context → thinking_os →
+  // evolution_principles → reflection_log → reason: truncation → fallback.
+  const result = truncateInjectionToBudget(
+    prependSystemContext,
+    prependContext,
+    appendSystemContext,
+    {
+      diagnosticianMode: pendingDiagTaskCount > 0,
+      blocks: { projectContextContent, thinkingOsContent, evolutionPrinciplesContent },
     }
+  );
 
-    // Steps 2-4: only strip in diagnostician priority mode (inDiagMode)
-    // In normal mode we stop after project_context to preserve context quality
-    if (inDiagMode) {
-      // Step 2 — strip thinking_os
-      if (thinkingOsContent && appendSystemContext.includes('<thinking_os>')) {
-        appendSystemContext = appendSystemContext.replace(
-          `<thinking_os>\n${thinkingOsContent}\n</thinking_os>`,
-          '<thinking_os>\n[stripped: thinking_os]\n</thinking_os>'
-        );
-        truncationLog.push('thinking_os');
-      }
+  prependSystemContext = result.prependSystemContext;
+  prependContext = result.prependContext;
+  appendSystemContext = result.appendSystemContext;
 
-      // Step 3 — strip evolution_principles (keep core_principles only)
-      if (evolutionPrinciplesContent && appendSystemContext.includes('<evolution_principles>')) {
-        appendSystemContext = appendSystemContext.replace(
-          `<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`,
-          '<evolution_principles>\n[stripped: evolution_principles]\n</evolution_principles>'
-        );
-        truncationLog.push('evolution_principles');
-      }
-
-      // Step 4 — strip reflection_log if present
-      if (appendSystemContext.includes('<reflection_log>')) {
-        appendSystemContext = appendSystemContext.replace(
-          /<reflection_log>[\s\S]*?<\/reflection_log>/,
-          '<reflection_log>\n[stripped: reflection_log]\n</reflection_log>'
-        );
-        truncationLog.push('reflection_log');
-      }
-    }
-
-    // Step 5 — re-evaluate: check if still over limit
-    let newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
-    if (newSize > MAX_INJECTION_SIZE) {
-      // Truncate the injected reason field by finding the "reason:" line prefix
-      // and cutting to 120 chars.  This is safe because the full prompt is
-      // The full context remains available in the runtime state store.
-      prependContext = prependContext
-        .split('\n')
-        .map((line) => {
-          if (line.startsWith('reason: ') && line.length > 129) {
-            return line.slice(0, 129) + '...[truncated]';
-          }
-          return line;
-        })
-        .join('\n');
-      newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
-      truncationLog.push('diagnostician_reason');
-    }
-
-    // FAIL-CLOSED: if we are still over the limit after all deterministic
-    // removals, do NOT return a prompt that exceeds MAX_INJECTION_SIZE.
-    // Drop the entire appendSystemContext (keep only prependContext +
-    // prependSystemContext) and log a hard error.
-    if (newSize > MAX_INJECTION_SIZE) {
-      const fallbackContext = `
-## 【CONTEXT SECTIONS】
-
-[WARNING: Context sections stripped due to prompt size constraints.
-This is a diagnostician-priority session — full context remains in the runtime state store.]
-
-${attitudeDirective}
-`.trim();
-
-      appendSystemContext = fallbackContext;
-      newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
-
+  if (result.truncated) {
+    const logEntry = result.truncationLog.join(', ');
+    if (result.appendSystemContext.includes('[WARNING: Context sections stripped')) {
       logger?.error(
         `[PD:Prompt] PROMPT OVER LIMIT AFTER ALL REDUCTIONS — using fallback. ` +
-        `Original: ${originalSize}, Current: ${newSize}, Limit: ${MAX_INJECTION_SIZE}. ` +
-        `Stripped: ${truncationLog.join(', ')}. Diagnostician mode: ${inDiagMode}.`
+        `Diagnostician mode: ${pendingDiagTaskCount > 0}. Stripped: ${logEntry}.`
       );
     } else {
       logger?.warn(
-        `[PD:Prompt] Injection size exceeded: ${originalSize} chars (limit: ${MAX_INJECTION_SIZE}), ` +
-        `truncated: ${truncationLog.join(', ') || 'none'}, new size: ${newSize} chars, ` +
-        `diagnostician mode: ${inDiagMode}`
+        `[PD:Prompt] Injection size exceeded budget, truncated: ${logEntry || 'none'}, ` +
+        `diagnostician mode: ${pendingDiagTaskCount > 0}`
       );
     }
   }
