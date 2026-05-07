@@ -8,7 +8,7 @@
  */
 
 // Types
-export type { PromptInjectionPart, SizeGuardOptions } from './types.js';
+export type { PromptInjectionPart, SizeGuardOptions, TruncateResult } from './types.js';
 
 // Functions
 export { buildAttitudeDirective } from './attitude-directive.js';

@@ -12,12 +12,18 @@ export interface PromptInjectionPart {
 export interface SizeGuardOptions {
   /** When true, also strip thinking_os, evolution_principles, reflection_log in addition to project_context */
   diagnosticianMode?: boolean;
-  /** Content strings for the blocks that may be stripped (needed for targeted replacement) */
+  /** Content strings for exact-match replacement (matching plugin behavior) */
   blocks?: {
     projectContextContent?: string;
     thinkingOsContent?: string;
     evolutionPrinciplesContent?: string;
   };
-  /** Minimum characters to keep below budget */
-  minHeadroom?: number;
+}
+
+export interface TruncateResult {
+  prependSystemContext: string;
+  prependContext: string;
+  appendSystemContext: string;
+  truncated: boolean;
+  truncationLog: string[];
 }
