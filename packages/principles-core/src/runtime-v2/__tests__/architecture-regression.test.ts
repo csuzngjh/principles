@@ -59,6 +59,8 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-67
   'internalization/dreamer-output.ts',
   'internalization/dreamer-runner.ts',
+  // PRI-75 Phase 3
+  'prompt-builder/routing-guidance.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -77,6 +79,8 @@ const REQUIRED_TEST_FILES = [
   'pitask-metadata.test.ts',
   // PRI-67
   'dreamer-runner.test.ts',
+  // PRI-75 Phase 3
+  'prompt-builder/__tests__/routing-guidance.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
