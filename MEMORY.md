@@ -203,3 +203,16 @@
   - Internalization 路线统一为三类：Prompt/Skill/SOP、Code/Hook/Tool、Model Parameter/LoRA；不要恢复旧的 SkillFactory-only L3 表述。
 - 核查中修复了 Mermaid fence 破损、尾部乱码、trailing whitespace，并整理为单一提交 `37dd24ba docs(architecture): align ontology and system blueprint`。
 - 下一步推荐执行 Linear `PRI-75 Prompt Injection SDK Migration Phase 1`：基于 PR #502 Phase 0 inventory，把 5 个零依赖 prompt 构建纯函数迁到 `@principles/core/src/prompt-builder/`，plugin 只保留 OpenClaw I/O 和适配。
+
+## PRI-75 Phase 1 完成 (PR #507 merged 2026-05-07)
+
+- **5 个纯函数**已迁移到 `@principles/core/src/prompt-builder/`：
+  - `buildAttitudeDirective(gfi)` — GFI 阈值 attitude directive
+  - `detectCorrectionCue(text)` — 中英文纠错 cue 检测（15 个 phrase）
+  - `extractMessageContent(message)` — 多格式 message 内容提取
+  - `isMinimalTrigger(trigger, sessionId)` — minimal mode 检测
+  - `truncateInjectionToBudget(ps, pc, ac, options?)` — size guard + priority stripping
+- **新增文件**：attitude-directive.ts / correction-cue.ts / message-extraction.ts / minimal-trigger.ts / size-guard.ts / types.ts / index.ts
+- **测试**：40 个单元测试 + 158 个架构回归测试全部通过
+- **未迁移（Phase 2）**：`selectPrinciplesForInjection` / `classifyTask` / empathy / `autoCompressFocus`
+- **设计决策**：`truncateInjectionToBudget` 改为 3 string 参数 + 1 options 参数（替代原 PromptInjectionPart[]），preserves prependSystemContext + prependContext
