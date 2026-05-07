@@ -183,4 +183,13 @@
 - 重要语义修正：`painId` 是触发事件/外部 provenance ID；`taskId` 是 Runtime v2 可执行诊断任务 ID，格式为 `diagnosis_<painId>`；`tasks.inputRef = painId`。不要再把 `painId` 当 `taskId`。
 - `PainSignalBridge.onPainDetected()` 应返回结构化结果：`painId/taskId/runId/artifactId/candidateIds/ledgerEntryIds/status/message`。`status=succeeded` 只能表示完整 pain->principle 链路成功，不能表示"已创建 task"或"已入队"。
 - 当前 M8 真实 UAT 状态：暂不签收。`pd pain record` 在真实环境返回 `status=retried` 且 exit 1，这是正确失败语义；UAT-01 blocked 在 OpenClaw CLI/runtime last-mile，尚未产生 artifact/candidate/ledgerEntry。
+
+## PRI-73 Bug Fix Follow-up (2026-05-07)
+
+- `InternalizationQueueReadModel.getSnapshot()` 两个 bug 在 review PR #504 时发现并修复：PR #505
+  - B1: `pendingCount`/`retryWaitCount` 包含非 PI 任务（diagnostician/evaluator_janitor）→ 先 filter PeerRunnerKind 再计数
+  - B2: `inspectedCount=0` 时 dominance 逻辑误判为 `all_hydration_failed` → 添加 `inspectedCount === 0` 显式 guard
+  - B3: `QueueNoReadyTasksReason` 类型过宽（包含 never 返回的 `all_lease_conflict`）→ 移除
+- 13 个单元测试覆盖：empty queue、non-PI 过滤、hydration failure、blocked、dependency_failed、ready tasks、counts 聚合、dominance 逻辑
+- JSDoc 已更新：明确所有 counts 只统计 PI peer-runner 任务
 - 当前最后 blocker：修 OpenClaw CLI runtime last-mile，使 `node packages/pd-cli/dist/index.js runtime probe --runtime openclaw-cli --openclaw-local --agent main --workspace D:/.openclaw/workspace --json` 能稳定成功；然后重跑 m8-03 UAT。不要再改 PainSignalBridge/CandidateIntake/ledger 主业务链路，除非 UAT 证明它们有缺陷。
