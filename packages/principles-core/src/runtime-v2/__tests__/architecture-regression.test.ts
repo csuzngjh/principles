@@ -1231,7 +1231,6 @@ describe('PRI-75/PRI-74 prompt-builder core boundary', () => {
     'prompt-builder/size-guard.ts',
     'prompt-builder/types.ts',
     'prompt-builder/principle-selection.ts',
-    // PRI-74
     'prompt-builder/routing-guidance.ts',
   ];
 
