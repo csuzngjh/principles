@@ -2,9 +2,9 @@
  * Local Worker Routing Policy — Task Classification and Routing Decisions
  * ======================================================================
  *
- * Phase: PRI-75 Prompt Injection SDK Migration Phase 3
+ * Phase: PRI-74 Routing Guidance Migration (follow-up to PRI-75 Prompt Injection SDK Migration)
  *
- * This file is now a THIN ADAPTER.
+ * This file is a THIN ADAPTER.
  * Pure classification logic lives in @principles/core/prompt-builder/routing-guidance.ts.
  * This file handles I/O (deployment registry, promotion state) and combines
  * pure classification with deployment checks.
@@ -14,11 +14,14 @@
  *   - I/O: getDeployment, isRoutingEnabledForProfile, isCheckpointDeployable, getPromotionState → plugin
  *
  * TASK CLASSIFICATION TAXONOMY:
- *   reader_eligible      — clearly suitable for local-reader
- *   editor_eligible     — clearly suitable for local-editor
- *   high_entropy_disallowed — high-complexity tasks that must stay on main agent
- *   ambiguous_scope     — tasks that are unclear and need main-agent judgment
- *   deployment_unavailable — no enabled deployment exists for the target profile
+ *   Pure-classification output from classifyTaskKind() in @principles/core/prompt-builder/routing-guidance.ts:
+ *     reader_eligible      — clearly suitable for local-reader
+ *     editor_eligible     — clearly suitable for local-editor
+ *     high_entropy_disallowed — high-complexity tasks that must stay on main agent
+ *     ambiguous_scope     — tasks that are unclear and need main-agent judgment
+ *   Plugin layer adds I/O-bound categories via deployment checks in classifyTask():
+ *     profile_mismatch    — target profile incompatible with task classification
+ *     deployment_unavailable — no enabled deployment exists for the target profile
  *
  * FAIL-CLOSED PRINCIPLE:
  *   - When in doubt → stay_main
