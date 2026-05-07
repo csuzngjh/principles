@@ -770,7 +770,6 @@ ${empathySilenceConstraint}
         const routingInput: RoutingInput = {
           taskIntent: toolMatches[0] ?? undefined,
           taskDescription: latestUserText.trim(),
-          requestedTools: toolMatches.length > 0 ? toolMatches : undefined,
           requestedFiles: fileMatches.length > 0 ? fileMatches : undefined,
         };
 

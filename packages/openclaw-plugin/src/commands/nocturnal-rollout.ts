@@ -653,19 +653,14 @@ ${lines.join('\n')}`,
       // Parse routing input arguments
       const intentArg = parts.find((p) => p.startsWith('--intent='))?.slice('--intent='.length) ?? '';
       const descriptionArg = parts.find((p) => p.startsWith('--description='))?.slice('--description='.length) ?? '';
-      const toolsArg = parts.find((p) => p.startsWith('--tools='))?.slice('--tools='.length) ?? '';
       const filesArg = parts.find((p) => p.startsWith('--files='))?.slice('--files='.length) ?? '';
       const outputArg = parts.find((p) => p.startsWith('--output='))?.slice('--output='.length) ?? '';
-      // Note: --risk= flag is deprecated (risk gating removed from routing)
-      const complexityArg = parts.find((p) => p.startsWith('--complexity='))?.slice('--complexity='.length) ?? '';
 
       const routingInput: RoutingInput = {
         taskIntent: intentArg || undefined,
         taskDescription: descriptionArg || undefined,
-        requestedTools: toolsArg ? toolsArg.split(',').map((t) => t.trim()) : undefined,
         requestedFiles: filesArg ? filesArg.split(',').map((f) => f.trim()) : undefined,
         expectedOutputShape: outputArg || undefined,
-        complexityHints: complexityArg ? complexityArg.split(',').map((c) => c.trim()) : undefined,
         targetProfile: parseProfile(profileArg),
       };
 

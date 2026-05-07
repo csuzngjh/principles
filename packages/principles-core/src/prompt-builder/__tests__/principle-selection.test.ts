@@ -138,20 +138,15 @@ describe('selectPrinciplesForInjection — budget truncation', () => {
   });
 
   it('Phase 2 safety-net: P0 that was never reached during iteration gets prepended at end', () => {
-    // P0 is tiny (fits), P1 and P2 fit after it, but budget is exceeded and P0 not reached.
-    // To ensure P0 is NOT reached during iteration: put it last in sorted order.
-    // We sort by recency, so oldest P comes last. Put oldest P as P0.
-    // Budget 100: P0 ('x'=2 chars), P1('yy'=3 chars), P2('zzz'=4 chars)
-    // Total with newline: P0=5, P1=6, P2=7. Budget=100.
-    // Hmm, all fit. Need P0 to NOT be reached: P0 must be sorted AFTER P1+P2.
-    // To sort P0 after P1/P2, P0 must be OLDER (smaller createdAt).
-    // Use createdAt: P0=2026-01, P1=2026-06, P2=2026-07 (newest first = P2, P1, P0)
-    const p0 = makeP('P0-001', 'AAAAAAAAAAAA', { priority: 'P0', createdAt: '2026-01-01T00:00:00.000Z' }); // 12 chars
-    const p1 = makeP('P1-001', 'BBBBBBBBBBBB', { priority: 'P1', createdAt: '2026-06-01T00:00:00.000Z' }); // 12 chars
-    const p2 = makeP('P2-001', 'CCCCCCCCCCCC', { priority: 'P2', createdAt: '2026-07-01T00:00:00.000Z' }); // 12 chars
-    // Sorted by recency: P2(Jul), P1(Jun), P0(Jan)
-    // Budget 15: P2=14+1=15 ✓ selected, P1=14+1=15 ✓ selected, P0=14+1=15 exceeds 15
-    // NOT reached → safety net prepends P0
+    // P0 guarantee: priority dominates recency — even if P0 is oldest (sorted last),
+    // the safety-net ensures it is prepended when iteration misses it due to budget.
+    // This test verifies the P0 guarantee / budget behavior.
+    const p0 = makeP('P0-001', 'AAAAAAAAAAAA', { priority: 'P0', createdAt: '2026-01-01T00:00:00.000Z' }); // oldest = sorted last
+    const p1 = makeP('P1-001', 'BBBBBBBBBBBB', { priority: 'P1', createdAt: '2026-06-01T00:00:00.000Z' });
+    const p2 = makeP('P2-001', 'CCCCCCCCCCCC', { priority: 'P2', createdAt: '2026-07-01T00:00:00.000Z' }); // newest = sorted first
+    // Sorted by recency: P2, P1, P0
+    // Budget 15: P2=14+1=15 fits, P1=14+1=15 fits, P0=14+1=15 exceeds budget
+    // Iteration reaches P2 and P1, misses P0 → safety net prepends P0
     const result = selectPrinciplesForInjection([p2, p1, p0], 15);
     expect(result.hasP0).toBe(true);
     // P0 was NOT in selected after iteration → safety net prepended it
