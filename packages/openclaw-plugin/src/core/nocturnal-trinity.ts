@@ -728,7 +728,18 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
    * runEmbeddedPiAgent does NOT read config.agents.defaults.model —
    * it requires explicit params.provider and params.model.
    */
-     
+
+  /**
+   * Deletes session file, ignoring errors.
+   * Duplicated cleanup is a code smell — this helper centralizes the pattern.
+   */
+  private deleteSessionFileSafe(sessionFile: string): void {
+    try { fs.unlinkSync(sessionFile); } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.api.logger?.warn?.(`[Trinity] Failed to delete session file ${sessionFile}: ${msg}`);
+    }
+  }
+
   private resolveModel(): { provider: string; model: string } {
     const config = this.loadFullConfig();
     const agents = config?.agents as Record<string, unknown> | undefined;
@@ -835,8 +846,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     } catch (err) {
       return this.buildRuntimeFailureDreamerOutput(this.classifyRuntimeError(err), err);
     } finally {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
+      this.deleteSessionFileSafe(sessionFile);
     }
   }
 
@@ -880,13 +890,12 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     } catch (err) {
       return this.buildRuntimeFailurePhilosopherOutput(this.classifyRuntimeError(err), err);
     } finally {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
+      this.deleteSessionFileSafe(sessionFile);
     }
   }
 
 
-   
+
   async invokeScribe(
     dreamerOutput: DreamerOutput,
     philosopherOutput: PhilosopherOutput,
@@ -944,8 +953,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         if (attempt < maxAttempts) { await this.sleep(2000); continue; }
         return null;
       } finally {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
+        this.deleteSessionFileSafe(sessionFile);
       }
     }
     return null;
@@ -998,7 +1006,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         if (attempt < maxAttempts) { await this.sleep(2000); continue; }
         return null;
       } finally {
-        try { fs.unlinkSync(sessionFile); } catch { /* session file cleanup */ }
+        this.deleteSessionFileSafe(sessionFile);
       }
     }
     return null;
