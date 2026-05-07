@@ -311,4 +311,3 @@ Pruning Review 是 append-only audit log，不改变实体生命周期。当前�
 
 > **架构师批注**:
 > Principle 是 PD 的管理核心；Rule 是 Principle 的实操化投影；Implementation 是 Rule 的行为承载物。后续所有重构都应减少这三者之间的语义混淆，而不是新增一套平行概念。
-e 的行为承载物。后续所有重构都应减少这三者之间的语义混淆，而不是新增一套平行概念。
