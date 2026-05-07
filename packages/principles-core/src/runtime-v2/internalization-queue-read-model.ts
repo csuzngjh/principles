@@ -75,11 +75,11 @@ export class InternalizationQueueReadModel {
       this.stateManager.listTasks({ status: 'retry_wait' }),
     ]);
 
-    const pendingCount = pending.length;
-    const retryWaitCount = retryWait.length;
-
-    // Filter to PeerRunnerKind tasks
+    // Filter to PeerRunnerKind tasks first — all counts below are PI-specific
     const peerTasks = [...pending, ...retryWait].filter(t => isPeerRunnerKind(t.taskKind));
+
+    const pendingCount = peerTasks.filter(t => t.status === 'pending').length;
+    const retryWaitCount = peerTasks.filter(t => t.status === 'retry_wait').length;
 
     // Accumulators
     const countsByTaskKind: Record<string, number> = {};
@@ -143,15 +143,18 @@ export class InternalizationQueueReadModel {
     let noReadyTasks: InternalizationQueueSnapshot['noReadyTasks'] = null;
 
     if (readyTasks.length === 0) {
-      const reason: QueueNoReadyTasksReason =
-        hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount
-          ? 'all_hydration_failed'
-          : dependencyFailures >= blockedCount
-            ? 'all_dependency_failed'
-            : blockedCount > 0
-              ? 'all_blocked'
-              : 'no_candidates';
-      noReadyTasks = { reason, inspectedCount };
+      // Empty queue: no candidates at all — must be no_candidates regardless of counts
+      if (inspectedCount === 0) {
+        noReadyTasks = { reason: 'no_candidates', inspectedCount };
+      } else {
+        const reason: QueueNoReadyTasksReason =
+          hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount
+            ? 'all_hydration_failed'
+            : dependencyFailures >= blockedCount
+              ? 'all_dependency_failed'
+              : 'all_blocked';
+        noReadyTasks = { reason, inspectedCount };
+      }
     }
 
     return {
