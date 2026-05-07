@@ -71,7 +71,8 @@ function comparePrinciples(a: InjectablePrinciple, b: InjectablePrinciple): numb
   }
 
   // Same priority: sort by recency (newer first)
-  return b.createdAt.localeCompare(a.createdAt);
+  // Date.parse is robust to non-ISO-8601 formats unlike localeCompare on raw strings
+  return Date.parse(b.createdAt) - Date.parse(a.createdAt);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +152,8 @@ export function selectPrinciplesForInjection(
       }
 
       wasTruncated = true;
-      break;
+      // Continue evaluating remaining principles — a smaller one that fits may exist
+      continue;
     }
 
     selected.push(principle);
