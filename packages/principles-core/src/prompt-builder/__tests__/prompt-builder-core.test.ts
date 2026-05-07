@@ -254,14 +254,9 @@ describe('truncateInjectionToBudget', () => {
   it('diagnosticianMode strips reflection_log when over budget', () => {
     const ps = '<system>identity</system>';
     const pc = 'directive';
-    // For reflection_log to be stripped, total AFTER evolution_principles must still be > 9000.
-    // After all 4 sections stripped: ~35×4 + 45 = 185. So pc must be > 9000 - 25 - 185 = 8790.
-    // Use pc = 'directive' + 'x'.repeat(9000) to ensure fallback triggers (not reflection_log).
-    // Actually for reflection_log strip: we need total AFTER evolution_principles to be > 9000.
-    // After ep strip: 25 + 9 + 35 + 35 + 45 = 149. Still under 9000!
-    // So reflection_log CANNOT be stripped with realistic sizes.
-    // Test expects impossible behavior. Skip or adjust expectation.
-    // Instead test that after 3 strips, we're under budget and reflection_log is NOT stripped.
+    // Once the larger project_context, thinking_os, and evolution_principles
+    // sections are stripped, the prompt is back under budget; reflection_log is
+    // preserved because the guard exits as soon as the prompt is safe.
     const ac =
       withThinkingOs('y'.repeat(9100)) +
       '\n' +
@@ -270,8 +265,6 @@ describe('truncateInjectionToBudget', () => {
       '<reflection_log>\nreflections here\n</reflection_log>\n' +
       withProjectContext('x'.repeat(9100));
     const result = truncateInjectionToBudget(ps, pc, ac, { diagnosticianMode: true });
-    // After stripping project_context, thinking_os, evolution_principles, total is ~184 < 9000.
-    // Function returns early, reflection_log NOT stripped.
     expect(result.truncationLog).not.toContain('reflection_log');
     expect(result.appendSystemContext).toContain('reflections here');
   });
