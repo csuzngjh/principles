@@ -258,6 +258,8 @@ export function handleAfterToolCall(
       gfi: updatedState.currentGfi,
       consecutiveErrors: updatedState.consecutiveErrors,
       exitCode: exitCode as number | undefined,
+      gfiBefore,
+      gfiAfter: updatedState.currentGfi,
     });
     wctx.trajectory?.recordToolCall?.({
       sessionId,
@@ -339,6 +341,8 @@ export function handleAfterToolCall(
         toolName: event.toolName,
         filePath: typeof filePath === 'string' ? filePath : undefined,
         gfi: 0,
+        gfiBefore,
+        gfiAfter: resetState.currentGfi,
       });
 
       // ── Hygiene Tracking: Record persistence actions ──

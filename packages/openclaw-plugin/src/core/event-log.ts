@@ -133,7 +133,8 @@ export class EventLog {
   }
   
   recordToolCall(sessionId: string | undefined, data: ToolCallEventData): void {
-    const category = data.error ? 'failure' : 'success';
+    // PRI-79: non-zero exitCode is also a failure, even without an error message
+    const category = data.error || (data.exitCode !== undefined && data.exitCode !== 0) ? 'failure' : 'success';
     this.record('tool_call', category, sessionId, data);
   }
   
@@ -300,6 +301,14 @@ export class EventLog {
       stats.tools.total++;
       if (entry.category === 'success') stats.tools.success++;
       else stats.tools.failure++;
+
+      // PRI-79: Update GFI stats from tool call events
+      const tcData = entry.data as unknown as ToolCallEventData;
+      if (tcData.gfiAfter !== undefined && tcData.gfiAfter > 0) {
+        stats.gfi.samples++;
+        stats.gfi.total += tcData.gfiAfter;
+        stats.gfi.peak = Math.max(stats.gfi.peak, tcData.gfiAfter);
+      }
     } else if (entry.type === 'pain_signal') {
       const data = entry.data as unknown as PainSignalEventData;
       stats.pain.signalsDetected++;

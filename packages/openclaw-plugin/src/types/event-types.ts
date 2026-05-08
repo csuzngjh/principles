@@ -82,9 +82,14 @@ export interface ToolCallEventData {
   filePath?: string;
   error?: string;
   errorType?: string;
+  /** Legacy field — pre-PR-79; prefer gfiBefore/gfiAfter for new code */
   gfi?: number;
   consecutiveErrors?: number;
   exitCode?: number;
+  /** PRI-79: GFI value before this tool call */
+  gfiBefore?: number;
+  /** PRI-79: GFI value after this tool call (post-friction or post-relief) */
+  gfiAfter?: number;
 }
 
 export interface PainSignalEventData {
