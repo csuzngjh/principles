@@ -326,7 +326,6 @@ export function trackFriction(
     const state = getOrCreateSession(sessionId, workspaceDir);
 
     const source: GfiSource = (options?.source as GfiSource) ?? 'unknown';
-    const compositeKey = options?.source ?? (hash ? `unattributed:${hash}` : 'unattributed:unknown');
     const event: GfiEvent = {
         source,
         baseScore: deltaF,
