@@ -96,6 +96,10 @@ export function listCorrectionSamples(
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     }));
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[PD:TrajectoryStore] Failed to list correction samples: ${msg}`);
+    return [];
   } finally {
     db.close();
   }
@@ -109,7 +113,7 @@ export function listCorrectionSamples(
  * @param note - Optional review note
  * @param workspaceDir - The workspace directory (DB path: {workspaceDir}/.state/.trajectory.db)
  * @returns The updated CorrectionSampleRecord
- * @throws Error if the sample is not found
+ * @throws Error if the sample is not found or DB cannot be opened
  */
 // eslint-disable-next-line @typescript-eslint/max-params
 export function reviewCorrectionSample(
@@ -119,7 +123,15 @@ export function reviewCorrectionSample(
   workspaceDir: string,
 ): CorrectionSampleRecord {
   const dbPath = getDbPath(workspaceDir);
-  const db = new Database(dbPath);
+
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+  let db: Database.Database;
+  try {
+    db = new Database(dbPath);
+  } catch {
+    throw new Error(`Database not found or cannot be opened: ${dbPath}`);
+  }
+
   const updatedAt = nowIso();
 
   try {
