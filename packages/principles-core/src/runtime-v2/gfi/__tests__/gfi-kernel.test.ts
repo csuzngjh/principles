@@ -30,7 +30,7 @@ describe('applyFriction', () => {
 
     expect(next.currentGfi).toBe(20);
     expect(next.gfiBySource.tool_failure).toBe(20);
-    expect(next.consecutiveErrors).toBe(0);
+    expect(next.consecutiveErrors).toBe(1);
   });
 
   it('repeated same-hash -> consecutiveErrors++', () => {

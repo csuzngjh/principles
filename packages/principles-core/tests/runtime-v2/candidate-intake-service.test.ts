@@ -34,12 +34,10 @@ function createCandidate(overrides: Record<string, unknown> = {}) {
     description: 'When deleting files, always verify backup exists first for safety.',
     confidence: 0.95,
     sourceRecommendationJson: JSON.stringify({
-      recommendation: {
-        title: 'Always verify backup before delete',
-        text: 'When deleting files, always verify backup exists first for safety.',
-        triggerPattern: 'file delete',
-        action: 'verify backup exists',
-      },
+      title: 'Always verify backup before delete',
+      text: 'When deleting files, always verify backup exists first for safety.',
+      triggerPattern: 'file delete',
+      action: 'verify backup exists',
     }),
     status: 'pending' as const,
     createdAt: '2026-04-26T10:00:00.000Z',
@@ -384,7 +382,12 @@ describe('CandidateIntakeService', () => {
     });
 
     it('handles minimal artifact without triggerPattern/action', async () => {
-      const candidate = createCandidate();
+      const candidate = createCandidate({
+        sourceRecommendationJson: JSON.stringify({
+          title: 'Test',
+          text: 'Test text',
+        }),
+      });
       const minimalArtifact = createArtifact({
         contentJson: JSON.stringify({
           recommendation: {
@@ -411,7 +414,15 @@ describe('CandidateIntakeService', () => {
     });
 
     it('uses description as fallback for text when recommendation text is empty', async () => {
-      const candidate = createCandidate({ description: 'Fallback description text' });
+      const candidate = createCandidate({
+        description: 'Fallback description text',
+        sourceRecommendationJson: JSON.stringify({
+          title: 'Test',
+          text: '',
+          triggerPattern: 'test',
+          action: 'do test',
+        }),
+      });
       const artifact = createArtifact({
         contentJson: JSON.stringify({
           recommendation: {
