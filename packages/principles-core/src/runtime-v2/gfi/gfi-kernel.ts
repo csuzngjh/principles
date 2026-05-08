@@ -64,8 +64,8 @@ export function applyDecay(
     ? Math.max(0, Math.round(
         Object.values(nextSources).reduce((a, b) => a + b, 0) * 10
       ) / 10)
-    // No sources remain (e.g. after full relief) — decay currentGfi directly
-    : Math.max(0, Math.round((state.currentGfi - rate * elapsedMinutes) * 10) / 10);
+    // All sources pruned — currentGfi must be 0 to preserve invariant
+    : 0;
 
   return {
     ...state,

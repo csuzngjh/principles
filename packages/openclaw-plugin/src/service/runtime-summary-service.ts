@@ -563,8 +563,10 @@ export class RuntimeSummaryService {
           Number.isFinite(live.currentGfi) ? Number(live.currentGfi) : persisted?.currentGfi,
         gfiBySource:
           live.gfiBySource ? { ...live.gfiBySource } : persisted?.gfiBySource,
+        lastErrorSource: live.lastErrorSource || persisted?.lastErrorSource,
         consecutiveErrors:
           Number.isFinite(live.consecutiveErrors) ? Number(live.consecutiveErrors) : persisted?.consecutiveErrors,
+        lastGfiDecayAt: live.lastGfiDecayAt || persisted?.lastGfiDecayAt,
         dailyGfiPeak:
           Number.isFinite(live.dailyGfiPeak) ? Number(live.dailyGfiPeak) : persisted?.dailyGfiPeak,
         lastActivityAt:

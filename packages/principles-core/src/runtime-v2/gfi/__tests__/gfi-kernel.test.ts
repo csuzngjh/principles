@@ -113,7 +113,7 @@ describe('applyFriction', () => {
 
 describe('applyDecay', () => {
   it('correct rate per stage (stable)', () => {
-    const state = makeState({ currentGfi: 30 });
+    const state = makeState({ currentGfi: 30, gfiBySource: { tool_failure: 30 } });
     const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
 
     // stable decay = 0.5 per minute, so 30 - 0.5 = 29.5
@@ -121,7 +121,7 @@ describe('applyDecay', () => {
   });
 
   it('correct rate per stage (elevated)', () => {
-    const state = makeState({ currentGfi: 50 });
+    const state = makeState({ currentGfi: 50, gfiBySource: { tool_failure: 50 } });
     const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'elevated', FIXED_NOW);
 
     // elevated decay = 1.0 per minute
@@ -129,7 +129,7 @@ describe('applyDecay', () => {
   });
 
   it('correct rate per stage (critical)', () => {
-    const state = makeState({ currentGfi: 80 });
+    const state = makeState({ currentGfi: 80, gfiBySource: { tool_failure: 80 } });
     const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'critical', FIXED_NOW);
 
     // critical decay = 2.0 per minute
@@ -137,7 +137,7 @@ describe('applyDecay', () => {
   });
 
   it('correct rate per stage (saturated)', () => {
-    const state = makeState({ currentGfi: 95 });
+    const state = makeState({ currentGfi: 95, gfiBySource: { tool_failure: 95 } });
     const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'saturated', FIXED_NOW);
 
     // saturated decay = 4.0 per minute
@@ -214,7 +214,7 @@ describe('applyDecay', () => {
   });
 
   it('rounds to 1 decimal', () => {
-    const state = makeState({ currentGfi: 33.33 });
+    const state = makeState({ currentGfi: 33.33, gfiBySource: { tool_failure: 33.33 } });
     const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
 
     // 33.33 - 0.5 = 32.83, rounds to 32.8
