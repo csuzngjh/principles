@@ -49,7 +49,7 @@ export function applyDecay(
 
   // Decay each source slice individually, then prune those below minPruneBelow.
   // currentGfi is derived from the sum of remaining source slices when sources exist.
-  // When no sources remain (e.g. after relief), decay currentGfi directly.
+  // When no source ledger entries exist, decay currentGfi directly (e.g. session restart).
   const nextSources: Partial<Record<GfiSource, number>> = {};
   for (const [src, value] of Object.entries(state.gfiBySource)) {
     const sourceDecayed = value - rate * elapsedMinutes;
@@ -59,13 +59,15 @@ export function applyDecay(
     }
   }
 
-  const nextGfi = Object.keys(nextSources).length > 0
-    // Invariant: currentGfi === sum of remaining source slices
-    ? Math.max(0, Math.round(
-        Object.values(nextSources).reduce((a, b) => a + b, 0) * 10
-      ) / 10)
-    // All sources pruned — currentGfi must be 0 to preserve invariant
-    : 0;
+  // Compute nextGfi:
+  //  - Has remaining sources: currentGfi = sum of remaining source slices (invariant)
+  //  - No remaining sources but had sources: currentGfi = 0 (all pruned → invariant)
+  //  - Had no source ledger at all: decay currentGfi directly (e.g. fresh session restart)
+  const nextGfi: number = Object.keys(nextSources).length > 0
+    ? Math.max(0, Math.round(Object.values(nextSources).reduce((a, b) => a + b, 0) * 10) / 10)
+    : Object.keys(state.gfiBySource).length > 0
+      ? 0
+      : Math.max(0, Math.round((state.currentGfi - rate * elapsedMinutes) * 10) / 10);
 
   return {
     ...state,
