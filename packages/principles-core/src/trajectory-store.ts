@@ -73,12 +73,6 @@ export function listCorrectionSamples(
   }
 
   try {
-    db = new Database(dbPath, { readonly: true });
-  } catch {
-    return [];
-  }
-
-  try {
     const rows = db.prepare(`
       SELECT sample_id, session_id, bad_assistant_turn_id, user_correction_turn_id,
              recovery_tool_span_json, diff_excerpt, principle_ids_json, quality_score,
@@ -102,7 +96,9 @@ export function listCorrectionSamples(
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
     }));
-  } catch {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[PD:TrajectoryStore] Failed to list correction samples: ${msg}`);
     return [];
   } finally {
     db.close();

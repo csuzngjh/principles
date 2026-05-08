@@ -339,9 +339,9 @@ export function trackFriction(
 
     // Preserve composite source key for unattributed sources
     if (!options?.source && hash && state.gfiBySource) {
-        const unknownVal = (state.gfiBySource['unknown'] as number) ?? 0;
-        delete (state.gfiBySource as Record<string, number>)['unknown'];
-        (state.gfiBySource as Record<string, number>)[compositeKey] = unknownVal;
+        const val = state.gfiBySource['unknown'];
+        delete state.gfiBySource['unknown'];
+        if (val !== undefined) state.gfiBySource[compositeKey] = val as number;
     }
 
     touchActivity(state, 'control');
