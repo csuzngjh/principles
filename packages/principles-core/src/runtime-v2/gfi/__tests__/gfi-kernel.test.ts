@@ -252,6 +252,33 @@ describe('applyDecay', () => {
     expect(next.gfiBySource).toEqual({});
   });
 
+  it('empty source ledger + elevated stage -> decay at 1.0/min', () => {
+    const state = makeState({ currentGfi: 30, gfiBySource: {} });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'elevated', FIXED_NOW);
+
+    // elevated decay = 1.0/min → 30 - 1.0 = 29.0
+    expect(next.currentGfi).toBeCloseTo(29.0);
+    expect(next.gfiBySource).toEqual({});
+  });
+
+  it('empty source ledger + critical stage -> decay at 2.0/min', () => {
+    const state = makeState({ currentGfi: 30, gfiBySource: {} });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'critical', FIXED_NOW);
+
+    // critical decay = 2.0/min → 30 - 2.0 = 28.0
+    expect(next.currentGfi).toBeCloseTo(28.0);
+    expect(next.gfiBySource).toEqual({});
+  });
+
+  it('empty source ledger + saturated stage -> decay at 4.0/min', () => {
+    const state = makeState({ currentGfi: 30, gfiBySource: {} });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'saturated', FIXED_NOW);
+
+    // saturated decay = 4.0/min → 30 - 4.0 = 26.0
+    expect(next.currentGfi).toBeCloseTo(26.0);
+    expect(next.gfiBySource).toEqual({});
+  });
+
   it('source ledger all pruned -> currentGfi=0', () => {
     // Source at minPruneBelow=8, stable decay=0.5/min → 7.5 after 1 min → pruned
     const state = makeState({

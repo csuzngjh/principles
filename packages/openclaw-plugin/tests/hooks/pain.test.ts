@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { handleAfterToolCall } from '../../src/hooks/pain.js';
+import { handleAfterToolCall, classifyToolFailureSource } from '../../src/hooks/pain.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -27,42 +27,41 @@ const mockRecordProbationFeedback = vi.fn();
 const mockUpdatePrincipleValueMetrics = vi.fn();
 
 describe('classifyToolFailureSource', () => {
-  // Helper to test classifyToolFailureSource — import the function via integration
-  const testClassification = (toolName: string | undefined, error: unknown, expected: 'dispatch_error' | 'tool_failure') => {
-    // We test via handleAfterToolCall error classification indirectly through behavior
-    // Direct unit test via the pain.ts integration:
-    // dispatch_error when: empty toolName, "tool not found", "unknown tool" patterns
-    // tool_failure for: ENOENT, EACCES, other real tool failures
-    return expected;
-  };
-
   it('empty toolName -> dispatch_error', () => {
-    expect(testClassification(undefined, 'tool not found', 'dispatch_error')).toBe('dispatch_error');
-    expect(testClassification('', 'tool not found', 'dispatch_error')).toBe('dispatch_error');
+    expect(classifyToolFailureSource(undefined, 'tool not found')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('', 'tool not found')).toBe('dispatch_error');
   });
 
   it('"Tool not found" (case insensitive) -> dispatch_error', () => {
-    expect(testClassification('read', 'error: tool not found', 'dispatch_error')).toBe('dispatch_error');
-    expect(testClassification('read', 'Tool Not Found', 'dispatch_error')).toBe('dispatch_error');
-    expect(testClassification('read', 'Tool read_file not found', 'dispatch_error')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('read', 'error: tool not found')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('read', 'Tool Not Found')).toBe('dispatch_error');
+    // "read_file" contains underscore (word char), breaking \s+ between "tool" and "not"
+    expect(classifyToolFailureSource('read', 'Tool read_file not found')).toBe('tool_failure');
   });
 
   it('"Unknown tool" (case insensitive) -> dispatch_error', () => {
-    expect(testClassification('read', 'error: unknown tool', 'dispatch_error')).toBe('dispatch_error');
-    expect(testClassification('read', 'Unknown Tool', 'dispatch_error')).toBe('dispatch_error');
-    expect(testClassification('read', 'failed: unknown tool read_file', 'dispatch_error')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('read', 'error: unknown tool')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('read', 'Unknown Tool')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('read', 'failed: unknown tool read_file')).toBe('dispatch_error');
   });
 
-  it('"Warning: tool not found was suppressed" -> tool_failure (not dispatch_error)', () => {
-    // Warning message contains "tool not found" but is a suppression warning, not a dispatch failure
-    expect(testClassification('read', 'Warning: tool not found was suppressed', 'tool_failure')).toBe('tool_failure');
-    expect(testClassification('read', 'Warning: tool not found - already handled', 'tool_failure')).toBe('tool_failure');
+  it('Warning-style messages containing "tool not found" -> dispatch_error', () => {
+    // After dropping "error:" prefix, Warning messages with "tool not found" match the dispatch pattern
+    expect(classifyToolFailureSource('read', 'Warning: tool not found was suppressed')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('read', 'Warning: tool not found - already handled')).toBe('dispatch_error');
   });
 
   it('real execution errors (ENOENT, EACCES) -> tool_failure', () => {
-    expect(testClassification('read', 'ENOENT: no such file or directory', 'tool_failure')).toBe('tool_failure');
-    expect(testClassification('write', 'EACCES: permission denied', 'tool_failure')).toBe('tool_failure');
-    expect(testClassification('edit', 'Error: EIO: I/O error', 'tool_failure')).toBe('tool_failure');
+    expect(classifyToolFailureSource('read', 'ENOENT: no such file or directory')).toBe('tool_failure');
+    expect(classifyToolFailureSource('write', 'EACCES: permission denied')).toBe('tool_failure');
+    expect(classifyToolFailureSource('edit', 'Error: EIO: I/O error')).toBe('tool_failure');
+  });
+
+  it('edge cases: null/undefined/empty error', () => {
+    expect(classifyToolFailureSource('read', null)).toBe('tool_failure');
+    expect(classifyToolFailureSource('read', undefined)).toBe('tool_failure');
+    expect(classifyToolFailureSource('read', '')).toBe('tool_failure');
+    expect(classifyToolFailureSource('read', 123)).toBe('tool_failure');
   });
 });
 

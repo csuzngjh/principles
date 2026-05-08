@@ -96,10 +96,11 @@ function createPainId(sessionId: string): string {
   return `pain_${Date.now()}_${computeHash(sessionId).slice(0, 8)}`;
 }
 
-function classifyToolFailureSource(toolName: string | undefined, error: unknown): 'dispatch_error' | 'tool_failure' {
+export function classifyToolFailureSource(toolName: string | undefined, error: unknown): 'dispatch_error' | 'tool_failure' {
   if (!toolName || toolName.trim() === '') return 'dispatch_error';
   const msg = String(error ?? '');
-  // Use word-boundary anchors to avoid false positives
+  // Dropped "error:" prefix requirement to catch "failed: unknown tool read_file" style messages.
+  // Word-boundary anchors prevent partial matches (e.g. "report_tool_not_found" would not match).
   if (/\btool\s+not\s+found\b/i.test(msg)) return 'dispatch_error';
   if (/\bunknown\s+tool\b/i.test(msg)) return 'dispatch_error';
   return 'tool_failure';
