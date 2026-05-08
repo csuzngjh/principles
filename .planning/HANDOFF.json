@@ -1,35 +1,36 @@
 {
   "version": "1.0",
-  "timestamp": "2025-05-05T09:55:44Z",
+  "timestamp": "2026-05-08T01:14:32Z",
   "phase": "default",
-  "phase_name": "PRI-52",
+  "phase_name": "PRI-76 GFI Control Kernel",
   "phase_dir": "",
-  "plan": "PD 多运行时解耦",
-  "task": 5,
+  "plan": "C:\\Users\\Administrator\\.claude\\plans\\virtual-noodling-torvalds.md",
+  "task": 1,
   "total_tasks": 5,
   "status": "paused",
   "completed_tasks": [
-    {"id": 1, "name": "新建 core/runtime-v2/internalization/lifecycle-metrics.ts", "status": "done", "commit": ""},
-    {"id": 2, "name": "更新 core/runtime-v2/internalization/index.ts", "status": "done", "commit": ""},
-    {"id": 3, "name": "更新 core/runtime-v2/index.ts", "status": "done", "commit": ""},
-    {"id": 4, "name": "更新 plugin lifecycle-metrics.ts 为 re-export", "status": "done", "commit": ""}
+    {"id": 0, "name": "Plan approved with 7 user corrections applied", "status": "done", "commit": "none"},
+    {"id": 1, "name": "Branch codex/pri-76-gfi-kernel created from origin/main", "status": "in_progress", "progress": "Branch created, no files written yet"}
   ],
   "remaining_tasks": [
-    {"id": 5, "name": "更新 architecture-regression.test.ts (添加 PRI-52 guard)", "status": "not_started"},
-    {"id": 6, "name": "验证测试通过", "status": "not_started"},
-    {"id": 7, "name": "Commit + Push + PR", "status": "not_started"}
+    {"id": 1, "name": "PRI-76 GFI Core Kernel (RED+GREEN+guards)", "status": "in_progress"},
+    {"id": 2, "name": "PRI-77 Plugin SessionTracker Adapter", "status": "not_started"},
+    {"id": 3, "name": "PRI-78 GFI Observability Read Model + CLI", "status": "not_started"},
+    {"id": 4, "name": "PRI-80 Source Taxonomy Cleanup", "status": "not_started"},
+    {"id": 5, "name": "PRI-79 Daily Stats Fix", "status": "not_started"}
   ],
   "blockers": [],
   "human_actions_pending": [],
   "decisions": [
-    {"decision": "提取所有魔法数字为命名常量", "rationale": "Linear issue 要求 '所有硬编码权重提取为命名常量'", "phase": "PRI-52"}
+    {"decision": "Execution order: PRI-76→77→78→80→79", "rationale": "Daily stats bySource depends on source taxonomy", "phase": "plan"},
+    {"decision": "GfiPolicy fields are number not literal values", "rationale": "User correction", "phase": "plan"},
+    {"decision": "PRI-77 does NOT touch prompt.ts or buildAttitudeDirective", "rationale": "Consumer semantics changes belong in PRI-78+", "phase": "plan"},
+    {"decision": "PRI-79 must fix EventLog recordToolCall category bug (exitCode=1 as success)", "rationale": "Discovered during plan review", "phase": "plan"},
+    {"decision": "PRI-80 must fix manual_pain missing source option", "rationale": "trackFriction called without {source:'manual_pain'}", "phase": "plan"},
+    {"decision": "CLI registration in pd-cli/src/index.ts not runtime.ts", "rationale": "Command tree root is at index.ts ~line 279", "phase": "plan"},
+    {"decision": "Plugin tests under tests/ not src/__tests__/", "rationale": "OpenClaw plugin convention", "phase": "plan"}
   ],
-  "uncommitted_files": [
-    "packages/principles-core/src/runtime-v2/internalization/lifecycle-metrics.ts",
-    "packages/principles-core/src/runtime-v2/internalization/index.ts",
-    "packages/principles-core/src/runtime-v2/index.ts",
-    "packages/openclaw-plugin/src/core/principle-internalization/lifecycle-metrics.ts"
-  ],
-  "next_action": "更新 architecture-regression.test.ts：添加 REQUIRED_SOURCE_FILES 条目 + 新增 PRI-52 describe 块",
-  "context_notes": "PRI-52: Phase 1b 搬迁 lifecycle-metrics.ts 到 core。Steps 1-4 已完成，build 通过。参考 PRI-42/PRI-51 模式。"
+  "uncommitted_files": [],
+  "next_action": "Write gfi-kernel.test.ts (TDD RED) in packages/principles-core/src/runtime-v2/gfi/__tests__/",
+  "context_notes": "Plan approved. Branch codex/pri-76-gfi-kernel created from origin/main. No implementation files written yet. Context was at 77% when paused. Design spec at docs/design/2026-05-08-gfi-control-kernel-and-observability.md"
 }
