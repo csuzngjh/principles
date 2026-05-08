@@ -340,10 +340,10 @@ export function trackFriction(
     if (!options?.source && hash) {
         const val = nextCore.gfiBySource['unknown'];
         if (val !== undefined) {
-            const nextSources = { ...nextCore.gfiBySource };
-            delete nextSources['unknown'];
-            nextSources[compositeKey] = (nextSources[compositeKey] ?? 0) + val;
-            (nextCore as { gfiBySource: Partial<Record<string, number>> }).gfiBySource = nextSources;
+            const s = nextCore.gfiBySource as Record<string, number>;
+            delete s['unknown'];
+            const key = `unattributed:${hash}`;
+            s[key] = (s[key] ?? 0) + val;
         }
     }
 
