@@ -195,7 +195,8 @@ export function handleAfterToolCall(
           gfi: 0,
           score: 100,
         });
-      } catch {
+      } catch (e) {
+        SystemLogger.log(effectiveWorkspaceDir, 'PAYLOAD_SERIALIZE_FAILED', String(e));
         payload = JSON.stringify({ reason: gate.reason, detail: '(log serialization failed)' });
       }
       SystemLogger.log(effectiveWorkspaceDir, 'PAIN_GATE_REJECTED', payload);
@@ -422,7 +423,8 @@ export function handleAfterToolCall(
         gfi: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.currentGfi ?? 0,
         score: painScore,
       });
-    } catch {
+    } catch (e) {
+      SystemLogger.log(effectiveWorkspaceDir, 'PAYLOAD_SERIALIZE_FAILED', String(e));
       rejectPayload = JSON.stringify({ reason: diagnosticGate.reason, detail: '(log serialization failed)' });
     }
     SystemLogger.log(effectiveWorkspaceDir, 'PAIN_GATE_REJECTED', rejectPayload);
