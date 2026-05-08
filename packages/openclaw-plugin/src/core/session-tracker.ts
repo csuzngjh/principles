@@ -5,6 +5,14 @@ import { atomicWriteFileSync } from '../utils/io.js';
 import type { PainConfig } from './config.js';
 import { SystemLogger } from './system-logger.js';
 import { TWO_HOURS_MS } from '../config/defaults/runtime.js';
+import {
+  applyFriction as coreApplyFriction,
+  applyDecay as coreApplyDecay,
+  applyRelief as coreApplyRelief,
+  classifyGfiStage,
+  DEFAULT_GFI_POLICY,
+} from '@principles/core/runtime-v2';
+import type { GfiState, GfiEvent, GfiSource } from '@principles/core/runtime-v2';
 
 export interface TokenUsage {
     input?: number;
@@ -12,6 +20,32 @@ export interface TokenUsage {
     cacheRead?: number;
     cacheWrite?: number;
     total?: number;
+}
+
+// ── GFI Core Kernel Adapter ──────────────────────────────────────────────────
+
+/** Convert SessionState GFI fields to GfiState for core kernel */
+function toGfiState(state: SessionState): GfiState {
+  return {
+    currentGfi: state.currentGfi ?? 0,
+    gfiBySource: (state.gfiBySource ?? {}) as Partial<Record<GfiSource, number>>,
+    lastErrorHash: state.lastErrorHash === '' ? undefined : state.lastErrorHash,
+    lastErrorSource: state.lastErrorSource || undefined,
+    consecutiveErrors: state.consecutiveErrors ?? 0,
+    lastGfiDecayAt: state.lastGfiDecayAt,
+    dailyGfiPeak: state.dailyGfiPeak,
+  };
+}
+
+/** Apply GfiState result back onto SessionState */
+function applyGfiResult(state: SessionState, result: GfiState): void {
+  state.currentGfi = result.currentGfi;
+  state.gfiBySource = { ...result.gfiBySource } as Record<string, number>;
+  state.lastErrorHash = result.lastErrorHash ?? '';
+  state.lastErrorSource = result.lastErrorSource ?? '';
+  state.consecutiveErrors = result.consecutiveErrors;
+  state.lastGfiDecayAt = result.lastGfiDecayAt;
+  state.dailyGfiPeak = result.dailyGfiPeak ?? state.dailyGfiPeak;
 }
 
 export interface SessionState {
@@ -233,13 +267,6 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey
     return state;
 }
 
-function ensureGfiLedger(state: SessionState): Record<string, number> {
-    if (!state.gfiBySource || typeof state.gfiBySource !== 'object') {
-        state.gfiBySource = {};
-    }
-    return state.gfiBySource;
-}
-
 export function trackToolRead(sessionId: string, filePath: string, workspaceDir?: string): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir);
     const normalizedPath = path.posix.normalize(filePath.replace(/\\/g, '/'));
@@ -287,9 +314,8 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
 
 /**
  * Tracks physical friction based on tool execution failures.
+ * Delegates to core GFI kernel for scoring.
  */
- 
-     
 export function trackFriction(
     sessionId: string,
     deltaF: number,
@@ -298,40 +324,46 @@ export function trackFriction(
     options?: { source?: string }
 ): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir);
-    const ledger = ensureGfiLedger(state);
-    
-    if (hash && hash === state.lastErrorHash) {
-        state.consecutiveErrors++;
-    } else {
-        state.lastErrorSource = options?.source || (hash ? `unattributed:${hash}` : 'unattributed:unknown');
-        state.lastErrorHash = hash;
-        state.consecutiveErrors = 1;
+
+    const source: GfiSource = (options?.source as GfiSource) ?? 'unknown';
+    const event: GfiEvent = {
+        source,
+        baseScore: deltaF,
+        hash: hash || undefined,
+    };
+
+    const coreState = toGfiState(state);
+    const nextCore = coreApplyFriction(coreState, event, DEFAULT_GFI_POLICY);
+
+    // Preserve composite source key for unattributed sources
+    if (!options?.source && hash) {
+        const val = nextCore.gfiBySource['unknown'];
+        if (val !== undefined) {
+            const s = nextCore.gfiBySource as Record<string, number>;
+            delete s['unknown'];
+            const key = `unattributed:${hash}`;
+            s[key] = (s[key] ?? 0) + val;
+        }
     }
 
-    // GFI formula with multiplier: GFI = GFI + (Delta_F * 1.5^(n-1))
-    const multiplier = Math.pow(1.5, state.consecutiveErrors - 1);
-    const addedFriction = deltaF * multiplier;
-    state.currentGfi = (state.currentGfi || 0) + addedFriction;
-    const sourceKey = options?.source || (hash ? `unattributed:${hash}` : 'unattributed:unknown');
-    ledger[sourceKey] = (ledger[sourceKey] || 0) + addedFriction;
+    applyGfiResult(state, nextCore);
+
     touchActivity(state, 'control');
-    
-    SystemLogger.log(state.workspaceDir, 'GFI_INC', `Friction added: +${addedFriction.toFixed(1)} (Base: ${deltaF}, Mult: ${multiplier.toFixed(2)}). Total GFI: ${state.currentGfi.toFixed(1)}`);
-    
+
     // Update daily stats
     state.dailyToolFailures++;
     state.dailyGfiPeak = Math.max(state.dailyGfiPeak, state.currentGfi);
-    
+
     // Schedule persistence
-    // Update decay anchor to prevent retroactive decay of the new friction
     state.lastGfiDecayAt = Date.now();
     schedulePersistence(state);
-    
+
     return state;
 }
 
 /**
  * Resets the friction index upon successful action.
+ * Delegates to core GFI kernel for relief computation.
  */
 export function resetFriction(
     sessionId: string,
@@ -339,50 +371,36 @@ export function resetFriction(
     options?: { source?: string; amount?: number }
 ): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir);
-    const ledger = ensureGfiLedger(state);
 
     if (options?.source) {
-        const sourceKey = options.source;
-        const currentSource = ledger[sourceKey] || 0;
-        const requestedAmount = Number.isFinite(options.amount) ? Number(options.amount) : currentSource;
-        const amountToRemove = Math.max(0, Math.min(currentSource, requestedAmount));
+        const coreState = toGfiState(state);
+        const nextCore = coreApplyRelief(coreState, { source: options.source, amount: options.amount ?? 0 }, DEFAULT_GFI_POLICY);
+        applyGfiResult(state, nextCore);
 
-        if (amountToRemove > 0) {
-            ledger[sourceKey] = Math.max(0, currentSource - amountToRemove);
-            if (ledger[sourceKey] === 0) {
-                delete ledger[sourceKey];
-            }
-            state.currentGfi = Math.max(0, (state.currentGfi || 0) - amountToRemove);
+        if (state.currentGfi > 0) {
             SystemLogger.log(
                 state.workspaceDir,
                 'GFI_SLICE_RESET',
-                `Friction slice reset for ${sourceKey}: -${amountToRemove.toFixed(1)}. Total GFI: ${state.currentGfi.toFixed(1)}`
+                `Friction slice reset for ${options.source}: remaining GFI=${state.currentGfi.toFixed(1)}`
             );
-
-            if (state.lastErrorSource === sourceKey) {
-                state.consecutiveErrors = 0;
-                state.lastErrorHash = '';
-                state.lastErrorSource = '';
-            }
         }
         touchActivity(state, 'control');
         schedulePersistence(state);
         return state;
     }
 
-    if (state.currentGfi > 0) {
-        SystemLogger.log(state.workspaceDir, 'GFI_RESET', `Friction reset to 0 (Was: ${state.currentGfi.toFixed(1)}). Action successful.`);
+    // Full reset via core kernel
+    const previousGfi = state.currentGfi;
+    const coreState = toGfiState(state);
+    const nextCore = coreApplyRelief(coreState, { source: 'all', amount: 100 }, DEFAULT_GFI_POLICY);
+    applyGfiResult(state, nextCore);
+
+    if (previousGfi > 0) {
+        SystemLogger.log(state.workspaceDir, 'GFI_RESET', `Friction reset to 0 (Was: ${previousGfi.toFixed(1)}). Action successful.`);
     }
-    state.currentGfi = 0;
-    state.gfiBySource = {};
-    state.lastErrorSource = '';
-    state.consecutiveErrors = 0;
-    state.lastErrorHash = '';
     touchActivity(state, 'control');
-    
-    // Schedule persistence
+
     schedulePersistence(state);
-    
     return state;
 }
 
@@ -538,15 +556,9 @@ export function resetDailyStats(sessionId: string): void {
 }
 
 /**
- * Apply time-based decay to GFI using segmented exponential decay.
- * 
- * Decay rates:
- * - GFI >= 70 (severe): 3%/min - fast recovery to avoid prolonged blocking
- * - GFI 40-70 (moderate): 2%/min - medium decay
- * - GFI < 40 (mild): 1%/min - slow decay to retain as warning
- * 
- * Formula: GFI_new = GFI * (1 - λ)^elapsedMinutes
- * 
+ * Apply time-based decay to GFI using stage-aware linear decay.
+ * Delegates to core GFI kernel.
+ *
  * @param sessionId - The session to decay
  * @param elapsedMinutes - Minutes since last decay
  * @returns Updated session state, or undefined if session not found or GFI is 0
@@ -554,49 +566,23 @@ export function resetDailyStats(sessionId: string): void {
 export function decayGfi(sessionId: string, elapsedMinutes: number): SessionState | undefined {
     const state = sessions.get(sessionId);
     if (!state || state.currentGfi <= 0 || elapsedMinutes <= 0) return undefined;
-    
-    // Determine decay rate based on current GFI level (segmented)
-     
-    let decayRate: number;
-    if (state.currentGfi >= 70) {
-      decayRate = 0.03;  // 3%/min for severe friction
-    } else if (state.currentGfi >= 40) {
-      decayRate = 0.02;  // 2%/min for moderate friction
-    } else {
-      decayRate = 0.01;  // 1%/min for mild friction
-    }
-    
-    // Exponential decay: GFI_new = GFI * (1-λ)^Δt
-    const decayFactor = Math.pow(1 - decayRate, elapsedMinutes);
+
+    const coreState = toGfiState(state);
+    const stage = classifyGfiStage(state.currentGfi, DEFAULT_GFI_POLICY);
+    const nextCore = coreApplyDecay(coreState, elapsedMinutes, DEFAULT_GFI_POLICY, stage);
     const previousGfi = state.currentGfi;
-    state.currentGfi = Math.max(0, state.currentGfi * decayFactor);
-    
-    // Apply same decay factor to all sources
-    const ledger = ensureGfiLedger(state);
-    for (const source of Object.keys(ledger)) {
-      ledger[source] = Math.max(0, ledger[source] * decayFactor);
-      // Remove sources that have decayed below 0.1
-      if (ledger[source] < 0.1) {
-        delete ledger[source];
-      }
-    }
-    
-    // Round to 1 decimal place
-    state.currentGfi = Math.round(state.currentGfi * 10) / 10;
-    
-    // Update last decay timestamp
-    state.lastGfiDecayAt = Date.now();
-    
+    applyGfiResult(state, nextCore);
+
     // Log if significant decay
     const decayedAmount = previousGfi - state.currentGfi;
     if (decayedAmount >= 1) {
       SystemLogger.log(
         state.workspaceDir,
         'GFI_DECAY',
-        `GFI decayed by ${decayedAmount.toFixed(1)} (${elapsedMinutes}min at ${decayRate*100}%/min). ${previousGfi.toFixed(1)} → ${state.currentGfi.toFixed(1)}`
+        `GFI decayed by ${decayedAmount.toFixed(1)} (${elapsedMinutes}min). ${previousGfi.toFixed(1)} → ${state.currentGfi.toFixed(1)}`
       );
     }
-    
+
     schedulePersistence(state);
     return state;
 }
