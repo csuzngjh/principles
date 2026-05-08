@@ -241,6 +241,45 @@ describe('applyDecay', () => {
 
     expect(state.currentGfi).toBe(30);
   });
+
+  // PRI-82: Empty source ledger + stable stage → direct decay on currentGfi
+  it('empty source ledger decays currentGfi directly (fresh session restart case)', () => {
+    const state = makeState({ currentGfi: 30, gfiBySource: {} });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
+
+    // stable decay = 0.5/min → 30 - 0.5 = 29.5
+    expect(next.currentGfi).toBeCloseTo(29.5);
+    expect(next.gfiBySource).toEqual({});
+  });
+
+  it('source ledger all pruned -> currentGfi=0', () => {
+    // Source at minPruneBelow=8, stable decay=0.5/min → 7.5 after 1 min → pruned
+    const state = makeState({
+      currentGfi: 8,
+      gfiBySource: { tool_failure: 8 },
+    });
+    const policy = makePolicy({ relief: { toolSuccessRatio: 0.25, minPruneBelow: 8 } });
+    const next = applyDecay(state, 1, policy, 'stable', FIXED_NOW);
+
+    expect(next.gfiBySource.tool_failure).toBeUndefined();
+    expect(next.currentGfi).toBe(0); // Invariant: when all sources pruned, currentGfi must be 0
+  });
+
+  it('all sources pruned -> currentGfi=0 (multi-source)', () => {
+    const state = makeState({
+      currentGfi: 16.5,
+      gfiBySource: {
+        tool_failure: 8.3,  // → 7.8 after decay → pruned (< 8)
+        dispatch_error: 8.2, // → 7.7 after decay → pruned (< 8)
+      },
+    });
+    const policy = makePolicy({ relief: { toolSuccessRatio: 0.25, minPruneBelow: 8 } });
+    const next = applyDecay(state, 1, policy, 'stable', FIXED_NOW);
+
+    expect(next.gfiBySource.tool_failure).toBeUndefined();
+    expect(next.gfiBySource.dispatch_error).toBeUndefined();
+    expect(next.currentGfi).toBe(0); // Invariant preserved
+  });
 });
 
 describe('applyRelief', () => {
