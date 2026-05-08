@@ -134,12 +134,21 @@ export function handleAfterToolCall(
   }
 
   // ── Track A: Empirical Friction (GFI) ──
-  
+
+  // PRI-80: Classify tool failure source — dispatch errors are distinct from execution failures
+  const classifyToolFailureSource = (toolName: string | undefined, error: unknown): 'dispatch_error' | 'tool_failure' => {
+    if (!toolName || toolName.trim() === '') return 'dispatch_error';
+    const msg = String(error ?? '');
+    if (/tool\s+not\s+found/i.test(msg)) return 'dispatch_error';
+    if (/unknown\s+tool/i.test(msg)) return 'dispatch_error';
+    return 'tool_failure';
+  };
+
   // 0. Special Case: Manual Pain Intervention
   if (event.toolName === 'pain' || event.toolName === 'skill:pain') {
     const reason = params.input || params.arguments || 'Manual intervention';
     const traceId = createTraceId();
-    trackFriction(sessionId, 100, 'manual_pain', effectiveWorkspaceDir);
+    trackFriction(sessionId, 100, 'manual_pain', effectiveWorkspaceDir, { source: 'manual_pain' });
     SystemLogger.log(effectiveWorkspaceDir, 'MANUAL_PAIN', `User manually triggered pain: ${reason}`);
     eventLog.recordPainSignal(sessionId, {
       score: 100,
@@ -215,13 +224,16 @@ export function handleAfterToolCall(
   const exitCode = (event.result && typeof event.result === 'object') ? (event.result as Record<string, unknown>).exitCode : 0;
   const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
 
+  // PRI-80: Classify source before tracking — available in both branches
+  const failureSource = classifyToolFailureSource(event.toolName, event.error);
+
   if (isFailure) {
     const errorText = String(event.error ?? (typeof event.result === 'string' ? event.result : JSON.stringify(event.result)));
     const denoised = denoiseError(errorText);
     const hash = computeHash(denoised);
-    
+
     const deltaF = config.get('scores.tool_failure_friction') || 30;
-    const updatedState = trackFriction(sessionId, deltaF, hash, effectiveWorkspaceDir, { source: 'tool_failure' });
+    const updatedState = trackFriction(sessionId, deltaF, hash, effectiveWorkspaceDir, { source: failureSource });
     latestFailureState = updatedState;
     
     // ── Trust Engine: Record failure ──
@@ -274,23 +286,29 @@ export function handleAfterToolCall(
     clearInjectedProbationIds(sessionId, effectiveWorkspaceDir);
   } else {
     // ── SUCCESS BRANCH ──
-    // Only reduce tool_failure source GFI by 50%, preserve user_empathy and other sources
-    // This prevents "read file success" from wiping user frustration signals
+    // PRI-80: Relieve both dispatch_error and tool_failure on success.
+    // This prevents "read file success" from wiping dispatch error signals.
     const session = getSession(sessionId);
     const toolFailureGfi = session?.gfiBySource?.tool_failure || 0;
-    
-     
-    let resetState: SessionState;
-    if (toolFailureGfi > 0) {
-      // Reduce tool_failure source by 50% (relief from successful tool execution)
-      const reliefAmount = toolFailureGfi * 0.5;
-      resetState = resetFriction(sessionId, effectiveWorkspaceDir, {
-        source: 'tool_failure',
-        amount: reliefAmount,
-      });
-    } else {
-      // No tool_failure GFI to reduce, just get current state
-      resetState = session || resetFriction(sessionId, effectiveWorkspaceDir);
+    const dispatchErrorGfi = session?.gfiBySource?.dispatch_error || 0;
+
+    let resetState: SessionState = session || resetFriction(sessionId, effectiveWorkspaceDir);
+    if (toolFailureGfi > 0 || dispatchErrorGfi > 0) {
+      // Relieve both sources proportionally (50% relief each)
+      if (toolFailureGfi > 0) {
+        const reliefAmount = toolFailureGfi * 0.5;
+        resetState = resetFriction(sessionId, effectiveWorkspaceDir, {
+          source: 'tool_failure',
+          amount: reliefAmount,
+        });
+      }
+      if (dispatchErrorGfi > 0) {
+        const reliefAmount = dispatchErrorGfi * 0.5;
+        resetState = resetFriction(sessionId, effectiveWorkspaceDir, {
+          source: 'dispatch_error',
+          amount: reliefAmount,
+        });
+      }
     }
     
     recordEvolutionSuccess(effectiveWorkspaceDir, event.toolName, {
@@ -370,7 +388,7 @@ export function handleAfterToolCall(
   const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, effectiveWorkspaceDir);
   const traceId = createTraceId();
   const diagnosticGate = evaluatePainDiagnosticGate({
-    source: 'tool_failure',
+    source: failureSource,
     score: painScore,
     currentGfi: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.currentGfi ?? 0,
     consecutiveErrors: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.consecutiveErrors ?? 0,
@@ -396,7 +414,7 @@ export function handleAfterToolCall(
       rejectPayload = JSON.stringify({
         reason: diagnosticGate.reason,
         detail: diagnosticGate.detail,
-        source: 'tool_failure',
+        source: failureSource,
         sessionId: sessionId,
         gfi: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.currentGfi ?? 0,
         score: painScore,
@@ -412,7 +430,7 @@ export function handleAfterToolCall(
   // resolve derivedFromPainIds to the originating failed action.
   wctx.trajectory?.recordPainEvent({
     sessionId,
-    source: 'tool_failure',
+    source: failureSource,
     score: painScore,
     reason: `Tool ${event.toolName} failed on ${relPath}`,
     severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
@@ -428,7 +446,7 @@ export function handleAfterToolCall(
       effectiveWorkspaceDir,
       {
         reason: `Tool ${event.toolName} failed on ${relPath}. Error: ${event.error ?? 'Non-zero exit code'}`,
-        source: 'tool_failure',
+        source: failureSource,
         score: String(painScore),
       },
       () => wctx.evolutionReducer.getActivePrinciples().map((p) => ({
@@ -468,7 +486,7 @@ export function handleAfterToolCall(
 
   eventLog.recordPainSignal(sessionId, {
     score: painScore,
-    source: 'tool_failure',
+    source: failureSource,
     reason: `Tool ${event.toolName} failed on ${relPath}`,
     isRisky: isRisk,
   });
@@ -477,7 +495,7 @@ export function handleAfterToolCall(
   const evoLogger = getEvolutionLogger(effectiveWorkspaceDir, wctx.trajectory);
   evoLogger.logPainDetected({
     traceId,
-    source: 'tool_failure',
+    source: failureSource,
     reason: `Tool ${event.toolName} failed on ${relPath}`,
     score: painScore,
     toolName: event.toolName,
@@ -490,7 +508,7 @@ export function handleAfterToolCall(
     type: 'pain_detected',
     data: {
       painId: createPainId(sessionId),
-      painType: 'tool_failure',
+      painType: failureSource,
       source: event.toolName,
       reason: `Tool ${event.toolName} failed on ${relPath}; diagnosticGate=${diagnosticGate.reason}`,
       score: painScore,

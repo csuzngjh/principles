@@ -393,7 +393,7 @@ export type EvolutionLoopEventType =
 
 export interface PainDetectedData {
   painId: string;
-  painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  painType: 'tool_failure' | 'dispatch_error' | 'subagent_error' | 'user_frustration';
   source: string;
   reason: string;
   score?: number;
