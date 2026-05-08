@@ -99,11 +99,10 @@ function createPainId(sessionId: string): string {
 export function classifyToolFailureSource(toolName: string | undefined, error: unknown): 'dispatch_error' | 'tool_failure' {
   if (!toolName || toolName.trim() === '') return 'dispatch_error';
   const msg = String(error ?? '');
-  // Dropped "error:" prefix requirement to catch "failed: unknown tool read_file" style messages.
-  // Word-boundary anchors prevent partial matches (e.g. "report_tool_not_found" would not match).
-  // Trade-off: messages containing "tool not found" without dispatch context (e.g. suppression
-  // warnings) will also match. This is acceptable since OpenClaw does not produce such messages.
-  if (/\btool\s+not\s+found\b/i.test(msg)) return 'dispatch_error';
+  // Dropped "error:" prefix to catch "failed: unknown tool read_file" style messages.
+  // Catches: "tool not found", "tool <name> not found", "unknown tool".
+  // Word-boundary anchors prevent "report_tool_not_found" from matching.
+  if (/\btool\s+(?:\S+\s+)?not\s+found\b/i.test(msg)) return 'dispatch_error';
   if (/\bunknown\s+tool\b/i.test(msg)) return 'dispatch_error';
   return 'tool_failure';
 }
