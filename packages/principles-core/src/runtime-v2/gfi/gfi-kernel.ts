@@ -1,5 +1,5 @@
-import type { GfiState, GfiEvent, GfiPolicy, GfiStage, GfiSource, GfiSnapshot } from './gfi-types';
-import { DEFAULT_GFI_POLICY } from './gfi-policy';
+import type { GfiState, GfiEvent, GfiPolicy, GfiStage, GfiSource, GfiSnapshot } from './gfi-types.js';
+import { DEFAULT_GFI_POLICY } from './gfi-policy.js';
 
 export { DEFAULT_GFI_POLICY };
 

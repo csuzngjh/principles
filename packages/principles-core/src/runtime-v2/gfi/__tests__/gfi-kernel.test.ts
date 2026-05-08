@@ -6,8 +6,8 @@ import {
   classifyGfiStage,
   createGfiSnapshot,
   DEFAULT_GFI_POLICY,
-} from '../gfi-kernel';
-import type { GfiState, GfiEvent, GfiPolicy } from '../gfi-types';
+} from '../gfi-kernel.js';
+import type { GfiState, GfiEvent, GfiPolicy } from '../gfi-types.js';
 
 function makeState(overrides: Partial<GfiState> = {}): GfiState {
   return {

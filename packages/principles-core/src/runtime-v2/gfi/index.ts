@@ -1,4 +1,4 @@
-export { DEFAULT_GFI_POLICY } from './gfi-policy';
+export { DEFAULT_GFI_POLICY } from './gfi-policy.js';
 
 export {
   applyFriction,
@@ -6,7 +6,7 @@ export {
   applyRelief,
   classifyGfiStage,
   createGfiSnapshot,
-} from './gfi-kernel';
+} from './gfi-kernel.js';
 
 export type {
   GfiState,
@@ -15,4 +15,4 @@ export type {
   GfiStage,
   GfiSource,
   GfiSnapshot,
-} from './gfi-types';
+} from './gfi-types.js';
