@@ -12,6 +12,15 @@ export type GfiStage = 'stable' | 'elevated' | 'critical' | 'saturated';
 
 export interface GfiState {
   currentGfi: number;
+  /**
+   * Per-source GFI ledger. Invariant: when gfiBySource is non-empty,
+   * currentGfi MUST equal the sum of all source values (within rounding).
+   *
+   * Exception: after session restart or persistence boundary, gfiBySource
+   * may be empty while currentGfi > 0 (source ledger not persisted).
+   * In this state, applyDecay falls back to direct currentGfi decay
+   * using the stage rate until source events repopulate the ledger.
+   */
   gfiBySource: Partial<Record<GfiSource, number>>;
   lastErrorHash?: string;
   lastErrorSource?: string;
