@@ -8,6 +8,8 @@ import { evaluatePhase3Inputs } from './phase3-input-filter.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import type { WorkflowStage } from '../core/workflow-funnel-loader.js';
 import type { RuntimeTruth, AnalyticsTruth } from '../types/runtime-summary.js';
+import { buildGfiWorkspaceSnapshot } from '@principles/core/runtime-v2';
+import type { GfiWorkspaceSnapshot } from '@principles/core/runtime-v2';
 
 export type RuntimeDataQuality = 'authoritative' | 'partial';
 export type RuntimeRewardPolicy =
@@ -47,6 +49,7 @@ export interface RuntimeSummary {
     peak: number | null;
     sources: RuntimeSummarySource[];
     dataQuality: RuntimeDataQuality;
+    workspaceSnapshot?: GfiWorkspaceSnapshot;
   };
   evolution: {
     queue: {
@@ -311,6 +314,18 @@ export class RuntimeSummaryService {
     const gfiPeak =
       sessionPeak ?? (Number.isFinite(dailyGfiPeak) ? Number(dailyGfiPeak) : null);
 
+    // PRI-78: Build authoritative GFI workspace snapshot (active vs stale)
+    const gfiWorkspaceSnapshot: GfiWorkspaceSnapshot = buildGfiWorkspaceSnapshot({
+      sessions: sessions.map((s) => ({
+        sessionId: s.sessionId,
+        currentGfi: s.currentGfi ?? 0,
+        gfiBySource: {},
+        consecutiveErrors: 0,
+        lastActivityAt: s.lastActivityAt ?? 0,
+      })),
+      nowMs: Date.now(),
+    });
+
     pushWarning(warnings, GFI_PARTIAL_WARNING);
     if (sessionPeak === null && Number.isFinite(dailyGfiPeak)) {
       pushWarning(warnings, DAILY_GFI_WARNING);
@@ -433,6 +448,7 @@ export class RuntimeSummaryService {
         peak: gfiPeak,
         sources: gfiSources,
         dataQuality: 'partial',
+        workspaceSnapshot: gfiWorkspaceSnapshot,
       },
       evolution: {
         queue: queueStats,

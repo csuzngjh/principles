@@ -466,3 +466,8 @@ export type {
   GfiSource,
   GfiSnapshot,
 } from './gfi/index.js';
+
+// ── GFI Workspace Read Model (PRI-78) ──────────────────────────────────────
+
+export { buildGfiWorkspaceSnapshot } from './gfi/index.js';
+export type { GfiReadModelInput, GfiWorkspaceSnapshot } from './gfi/index.js';
