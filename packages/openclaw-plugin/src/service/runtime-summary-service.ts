@@ -317,14 +317,16 @@ export class RuntimeSummaryService {
       sessionPeak ?? (Number.isFinite(dailyGfiPeak) ? Number(dailyGfiPeak) : null);
 
     // PRI-78: Build authoritative GFI workspace snapshot (active vs stale)
-    // gfiBySource and consecutiveErrors are now populated from live session state
-    // when available; persisted sessions may still lack these fields.
+    // Note: gfiBySource and consecutiveErrors are intentionally stubbed — session-tracker
+    // does not yet persist full GfiState. workspaceSnapshot reflects degraded data
+    // (empty sources, no consecutive error tracking). Full fidelity requires PRI-77 persistence.
+    // TODO(PRI-78b): populate gfiBySource and consecutiveErrors from session tracker
     const gfiWorkspaceSnapshot: GfiWorkspaceSnapshot = buildGfiWorkspaceSnapshot({
       sessions: sessions.map((s) => ({
         sessionId: s.sessionId,
         currentGfi: s.currentGfi ?? 0,
-        gfiBySource: s.gfiBySource ?? {},
-        consecutiveErrors: s.consecutiveErrors ?? 0,
+        gfiBySource: {},
+        consecutiveErrors: 0,
         lastActivityAt: s.lastControlActivityAt ?? s.lastActivityAt ?? 0,
         dailyGfiPeak: s.dailyGfiPeak,
       })),
