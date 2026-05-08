@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { handleAfterToolCall } from '../../src/hooks/pain.js';
+import { handleAfterToolCall, classifyToolFailureSource } from '../../src/hooks/pain.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -25,6 +25,45 @@ vi.mock('../../src/core/evolution-logger.js', () => ({
 const mockEmitSync = vi.fn();
 const mockRecordProbationFeedback = vi.fn();
 const mockUpdatePrincipleValueMetrics = vi.fn();
+
+describe('classifyToolFailureSource', () => {
+  it('empty toolName -> dispatch_error', () => {
+    expect(classifyToolFailureSource(undefined, 'tool not found')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('', 'tool not found')).toBe('dispatch_error');
+  });
+
+  it('"Tool not found" (case insensitive) -> dispatch_error', () => {
+    expect(classifyToolFailureSource('read', 'error: tool not found')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('read', 'Tool Not Found')).toBe('dispatch_error');
+    // "read_file" contains underscore (word char), breaking \s+ between "tool" and "not"
+    expect(classifyToolFailureSource('read', 'Tool read_file not found')).toBe('tool_failure');
+  });
+
+  it('"Unknown tool" (case insensitive) -> dispatch_error', () => {
+    expect(classifyToolFailureSource('read', 'error: unknown tool')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('read', 'Unknown Tool')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('read', 'failed: unknown tool read_file')).toBe('dispatch_error');
+  });
+
+  it('Warning-style messages containing "tool not found" -> dispatch_error', () => {
+    // After dropping "error:" prefix, Warning messages with "tool not found" match the dispatch pattern
+    expect(classifyToolFailureSource('read', 'Warning: tool not found was suppressed')).toBe('dispatch_error');
+    expect(classifyToolFailureSource('read', 'Warning: tool not found - already handled')).toBe('dispatch_error');
+  });
+
+  it('real execution errors (ENOENT, EACCES) -> tool_failure', () => {
+    expect(classifyToolFailureSource('read', 'ENOENT: no such file or directory')).toBe('tool_failure');
+    expect(classifyToolFailureSource('write', 'EACCES: permission denied')).toBe('tool_failure');
+    expect(classifyToolFailureSource('edit', 'Error: EIO: I/O error')).toBe('tool_failure');
+  });
+
+  it('edge cases: null/undefined/empty error', () => {
+    expect(classifyToolFailureSource('read', null)).toBe('tool_failure');
+    expect(classifyToolFailureSource('read', undefined)).toBe('tool_failure');
+    expect(classifyToolFailureSource('read', '')).toBe('tool_failure');
+    expect(classifyToolFailureSource('read', 123)).toBe('tool_failure');
+  });
+});
 
 describe('Post-Write Checks & Pain Hook', () => {
   const workspaceDir = '/mock/workspace';
