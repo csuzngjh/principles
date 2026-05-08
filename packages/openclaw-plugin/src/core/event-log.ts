@@ -302,12 +302,13 @@ export class EventLog {
       if (entry.category === 'success') stats.tools.success++;
       else stats.tools.failure++;
 
-      // PRI-79: Update GFI stats from tool call events
+      // PRI-79/PRI-82: Update GFI stats — use gfiAfter if present, else legacy gfi field
       const tcData = entry.data as unknown as ToolCallEventData;
-      if (tcData.gfiAfter !== undefined) {
+      const observedGfi = tcData.gfiAfter ?? tcData.gfi;
+      if (observedGfi !== undefined) {
         stats.gfi.samples++;
-        stats.gfi.total += tcData.gfiAfter;
-        stats.gfi.peak = Math.max(stats.gfi.peak, tcData.gfiAfter);
+        stats.gfi.total += observedGfi;
+        stats.gfi.peak = Math.max(stats.gfi.peak, observedGfi);
       }
     } else if (entry.type === 'pain_signal') {
       const data = entry.data as unknown as PainSignalEventData;

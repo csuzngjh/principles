@@ -1,13 +1,14 @@
 /**
- * pd runtime health gfi command — GFI workspace snapshot for Runtime V2.
+ * pd runtime gfi snapshot command — GFI workspace snapshot for Runtime V2.
  *
  * Usage:
- *   pd runtime health gfi --workspace <path> --json
+ *   pd runtime gfi snapshot --workspace <path> --json
+ *   pd runtime health gfi --workspace <path> --json  (alias)
  *
  * Shows active vs stale session breakdown for GFI visibility.
  * Stale sessions (>2h inactive) do NOT influence the active snapshot.
  *
- * PRI-78: GFI Observability
+ * PRI-78/PRI-82: GFI Observability
  */
 import * as path from 'path';
 import * as fs from 'fs';
