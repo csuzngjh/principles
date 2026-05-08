@@ -8,6 +8,8 @@ export {
   createGfiSnapshot,
 } from './gfi-kernel.js';
 
+export { buildGfiWorkspaceSnapshot } from './gfi-read-model.js';
+
 export type {
   GfiState,
   GfiEvent,
@@ -16,3 +18,5 @@ export type {
   GfiSource,
   GfiSnapshot,
 } from './gfi-types.js';
+
+export type { GfiReadModelInput, GfiWorkspaceSnapshot } from './gfi-read-model.js';

@@ -8,6 +8,8 @@ import { evaluatePhase3Inputs } from './phase3-input-filter.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import type { WorkflowStage } from '../core/workflow-funnel-loader.js';
 import type { RuntimeTruth, AnalyticsTruth } from '../types/runtime-summary.js';
+import { buildGfiWorkspaceSnapshot } from '@principles/core/runtime-v2';
+import type { GfiWorkspaceSnapshot } from '@principles/core/runtime-v2';
 
 export type RuntimeDataQuality = 'authoritative' | 'partial';
 export type RuntimeRewardPolicy =
@@ -47,6 +49,7 @@ export interface RuntimeSummary {
     peak: number | null;
     sources: RuntimeSummarySource[];
     dataQuality: RuntimeDataQuality;
+    workspaceSnapshot?: GfiWorkspaceSnapshot;
   };
   evolution: {
     queue: {
@@ -311,6 +314,23 @@ export class RuntimeSummaryService {
     const gfiPeak =
       sessionPeak ?? (Number.isFinite(dailyGfiPeak) ? Number(dailyGfiPeak) : null);
 
+    // PRI-78: Build authoritative GFI workspace snapshot (active vs stale)
+    // Note: gfiBySource and consecutiveErrors are intentionally stubbed — session-tracker
+    // does not yet persist full GfiState. workspaceSnapshot reflects degraded data
+    // (empty sources, no consecutive error tracking). Full fidelity requires PRI-77 persistence.
+    // TODO(PRI-78b): populate gfiBySource and consecutiveErrors from session tracker
+    const gfiWorkspaceSnapshot: GfiWorkspaceSnapshot = buildGfiWorkspaceSnapshot({
+      sessions: sessions.map((s) => ({
+        sessionId: s.sessionId,
+        currentGfi: s.currentGfi ?? 0,
+        gfiBySource: {},
+        consecutiveErrors: 0,
+        lastActivityAt: s.lastControlActivityAt ?? s.lastActivityAt ?? 0,
+        dailyGfiPeak: s.dailyGfiPeak,
+      })),
+      nowMs: Date.now(),
+    });
+
     pushWarning(warnings, GFI_PARTIAL_WARNING);
     if (sessionPeak === null && Number.isFinite(dailyGfiPeak)) {
       pushWarning(warnings, DAILY_GFI_WARNING);
@@ -359,6 +379,7 @@ export class RuntimeSummaryService {
         db.close();
       }
     } catch { /* task store not yet initialized — 0 pending */ }
+    // TODO(PRI-XXX): distinguish "not initialized" from permission/corruption/query errors
     const runtimeDiagnosis = {
       pendingTasks: pendingRuntimeDiagTasks,
       tasksWrittenToday: diagDailyStats?.diagnosisTasksWritten ?? 0,
@@ -433,6 +454,7 @@ export class RuntimeSummaryService {
         peak: gfiPeak,
         sources: gfiSources,
         dataQuality: 'partial',
+        workspaceSnapshot: gfiWorkspaceSnapshot,
       },
       evolution: {
         queue: queueStats,
