@@ -304,7 +304,7 @@ export class EventLog {
 
       // PRI-79: Update GFI stats from tool call events
       const tcData = entry.data as unknown as ToolCallEventData;
-      if (tcData.gfiAfter !== undefined && tcData.gfiAfter > 0) {
+      if (tcData.gfiAfter !== undefined) {
         stats.gfi.samples++;
         stats.gfi.total += tcData.gfiAfter;
         stats.gfi.peak = Math.max(stats.gfi.peak, tcData.gfiAfter);

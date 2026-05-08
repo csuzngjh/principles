@@ -82,7 +82,7 @@ export interface ToolCallEventData {
   filePath?: string;
   error?: string;
   errorType?: string;
-  /** Legacy field — pre-PR-79; prefer gfiBefore/gfiAfter for new code */
+  /** @deprecated use gfiBefore/gfiAfter instead */
   gfi?: number;
   consecutiveErrors?: number;
   exitCode?: number;
@@ -377,7 +377,9 @@ export interface GfiStats {
   peak: number;
   samples: number;
   total: number;
+  // TODO: resetCount — requires GFI reset event from session-tracker (not yet wired to event-log)
   resetCount: number;
+  // TODO: hourlyDistribution — requires timestamp bucketing in updateStats (not yet implemented)
   hourlyDistribution: number[];  // 24 hourly samples
 }
 
