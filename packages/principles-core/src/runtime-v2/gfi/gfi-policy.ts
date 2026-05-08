@@ -1,4 +1,4 @@
-import type { GfiPolicy } from './gfi-types';
+import type { GfiPolicy } from './gfi-types.js';
 
 export const DEFAULT_GFI_POLICY: GfiPolicy = {
   stageThresholds: {
