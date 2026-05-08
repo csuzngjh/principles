@@ -81,6 +81,7 @@ function readPersistedSessions(workspaceDir: string): {
     dailyGfiPeak?: number;
     lastActivityAt: number;
   }[] = [];
+  let skippedCount = 0;
 
   for (const file of fs.readdirSync(sessionDir)) {
     if (!file.endsWith('.json')) continue;
@@ -98,10 +99,16 @@ function readPersistedSessions(workspaceDir: string): {
           dailyGfiPeak: parsed.dailyGfiPeak,
           lastActivityAt: parsed.lastActivityAt ?? parsed.lastControlActivityAt ?? 0,
         });
+      } else {
+        skippedCount++;
       }
     } catch {
-      // Skip malformed session files
+      skippedCount++;
     }
+  }
+
+  if (skippedCount > 0) {
+    console.warn(`[runtime-gfi-snapshot] Skipped ${skippedCount} malformed session file(s)`);
   }
 
   return sessions;

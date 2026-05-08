@@ -15,23 +15,40 @@ import { createGfiSnapshot } from './gfi-kernel.js';
 export interface GfiReadModelInput {
   sessions: {
     sessionId: string;
-    currentGfi: number;
+    /** Defaults to 0 if omitted */
+    currentGfi?: number;
     gfiBySource?: Partial<Record<GfiSource, number>>;
     lastErrorSource?: string;
-    consecutiveErrors: number;
+    /** Defaults to 0 if omitted */
+    consecutiveErrors?: number;
     lastGfiDecayAt?: number;
     dailyGfiPeak?: number;
-    lastActivityAt: number;
-    workspaceDir?: string;
+    /** Defaults to 0 if omitted — session older than cutoff is classified stale */
+    lastActivityAt?: number;
   }[];
   nowMs: number;
-  staleCutoffMs?: number; // default: 2 hours
+  /** Sessions with lastActivityAt < nowMs - staleCutoffMs are classified stale. Default: 2 hours */
+  staleCutoffMs?: number;
   policy?: GfiPolicy;
 }
 
+/**
+ * Workspace-level GFI snapshot — partitions sessions into active vs stale.
+ *
+ * Invariant: `active === null` iff `activeSessionCount === 0` (no active sessions exist).
+ * Invariant: `staleGfiRange === null` iff `staleSessionCount === 0` (not an error state).
+ */
 export interface GfiWorkspaceSnapshot {
+  /**
+   * Snapshot for the highest-GFI active session.
+   * Null when there are no active sessions (all stale, or no sessions exist).
+   */
   active: GfiSnapshot | null;
   staleSessionCount: number;
+  /**
+   * Min/max GFI across all stale sessions.
+   * Null when staleSessionCount === 0 (no stale sessions — not an error state).
+   */
   staleGfiRange: { min: number; max: number } | null;
   totalSessionCount: number;
   activeSessionCount: number;
@@ -95,7 +112,7 @@ export function buildGfiWorkspaceSnapshot(
   const staleSessions: GfiReadModelInput['sessions'] = [];
 
   for (const session of sessions) {
-    if (session.lastActivityAt >= cutoffTime) {
+    if ((session.lastActivityAt ?? 0) >= cutoffTime) {
       activeSessions.push(session);
     } else {
       staleSessions.push(session);
@@ -108,9 +125,9 @@ export function buildGfiWorkspaceSnapshot(
   for (const session of activeSessions) {
     if (
       selectedActive === null ||
-      session.currentGfi > selectedActive.currentGfi ||
-      (session.currentGfi === selectedActive.currentGfi &&
-        session.lastActivityAt > selectedActive.lastActivityAt)
+      (session.currentGfi ?? 0) > (selectedActive.currentGfi ?? 0) ||
+      ((session.currentGfi ?? 0) === (selectedActive.currentGfi ?? 0) &&
+        (session.lastActivityAt ?? 0) > (selectedActive.lastActivityAt ?? 0))
     ) {
       selectedActive = session;
     }

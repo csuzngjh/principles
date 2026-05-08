@@ -220,6 +220,25 @@ describe('buildGfiWorkspaceSnapshot', () => {
 
       expect(result.staleGfiRange).toEqual({ min: 45, max: 45 });
     });
+
+    it('stale range with multiple sessions — min/max computed across all', () => {
+      const twoHoursAgo = nowMs - 2 * 60 * 60 * 1000;
+      const input: GfiReadModelInput = {
+        sessions: [
+          makeSession({ sessionId: 's_1', currentGfi: 10, lastActivityAt: twoHoursAgo - 4000 }),
+          makeSession({ sessionId: 's_2', currentGfi: 90, lastActivityAt: twoHoursAgo - 2000 }),
+          makeSession({ sessionId: 's_3', currentGfi: 45, lastActivityAt: twoHoursAgo }),
+        ],
+        nowMs: nowMs + 1000,
+      };
+
+      const result = buildGfiWorkspaceSnapshot(input);
+
+      // s_1 is min (10), s_2 is max (90)
+      expect(result.staleGfiRange).toEqual({ min: 10, max: 90 });
+      expect(result.staleSessionCount).toBe(3);
+      expect(result.active).toBeNull();
+    });
   });
 
   describe('generatedAt', () => {
