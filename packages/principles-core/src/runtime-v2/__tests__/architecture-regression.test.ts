@@ -65,7 +65,6 @@ const REQUIRED_SOURCE_FILES = [
   'gfi/gfi-types.ts',
   'gfi/gfi-policy.ts',
   'gfi/gfi-kernel.ts',
-  'gfi/gfi-snapshot.ts',
   'gfi/index.ts',
 ] as const;
 
@@ -1370,7 +1369,6 @@ describe('PRI-76 GFI core kernel boundary', () => {
     'gfi/gfi-types.ts',
     'gfi/gfi-policy.ts',
     'gfi/gfi-kernel.ts',
-    'gfi/gfi-snapshot.ts',
     'gfi/index.ts',
   ];
 

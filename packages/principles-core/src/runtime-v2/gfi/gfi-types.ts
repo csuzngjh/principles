@@ -12,7 +12,7 @@ export type GfiStage = 'stable' | 'elevated' | 'critical' | 'saturated';
 
 export interface GfiState {
   currentGfi: number;
-  gfiBySource: Record<string, number>;
+  gfiBySource: Partial<Record<GfiSource, number>>;
   lastErrorHash?: string;
   lastErrorSource?: string;
   consecutiveErrors: number;
@@ -39,7 +39,7 @@ export interface GfiEvent {
 export interface GfiSnapshot {
   currentGfi: number;
   stage: GfiStage;
-  sources: Record<string, number>;
+  sources: Partial<Record<GfiSource, number>>;
   dominantSource: string | null;
   consecutiveErrors: number;
   lastErrorSource?: string;

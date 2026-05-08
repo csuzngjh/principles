@@ -1,4 +1,4 @@
-import type { GfiState, GfiEvent, GfiPolicy, GfiStage } from './gfi-types';
+import type { GfiState, GfiEvent, GfiPolicy, GfiStage, GfiSource, GfiSnapshot } from './gfi-types';
 import { DEFAULT_GFI_POLICY } from './gfi-policy';
 
 export { DEFAULT_GFI_POLICY };
@@ -26,7 +26,7 @@ export function applyFriction(
   const score = event.baseScore * multiplier;
   const newCurrentGfi = state.currentGfi + score;
 
-  const newGfiBySource: Record<string, number> = { ...state.gfiBySource };
+  const newGfiBySource: Partial<Record<GfiSource, number>> = { ...state.gfiBySource };
   newGfiBySource[event.source] = (newGfiBySource[event.source] ?? 0) + score;
 
   return {
@@ -51,11 +51,11 @@ export function applyDecay(
   const decayed = state.currentGfi - rate * elapsedMinutes;
   const nextGfi = Math.max(0, Math.round(decayed * 10) / 10);
 
-  const nextSources: Record<string, number> = {};
-  for (const [source, value] of Object.entries(state.gfiBySource)) {
+  const nextSources: Partial<Record<GfiSource, number>> = {};
+  for (const [src, value] of Object.entries(state.gfiBySource)) {
     if (value >= policy.relief.minPruneBelow) {
       const sourceDecayed = value - rate * elapsedMinutes;
-      nextSources[source] = Math.max(0, Math.round(sourceDecayed * 10) / 10);
+      nextSources[src as GfiSource] = Math.max(0, Math.round(sourceDecayed * 10) / 10);
     }
   }
 
@@ -85,18 +85,20 @@ export function applyRelief(
     };
   }
 
-  const newSources: Record<string, number> = { ...state.gfiBySource };
+  const newSources: Partial<Record<GfiSource, number>> = { ...state.gfiBySource };
 
   if (amount > 0) {
     // source-specific partial relief
-    if (newSources[source] !== undefined) {
-      newSources[source] = Math.max(0, newSources[source] - amount);
+    const key = source as GfiSource;
+    if (newSources[key] !== undefined) {
+      newSources[key] = Math.max(0, (newSources[key] ?? 0) - amount);
     }
   } else {
     // ratio-based relief (toolSuccessRatio)
     const ratio = policy.relief.toolSuccessRatio;
     for (const src of Object.keys(newSources)) {
-      newSources[src] = Math.max(0, Math.round(((newSources[src] ?? 0) * (1 - ratio)) * 10) / 10);
+      const key = src as GfiSource;
+      newSources[key] = Math.max(0, Math.round(((newSources[key] ?? 0) * (1 - ratio)) * 10) / 10);
     }
   }
 
@@ -122,12 +124,10 @@ export function classifyGfiStage(gfi: number, policy: GfiPolicy): GfiStage {
   return 'stable';
 }
 
-import type { GfiSnapshot } from './gfi-types';
-
 export function createGfiSnapshot(state: GfiState, policy: GfiPolicy): GfiSnapshot {
   const stage = classifyGfiStage(state.currentGfi, policy);
 
-  const sources: Record<string, number> = { ...state.gfiBySource };
+  const sources: Partial<Record<GfiSource, number>> = { ...state.gfiBySource };
 
   let dominantSource: string | null = null;
   let maxSourceValue = 0;

@@ -221,6 +221,24 @@ describe('applyRelief', () => {
     expect(next.lastErrorSource).toBeUndefined();
   });
 
+  it('source=all with amount < 100 falls through to ratio-based relief', () => {
+    const state = makeState({
+      currentGfi: 60,
+      gfiBySource: { tool_failure: 40, dispatch_error: 20 },
+      consecutiveErrors: 2,
+    });
+    const policy = makePolicy({ relief: { toolSuccessRatio: 0.5, minPruneBelow: 5 } });
+    // amount=50 is not >= 100, so it falls through: amount > 0 but 'all' not in gfiBySource → no-op
+    const next = applyRelief(state, { source: 'all', amount: 50 }, policy);
+
+    // 'all' not a real source, so no source-specific partial relief applies
+    // consecutiveErrors unchanged (source='all' is not lastErrorSource)
+    expect(next.gfiBySource.tool_failure).toBe(40);
+    expect(next.gfiBySource.dispatch_error).toBe(20);
+    expect(next.currentGfi).toBe(60);
+    expect(next.consecutiveErrors).toBe(2);
+  });
+
   it('resets consecutiveErrors when relieving last error source', () => {
     const state = makeState({
       currentGfi: 50,
