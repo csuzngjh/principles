@@ -267,13 +267,6 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey
     return state;
 }
 
-function ensureGfiLedger(state: SessionState): Record<string, number> {
-    if (!state.gfiBySource || typeof state.gfiBySource !== 'object') {
-        state.gfiBySource = {};
-    }
-    return state.gfiBySource;
-}
-
 export function trackToolRead(sessionId: string, filePath: string, workspaceDir?: string): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir);
     const normalizedPath = path.posix.normalize(filePath.replace(/\\/g, '/'));
