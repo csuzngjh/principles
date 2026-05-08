@@ -217,3 +217,33 @@
 - **测试**：40 个单元测试 + 159 个架构回归测试全部通过
 - **未迁移（Phase 2）**：`selectPrinciplesForInjection` / `classifyTask` / empathy / `autoCompressFocus`
 - **设计决策**：`truncateInjectionToBudget` 改为 3 string 参数 + 1 options 参数（替代原 PromptInjectionPart[]），preserves prependSystemContext + prependContext
+
+## PRI-75 Phase 2 完成 (PR #510 merged 2026-05-07)
+
+- **3 个纯函数**已迁移到 `@principles/core/src/prompt-builder/`：
+  - `formatPrinciple(p)` — principle 格式化
+  - `selectPrinciplesForInjection(principles, budgetChars)` — principle 选择
+  - `DEFAULT_PRINCIPLE_BUDGET` 常量
+- **plugin thin adapter**：`principle-injection.ts` re-export from core，删除了内联 `selectPrinciplesForInjection` 和 `PRIORITY_ORDER`
+- **测试**：51 个单元测试 + 架构回归测试全部通过
+- **未迁移（Phase 3）**：`classifyTask` / empathy / `autoCompressFocus`
+
+## PRI-75 Phase 3 完成 (PR #511 merged 2026-05-07)
+
+- **路由分类纯逻辑**已迁移到 `@principles/core/src/prompt-builder/routing-guidance.ts`：
+  - `RoutingInput` 接口、`RoutingClassification` 类型
+  - `READER_KEYWORDS / EDITOR_KEYWORDS / HIGH_ENTROPY_KEYWORDS` 常量
+  - `containsKeyword(text, keywords)` / `computeCombinedText(input)` / `classifyTaskKind(input)` / `buildReason` / `buildBlockers`
+  - `COMPLEXITY_HINTS` / `MAX_BOUNDED_EDIT_FILES` 常量
+- **plugin thin adapter**：`local-worker-routing.ts` 变为 thin adapter，调用 core 纯函数，保留 I/O（getDeployment/isRoutingEnabledForProfile 等）
+- **review 修复**：H2 blockers 条件触发、M1 `@deprecated` JSDoc
+- **测试**：51 个单元测试 + architecture regression guards 通过
+
+## PRI-74 完成 (PR #512 merged 2026-05-07)
+
+- **review findings 修复**：PRI-75 Phase 3 的 follow-up
+  - 恢复 `nocturnal-rollout route --complexity=` 解析
+  - `index.ts` 添加 PRI-74 phase comment
+  - 更新 route 注释（移除过时的 shadow observation 描述）
+  - `local-worker-routing.ts` 明确 pure vs I/O-bound classification categories
+  - 删除 architecture-regression.test.ts 内冗余 inline phase comment
