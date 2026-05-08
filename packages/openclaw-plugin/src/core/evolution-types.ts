@@ -290,7 +290,7 @@ export interface Principle {
   text: string;
   source: {
     painId: string;
-    painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+    painType: 'tool_failure' | 'dispatch_error' | 'subagent_error' | 'user_frustration';
     timestamp: string;
   };
   trigger: string;
@@ -393,7 +393,7 @@ export type EvolutionLoopEventType =
 
 export interface PainDetectedData {
   painId: string;
-  painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  painType: 'tool_failure' | 'dispatch_error' | 'subagent_error' | 'user_frustration';
   source: string;
   reason: string;
   score?: number;
@@ -410,7 +410,7 @@ export interface CandidateCreatedData {
   action: string;
   status: 'candidate';
   /** Pain type that generated this candidate — preserved on replay */
-  painType?: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  painType?: 'tool_failure' | 'dispatch_error' | 'subagent_error' | 'user_frustration';
   /** Optional evaluability — defaults to 'manual_only' if omitted */
   evaluability?: PrincipleEvaluatorLevel;
   /** Optional detector metadata — absent = manual_only */

@@ -144,8 +144,8 @@ export function buildGfiWorkspaceSnapshot(
   if (staleSessions.length > 0) {
     const staleGfis = staleSessions.map((s) => s.currentGfi ?? 0);
     staleGfiRange = {
-      min: Math.min(...staleGfis),
-      max: Math.max(...staleGfis),
+      min: staleGfis.reduce((a, b) => Math.min(a, b), Infinity),
+      max: staleGfis.reduce((a, b) => Math.max(a, b), -Infinity),
     };
   }
 
