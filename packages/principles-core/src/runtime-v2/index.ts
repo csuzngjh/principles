@@ -447,3 +447,22 @@ export type {
   BlockedSample,
   DependencyFailedSample,
 } from './internalization-queue-read-model.js';
+
+// ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────
+
+export {
+  DEFAULT_GFI_POLICY,
+  applyFriction,
+  applyDecay,
+  applyRelief,
+  classifyGfiStage,
+  createGfiSnapshot,
+} from './gfi/index.js';
+export type {
+  GfiState,
+  GfiEvent,
+  GfiPolicy,
+  GfiStage,
+  GfiSource,
+  GfiSnapshot,
+} from './gfi/index.js';
