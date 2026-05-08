@@ -374,7 +374,7 @@ export function resetFriction(
 
     if (options?.source) {
         const coreState = toGfiState(state);
-        const nextCore = coreApplyRelief(coreState, { source: options.source, amount: options.amount ?? 0 }, DEFAULT_GFI_POLICY);
+        const nextCore = coreApplyRelief(coreState, { source: options.source, amount: options.amount ?? 0 }, Date.now(), DEFAULT_GFI_POLICY);
         applyGfiResult(state, nextCore);
 
         if (state.currentGfi > 0) {
@@ -392,7 +392,7 @@ export function resetFriction(
     // Full reset via core kernel
     const previousGfi = state.currentGfi;
     const coreState = toGfiState(state);
-    const nextCore = coreApplyRelief(coreState, { source: 'all', amount: 100 }, DEFAULT_GFI_POLICY);
+    const nextCore = coreApplyRelief(coreState, { source: 'all', amount: 100 }, Date.now(), DEFAULT_GFI_POLICY);
     applyGfiResult(state, nextCore);
 
     if (previousGfi > 0) {
@@ -569,7 +569,7 @@ export function decayGfi(sessionId: string, elapsedMinutes: number): SessionStat
 
     const coreState = toGfiState(state);
     const stage = classifyGfiStage(state.currentGfi, DEFAULT_GFI_POLICY);
-    const nextCore = coreApplyDecay(coreState, elapsedMinutes, DEFAULT_GFI_POLICY, stage);
+    const nextCore = coreApplyDecay(coreState, elapsedMinutes, DEFAULT_GFI_POLICY, stage, Date.now());
     const previousGfi = state.currentGfi;
     applyGfiResult(state, nextCore);
 

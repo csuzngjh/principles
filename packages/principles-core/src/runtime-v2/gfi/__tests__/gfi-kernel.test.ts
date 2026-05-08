@@ -22,6 +22,9 @@ function makePolicy(overrides: Partial<GfiPolicy> = {}): GfiPolicy {
   return { ...DEFAULT_GFI_POLICY, ...overrides };
 }
 
+// Fixed timestamp injected into applyDecay/applyRelief (architecture requirement: no Date.now() in core kernel)
+const FIXED_NOW = 1700000000000;
+
 describe('applyFriction', () => {
   it('single event increments currentGfi + source ledger', () => {
     const state = makeState({ currentGfi: 0, gfiBySource: {} });
@@ -110,32 +113,32 @@ describe('applyFriction', () => {
 
 describe('applyDecay', () => {
   it('correct rate per stage (stable)', () => {
-    const state = makeState({ currentGfi: 30 });
-    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable');
+    const state = makeState({ currentGfi: 30, gfiBySource: { tool_failure: 30 } });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
 
     // stable decay = 0.5 per minute, so 30 - 0.5 = 29.5
     expect(next.currentGfi).toBeCloseTo(29.5);
   });
 
   it('correct rate per stage (elevated)', () => {
-    const state = makeState({ currentGfi: 50 });
-    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'elevated');
+    const state = makeState({ currentGfi: 50, gfiBySource: { tool_failure: 50 } });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'elevated', FIXED_NOW);
 
     // elevated decay = 1.0 per minute
     expect(next.currentGfi).toBeCloseTo(49.0);
   });
 
   it('correct rate per stage (critical)', () => {
-    const state = makeState({ currentGfi: 80 });
-    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'critical');
+    const state = makeState({ currentGfi: 80, gfiBySource: { tool_failure: 80 } });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'critical', FIXED_NOW);
 
     // critical decay = 2.0 per minute
     expect(next.currentGfi).toBeCloseTo(78.0);
   });
 
   it('correct rate per stage (saturated)', () => {
-    const state = makeState({ currentGfi: 95 });
-    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'saturated');
+    const state = makeState({ currentGfi: 95, gfiBySource: { tool_failure: 95 } });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'saturated', FIXED_NOW);
 
     // saturated decay = 4.0 per minute
     expect(next.currentGfi).toBeCloseTo(91.0);
@@ -150,15 +153,69 @@ describe('applyDecay', () => {
       },
     });
     const policy = makePolicy({ relief: { toolSuccessRatio: 0.5, minPruneBelow: 8 } });
-    const nextState = applyDecay(state, 1, policy, 'stable');
+    const nextState = applyDecay(state, 1, policy, 'stable', FIXED_NOW);
 
     expect(nextState.gfiBySource.tool_failure).toBeDefined();
     expect(nextState.gfiBySource.dispatch_error).toBeUndefined();
   });
 
+  // PRI-82: Decay invariant — currentGfi must equal sum of remaining source slices
+  it('multi-source decay: currentGfi equals sum of remaining gfiBySource', () => {
+    const state = makeState({
+      currentGfi: 50,
+      gfiBySource: {
+        tool_failure: 30,
+        dispatch_error: 20,
+      },
+    });
+    // stable decay = 0.5/min, 1 min → each source loses 0.5
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
+
+    expect(next.gfiBySource.tool_failure).toBe(29.5);
+    expect(next.gfiBySource.dispatch_error).toBe(19.5);
+    expect(next.currentGfi).toBe(49.0); // 29.5 + 19.5
+  });
+
+  it('source prune causes currentGfi to drop by exact pruned amount', () => {
+    // tool_failure: 8.3 → after 1min decay: 7.8 (< minPruneBelow=8 → pruned)
+    // dispatch_error: 20 → after 1min decay: 19.5 (kept)
+    const state = makeState({
+      currentGfi: 28.3,
+      gfiBySource: {
+        tool_failure: 8.3,
+        dispatch_error: 20,
+      },
+    });
+    const policy = makePolicy({ relief: { toolSuccessRatio: 0.25, minPruneBelow: 8 } });
+    const next = applyDecay(state, 1, policy, 'stable', FIXED_NOW);
+
+    expect(next.gfiBySource.tool_failure).toBeUndefined(); // pruned
+    expect(next.gfiBySource.dispatch_error).toBe(19.5);
+    expect(next.currentGfi).toBe(19.5); // only dispatch_error remains
+  });
+
+  it('single source decay preserves original semantic (currentGfi derived from source)', () => {
+    const state = makeState({
+      currentGfi: 30,
+      gfiBySource: { tool_failure: 30 },
+    });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
+
+    // 30 - 0.5 = 29.5
+    expect(next.gfiBySource.tool_failure).toBe(29.5);
+    expect(next.currentGfi).toBe(29.5);
+  });
+
+  it('nowMs is injected by caller (time independence)', () => {
+    const state = makeState({ currentGfi: 30, gfiBySource: { tool_failure: 30 } });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
+
+    expect(next.lastGfiDecayAt).toBe(FIXED_NOW);
+  });
+
   it('rounds to 1 decimal', () => {
-    const state = makeState({ currentGfi: 33.33 });
-    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable');
+    const state = makeState({ currentGfi: 33.33, gfiBySource: { tool_failure: 33.33 } });
+    const next = applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
 
     // 33.33 - 0.5 = 32.83, rounds to 32.8
     expect(next.currentGfi).toBe(32.8);
@@ -168,19 +225,19 @@ describe('applyDecay', () => {
     // Source: 9, minPruneBelow=8, stable decay=0.5/min for 1 min → 8.5 after decay
     // BUG-FIX: pre-decay check (>=8) would keep it; post-decay check (>=8) correctly keeps it
     const state1 = makeState({ currentGfi: 9, gfiBySource: { tool_failure: 9 } });
-    const next1 = applyDecay(state1, 1, makePolicy({ relief: { toolSuccessRatio: 0.25, minPruneBelow: 8 } }), 'stable');
+    const next1 = applyDecay(state1, 1, makePolicy({ relief: { toolSuccessRatio: 0.25, minPruneBelow: 8 } }), 'stable', FIXED_NOW);
     expect(next1.gfiBySource.tool_failure).toBe(8.5);
 
     // Source: 8, minPruneBelow=8, stable decay=0.5/min → 7.5 after decay
     // BUG-FIX: pre-decay check (8 >= 8) would incorrectly keep it; post-decay check (7.5 < 8) correctly prunes it
     const state2 = makeState({ currentGfi: 8, gfiBySource: { tool_failure: 8 } });
-    const next2 = applyDecay(state2, 1, makePolicy({ relief: { toolSuccessRatio: 0.25, minPruneBelow: 8 } }), 'stable');
+    const next2 = applyDecay(state2, 1, makePolicy({ relief: { toolSuccessRatio: 0.25, minPruneBelow: 8 } }), 'stable', FIXED_NOW);
     expect(next2.gfiBySource.tool_failure).toBeUndefined();
   });
 
   it('immutable', () => {
     const state = makeState({ currentGfi: 30, gfiBySource: { tool_failure: 30 } });
-    applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable');
+    applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
 
     expect(state.currentGfi).toBe(30);
   });
@@ -193,12 +250,13 @@ describe('applyRelief', () => {
       gfiBySource: { tool_failure: 30, dispatch_error: 20 },
       consecutiveErrors: 2,
     });
-    const next = applyRelief(state, { source: 'tool_failure', amount: 10 });
+    const next = applyRelief(state, { source: 'tool_failure', amount: 10 }, FIXED_NOW, DEFAULT_GFI_POLICY);
 
     expect(next.currentGfi).toBe(40);
     expect(next.gfiBySource.tool_failure).toBe(20);
     expect(next.gfiBySource.dispatch_error).toBe(20);
     expect(next.consecutiveErrors).toBe(2);
+    expect(next.lastGfiDecayAt).toBe(FIXED_NOW);
   });
 
   it('ratio-based relief (toolSuccessRatio)', () => {
@@ -209,12 +267,13 @@ describe('applyRelief', () => {
     });
     const policy = makePolicy({ relief: { toolSuccessRatio: 0.25, minPruneBelow: 5 } });
     // amount=0 triggers ratio-based relief applied to ALL sources
-    const next = applyRelief(state, { source: 'tool_failure', amount: 0 }, policy);
+    const next = applyRelief(state, { source: 'tool_failure', amount: 0 }, FIXED_NOW, policy);
 
     // 25% ratio applied to each source: tool_failure 40→30, dispatch_error 20→15
     expect(next.gfiBySource.tool_failure).toBe(30);
     expect(next.gfiBySource.dispatch_error).toBe(15);
     expect(next.currentGfi).toBe(45);
+    expect(next.lastGfiDecayAt).toBe(FIXED_NOW);
   });
 
   it('full reset zeroes everything', () => {
@@ -226,13 +285,14 @@ describe('applyRelief', () => {
       lastErrorSource: 'tool_failure',
       dailyGfiPeak: 90,
     });
-    const next = applyRelief(state, { source: 'all', amount: 100 });
+    const next = applyRelief(state, { source: 'all', amount: 100 }, FIXED_NOW, DEFAULT_GFI_POLICY);
 
     expect(next.currentGfi).toBe(0);
     expect(next.gfiBySource).toEqual({});
     expect(next.consecutiveErrors).toBe(0);
     expect(next.lastErrorHash).toBeUndefined();
     expect(next.lastErrorSource).toBeUndefined();
+    expect(next.lastGfiDecayAt).toBe(FIXED_NOW);
   });
 
   it('source=all with amount < 100 falls through to ratio-based relief', () => {
@@ -243,7 +303,7 @@ describe('applyRelief', () => {
     });
     const policy = makePolicy({ relief: { toolSuccessRatio: 0.5, minPruneBelow: 5 } });
     // amount=50 is not >= 100, so it falls through: amount > 0 but 'all' not in gfiBySource → no-op
-    const next = applyRelief(state, { source: 'all', amount: 50 }, policy);
+    const next = applyRelief(state, { source: 'all', amount: 50 }, FIXED_NOW, policy);
 
     // 'all' not a real source, so no source-specific partial relief applies
     // consecutiveErrors unchanged (source='all' is not lastErrorSource)
@@ -261,11 +321,22 @@ describe('applyRelief', () => {
       lastErrorHash: 'abc123',
       lastErrorSource: 'tool_failure',
     });
-    const next = applyRelief(state, { source: 'tool_failure', amount: 50 });
+    const next = applyRelief(state, { source: 'tool_failure', amount: 50 }, FIXED_NOW, DEFAULT_GFI_POLICY);
 
     expect(next.consecutiveErrors).toBe(0);
     expect(next.lastErrorHash).toBeUndefined();
     expect(next.lastErrorSource).toBeUndefined();
+    expect(next.lastGfiDecayAt).toBe(FIXED_NOW);
+  });
+
+  it('never mutates input state', () => {
+    const state = makeState({ currentGfi: 50, gfiBySource: { tool_failure: 30 }, consecutiveErrors: 2 });
+    const originalCurrentGfi = state.currentGfi;
+    const originalConsecutiveErrors = state.consecutiveErrors;
+    applyRelief(state, { source: 'tool_failure', amount: 10 }, FIXED_NOW, DEFAULT_GFI_POLICY);
+
+    expect(state.currentGfi).toBe(originalCurrentGfi);
+    expect(state.consecutiveErrors).toBe(originalConsecutiveErrors);
   });
 });
 

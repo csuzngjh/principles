@@ -99,8 +99,9 @@ function createPainId(sessionId: string): string {
 function classifyToolFailureSource(toolName: string | undefined, error: unknown): 'dispatch_error' | 'tool_failure' {
   if (!toolName || toolName.trim() === '') return 'dispatch_error';
   const msg = String(error ?? '');
-  if (/^error:\s*tool\s+not\s+found/i.test(msg)) return 'dispatch_error';
-  if (/^error:\s*unknown\s+tool/i.test(msg)) return 'dispatch_error';
+  // Require "error:" prefix to avoid false positives like "Warning: tool not found was suppressed"
+  if (/\berror:\s*tool\s+not\s+found\b/i.test(msg)) return 'dispatch_error';
+  if (/\berror:\s*unknown\s+tool\b/i.test(msg)) return 'dispatch_error';
   return 'tool_failure';
 }
 
