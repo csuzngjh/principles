@@ -256,6 +256,7 @@ describe('applyRelief', () => {
     expect(next.gfiBySource.tool_failure).toBe(20);
     expect(next.gfiBySource.dispatch_error).toBe(20);
     expect(next.consecutiveErrors).toBe(2);
+    expect(next.lastGfiDecayAt).toBe(FIXED_NOW);
   });
 
   it('ratio-based relief (toolSuccessRatio)', () => {
@@ -272,6 +273,7 @@ describe('applyRelief', () => {
     expect(next.gfiBySource.tool_failure).toBe(30);
     expect(next.gfiBySource.dispatch_error).toBe(15);
     expect(next.currentGfi).toBe(45);
+    expect(next.lastGfiDecayAt).toBe(FIXED_NOW);
   });
 
   it('full reset zeroes everything', () => {
@@ -290,6 +292,7 @@ describe('applyRelief', () => {
     expect(next.consecutiveErrors).toBe(0);
     expect(next.lastErrorHash).toBeUndefined();
     expect(next.lastErrorSource).toBeUndefined();
+    expect(next.lastGfiDecayAt).toBe(FIXED_NOW);
   });
 
   it('source=all with amount < 100 falls through to ratio-based relief', () => {
@@ -323,6 +326,17 @@ describe('applyRelief', () => {
     expect(next.consecutiveErrors).toBe(0);
     expect(next.lastErrorHash).toBeUndefined();
     expect(next.lastErrorSource).toBeUndefined();
+    expect(next.lastGfiDecayAt).toBe(FIXED_NOW);
+  });
+
+  it('never mutates input state', () => {
+    const state = makeState({ currentGfi: 50, gfiBySource: { tool_failure: 30 }, consecutiveErrors: 2 });
+    const originalCurrentGfi = state.currentGfi;
+    const originalConsecutiveErrors = state.consecutiveErrors;
+    applyRelief(state, { source: 'tool_failure', amount: 10 }, FIXED_NOW, DEFAULT_GFI_POLICY);
+
+    expect(state.currentGfi).toBe(originalCurrentGfi);
+    expect(state.consecutiveErrors).toBe(originalConsecutiveErrors);
   });
 });
 
