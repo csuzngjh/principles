@@ -8,14 +8,11 @@ export function applyFriction(
   event: GfiEvent,
   policy: GfiPolicy,
 ): GfiState {
-  const hasPriorHash = state.lastErrorHash !== undefined;
-  const isRepeated = hasPriorHash && state.lastErrorHash === event.hash;
+  const isRepeated = state.lastErrorHash !== undefined && state.lastErrorHash === event.hash;
 
   const consecutiveErrors = isRepeated
     ? state.consecutiveErrors + 1
-    : hasPriorHash
-      ? 1
-      : 0;
+    : 1;
 
   const exponent = Math.max(0, consecutiveErrors - 1);
   const multiplier = Math.min(
@@ -82,6 +79,7 @@ export function applyRelief(
       consecutiveErrors: 0,
       lastErrorHash: undefined,
       lastErrorSource: undefined,
+      lastGfiDecayAt: Date.now(),
       dailyGfiPeak: state.dailyGfiPeak,
     };
   }
@@ -93,6 +91,9 @@ export function applyRelief(
     const key = source as GfiSource;
     if (newSources[key] !== undefined) {
       newSources[key] = Math.max(0, (newSources[key] ?? 0) - amount);
+      if (newSources[key] === 0) {
+        delete newSources[key];
+      }
     }
   } else {
     // ratio-based relief (toolSuccessRatio)
@@ -100,6 +101,9 @@ export function applyRelief(
     for (const src of Object.keys(newSources)) {
       const key = src as GfiSource;
       newSources[key] = Math.max(0, Math.round(((newSources[key] ?? 0) * (1 - ratio)) * 10) / 10);
+      if (newSources[key] === 0) {
+        delete newSources[key];
+      }
     }
   }
 
