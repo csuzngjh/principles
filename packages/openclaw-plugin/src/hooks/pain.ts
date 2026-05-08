@@ -195,7 +195,8 @@ export function handleAfterToolCall(
           gfi: 0,
           score: 100,
         });
-      } catch {
+      } catch (e) {
+        SystemLogger.log(effectiveWorkspaceDir, 'PAYLOAD_SERIALIZE_FAILED', String(e));
         payload = JSON.stringify({ reason: gate.reason, detail: '(log serialization failed)' });
       }
       SystemLogger.log(effectiveWorkspaceDir, 'PAIN_GATE_REJECTED', payload);
@@ -258,6 +259,8 @@ export function handleAfterToolCall(
       gfi: updatedState.currentGfi,
       consecutiveErrors: updatedState.consecutiveErrors,
       exitCode: exitCode as number | undefined,
+      gfiBefore,
+      gfiAfter: updatedState.currentGfi,
     });
     wctx.trajectory?.recordToolCall?.({
       sessionId,
@@ -333,31 +336,29 @@ export function handleAfterToolCall(
       paramsJson: event.params,
     });
     
-    if (WRITE_TOOLS.includes(event.toolName)) {
-      const filePath = params.file_path || params.path || params.file;
-      eventLog.recordToolCall(sessionId, {
-        toolName: event.toolName,
-        filePath: typeof filePath === 'string' ? filePath : undefined,
-        gfi: 0,
-      });
+    const filePath = params.file_path || params.path || params.file;
+    eventLog.recordToolCall(sessionId, {
+      toolName: event.toolName,
+      filePath: typeof filePath === 'string' ? filePath : undefined,
+      gfi: resetState.currentGfi,
+      gfiBefore,
+      gfiAfter: resetState.currentGfi,
+    });
 
-      // ── Hygiene Tracking: Record persistence actions ──
-      if (typeof filePath === 'string') {
-        const normalized = filePath.replace(/\\/g, '/');
-        const isMemory = /(?:^|\/)memory\//.test(normalized) || normalized.endsWith('/MEMORY.md') || normalized === 'MEMORY.md';
-        const isPlan = normalized === 'PLAN.md' || normalized.endsWith('/PLAN.md');
-        
-        if (isMemory || isPlan) {
-          const content = params.content || params.new_string || '';
-          wctx.hygiene.recordPersistence({
-            ts: new Date().toISOString(),
-            tool: event.toolName,
-            path: filePath,
-            type: isMemory ? 'memory' : 'plan',
-            contentLength: content.length,
-          });
-        }
-      }
+    // ── Hygiene Tracking: Record persistence actions ──
+    const normalized = typeof filePath === 'string' ? filePath.replace(/\\/g, '/') : '';
+    const isMemory = /(?:^|\/)memory\//.test(normalized) || normalized.endsWith('/MEMORY.md') || normalized === 'MEMORY.md';
+    const isPlan = normalized === 'PLAN.md' || normalized.endsWith('/PLAN.md');
+
+    if (isMemory || isPlan) {
+      const content = params.content || params.new_string || '';
+      wctx.hygiene.recordPersistence({
+        ts: new Date().toISOString(),
+        tool: event.toolName,
+        path: typeof filePath === 'string' ? filePath : 'unknown',
+        type: isMemory ? 'memory' : 'plan',
+        contentLength: content.length,
+      });
     }
 
     // Special case for memory_store tool (Success only)
@@ -418,7 +419,8 @@ export function handleAfterToolCall(
         gfi: (latestFailureState ?? getSession(sessionId) ?? sessionState)?.currentGfi ?? 0,
         score: painScore,
       });
-    } catch {
+    } catch (e) {
+      SystemLogger.log(effectiveWorkspaceDir, 'PAYLOAD_SERIALIZE_FAILED', String(e));
       rejectPayload = JSON.stringify({ reason: diagnosticGate.reason, detail: '(log serialization failed)' });
     }
     SystemLogger.log(effectiveWorkspaceDir, 'PAIN_GATE_REJECTED', rejectPayload);

@@ -82,9 +82,14 @@ export interface ToolCallEventData {
   filePath?: string;
   error?: string;
   errorType?: string;
+  /** @deprecated use gfiBefore/gfiAfter instead */
   gfi?: number;
   consecutiveErrors?: number;
   exitCode?: number;
+  /** PRI-79: GFI value before this tool call */
+  gfiBefore?: number;
+  /** PRI-79: GFI value after this tool call (post-friction or post-relief) */
+  gfiAfter?: number;
 }
 
 export interface PainSignalEventData {
@@ -372,7 +377,9 @@ export interface GfiStats {
   peak: number;
   samples: number;
   total: number;
+  // TODO: resetCount — requires GFI reset event from session-tracker (not yet wired to event-log)
   resetCount: number;
+  // TODO: hourlyDistribution — requires timestamp bucketing in updateStats (not yet implemented)
   hourlyDistribution: number[];  // 24 hourly samples
 }
 
