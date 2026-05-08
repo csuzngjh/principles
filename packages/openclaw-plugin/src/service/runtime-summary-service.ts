@@ -325,7 +325,7 @@ export class RuntimeSummaryService {
         currentGfi: s.currentGfi ?? 0,
         gfiBySource: {},
         consecutiveErrors: 0,
-        lastActivityAt: s.lastActivityAt ?? 0,
+        lastActivityAt: s.lastControlActivityAt ?? s.lastActivityAt ?? 0,
         dailyGfiPeak: s.dailyGfiPeak,
       })),
       nowMs: Date.now(),
