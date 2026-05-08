@@ -754,7 +754,7 @@ export class RuntimeSummaryService {
 
       return {
         source: `tool_failure:${String(entry.data?.toolName ?? 'unknown')}`,
-        score: this.asFiniteNumber(entry.data?.gfi),
+        score: this.asFiniteNumber(entry.data?.gfiAfter ?? entry.data?.gfi),
         ts: entry.ts,
       };
     });
