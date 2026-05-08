@@ -1369,6 +1369,7 @@ describe('PRI-76 GFI core kernel boundary', () => {
     'gfi/gfi-types.ts',
     'gfi/gfi-policy.ts',
     'gfi/gfi-kernel.ts',
+    'gfi/gfi-read-model.ts',
     'gfi/index.ts',
   ];
 
@@ -1402,5 +1403,32 @@ describe('PRI-76 GFI core kernel boundary', () => {
     expect(src).toContain('GfiStage');
     expect(src).toContain('GfiSource');
     expect(src).toContain('GfiSnapshot');
+    expect(src).toContain('buildGfiWorkspaceSnapshot');
+    expect(src).toContain('GfiReadModelInput');
+    expect(src).toContain('GfiWorkspaceSnapshot');
+  });
+});
+
+// ── PRI-78: GFI observability boundary ──────────────────────────────────────
+
+describe('PRI-78 GFI observability boundary', () => {
+  it('gfi-read-model.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'gfi/gfi-read-model.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('pd-cli runtime-gfi-snapshot.ts imports from @principles/core/runtime-v2', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(
+      resolve(__dirname, '../../../../pd-cli/src/commands/runtime-gfi-snapshot.ts'),
+      'utf-8'
+    );
+    expect(src).toContain("from '@principles/core/runtime-v2'");
   });
 });
