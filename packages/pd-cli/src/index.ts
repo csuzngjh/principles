@@ -367,6 +367,18 @@ runtimeHealthCmd
     await handleRuntimeGfiSnapshot({ workspace: opts.workspace, json: opts.json });
   });
 
+// PRI-82: pd runtime gfi snapshot — canonical operator command (alias of runtime health gfi)
+runtimeCmd
+  .command('gfi')
+  .description('GFI workspace snapshot — active vs stale session breakdown')
+  .command('snapshot')
+  .description('GFI workspace snapshot for the operator (alias: pd runtime health gfi)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeGfiSnapshot({ workspace: opts.workspace, json: opts.json });
+  });
+
 const internalizationCmd = runtimeCmd
   .command('internalization')
   .description('Internalization Engine operator visibility');
