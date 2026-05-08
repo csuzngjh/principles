@@ -164,6 +164,20 @@ describe('applyDecay', () => {
     expect(next.currentGfi).toBe(32.8);
   });
 
+  it('prunes based on post-decay value, not pre-decay value', () => {
+    // Source: 9, minPruneBelow=8, stable decay=0.5/min for 1 min → 8.5 after decay
+    // BUG-FIX: pre-decay check (>=8) would keep it; post-decay check (>=8) correctly keeps it
+    const state1 = makeState({ currentGfi: 9, gfiBySource: { tool_failure: 9 } });
+    const next1 = applyDecay(state1, 1, makePolicy({ relief: { toolSuccessRatio: 0.25, minPruneBelow: 8 } }), 'stable');
+    expect(next1.gfiBySource.tool_failure).toBe(8.5);
+
+    // Source: 8, minPruneBelow=8, stable decay=0.5/min → 7.5 after decay
+    // BUG-FIX: pre-decay check (8 >= 8) would incorrectly keep it; post-decay check (7.5 < 8) correctly prunes it
+    const state2 = makeState({ currentGfi: 8, gfiBySource: { tool_failure: 8 } });
+    const next2 = applyDecay(state2, 1, makePolicy({ relief: { toolSuccessRatio: 0.25, minPruneBelow: 8 } }), 'stable');
+    expect(next2.gfiBySource.tool_failure).toBeUndefined();
+  });
+
   it('immutable', () => {
     const state = makeState({ currentGfi: 30, gfiBySource: { tool_failure: 30 } });
     applyDecay(state, 1, DEFAULT_GFI_POLICY, 'stable');

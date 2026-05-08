@@ -53,9 +53,10 @@ export function applyDecay(
 
   const nextSources: Partial<Record<GfiSource, number>> = {};
   for (const [src, value] of Object.entries(state.gfiBySource)) {
-    if (value >= policy.relief.minPruneBelow) {
-      const sourceDecayed = value - rate * elapsedMinutes;
-      nextSources[src as GfiSource] = Math.max(0, Math.round(sourceDecayed * 10) / 10);
+    const sourceDecayed = value - rate * elapsedMinutes;
+    const sourceAfterDecay = Math.max(0, Math.round(sourceDecayed * 10) / 10);
+    if (sourceAfterDecay >= policy.relief.minPruneBelow) {
+      nextSources[src as GfiSource] = sourceAfterDecay;
     }
   }
 
