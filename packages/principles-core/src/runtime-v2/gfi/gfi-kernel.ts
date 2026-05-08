@@ -79,6 +79,7 @@ export function applyRelief(
       consecutiveErrors: 0,
       lastErrorHash: undefined,
       lastErrorSource: undefined,
+      lastGfiDecayAt: Date.now(),
       dailyGfiPeak: state.dailyGfiPeak,
     };
   }

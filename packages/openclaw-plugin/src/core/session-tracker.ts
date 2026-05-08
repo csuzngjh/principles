@@ -29,7 +29,7 @@ function toGfiState(state: SessionState): GfiState {
   return {
     currentGfi: state.currentGfi ?? 0,
     gfiBySource: (state.gfiBySource ?? {}) as Partial<Record<GfiSource, number>>,
-    lastErrorHash: state.lastErrorHash || undefined,
+    lastErrorHash: state.lastErrorHash === '' ? undefined : state.lastErrorHash,
     lastErrorSource: state.lastErrorSource || undefined,
     consecutiveErrors: state.consecutiveErrors ?? 0,
     lastGfiDecayAt: state.lastGfiDecayAt,
@@ -40,7 +40,7 @@ function toGfiState(state: SessionState): GfiState {
 /** Apply GfiState result back onto SessionState */
 function applyGfiResult(state: SessionState, result: GfiState): void {
   state.currentGfi = result.currentGfi;
-  state.gfiBySource = result.gfiBySource as Record<string, number>;
+  state.gfiBySource = { ...result.gfiBySource } as Record<string, number>;
   state.lastErrorHash = result.lastErrorHash ?? '';
   state.lastErrorSource = result.lastErrorSource ?? '';
   state.consecutiveErrors = result.consecutiveErrors;
@@ -335,14 +335,19 @@ export function trackFriction(
 
     const coreState = toGfiState(state);
     const nextCore = coreApplyFriction(coreState, event, DEFAULT_GFI_POLICY);
-    applyGfiResult(state, nextCore);
 
     // Preserve composite source key for unattributed sources
-    if (!options?.source && hash && state.gfiBySource) {
-        const val = state.gfiBySource['unknown'];
-        delete state.gfiBySource['unknown'];
-        if (val !== undefined) state.gfiBySource[compositeKey] = val as number;
+    if (!options?.source && hash) {
+        const val = nextCore.gfiBySource['unknown'];
+        if (val !== undefined) {
+            const nextSources = { ...nextCore.gfiBySource };
+            delete nextSources['unknown'];
+            nextSources[compositeKey] = (nextSources[compositeKey] ?? 0) + val;
+            (nextCore as { gfiBySource: Partial<Record<string, number>> }).gfiBySource = nextSources;
+        }
     }
+
+    applyGfiResult(state, nextCore);
 
     touchActivity(state, 'control');
 
@@ -386,12 +391,13 @@ export function resetFriction(
     }
 
     // Full reset via core kernel
+    const previousGfi = state.currentGfi;
     const coreState = toGfiState(state);
     const nextCore = coreApplyRelief(coreState, { source: 'all', amount: 100 }, DEFAULT_GFI_POLICY);
     applyGfiResult(state, nextCore);
 
-    if (state.currentGfi > 0) {
-        SystemLogger.log(state.workspaceDir, 'GFI_RESET', `Friction reset to 0 (Was: ${state.currentGfi.toFixed(1)}). Action successful.`);
+    if (previousGfi > 0) {
+        SystemLogger.log(state.workspaceDir, 'GFI_RESET', `Friction reset to 0 (Was: ${previousGfi.toFixed(1)}). Action successful.`);
     }
     touchActivity(state, 'control');
 
