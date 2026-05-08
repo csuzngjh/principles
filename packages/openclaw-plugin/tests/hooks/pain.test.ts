@@ -35,8 +35,8 @@ describe('classifyToolFailureSource', () => {
   it('"Tool not found" (case insensitive) -> dispatch_error', () => {
     expect(classifyToolFailureSource('read', 'error: tool not found')).toBe('dispatch_error');
     expect(classifyToolFailureSource('read', 'Tool Not Found')).toBe('dispatch_error');
-    // "read_file" contains underscore (word char), breaking \s+ between "tool" and "not"
-    expect(classifyToolFailureSource('read', 'Tool read_file not found')).toBe('tool_failure');
+    // "tool <name> not found" also matches (e.g. "tool read_file not found")
+    expect(classifyToolFailureSource('read', 'Tool read_file not found')).toBe('dispatch_error');
   });
 
   it('"Unknown tool" (case insensitive) -> dispatch_error', () => {
