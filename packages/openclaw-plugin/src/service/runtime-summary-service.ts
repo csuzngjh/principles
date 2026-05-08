@@ -127,7 +127,9 @@ interface PersistedSessionState {
   sessionId: string;
   currentGfi?: number;
   gfiBySource?: Record<string, number>;
+  lastErrorSource?: string;
   consecutiveErrors?: number;
+  lastGfiDecayAt?: number;
   dailyGfiPeak?: number;
   lastActivityAt?: number;
   lastControlActivityAt?: number;
@@ -316,19 +318,19 @@ export class RuntimeSummaryService {
     const gfiPeak =
       sessionPeak ?? (Number.isFinite(dailyGfiPeak) ? Number(dailyGfiPeak) : null);
 
-    // PRI-78: Build authoritative GFI workspace snapshot (active vs stale)
-    // Note: gfiBySource and consecutiveErrors are intentionally stubbed — session-tracker
-    // does not yet persist full GfiState. workspaceSnapshot reflects degraded data
-    // (empty sources, no consecutive error tracking). Full fidelity requires PRI-77 persistence.
-    // TODO(PRI-78b): populate gfiBySource and consecutiveErrors from session tracker
+    // PRI-78/PRI-82: Build authoritative GFI workspace snapshot (active vs stale)
+    // Uses real persisted GFI fields: gfiBySource, consecutiveErrors, lastErrorSource,
+    // lastGfiDecayAt, dailyGfiPeak from session-tracker persistence.
     const gfiWorkspaceSnapshot: GfiWorkspaceSnapshot = buildGfiWorkspaceSnapshot({
       sessions: sessions.map((s) => ({
         sessionId: s.sessionId,
         currentGfi: s.currentGfi ?? 0,
-        gfiBySource: {},
-        consecutiveErrors: 0,
-        lastActivityAt: s.lastControlActivityAt ?? s.lastActivityAt ?? 0,
+        gfiBySource: s.gfiBySource ?? {},
+        consecutiveErrors: s.consecutiveErrors ?? 0,
+        lastErrorSource: s.lastErrorSource,
+        lastGfiDecayAt: s.lastGfiDecayAt,
         dailyGfiPeak: s.dailyGfiPeak,
+        lastActivityAt: s.lastControlActivityAt ?? s.lastActivityAt ?? 0,
       })),
       nowMs: Date.now(),
     });

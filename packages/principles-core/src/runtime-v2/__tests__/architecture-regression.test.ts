@@ -1387,6 +1387,14 @@ describe('PRI-76 GFI core kernel boundary', () => {
     });
   }
 
+  // PRI-82: gfi-kernel.ts must not call Date.now() — nowMs is injected by caller
+  it('gfi-kernel.ts does not call Date.now()', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'gfi/gfi-kernel.ts'), 'utf-8');
+    expect(src).not.toContain('Date.now()');
+  });
+
   it('gfi/index.ts exports all public symbols', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');

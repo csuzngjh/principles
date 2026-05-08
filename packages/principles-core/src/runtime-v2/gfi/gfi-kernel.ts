@@ -43,11 +43,13 @@ export function applyDecay(
   elapsedMinutes: number,
   policy: GfiPolicy,
   stage: GfiStage,
+  nowMs: number,
 ): GfiState {
   const rate = policy.decayRatesPerMinute[stage];
-  const decayed = state.currentGfi - rate * elapsedMinutes;
-  const nextGfi = Math.max(0, Math.round(decayed * 10) / 10);
 
+  // Decay each source slice individually, then prune those below minPruneBelow.
+  // currentGfi is derived from the sum of remaining source slices when sources exist.
+  // When no sources remain (e.g. after relief), decay currentGfi directly.
   const nextSources: Partial<Record<GfiSource, number>> = {};
   for (const [src, value] of Object.entries(state.gfiBySource)) {
     const sourceDecayed = value - rate * elapsedMinutes;
@@ -57,17 +59,27 @@ export function applyDecay(
     }
   }
 
+  const nextGfi = Object.keys(nextSources).length > 0
+    // Invariant: currentGfi === sum of remaining source slices
+    ? Math.max(0, Math.round(
+        Object.values(nextSources).reduce((a, b) => a + b, 0) * 10
+      ) / 10)
+    // No sources remain (e.g. after full relief) — decay currentGfi directly
+    : Math.max(0, Math.round((state.currentGfi - rate * elapsedMinutes) * 10) / 10);
+
   return {
     ...state,
     currentGfi: nextGfi,
     gfiBySource: nextSources,
-    lastGfiDecayAt: Date.now(),
+    lastGfiDecayAt: nowMs,
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params
 export function applyRelief(
   state: GfiState,
   opts: { source: string; amount?: number },
+  nowMs: number,
   policy: GfiPolicy = DEFAULT_GFI_POLICY,
 ): GfiState {
   const { source, amount = 0 } = opts;
@@ -79,7 +91,7 @@ export function applyRelief(
       consecutiveErrors: 0,
       lastErrorHash: undefined,
       lastErrorSource: undefined,
-      lastGfiDecayAt: Date.now(),
+      lastGfiDecayAt: nowMs,
       dailyGfiPeak: state.dailyGfiPeak,
     };
   }
@@ -119,6 +131,7 @@ export function applyRelief(
     consecutiveErrors: newConsecutiveErrors,
     lastErrorHash: newConsecutiveErrors === 0 ? undefined : state.lastErrorHash,
     lastErrorSource: newConsecutiveErrors === 0 ? undefined : state.lastErrorSource,
+    lastGfiDecayAt: nowMs,
   };
 }
 
