@@ -126,6 +126,8 @@ export interface RuntimeSummary {
 interface PersistedSessionState {
   sessionId: string;
   currentGfi?: number;
+  gfiBySource?: Record<string, number>;
+  consecutiveErrors?: number;
   dailyGfiPeak?: number;
   lastActivityAt?: number;
   lastControlActivityAt?: number;
@@ -557,6 +559,10 @@ export class RuntimeSummaryService {
         sessionId: live.sessionId,
         currentGfi:
           Number.isFinite(live.currentGfi) ? Number(live.currentGfi) : persisted?.currentGfi,
+        gfiBySource:
+          live.gfiBySource ? { ...live.gfiBySource } : persisted?.gfiBySource,
+        consecutiveErrors:
+          Number.isFinite(live.consecutiveErrors) ? Number(live.consecutiveErrors) : persisted?.consecutiveErrors,
         dailyGfiPeak:
           Number.isFinite(live.dailyGfiPeak) ? Number(live.dailyGfiPeak) : persisted?.dailyGfiPeak,
         lastActivityAt:
