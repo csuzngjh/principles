@@ -61,6 +61,11 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/dreamer-runner.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../prompt-builder/routing-guidance.ts',
+  // PRI-76
+  'gfi/gfi-types.ts',
+  'gfi/gfi-policy.ts',
+  'gfi/gfi-kernel.ts',
+  'gfi/index.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -81,6 +86,8 @@ const REQUIRED_TEST_FILES = [
   'dreamer-runner.test.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../../prompt-builder/__tests__/routing-guidance.test.ts',
+  // PRI-76
+  '../gfi/__tests__/gfi-kernel.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -1352,5 +1359,48 @@ describe('PRI-74 routing guidance thin-adapter boundary', () => {
     expect(src).toContain('coreClassifyTaskKind');
     expect(src).toContain('coreBuildReason');
     expect(src).toContain('coreBuildBlockers');
+  });
+});
+
+// ── PRI-76: GFI core kernel boundary ───────────────────────────────────────
+
+describe('PRI-76 GFI core kernel boundary', () => {
+  const gfiFiles = [
+    'gfi/gfi-types.ts',
+    'gfi/gfi-policy.ts',
+    'gfi/gfi-kernel.ts',
+    'gfi/index.ts',
+  ];
+
+  for (const file of gfiFiles) {
+    it(`${file} has zero infrastructure imports`, async () => {
+      const { readFileSync } = await import('node:fs');
+      const { resolve } = await import('node:path');
+      const src = readFileSync(resolve(__dirname, '..', file), 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('node:process');
+      expect(src).not.toContain('openclaw-plugin');
+      expect(src).not.toContain('node:crypto');
+      expect(src).not.toContain('node:async_hooks');
+    });
+  }
+
+  it('gfi/index.ts exports all public symbols', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'gfi/index.ts'), 'utf-8');
+    expect(src).toContain('applyFriction');
+    expect(src).toContain('applyDecay');
+    expect(src).toContain('applyRelief');
+    expect(src).toContain('classifyGfiStage');
+    expect(src).toContain('createGfiSnapshot');
+    expect(src).toContain('DEFAULT_GFI_POLICY');
+    expect(src).toContain('GfiState');
+    expect(src).toContain('GfiEvent');
+    expect(src).toContain('GfiPolicy');
+    expect(src).toContain('GfiStage');
+    expect(src).toContain('GfiSource');
+    expect(src).toContain('GfiSnapshot');
   });
 });
