@@ -96,6 +96,14 @@ function createPainId(sessionId: string): string {
   return `pain_${Date.now()}_${computeHash(sessionId).slice(0, 8)}`;
 }
 
+function classifyToolFailureSource(toolName: string | undefined, error: unknown): 'dispatch_error' | 'tool_failure' {
+  if (!toolName || toolName.trim() === '') return 'dispatch_error';
+  const msg = String(error ?? '');
+  if (/^error:\s*tool\s+not\s+found/i.test(msg)) return 'dispatch_error';
+  if (/^error:\s*unknown\s+tool/i.test(msg)) return 'dispatch_error';
+  return 'tool_failure';
+}
+
 export function handleAfterToolCall(
   event: PluginHookAfterToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> },
@@ -134,15 +142,6 @@ export function handleAfterToolCall(
   }
 
   // ── Track A: Empirical Friction (GFI) ──
-
-  // PRI-80: Classify tool failure source — dispatch errors are distinct from execution failures
-  const classifyToolFailureSource = (toolName: string | undefined, error: unknown): 'dispatch_error' | 'tool_failure' => {
-    if (!toolName || toolName.trim() === '') return 'dispatch_error';
-    const msg = String(error ?? '');
-    if (/tool\s+not\s+found/i.test(msg)) return 'dispatch_error';
-    if (/unknown\s+tool/i.test(msg)) return 'dispatch_error';
-    return 'tool_failure';
-  };
 
   // 0. Special Case: Manual Pain Intervention
   if (event.toolName === 'pain' || event.toolName === 'skill:pain') {
@@ -224,10 +223,8 @@ export function handleAfterToolCall(
   const exitCode = (event.result && typeof event.result === 'object') ? (event.result as Record<string, unknown>).exitCode : 0;
   const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
 
-  // PRI-80: Classify source before tracking — available in both branches
-  const failureSource = classifyToolFailureSource(event.toolName, event.error);
-
   if (isFailure) {
+    const failureSource = classifyToolFailureSource(event.toolName, event.error);
     const errorText = String(event.error ?? (typeof event.result === 'string' ? event.result : JSON.stringify(event.result)));
     const denoised = denoiseError(errorText);
     const hash = computeHash(denoised);
@@ -380,6 +377,8 @@ export function handleAfterToolCall(
   if (!WRITE_TOOLS.includes(event.toolName) || !isFailure) {
     return;
   }
+
+  const failureSource = classifyToolFailureSource(event.toolName, event.error);
 
   const filePath = params.file_path || params.path || params.file;
   const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';

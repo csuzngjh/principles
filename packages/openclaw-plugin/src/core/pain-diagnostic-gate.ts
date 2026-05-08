@@ -1,14 +1,17 @@
 import { SystemLogger } from './system-logger.js';
 
-export type PainDiagnosticSource =
-  | 'manual'
-  | 'tool_failure'
-  | 'dispatch_error'
-  | 'gate_blocked'
-  | 'user_empathy'
-  | 'llm_paralysis'
-  | 'semantic'
-  | 'subagent_error';
+const PAIN_DIAGNOSTIC_SOURCES = [
+  'manual',
+  'tool_failure',
+  'dispatch_error',
+  'gate_blocked',
+  'user_empathy',
+  'llm_paralysis',
+  'semantic',
+  'subagent_error',
+] as const;
+
+export type PainDiagnosticSource = typeof PAIN_DIAGNOSTIC_SOURCES[number];
 
 export type PainDiagnosticGateReason =
   | 'manual'
@@ -54,7 +57,7 @@ function normalizedSource(source: string): PainDiagnosticSource | string {
   if (source.startsWith('llm_') && source !== 'llm_paralysis') {
     return 'semantic';
   }
-  if (!['manual', 'tool_failure', 'dispatch_error', 'gate_blocked', 'user_empathy', 'llm_paralysis', 'semantic', 'subagent_error'].includes(source)) {
+  if (!(PAIN_DIAGNOSTIC_SOURCES as readonly string[]).includes(source)) {
     SystemLogger.log('', 'GATE_UNKNOWN_SOURCE', `Unknown pain source: "${source}"`);
   }
   return source;
