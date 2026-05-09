@@ -331,4 +331,109 @@ describe('Empathy Keyword Matching (core)', () => {
       expect(normalizeSeverity('MODERATE')).toBe('moderate');
     });
   });
+
+  describe('scoreToSeverity boundary values', () => {
+    it('score exactly 0.3 is moderate', () => {
+      expect(scoreToSeverity(0.3)).toBe('moderate');
+    });
+
+    it('score exactly 0.6 is severe', () => {
+      expect(scoreToSeverity(0.6)).toBe('severe');
+    });
+
+    it('score just below 0.3 is mild', () => {
+      expect(scoreToSeverity(0.29)).toBe('mild');
+    });
+
+    it('score just below 0.6 is moderate', () => {
+      expect(scoreToSeverity(0.59)).toBe('moderate');
+    });
+
+    it('score 0 is mild', () => {
+      expect(scoreToSeverity(0)).toBe('mild');
+    });
+
+    it('score 1 is severe', () => {
+      expect(scoreToSeverity(1)).toBe('severe');
+    });
+  });
+
+  describe('severityToPenalty with custom config', () => {
+    it('uses custom penalty values', () => {
+      const customConfig = {
+        ...DEFAULT_EMPATHY_KEYWORD_CONFIG,
+        penaltyMild: 5,
+        penaltyModerate: 15,
+        penaltySevere: 50,
+      };
+      expect(severityToPenalty('mild', customConfig)).toBe(5);
+      expect(severityToPenalty('moderate', customConfig)).toBe(15);
+      expect(severityToPenalty('severe', customConfig)).toBe(50);
+    });
+  });
+
+  describe('matchEmpathyKeywords edge cases', () => {
+    it('whitespace-only text returns no match', () => {
+      const store = createDefaultKeywordStore('zh');
+      const result = matchEmpathyKeywords('   \t\n  ', store);
+
+      expect(result.matched).toBe(false);
+      expect(result.score).toBe(0);
+    });
+
+    it('maxTermsPerMessage limits matched terms', () => {
+      const store = createDefaultKeywordStore('zh');
+      const config = { ...DEFAULT_EMPATHY_KEYWORD_CONFIG, maxTermsPerMessage: 2 };
+      const result = matchEmpathyKeywords('不对 错了 搞错了', store, config);
+
+      expect(result.matchedTerms.length).toBeLessThanOrEqual(2);
+    });
+
+    it('adjusted weight accounts for falsePositiveRate', () => {
+      const store = createDefaultKeywordStore('zh');
+      const term = '垃圾';
+      const entry = store.terms[term];
+      expect(entry).toBeDefined();
+      const expectedWeight = entry!.weight * (1 - entry!.falsePositiveRate);
+
+      const result = matchEmpathyKeywords(term, store);
+
+      expect(result.score).toBeCloseTo(expectedWeight, 2);
+    });
+  });
+
+  describe('applyKeywordUpdates edge cases', () => {
+    it('remove non-existent term is no-op', () => {
+      const store = createDefaultKeywordStore('zh');
+      const result = applyKeywordUpdates(store, { 'nonexistent': { action: 'remove' } });
+
+      expect(result.removed).toBe(0);
+    });
+
+    it('add with default weight and falsePositiveRate', () => {
+      const store = createDefaultKeywordStore('zh');
+      const result = applyKeywordUpdates(store, { 'testTerm': { action: 'add' } });
+
+      expect(result.added).toBe(1);
+      expect(store.terms.testTerm?.weight).toBe(0.5);
+      expect(store.terms.testTerm?.falsePositiveRate).toBe(0.2);
+      expect(store.terms.testTerm?.source).toBe('llm_discovered');
+    });
+
+    it('add with examples', () => {
+      const store = createDefaultKeywordStore('zh');
+      applyKeywordUpdates(store, {
+        'testTerm': { action: 'add', examples: ['example 1', 'example 2'] },
+      });
+
+      expect(store.terms.testTerm?.examples).toEqual(['example 1', 'example 2']);
+    });
+
+    it('empty updates object returns zeros', () => {
+      const store = createDefaultKeywordStore('zh');
+      const result = applyKeywordUpdates(store, {});
+
+      expect(result).toEqual({ added: 0, updated: 0, removed: 0 });
+    });
+  });
 });
