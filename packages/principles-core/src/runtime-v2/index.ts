@@ -461,6 +461,33 @@ export {
 
 export { DreamerRunner } from './internalization/dreamer-runner.js';
 
+// ── Philosopher Runner (PRI-90) ────────────────────────────────────────────────
+
+export type {
+  PhilosopherOutputV1,
+  PhilosopherPrincipleCandidate,
+  PhilosopherValidationResult,
+  PhilosopherValidator,
+} from './internalization/philosopher-output.js';
+
+export {
+  DefaultPhilosopherValidator,
+} from './internalization/philosopher-output.js';
+
+export type {
+  PhilosopherRunnerResultStatus,
+  PhilosopherRunnerResult,
+  PhilosopherRunnerOptions,
+  ResolvedPhilosopherRunnerOptions,
+  PhilosopherRunnerDeps,
+} from './internalization/philosopher-runner.js';
+
+export {
+  PhilosopherRunner,
+  resolvePhilosopherRunnerOptions,
+  DEFAULT_PHILOSOPHER_RUNNER_OPTIONS,
+} from './internalization/philosopher-runner.js';
+
 // ── PIArtifact Durable Store (PRI-84) ────────────────────────────────────────
 
 export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
