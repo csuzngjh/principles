@@ -1235,6 +1235,45 @@ describe('PRI-67 DreamerRunner', () => {
     expect(src).toContain('DreamerRunner');
     expect(src).toContain('DreamerOutput');
     expect(src).toContain('PassThroughDreamerValidator');
+    expect(src).toContain('DefaultDreamerValidator');
+  });
+});
+
+// ── PRI-87: DefaultDreamerValidator strict validation ───────────────────────────
+
+describe('PRI-87 DefaultDreamerValidator strict validation', () => {
+  it('CORE_NO_FORBIDDEN_IMPORTS: dreamer-output.ts has no openclaw-plugin, nocturnal, fs, path, process imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'dreamer-output.ts'), 'utf-8');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('nocturnal');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+  });
+
+  it('PRODUCTION_USES_STRICT_VALIDATOR: run-once CLI uses DefaultDreamerValidator, not PassThroughDreamerValidator', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '..', '..', '..', '..', 'pd-cli', 'src', 'commands', 'runtime-internalization-run-once.ts'
+    ), 'utf-8');
+    expect(src).toContain('DefaultDreamerValidator');
+    expect(src).not.toContain('new PassThroughDreamerValidator()');
+  });
+
+  it('BARREL_EXPORTS: DefaultDreamerValidator is exported from internalization/index.ts', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
+    expect(src).toContain('DefaultDreamerValidator');
+  });
+
+  it('validator test file exists', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, '..', '__tests__', 'dreamer-output-validator.test.ts'))).toBe(true);
   });
 });
 

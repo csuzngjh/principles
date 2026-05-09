@@ -78,20 +78,76 @@ export interface DreamerValidationResult {
 /**
  * Validator interface consumed by DreamerRunner.
  *
- * Initial scope uses PassThroughDreamerValidator (accepts all output).
- * Full validation (schema + semantic + confidence range) is future scope.
+ * Production code must use DefaultDreamerValidator (strict validation).
+ * PassThroughDreamerValidator is test-only and must not be used in production paths.
  */
 export interface DreamerValidator {
   validate(output: DreamerOutput, taskId: string): Promise<DreamerValidationResult>;
 }
 
+const VALID_RISK_LEVELS = new Set(['low', 'medium', 'high']);
+
+export class DefaultDreamerValidator implements DreamerValidator {
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  async validate(output: DreamerOutput, taskId: string): Promise<DreamerValidationResult> {
+    const errors: string[] = [];
+
+    if (typeof output !== 'object' || output === null) {
+      return { valid: false, errors: ['Output is not an object'], errorCategory: 'output_invalid' };
+    }
+
+    if (output.taskId !== taskId) {
+      errors.push(`taskId mismatch: expected ${taskId}, got ${String(output.taskId)}`);
+    }
+
+    if (output.valid !== true) {
+      errors.push('output.valid must be true');
+    }
+
+    if (!Array.isArray(output.candidates)) {
+      errors.push('candidates must be an array');
+    } else {
+      if (output.candidates.length < 1 || output.candidates.length > 5) {
+        errors.push('candidates must have 1-5 items');
+      }
+      for (let i = 0; i < output.candidates.length; i++) {
+        const c = output.candidates[i] as Record<string, unknown> | undefined;
+        if (!c) {
+          errors.push(`candidates[${i}] is null/undefined`);
+          continue;
+        }
+        if (typeof c.candidateIndex !== 'number') errors.push(`candidates[${i}].candidateIndex must be number`);
+        if (typeof c.badDecision !== 'string' || (c.badDecision).trim() === '') errors.push(`candidates[${i}].badDecision must be non-empty string`);
+        if (typeof c.betterDecision !== 'string' || (c.betterDecision).trim() === '') errors.push(`candidates[${i}].betterDecision must be non-empty string`);
+        if (typeof c.rationale !== 'string' || (c.rationale).trim() === '') errors.push(`candidates[${i}].rationale must be non-empty string`);
+        if (typeof c.confidence !== 'number') errors.push(`candidates[${i}].confidence must be number`);
+        else if (c.confidence < 0 || c.confidence > 1) errors.push(`candidates[${i}].confidence must be in [0, 1]`);
+        if (typeof c.riskLevel !== 'string' || !VALID_RISK_LEVELS.has(c.riskLevel)) errors.push(`candidates[${i}].riskLevel must be low|medium|high`);
+        if (typeof c.strategicPerspective !== 'string' || (c.strategicPerspective).trim() === '') errors.push(`candidates[${i}].strategicPerspective must be non-empty string`);
+      }
+    }
+
+    if (!Array.isArray(output.contextRefs)) {
+      errors.push('contextRefs must be an array');
+    }
+
+    if (typeof output.generatedAt !== 'string' || (output.generatedAt).trim() === '') {
+      errors.push('generatedAt must be non-empty string');
+    }
+
+    return errors.length > 0
+      ? { valid: false, errors, errorCategory: 'output_invalid' }
+      : { valid: true, errors: [] };
+  }
+}
+
 /**
- * Pass-through validator — accepts all output (initial scope).
+ * Pass-through validator — accepts all output.
  *
- * @deprecated Temporary implementation. Real DreamerValidator with schema
- *   validation, candidate count (1-5), confidence range (0..1), and
- *   riskLevel validation must be implemented in a future PRI-67 follow-up.
- *   When a real validator rejects output, DreamerRunner retries via retryOrFail.
+ * @deprecated Test-only. Do NOT use in production paths.
+ *   Production code must use DefaultDreamerValidator which enforces schema,
+ *   candidate count (1-5), confidence range (0..1), and riskLevel validation.
+ * @internal
  */
 export class PassThroughDreamerValidator implements DreamerValidator {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
