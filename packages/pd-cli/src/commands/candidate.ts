@@ -20,6 +20,7 @@ import {
   loadLedger,
   getLedgerFilePathPublic,
   decideInternalizationRoute,
+  createPITaskDiagnosticJson,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
@@ -131,6 +132,182 @@ export async function handleCandidateList(opts: CandidateListOptions): Promise<v
       console.log(`    Confidence:  ${candidate.confidence ?? 'N/A'}`);
       console.log(`    Status:      ${candidate.status}`);
       console.log(`    Description: ${candidate.description.substring(0, 100)}${candidate.description.length > 100 ? '...' : ''}`);
+      console.log('');
+    }
+  } finally {
+    await stateManager.close();
+  }
+}
+
+// ── Internalize (PRI-89) ──────────────────────────────────────────────────────
+
+interface CandidateInternalizeOptions {
+  candidateId: string;
+  workspace?: string;
+  json?: boolean;
+  dryRun?: boolean;
+}
+
+interface CandidateInternalizeResult {
+  candidateId: string;
+  route: string;
+  taskId?: string;
+  channel?: string;
+  status: 'created' | 'existing' | 'dry_run' | 'no_task_created';
+  reason?: string;
+}
+
+const ROUTE_CHANNEL_MAP: Record<string, string> = {
+  'principle-ledger': 'prompt',
+  'rule-candidate': 'code_tool_hook',
+  'implementation-candidate': 'skill',
+  'prompt-injection-candidate': 'prompt',
+};
+
+export async function handleCandidateInternalize(opts: CandidateInternalizeOptions): Promise<void> {
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+
+  try {
+    await stateManager.initialize();
+
+    const candidate = await stateManager.getCandidate(opts.candidateId);
+    if (!candidate) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: 'unknown',
+        status: 'no_task_created',
+        reason: `Candidate not found: ${opts.candidateId}`,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Candidate not found: ${opts.candidateId}`);
+      }
+      process.exit(1);
+      return;
+    }
+
+    let recommendation: { kind: string; description: string; triggerPattern?: string; action?: string; abstractedPrinciple?: string } = {
+      kind: 'defer',
+      description: candidate.description || '',
+    };
+
+    if (candidate.sourceRecommendationJson) {
+      try {
+        const parsed = JSON.parse(candidate.sourceRecommendationJson);
+        if (parsed?.kind) {
+          recommendation = {
+            kind: parsed.kind,
+            description: parsed.description ?? candidate.description,
+            triggerPattern: parsed.triggerPattern,
+            action: parsed.action,
+            abstractedPrinciple: parsed.abstractedPrinciple,
+          };
+        }
+      } catch { /* fall through to defaults */ }
+    }
+
+    const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
+
+    if (!decision.ready || decision.route === 'deferred') {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: decision.route,
+        status: 'no_task_created',
+        reason: decision.reason,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\nCandidate Internalize: ${opts.candidateId}\n`);
+        console.log(`  Route:   ${decision.route}`);
+        console.log(`  Ready:   ${decision.ready}`);
+        console.log(`  Reason:  ${decision.reason}`);
+        console.log('');
+      }
+      return;
+    }
+
+    const channel = ROUTE_CHANNEL_MAP[decision.route] ?? 'prompt';
+
+    if (opts.dryRun) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: decision.route,
+        channel,
+        status: 'dry_run',
+        reason: 'Dry-run mode — no task created',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\nCandidate Internalize (dry-run): ${opts.candidateId}\n`);
+        console.log(`  Route:    ${decision.route}`);
+        console.log(`  Channel:  ${channel}`);
+        console.log(`  Would create: dreamer PI task`);
+        console.log('');
+      }
+      return;
+    }
+
+    const taskId = `dreamer-${opts.candidateId}-${channel}`;
+
+    const existingTask = await stateManager.getTask(taskId);
+    if (existingTask) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: decision.route,
+        taskId: existingTask.taskId,
+        channel,
+        status: 'existing',
+        reason: 'Task already exists for this candidate+channel combination',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\nCandidate Internalize: ${opts.candidateId}\n`);
+        console.log(`  Route:    ${decision.route}`);
+        console.log(`  Channel:  ${channel}`);
+        console.log(`  Task:     ${existingTask.taskId} (existing)`);
+        console.log('');
+      }
+      return;
+    }
+
+    const diagnosticJson = createPITaskDiagnosticJson({
+      dependencyTaskIds: [],
+      channel: channel as 'prompt' | 'skill' | 'code_tool_hook' | 'model_training',
+      timeoutMs: 300_000,
+      inputArtifactRefs: [{ artifactType: 'candidate', ref: `candidate://${opts.candidateId}` }],
+      outputArtifactRefs: [],
+      parentTaskId: undefined,
+      correlationId: opts.candidateId,
+    });
+
+    const task = await stateManager.createTask({
+      taskId,
+      taskKind: 'dreamer',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson,
+    });
+
+    const result: CandidateInternalizeResult = {
+      candidateId: opts.candidateId,
+      route: decision.route,
+      taskId: task.taskId,
+      channel,
+      status: 'created',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`\nCandidate Internalize: ${opts.candidateId}\n`);
+      console.log(`  Route:    ${decision.route}`);
+      console.log(`  Channel:  ${channel}`);
+      console.log(`  Task:     ${task.taskId} (created)`);
       console.log('');
     }
   } finally {

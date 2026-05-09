@@ -32,7 +32,7 @@ import { handleRuntimeUat } from './commands/runtime-uat.js';
 import { handleRuntimeInternalizationQueue } from './commands/runtime-internalization-queue.js';
 import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-internalization-wake-once.js';
 import { handleRuntimeInternalizationRunOnce } from './commands/runtime-internalization-run-once.js';
-import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute } from './commands/candidate.js';
+import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
 const program = new Command();
@@ -539,6 +539,17 @@ candidateCmd
   .option('--json', 'Output as JSON')
   .action(async (opts) => {
     await handleCandidateRoute(opts);
+  });
+
+candidateCmd
+  .command('internalize')
+  .description('Seed internalization Dreamer task from a candidate')
+  .requiredOption('--candidate-id <id>', 'Candidate ID to internalize')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output as JSON')
+  .option('--dry-run', 'Preview without writing to database')
+  .action(async (opts) => {
+    await handleCandidateInternalize(opts);
   });
 
 // ── Artifact inspection commands ────────────────────────────────────────────
