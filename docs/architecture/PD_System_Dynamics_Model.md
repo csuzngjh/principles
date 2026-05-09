@@ -61,7 +61,9 @@ PD 系统的生与死，由以下三个相互交织的反馈环决定：
 
 ## 4. 破局机制：三类内化路线 (Three Internalization Routes)
 
-根据回路 3 的要求，PD 系统的“内化”绝不仅仅是攒数据做 LoRA 训练。我们将 PD 的减压机制解构为三个层级：
+根据回路 3 的要求，PD 系统的"内化"绝不仅仅是攒数据做 LoRA 训练。我们将 PD 的减压机制解构为三个层级：
+
+> **术语说明**：本节使用 L1/L2/L3 编号与 [DOMAIN_MODEL.md](./DOMAIN_MODEL.md) Section 3 保持一致。L1=软内化（Prompt），L2=硬内化（Code/Hook/Tool），L3=模型参数化（LoRA）。
 
 ### L1: 软内化 (Prompt / Skill / SOP)
 *   **载体**：System Prompt、Skill 文档、SOP。

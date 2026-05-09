@@ -159,10 +159,11 @@ Rule 必须绑定上下文，否则无法测试与执行。后续 Rule 模型和
 
 ## 3. 三类内化路线
 
-Principle 可以通过不同路线影响系统行为。不要把内化只理解为生成代码。
+Principle 可以通过不同路线影响系统行为。**本节与 [PD_System_Dynamics_Model.md](./PD_System_Dynamics_Model.md) Section 4 保持术语一致，使用 L1/L2/L3 编号作为 canonical 别名。**
 
-### 3.1 Prompt / Skill / SOP 内化
+### 3.1 L1: Prompt / Skill / SOP 内化（软内化）
 
+- **L1 别名**：软内化
 - **目标**: 影响 LLM 的思考方式、注意事项、流程习惯。
 - **载体**:
   - system prompt
@@ -178,8 +179,9 @@ Principle 可以通过不同路线影响系统行为。不要把内化只理解�
   - 遵循不稳定
   - 难以证明生效
 
-### 3.2 Code / Hook / Tool 内化
+### 3.2 L2: Code / Hook / Tool 内化（硬内化）
 
+- **L2 别名**：硬内化
 - **目标**: 通过确定性逻辑影响或拦截 agent 行为。
 - **载体**:
   - RuleHost implementation
@@ -196,8 +198,9 @@ Principle 可以通过不同路线影响系统行为。不要把内化只理解�
   - 与真实 workflow 不匹配
   - 需要回滚和 shadow/probation
 
-### 3.3 Model Parameter / LoRA 内化
+### 3.3 L3: Model Parameter / LoRA 内化（模型参数化）
 
+- **L3 别名**：模型参数化
 - **目标**: 通过模型参数或偏好学习改变默认行为倾向。
 - **载体**:
   - LoRA
@@ -263,20 +266,35 @@ Pruning Review 是 append-only audit log，不改变实体生命周期。当前�
 
 ## 6. 当前代码映射
 
-| 领域概念 | 当前主要位置 | 说明 |
-| --- | --- | --- |
-| Pain Signal | `packages/principles-core/src/runtime-v2/pain-to-principle-service.ts` | Runtime V2 写侧统一入口 |
-| Pain Chain Read Model | `packages/principles-core/src/runtime-v2/pain-chain-read-model.ts` | pain -> task -> run -> candidate -> ledger 读侧 |
-| Principle | `packages/openclaw-plugin/src/types/principle-tree-schema.ts` | 当前仍在 plugin types 中定义 |
-| LedgerPrinciple | `packages/openclaw-plugin/src/core/principle-tree-ledger.ts` | ledger 文件中的 Principle |
-| Rule / LedgerRule | `packages/openclaw-plugin/src/types/principle-tree-schema.ts`, `principle-tree-ledger.ts` | Principle 的可验证投影 |
-| Implementation | `packages/openclaw-plugin/src/types/principle-tree-schema.ts` | Rule 的承载物 |
-| Code Implementation Asset | `packages/openclaw-plugin/src/core/code-implementation-storage.ts` | code implementation 的文件资产 |
-| RuleHost | `packages/openclaw-plugin/src/core/rule-host.ts` | code implementation 的执行宿主 |
-| RuleHostInput/Result | `packages/openclaw-plugin/src/core/rule-host-types.ts` | active implementation 的执行契约 |
-| Pruning Signal | `packages/principles-core/src/runtime-v2/pruning-read-model.ts` | non-destructive read model |
-| Pruning Review | `packages/principles-core/src/runtime-v2/pruning-review-log.ts` | append-only audit log |
-| Diagnostician Recommendation | `packages/principles-core/src/runtime-v2/diagnostician-output.ts` | recommendation taxonomy schema |
+| 领域概念 | 当前主要位置 | 目标位置 | 迁移状态 | 说明 |
+| --- | --- | --- | --- | --- |
+| Pain Signal | `packages/principles-core/src/runtime-v2/pain-to-principle-service.ts` | - | ✅ Done (ADR-0001) | Runtime V2 写侧统一入口 |
+| Pain Chain Read Model | `packages/principles-core/src/runtime-v2/pain-chain-read-model.ts` | - | ✅ Done (ADR-0001) | pain -> task -> run -> candidate -> ledger 读侧 |
+| Principle Schema | `packages/openclaw-plugin/src/types/principle-tree-schema.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | 类型定义迁移中 |
+| LedgerPrinciple | `packages/openclaw-plugin/src/core/principle-tree-ledger.ts` | - | 🔒 Keep in plugin | ledger 文件操作保留在 plugin |
+| Rule / LedgerRule | `packages/openclaw-plugin/src/types/principle-tree-schema.ts`, `principle-tree-ledger.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | 类型迁移中 |
+| Implementation Schema | `packages/openclaw-plugin/src/types/principle-tree-schema.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | 类型定义迁移中 |
+| Code Implementation Asset | `packages/openclaw-plugin/src/core/code-implementation-storage.ts` | - | 🔒 Keep in plugin | 文件系统操作保留在 plugin |
+| RuleHost | `packages/openclaw-plugin/src/core/rule-host.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | PRI-45 拆分中 |
+| RuleHostInput/Result | `packages/openclaw-plugin/src/core/rule-host-types.ts` | `@principles/core` | ✅ Done (PRI-42) | 已迁移至 `internalization/rule-host-contracts.ts` |
+| RuleHost Helpers | `packages/openclaw-plugin/src/core/rule-host-helpers.ts` | `@principles/core` | ✅ Done (PRI-42) | 已迁移 |
+| Lifecycle Metrics | `packages/openclaw-plugin/src/core/principle-internalization/lifecycle-metrics.ts` | `@principles/core` | ✅ Done (PRI-42) | 已迁移至 `internalization/` |
+| Routing Policy | `packages/openclaw-plugin/src/core/principle-internalization/internalization-routing-policy.ts` | `@principles/core` | ✅ Done (PRI-43) | 已迁移至 `internalization/routing-policy.ts` |
+| Template Generator | `packages/openclaw-plugin/src/core/principle-compiler/template-generator.ts` | `@principles/core` | ⏳ Pending (PRI-44) | 模板生成逻辑迁移中 |
+| Pruning Signal | `packages/principles-core/src/runtime-v2/pruning-read-model.ts` | - | ✅ Done | non-destructive read model |
+| Pruning Review | `packages/principles-core/src/runtime-v2/pruning-review-log.ts` | - | ✅ Done | append-only audit log |
+| Diagnostician Recommendation | `packages/principles-core/src/runtime-v2/diagnostician-output.ts` | - | ✅ Done | recommendation taxonomy schema |
+
+**迁移状态说明**:
+- ✅ Done: 已完成迁移
+- ⏳ Pending: 迁移计划中（见 ADR-0002）
+- 🔒 Keep in plugin: 保留在 plugin（基础设施绑定）
+
+---
+
+**相关 ADR**:
+- [ADR-0001: Runtime V2 Service Boundaries](../adr/0001-runtime-v2-service-boundaries.md)
+- [ADR-0002: Hard Internalization Core Boundary](../adr/0002-hard-internalization-core-boundary.md)
 
 ---
 

@@ -1,9 +1,16 @@
 # PD Task Manager — Design Document
 
-> **Status**: Draft  
-> **Date**: 2026-04-07  
-> **Author**: Qwen-Coder  
+> **Status**: Partially Implemented
+> **Date**: 2026-04-07
+> **Author**: Qwen-Coder
 > **Related PR**: [#174](https://github.com/csuzngjh/principles/pull/174)
+>
+> **⚠️ 实现状态**：
+> - ✅ PDTaskSpec 类型定义已创建
+> - ✅ PDTaskStore 已创建
+> - ✅ cron-initializer.ts 已删除
+> - ⏳ PDTaskService（Plugin Service 集成）待完成
+> - 📁 本文档保留作为迁移计划参考
 
 ---
 
