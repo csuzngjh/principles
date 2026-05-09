@@ -441,18 +441,43 @@ export class DreamerRunner {
     }
 
     // Write PIArtifact via artifactStore (idempotent upsert)
-    const lineageArtifactIds = await this.resolveLineageArtifactIds(ctx.taskId);
+    // PIArtifact is the core durable output of DreamerRunner.
+    // If artifact write fails, the task must NOT be marked succeeded —
+    // downstream runners (Philosopher/Scribe) require durable artifact input.
+    let lineageArtifactIds: string[] = [];
+    try {
+      lineageArtifactIds = await this.resolveLineageArtifactIds(ctx.taskId);
+    } catch (lineageErr) {
+      this.emitDreamerEvent('dreamer_lineage_resolve_failed', ctx.taskId, {
+        runId: ctx.runId,
+        errorMessage: lineageErr instanceof Error ? lineageErr.message : String(lineageErr),
+      });
+    }
+
     const now = new Date().toISOString();
-    await this.artifactStore.upsertArtifact({
-      artifactId: `pi-art-${ctx.taskId}-${ctx.runId}`,
-      artifactKind: 'principle',
-      sourceTaskId: ctx.taskId,
-      lineageArtifactIds,
-      validationStatus: 'pending',
-      contentJson: JSON.stringify(ctx.output),
-      createdAt: now,
-      updatedAt: now,
-    });
+    try {
+      await this.artifactStore.upsertArtifact({
+        artifactId: `pi-art-${ctx.taskId}-${ctx.runId}`,
+        artifactKind: 'principle',
+        sourceTaskId: ctx.taskId,
+        lineageArtifactIds,
+        validationStatus: 'pending',
+        contentJson: JSON.stringify(ctx.output),
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (artifactErr) {
+      this.emitDreamerEvent('dreamer_artifact_write_failed', ctx.taskId, {
+        runId: ctx.runId,
+        errorMessage: artifactErr instanceof Error ? artifactErr.message : String(artifactErr),
+      });
+      return this.retryOrFail({
+        taskId: ctx.taskId,
+        task: ctx.task,
+        errorCategory: 'artifact_commit_failed',
+        failureReason: `PIArtifact write failed: ${artifactErr instanceof Error ? artifactErr.message : String(artifactErr)}`,
+      });
+    }
 
     // Mark task succeeded with dreamer:// resultRef
     const resultRef = `dreamer://${ctx.runId}`;

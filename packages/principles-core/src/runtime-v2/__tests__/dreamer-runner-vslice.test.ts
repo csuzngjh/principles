@@ -237,4 +237,29 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
       expect(artifacts[0].lineageArtifactIds).toContain('pre-art-001');
     }
   });
+
+  it('artifact write failure: task is retried/failed, NOT marked succeeded', async () => {
+    const failingStore = {
+      createArtifact: vi.fn().mockRejectedValue(new Error('store write failed')),
+      upsertArtifact: vi.fn().mockRejectedValue(new Error('store write failed')),
+      getArtifactById: vi.fn().mockResolvedValue(null),
+      listBySourceTaskId: vi.fn().mockResolvedValue([]),
+      listLineage: vi.fn().mockResolvedValue([]),
+    } as unknown as PIArtifactStore;
+
+    const failingDeps = createMockDeps(failingStore);
+
+    const runner = new DreamerRunner(failingDeps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-001');
+
+    expect(result.status).toBe('failed');
+
+    expect(failingDeps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
 });
