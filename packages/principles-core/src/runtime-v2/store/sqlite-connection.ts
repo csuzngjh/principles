@@ -15,32 +15,56 @@ import Database from 'better-sqlite3';
 import { join } from 'path';
 import * as fs from 'fs';
 
+export interface SqliteConnectionOptions {
+  workspaceDir: string;
+  readonly?: boolean;
+}
+
 export class SqliteConnection {
   private db: Database.Database | null = null;
   private readonly dbPath: string;
+  private readonly readonlyMode: boolean;
 
-  constructor(workspaceDir: string) {
-    const pdDir = join(workspaceDir, '.pd');
+  constructor(workspaceDirOrOpts: string | SqliteConnectionOptions) {
+    const opts = typeof workspaceDirOrOpts === 'string'
+      ? { workspaceDir: workspaceDirOrOpts }
+      : workspaceDirOrOpts;
+    const pdDir = join(opts.workspaceDir, '.pd');
     if (!fs.existsSync(pdDir)) {
       fs.mkdirSync(pdDir, { recursive: true });
     }
     this.dbPath = join(pdDir, 'state.db');
+    this.readonlyMode = opts.readonly ?? false;
   }
 
-  /** Returns the underlying better-sqlite3 Database instance. */
   getDb(): Database.Database {
     if (this.db) return this.db;
 
-    this.db = new Database(this.dbPath);
-    try {
-      this.db.pragma('journal_mode = WAL');
-    } catch {
-      this.db.pragma('journal_mode = DELETE');
-    }
-    this.db.pragma('busy_timeout = 5000');
-    this.db.pragma('foreign_keys = ON');
+    this.db = this.readonlyMode
+      ? new Database(this.dbPath, { readonly: true })
+      : new Database(this.dbPath);
 
-    this.initSchema();
+    if (!this.readonlyMode) {
+      try {
+        this.db.pragma('journal_mode = WAL');
+      } catch {
+        try {
+          this.db.pragma('journal_mode = DELETE');
+        } catch {
+          // Sandbox may block all journal file creation — continue without journal
+        }
+      }
+      try {
+        this.db.pragma('busy_timeout = 5000');
+      } catch { /* non-critical */ }
+      try {
+        this.db.pragma('foreign_keys = ON');
+      } catch { /* non-critical */ }
+      try {
+        this.initSchema();
+      } catch { /* schema init may fail in restricted environments */ }
+    }
+
     return this.db;
   }
 
