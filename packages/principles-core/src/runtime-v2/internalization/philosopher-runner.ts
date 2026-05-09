@@ -292,18 +292,15 @@ export class PhilosopherRunner {
       }
 
       const depPiTask = hydratePITaskRecord(depTask);
-      if (depPiTask?.outputArtifactRefs && depPiTask.outputArtifactRefs.length > 0) {
-        const artifactRef = depPiTask.outputArtifactRefs[0]?.ref;
-        if (!artifactRef) continue;
-        const artifacts = await this.artifactStore.listBySourceTaskId(depId);
-        if (artifacts.length > 0) {
-          const [firstArtifact] = artifacts;
-          if (!firstArtifact) continue;
-          return {
-            contextHash: PhilosopherRunner.hashContextRefs([artifactRef]),
-            dreamerArtifact: firstArtifact.contentJson,
-          };
-        }
+      const artifacts = await this.artifactStore.listBySourceTaskId(depId);
+      if (artifacts.length > 0) {
+        const [firstArtifact] = artifacts;
+        if (!firstArtifact) continue;
+        const artifactRef = depPiTask?.outputArtifactRefs?.[0]?.ref ?? `pi-artifact://${depId}`;
+        return {
+          contextHash: PhilosopherRunner.hashContextRefs([artifactRef]),
+          dreamerArtifact: firstArtifact.contentJson,
+        };
       }
     }
 

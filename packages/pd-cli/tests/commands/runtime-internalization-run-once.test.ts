@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
 
-const VALID_DREAMER_CANDIDATES = [{ id: 'c-1', description: 'Test', confidence: 0.9, riskLevel: 'low' as const, reasoning: 'Test' }];
+const VALID_DREAMER_CANDIDATES = [{ candidateIndex: 0, badDecision: 'Ignored validation', betterDecision: 'Validate inputs', rationale: 'Prevents errors', confidence: 0.9, riskLevel: 'low' as const, strategicPerspective: 'defensive-programming' }];
 
 const mockWakeOnce = vi.fn();
 const mockRun = vi.fn();
