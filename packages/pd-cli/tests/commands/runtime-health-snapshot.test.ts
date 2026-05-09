@@ -58,6 +58,14 @@ function healthySnapshot() {
       reviewCount: 0,
       orphanDerivedCandidateCount: 0,
     },
+    gfi: {
+      active: null,
+      staleSessionCount: 0,
+      staleGfiRange: null,
+      totalSessionCount: 0,
+      activeSessionCount: 0,
+      generatedAt: '2026-05-03T12:00:00.000Z',
+    },
     overallStatus: 'healthy' as const,
     recommendedActions: [],
   };
@@ -255,5 +263,94 @@ describe('handleRuntimeHealthSnapshot', () => {
     expect(jsonOutput.recommendedActions).toHaveLength(3);
 
     exitSpy.mockRestore();
+  });
+
+  // ── GFI section (PRI-83) ──────────────────────────────────────────────────
+
+  it('includes gfi section in JSON output with active session data', async () => {
+    const snapshot = {
+      ...healthySnapshot(),
+      gfi: {
+        active: {
+          currentGfi: 42,
+          stage: 'elevated',
+          dominantSource: 'tool_failure',
+          consecutiveErrors: 2,
+          dailyGfiPeak: 55,
+          consumers: {
+            attitudeMode: 'conciliatory',
+            painDiagnosticReason: 'high_gfi',
+          },
+        },
+        staleSessionCount: 1,
+        staleGfiRange: { min: 10, max: 20 },
+        totalSessionCount: 2,
+        activeSessionCount: 1,
+        generatedAt: '2026-05-03T12:00:00.000Z',
+      },
+    };
+    mockSnapshotFn.mockResolvedValue(snapshot);
+
+    await handleRuntimeHealthSnapshot({ workspace: WS, json: true });
+
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(jsonOutput.gfi).toBeDefined();
+    expect(jsonOutput.gfi.active).not.toBeNull();
+    expect(jsonOutput.gfi.active.currentGfi).toBe(42);
+    expect(jsonOutput.gfi.active.stage).toBe('elevated');
+    expect(jsonOutput.gfi.active.dominantSource).toBe('tool_failure');
+    expect(jsonOutput.gfi.activeSessionCount).toBe(1);
+    expect(jsonOutput.gfi.staleSessionCount).toBe(1);
+  });
+
+  it('includes compact GFI line in text output', async () => {
+    const snapshot = {
+      ...healthySnapshot(),
+      gfi: {
+        active: {
+          currentGfi: 42,
+          stage: 'elevated',
+          dominantSource: 'tool_failure',
+          consecutiveErrors: 2,
+          dailyGfiPeak: 55,
+          consumers: {
+            attitudeMode: 'conciliatory',
+            painDiagnosticReason: 'high_gfi',
+          },
+        },
+        staleSessionCount: 0,
+        staleGfiRange: null,
+        totalSessionCount: 1,
+        activeSessionCount: 1,
+        generatedAt: '2026-05-03T12:00:00.000Z',
+      },
+    };
+    mockSnapshotFn.mockResolvedValue(snapshot);
+
+    await handleRuntimeHealthSnapshot({ workspace: WS, json: false });
+
+    const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(allOutput).toContain('gfi:');
+    expect(allOutput).toContain('elevated');
+    expect(allOutput).toContain('42');
+  });
+
+  it('shows no active sessions in text when gfi.active is null', async () => {
+    mockSnapshotFn.mockResolvedValue(healthySnapshot());
+
+    await handleRuntimeHealthSnapshot({ workspace: WS, json: false });
+
+    const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(allOutput).toContain('no active sessions');
+  });
+
+  it('does not mark runtime unhealthy solely for missing GFI data', async () => {
+    mockSnapshotFn.mockResolvedValue(healthySnapshot());
+
+    await handleRuntimeHealthSnapshot({ workspace: WS, json: true });
+
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(jsonOutput.gfi.active).toBeNull();
+    expect(jsonOutput.overallStatus).toBe('healthy');
   });
 });
