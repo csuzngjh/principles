@@ -138,14 +138,12 @@ describe('selectPrinciplesForInjection — budget truncation', () => {
   });
 
   it('Phase 2 safety-net: P0 that was never reached during iteration gets prepended at end', () => {
-    // P0 guarantee: priority dominates recency — the safety-net ensures P0 is prepended
-    // when iteration misses it due to budget. The iteration sorts by recency, so the
-    // oldest P0 would be processed last; if budget runs out before reaching it, the
-    // safety-net prepends it anyway.
+    // P0 guarantee: safety-net ensures at least one P0 is always included
+    // when iteration misses it due to budget.
     const p0 = makeP('P0-001', 'AAAAAAAAAAAA', { priority: 'P0', createdAt: '2026-01-01T00:00:00.000Z' }); // oldest
     const p1 = makeP('P1-001', 'BBBBBBBBBBBB', { priority: 'P1', createdAt: '2026-06-01T00:00:00.000Z' });
     const p2 = makeP('P2-001', 'CCCCCCCCCCCC', { priority: 'P2', createdAt: '2026-07-01T00:00:00.000Z' }); // newest
-    // Recency-sorted order: P2, P1, P0
+    // Iteration processes by recency; P0 may be missed → safety net prepends it
     // Budget 15: P2=14+1=15 fits, P1=14+1=15 fits, P0=14+1=15 exceeds budget
     // Iteration reaches P2 and P1, misses P0 → safety net prepends P0
     const result = selectPrinciplesForInjection([p2, p1, p0], 15);
