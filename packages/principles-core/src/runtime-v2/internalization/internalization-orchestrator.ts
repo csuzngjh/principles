@@ -14,11 +14,12 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 
-import type { TaskRecord } from '../task-status.js';
+import type { TaskRecord, PDTaskStatus } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PeerRunnerKind } from './peer-runner-contracts.js';
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
-import { hydratePITaskRecord } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson } from './pitask-metadata.js';
+import type { PITaskMetadata } from './pitask-metadata.js';
 import { isPeerRunnerKind } from './peer-runner-contracts.js';
 import {
   validateInternalizationTaskReady,
@@ -108,6 +109,16 @@ export interface ProposalCreatedResult {
 }
 
 export type ProposeNextTaskResult = ProposalCreatedResult | null;
+
+// ── Commit Next Task Result Types (PRI-88) ────────────────────────────────────
+
+export type CommitNextTaskResult =
+  | { decision: 'successor_created'; sourceTaskId: string; successorTaskId: string; successorKind: PeerRunnerKind }
+  | { decision: 'successor_exists'; sourceTaskId: string; successorTaskId: string; successorKind: PeerRunnerKind }
+  | { decision: 'no_successor'; sourceTaskId: string; reason: string }
+  | { decision: 'invalid_task_metadata'; taskId: string; reason: string }
+  | { decision: 'source_not_succeeded'; taskId: string; status: PDTaskStatus }
+  | { decision: 'task_not_found'; taskId: string };
 
 // ── Constructor Options ───────────────────────────────────────────────────────
 
@@ -312,7 +323,128 @@ export class InternalizationOrchestrator {
     };
   }
 
+  // ── commitNextTaskProposal ──────────────────────────────────────────────
+
+  /**
+   * Commit a successor task proposal for a succeeded source task.
+   *
+   * Idempotent: if a matching successor already exists (same parentTaskId +
+   * successorKind + channel), returns successor_exists without creating a duplicate.
+   *
+   * Steps:
+   *   1. getTask(taskId) → null → task_not_found
+   *   2. hydratePITaskRecord(task) → null → invalid_task_metadata
+   *   3. task.status !== 'succeeded' → source_not_succeeded
+   *   4. proposeNextTask(taskId) → null → no_successor
+   *   5. Deduplicate: scan pending tasks for matching successor
+   *   6. Found → successor_exists
+   *   7. Not found → createTask + write PI metadata → successor_created
+   */
+  async commitNextTaskProposal(taskId: string): Promise<CommitNextTaskResult> {
+    const rawTask = await this.stateManager.getTask(taskId);
+    if (!rawTask) {
+      return { decision: 'task_not_found', taskId };
+    }
+
+    const piTask = hydratePITaskRecord(rawTask);
+    if (!piTask) {
+      return { decision: 'invalid_task_metadata', taskId, reason: 'Failed to hydrate PITaskRecord from diagnosticJson' };
+    }
+
+    if (piTask.status !== 'succeeded') {
+      return { decision: 'source_not_succeeded', taskId, status: piTask.status };
+    }
+
+    const proposalResult = await this.proposeNextTask(taskId);
+    if (!proposalResult) {
+      return { decision: 'no_successor', sourceTaskId: taskId, reason: 'No valid successor in job graph for this task kind and channel' };
+    }
+
+    const {proposal} = proposalResult;
+
+    const existingSuccessor = await this.findExistingSuccessor(taskId, proposal.taskKind, proposal.channel);
+    if (existingSuccessor) {
+      return {
+        decision: 'successor_exists',
+        sourceTaskId: taskId,
+        successorTaskId: existingSuccessor.taskId,
+        successorKind: proposal.taskKind,
+      };
+    }
+
+    const successorTaskId = `${proposal.taskKind}-${taskId}-${proposal.channel}`;
+    const successorMetadata: PITaskMetadata = {
+      dependencyTaskIds: proposal.dependencyTaskIds,
+      channel: proposal.channel,
+      timeoutMs: 300_000,
+      inputArtifactRefs: proposal.inputArtifactRefs,
+      outputArtifactRefs: [],
+      parentTaskId: proposal.parentTaskId,
+      correlationId: proposal.correlationId,
+    };
+
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let successorRecord: TaskRecord;
+    try {
+      successorRecord = await this.stateManager.createTask({
+        taskId: successorTaskId,
+        taskKind: proposal.taskKind,
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        inputRef: undefined,
+        resultRef: undefined,
+        lastError: undefined,
+        leaseOwner: undefined,
+        leaseExpiresAt: undefined,
+        diagnosticJson: createPITaskDiagnosticJson(successorMetadata),
+      });
+    } catch (createErr) {
+      const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
+      if (errMsg.includes('UNIQUE constraint') || errMsg.includes('PRIMARY KEY') || errMsg.includes('already exists')) {
+        return {
+          decision: 'successor_exists',
+          sourceTaskId: taskId,
+          successorTaskId,
+          successorKind: proposal.taskKind,
+        };
+      }
+      throw createErr;
+    }
+
+    return {
+      decision: 'successor_created',
+      sourceTaskId: taskId,
+      successorTaskId: successorRecord.taskId,
+      successorKind: proposal.taskKind,
+    };
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
+
+  /**
+   * Find an existing successor task matching parentTaskId + successorKind + channel.
+   * Scans pending tasks and hydrates to check PI metadata.
+   * Returns the matching TaskRecord or null.
+   */
+  private async findExistingSuccessor(
+    parentTaskId: string,
+    successorKind: PeerRunnerKind,
+    channel: string,
+  ): Promise<TaskRecord | null> {
+    const pendingTasks = await this.stateManager.listTasks({ status: 'pending' });
+    const retryWaitTasks = await this.stateManager.listTasks({ status: 'retry_wait' });
+    const candidates = [...pendingTasks, ...retryWaitTasks];
+    for (const task of candidates) {
+      if (task.taskKind !== successorKind) continue;
+      const piTask = hydratePITaskRecord(task);
+      if (!piTask) continue;
+      if (piTask.parentTaskId === parentTaskId && piTask.channel === channel) {
+        return task;
+      }
+    }
+    return null;
+  }
 
   /**
    * Find candidate PI tasks by querying pending and retry_wait statuses.

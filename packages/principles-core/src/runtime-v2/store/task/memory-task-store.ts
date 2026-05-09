@@ -7,7 +7,7 @@ import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task-st
 export class MemoryTaskStore implements TaskStore {
   private readonly tasks = new Map<string, TaskRecord>();
 
-  async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'> & { diagnosticJson?: string }): Promise<TaskRecord> {
+  async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
     const now = new Date().toISOString();
     const full: TaskRecord = {
       ...record,

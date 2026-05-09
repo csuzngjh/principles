@@ -1,26 +1,26 @@
 /**
- * DreamerRunner — First real peer runner for the Internalization Engine (PRI-67).
+ * PhilosopherRunner — Second peer runner for the Internalization Engine (PRI-90).
  *
- * Follows the lease → build context → invoke runtime → poll → fetch output →
- * validate → succeed/fail pipeline established by DiagnosticianRunner.
+ * Reads a Dreamer artifact, invokes PDRuntimeAdapter for philosophical analysis,
+ * validates output, writes Philosopher PIArtifact, and marks task succeeded.
  *
  * Key constraints (ADR-0003):
  *   - Uses PDRuntimeAdapter for all LLM execution (no direct SDK calls)
- *   - Does NOT directly invoke Philosopher/Scribe (host layer enqueues next task)
+ *   - Does NOT directly invoke Scribe (host layer enqueues next task)
  *   - No plugin-layer imports (core is infrastructure-agnostic)
- *   - No timer-based scheduling (sleep via setTimeout is polling-only, not cron-like)
+ *   - No timer-based scheduling (sleep via setTimeout is polling-only)
  *   - Uses RuntimeStateManager for all state operations
  *
- * Pipeline (same as DiagnosticianRunner):
+ * Pipeline:
  *   1. acquireLease — isolated try/catch, lease_conflict is non-mutating
- *   2. resolve store runId via getRunsByTask
- *   3. resolve predecessor context from dependencyTaskIds (no ContextAssembler)
- *   4. startRun with outputSchemaRef: 'dreamer-output-v1'
+ *   2. resolve Dreamer dependency from dependencyTaskIds
+ *   3. fetch Dreamer artifact via PIArtifactStore
+ *   4. startRun with outputSchemaRef: 'philosopher-output-v1'
  *   5. pollUntilTerminal
- *   6. fetchOutput → parse as DreamerOutput
- *   7. validate via DreamerValidator
+ *   6. fetchOutput → parse as PhilosopherOutputV1
+ *   7. validate via PhilosopherValidator
  *   8. updateRunOutput → persist serialized output
- *   9. markTaskSucceeded with 'dreamer://' + storeRunId
+ *   9. write PIArtifact → markTaskSucceeded with philosopher:// resultRef
  *
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
@@ -32,7 +32,7 @@ import type {
   StartRunInput,
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
-import type { DreamerOutput, DreamerValidator } from './dreamer-output.js';
+import type { PhilosopherOutputV1, PhilosopherValidator } from './philosopher-output.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
@@ -40,18 +40,18 @@ import type { TelemetryEvent } from '../../telemetry-event.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 
-// ── Result Types ─────────────────────────────────────────────────────────────
+// ── Result Types ──────────────────────────────────────────────────────────────
 
-export type DreamerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
+export type PhilosopherRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
 
-export interface DreamerRunnerResult {
-  readonly status: DreamerRunnerResultStatus;
+export interface PhilosopherRunnerResult {
+  readonly status: PhilosopherRunnerResultStatus;
   readonly taskId: string;
   readonly runId?: string;
   readonly artifactId?: string;
   readonly resultRef?: string;
   readonly contextHash?: string;
-  readonly output?: DreamerOutput;
+  readonly output?: PhilosopherOutputV1;
   readonly errorCategory?: PDErrorCategory;
   readonly failureReason?: string;
   readonly attemptCount: number;
@@ -59,7 +59,7 @@ export interface DreamerRunnerResult {
 
 // ── Constructor Options ───────────────────────────────────────────────────────
 
-export interface DreamerRunnerOptions {
+export interface PhilosopherRunnerOptions {
   readonly pollIntervalMs?: number;
   readonly timeoutMs?: number;
   readonly defaultMaxAttempts?: number;
@@ -68,7 +68,7 @@ export interface DreamerRunnerOptions {
   readonly agentId?: string;
 }
 
-export interface ResolvedDreamerRunnerOptions {
+export interface ResolvedPhilosopherRunnerOptions {
   readonly pollIntervalMs: number;
   readonly timeoutMs: number;
   readonly defaultMaxAttempts: number;
@@ -77,35 +77,35 @@ export interface ResolvedDreamerRunnerOptions {
   readonly agentId: string;
 }
 
-const DEFAULT_DREAMER_RUNNER_OPTIONS: Readonly<Omit<ResolvedDreamerRunnerOptions, 'owner' | 'runtimeKind'>> = {
+const DEFAULT_PHILOSOPHER_RUNNER_OPTIONS: Readonly<Omit<ResolvedPhilosopherRunnerOptions, 'owner' | 'runtimeKind'>> = {
   pollIntervalMs: 5_000,
   timeoutMs: 300_000,
   defaultMaxAttempts: 3,
-  agentId: 'dreamer',
+  agentId: 'philosopher',
 } as const;
 
-function resolveDreamerRunnerOptions(options: DreamerRunnerOptions): ResolvedDreamerRunnerOptions {
+function resolvePhilosopherRunnerOptions(options: PhilosopherRunnerOptions): ResolvedPhilosopherRunnerOptions {
   return {
-    pollIntervalMs: options.pollIntervalMs ?? DEFAULT_DREAMER_RUNNER_OPTIONS.pollIntervalMs,
-    timeoutMs: options.timeoutMs ?? DEFAULT_DREAMER_RUNNER_OPTIONS.timeoutMs,
-    defaultMaxAttempts: options.defaultMaxAttempts ?? DEFAULT_DREAMER_RUNNER_OPTIONS.defaultMaxAttempts,
+    pollIntervalMs: options.pollIntervalMs ?? DEFAULT_PHILOSOPHER_RUNNER_OPTIONS.pollIntervalMs,
+    timeoutMs: options.timeoutMs ?? DEFAULT_PHILOSOPHER_RUNNER_OPTIONS.timeoutMs,
+    defaultMaxAttempts: options.defaultMaxAttempts ?? DEFAULT_PHILOSOPHER_RUNNER_OPTIONS.defaultMaxAttempts,
     owner: options.owner,
     runtimeKind: options.runtimeKind,
-    agentId: options.agentId ?? DEFAULT_DREAMER_RUNNER_OPTIONS.agentId,
+    agentId: options.agentId ?? DEFAULT_PHILOSOPHER_RUNNER_OPTIONS.agentId,
   };
 }
 
-// ── Dependencies ─────────────────────────────────────────────────────────────
+// ── Dependencies ──────────────────────────────────────────────────────────────
 
-export interface DreamerRunnerDeps {
+export interface PhilosopherRunnerDeps {
   readonly stateManager: RuntimeStateManager;
   readonly runtimeAdapter: PDRuntimeAdapter;
   readonly eventEmitter: StoreEventEmitter;
-  readonly validator: DreamerValidator;
+  readonly validator: PhilosopherValidator;
   readonly artifactStore: PIArtifactStore;
 }
 
-// ── Context types for error handling ─────────────────────────────────────────
+// ── Context types for error handling ──────────────────────────────────────────
 
 interface FailureContext {
   readonly taskId: string;
@@ -117,7 +117,7 @@ interface FailureContext {
 interface SucceedContext {
   readonly taskId: string;
   readonly runId: string;
-  readonly output: DreamerOutput;
+  readonly output: PhilosopherOutputV1;
   readonly task: TaskRecord;
   readonly contextHash: string;
 }
@@ -126,35 +126,34 @@ interface ValidationErrorContext {
   readonly taskId: string;
   readonly task: TaskRecord;
   readonly errors: readonly string[];
-  readonly errorCategory?: PDErrorCategory;
+  readonly errorCategory?: string;
 }
 
-// ── DreamerRunner ─────────────────────────────────────────────────────────────
+// ── PhilosopherRunner ──────────────────────────────────────────────────────────
 
-export class DreamerRunner {
+export class PhilosopherRunner {
   private phase: RunnerPhase = RunnerPhase.Idle;
-  private readonly resolvedOptions: ResolvedDreamerRunnerOptions;
+  private readonly resolvedOptions: ResolvedPhilosopherRunnerOptions;
   private readonly stateManager: RuntimeStateManager;
   private readonly runtimeAdapter: PDRuntimeAdapter;
   private readonly eventEmitter: StoreEventEmitter;
-  private readonly validator: DreamerValidator;
+  private readonly validator: PhilosopherValidator;
   private readonly artifactStore: PIArtifactStore;
 
-  constructor(deps: DreamerRunnerDeps, options: DreamerRunnerOptions) {
+  constructor(deps: PhilosopherRunnerDeps, options: PhilosopherRunnerOptions) {
     this.stateManager = deps.stateManager;
     this.runtimeAdapter = deps.runtimeAdapter;
     this.eventEmitter = deps.eventEmitter;
     this.validator = deps.validator;
     this.artifactStore = deps.artifactStore;
-    this.resolvedOptions = resolveDreamerRunnerOptions(options);
+    this.resolvedOptions = resolvePhilosopherRunnerOptions(options);
   }
 
-  /** Get the current internal phase. For testing/observability only. */
   get currentPhase(): RunnerPhase {
     return this.phase;
   }
 
-  private emitDreamerEvent(
+  private emitPhilosopherEvent(
     eventType: string,
     taskId: string,
     payload: Record<string, unknown>,
@@ -169,16 +168,9 @@ export class DreamerRunner {
     });
   }
 
-  /**
-   * Execute the full Dreamer lifecycle for a task.
-   *
-   * The runner does NOT hold mutable state between run() calls.
-   * Each invocation is independent.
-   */
-  async run(taskId: string): Promise<DreamerRunnerResult> {
+  async run(taskId: string): Promise<PhilosopherRunnerResult> {
     this.phase = RunnerPhase.Idle;
 
-    // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
     // eslint-disable-next-line @typescript-eslint/init-declarations
     let leasedTask: TaskRecord;
     try {
@@ -191,14 +183,9 @@ export class DreamerRunner {
       return await this.handleLeaseOrPhaseError(taskId, error);
     }
 
-    this.emitDreamerEvent('dreamer_task_leased', taskId, {
-      taskKind: 'dreamer',
-      attemptCount: leasedTask.attemptCount,
-    });
-
-    if (leasedTask.taskKind !== 'dreamer') {
-      this.emitDreamerEvent('dreamer_wrong_task_kind', taskId, {
-        expectedKind: 'dreamer',
+    if (leasedTask.taskKind !== 'philosopher') {
+      this.emitPhilosopherEvent('philosopher_wrong_task_kind', taskId, {
+        expectedKind: 'philosopher',
         actualKind: leasedTask.taskKind,
       });
       await this.stateManager.markTaskFailed(taskId, 'input_invalid');
@@ -206,44 +193,50 @@ export class DreamerRunner {
         status: 'failed',
         taskId,
         errorCategory: 'input_invalid',
-        failureReason: `Task kind must be 'dreamer', got '${leasedTask.taskKind}'`,
+        failureReason: `Task kind must be 'philosopher', got '${leasedTask.taskKind}'`,
         attemptCount: leasedTask.attemptCount,
       };
     }
 
-    // All subsequent errors use the real leasedTask — no synthetic TaskRecord allowed
+    this.emitPhilosopherEvent('philosopher_task_leased', taskId, {
+      taskKind: 'philosopher',
+      attemptCount: leasedTask.attemptCount,
+    });
+
     try {
-      // acquireLease creates a RunRecord; resolve its runId for store operations
       const storeRunId = await this.resolveStoreRunId(taskId);
 
-      // 2. Build context from predecessor task outputs (no ContextAssembler)
       this.phase = RunnerPhase.BuildingContext;
-      const { contextHash } = await this.buildContext(taskId);
+      const { contextHash, dreamerArtifact } = await this.buildContext(taskId);
 
-      this.emitDreamerEvent('dreamer_context_built', taskId, { contextHash });
+      if (!dreamerArtifact) {
+        return this.retryOrFail({
+          taskId,
+          task: leasedTask,
+          errorCategory: 'input_invalid',
+          failureReason: 'Dreamer dependency artifact not found',
+        });
+      }
 
-      // 3. Invoke runtime
+      this.emitPhilosopherEvent('philosopher_context_built', taskId, { contextHash });
+
       this.phase = RunnerPhase.Invoking;
-      const runHandle = await this.invokeRuntime(taskId, contextHash);
+      const runHandle = await this.invokeRuntime(taskId, contextHash, dreamerArtifact);
 
-      this.emitDreamerEvent('dreamer_run_started', taskId, {
+      this.emitPhilosopherEvent('philosopher_run_started', taskId, {
         runtimeKind: this.resolvedOptions.runtimeKind,
       });
 
-      // 4. Poll until terminal
       this.phase = RunnerPhase.Polling;
       const finalStatus = await this.pollUntilTerminal(runHandle);
 
-      // 5. Handle non-success terminal states
       if (finalStatus.status !== 'succeeded') {
         return await this.handleRuntimeFailure(taskId, leasedTask, finalStatus);
       }
 
-      // 6. Fetch output
       this.phase = RunnerPhase.FetchingOutput;
       const output = await this.fetchAndParseOutput(runHandle.runId);
 
-      // 7. Validate
       this.phase = RunnerPhase.Validating;
       const validationResult = await this.validator.validate(output, taskId);
       if (!validationResult.valid) {
@@ -255,11 +248,10 @@ export class DreamerRunner {
         });
       }
 
-      this.emitDreamerEvent('dreamer_output_validated', taskId, {
-        candidateCount: output.candidates.length,
+      this.emitPhilosopherEvent('philosopher_output_validated', taskId, {
+        principleTitle: output.principleCandidate.title,
       });
 
-      // 8. Succeed task
       return await this.succeedTask({
         taskId,
         runId: storeRunId,
@@ -268,34 +260,13 @@ export class DreamerRunner {
         contextHash,
       });
     } catch (error) {
-      // handleLeaseOrPhaseError is only for lease errors (before lease).
-      // Post-lease errors use retryOrFail with the real leasedTask.
       return await this.handlePostLeaseError(taskId, leasedTask, error);
     }
   }
 
   // ── Phase methods ─────────────────────────────────────────────────────────
 
-  /**
-   * Build context from predecessor task outputs.
-   *
-   * Dreamer doesn't use ContextAssembler — it resolves predecessor context
-   * from dependencyTaskIds via stateManager.getTask(). The predecessor's
-   * resultRef/outputArtifactRefs become the Dreamer's input context.
-   *
-   * Degradation semantics (intentional partial failure):
-   *   - If ALL dependencies fail → builds empty context (continues, not fail-closed)
-   *   - If SOME dependencies fail → builds partial context + emits dreamer_context_partial
-   *   - Only fulfilled results contribute contextRefs
-   *
-   * This is a deliberate design choice: Dreamer can produce output with partial
-   * context, whereas the host layer's task-ready validation is fail-closed.
-   * Partial context is reported via telemetry.
-   *
-   * @see hydratePITaskRecord (PRI-65) for fail-closed PI metadata access
-   */
-  private async buildContext(taskId: string): Promise<{ contextHash: string }> {
-    // Get the task to read dependencyTaskIds
+  private async buildContext(taskId: string): Promise<{ contextHash: string; dreamerArtifact: string | null }> {
     const task = await this.stateManager.getTask(taskId);
     if (!task) {
       throw new PDRuntimeError('input_invalid', `Task ${taskId} not found`);
@@ -304,52 +275,41 @@ export class DreamerRunner {
     const piTask = hydratePITaskRecord(task);
     const deps = piTask?.dependencyTaskIds ?? [];
 
-    // Resolve each dependency and collect result refs
-    const contextRefs: string[] = [];
-    const rejectedDeps: string[] = [];
-    if (deps.length > 0) {
-      const results = await Promise.allSettled(
-        deps.map((depId) => this.stateManager.getTask(depId)),
-      );
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const depId = deps[i];
-        if (!result || depId === undefined) continue;
-        if (result.status === 'rejected') {
-          rejectedDeps.push(depId);
-        } else if (result.status === 'fulfilled' && result.value) {
-          if (result.value.resultRef) {
-            contextRefs.push(result.value.resultRef);
-          }
-          const depPiTask = result.value ? hydratePITaskRecord(result.value) : null;
-          if (depPiTask?.outputArtifactRefs) {
-            contextRefs.push(...depPiTask.outputArtifactRefs.map((a) => a.ref));
-          }
-        }
+    if (deps.length === 0) {
+      this.emitPhilosopherEvent('philosopher_no_dependencies', taskId, {});
+      return { contextHash: 'empty', dreamerArtifact: null };
+    }
+
+    for (const depId of deps) {
+      const depTask = await this.stateManager.getTask(depId);
+      if (!depTask) continue;
+      if (depTask.status !== 'succeeded') {
+        this.emitPhilosopherEvent('philosopher_dependency_not_succeeded', taskId, {
+          depTaskId: depId,
+          depStatus: depTask.status,
+        });
+        continue;
+      }
+
+      const depPiTask = hydratePITaskRecord(depTask);
+      const artifacts = await this.artifactStore.listBySourceTaskId(depId);
+      if (artifacts.length > 0) {
+        const [firstArtifact] = artifacts;
+        if (!firstArtifact) continue;
+        const artifactRef = depPiTask?.outputArtifactRefs?.[0]?.ref ?? `pi-artifact://${depId}`;
+        return {
+          contextHash: PhilosopherRunner.hashContextRefs([artifactRef]),
+          dreamerArtifact: firstArtifact.contentJson,
+        };
       }
     }
 
-    if (rejectedDeps.length > 0) {
-      this.emitDreamerEvent('dreamer_context_partial', taskId, {
-        rejectedCount: rejectedDeps.length,
-        rejectedDeps,
-      });
-    }
-
-    // Compute context hash from collected refs
-    const contextHash = DreamerRunner.hashContextRefs(contextRefs);
-
-    return { contextHash };
+    this.emitPhilosopherEvent('philosopher_no_dreamer_artifact', taskId, {});
+    return { contextHash: 'empty', dreamerArtifact: null };
   }
 
-  /**
-   * Compute a deterministic hash from context references.
-   * Used for telemetry and result tracking, not for caching.
-   */
   private static hashContextRefs(refs: readonly string[]): string {
     if (refs.length === 0) return 'empty';
-    // Simple deterministic hash via DJB2-style accumulator
-    // Not cryptographic — only used for observability
     const str = refs.join('|');
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -367,38 +327,13 @@ export class DreamerRunner {
     return latestRun.runId;
   }
 
-  private async resolveLineageArtifactIds(taskId: string): Promise<{ ids: string[]; hasRejected: boolean }> {
-    const task = await this.stateManager.getTask(taskId);
-    if (!task) return { ids: [], hasRejected: false };
-
-    const piTask = hydratePITaskRecord(task);
-    const deps = piTask?.dependencyTaskIds ?? [];
-    if (deps.length === 0) return { ids: [], hasRejected: false };
-
-    const lineageIds: string[] = [];
-    let hasRejected = false;
-    const results = await Promise.allSettled(
-      deps.map((depId) => this.artifactStore.listBySourceTaskId(depId)),
-    );
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        for (const artifact of result.value) {
-          lineageIds.push(artifact.artifactId);
-        }
-      } else {
-        hasRejected = true;
-      }
-    }
-    return { ids: lineageIds, hasRejected };
-  }
-
-  private async invokeRuntime(taskId: string, contextHash: string): Promise<RunHandle> {
+  private async invokeRuntime(taskId: string, contextHash: string, dreamerArtifact: string): Promise<RunHandle> {
     const startInput: StartRunInput = {
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
-      inputPayload: JSON.stringify({ taskId, contextHash }),
+      inputPayload: JSON.stringify({ taskId, contextHash, dreamerArtifact }),
       contextItems: [],
-      outputSchemaRef: 'dreamer-output-v1',
+      outputSchemaRef: 'philosopher-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
     };
 
@@ -417,13 +352,12 @@ export class DreamerRunner {
       await this.sleep(this.resolvedOptions.pollIntervalMs);
     }
 
-    // Timeout — cancel gracefully, preserve timeout error with cancel status
     let cancelFailed = false;
     try {
       await this.runtimeAdapter.cancelRun(runHandle.runId);
     } catch (cancelErr) {
       cancelFailed = true;
-      this.emitDreamerEvent('dreamer_cancel_run_failed', runHandle.runId, {
+      this.emitPhilosopherEvent('philosopher_cancel_run_failed', runHandle.runId, {
         runId: runHandle.runId,
         errorMessage: cancelErr instanceof Error ? cancelErr.message : String(cancelErr),
       });
@@ -432,62 +366,44 @@ export class DreamerRunner {
     throw new PDRuntimeError('timeout', `Run ${runHandle.runId} timed out after ${this.resolvedOptions.timeoutMs}ms${cancelNote}`);
   }
 
-  private async fetchAndParseOutput(runId: string): Promise<DreamerOutput> {
+  private async fetchAndParseOutput(runId: string): Promise<PhilosopherOutputV1> {
     const result = await this.runtimeAdapter.fetchOutput(runId);
     if (!result || !result.payload) {
       throw new PDRuntimeError('output_invalid', `No output available for run ${runId}`);
     }
-    return result.payload as DreamerOutput;
+    return result.payload as PhilosopherOutputV1;
   }
 
-  private async succeedTask(ctx: SucceedContext): Promise<DreamerRunnerResult> {
-    // Store output before marking succeeded so run record reflects output
+  private async succeedTask(ctx: SucceedContext): Promise<PhilosopherRunnerResult> {
     try {
       await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));
     } catch (updateErr) {
-      this.emitDreamerEvent('dreamer_update_output_failed', ctx.taskId, {
+      this.emitPhilosopherEvent('philosopher_update_output_failed', ctx.taskId, {
         runId: ctx.runId,
         errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
       });
       throw updateErr;
     }
 
-    // Emit per-candidate telemetry
-    for (const candidate of ctx.output.candidates) {
-      this.emitDreamerEvent('dreamer_candidate_generated', ctx.taskId, {
-        candidateIndex: candidate.candidateIndex,
-        confidence: candidate.confidence,
-        riskLevel: candidate.riskLevel,
-      });
-    }
-
-    // Write PIArtifact via artifactStore (idempotent upsert)
-    // PIArtifact is the core durable output of DreamerRunner.
-    // If artifact write fails, the task must NOT be marked succeeded —
-    // downstream runners (Philosopher/Scribe) require durable artifact input.
-    let lineageArtifactIds: string[] = [];
-    let lineageHasRejected = false;
-    try {
-      const lineageResult = await this.resolveLineageArtifactIds(ctx.taskId);
-      lineageArtifactIds = lineageResult.ids;
-      lineageHasRejected = lineageResult.hasRejected;
-    } catch (lineageErr) {
-      this.emitDreamerEvent('dreamer_lineage_resolve_failed', ctx.taskId, {
-        runId: ctx.runId,
-        errorMessage: lineageErr instanceof Error ? lineageErr.message : String(lineageErr),
-      });
-    }
-
-    if (lineageHasRejected) {
-      this.emitDreamerEvent('dreamer_lineage_partial', ctx.taskId, {
-        runId: ctx.runId,
-        resolvedCount: lineageArtifactIds.length,
-        warning: 'Some dependency artifact queries were rejected; lineage may be incomplete',
-      });
-    }
-
     const artifactId = `pi-art-${ctx.taskId}-${ctx.runId}`;
     const now = new Date().toISOString();
+
+    let lineageArtifactIds: string[] = [];
+    try {
+      const piTask = hydratePITaskRecord(ctx.task);
+      const deps = piTask?.dependencyTaskIds ?? [];
+      const results = await Promise.allSettled(
+        deps.map((depId) => this.artifactStore.listBySourceTaskId(depId)),
+      );
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          for (const artifact of result.value) {
+            lineageArtifactIds.push(artifact.artifactId);
+          }
+        }
+      }
+    } catch { /* lineage resolution failure is non-fatal */ }
+
     try {
       await this.artifactStore.upsertArtifact({
         artifactId,
@@ -500,7 +416,7 @@ export class DreamerRunner {
         updatedAt: now,
       });
     } catch (artifactErr) {
-      this.emitDreamerEvent('dreamer_artifact_write_failed', ctx.taskId, {
+      this.emitPhilosopherEvent('philosopher_artifact_write_failed', ctx.taskId, {
         runId: ctx.runId,
         errorMessage: artifactErr instanceof Error ? artifactErr.message : String(artifactErr),
       });
@@ -512,12 +428,11 @@ export class DreamerRunner {
       });
     }
 
-    // Mark task succeeded with dreamer:// resultRef
-    const resultRef = `dreamer://${ctx.runId}`;
+    const resultRef = `philosopher://${ctx.runId}`;
     try {
       await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
     } catch (stateErr) {
-      this.emitDreamerEvent('dreamer_mark_succeeded_failed', ctx.taskId, {
+      this.emitPhilosopherEvent('philosopher_mark_succeeded_failed', ctx.taskId, {
         taskId: ctx.taskId,
         runId: ctx.runId,
         errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
@@ -525,10 +440,10 @@ export class DreamerRunner {
       throw stateErr;
     }
 
-    this.emitDreamerEvent('dreamer_task_succeeded', ctx.taskId, {
+    this.emitPhilosopherEvent('philosopher_task_succeeded', ctx.taskId, {
       attemptCount: ctx.task.attemptCount,
       resultRef,
-      candidateCount: ctx.output.candidates.length,
+      principleTitle: ctx.output.principleCandidate.title,
     });
 
     this.phase = RunnerPhase.Completed;
@@ -548,10 +463,10 @@ export class DreamerRunner {
     taskId: string,
     task: TaskRecord,
     runStatus: RunStatus,
-  ): Promise<DreamerRunnerResult> {
-    const errorCategory = this.mapRunStatusToErrorCategory(runStatus.status, runStatus.reason);
+  ): Promise<PhilosopherRunnerResult> {
+    const errorCategory = this.mapRunStatusToErrorCategory(runStatus.status);
 
-    this.emitDreamerEvent('dreamer_run_failed', taskId, {
+    this.emitPhilosopherEvent('philosopher_run_failed', taskId, {
       runStatus: runStatus.status,
       errorCategory,
     });
@@ -564,10 +479,10 @@ export class DreamerRunner {
     });
   }
 
-  private async handleValidationError(ctx: ValidationErrorContext): Promise<DreamerRunnerResult> {
-    const category = ctx.errorCategory ?? 'output_invalid';
+  private async handleValidationError(ctx: ValidationErrorContext): Promise<PhilosopherRunnerResult> {
+    const category = (ctx.errorCategory ?? 'output_invalid') as PDErrorCategory;
 
-    this.emitDreamerEvent('dreamer_output_invalid', ctx.taskId, {
+    this.emitPhilosopherEvent('philosopher_output_invalid', ctx.taskId, {
       errorCount: ctx.errors.length,
       errorCategory: category,
     });
@@ -583,13 +498,11 @@ export class DreamerRunner {
   private async handleLeaseOrPhaseError(
     taskId: string,
     error: unknown,
-  ): Promise<DreamerRunnerResult> {
+  ): Promise<PhilosopherRunnerResult> {
     const classified = this.classifyError(error);
 
-    // lease_conflict is concurrent-access conflict, not a state change.
-    // No mutation methods (markTaskFailed/markTaskRetryWait) are called.
     if (classified.category === 'lease_conflict') {
-      this.emitDreamerEvent('dreamer_run_failed', taskId, {
+      this.emitPhilosopherEvent('philosopher_run_failed', taskId, {
         errorCategory: 'lease_conflict',
         errorMessage: classified.message,
       });
@@ -602,16 +515,14 @@ export class DreamerRunner {
       };
     }
 
-    // Non-lease errors (e.g., storage_unavailable before lease) must not
-    // use synthetic TaskRecord. Build one with real defaults from options.
-    this.emitDreamerEvent('dreamer_run_failed', taskId, {
+    this.emitPhilosopherEvent('philosopher_run_failed', taskId, {
       errorCategory: classified.category,
       errorMessage: classified.message,
     });
 
     const task: TaskRecord = {
       taskId,
-      taskKind: 'dreamer',
+      taskKind: 'philosopher',
       status: 'leased',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -625,10 +536,10 @@ export class DreamerRunner {
     taskId: string,
     task: TaskRecord,
     error: unknown,
-  ): Promise<DreamerRunnerResult> {
+  ): Promise<PhilosopherRunnerResult> {
     const classified = this.classifyError(error);
 
-    this.emitDreamerEvent('dreamer_run_failed', taskId, {
+    this.emitPhilosopherEvent('philosopher_run_failed', taskId, {
       errorCategory: classified.category,
       errorMessage: classified.message,
     });
@@ -636,13 +547,12 @@ export class DreamerRunner {
     return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
   }
 
-  private async retryOrFail(ctx: FailureContext): Promise<DreamerRunnerResult> {
-    // Check if error is permanent (never retry)
+  private async retryOrFail(ctx: FailureContext): Promise<PhilosopherRunnerResult> {
     if (this.isPermanentError(ctx.errorCategory)) {
       try {
         await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory);
       } catch (stateErr) {
-        this.emitDreamerEvent('dreamer_mark_failed_error', ctx.taskId, {
+        this.emitPhilosopherEvent('philosopher_mark_failed_error', ctx.taskId, {
           errorCategory: 'storage_unavailable',
           attemptCount: ctx.task.attemptCount,
           errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
@@ -655,7 +565,7 @@ export class DreamerRunner {
           attemptCount: ctx.task.attemptCount,
         };
       }
-      this.emitDreamerEvent('dreamer_task_failed', ctx.taskId, {
+      this.emitPhilosopherEvent('philosopher_task_failed', ctx.taskId, {
         errorCategory: ctx.errorCategory,
         attemptCount: ctx.task.attemptCount,
         failureReason: ctx.failureReason,
@@ -670,13 +580,12 @@ export class DreamerRunner {
       };
     }
 
-    // Check retry policy
     const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
     if (shouldRetry) {
       try {
         await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory);
       } catch (stateErr) {
-        this.emitDreamerEvent('dreamer_mark_retry_error', ctx.taskId, {
+        this.emitPhilosopherEvent('philosopher_mark_retry_error', ctx.taskId, {
           errorCategory: 'storage_unavailable',
           attemptCount: ctx.task.attemptCount,
           errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
@@ -689,7 +598,7 @@ export class DreamerRunner {
           attemptCount: ctx.task.attemptCount,
         };
       }
-      this.emitDreamerEvent('dreamer_task_retried', ctx.taskId, {
+      this.emitPhilosopherEvent('philosopher_task_retried', ctx.taskId, {
         errorCategory: ctx.errorCategory,
         attemptCount: ctx.task.attemptCount,
       });
@@ -703,11 +612,10 @@ export class DreamerRunner {
       };
     }
 
-    // Max attempts exceeded
     try {
       await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded');
     } catch (stateErr) {
-      this.emitDreamerEvent('dreamer_mark_failed_error', ctx.taskId, {
+      this.emitPhilosopherEvent('philosopher_mark_failed_error', ctx.taskId, {
         errorCategory: 'storage_unavailable',
         attemptCount: ctx.task.attemptCount,
         errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
@@ -720,7 +628,7 @@ export class DreamerRunner {
         attemptCount: ctx.task.attemptCount,
       };
     }
-    this.emitDreamerEvent('dreamer_task_failed', ctx.taskId, {
+    this.emitPhilosopherEvent('philosopher_task_failed', ctx.taskId, {
       errorCategory: 'max_attempts_exceeded',
       attemptCount: ctx.task.attemptCount,
       failureReason: `Max attempts exceeded: ${ctx.failureReason}`,
@@ -757,7 +665,7 @@ export class DreamerRunner {
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  private mapRunStatusToErrorCategory(status: string, _reason?: string): PDErrorCategory {
+  private mapRunStatusToErrorCategory(status: string): PDErrorCategory {
     switch (status) {
       case 'failed': return 'execution_failed';
       case 'timed_out': return 'timeout';
@@ -772,6 +680,4 @@ export class DreamerRunner {
   }
 }
 
-// ── Exports ───────────────────────────────────────────────────────────────────
-
-export { resolveDreamerRunnerOptions, DEFAULT_DREAMER_RUNNER_OPTIONS };
+export { resolvePhilosopherRunnerOptions, DEFAULT_PHILOSOPHER_RUNNER_OPTIONS };

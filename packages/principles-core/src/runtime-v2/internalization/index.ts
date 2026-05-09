@@ -161,7 +161,7 @@ export type {
   DreamerValidator,
 } from './dreamer-output.js';
 
-export { PassThroughDreamerValidator } from './dreamer-output.js';
+export { PassThroughDreamerValidator, DefaultDreamerValidator } from './dreamer-output.js';
 
 export type {
   DreamerRunnerResult,
@@ -176,6 +176,33 @@ export {
 
 export { DreamerRunner } from './dreamer-runner.js';
 
+// ── Philosopher Runner (PRI-90) ────────────────────────────────────────────────
+
+export type {
+  PhilosopherOutputV1,
+  PhilosopherPrincipleCandidate,
+  PhilosopherValidationResult,
+  PhilosopherValidator,
+} from './philosopher-output.js';
+
+export {
+  DefaultPhilosopherValidator,
+} from './philosopher-output.js';
+
+export type {
+  PhilosopherRunnerResultStatus,
+  PhilosopherRunnerResult,
+  PhilosopherRunnerOptions,
+  ResolvedPhilosopherRunnerOptions,
+  PhilosopherRunnerDeps,
+} from './philosopher-runner.js';
+
+export {
+  PhilosopherRunner,
+  resolvePhilosopherRunnerOptions,
+  DEFAULT_PHILOSOPHER_RUNNER_OPTIONS,
+} from './philosopher-runner.js';
+
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
 
 export type {
@@ -189,6 +216,7 @@ export type {
   InvalidTaskMetadataResult,
   ProposalCreatedResult,
   ProposeNextTaskResult,
+  CommitNextTaskResult,
   InternalizationOrchestratorOptions,
   InternalizationOrchestratorDeps,
 } from './internalization-orchestrator.js';

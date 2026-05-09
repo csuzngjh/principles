@@ -62,6 +62,8 @@ export const TaskRecordSchema = Type.Object({
   inputRef: Type.Optional(Type.String()),
   /** Reference to the task's result data. */
   resultRef: Type.Optional(Type.String()),
+  /** Diagnostic JSON payload (PI metadata, session hints, etc.). */
+  diagnosticJson: Type.Optional(Type.String()),
 });
 export type TaskRecord = Static<typeof TaskRecordSchema>;
 

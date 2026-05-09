@@ -32,7 +32,7 @@ import { handleRuntimeUat } from './commands/runtime-uat.js';
 import { handleRuntimeInternalizationQueue } from './commands/runtime-internalization-queue.js';
 import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-internalization-wake-once.js';
 import { handleRuntimeInternalizationRunOnce } from './commands/runtime-internalization-run-once.js';
-import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute } from './commands/candidate.js';
+import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
 const program = new Command();
@@ -410,9 +410,10 @@ internalizationCmd
   .option('--runner <kind>', 'Runner kind to execute (default: dreamer)', 'dreamer')
   .option('--runtime <kind>', 'Runtime adapter kind: config (from workflows.yaml), pi-ai, openclaw-cli, test-double (default: config)', 'config')
   .option('--allow-test-double', 'Acknowledge that test-double runtime will mutate real queue state')
+  .option('--enqueue-next', 'After successful runner execution, commit successor task to queue')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble });
+    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext });
   });
 
 const pruningCmd = runtimeCmd
@@ -539,6 +540,17 @@ candidateCmd
   .option('--json', 'Output as JSON')
   .action(async (opts) => {
     await handleCandidateRoute(opts);
+  });
+
+candidateCmd
+  .command('internalize')
+  .description('Seed internalization Dreamer task from a candidate')
+  .requiredOption('--candidate-id <id>', 'Candidate ID to internalize')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output as JSON')
+  .option('--dry-run', 'Preview without writing to database')
+  .action(async (opts) => {
+    await handleCandidateInternalize(opts);
   });
 
 // ── Artifact inspection commands ────────────────────────────────────────────
