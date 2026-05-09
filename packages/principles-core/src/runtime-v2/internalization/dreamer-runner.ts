@@ -47,6 +47,9 @@ export type DreamerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
 export interface DreamerRunnerResult {
   readonly status: DreamerRunnerResultStatus;
   readonly taskId: string;
+  readonly runId?: string;
+  readonly artifactId?: string;
+  readonly resultRef?: string;
   readonly contextHash?: string;
   readonly output?: DreamerOutput;
   readonly errorCategory?: PDErrorCategory;
@@ -454,10 +457,11 @@ export class DreamerRunner {
       });
     }
 
+    const artifactId = `pi-art-${ctx.taskId}-${ctx.runId}`;
     const now = new Date().toISOString();
     try {
       await this.artifactStore.upsertArtifact({
-        artifactId: `pi-art-${ctx.taskId}-${ctx.runId}`,
+        artifactId,
         artifactKind: 'principle',
         sourceTaskId: ctx.taskId,
         lineageArtifactIds,
@@ -502,6 +506,9 @@ export class DreamerRunner {
     return {
       status: 'succeeded',
       taskId: ctx.taskId,
+      runId: ctx.runId,
+      artifactId,
+      resultRef,
       contextHash: ctx.contextHash,
       output: ctx.output,
       attemptCount: ctx.task.attemptCount,

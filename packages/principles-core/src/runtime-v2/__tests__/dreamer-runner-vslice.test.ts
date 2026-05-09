@@ -107,6 +107,9 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
 
     expect(result.status).toBe('succeeded');
     expect(result.taskId).toBe('task-dreamer-001');
+    expect(result.runId).toBe('run-001');
+    expect(result.artifactId).toBe('pi-art-task-dreamer-001-run-001');
+    expect(result.resultRef).toContain('dreamer://');
 
     const artifacts = await artifactStore.listBySourceTaskId('task-dreamer-001');
     expect(artifacts.length).toBeGreaterThanOrEqual(1);
