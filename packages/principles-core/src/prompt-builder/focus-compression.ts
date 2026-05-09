@@ -368,7 +368,7 @@ export function mergeWorkingMemory(content: string, snapshot: WorkingMemorySnaps
   }
 }
 
-function cleanupStaleInfoPure(
+export function cleanupStaleInfoPure(
   content: string,
   config: FocusCompressionOptions,
 ): string {

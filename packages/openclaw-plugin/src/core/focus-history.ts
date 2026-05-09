@@ -4,9 +4,9 @@ import { atomicWriteFileSync } from '../utils/io.js';
 import {
   extractVersion,
   extractDate,
-  extractSummary,
-  extractMilestones,
   validateCurrentFocus,
+  compressFocusContent,
+  cleanupStaleInfoPure,
   extractDescription,
   extractProblems,
   extractNextActions,
@@ -26,6 +26,7 @@ export {
   extractMilestones,
   validateCurrentFocus,
   mergeWorkingMemory,
+  compressFocusContent,
 } from '@principles/core/prompt-builder';
 
 export type {
@@ -376,70 +377,53 @@ export function cleanupStaleInfo(
   config?: CompressionConfig
 ): string {
   const effectiveConfig = config || DEFAULT_COMPRESSION_CONFIG;
-  const lines = content.split('\n');
-  const result: string[] = [];
+  const coreOptions = {
+    lineThreshold: effectiveConfig.lineThreshold,
+    sizeThreshold: effectiveConfig.sizeThreshold,
+    keepCompletedTasks: effectiveConfig.keepCompletedTasks,
+    maxWorkingMemoryArtifacts: effectiveConfig.maxWorkingMemoryArtifacts,
+  };
+  let result = cleanupStaleInfoPure(content, coreOptions);
 
-  let inWorkingMemory = false;
-  let inFileTable = false;
-  let completedCount = 0;
-  let artifactCount = 0;
+  if (workspaceDir) {
+    const lines = result.split('\n');
+    const filtered: string[] = [];
+    let inFileTable = false;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    const trimmed = line.trim();
+    for (const line of lines) {
+      const trimmed = line.trim();
 
-    if (/^##\s*🧠\s*Working Memory/.test(trimmed)) {
-      inWorkingMemory = true;
-      inFileTable = false;
-    } else if (/^##\s/.test(trimmed) && !trimmed.includes('Working Memory')) {
-      inWorkingMemory = false;
-      inFileTable = false;
-    }
-
-    if (inWorkingMemory && /^\|\s*文件路径/.test(trimmed)) {
-      inFileTable = true;
-      result.push(line);
-      continue;
-    }
-
-    if (inFileTable && /^\|[^|]+\|[^|]+\|[^|]+\|/.test(trimmed)) {
-      if (/^\|[-\s|:]+\|$/.test(trimmed)) {
-        result.push(line);
+      if (/^\|\s*文件路径/.test(trimmed)) {
+        inFileTable = true;
+        filtered.push(line);
         continue;
       }
 
-      const match = /^\|\s*`?([^`|\n]+)`?\s*\|/.exec(trimmed);
-      if (match) {
-        const filePath = match[1]!.trim();
-        artifactCount++;
-
-        if (artifactCount > effectiveConfig.maxWorkingMemoryArtifacts) {
+      if (inFileTable && /^\|[^|]+\|[^|]+\|[^|]+\|/.test(trimmed)) {
+        if (/^\|[-\s|:]+\|$/.test(trimmed)) {
+          filtered.push(line);
           continue;
         }
-
-        if (workspaceDir) {
+        const match = /^\|\s*`?([^`|\n]+)`?\s*\|/.exec(trimmed);
+        if (match && match[1]) {
+          const filePath = match[1].trim();
           const fullPath = path.join(workspaceDir, filePath);
           if (!fs.existsSync(fullPath)) {
+            inFileTable = false;
             continue;
           }
         }
-
-        result.push(line);
-        continue;
+      } else if (inFileTable && /^##\s/.test(trimmed)) {
+        inFileTable = false;
       }
+
+      filtered.push(line);
     }
 
-    if (/^-\s*\[x\]/i.test(trimmed)) {
-      completedCount++;
-      if (completedCount > effectiveConfig.keepCompletedTasks) {
-        continue;
-      }
-    }
-
-    result.push(line);
+    result = filtered.join('\n');
   }
 
-  return result.join('\n');
+  return result;
 }
 
 function loadCompressionConfig(stateDir?: string): CompressionConfig {
@@ -552,36 +536,42 @@ export function autoCompressFocus(
     };
   }
 
-  const version = extractVersion(oldContent);
-  const milestones = extractMilestones(oldContent);
+  const coreOptions = {
+    lineThreshold: config.lineThreshold,
+    sizeThreshold: config.sizeThreshold,
+    keepCompletedTasks: config.keepCompletedTasks,
+    maxWorkingMemoryArtifacts: config.maxWorkingMemoryArtifacts,
+  };
+  const coreResult = compressFocusContent(oldContent, coreOptions);
+
+  if (!coreResult.compressed) {
+    return {
+      compressed: false,
+      oldLines,
+      newLines: oldLines,
+      milestonesArchived: false,
+      backupPath: null,
+      reason: 'Compression returned no content'
+    };
+  }
 
   let milestonesArchived = false;
   if (workspaceDir) {
-    const archivePath = archiveMilestonesToDaily(workspaceDir, milestones, version);
+    const archivePath = archiveMilestonesToDaily(workspaceDir, coreResult.milestones, coreResult.newVersion);
     milestonesArchived = archivePath !== null;
   }
-
-  let newContent = cleanupStaleInfo(oldContent, workspaceDir, config);
-
-  newContent = extractSummary(newContent, 50);
-
-  const newVersion = `${parseInt(version, 10) + 1}`;
-  const [today] = new Date().toISOString().split('T');
-  newContent = newContent
-    .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
-    .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`);
 
   const backupPath = backupToHistory(focusPath, oldContent);
 
   cleanupHistory(focusPath);
 
-  atomicWriteFileSync(focusPath, newContent);
+  atomicWriteFileSync(focusPath, coreResult.newContent);
 
   if (stateDir) {
     recordCompressTime(stateDir);
   }
 
-  const newLines = newContent.split('\n').length;
+  const newLines = coreResult.newContent.split('\n').length;
 
   return {
     compressed: true,
@@ -589,7 +579,7 @@ export function autoCompressFocus(
     newLines,
     milestonesArchived,
     backupPath,
-    newContent,
+    newContent: coreResult.newContent,
     reason: `Auto-compressed: ${oldLines} → ${newLines} lines`
   };
 }

@@ -33,4 +33,4 @@ export { matchEmpathyKeywords, createDefaultKeywordStore, applyKeywordUpdates, s
 export { EMPATHY_SEED_KEYWORDS, DEFAULT_EMPATHY_KEYWORD_CONFIG, scoreToSeverity, severityToPenalty, normalizeSeverity } from './empathy-types.js';
 
 // PRI-81 Phase B: Focus compression
-export { extractVersion, extractDate, extractSummary, parseWorkingMemorySection, workingMemoryToInjection, extractMilestones, validateCurrentFocus, mergeWorkingMemory, compressFocusContent, DEFAULT_FOCUS_COMPRESSION_OPTIONS, extractDescription, extractProblems, extractNextActions, deduplicateArtifacts } from './focus-compression.js';
+export { extractVersion, extractDate, extractSummary, parseWorkingMemorySection, workingMemoryToInjection, extractMilestones, validateCurrentFocus, mergeWorkingMemory, compressFocusContent, cleanupStaleInfoPure, DEFAULT_FOCUS_COMPRESSION_OPTIONS, extractDescription, extractProblems, extractNextActions, deduplicateArtifacts } from './focus-compression.js';
