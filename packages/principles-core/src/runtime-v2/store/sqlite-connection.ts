@@ -32,7 +32,11 @@ export class SqliteConnection {
     if (this.db) return this.db;
 
     this.db = new Database(this.dbPath);
-    this.db.pragma('journal_mode = WAL');
+    try {
+      this.db.pragma('journal_mode = WAL');
+    } catch {
+      this.db.pragma('journal_mode = DELETE');
+    }
     this.db.pragma('busy_timeout = 5000');
     this.db.pragma('foreign_keys = ON');
 
@@ -217,11 +221,13 @@ export class SqliteConnection {
 
   /** Closes the underlying database connection. */
   close(): void {
-    if (this.db) {
-      // Checkpoint WAL before closing so all data is flushed to the main DB file.
-      // TRUNCATE also shrinks the WAL file, preventing unbounded growth on Windows.
+    if (!this.db) return;
+    try {
       this.db.pragma('wal_checkpoint(TRUNCATE)');
       this.db.close();
+    } catch {
+      // ignore errors during close (e.g., if db file was removed externally)
+    } finally {
       this.db = null;
     }
   }
