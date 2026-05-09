@@ -265,4 +265,56 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
 
     expect(failingDeps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
+
+  it('lineage with rejected artifact queries: emits dreamer_lineage_partial telemetry, task still succeeds with partial lineage', async () => {
+    const partialStore = {
+      createArtifact: vi.fn().mockResolvedValue({}),
+      upsertArtifact: vi.fn().mockResolvedValue({}),
+      getArtifactById: vi.fn().mockResolvedValue(null),
+      listBySourceTaskId: vi.fn().mockImplementation(async (depId: string) => {
+        if (depId === 'task-pre-fail') {
+          throw new Error('artifact store unavailable');
+        }
+        return [{ artifactId: 'pre-art-ok', sourceTaskId: depId }];
+      }),
+      listLineage: vi.fn().mockResolvedValue([]),
+    } as unknown as PIArtifactStore;
+
+    const partialDeps = createMockDeps(partialStore);
+
+    const baseTask = makeTask();
+    const taskWithDeps = Object.assign({}, baseTask, {
+      diagnosticJson: serializePITaskMetadata({
+        dependencyTaskIds: ['task-pre-ok', 'task-pre-fail'],
+        channel: 'prompt',
+        timeoutMs: 30000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+      }),
+    });
+
+    const getTaskMock = vi.fn().mockImplementation(async (id: string) => {
+      if (id === 'task-pre-ok') return Object.assign({}, makeTask(), { taskId: 'task-pre-ok', resultRef: 'dreamer://run-ok' });
+      if (id === 'task-pre-fail') return Object.assign({}, makeTask(), { taskId: 'task-pre-fail', resultRef: 'dreamer://run-fail' });
+      return taskWithDeps;
+    });
+    (partialDeps.stateManager as unknown as Record<string, unknown>).getTask = getTaskMock;
+
+    const runner = new DreamerRunner(partialDeps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-001');
+
+    expect(result.status).toBe('succeeded');
+
+    const lineagePartialEvents = (partialDeps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call: unknown[]) => (call[0] as { eventType: string }).eventType === 'dreamer_lineage_partial',
+    );
+    expect(lineagePartialEvents.length).toBeGreaterThanOrEqual(1);
+    expect((lineagePartialEvents[0][0] as { payload: { resolvedCount: number } }).payload.resolvedCount).toBe(1);
+  });
 });
