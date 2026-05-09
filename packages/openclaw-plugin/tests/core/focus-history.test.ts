@@ -8,7 +8,6 @@ import {
   getHistoryVersions,
   extractSummary,
   cleanupStaleInfo,
-  compressFocusContent,
   extractWorkingMemory,
   parseWorkingMemorySection,
   mergeWorkingMemory,
@@ -705,9 +704,11 @@ ${Array.from({ length: 40 }, (_, i) => `| Item ${i + 1} | Value ${i + 1} |`).joi
     });
   });
 
-  describe('compressFocusContent delegation', () => {
-    it('should produce same result as core compressFocusContent', () => {
-      const longContent = `**版本**: v3
+  describe('autoCompressFocus', () => {
+    it('should filter stale artifacts when workspaceDir is provided', () => {
+      const focusContent = `# 🎯 CURRENT_FOCUS
+
+**版本**: v3
 **更新**: 2026-01-01
 
 ## 🔄 当前任务
@@ -716,38 +717,45 @@ ${Array.from({ length: 150 }, (_, i) => `- [x] Task ${i + 1}`).join('\n')}
 
 ## 🧠 Working Memory
 
-${Array.from({ length: 20 }, (_, i) => `| src/file${i}.ts | modified | file ${i} |`).join('\n')}`;
+| 文件路径 | 操作 | 描述 |
+|----------|------|------|
+| \`src/missing-a.ts\` | modified | stale |
+| \`src/existing.ts\` | modified | valid |
+| \`src/missing-b.ts\` | modified | stale |
 
-      const result = compressFocusContent(longContent, {
-        lineThreshold: 100,
-        sizeThreshold: 5000,
-        keepCompletedTasks: 3,
-        maxWorkingMemoryArtifacts: 10,
+### ➡️ 下一步行动
+
+1. Next action`;
+
+      vi.spyOn(fs, 'existsSync').mockImplementation((p: unknown) => {
+        const s = String(p);
+        if (s.includes('existing')) return true;
+        return false;
       });
 
-      expect(result.compressed).toBe(true);
-      expect(result.newVersion).toBe('4');
-      expect(result.milestones.completedTasks.length).toBeGreaterThan(0);
+      const result = cleanupStaleInfo(focusContent, '/workspace');
+
+      expect(result).toContain('existing.ts');
+      expect(result).not.toContain('missing-a.ts');
+      expect(result).not.toContain('missing-b.ts');
     });
 
-    it('should return unchanged content when below threshold', () => {
-      const shortContent = `**版本**: v1
-**更新**: 2026-01-01
+    it('should not filter when workspaceDir is omitted', () => {
+      const focusContent = `# 🎯 CURRENT_FOCUS
 
-## ➡️ 下一步
+## 🧠 Working Memory
 
-1. Task`;
+| 文件路径 | 操作 | 描述 |
+|----------|------|------|
+| \`src/stale.ts\` | modified | stale |
 
-      const result = compressFocusContent(shortContent, {
-        lineThreshold: 100,
-        sizeThreshold: 5000,
-        keepCompletedTasks: 3,
-        maxWorkingMemoryArtifacts: 10,
-      });
+### ➡️ 下一步行动
 
-      expect(result.compressed).toBe(false);
-      expect(result.needsCompression).toBe(false);
-      expect(result.newContent).toBe(shortContent);
+1. Action`;
+
+      const result = cleanupStaleInfo(focusContent);
+
+      expect(result).toContain('stale.ts');
     });
   });
 

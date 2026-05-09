@@ -381,7 +381,7 @@ export function cleanupStaleInfo(
     lineThreshold: effectiveConfig.lineThreshold,
     sizeThreshold: effectiveConfig.sizeThreshold,
     keepCompletedTasks: effectiveConfig.keepCompletedTasks,
-    maxWorkingMemoryArtifacts: effectiveConfig.maxWorkingMemoryArtifacts,
+    maxWorkingMemoryArtifacts: workspaceDir ? Infinity : effectiveConfig.maxWorkingMemoryArtifacts,
   };
   let result = cleanupStaleInfoPure(content, coreOptions);
 
@@ -541,7 +541,10 @@ export function autoCompressFocus(
     keepCompletedTasks: config.keepCompletedTasks,
     maxWorkingMemoryArtifacts: config.maxWorkingMemoryArtifacts,
   };
-  const coreResult = compressFocusContent(oldContent, coreOptions);
+  const prefilteredContent = workspaceDir
+    ? cleanupStaleInfo(oldContent, workspaceDir, config)
+    : oldContent;
+  const coreResult = compressFocusContent(prefilteredContent, coreOptions);
 
   if (!coreResult.compressed) {
     return {
