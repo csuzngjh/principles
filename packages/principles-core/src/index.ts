@@ -59,6 +59,50 @@ export {
 } from './prompt-builder/index.js';
 export type { PromptInjectionPart, SizeGuardOptions } from './prompt-builder/index.js';
 
+// Prompt builder — empathy keyword matching (PRI-81 Phase A)
+export {
+  matchEmpathyKeywords,
+  createDefaultKeywordStore,
+  applyKeywordUpdates,
+  shouldTriggerOptimization,
+  getKeywordStoreSummary,
+  EMPATHY_SEED_KEYWORDS,
+  DEFAULT_EMPATHY_KEYWORD_CONFIG,
+  scoreToSeverity,
+  severityToPenalty,
+  normalizeSeverity,
+} from './prompt-builder/index.js';
+export type {
+  EmpathyKeywordStore,
+  EmpathyKeywordEntry,
+  EmpathyKeywordStats,
+  EmpathyMatchResult,
+  EmpathyKeywordUpdate,
+  EmpathyOptimizationResult,
+  SeedKeywordEntry,
+  EmpathyKeywordConfig,
+} from './prompt-builder/index.js';
+
+// Prompt builder — focus compression (PRI-81 Phase B)
+export {
+  extractVersion,
+  extractDate,
+  extractSummary,
+  parseWorkingMemorySection,
+  workingMemoryToInjection,
+  extractMilestones,
+  validateCurrentFocus,
+  mergeWorkingMemory,
+  compressFocusContent,
+  DEFAULT_FOCUS_COMPRESSION_OPTIONS,
+} from './prompt-builder/index.js';
+export type {
+  FileArtifact,
+  WorkingMemorySnapshot,
+  FocusCompressionOptions,
+  FocusCompressionResult,
+} from './prompt-builder/index.js';
+
 // TrajectoryStore — correction sample primitives (SAMPLES-01, SAMPLES-02)
 export { listCorrectionSamples, reviewCorrectionSample } from './trajectory-store.js';
 export type { CorrectionSampleRecord, CorrectionSampleReviewStatus } from './trajectory-store.js';
