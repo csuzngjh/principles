@@ -361,7 +361,9 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
     }
   }
 
-  saveLedger(stateDir, ledger);
+  if (removedFromPrinciples.length > 0) {
+    saveLedger(stateDir, ledger);
+  }
 
   const result: OrphanCleanupResult = {
     orphanDerivedCandidateCount: orphans.length,

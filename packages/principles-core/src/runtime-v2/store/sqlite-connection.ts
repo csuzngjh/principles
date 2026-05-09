@@ -69,7 +69,9 @@ export class SqliteConnection {
       } catch { /* schema init may fail in restricted environments */ }
       try {
         this.migrateSchema();
-      } catch { /* migration may fail in restricted environments */ }
+      } catch (err) {
+        console.warn('Schema migration failed (non-fatal):', err instanceof Error ? err.message : String(err));
+      }
     }
 
     return this.db;

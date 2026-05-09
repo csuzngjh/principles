@@ -281,18 +281,16 @@ export class PruningReadModel {
     }
 
     const allCandidateIds = new Set<string>();
-    const candidateStatusMap = new Map<string, string>();
     const pdDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     try {
       if (fs.existsSync(pdDbPath)) {
         const db = new Database(pdDbPath, { readonly: true });
         try {
           const rows = db.prepare(
-            'SELECT candidate_id, status FROM principle_candidates'
-          ).all() as { candidate_id: string; status: string }[];
+            'SELECT candidate_id FROM principle_candidates'
+          ).all() as { candidate_id: string }[];
           for (const r of rows) {
             allCandidateIds.add(r.candidate_id);
-            candidateStatusMap.set(r.candidate_id, r.status);
           }
         } finally {
           db.close();
