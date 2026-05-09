@@ -315,6 +315,8 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
       (call: unknown[]) => (call[0] as { eventType: string }).eventType === 'dreamer_lineage_partial',
     );
     expect(lineagePartialEvents.length).toBeGreaterThanOrEqual(1);
-    expect((lineagePartialEvents[0][0] as { payload: { resolvedCount: number } }).payload.resolvedCount).toBe(1);
+    const [firstEvent] = lineagePartialEvents;
+    expect(firstEvent).toBeDefined();
+    expect((firstEvent?.[0] as { payload: { resolvedCount: number } }).payload.resolvedCount).toBe(1);
   });
 });
