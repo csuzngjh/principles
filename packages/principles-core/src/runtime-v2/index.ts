@@ -436,6 +436,35 @@ export type {
 
 export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalization/internalization-orchestrator.js';
 
+// ── Dreamer Peer Runner (PRI-67/PRI-85) ───────────────────────────────────────
+
+export type {
+  DreamerCandidate,
+  DreamerOutput,
+  DreamerValidationResult,
+  DreamerValidator,
+} from './internalization/dreamer-output.js';
+
+export { PassThroughDreamerValidator } from './internalization/dreamer-output.js';
+
+export type {
+  DreamerRunnerResult,
+  DreamerRunnerOptions,
+  ResolvedDreamerRunnerOptions,
+} from './internalization/dreamer-runner.js';
+
+export {
+  resolveDreamerRunnerOptions,
+  DEFAULT_DREAMER_RUNNER_OPTIONS,
+} from './internalization/dreamer-runner.js';
+
+export { DreamerRunner } from './internalization/dreamer-runner.js';
+
+// ── PIArtifact Durable Store (PRI-84) ────────────────────────────────────────
+
+export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
+export { MemoryPIArtifactStore } from './internalization/pi-artifact-store.js';
+
 // ── Internalization Queue Read Model (PRI-73) ──────────────────────────────
 
 export { InternalizationQueueReadModel } from './internalization-queue-read-model.js';
