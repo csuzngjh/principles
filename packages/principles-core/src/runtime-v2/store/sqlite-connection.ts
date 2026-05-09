@@ -195,6 +195,24 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_candidates_task_id ON principle_candidates(task_id);
       CREATE INDEX IF NOT EXISTS idx_candidates_recommendation_kind ON principle_candidates(recommendation_kind);
     `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pi_artifacts (
+        artifact_id TEXT PRIMARY KEY,
+        artifact_kind TEXT NOT NULL,
+        source_task_id TEXT NOT NULL,
+        source_principle_id TEXT,
+        source_rule_id TEXT,
+        lineage_artifact_ids TEXT NOT NULL DEFAULT '[]',
+        validation_status TEXT NOT NULL DEFAULT 'pending',
+        content_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pi_artifacts_source_task_id ON pi_artifacts(source_task_id);
+      CREATE INDEX IF NOT EXISTS idx_pi_artifacts_artifact_kind ON pi_artifacts(artifact_kind);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pi_artifacts_idempotency ON pi_artifacts(source_task_id, artifact_kind);
+    `);
   }
 
   /** Closes the underlying database connection. */

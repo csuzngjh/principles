@@ -35,9 +35,11 @@ import { DefaultRecoverySweep } from './lifecycle/recovery-sweep.js';
 import { SqliteCommitStore } from './commit/sqlite-commit-store.js';
 import { SqliteCandidateStore } from './candidate/sqlite-candidate-store.js';
 import { SqliteArtifactStore } from './artifact/sqlite-artifact-store.js';
+import { SqlitePIArtifactStore } from './artifact/sqlite-pi-artifact-store.js';
 import type { CommitStore } from './commit/commit-store.js';
 import type { CandidateStore } from './candidate/candidate-store.js';
 import type { ArtifactStore } from './artifact/artifact-store.js';
+import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { CommitRecord } from './commit/commit-store.js';
 import type { CandidateRecord } from './candidate/candidate-store.js';
 import type { ArtifactRecord, ArtifactWithCandidates } from './artifact/artifact-store.js';
@@ -67,6 +69,7 @@ export class RuntimeStateManager {
   private _commitStore!: CommitStore;
   private _candidateStore!: CandidateStore;
   private _artifactStore!: ArtifactStore;
+  private _piArtifactStore!: PIArtifactStore;
   private leaseManager!: LeaseManager;
   private retryPolicy!: RetryPolicy;
   private recoverySweep!: RecoverySweep;
@@ -89,6 +92,7 @@ export class RuntimeStateManager {
     this._commitStore = new SqliteCommitStore(this._connection);
     this._candidateStore = new SqliteCandidateStore(this._connection);
     this._artifactStore = new SqliteArtifactStore(this._connection);
+    this._piArtifactStore = new SqlitePIArtifactStore(this._connection);
 
     this.retryPolicy = new DefaultRetryPolicy(this.options.retryPolicyConfig);
 
@@ -128,6 +132,11 @@ export class RuntimeStateManager {
   get runStore(): RunStore {
     this.assertInitialized();
     return this._runStore;
+  }
+
+  get piArtifactStore(): PIArtifactStore {
+    this.assertInitialized();
+    return this._piArtifactStore;
   }
 
   private assertInitialized(): void {

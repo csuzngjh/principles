@@ -199,3 +199,4 @@ export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalizat
 
 export type { PIArtifactRecord, PIArtifactStore } from './pi-artifact.js';
 export { MemoryPIArtifactStore } from './pi-artifact-store.js';
+export { SqlitePIArtifactStore } from '../store/artifact/sqlite-pi-artifact-store.js';
