@@ -430,6 +430,7 @@ export type {
   InvalidTaskMetadataResult,
   ProposalCreatedResult,
   ProposeNextTaskResult,
+  CommitNextTaskResult,
   InternalizationOrchestratorOptions,
   InternalizationOrchestratorDeps,
 } from './internalization/internalization-orchestrator.js';

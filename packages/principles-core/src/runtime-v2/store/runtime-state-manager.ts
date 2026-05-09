@@ -155,7 +155,7 @@ export class RuntimeStateManager {
 
   // ── Task operations ───────────────────────────────────────────────────────
 
-  async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
+  async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'> & { diagnosticJson?: string }): Promise<TaskRecord> {
     this.assertInitialized();
     return this._taskStore.createTask(record);
   }
