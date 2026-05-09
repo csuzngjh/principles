@@ -8,7 +8,9 @@
 
 ## 1. 存储组件概览
 
-PD 系统的持久化存储分为两个物理文件：
+### 1.1 Runtime V2 Canonical Storage
+
+PD Runtime V2 的权威存储分为两个物理事实源：
 
 | 物理文件 | 技术 | 内容 |
 |---------|------|------|
@@ -16,6 +18,21 @@ PD 系统的持久化存储分为两个物理文件：
 | `{workspace}/.state/principle_training_state.json` | JSON 文件 | Principle Tree 账本（Principle / Rule / Implementation） |
 
 > **关键事实**: `RuntimeStateManager` + `SqliteConnection` 创建 `{workspace}/.pd/state.db`，所有 runtime-v2 store 模块（task/run/commit/candidate/artifact/history/trajectory）复用同一条 SQLite connection。不存在独立的 `candidate.db`、`trajectory.db` 或 `history.db`。
+
+### 1.2 Plugin/Host Auxiliary State
+
+以下辅助状态由 plugin/host 管理，不属于 Runtime V2 authoritative store，但存在于工作区中：
+
+| 路径 | 说明 | 管理方 |
+|------|------|--------|
+| `{workspace}/.state/trajectory.db` | OpenClaw 原始轨迹数据（plugin 写入） | openclaw-plugin |
+| `{workspace}/.state/sessions/` | 会话记录 | openclaw-plugin |
+| `{workspace}/.state/event-log.jsonl` | 事件日志 | openclaw-plugin |
+| `{workspace}/.state/daily-stats/` | 每日统计 | openclaw-plugin |
+| `{workspace}/.state/CURRENT_FOCUS` | 当前焦点 | openclaw-plugin |
+| `{workspace}/.state/evolution.jsonl` | 进化事件流 | openclaw-plugin |
+
+> **注意**: 这些辅助状态可能在未来版本迁移到 Runtime V2 canonical store，但当前由 plugin 独立管理。架构文档中的"存储"如无特别说明，均指 Runtime V2 canonical storage。
 
 ---
 

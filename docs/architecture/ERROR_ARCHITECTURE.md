@@ -32,9 +32,9 @@ PD Runtime V2 使用统一的错误分类体系。所有 PD 组件、适配器�
 | `workspace_invalid` | 工作区无效 | 工作区路径不存在 |
 | `query_invalid` | 查询无效 | Read Model 查询参数错误 |
 
-### 1.2 FAILURE_CATEGORY_MAP（9 个用户可见类别）
+### 1.2 FAILURE_CATEGORY_MAP（6 个用户可见类别）
 
-17 个内部错误码映射为 9 个用户可见类别，用于 CLI trace 和 pain-record 命令：
+17 个内部错误码映射为 6 个用户可见类别，用于 CLI trace 和 pain-record 命令：
 
 | 用户可见类别 | 对应内部错误码 |
 |-------------|--------------|
@@ -134,13 +134,15 @@ DiagnosticianRunner
 ```
 Store Operations
     │
-    ├── 正常路径: 内存缓存 → 同步写入 → 返回成功
+    ├── 正常路径: SQLite 同步写入 → 返回成功
     │
     └── 降级路径:
-        ├── 写入失败 → PDRuntimeError('storage_unavailable') → Resilient* 包装器自动重试 ✅
-        ├── 读取失败 → Resilient* 包装器 → 自动重试 ✅
+        ├── 写入失败 → PDRuntimeError('storage_unavailable') → 调用方决定重试或失败 🎯
+        ├── 读取失败 → ResilientContextAssembler / ResilientHistoryQuery 自动重试 ✅
         └── 锁获取失败 → PDRuntimeError('lease_conflict') → 等待重试 🎯
 ```
+
+> **注意**: `Resilient*` 包装器（`ResilientContextAssembler`、`ResilientHistoryQuery`）是读侧/上下文降级包装，不是通用写入重试。SQLite store 写失败通常直接抛出 `PDRuntimeError('storage_unavailable')`，由调用方决定重试策略。
 
 ---
 
