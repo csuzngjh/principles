@@ -1,4 +1,12 @@
 <!-- generated-by: gsd-doc-writer -->
+
+> ⚠️ **废弃状态 (DEPRECATED)**: 本文档已被 [docs/architecture/](docs/architecture/README.md) 目录下的新架构文档替代。
+> - **废弃原因**: 原架构描述已被 [PD_SYSTEM_ARCHITECTURE.md](docs/architecture/PD_SYSTEM_ARCHITECTURE.md) 取代
+> - **替代文档**: 请查阅 [docs/architecture/README.md](docs/architecture/README.md) 获取当前架构文档索引
+> - **废弃日期**: 2026-05-09
+
+---
+
 # Architecture
 
 **Principles Disciple** is an OpenClaw plugin that transforms AI assistants from simple task-executors into self-improving teammates. The system captures failures ("pain signals"), distills them into reusable principles, and applies this learned wisdom to avoid repeating mistakes.
