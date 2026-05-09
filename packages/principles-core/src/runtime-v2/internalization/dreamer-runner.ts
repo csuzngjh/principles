@@ -33,6 +33,7 @@ import type {
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DreamerOutput, DreamerValidator } from './dreamer-output.js';
+import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
@@ -98,6 +99,7 @@ export interface DreamerRunnerDeps {
   readonly runtimeAdapter: PDRuntimeAdapter;
   readonly eventEmitter: StoreEventEmitter;
   readonly validator: DreamerValidator;
+  readonly artifactStore: PIArtifactStore;
 }
 
 // ── Context types for error handling ─────────────────────────────────────────
@@ -133,12 +135,14 @@ export class DreamerRunner {
   private readonly runtimeAdapter: PDRuntimeAdapter;
   private readonly eventEmitter: StoreEventEmitter;
   private readonly validator: DreamerValidator;
+  private readonly artifactStore: PIArtifactStore;
 
   constructor(deps: DreamerRunnerDeps, options: DreamerRunnerOptions) {
     this.stateManager = deps.stateManager;
     this.runtimeAdapter = deps.runtimeAdapter;
     this.eventEmitter = deps.eventEmitter;
     this.validator = deps.validator;
+    this.artifactStore = deps.artifactStore;
     this.resolvedOptions = resolveDreamerRunnerOptions(options);
   }
 
@@ -345,6 +349,28 @@ export class DreamerRunner {
     return latestRun.runId;
   }
 
+  private async resolveLineageArtifactIds(taskId: string): Promise<string[]> {
+    const task = await this.stateManager.getTask(taskId);
+    if (!task) return [];
+
+    const piTask = hydratePITaskRecord(task);
+    const deps = piTask?.dependencyTaskIds ?? [];
+    if (deps.length === 0) return [];
+
+    const lineageIds: string[] = [];
+    const results = await Promise.allSettled(
+      deps.map((depId) => this.artifactStore.listBySourceTaskId(depId)),
+    );
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        for (const artifact of result.value) {
+          lineageIds.push(artifact.artifactId);
+        }
+      }
+    }
+    return lineageIds;
+  }
+
   private async invokeRuntime(taskId: string, contextHash: string): Promise<RunHandle> {
     const startInput: StartRunInput = {
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
@@ -413,6 +439,20 @@ export class DreamerRunner {
         riskLevel: candidate.riskLevel,
       });
     }
+
+    // Write PIArtifact via artifactStore (idempotent upsert)
+    const lineageArtifactIds = await this.resolveLineageArtifactIds(ctx.taskId);
+    const now = new Date().toISOString();
+    await this.artifactStore.upsertArtifact({
+      artifactId: `pi-art-${ctx.taskId}-${ctx.runId}`,
+      artifactKind: 'principle',
+      sourceTaskId: ctx.taskId,
+      lineageArtifactIds,
+      validationStatus: 'pending',
+      contentJson: JSON.stringify(ctx.output),
+      createdAt: now,
+      updatedAt: now,
+    });
 
     // Mark task succeeded with dreamer:// resultRef
     const resultRef = `dreamer://${ctx.runId}`;
