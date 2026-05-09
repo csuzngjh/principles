@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Architecture regression guard — verifies critical PRI-12/13/14/15/16/28
  * module boundaries are present and exportable.
  *
@@ -61,6 +61,11 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/dreamer-runner.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../prompt-builder/routing-guidance.ts',
+  // PRI-81 Phase A
+  '../prompt-builder/empathy-keyword-matching.ts',
+  '../prompt-builder/empathy-types.ts',
+  // PRI-81 Phase B
+  '../prompt-builder/focus-compression.ts',
   // PRI-76
   'gfi/gfi-types.ts',
   'gfi/gfi-policy.ts',
@@ -86,6 +91,10 @@ const REQUIRED_TEST_FILES = [
   'dreamer-runner.test.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../../prompt-builder/__tests__/routing-guidance.test.ts',
+  // PRI-81 Phase A
+  '../../prompt-builder/__tests__/empathy-keyword-matching.test.ts',
+  // PRI-81 Phase B
+  '../../prompt-builder/__tests__/focus-compression.test.ts',
   // PRI-76
   '../gfi/__tests__/gfi-kernel.test.ts',
 ];
@@ -1226,9 +1235,9 @@ describe('PRI-67 DreamerRunner', () => {
   });
 });
 
-// ── PRI-75/PRI-74: Prompt-builder core boundary ─────────────────────────────────
+// ── PRI-75/PRI-74/PRI-81: Prompt-builder core boundary ─────────────────────────────────
 
-describe('PRI-75/PRI-74 prompt-builder core boundary', () => {
+describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
   const files = [
     'prompt-builder/index.ts',
     'prompt-builder/attitude-directive.ts',
@@ -1240,6 +1249,11 @@ describe('PRI-75/PRI-74 prompt-builder core boundary', () => {
     'prompt-builder/principle-selection.ts',
     // PRI-74
     'prompt-builder/routing-guidance.ts',
+    // PRI-81 Phase A
+    'prompt-builder/empathy-keyword-matching.ts',
+    'prompt-builder/empathy-types.ts',
+    // PRI-81 Phase B
+    'prompt-builder/focus-compression.ts',
   ];
 
   for (const file of files) {
@@ -1254,7 +1268,7 @@ describe('PRI-75/PRI-74 prompt-builder core boundary', () => {
     });
   }
 
-  it('prompt-builder/index.ts exports all 13 functions', async () => {
+  it('prompt-builder/index.ts exports all functions', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '../..', 'prompt-builder/index.ts'), 'utf-8');
@@ -1274,6 +1288,28 @@ describe('PRI-75/PRI-74 prompt-builder core boundary', () => {
     expect(src).toContain('buildBlockers');
     expect(src).toContain('computeCombinedText');
     expect(src).toContain('containsKeyword');
+    // PRI-81 Phase A: empathy keyword matching
+    expect(src).toContain('matchEmpathyKeywords');
+    expect(src).toContain('createDefaultKeywordStore');
+    expect(src).toContain('applyKeywordUpdates');
+    expect(src).toContain('shouldTriggerOptimization');
+    expect(src).toContain('getKeywordStoreSummary');
+    expect(src).toContain('EMPATHY_SEED_KEYWORDS');
+    expect(src).toContain('DEFAULT_EMPATHY_KEYWORD_CONFIG');
+    expect(src).toContain('scoreToSeverity');
+    expect(src).toContain('severityToPenalty');
+    expect(src).toContain('normalizeSeverity');
+    // PRI-81 Phase B: focus compression
+    expect(src).toContain('extractVersion');
+    expect(src).toContain('extractDate');
+    expect(src).toContain('extractSummary');
+    expect(src).toContain('parseWorkingMemorySection');
+    expect(src).toContain('workingMemoryToInjection');
+    expect(src).toContain('extractMilestones');
+    expect(src).toContain('validateCurrentFocus');
+    expect(src).toContain('mergeWorkingMemory');
+    expect(src).toContain('compressFocusContent');
+    expect(src).toContain('DEFAULT_FOCUS_COMPRESSION_OPTIONS');
   });
 
   it('principle-selection.ts does not import EvolutionReducer or WorkspaceContext', async () => {
@@ -1315,6 +1351,41 @@ describe('PRI-75/PRI-74 prompt-builder core boundary', () => {
     expect(src).not.toMatch(/<reflection_log>\[\\s\\S\]\*?<\/reflection_log>/);
     // Must NOT have the old multi-line fallback block with attitudeDirective interpolation
     expect(src).not.toMatch(/## 【CONTEXT SECTIONS】\n\n\[WARNING: Context sections stripped/);
+  });
+
+  it('plugin empathy-keyword-matcher.ts is a thin adapter (re-exports from core)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../../../../openclaw-plugin/src/core/empathy-keyword-matcher.ts'), 'utf-8');
+    expect(src).toContain('@principles/core/prompt-builder');
+    expect(src).not.toMatch(/function matchEmpathyKeywords\s*\(/);
+    expect(src).not.toMatch(/function createDefaultKeywordStore\s*\(/);
+    expect(src).not.toMatch(/function applyKeywordUpdates\s*\(/);
+    expect(src).not.toMatch(/function shouldTriggerOptimization\s*\(/);
+    expect(src).not.toMatch(/function getKeywordStoreSummary\s*\(/);
+  });
+
+  it('plugin empathy-types.ts is a thin re-export (no inline definitions)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../../../../openclaw-plugin/src/core/empathy-types.ts'), 'utf-8');
+    expect(src).toContain('@principles/core/prompt-builder');
+    expect(src).not.toMatch(/interface EmpathyKeywordStore/);
+    expect(src).not.toMatch(/const EMPATHY_SEED_KEYWORDS/);
+    expect(src).not.toMatch(/function scoreToSeverity/);
+  });
+
+  it('plugin focus-history.ts delegates pure functions to core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../../../../openclaw-plugin/src/core/focus-history.ts'), 'utf-8');
+    expect(src).toContain('@principles/core/prompt-builder');
+    expect(src).not.toMatch(/function extractSummary\s*\(/);
+    expect(src).not.toMatch(/function parseWorkingMemorySection\s*\(/);
+    expect(src).not.toMatch(/function workingMemoryToInjection\s*\(/);
+    expect(src).not.toMatch(/function extractMilestones\s*\(/);
+    expect(src).not.toMatch(/function validateCurrentFocus\s*\(/);
+    expect(src).not.toMatch(/function mergeWorkingMemory\s*\(/);
   });
 });
 
