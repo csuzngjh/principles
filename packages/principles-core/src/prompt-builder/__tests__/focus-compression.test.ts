@@ -105,10 +105,18 @@ describe('Focus Compression (core)', () => {
       expect(lines.length).toBeLessThanOrEqual(32);
     });
 
-    it('should handle unstructured content', () => {
+    it('should include truncation marker for unstructured content exceeding maxLines', () => {
       const unstructured = Array(50).fill('just some text').join('\n');
       const summary = extractSummary(unstructured, 30);
       expect(summary).toContain('just some text');
+      expect(summary).toContain('...[truncated, see CURRENT_FOCUS.md for full context]');
+    });
+
+    it('should respect maxLines for structured content', () => {
+      const structured = '# Focus\n## 📍 状态快照\n' + Array(500).fill('content line with enough text to exceed').join('\n');
+      const summary = extractSummary(structured, 30);
+      const lines = summary.split('\n');
+      expect(lines.length).toBeLessThanOrEqual(35);
     });
   });
 
@@ -189,6 +197,13 @@ describe('Focus Compression (core)', () => {
       const result = validateCurrentFocus(content);
       expect(result.warnings.length).toBeGreaterThan(0);
     });
+
+    it('should detect binary corruption with non-printable characters', () => {
+      const corruptedContent = String.fromCharCode(0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 15, 16);
+      const result = validateCurrentFocus(corruptedContent);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('文件内容损坏（可能是二进制乱码）');
+    });
   });
 
   describe('mergeWorkingMemory', () => {
@@ -216,6 +231,34 @@ describe('Focus Compression (core)', () => {
 
       const merged = mergeWorkingMemory(SAMPLE_FOCUS, snapshot);
       expect(merged).toContain('src/new.ts');
+    });
+
+    it('should handle WM section at end of file with no following section', () => {
+      const contentWithWmAtEnd = `# CURRENT_FOCUS
+
+**版本**: v1
+**更新**: 2025-01-15
+
+## 🧠 Working Memory
+
+> Last updated: 2025-01-15T10:00:00Z
+
+### 📁 文件输出记录
+
+| 文件路径 | 操作 | 描述 |
+|----------|------|------|
+| \`src/old.ts\` | created | old file |`;
+
+      const snapshot: WorkingMemorySnapshot = {
+        lastUpdated: new Date().toISOString(),
+        artifacts: [{ path: 'src/end.ts', action: 'modified', description: 'end file' }],
+        activeProblems: [],
+        nextActions: [],
+      };
+
+      const merged = mergeWorkingMemory(contentWithWmAtEnd, snapshot);
+      expect(merged).toContain('src/end.ts');
+      expect(merged).not.toContain('src/old.ts');
     });
   });
 

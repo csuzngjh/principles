@@ -127,6 +127,7 @@ export function severityToPenalty(
     case 'mild': return config.penaltyMild;
     case 'moderate': return config.penaltyModerate;
     case 'severe': return config.penaltySevere;
+    default: return config.penaltyMild;
   }
 }
 
