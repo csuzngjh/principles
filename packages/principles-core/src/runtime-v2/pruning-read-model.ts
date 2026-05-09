@@ -56,6 +56,11 @@ export interface OrphanDerivedCandidate {
   status?: string;
 }
 
+export interface OrphanDetectionResult {
+  candidates: OrphanDerivedCandidate[];
+  dbReadable: boolean;
+}
+
 export interface PruningReadModelOptions {
   workspaceDir: string;
   /** Override days threshold for 'watch' risk level (default: 30) */
@@ -271,16 +276,17 @@ export class PruningReadModel {
     };
   }
 
-  getOrphanDerivedCandidates(): OrphanDerivedCandidate[] {
+  getOrphanDerivedCandidates(): OrphanDetectionResult {
     const stateDir = path.join(this.workspaceDir, '.state');
     const ledger = loadLedger(stateDir);
     const principleEntries = Object.values(ledger.tree.principles);
 
     if (principleEntries.length === 0) {
-      return [];
+      return { candidates: [], dbReadable: true };
     }
 
     const allCandidateIds = new Set<string>();
+    let dbReadable = true;
     const pdDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     try {
       if (fs.existsSync(pdDbPath)) {
@@ -295,9 +301,11 @@ export class PruningReadModel {
         } finally {
           db.close();
         }
+      } else {
+        dbReadable = false;
       }
     } catch {
-      // Graceful degradation — candidate sets stay empty
+      dbReadable = false;
     }
 
     const orphans: OrphanDerivedCandidate[] = [];
@@ -308,7 +316,9 @@ export class PruningReadModel {
           orphans.push({
             candidateId: cid,
             principleId: p.id,
-            reason: 'candidate not found in state.db',
+            reason: dbReadable
+              ? 'candidate not found in state.db'
+              : 'candidate not verifiable: state.db unreadable',
             sourceRef: 'derivedFromPainIds',
             status: p.status as string | undefined,
           });
@@ -316,6 +326,6 @@ export class PruningReadModel {
       }
     }
 
-    return orphans;
+    return { candidates: orphans, dbReadable };
   }
 }

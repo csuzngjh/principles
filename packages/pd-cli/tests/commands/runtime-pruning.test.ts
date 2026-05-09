@@ -51,7 +51,7 @@ const { MockPruningReadModel } = vi.hoisted(() => {
       };
     }
     getOrphanDerivedCandidates() {
-      return [];
+      return { candidates: [], dbReadable: true };
     }
   }
   return { MockPruningReadModel };
@@ -497,10 +497,13 @@ describe('pd runtime pruning orphans', () => {
   it('dry-run outputs orphan list with count (JSON)', () => {
     class MockOrphanReadModel {
       getOrphanDerivedCandidates() {
-        return [
-          { candidateId: 'c_orphan1', principleId: 'p1', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
-          { candidateId: 'c_orphan2', principleId: 'p1', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
-        ];
+        return {
+          candidates: [
+            { candidateId: 'c_orphan1', principleId: 'p1', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
+            { candidateId: 'c_orphan2', principleId: 'p1', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
+          ],
+          dbReadable: true,
+        };
       }
     }
     (PruningReadModel as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(function () {
@@ -512,6 +515,7 @@ describe('pd runtime pruning orphans', () => {
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
     expect(output.orphanDerivedCandidateCount).toBe(2);
     expect(output.dryRun).toBe(true);
+    expect(output.dbReadable).toBe(true);
     expect(output.candidates).toHaveLength(2);
     expect(output.candidates[0].candidateId).toBe('c_orphan1');
     consoleSpy.mockRestore();
@@ -542,9 +546,12 @@ describe('pd runtime pruning orphans', () => {
 
     class MockOrphanReadModel {
       getOrphanDerivedCandidates() {
-        return [
-          { candidateId: 'c_orphan1', principleId: 'p1', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
-        ];
+        return {
+          candidates: [
+            { candidateId: 'c_orphan1', principleId: 'p1', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
+          ],
+          dbReadable: true,
+        };
       }
     }
     (PruningReadModel as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(function () {
@@ -557,6 +564,7 @@ describe('pd runtime pruning orphans', () => {
     expect(mockLedger.tree.principles.p1.derivedFromPainIds).toEqual(['c_valid1']);
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
     expect(output.dryRun).toBe(false);
+    expect(output.dbReadable).toBe(true);
     expect(output.removedFromPrinciples).toHaveLength(1);
     expect(output.removedFromPrinciples[0].principleId).toBe('p1');
     expect(output.removedFromPrinciples[0].removedIds).toContain('c_orphan1');
@@ -579,9 +587,12 @@ describe('pd runtime pruning orphans', () => {
 
     class MockOrphanReadModel {
       getOrphanDerivedCandidates() {
-        return [
-          { candidateId: 'c_orphan1', principleId: 'p2', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
-        ];
+        return {
+          candidates: [
+            { candidateId: 'c_orphan1', principleId: 'p2', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
+          ],
+          dbReadable: true,
+        };
       }
     }
     (PruningReadModel as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(function () {
@@ -600,6 +611,83 @@ describe('pd runtime pruning orphans', () => {
     const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(output).toContain('dryRun: true');
     expect(output).toContain('No orphan derived candidates found.');
+    consoleSpy.mockRestore();
+  });
+
+  it('--confirm REFUSED when DB is unreadable, does not call saveLedger', () => {
+    class MockDegradedReadModel {
+      getOrphanDerivedCandidates() {
+        return {
+          candidates: [
+            { candidateId: 'c_maybe_orphan', principleId: 'p1', reason: 'candidate not verifiable: state.db unreadable', sourceRef: 'derivedFromPainIds', status: 'active' },
+          ],
+          dbReadable: false,
+        };
+      }
+    }
+    (PruningReadModel as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(function () {
+      return new MockDegradedReadModel() as unknown as InstanceType<typeof PruningReadModel>;
+    });
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const processSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as (code: number) => never);
+    handlePruningOrphans({ json: false, confirm: true });
+    expect(processSpy).toHaveBeenCalledWith(1);
+    expect(mockSaveLedger).not.toHaveBeenCalled();
+    const errOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(errOutput).toContain('REFUSED');
+    consoleSpy.mockRestore();
+    processSpy.mockRestore();
+  });
+
+  it('--confirm REFUSED when DB is unreadable (JSON mode)', () => {
+    class MockDegradedReadModel {
+      getOrphanDerivedCandidates() {
+        return {
+          candidates: [
+            { candidateId: 'c_maybe_orphan', principleId: 'p1', reason: 'candidate not verifiable: state.db unreadable', sourceRef: 'derivedFromPainIds', status: 'active' },
+          ],
+          dbReadable: false,
+        };
+      }
+    }
+    (PruningReadModel as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(function () {
+      return new MockDegradedReadModel() as unknown as InstanceType<typeof PruningReadModel>;
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const processSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as (code: number) => never);
+    handlePruningOrphans({ json: true, confirm: true });
+    expect(processSpy).toHaveBeenCalledWith(1);
+    expect(mockSaveLedger).not.toHaveBeenCalled();
+    const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.dbReadable).toBe(false);
+    expect(output.dryRun).toBe(true);
+    consoleSpy.mockRestore();
+    processSpy.mockRestore();
+  });
+
+  it('dry-run shows degraded warning when DB is unreadable', () => {
+    class MockDegradedReadModel {
+      getOrphanDerivedCandidates() {
+        return {
+          candidates: [
+            { candidateId: 'c_maybe_orphan', principleId: 'p1', reason: 'candidate not verifiable: state.db unreadable', sourceRef: 'derivedFromPainIds', status: 'active' },
+          ],
+          dbReadable: false,
+        };
+      }
+    }
+    (PruningReadModel as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(function () {
+      return new MockDegradedReadModel() as unknown as InstanceType<typeof PruningReadModel>;
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    handlePruningOrphans({ json: false, dryRun: true, confirm: false });
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(output).toContain('dbReadable: false');
+    expect(output).toContain('not verifiable');
+    expect(output).toContain('--confirm will be refused');
     consoleSpy.mockRestore();
   });
 });

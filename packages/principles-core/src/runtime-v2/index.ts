@@ -241,7 +241,7 @@ export { loadLedger, saveLedger, getLedgerFilePathPublic } from '../principle-tr
 
 // Pruning read model (PRI-15)
 export { PruningReadModel } from './pruning-read-model.js';
-export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, OrphanDerivedCandidate } from './pruning-read-model.js';
+export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, OrphanDerivedCandidate, OrphanDetectionResult } from './pruning-read-model.js';
 
 // Pruning review audit log (PRI-24)
 export { appendPruningReview, listPruningReviews } from './pruning-review-log.js';

@@ -9,7 +9,7 @@
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { PruningReadModel, appendPruningReview, listPruningReviews, buildMaskedPrincipleSet, loadLedger, saveLedger } from '@principles/core/runtime-v2';
-import type { PruningReviewDecision, OrphanDerivedCandidate } from '@principles/core/runtime-v2';
+import type { PruningReviewDecision, OrphanDerivedCandidate, OrphanDetectionResult } from '@principles/core/runtime-v2';
 
 interface PruningReportOptions {
   workspace?: string;
@@ -291,6 +291,7 @@ export interface OrphanCleanupResult {
   orphanDerivedCandidateCount: number;
   candidates: OrphanDerivedCandidate[];
   dryRun: boolean;
+  dbReadable: boolean;
   removedFromPrinciples?: { principleId: string; removedIds: string[] }[];
 }
 
@@ -300,7 +301,8 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
     : resolveWorkspaceDir();
 
   const model = new PruningReadModel({ workspaceDir });
-  const orphans = model.getOrphanDerivedCandidates();
+  const detection: OrphanDetectionResult = model.getOrphanDerivedCandidates();
+  const orphans = detection.candidates;
   const isDryRun = !opts.confirm;
 
   if (isDryRun) {
@@ -308,6 +310,7 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
       orphanDerivedCandidateCount: orphans.length,
       candidates: orphans,
       dryRun: true,
+      dbReadable: detection.dbReadable,
     };
 
     if (opts.json) {
@@ -317,7 +320,13 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
 
     console.log(`orphanDerivedCandidateCount: ${orphans.length}`);
     console.log(`dryRun: true`);
+    console.log(`dbReadable: ${detection.dbReadable}`);
     console.log('');
+    if (!detection.dbReadable) {
+      console.log('⚠️  state.db is unreadable — orphan list may include valid candidates.');
+      console.log('   --confirm will be refused until the DB is accessible.');
+      console.log('');
+    }
     if (orphans.length === 0) {
       console.log('No orphan derived candidates found.');
     } else {
@@ -329,6 +338,25 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
       console.log('');
       console.log('NOTE: This is a dry-run. No data was modified. Use --confirm to remove orphan references.');
     }
+    return;
+  }
+
+  if (!detection.dbReadable) {
+    const result: OrphanCleanupResult = {
+      orphanDerivedCandidateCount: orphans.length,
+      candidates: orphans,
+      dryRun: true,
+      dbReadable: false,
+    };
+
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error('❌ REFUSED: state.db is unreadable — cannot safely confirm orphan cleanup.');
+      console.error('   All derivedFromPainIds would appear as orphans when the DB is inaccessible.');
+      console.error('   Fix the DB access issue and re-run.');
+    }
+    process.exit(1);
     return;
   }
 
@@ -369,6 +397,7 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
     orphanDerivedCandidateCount: orphans.length,
     candidates: orphans,
     dryRun: false,
+    dbReadable: true,
     removedFromPrinciples,
   };
 
