@@ -69,8 +69,8 @@ export class SqliteConnection {
       } catch { /* schema init may fail in restricted environments */ }
       try {
         this.migrateSchema();
-      } catch (err) {
-        console.warn('Schema migration failed (non-fatal):', err instanceof Error ? err.message : String(err));
+      } catch {
+        // schema migration is non-fatal — run with degraded indexes
       }
     }
 

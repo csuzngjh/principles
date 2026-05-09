@@ -561,7 +561,9 @@ describe('pd runtime pruning orphans', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     handlePruningOrphans({ json: true, confirm: true });
     expect(mockSaveLedger).toHaveBeenCalledTimes(1);
-    expect(mockLedger.tree.principles.p1.derivedFromPainIds).toEqual(['c_valid1']);
+    // Verify the saved ledger contains the correct filtered data (immutability: original mock unchanged)
+    const savedLedgerArg = mockSaveLedger.mock.calls[0]![1];
+    expect(savedLedgerArg.tree.principles.p1.derivedFromPainIds).toEqual(['c_valid1']);
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
     expect(output.dryRun).toBe(false);
     expect(output.dbReadable).toBe(true);
@@ -662,7 +664,7 @@ describe('pd runtime pruning orphans', () => {
     expect(mockSaveLedger).not.toHaveBeenCalled();
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
     expect(output.dbReadable).toBe(false);
-    expect(output.dryRun).toBe(true);
+    expect(output.dryRun).toBe(false); // operation was refused, not a dry-run
     consoleSpy.mockRestore();
     processSpy.mockRestore();
   });

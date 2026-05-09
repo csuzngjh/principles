@@ -345,7 +345,7 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
     const result: OrphanCleanupResult = {
       orphanDerivedCandidateCount: orphans.length,
       candidates: orphans,
-      dryRun: true,
+      dryRun: false,
       dbReadable: false,
     };
 
@@ -372,8 +372,11 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
   const ledger = loadLedger(stateDir);
   const removedFromPrinciples: { principleId: string; removedIds: string[] }[] = [];
 
+  // Deep clone ledger to avoid mutating the loaded object (immutability requirement)
+  const nextLedger = JSON.parse(JSON.stringify(ledger)) as typeof ledger;
+
   for (const [principleId, orphanIds] of orphanIdsByPrinciple) {
-    const entry = ledger.tree.principles[principleId];
+    const entry = nextLedger.tree.principles[principleId];
     if (!entry) continue;
 
     const originalIds = entry.derivedFromPainIds ?? [];
@@ -390,7 +393,13 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
   }
 
   if (removedFromPrinciples.length > 0) {
-    saveLedger(stateDir, ledger);
+    try {
+      saveLedger(stateDir, nextLedger);
+    } catch (err) {
+      console.error(`❌ Failed to save ledger: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+      return;
+    }
   }
 
   const result: OrphanCleanupResult = {
