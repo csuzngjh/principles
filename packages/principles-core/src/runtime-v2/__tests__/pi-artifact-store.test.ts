@@ -175,6 +175,43 @@ function createStoreContractTests(
 
 createStoreContractTests('MemoryPIArtifactStore', () => new MemoryPIArtifactStore());
 
+describe('MemoryPIArtifactStore index consistency (PRI-84)', () => {
+  let store: MemoryPIArtifactStore = new MemoryPIArtifactStore();
+
+  beforeEach(() => {
+    store = new MemoryPIArtifactStore();
+  });
+
+  it('upsertArtifact with different artifactId cleans up old idempotency entries', async () => {
+    const r1 = makeRecord({ artifactId: 'art-old', sourceTaskId: 'task-1', artifactKind: 'principle' });
+    await store.createArtifact(r1);
+
+    const r2 = makeRecord({ artifactId: 'art-new', sourceTaskId: 'task-1', artifactKind: 'principle' });
+    await store.upsertArtifact(r2);
+
+    const byId = await store.getArtifactById('art-old');
+    expect(byId).toBeNull();
+
+    const byIdNew = await store.getArtifactById('art-new');
+    expect(byIdNew).not.toBeNull();
+    expect(byIdNew?.artifactId).toBe('art-new');
+  });
+
+  it('upsertArtifact does not leave dangling entries in artifacts map', async () => {
+    const r1 = makeRecord({ artifactId: 'art-v1', sourceTaskId: 'task-X', artifactKind: 'principle' });
+    await store.createArtifact(r1);
+
+    const r2 = makeRecord({ artifactId: 'art-v2', sourceTaskId: 'task-X', artifactKind: 'principle' });
+    await store.upsertArtifact(r2);
+
+    const results = await store.listBySourceTaskId('task-X');
+    expect(results).toHaveLength(1);
+    const [first] = results;
+    expect(first).toBeDefined();
+    expect(first?.artifactId).toBe('art-v2');
+  });
+});
+
 describe('SqlitePIArtifactStore contract (PRI-84)', () => {
   let tmpDir = '';
   let connection: SqliteConnection = new SqliteConnection(os.tmpdir());
