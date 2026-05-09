@@ -103,6 +103,10 @@ function formatTextOutput(output: RunOnceOutput): string {
 
   lines.push(`Internalization Run-Once: ${output.decision}`);
 
+  if (output.runnerKind) {
+    lines.push(`  runner: ${output.runnerKind}`);
+  }
+
   if (output.taskId) {
     lines.push(`  task: ${output.taskId} (${output.taskKind ?? 'unknown'})`);
   }

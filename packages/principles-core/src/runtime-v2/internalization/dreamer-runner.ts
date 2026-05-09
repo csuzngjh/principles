@@ -196,6 +196,20 @@ export class DreamerRunner {
       attemptCount: leasedTask.attemptCount,
     });
 
+    if (leasedTask.taskKind !== 'dreamer') {
+      this.emitDreamerEvent('dreamer_wrong_task_kind', taskId, {
+        expectedKind: 'dreamer',
+        actualKind: leasedTask.taskKind,
+      });
+      return {
+        status: 'failed',
+        taskId,
+        errorCategory: 'input_invalid',
+        failureReason: `Task kind must be 'dreamer', got '${leasedTask.taskKind}'`,
+        attemptCount: leasedTask.attemptCount,
+      };
+    }
+
     // All subsequent errors use the real leasedTask — no synthetic TaskRecord allowed
     try {
       // acquireLease creates a RunRecord; resolve its runId for store operations
@@ -723,7 +737,7 @@ export class DreamerRunner {
   // ── Error classification ──────────────────────────────────────────────────
 
   private readonly PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set(
-    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled'] as const),
+    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid'] as const),
   );
 
   private isPermanentError(category: PDErrorCategory): boolean {

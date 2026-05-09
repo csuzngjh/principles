@@ -383,19 +383,34 @@ export class InternalizationOrchestrator {
       correlationId: proposal.correlationId,
     };
 
-    const successorRecord = await this.stateManager.createTask({
-      taskId: successorTaskId,
-      taskKind: proposal.taskKind,
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: 3,
-      inputRef: undefined,
-      resultRef: undefined,
-      lastError: undefined,
-      leaseOwner: undefined,
-      leaseExpiresAt: undefined,
-      diagnosticJson: createPITaskDiagnosticJson(successorMetadata),
-    });
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let successorRecord: TaskRecord;
+    try {
+      successorRecord = await this.stateManager.createTask({
+        taskId: successorTaskId,
+        taskKind: proposal.taskKind,
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        inputRef: undefined,
+        resultRef: undefined,
+        lastError: undefined,
+        leaseOwner: undefined,
+        leaseExpiresAt: undefined,
+        diagnosticJson: createPITaskDiagnosticJson(successorMetadata),
+      });
+    } catch (createErr) {
+      const errMsg = createErr instanceof Error ? createErr.message : String(createErr);
+      if (errMsg.includes('UNIQUE constraint') || errMsg.includes('PRIMARY KEY') || errMsg.includes('already exists')) {
+        return {
+          decision: 'successor_exists',
+          sourceTaskId: taskId,
+          successorTaskId,
+          successorKind: proposal.taskKind,
+        };
+      }
+      throw createErr;
+    }
 
     return {
       decision: 'successor_created',
@@ -418,7 +433,9 @@ export class InternalizationOrchestrator {
     channel: string,
   ): Promise<TaskRecord | null> {
     const pendingTasks = await this.stateManager.listTasks({ status: 'pending' });
-    for (const task of pendingTasks) {
+    const retryWaitTasks = await this.stateManager.listTasks({ status: 'retry_wait' });
+    const candidates = [...pendingTasks, ...retryWaitTasks];
+    for (const task of candidates) {
       if (task.taskKind !== successorKind) continue;
       const piTask = hydratePITaskRecord(task);
       if (!piTask) continue;
