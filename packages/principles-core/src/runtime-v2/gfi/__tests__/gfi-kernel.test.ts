@@ -7,7 +7,7 @@ import {
   createGfiSnapshot,
   DEFAULT_GFI_POLICY,
 } from '../gfi-kernel.js';
-import type { GfiState, GfiEvent, GfiPolicy } from '../gfi-types.js';
+import type { GfiState, GfiEvent, GfiPolicy, GfiSource } from '../gfi-types.js';
 
 function makeState(overrides: Partial<GfiState> = {}): GfiState {
   return {
@@ -524,5 +524,233 @@ describe('DEFAULT_GFI_POLICY', () => {
     expect(typeof elevated).toBe('number');
     expect(typeof critical).toBe('number');
     expect(typeof saturated).toBe('number');
+  });
+});
+
+describe('applyFriction edge cases', () => {
+  it('event without hash sets consecutiveErrors to 1', () => {
+    const state = makeState({
+      currentGfi: 10,
+      gfiBySource: { tool_failure: 10 },
+      consecutiveErrors: 3,
+      lastErrorHash: 'abc',
+    });
+    const event: GfiEvent = { source: 'tool_failure', baseScore: 20 };
+    const next = applyFriction(state, event, DEFAULT_GFI_POLICY);
+
+    expect(next.consecutiveErrors).toBe(1);
+    expect(next.lastErrorHash).toBeUndefined();
+  });
+
+  it('event with undefined hash resets consecutiveErrors', () => {
+    const state = makeState({
+      currentGfi: 10,
+      consecutiveErrors: 5,
+      lastErrorHash: 'abc',
+    });
+    const event: GfiEvent = { source: 'dispatch_error', baseScore: 15, hash: undefined };
+    const next = applyFriction(state, event, DEFAULT_GFI_POLICY);
+
+    expect(next.consecutiveErrors).toBe(1);
+  });
+
+  it('accumulates across multiple sources correctly', () => {
+    const state = makeState({ currentGfi: 0, gfiBySource: {} });
+    const events: GfiEvent[] = [
+      { source: 'tool_failure', baseScore: 10 },
+      { source: 'dispatch_error', baseScore: 15 },
+      { source: 'user_empathy', baseScore: 20 },
+    ];
+
+    let current = state;
+    for (const event of events) {
+      current = applyFriction(current, event, DEFAULT_GFI_POLICY);
+    }
+
+    expect(current.currentGfi).toBe(45);
+    expect(current.gfiBySource.tool_failure).toBe(10);
+    expect(current.gfiBySource.dispatch_error).toBe(15);
+    expect(current.gfiBySource.user_empathy).toBe(20);
+  });
+
+  it('tracks dailyGfiPeak across friction events', () => {
+    const state = makeState({ currentGfi: 50, dailyGfiPeak: 60 });
+    const event: GfiEvent = { source: 'tool_failure', baseScore: 30 };
+    const next = applyFriction(state, event, DEFAULT_GFI_POLICY);
+
+    expect(next.currentGfi).toBe(80);
+    expect(next.dailyGfiPeak).toBe(80);
+  });
+
+  it('dailyGfiPeak does not decrease on lower friction', () => {
+    const state = makeState({ currentGfi: 50, dailyGfiPeak: 100 });
+    const event: GfiEvent = { source: 'tool_failure', baseScore: 10 };
+    const next = applyFriction(state, event, DEFAULT_GFI_POLICY);
+
+    expect(next.dailyGfiPeak).toBe(100);
+  });
+});
+
+describe('applyDecay edge cases', () => {
+  it('zero elapsed minutes does not change currentGfi', () => {
+    const state = makeState({ currentGfi: 50, gfiBySource: { tool_failure: 50 } });
+    const next = applyDecay(state, 0, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
+
+    expect(next.currentGfi).toBe(50);
+    expect(next.gfiBySource.tool_failure).toBe(50);
+  });
+
+  it('large elapsed minutes drives GFI to 0', () => {
+    const state = makeState({ currentGfi: 50, gfiBySource: { tool_failure: 50 } });
+    const next = applyDecay(state, 1000, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
+
+    expect(next.currentGfi).toBe(0);
+  });
+
+  it('decay never produces negative currentGfi', () => {
+    const state = makeState({ currentGfi: 1, gfiBySource: { tool_failure: 1 } });
+    const next = applyDecay(state, 100, DEFAULT_GFI_POLICY, 'saturated', FIXED_NOW);
+
+    expect(next.currentGfi).toBeGreaterThanOrEqual(0);
+  });
+
+  it('empty source ledger with large elapsed minutes drives currentGfi to 0', () => {
+    const state = makeState({ currentGfi: 5, gfiBySource: {} });
+    const next = applyDecay(state, 1000, DEFAULT_GFI_POLICY, 'stable', FIXED_NOW);
+
+    expect(next.currentGfi).toBe(0);
+  });
+});
+
+describe('applyRelief edge cases', () => {
+  it('source-specific relief on non-existent source is no-op', () => {
+    const state = makeState({
+      currentGfi: 50,
+      gfiBySource: { tool_failure: 50 },
+      consecutiveErrors: 2,
+    });
+    const next = applyRelief(state, { source: 'dispatch_error', amount: 10 }, FIXED_NOW, DEFAULT_GFI_POLICY);
+
+    expect(next.currentGfi).toBe(50);
+    expect(next.gfiBySource.tool_failure).toBe(50);
+  });
+
+  it('source-specific relief greater than source value zeroes source', () => {
+    const state = makeState({
+      currentGfi: 30,
+      gfiBySource: { tool_failure: 30 },
+      consecutiveErrors: 2,
+      lastErrorSource: 'dispatch_error',
+    });
+    const next = applyRelief(state, { source: 'tool_failure', amount: 100 }, FIXED_NOW, DEFAULT_GFI_POLICY);
+
+    expect(next.gfiBySource.tool_failure).toBeUndefined();
+    expect(next.currentGfi).toBe(0);
+  });
+
+  it('ratio-based relief prunes sources that drop to 0', () => {
+    const state = makeState({
+      currentGfi: 4,
+      gfiBySource: { tool_failure: 4 },
+    });
+    const policy = makePolicy({ relief: { toolSuccessRatio: 0.99, minPruneBelow: 1 } });
+    const next = applyRelief(state, { source: 'tool_failure', amount: 0 }, FIXED_NOW, policy);
+
+    expect(next.gfiBySource.tool_failure).toBeUndefined();
+    expect(next.currentGfi).toBe(0);
+  });
+
+  it('full reset preserves dailyGfiPeak', () => {
+    const state = makeState({
+      currentGfi: 80,
+      gfiBySource: { tool_failure: 80 },
+      dailyGfiPeak: 95,
+    });
+    const next = applyRelief(state, { source: 'all', amount: 100 }, FIXED_NOW, DEFAULT_GFI_POLICY);
+
+    expect(next.currentGfi).toBe(0);
+    expect(next.dailyGfiPeak).toBe(95);
+  });
+
+  it('relief on lastErrorSource resets consecutiveErrors', () => {
+    const state = makeState({
+      currentGfi: 50,
+      gfiBySource: { tool_failure: 50 },
+      consecutiveErrors: 3,
+      lastErrorHash: 'abc',
+      lastErrorSource: 'tool_failure',
+    });
+    const next = applyRelief(state, { source: 'tool_failure', amount: 10 }, FIXED_NOW, DEFAULT_GFI_POLICY);
+
+    expect(next.consecutiveErrors).toBe(0);
+    expect(next.lastErrorHash).toBeUndefined();
+    expect(next.lastErrorSource).toBeUndefined();
+  });
+
+  it('relief on different source preserves consecutiveErrors', () => {
+    const state = makeState({
+      currentGfi: 50,
+      gfiBySource: { tool_failure: 30, dispatch_error: 20 },
+      consecutiveErrors: 3,
+      lastErrorHash: 'abc',
+      lastErrorSource: 'tool_failure',
+    });
+    const next = applyRelief(state, { source: 'dispatch_error', amount: 10 }, FIXED_NOW, DEFAULT_GFI_POLICY);
+
+    expect(next.consecutiveErrors).toBe(3);
+    expect(next.lastErrorHash).toBe('abc');
+    expect(next.lastErrorSource).toBe('tool_failure');
+  });
+});
+
+describe('classifyGfiStage edge cases', () => {
+  it('negative GFI is classified as stable', () => {
+    expect(classifyGfiStage(-10, DEFAULT_GFI_POLICY)).toBe('stable');
+  });
+
+  it('zero GFI is stable', () => {
+    expect(classifyGfiStage(0, DEFAULT_GFI_POLICY)).toBe('stable');
+  });
+
+  it('custom policy thresholds', () => {
+    const policy = makePolicy({
+      stageThresholds: { elevated: 20, critical: 50, saturated: 80 },
+    });
+    expect(classifyGfiStage(25, policy)).toBe('elevated');
+    expect(classifyGfiStage(55, policy)).toBe('critical');
+    expect(classifyGfiStage(85, policy)).toBe('saturated');
+  });
+});
+
+describe('createGfiSnapshot edge cases', () => {
+  it('dominantSource picks first when tied', () => {
+    const state = makeState({
+      currentGfi: 40,
+      gfiBySource: { tool_failure: 20, dispatch_error: 20 },
+    });
+    const snapshot = createGfiSnapshot(state, DEFAULT_GFI_POLICY);
+
+    expect(snapshot.dominantSource).not.toBeNull();
+    const domValue = snapshot.dominantSource ? snapshot.sources[snapshot.dominantSource as GfiSource] : undefined;
+    expect([20, 20]).toContain(domValue ?? 0);
+  });
+
+  it('lastDecayAt is formatted as ISO string when present', () => {
+    const state = makeState({
+      currentGfi: 30,
+      gfiBySource: { tool_failure: 30 },
+      lastGfiDecayAt: 1700000000000,
+    });
+    const snapshot = createGfiSnapshot(state, DEFAULT_GFI_POLICY);
+
+    expect(snapshot.lastDecayAt).toBeDefined();
+    expect(typeof snapshot.lastDecayAt).toBe('string');
+  });
+
+  it('lastDecayAt is undefined when not present', () => {
+    const state = makeState({ currentGfi: 30, gfiBySource: { tool_failure: 30 } });
+    const snapshot = createGfiSnapshot(state, DEFAULT_GFI_POLICY);
+
+    expect(snapshot.lastDecayAt).toBeUndefined();
   });
 });

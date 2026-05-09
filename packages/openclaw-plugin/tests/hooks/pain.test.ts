@@ -63,6 +63,38 @@ describe('classifyToolFailureSource', () => {
     expect(classifyToolFailureSource('read', '')).toBe('tool_failure');
     expect(classifyToolFailureSource('read', 123)).toBe('tool_failure');
   });
+
+  it('word-boundary: "report_tool_not_found" does NOT match dispatch pattern', () => {
+    expect(classifyToolFailureSource('read', 'report_tool_not_found')).toBe('tool_failure');
+  });
+
+  it('word-boundary: "atoolnotfound" (no spaces) does NOT match dispatch pattern', () => {
+    expect(classifyToolFailureSource('read', 'atoolnotfound')).toBe('tool_failure');
+  });
+
+  it('word-boundary: "unknown_tool" (underscore, no space) does NOT match dispatch pattern', () => {
+    expect(classifyToolFailureSource('read', 'unknown_tool')).toBe('tool_failure');
+  });
+
+  it('whitespace-only toolName -> dispatch_error', () => {
+    expect(classifyToolFailureSource('   ', 'tool not found')).toBe('dispatch_error');
+  });
+
+  it('numeric error value -> tool_failure', () => {
+    expect(classifyToolFailureSource('read', 42)).toBe('tool_failure');
+  });
+
+  it('object error value -> tool_failure', () => {
+    expect(classifyToolFailureSource('read', { code: 'ENOENT' })).toBe('tool_failure');
+  });
+
+  it('"tool <name> not found" with multi-word tool name -> dispatch_error', () => {
+    expect(classifyToolFailureSource('read', 'tool my_custom_tool not found')).toBe('dispatch_error');
+  });
+
+  it('partial match "not found" without "tool" prefix -> tool_failure', () => {
+    expect(classifyToolFailureSource('read', 'file not found')).toBe('tool_failure');
+  });
 });
 
 describe('Post-Write Checks & Pain Hook', () => {
