@@ -71,6 +71,9 @@ const REQUIRED_SOURCE_FILES = [
   'gfi/gfi-policy.ts',
   'gfi/gfi-kernel.ts',
   'gfi/index.ts',
+  // PRI-84
+  'internalization/pi-artifact.ts',
+  'internalization/pi-artifact-store.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
