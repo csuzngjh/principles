@@ -4,7 +4,7 @@ import {
   InternalizationOrchestrator,
   DreamerRunner,
   StoreEventEmitter,
-  PassThroughDreamerValidator,
+  DefaultDreamerValidator,
   TestDoubleRuntimeAdapter,
   PiAiRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
@@ -224,7 +224,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     if (wakeResult.decision === 'would_lease' && wakeResult.taskKind === runnerKind) {
       const eventEmitter = new StoreEventEmitter();
       const artifactStore = stateManager.piArtifactStore;
-      const validator = new PassThroughDreamerValidator();
+      const validator = new DefaultDreamerValidator();
       const runtimeAdapter = resolveRuntimeAdapter(runtimeKind, wakeResult.taskId, workspaceDir);
 
       const runner = new DreamerRunner(

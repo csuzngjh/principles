@@ -40,6 +40,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
   PassThroughDreamerValidator: vi.fn().mockImplementation(function () {
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
+  DefaultDreamerValidator: vi.fn().mockImplementation(function () {
+    return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
+  }),
   TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () {
     return {
       kind: vi.fn().mockReturnValue('test-double'),

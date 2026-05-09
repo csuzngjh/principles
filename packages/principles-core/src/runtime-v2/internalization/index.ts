@@ -161,7 +161,7 @@ export type {
   DreamerValidator,
 } from './dreamer-output.js';
 
-export { PassThroughDreamerValidator } from './dreamer-output.js';
+export { PassThroughDreamerValidator, DefaultDreamerValidator } from './dreamer-output.js';
 
 export type {
   DreamerRunnerResult,

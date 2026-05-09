@@ -445,7 +445,7 @@ export type {
   DreamerValidator,
 } from './internalization/dreamer-output.js';
 
-export { PassThroughDreamerValidator } from './internalization/dreamer-output.js';
+export { PassThroughDreamerValidator, DefaultDreamerValidator } from './internalization/dreamer-output.js';
 
 export type {
   DreamerRunnerResult,
