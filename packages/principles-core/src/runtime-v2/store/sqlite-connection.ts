@@ -67,6 +67,9 @@ export class SqliteConnection {
       try {
         this.initSchema();
       } catch { /* schema init may fail in restricted environments */ }
+      try {
+        this.migrateSchema();
+      } catch { /* migration may fail in restricted environments */ }
     }
 
     return this.db;
@@ -245,6 +248,37 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_pi_artifacts_artifact_kind ON pi_artifacts(artifact_kind);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_pi_artifacts_idempotency ON pi_artifacts(source_task_id, artifact_kind);
     `);
+  }
+
+  private migrateSchema(): void {
+    const db = this.db as Database.Database;
+
+    const tableExists = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='principle_candidates'"
+    ).get();
+    if (!tableExists) return;
+
+    const columns = db.prepare('PRAGMA table_info(principle_candidates)').all() as { name: string }[];
+    const existingNames = new Set(columns.map((c) => c.name));
+
+    const candidateMigrations = [
+      { name: 'recommendation_kind', sql: "ALTER TABLE principle_candidates ADD COLUMN recommendation_kind TEXT NOT NULL DEFAULT 'principle'" },
+      { name: 'trigger_pattern', sql: 'ALTER TABLE principle_candidates ADD COLUMN trigger_pattern TEXT' },
+      { name: 'action', sql: 'ALTER TABLE principle_candidates ADD COLUMN action TEXT' },
+      { name: 'abstracted_principle', sql: 'ALTER TABLE principle_candidates ADD COLUMN abstracted_principle TEXT' },
+    ];
+
+    for (const migration of candidateMigrations) {
+      if (!existingNames.has(migration.name)) {
+        db.exec(migration.sql);
+      }
+    }
+
+    try {
+      db.exec("CREATE INDEX IF NOT EXISTS idx_candidates_recommendation_kind ON principle_candidates(recommendation_kind)");
+    } catch {
+      // index may already exist
+    }
   }
 
   /** Closes the underlying database connection. */
