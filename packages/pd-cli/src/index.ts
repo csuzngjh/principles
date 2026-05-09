@@ -31,6 +31,7 @@ import { handleRuntimeGfiSnapshot } from './commands/runtime-gfi-snapshot.js';
 import { handleRuntimeUat } from './commands/runtime-uat.js';
 import { handleRuntimeInternalizationQueue } from './commands/runtime-internalization-queue.js';
 import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-internalization-wake-once.js';
+import { handleRuntimeInternalizationRunOnce } from './commands/runtime-internalization-run-once.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 
@@ -400,6 +401,18 @@ internalizationCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeInternalizationWakeOnce({ workspace: opts.workspace, dryRun: opts.dryRun, json: opts.json });
+  });
+
+internalizationCmd
+  .command('run-once')
+  .description('Wake-and-run: lease the next PI task and execute it')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--runner <kind>', 'Runner kind to execute (default: dreamer)', 'dreamer')
+  .option('--runtime <kind>', 'Runtime adapter kind: config (from workflows.yaml), pi-ai, openclaw-cli, test-double (default: config)', 'config')
+  .option('--allow-test-double', 'Acknowledge that test-double runtime will mutate real queue state')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble });
   });
 
 const pruningCmd = runtimeCmd
