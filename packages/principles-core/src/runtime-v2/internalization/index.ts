@@ -194,3 +194,8 @@ export type {
 } from './internalization-orchestrator.js';
 
 export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalization-orchestrator.js';
+
+// ── PIArtifact Durable Store (PRI-84) ────────────────────────────────────────
+
+export type { PIArtifactRecord, PIArtifactStore } from './pi-artifact.js';
+export { MemoryPIArtifactStore } from './pi-artifact-store.js';
