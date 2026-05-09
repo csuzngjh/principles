@@ -7,7 +7,8 @@ import {
   cleanupHistory,
   getHistoryVersions,
   extractSummary,
-  // 工作记忆相关函数
+  cleanupStaleInfo,
+  compressFocusContent,
   extractWorkingMemory,
   parseWorkingMemorySection,
   mergeWorkingMemory,
@@ -622,6 +623,131 @@ ${Array.from({ length: 40 }, (_, i) => `| Item ${i + 1} | Value ${i + 1} |`).joi
       const result = workingMemoryToInjection(snapshot);
 
       expect(result).toContain('压缩后失忆');
+    });
+  });
+
+  describe('cleanupStaleInfo', () => {
+    it('should filter stale file artifacts when workspaceDir is provided', () => {
+      const content = `# 🎯 CURRENT_FOCUS
+
+## 🧠 Working Memory
+
+| 文件路径 | 操作 | 描述 |
+|----------|------|------|
+| \`src/exists.ts\` | modified | exists |
+| \`src/missing.ts\` | modified | missing |
+| \`src/also-missing.ts\` | modified | also missing |
+
+### ➡️ 下一步行动
+
+1. Next action`;
+
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => {
+        const path = String(p);
+        return path.includes('exists');
+      });
+
+      const result = cleanupStaleInfo(content, '/workspace');
+
+      expect(result).toContain('exists.ts');
+      expect(result).not.toContain('missing.ts');
+      expect(result).not.toContain('also-missing.ts');
+    });
+
+    it('should keep table state after skipping a missing file row', () => {
+      const content = `# 🎯 CURRENT_FOCUS
+
+## 🧠 Working Memory
+
+| 文件路径 | 操作 | 描述 |
+|----------|------|------|
+| \`src/stale-a.ts\` | modified | stale |
+| \`src/stale-b.ts\` | modified | stale |
+| \`src/valid.ts\` | modified | valid |
+
+### ➡️ 下一步行动
+
+1. Action`;
+
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => {
+        const path = String(p);
+        return path.includes('valid');
+      });
+
+      const result = cleanupStaleInfo(content, '/workspace');
+
+      expect(result).toContain('valid.ts');
+      expect(result).not.toContain('stale-a.ts');
+      expect(result).not.toContain('stale-b.ts');
+      expect(result).toContain('### ➡️ 下一步行动');
+    });
+
+    it('should preserve table header when filtering artifacts', () => {
+      const content = `# 🎯 CURRENT_FOCUS
+
+## 🧠 Working Memory
+
+| 文件路径 | 操作 | 描述 |
+|----------|------|------|
+| \`src/stale.ts\` | modified | stale |
+
+### ➡️ 下一步行动
+
+1. Action`;
+
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      const result = cleanupStaleInfo(content, '/workspace');
+
+      expect(result).toContain('| 文件路径 | 操作 | 描述 |');
+      expect(result).not.toContain('stale.ts');
+      expect(result).toContain('### ➡️ 下一步行动');
+    });
+  });
+
+  describe('compressFocusContent delegation', () => {
+    it('should produce same result as core compressFocusContent', () => {
+      const longContent = `**版本**: v3
+**更新**: 2026-01-01
+
+## 🔄 当前任务
+
+${Array.from({ length: 150 }, (_, i) => `- [x] Task ${i + 1}`).join('\n')}
+
+## 🧠 Working Memory
+
+${Array.from({ length: 20 }, (_, i) => `| src/file${i}.ts | modified | file ${i} |`).join('\n')}`;
+
+      const result = compressFocusContent(longContent, {
+        lineThreshold: 100,
+        sizeThreshold: 5000,
+        keepCompletedTasks: 3,
+        maxWorkingMemoryArtifacts: 10,
+      });
+
+      expect(result.compressed).toBe(true);
+      expect(result.newVersion).toBe('4');
+      expect(result.milestones.completedTasks.length).toBeGreaterThan(0);
+    });
+
+    it('should return unchanged content when below threshold', () => {
+      const shortContent = `**版本**: v1
+**更新**: 2026-01-01
+
+## ➡️ 下一步
+
+1. Task`;
+
+      const result = compressFocusContent(shortContent, {
+        lineThreshold: 100,
+        sizeThreshold: 5000,
+        keepCompletedTasks: 3,
+        maxWorkingMemoryArtifacts: 10,
+      });
+
+      expect(result.compressed).toBe(false);
+      expect(result.needsCompression).toBe(false);
+      expect(result.newContent).toBe(shortContent);
     });
   });
 

@@ -409,7 +409,6 @@ export function cleanupStaleInfo(
           const filePath = match[1].trim();
           const fullPath = path.join(workspaceDir, filePath);
           if (!fs.existsSync(fullPath)) {
-            inFileTable = false;
             continue;
           }
         }
