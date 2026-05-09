@@ -158,7 +158,9 @@ const LEDGER_DEPRECATED: LedgerStore = {
 
 let mockLedgerData: LedgerStore = LEDGER_EMPTY;
 let mockCandidateRows: { candidate_id: string; created_at: string }[] = [];
+let mockAllCandidateRows: { candidate_id: string; status: string }[] = [];
 let mockDbExists = false;
+let mockDbShouldThrow = false;
 
 vi.mock('../../principle-tree-ledger.js', () => ({
   loadLedger: vi.fn(() => mockLedgerData),
@@ -166,8 +168,19 @@ vi.mock('../../principle-tree-ledger.js', () => ({
 
 vi.mock('better-sqlite3', () => ({
   default: vi.fn(function (this: Record<string, unknown>) {
-    this.prepare = vi.fn(() => ({
-      all: vi.fn(() => mockCandidateRows),
+    if (mockDbShouldThrow) {
+      throw new Error('SQLITE_CANTOPEN');
+    }
+    this.prepare = vi.fn((sql: string) => ({
+      all: vi.fn(() => {
+        if (sql.includes('consumed')) {
+          return mockCandidateRows;
+        }
+        if (sql.includes('FROM principle_candidates')) {
+          return mockAllCandidateRows;
+        }
+        return [];
+      }),
     }));
     this.close = vi.fn();
   }),
@@ -182,7 +195,9 @@ vi.mock('fs', () => ({
 function reset() {
   mockLedgerData = LEDGER_EMPTY;
   mockCandidateRows = [];
+  mockAllCandidateRows = [];
   mockDbExists = false;
+  mockDbShouldThrow = false;
   vi.clearAllMocks();
 }
 
@@ -564,5 +579,179 @@ describe('PruningReadModel', () => {
 
     expect(summary.totalPrinciples).toBe(4);
     expect(summary.orphanDerivedCandidateCount).toBe(1);
+  });
+
+  describe('getOrphanDerivedCandidates', () => {
+    it('returns list with detail, not just count', () => {
+      mockLedgerData = {
+        tree: {
+          principles: {
+            p1: {
+              id: 'p1',
+              status: 'active',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              derivedFromPainIds: ['c_missing1', 'c_missing2'],
+              ruleIds: [],
+              conflictsWithPrincipleIds: [],
+              version: 1,
+              text: '',
+              triggerPattern: '',
+              action: '',
+              priority: 'P1',
+              scope: 'general',
+              evaluability: 'deterministic',
+              valueScore: 0,
+              adherenceRate: 0,
+              painPreventedCount: 0,
+            } as LedgerPrinciple,
+          },
+        },
+      };
+      mockCandidateRows = [];
+      mockAllCandidateRows = [];
+      mockDbExists = true;
+
+      const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+      const result = model.getOrphanDerivedCandidates();
+
+      expect(result.dbReadable).toBe(true);
+      expect(result.candidates).toHaveLength(2);
+      expect(result.candidates[0]?.candidateId).toBe('c_missing1');
+      expect(result.candidates[0]?.principleId).toBe('p1');
+      expect(result.candidates[0]?.reason).toBe('candidate not found in state.db');
+      expect(result.candidates[0]?.sourceRef).toBe('derivedFromPainIds');
+      expect(result.candidates[0]?.status).toBe('active');
+    });
+
+    it('does not include non-orphan candidates', () => {
+      mockLedgerData = {
+        tree: {
+          principles: {
+            p1: {
+              id: 'p1',
+              status: 'active',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              derivedFromPainIds: ['c_exists', 'c_missing'],
+              ruleIds: [],
+              conflictsWithPrincipleIds: [],
+              version: 1,
+              text: '',
+              triggerPattern: '',
+              action: '',
+              priority: 'P1',
+              scope: 'general',
+              evaluability: 'deterministic',
+              valueScore: 0,
+              adherenceRate: 0,
+              painPreventedCount: 0,
+            } as LedgerPrinciple,
+          },
+        },
+      };
+      mockCandidateRows = [
+        { candidate_id: 'c_exists', created_at: '2026-01-15T00:00:00.000Z' },
+      ];
+      mockAllCandidateRows = [
+        { candidate_id: 'c_exists', status: 'consumed' },
+      ];
+      mockDbExists = true;
+
+      const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+      const result = model.getOrphanDerivedCandidates();
+
+      expect(result.dbReadable).toBe(true);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0]?.candidateId).toBe('c_missing');
+    });
+
+    it('returns empty for empty ledger', () => {
+      mockLedgerData = LEDGER_EMPTY;
+      mockDbExists = false;
+
+      const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+      const result = model.getOrphanDerivedCandidates();
+
+      expect(result.candidates).toEqual([]);
+      expect(result.dbReadable).toBe(true);
+    });
+
+    it('returns dbReadable=false when DB does not exist', () => {
+      mockLedgerData = {
+        tree: {
+          principles: {
+            p1: {
+              id: 'p1',
+              status: 'active',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              derivedFromPainIds: ['c_orphan1'],
+              ruleIds: [],
+              conflictsWithPrincipleIds: [],
+              version: 1,
+              text: '',
+              triggerPattern: '',
+              action: '',
+              priority: 'P1',
+              scope: 'general',
+              evaluability: 'deterministic',
+              valueScore: 0,
+              adherenceRate: 0,
+              painPreventedCount: 0,
+            } as LedgerPrinciple,
+          },
+        },
+      };
+      mockCandidateRows = [];
+      mockAllCandidateRows = [];
+      mockDbExists = false;
+
+      const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+      const result = model.getOrphanDerivedCandidates();
+
+      expect(result.dbReadable).toBe(false);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0]?.reason).toBe('candidate not verifiable: state.db unreadable');
+    });
+
+    it('returns dbReadable=false when DB read throws', () => {
+      mockLedgerData = {
+        tree: {
+          principles: {
+            p1: {
+              id: 'p1',
+              status: 'active',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              derivedFromPainIds: ['c_orphan1'],
+              ruleIds: [],
+              conflictsWithPrincipleIds: [],
+              version: 1,
+              text: '',
+              triggerPattern: '',
+              action: '',
+              priority: 'P1',
+              scope: 'general',
+              evaluability: 'deterministic',
+              valueScore: 0,
+              adherenceRate: 0,
+              painPreventedCount: 0,
+            } as LedgerPrinciple,
+          },
+        },
+      };
+      mockCandidateRows = [];
+      mockAllCandidateRows = [];
+      mockDbExists = true;
+      mockDbShouldThrow = true;
+
+      const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+      const result = model.getOrphanDerivedCandidates();
+
+      expect(result.dbReadable).toBe(false);
+      expect(result.candidates).toHaveLength(1);
+      expect(result.candidates[0]?.reason).toContain('not verifiable');
+    });
   });
 });
