@@ -1,101 +1,73 @@
 # PD 数据架构 (Data Architecture)
 
-> **状态**: Draft
+> **状态**: Active
 > **最后更新**: 2026-05-09
-> **背景**: 定义 PD 系统的数据存储架构、读写分离策略、以及与 ADR-0001/ADR-0002 一致的迁移计划。
+> **背景**: 定义 PD 系统的数据存储架构、读写分离策略、以及与 ADR-0001/ADR-0002 一致的迁移计划。所有物理路径已通过 `rg` 验证。
 
 ---
 
 ## 1. 存储组件概览
 
-PD 系统使用多种存储机制，按用途分为以下几类：
+PD 系统的持久化存储分为两个物理文件：
 
-### 1.1 按存储技术分类
-
-| 存储类型 | 技术 | 用途 |
+| 物理文件 | 技术 | 内容 |
 |---------|------|------|
-| **State Store** | SQLite (per-workspace) | 痛点、任务、运行记录、轨迹 |
-| **Ledger Store** | JSON 文件 | Principle Tree 账本 |
-| **Artifact Store** | 文件系统 | Code Implementation 资产 |
-| **Candidate Store** | SQLite | Candidate Intake 队列 |
-| **History Store** | SQLite | 查询优化和历史记录 |
+| `{workspace}/.pd/state.db` | SQLite | Task / Run / Commit / Candidate / Artifact / History / Trajectory（共享一条 SqliteConnection） |
+| `{workspace}/.state/principle_training_state.json` | JSON 文件 | Principle Tree 账本（Principle / Rule / Implementation） |
 
-### 1.2 按物理位置分类
-
-| 位置 | 内容 |
-|------|------|
-| `{workspace}/.pd/state/` | Per-workspace 状态 |
-| `{workspace}/.pd/state/ledger/` | Ledger JSON 文件 |
-| `{workspace}/.pd/state/artifacts/` | Implementation 代码资产 |
-| `~/.openclaw/` | 全局配置和 OpenClaw 状态 |
-| `@principles/core` 内存 | 运行时缓存和内存状态 |
+> **关键事实**: `RuntimeStateManager` + `SqliteConnection` 创建 `{workspace}/.pd/state.db`，所有 runtime-v2 store 模块（task/run/commit/candidate/artifact/history/trajectory）复用同一条 SQLite connection。不存在独立的 `candidate.db`、`trajectory.db` 或 `history.db`。
 
 ---
 
 ## 2. 存储组件详细说明
 
-### 2.1 State Store（状态存储）
+### 2.1 State Store（SQLite 统一存储）
 
-State Store 是 PD 的核心写侧存储，使用 SQLite 实现。
+**物理文件**: `{workspace}/.pd/state.db`  
+**创建入口**: `packages/principles-core/src/runtime-v2/store/sqlite-connection.ts`  
+**管理器**: `packages/principles-core/src/runtime-v2/store/runtime-state-manager.ts`
 
-**文件位置**: `{workspace}/.pd/state/state.db`
+所有 runtime-v2 store 模块共享此 SQLite 数据库：
 
-**核心表结构**:
+| Store 模块 | 代码位置 | 用途 |
+|-----------|---------|------|
+| TaskStore | `runtime-v2/store/task/` | 诊断任务队列 |
+| RunStore | `runtime-v2/store/run/` | 运行记录 |
+| CommitStore | `runtime-v2/store/commit/` | Diagnostician 提交记录 |
+| CandidateStore | `runtime-v2/store/candidate/` | Candidate Intake 队列 |
+| ArtifactStore | `runtime-v2/store/artifact/` | Code Implementation 资产元数据 |
+| HistoryQuery | `runtime-v2/store/history/` | 历史查询 |
+| TrajectoryLocator | `runtime-v2/store/trajectory/` | Agent 行为轨迹 |
 
-| 表名 | 用途 | 关联模块 |
-|------|------|---------|
-| `tasks` | 诊断任务队列 | TaskStore |
-| `runs` | 运行记录 | RunStore |
-| `commits` | Diagnostician 提交记录 | CommitStore |
-| `events` | 事件日志 | EventLog |
-| `pain_signals` | Pain Signal 记录 | PainSignalBridge |
-
-**TaskStore 结构** (`runtime-v2/store/task/`):
-
-```
-TaskStore
-├── TaskStore 接口
-├── MemoryTaskStore (测试用)
-└── SqliteTaskStore (生产用)
-    └── task-migration.ts (Schema 迁移)
-```
-
-**RunStore 结构** (`runtime-v2/store/run/`):
+每个 Store 模块的结构：
 
 ```
-RunStore
-├── RunStore 接口
-├── MemoryRunStore (测试用)
-└── SqliteRunStore (生产用)
+{StoreName}/
+├── {store-name}.ts          # 接口定义
+├── memory-{store-name}.ts   # 内存实现（测试用）
+└── sqlite-{store-name}.ts   # SQLite 实现（生产用）
 ```
 
-**CommitStore 结构** (`runtime-v2/store/commit/`):
+**辅助模块**:
 
-```
-CommitStore
-├── CommitStore 接口
-├── MemoryCommitStore (测试用)
-├── SqliteCommitStore (生产用)
-└── DiagnosticianCommitter (提交逻辑)
-```
+| 模块 | 代码位置 | 用途 |
+|------|---------|------|
+| LeaseManager | `runtime-v2/store/lifecycle/` | 分布式租约管理 |
+| RecoverySweep | `runtime-v2/store/lifecycle/` | 故障恢复扫描 |
+| RetryPolicy | `runtime-v2/store/lifecycle/` | 重试策略 |
+| ContextAssembler | `runtime-v2/store/context/` | Pain Chain 上下文组装 |
+| DiagnosticianCommitter | `runtime-v2/store/commit/` | 提交原子性保证 |
+| IdempotentTransitions | `runtime-v2/store/` | 幂等状态转换 |
+| task-migration.ts | `runtime-v2/store/` | SQLite schema 迁移 |
 
-### 2.2 Ledger Store（账本存储）
+### 2.2 Ledger Store（JSON 账本）
+
+**物理文件**: `{workspace}/.state/principle_training_state.json`  
+**代码位置**: `packages/principles-core/src/principle-tree-ledger.ts`
 
 Ledger Store 存储 Principle Tree 的持久化状态。
 
-**文件位置**: `{workspace}/.pd/state/ledger/`
-
-**文件结构**:
-
-```
-ledger/
-├── ledger.json          # Principle/Rule/Implementation 主账本
-├── metadata.json        # 账本元信息（版本、更新时间）
-└── backups/             # 自动备份
-    └── YYYY-MM-DD.json  # 每日备份
-```
-
-**数据结构**（见 `principle-tree-ledger.ts`）:
+**数据结构**:
 
 ```typescript
 interface PrincipleTree {
@@ -107,101 +79,10 @@ interface PrincipleTree {
 }
 ```
 
-### 2.3 Artifact Store（资产存储）
+**适配器**: `packages/principles-core/src/runtime-v2/adapter/principle-tree-ledger-adapter.ts`  
+将 JSON 文件操作适配为 runtime-v2 可用的接口。
 
-Artifact Store 存储 Rule Implementation 的代码资产。
-
-**文件位置**: `{workspace}/.pd/state/artifacts/`
-
-**文件结构**:
-
-```
-artifacts/
-├── {implId}/
-│   ├── source.ts        # 实现源代码
-│   ├── metadata.json    # 元信息（创建时间、状态）
-│   └── validation.json  # 验证结果
-└── index.json           # 资产索引
-```
-
-### 2.4 Candidate Store（候选存储）
-
-Candidate Store 存储待处理的 Principle/Rule Candidate。
-
-**文件位置**: `{workspace}/.pd/state/candidate.db`
-
-**核心表结构**:
-
-| 表名 | 用途 |
-|------|------|
-| `principle_candidates` | Principle 候选 |
-| `rule_candidates` | Rule 候选 |
-| `implementation_candidates` | Implementation 候选 |
-
-**实现** (`runtime-v2/store/candidate/`):
-
-```
-CandidateStore
-├── CandidateStore 接口
-├── MemoryCandidateStore (测试用)
-└── SqliteCandidateStore (生产用)
-```
-
-### 2.5 History Store（历史查询）
-
-History Store 提供高效的历史查询能力。
-
-**文件位置**: `{workspace}/.pd/state/state.db`（与 State Store 共享 SQLite 连接）
-
-**实现** (`runtime-v2/store/history/`):
-
-```
-HistoryQuery
-├── HistoryQuery 接口
-├── SqliteHistoryQuery (生产用)
-└── ResilientHistoryQuery (带重试的包装)
-```
-
-> **注意**: History Store 复用 State Store 的 SQLite 数据库，不使用独立的 `history.db`。查询通过 `SqliteHistoryQuery` 接口实现，具体表结构由 `task-migration.ts` 管理。
-
-### 2.6 Context Store（上下文组装）
-
-Context Store 提供 Pain Chain 上下文组装能力。
-
-**实现** (`runtime-v2/store/context/`):
-
-```
-ContextAssembler
-├── ContextAssembler 接口
-├── SqliteContextAssembler (生产用)
-└── ResilientContextAssembler (带重试的包装)
-```
-
-### 2.7 Trajectory Store（轨迹存储）
-
-Trajectory Store 存储 Agent 行为轨迹。
-
-**文件位置**: `{workspace}/.pd/state/trajectory.db`
-
-**实现** (`runtime-v2/store/trajectory/`):
-
-```
-TrajectoryLocator
-├── TrajectoryLocator 接口
-└── SqliteTrajectoryLocator (生产用)
-```
-
-### 2.8 Lifecycle Store（生命周期管理）
-
-Lifecycle Store 管理分布式锁和恢复机制。
-
-**实现** (`runtime-v2/store/lifecycle/`):
-
-```
-LeaseManager      # 分布式租约管理
-RecoverySweep     # 故障恢复扫描
-RetryPolicy       # 重试策略
-```
+> **注意**: Ledger 的物理路径是 `.state/principle_training_state.json`（不是 `.pd/state/ledger/`）。这与 OpenClaw plugin 的历史路径约定一致。
 
 ---
 
@@ -216,7 +97,7 @@ PainSignal → PainBridge → TaskStore → RunStore → CommitStore → Candida
 ```
 
 **写入保证**:
-- 使用 `LeaseManager` 确保分布式锁
+- 使用 `LeaseManager` 确保租约互斥
 - 使用 `IdempotentTransitions` 确保幂等性
 - 使用 `DiagnosticianCommitter` 保证提交原子性
 
@@ -224,12 +105,13 @@ PainSignal → PainBridge → TaskStore → RunStore → CommitStore → Candida
 
 **读侧服务**:
 
-| 读模型 | 用途 |
-|--------|------|
-| `PainChainReadModel` | Pain Chain 全链路追踪 |
-| `PruningReadModel` | Pruning 信号生成 |
-| `LifecycleReadModel` | Principle 生命周期状态 |
-| `OperatorHealthReadModel` | Operator 健康状态 |
+| 读模型 | 代码位置 | 用途 |
+|--------|---------|------|
+| `PainChainReadModel` | `runtime-v2/pain-chain-read-model.ts` | Pain Chain 全链路追踪 |
+| `PruningReadModel` | `runtime-v2/pruning-read-model.ts` | Pruning 信号生成 |
+| `LifecycleReadModel` | `runtime-v2/internalization/lifecycle-read-model.ts` | Principle 生命周期状态 |
+| `OperatorHealthReadModel` | `runtime-v2/operator-health-read-model.ts` | Operator 健康状态 |
+| `GfiReadModel` | `runtime-v2/gfi/gfi-read-model.ts` | 摩擦力指标快照 |
 
 **读取原则**:
 - 所有读操作都是非破坏性的
@@ -242,25 +124,28 @@ PainSignal → PainBridge → TaskStore → RunStore → CommitStore → Candida
 
 ```mermaid
 flowchart TD
-    subgraph WriteSide["写侧 (Write Side)"]
-        PS[Pain Signal]
-        PB[PainBridge]
+    subgraph SQLite["{workspace}/.pd/state.db"]
         TS[TaskStore]
         RS[RunStore]
         CS[CommitStore]
         CAN[CandidateStore]
-        LED[Ledger]
         ART[ArtifactStore]
+        HQ[HistoryQuery]
+        TL[TrajectoryLocator]
     end
 
-    subgraph ReadSide["读侧 (Read Side)"]
+    subgraph JSON["{workspace}/.state/principle_training_state.json"]
+        LED[Ledger: Principle/Rule/Implementation]
+    end
+
+    subgraph ReadModels["读侧"]
         PCRM[PainChainReadModel]
         PRM[PruningReadModel]
         LRM[LifecycleReadModel]
         OHRM[OperatorHealthReadModel]
     end
 
-    PS --> PB
+    PS[PainSignal] --> PB[PainBridge]
     PB --> TS
     TS --> RS
     RS --> CS
@@ -271,6 +156,8 @@ flowchart TD
     LED --> PRM
     LED --> LRM
     PCRM --> OHRM
+    HQ -.-> PCRM
+    TL -.-> PCRM
 ```
 
 ---
@@ -284,15 +171,16 @@ flowchart TD
 | PainToPrincipleService | plugin | `@principles/core` | ✅ Done |
 | PainChainReadModel | pd-cli | `@principles/core` | ✅ Done |
 | PruningReadModel | plugin | `@principles/core` | ✅ Done |
+| PrincipleTreeLedger | plugin | `@principles/core` | ✅ Done |
+| TemplateGenerator | plugin | `@principles/core` | ✅ Done |
 
 ### 5.2 进行中迁移（ADR-0002）
 
 | 组件 | 原位置 | 目标位置 | 状态 |
 |------|--------|---------|------|
-| RuleHost contracts | plugin | `@principles/core` | ⏳ PRI-42 |
-| TemplateGenerator | plugin | `@principles/core` | ⏳ PRI-44 |
-| LifecycleMetrics | plugin | `@principles/core` | ⏳ PRI-42 |
-| RoutingPolicy | plugin | `@principles/core` | ⏳ PRI-43 |
+| RuleHost contracts | plugin | `@principles/core` | ✅ Done (PRI-42) |
+| RoutingPolicy | plugin | `@principles/core` | ✅ Done (PRI-43) |
+| LifecycleMetrics | plugin | `@principles/core` | ✅ Done (PRI-42) |
 
 ### 5.3 待迁移
 

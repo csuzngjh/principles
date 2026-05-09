@@ -271,7 +271,7 @@ Pruning Review 是 append-only audit log，不改变实体生命周期。当前�
 | Pain Signal | `packages/principles-core/src/runtime-v2/pain-to-principle-service.ts` | - | ✅ Done (ADR-0001) | Runtime V2 写侧统一入口 |
 | Pain Chain Read Model | `packages/principles-core/src/runtime-v2/pain-chain-read-model.ts` | - | ✅ Done (ADR-0001) | pain -> task -> run -> candidate -> ledger 读侧 |
 | Principle Schema | `packages/openclaw-plugin/src/types/principle-tree-schema.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | 类型定义迁移中 |
-| LedgerPrinciple | `packages/openclaw-plugin/src/core/principle-tree-ledger.ts` | - | 🔒 Keep in plugin | ledger 文件操作保留在 plugin |
+| LedgerPrinciple | `packages/openclaw-plugin/src/core/principle-tree-ledger.ts` | `@principles/core` | ✅ Done | 已迁移至 `packages/principles-core/src/principle-tree-ledger.ts` |
 | Rule / LedgerRule | `packages/openclaw-plugin/src/types/principle-tree-schema.ts`, `principle-tree-ledger.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | 类型迁移中 |
 | Implementation Schema | `packages/openclaw-plugin/src/types/principle-tree-schema.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | 类型定义迁移中 |
 | Code Implementation Asset | `packages/openclaw-plugin/src/core/code-implementation-storage.ts` | - | 🔒 Keep in plugin | 文件系统操作保留在 plugin |
@@ -280,7 +280,7 @@ Pruning Review 是 append-only audit log，不改变实体生命周期。当前�
 | RuleHost Helpers | `packages/openclaw-plugin/src/core/rule-host-helpers.ts` | `@principles/core` | ✅ Done (PRI-42) | 已迁移 |
 | Lifecycle Metrics | `packages/openclaw-plugin/src/core/principle-internalization/lifecycle-metrics.ts` | `@principles/core` | ✅ Done (PRI-42) | 已迁移至 `internalization/` |
 | Routing Policy | `packages/openclaw-plugin/src/core/principle-internalization/internalization-routing-policy.ts` | `@principles/core` | ✅ Done (PRI-43) | 已迁移至 `internalization/routing-policy.ts` |
-| Template Generator | `packages/openclaw-plugin/src/core/principle-compiler/template-generator.ts` | `@principles/core` | ⏳ Pending (PRI-44) | 模板生成逻辑迁移中 |
+| Template Generator | `packages/openclaw-plugin/src/core/principle-compiler/template-generator.ts` | `@principles/core` | ✅ Done | 已迁移至 `runtime-v2/internalization/template-generator.ts` |
 | Pruning Signal | `packages/principles-core/src/runtime-v2/pruning-read-model.ts` | - | ✅ Done | non-destructive read model |
 | Pruning Review | `packages/principles-core/src/runtime-v2/pruning-review-log.ts` | - | ✅ Done | append-only audit log |
 | Diagnostician Recommendation | `packages/principles-core/src/runtime-v2/diagnostician-output.ts` | - | ✅ Done | recommendation taxonomy schema |

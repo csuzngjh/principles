@@ -45,9 +45,9 @@ The common pattern: **these are background maintenance tasks that should not blo
 
 ## 2. Problem Statement
 
-### 2.1 Current Implementation (cron-initializer.ts)
+### 2.1 Historical Prototype (cron-initializer.ts) — DELETED
 
-The current code lives in `packages/openclaw-plugin/src/core/cron-initializer.ts`. It:
+The original prototype lived in `packages/openclaw-plugin/src/core/cron-initializer.ts` (now deleted). It:
 
 1. Reads `~/.openclaw/cron/jobs.json` directly via `fs.readFileSync`
 2. Checks if a job named "PD Empathy Optimizer" already exists

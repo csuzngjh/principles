@@ -65,9 +65,9 @@ class PDRuntimeError extends Error {
 }
 ```
 
-**使用规范**：
+**使用规范**:
 - 适配器和服务在 runtime-v2 路径中应抛出 `PDRuntimeError` 而非通用 `Error`
-- `category` 必须是 `PDErrorCategory` 的合法值（TypeBox 运行时校验）
+- `category` 必须是 `PDErrorCategory` 的合法值（`isPDErrorCategory()` 可用于运行时校验，但 `PDRuntimeError` constructor 本身不做校验）
 - `details` 用于附加上下文（如 taskId、runId、painSignalId）
 
 ### 2.2 已废弃的错误体系
@@ -101,6 +101,8 @@ class PDRuntimeError extends Error {
 
 ## 4. 降级路径
 
+> **说明**: 以下降级路径描述的是**目标规范 / recommended behavior**，而非当前所有路径的完整实现状态。标注了 ✅ 的路径已有代码实现，标注为 🎯 的路径是推荐行为但尚未统一实现。
+
 ### 4.1 Pain Chain 降级
 
 ```
@@ -109,9 +111,9 @@ PainSignalBridge
     ├── 正常路径: PainSignal → Task → Run → Candidate → Ledger
     │
     └── 降级路径:
-        ├── Bridge 调用失败 → PDRuntimeError('runtime_unavailable') → 返回 skipped
-        ├── Lease 超时 → PDRuntimeError('lease_expired') → RecoverySweep 重试
-        └── 上下文组装失败 → PDRuntimeError('context_assembly_failed') → 返回 partial
+        ├── Bridge 调用失败 → PDRuntimeError('runtime_unavailable') → 返回 skipped ✅
+        ├── Lease 超时 → PDRuntimeError('lease_expired') → RecoverySweep 重试 ✅
+        └── 上下文组装失败 → PDRuntimeError('context_assembly_failed') → 返回 partial 🎯
 ```
 
 ### 4.2 Diagnostician 降级
@@ -122,9 +124,9 @@ DiagnosticianRunner
     ├── 正常路径: Prompt → Output → Validate → Commit
     │
     └── 降级路径:
-        ├── 超时 → PDRuntimeError('timeout') → RunnerResult.status = 'timed_out'
-        ├── 解析失败 → PDRuntimeError('output_invalid') → 尝试修复 → 仍失败则返回
-        └── 最大重试 → PDRuntimeError('max_attempts_exceeded') → 返回失败
+        ├── 超时 → PDRuntimeError('timeout') → RunnerResult.status = 'timed_out' ✅
+        ├── 解析失败 → PDRuntimeError('output_invalid') → 尝试修复 → 仍失败则返回 ✅
+        └── 最大重试 → PDRuntimeError('max_attempts_exceeded') → 返回失败 ✅
 ```
 
 ### 4.3 Storage 降级
@@ -135,9 +137,9 @@ Store Operations
     ├── 正常路径: 内存缓存 → 同步写入 → 返回成功
     │
     └── 降级路径:
-        ├── 写入失败 → PDRuntimeError('storage_unavailable') → 重试 3 次
-        ├── 读取失败 → Resilient* 包装器 → 自动重试
-        └── 锁获取失败 → PDRuntimeError('lease_conflict') → 等待重试
+        ├── 写入失败 → PDRuntimeError('storage_unavailable') → Resilient* 包装器自动重试 ✅
+        ├── 读取失败 → Resilient* 包装器 → 自动重试 ✅
+        └── 锁获取失败 → PDRuntimeError('lease_conflict') → 等待重试 🎯
 ```
 
 ---
