@@ -8,8 +8,8 @@
 
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { PruningReadModel, appendPruningReview, listPruningReviews, buildMaskedPrincipleSet } from '@principles/core/runtime-v2';
-import type { PruningReviewDecision } from '@principles/core/runtime-v2';
+import { PruningReadModel, appendPruningReview, listPruningReviews, buildMaskedPrincipleSet, loadLedger, saveLedger } from '@principles/core/runtime-v2';
+import type { PruningReviewDecision, OrphanDerivedCandidate } from '@principles/core/runtime-v2';
 
 interface PruningReportOptions {
   workspace?: string;
@@ -276,4 +276,112 @@ export function handlePruningRollback(opts: PruningRollbackOptions): void {
   console.log(`reviewedAt: ${record.reviewedAt}`);
   console.log('');
   console.log('Principle has been restored to injection.');
+}
+
+// ── Pruning orphans ───────────────────────────────────────────────────────────
+
+export interface PruningOrphansOptions {
+  workspace?: string;
+  dryRun?: boolean;
+  confirm?: boolean;
+  json?: boolean;
+}
+
+export interface OrphanCleanupResult {
+  orphanDerivedCandidateCount: number;
+  candidates: OrphanDerivedCandidate[];
+  dryRun: boolean;
+  removedFromPrinciples?: { principleId: string; removedIds: string[] }[];
+}
+
+export function handlePruningOrphans(opts: PruningOrphansOptions): void {
+  const workspaceDir = opts.workspace
+    ? path.resolve(opts.workspace)
+    : resolveWorkspaceDir();
+
+  const model = new PruningReadModel({ workspaceDir });
+  const orphans = model.getOrphanDerivedCandidates();
+  const isDryRun = !opts.confirm;
+
+  if (isDryRun) {
+    const result: OrphanCleanupResult = {
+      orphanDerivedCandidateCount: orphans.length,
+      candidates: orphans,
+      dryRun: true,
+    };
+
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    console.log(`orphanDerivedCandidateCount: ${orphans.length}`);
+    console.log(`dryRun: true`);
+    console.log('');
+    if (orphans.length === 0) {
+      console.log('No orphan derived candidates found.');
+    } else {
+      console.log('── Orphan derived candidates ──');
+      for (const o of orphans) {
+        console.log(`  [${o.status ?? 'unknown'}] ${o.candidateId} → principle: ${o.principleId}`);
+        console.log(`    ↳ ${o.reason}`);
+      }
+      console.log('');
+      console.log('NOTE: This is a dry-run. No data was modified. Use --confirm to remove orphan references.');
+    }
+    return;
+  }
+
+  const orphanIdsByPrinciple = new Map<string, Set<string>>();
+  for (const o of orphans) {
+    if (!orphanIdsByPrinciple.has(o.principleId)) {
+      orphanIdsByPrinciple.set(o.principleId, new Set());
+    }
+    orphanIdsByPrinciple.get(o.principleId)?.add(o.candidateId);
+  }
+
+  const stateDir = path.join(workspaceDir, '.state');
+  const ledger = loadLedger(stateDir);
+  const removedFromPrinciples: { principleId: string; removedIds: string[] }[] = [];
+
+  for (const [principleId, orphanIds] of orphanIdsByPrinciple) {
+    const entry = ledger.tree.principles[principleId];
+    if (!entry) continue;
+
+    const originalIds = entry.derivedFromPainIds ?? [];
+    const orphanIdSet = orphanIds;
+    const filteredIds = originalIds.filter((id: string) => !orphanIdSet.has(id));
+
+    if (filteredIds.length !== originalIds.length) {
+      entry.derivedFromPainIds = filteredIds;
+      removedFromPrinciples.push({
+        principleId,
+        removedIds: originalIds.filter((id: string) => orphanIdSet.has(id)),
+      });
+    }
+  }
+
+  saveLedger(stateDir, ledger);
+
+  const result: OrphanCleanupResult = {
+    orphanDerivedCandidateCount: orphans.length,
+    candidates: orphans,
+    dryRun: false,
+    removedFromPrinciples,
+  };
+
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`orphanDerivedCandidateCount: ${orphans.length}`);
+  console.log(`dryRun: false`);
+  console.log('');
+  for (const r of removedFromPrinciples) {
+    console.log(`principle: ${r.principleId}`);
+    console.log(`  removed: ${r.removedIds.join(', ')}`);
+  }
+  console.log('');
+  console.log(`${removedFromPrinciples.length} principles updated. ${orphans.length} orphan references removed.`);
 }

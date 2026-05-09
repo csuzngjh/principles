@@ -50,6 +50,9 @@ const { MockPruningReadModel } = vi.hoisted(() => {
         generatedAt: '2026-05-02T00:00:00.000Z',
       };
     }
+    getOrphanDerivedCandidates() {
+      return [];
+    }
   }
   return { MockPruningReadModel };
 }, { validateType: false });
@@ -57,6 +60,8 @@ const { MockPruningReadModel } = vi.hoisted(() => {
 const mockAppendPruningReview = vi.hoisted(() => vi.fn());
 const mockListPruningReviews = vi.hoisted(() => vi.fn());
 const mockBuildMaskedPrincipleSet = vi.hoisted(() => vi.fn());
+const mockLoadLedger = vi.hoisted(() => vi.fn());
+const mockSaveLedger = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/test-workspace'),
@@ -69,9 +74,11 @@ vi.mock('@principles/core/runtime-v2', () => ({
   appendPruningReview: mockAppendPruningReview,
   listPruningReviews: mockListPruningReviews,
   buildMaskedPrincipleSet: mockBuildMaskedPrincipleSet,
+  loadLedger: mockLoadLedger,
+  saveLedger: mockSaveLedger,
 }));
 
-import { handlePruningReport, handlePruningExplain, handlePruningReview, handlePruningRollback } from '../../src/commands/runtime-pruning.js';
+import { handlePruningReport, handlePruningExplain, handlePruningReview, handlePruningRollback, handlePruningOrphans } from '../../src/commands/runtime-pruning.js';
 import { PruningReadModel } from '@principles/core/runtime-v2';
 
 // ── pd runtime pruning report ───────────────────────────────────────────────
@@ -474,6 +481,125 @@ describe('pd runtime pruning rollback', () => {
     expect(callInput.principleId).toBe('p_orphan');
     expect(callInput.decision).toBe('keep');
     expect(callInput.signalSnapshot).toBeUndefined();
+    consoleSpy.mockRestore();
+  });
+});
+
+// ── pd runtime pruning orphans ───────────────────────────────────────────────
+
+describe('pd runtime pruning orphans', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockLoadLedger.mockReset();
+    mockSaveLedger.mockReset();
+  });
+
+  it('dry-run outputs orphan list with count (JSON)', () => {
+    class MockOrphanReadModel {
+      getOrphanDerivedCandidates() {
+        return [
+          { candidateId: 'c_orphan1', principleId: 'p1', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
+          { candidateId: 'c_orphan2', principleId: 'p1', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
+        ];
+      }
+    }
+    (PruningReadModel as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(function () {
+      return new MockOrphanReadModel() as unknown as InstanceType<typeof PruningReadModel>;
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    handlePruningOrphans({ json: true, dryRun: true, confirm: false });
+    const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.orphanDerivedCandidateCount).toBe(2);
+    expect(output.dryRun).toBe(true);
+    expect(output.candidates).toHaveLength(2);
+    expect(output.candidates[0].candidateId).toBe('c_orphan1');
+    consoleSpy.mockRestore();
+  });
+
+  it('default is dry-run (no modifications)', () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    handlePruningOrphans({ json: true });
+    const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.dryRun).toBe(true);
+    expect(mockSaveLedger).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+
+  it('--confirm removes orphan IDs from ledger derivedFromPainIds', () => {
+    const mockLedger = {
+      tree: {
+        principles: {
+          p1: {
+            id: 'p1',
+            derivedFromPainIds: ['c_orphan1', 'c_valid1'],
+          },
+        },
+      },
+    };
+    mockLoadLedger.mockReturnValue(mockLedger);
+    mockSaveLedger.mockImplementation(() => {});
+
+    class MockOrphanReadModel {
+      getOrphanDerivedCandidates() {
+        return [
+          { candidateId: 'c_orphan1', principleId: 'p1', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
+        ];
+      }
+    }
+    (PruningReadModel as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(function () {
+      return new MockOrphanReadModel() as unknown as InstanceType<typeof PruningReadModel>;
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    handlePruningOrphans({ json: true, confirm: true });
+    expect(mockSaveLedger).toHaveBeenCalledTimes(1);
+    expect(mockLedger.tree.principles.p1.derivedFromPainIds).toEqual(['c_valid1']);
+    const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.dryRun).toBe(false);
+    expect(output.removedFromPrinciples).toHaveLength(1);
+    expect(output.removedFromPrinciples[0].principleId).toBe('p1');
+    expect(output.removedFromPrinciples[0].removedIds).toContain('c_orphan1');
+    consoleSpy.mockRestore();
+  });
+
+  it('--confirm does not touch non-orphan candidates', () => {
+    const mockLedger = {
+      tree: {
+        principles: {
+          p1: {
+            id: 'p1',
+            derivedFromPainIds: ['c_valid1', 'c_valid2'],
+          },
+        },
+      },
+    };
+    mockLoadLedger.mockReturnValue(mockLedger);
+    mockSaveLedger.mockImplementation(() => {});
+
+    class MockOrphanReadModel {
+      getOrphanDerivedCandidates() {
+        return [
+          { candidateId: 'c_orphan1', principleId: 'p2', reason: 'candidate not found in state.db', sourceRef: 'derivedFromPainIds', status: 'active' },
+        ];
+      }
+    }
+    (PruningReadModel as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(function () {
+      return new MockOrphanReadModel() as unknown as InstanceType<typeof PruningReadModel>;
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    handlePruningOrphans({ json: true, confirm: true });
+    expect(mockLedger.tree.principles.p1.derivedFromPainIds).toEqual(['c_valid1', 'c_valid2']);
+    consoleSpy.mockRestore();
+  });
+
+  it('dry-run text output includes note about no modifications', () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    handlePruningOrphans({ json: false, dryRun: true, confirm: false });
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(output).toContain('dryRun: true');
+    expect(output).toContain('No orphan derived candidates found.');
     consoleSpy.mockRestore();
   });
 });

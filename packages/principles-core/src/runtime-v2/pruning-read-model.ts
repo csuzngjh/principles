@@ -48,6 +48,14 @@ export interface PruningHealthSummary {
   generatedAt: string;
 }
 
+export interface OrphanDerivedCandidate {
+  candidateId: string;
+  principleId: string;
+  reason: string;
+  sourceRef?: string;
+  status?: string;
+}
+
 export interface PruningReadModelOptions {
   workspaceDir: string;
   /** Override days threshold for 'watch' risk level (default: 30) */
@@ -261,5 +269,55 @@ export class PruningReadModel {
         : 0,
       generatedAt: now.toISOString(),
     };
+  }
+
+  getOrphanDerivedCandidates(): OrphanDerivedCandidate[] {
+    const stateDir = path.join(this.workspaceDir, '.state');
+    const ledger = loadLedger(stateDir);
+    const principleEntries = Object.values(ledger.tree.principles);
+
+    if (principleEntries.length === 0) {
+      return [];
+    }
+
+    const allCandidateIds = new Set<string>();
+    const candidateStatusMap = new Map<string, string>();
+    const pdDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    try {
+      if (fs.existsSync(pdDbPath)) {
+        const db = new Database(pdDbPath, { readonly: true });
+        try {
+          const rows = db.prepare(
+            'SELECT candidate_id, status FROM principle_candidates'
+          ).all() as { candidate_id: string; status: string }[];
+          for (const r of rows) {
+            allCandidateIds.add(r.candidate_id);
+            candidateStatusMap.set(r.candidate_id, r.status);
+          }
+        } finally {
+          db.close();
+        }
+      }
+    } catch {
+      // Graceful degradation — candidate sets stay empty
+    }
+
+    const orphans: OrphanDerivedCandidate[] = [];
+
+    for (const p of principleEntries) {
+      for (const cid of p.derivedFromPainIds ?? []) {
+        if (!allCandidateIds.has(cid)) {
+          orphans.push({
+            candidateId: cid,
+            principleId: p.id,
+            reason: 'candidate not found in state.db',
+            sourceRef: 'derivedFromPainIds',
+            status: p.status as string | undefined,
+          });
+        }
+      }
+    }
+
+    return orphans;
   }
 }
