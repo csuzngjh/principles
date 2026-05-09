@@ -182,6 +182,8 @@ export class OperatorHealthReadModel {
       audit.status === 'degraded'
       || watchCount > 0
       || reviewCount > 0
+      || orphanDerivedCandidateCount > 10
+      || (gfi.staleSessionCount > 20 && gfi.activeSessionCount === 0)
       || lastSuccessfulChain === null
     ) {
       overallStatus = 'degraded';
@@ -202,6 +204,14 @@ export class OperatorHealthReadModel {
 
     if (watchCount > 0 || reviewCount > 0) {
       recommendedActions.push('Run `pd runtime pruning report --workspace <path> --json` for lifecycle signals.');
+    }
+
+    if (orphanDerivedCandidateCount > 10) {
+      recommendedActions.push(`High orphan-derived-candidate count (${orphanDerivedCandidateCount}) — run pruning to clean up.`);
+    }
+
+    if (gfi.staleSessionCount > 20 && gfi.activeSessionCount === 0) {
+      recommendedActions.push(`Many stale sessions (${gfi.staleSessionCount}) with no active sessions — run cleanup or investigate session lifecycle.`);
     }
 
     if (lastSuccessfulChain === null && dbExists) {

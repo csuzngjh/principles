@@ -135,4 +135,25 @@ describe('OperatorHealthReadModel.getSnapshot', () => {
     expect(s.recommendedActions).toHaveLength(3);
     await model.close();
   });
+
+  it('CANARY-01: high orphanDerivedCandidateCount should flag degraded (observation gap)', async () => {
+    const { model, painChain, pruning } = createModel();
+    painChain.getLastSuccessfulChain.mockResolvedValue(healthyChain());
+    pruning.getHealthSummary.mockReturnValue({ ...cleanPruning(), orphanDerivedCandidateCount: 18 });
+
+    const s = await model.getSnapshot();
+    expect(s.overallStatus).toBe('degraded');
+    expect(s.pruning.orphanDerivedCandidateCount).toBe(18);
+    await model.close();
+  });
+
+  it('CANARY-03: orphanDerivedCandidateCount reflected in pruning snapshot even when healthy', async () => {
+    const { model, painChain, pruning } = createModel();
+    painChain.getLastSuccessfulChain.mockResolvedValue(healthyChain());
+    pruning.getHealthSummary.mockReturnValue({ ...cleanPruning(), orphanDerivedCandidateCount: 18 });
+
+    const s = await model.getSnapshot();
+    expect(s.pruning.orphanDerivedCandidateCount).toBe(18);
+    await model.close();
+  });
 });
