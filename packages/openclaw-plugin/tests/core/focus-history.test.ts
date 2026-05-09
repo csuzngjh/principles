@@ -704,7 +704,7 @@ ${Array.from({ length: 40 }, (_, i) => `| Item ${i + 1} | Value ${i + 1} |`).joi
     });
   });
 
-  describe('autoCompressFocus', () => {
+  describe('cleanupStaleInfo I/O integration (autoCompressFocus prefilter path)', () => {
     it('should filter stale artifacts when workspaceDir is provided', () => {
       const focusContent = `# 🎯 CURRENT_FOCUS
 
