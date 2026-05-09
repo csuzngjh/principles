@@ -27,6 +27,7 @@ import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError } from '../error-categories.js';
 import { DreamerRunner } from '../internalization/dreamer-runner.js';
 import { createMinimalPITaskRecord } from '../internalization/peer-runner-contracts.js';
+import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
 
@@ -182,6 +183,7 @@ function createRunner(mocks: ReturnType<typeof createMocks>) {
       runtimeAdapter: mocks.mockRuntimeAdapter,
       eventEmitter: mocks.mockEventEmitter,
       validator: mocks.mockValidator,
+      artifactStore: new MemoryPIArtifactStore(),
     },
     {
       owner: OWNER,

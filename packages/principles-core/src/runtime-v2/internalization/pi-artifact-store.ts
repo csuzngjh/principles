@@ -29,6 +29,11 @@ export class MemoryPIArtifactStore implements PIArtifactStore {
 
     if (existingId) {
       this.artifacts.delete(existingId);
+      for (const [idxKey, idxVal] of this.idempotencyIndex.entries()) {
+        if (idxVal === existingId && idxKey !== key) {
+          this.idempotencyIndex.delete(idxKey);
+        }
+      }
     }
 
     this.artifacts.set(record.artifactId, record);

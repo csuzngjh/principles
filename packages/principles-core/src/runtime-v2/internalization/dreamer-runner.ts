@@ -33,6 +33,7 @@ import type {
 } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DreamerOutput, DreamerValidator } from './dreamer-output.js';
+import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
@@ -46,6 +47,9 @@ export type DreamerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
 export interface DreamerRunnerResult {
   readonly status: DreamerRunnerResultStatus;
   readonly taskId: string;
+  readonly runId?: string;
+  readonly artifactId?: string;
+  readonly resultRef?: string;
   readonly contextHash?: string;
   readonly output?: DreamerOutput;
   readonly errorCategory?: PDErrorCategory;
@@ -98,6 +102,7 @@ export interface DreamerRunnerDeps {
   readonly runtimeAdapter: PDRuntimeAdapter;
   readonly eventEmitter: StoreEventEmitter;
   readonly validator: DreamerValidator;
+  readonly artifactStore: PIArtifactStore;
 }
 
 // ── Context types for error handling ─────────────────────────────────────────
@@ -133,12 +138,14 @@ export class DreamerRunner {
   private readonly runtimeAdapter: PDRuntimeAdapter;
   private readonly eventEmitter: StoreEventEmitter;
   private readonly validator: DreamerValidator;
+  private readonly artifactStore: PIArtifactStore;
 
   constructor(deps: DreamerRunnerDeps, options: DreamerRunnerOptions) {
     this.stateManager = deps.stateManager;
     this.runtimeAdapter = deps.runtimeAdapter;
     this.eventEmitter = deps.eventEmitter;
     this.validator = deps.validator;
+    this.artifactStore = deps.artifactStore;
     this.resolvedOptions = resolveDreamerRunnerOptions(options);
   }
 
@@ -345,6 +352,31 @@ export class DreamerRunner {
     return latestRun.runId;
   }
 
+  private async resolveLineageArtifactIds(taskId: string): Promise<{ ids: string[]; hasRejected: boolean }> {
+    const task = await this.stateManager.getTask(taskId);
+    if (!task) return { ids: [], hasRejected: false };
+
+    const piTask = hydratePITaskRecord(task);
+    const deps = piTask?.dependencyTaskIds ?? [];
+    if (deps.length === 0) return { ids: [], hasRejected: false };
+
+    const lineageIds: string[] = [];
+    let hasRejected = false;
+    const results = await Promise.allSettled(
+      deps.map((depId) => this.artifactStore.listBySourceTaskId(depId)),
+    );
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        for (const artifact of result.value) {
+          lineageIds.push(artifact.artifactId);
+        }
+      } else {
+        hasRejected = true;
+      }
+    }
+    return { ids: lineageIds, hasRejected };
+  }
+
   private async invokeRuntime(taskId: string, contextHash: string): Promise<RunHandle> {
     const startInput: StartRunInput = {
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
@@ -414,6 +446,57 @@ export class DreamerRunner {
       });
     }
 
+    // Write PIArtifact via artifactStore (idempotent upsert)
+    // PIArtifact is the core durable output of DreamerRunner.
+    // If artifact write fails, the task must NOT be marked succeeded —
+    // downstream runners (Philosopher/Scribe) require durable artifact input.
+    let lineageArtifactIds: string[] = [];
+    let lineageHasRejected = false;
+    try {
+      const lineageResult = await this.resolveLineageArtifactIds(ctx.taskId);
+      lineageArtifactIds = lineageResult.ids;
+      lineageHasRejected = lineageResult.hasRejected;
+    } catch (lineageErr) {
+      this.emitDreamerEvent('dreamer_lineage_resolve_failed', ctx.taskId, {
+        runId: ctx.runId,
+        errorMessage: lineageErr instanceof Error ? lineageErr.message : String(lineageErr),
+      });
+    }
+
+    if (lineageHasRejected) {
+      this.emitDreamerEvent('dreamer_lineage_partial', ctx.taskId, {
+        runId: ctx.runId,
+        resolvedCount: lineageArtifactIds.length,
+        warning: 'Some dependency artifact queries were rejected; lineage may be incomplete',
+      });
+    }
+
+    const artifactId = `pi-art-${ctx.taskId}-${ctx.runId}`;
+    const now = new Date().toISOString();
+    try {
+      await this.artifactStore.upsertArtifact({
+        artifactId,
+        artifactKind: 'principle',
+        sourceTaskId: ctx.taskId,
+        lineageArtifactIds,
+        validationStatus: 'pending',
+        contentJson: JSON.stringify(ctx.output),
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (artifactErr) {
+      this.emitDreamerEvent('dreamer_artifact_write_failed', ctx.taskId, {
+        runId: ctx.runId,
+        errorMessage: artifactErr instanceof Error ? artifactErr.message : String(artifactErr),
+      });
+      return this.retryOrFail({
+        taskId: ctx.taskId,
+        task: ctx.task,
+        errorCategory: 'artifact_commit_failed',
+        failureReason: `PIArtifact write failed: ${artifactErr instanceof Error ? artifactErr.message : String(artifactErr)}`,
+      });
+    }
+
     // Mark task succeeded with dreamer:// resultRef
     const resultRef = `dreamer://${ctx.runId}`;
     try {
@@ -437,6 +520,9 @@ export class DreamerRunner {
     return {
       status: 'succeeded',
       taskId: ctx.taskId,
+      runId: ctx.runId,
+      artifactId,
+      resultRef,
       contextHash: ctx.contextHash,
       output: ctx.output,
       attemptCount: ctx.task.attemptCount,
