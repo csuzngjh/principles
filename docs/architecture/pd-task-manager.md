@@ -1,9 +1,16 @@
 # PD Task Manager — Design Document
 
-> **Status**: Draft  
-> **Date**: 2026-04-07  
-> **Author**: Qwen-Coder  
+> **Status**: Partially Implemented
+> **Date**: 2026-04-07
+> **Author**: Qwen-Coder
 > **Related PR**: [#174](https://github.com/csuzngjh/principles/pull/174)
+>
+> **⚠️ 实现状态**：
+> - ✅ PDTaskSpec 类型定义已创建
+> - ✅ PDTaskStore 已创建
+> - ✅ cron-initializer.ts 已删除
+> - ⏳ PDTaskService（Plugin Service 集成）待完成
+> - 📁 本文档保留作为迁移计划参考
 
 ---
 
@@ -38,9 +45,9 @@ The common pattern: **these are background maintenance tasks that should not blo
 
 ## 2. Problem Statement
 
-### 2.1 Current Implementation (cron-initializer.ts)
+### 2.1 Historical Prototype (cron-initializer.ts) — DELETED
 
-The current code lives in `packages/openclaw-plugin/src/core/cron-initializer.ts`. It:
+The original prototype lived in `packages/openclaw-plugin/src/core/cron-initializer.ts` (now deleted). It:
 
 1. Reads `~/.openclaw/cron/jobs.json` directly via `fs.readFileSync`
 2. Checks if a job named "PD Empathy Optimizer" already exists
