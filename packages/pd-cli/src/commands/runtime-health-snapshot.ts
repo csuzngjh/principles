@@ -57,6 +57,15 @@ function formatTextOutput(snapshot: OperatorHealthSnapshot): string {
   }
   lines.push('');
 
+  // GFI
+  if (snapshot.gfi.active) {
+    const g = snapshot.gfi.active;
+    lines.push(`gfi: stage=${g.stage} currentGfi=${g.currentGfi} dominantSource=${g.dominantSource ?? '-'} sessions=${snapshot.gfi.activeSessionCount}active/${snapshot.gfi.staleSessionCount}stale`);
+  } else {
+    lines.push('gfi: (no active sessions)');
+  }
+  lines.push('');
+
   // Actions
   if (snapshot.recommendedActions.length === 0) {
     lines.push('No actions recommended.');

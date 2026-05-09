@@ -13,6 +13,9 @@ import type { PainChainTrace } from './pain-chain-read-model.js';
 import { PruningReadModel } from './pruning-read-model.js';
 import { auditCandidateLedgerConsistency } from './candidate-audit.js';
 import type { CandidateAuditResult } from './candidate-audit.js';
+import { buildGfiWorkspaceSnapshot } from './gfi/gfi-read-model.js';
+import type { GfiWorkspaceSnapshot } from './gfi/gfi-read-model.js';
+import type { GfiSource } from './gfi/gfi-types.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +38,7 @@ export interface OperatorHealthSnapshot {
     reviewCount: number;
     orphanDerivedCandidateCount: number;
   };
+  gfi: GfiWorkspaceSnapshot;
   overallStatus: OverallHealthStatus;
   recommendedActions: string[];
 }
@@ -46,6 +50,51 @@ export interface OperatorHealthReadModelOptions {
 }
 
 // ── Read model ───────────────────────────────────────────────────────────────
+
+interface PersistedSession {
+  sessionId: string;
+  currentGfi: number;
+  gfiBySource?: Partial<Record<GfiSource, number>>;
+  lastErrorSource?: string;
+  consecutiveErrors: number;
+  lastGfiDecayAt?: number;
+  dailyGfiPeak?: number;
+  lastActivityAt: number;
+}
+
+function readPersistedSessions(workspaceDir: string): PersistedSession[] {
+  const sessionDir = path.join(workspaceDir, '.state', 'sessions');
+
+  if (!fs.existsSync(sessionDir)) {
+    return [];
+  }
+
+  const sessions: PersistedSession[] = [];
+
+  for (const file of fs.readdirSync(sessionDir)) {
+    if (!file.endsWith('.json')) continue;
+    try {
+      const raw = fs.readFileSync(path.join(sessionDir, file), 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed?.sessionId) {
+        sessions.push({
+          sessionId: parsed.sessionId ?? file.replace('.json', ''),
+          currentGfi: parsed.currentGfi ?? 0,
+          gfiBySource: parsed.gfiBySource,
+          lastErrorSource: parsed.lastErrorSource,
+          consecutiveErrors: parsed.consecutiveErrors ?? 0,
+          lastGfiDecayAt: parsed.lastGfiDecayAt,
+          dailyGfiPeak: parsed.dailyGfiPeak,
+          lastActivityAt: parsed.lastActivityAt ?? parsed.lastControlActivityAt ?? 0,
+        });
+      }
+    } catch {
+      // skip malformed session files
+    }
+  }
+
+  return sessions;
+}
 
 export class OperatorHealthReadModel {
   private readonly workspaceDir: string;
@@ -107,6 +156,23 @@ export class OperatorHealthReadModel {
       // Graceful — pruning section stays zeroed
     }
 
+    // ── GFI ───────────────────────────────────────────────────────────────
+    const gfi: GfiWorkspaceSnapshot = (() => {
+      try {
+        const sessions = readPersistedSessions(this.workspaceDir);
+        return buildGfiWorkspaceSnapshot({ sessions, nowMs: Date.now() });
+      } catch {
+        return {
+          active: null,
+          staleSessionCount: 0,
+          staleGfiRange: null,
+          totalSessionCount: 0,
+          activeSessionCount: 0,
+          generatedAt: new Date().toISOString(),
+        };
+      }
+    })();
+
     // ── Compute overallStatus ─────────────────────────────────────────────
     let overallStatus: OverallHealthStatus = 'healthy';
 
@@ -152,6 +218,7 @@ export class OperatorHealthReadModel {
         missingLedgerCount: audit.missingLedgerCount,
       },
       pruning: { watchCount, reviewCount, orphanDerivedCandidateCount },
+      gfi,
       overallStatus,
       recommendedActions,
     };
@@ -162,7 +229,6 @@ export class OperatorHealthReadModel {
       await this.ownedPainChainReadModel.close();
       this.ownedPainChainReadModel = null;
     }
-    // PruningReadModel uses better-sqlite3 readonly — close to release file handle
     if (this.ownedPruningReadModel) {
       this.ownedPruningReadModel = null;
     }
