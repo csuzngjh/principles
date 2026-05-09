@@ -21,7 +21,7 @@ interface WakeOnceOptions {
 }
 
 const OWNER = 'pd-cli-internalization-wake-once';
-const RUNTIME_KIND = 'internalization-engine';
+const RUNTIME_KIND = 'local-worker';
 
 function formatTextOutput(result: WakeOnceResult): string {
   switch (result.decision) {

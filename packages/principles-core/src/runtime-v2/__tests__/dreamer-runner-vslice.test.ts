@@ -7,6 +7,7 @@ import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { DreamerOutput, DreamerValidationResult } from '../internalization/dreamer-output.js';
+import { DefaultDreamerValidator } from '../internalization/dreamer-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { createMinimalPITaskRecord } from '../internalization/peer-runner-contracts.js';
 import { serializePITaskMetadata } from '../internalization/pitask-metadata.js';
@@ -15,12 +16,10 @@ function makeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   const base = createMinimalPITaskRecord('task-dreamer-001', 'dreamer', 'prompt');
   return {
     ...base,
+    ...overrides,
     status: overrides.status ?? 'leased',
     createdAt: overrides.createdAt ?? new Date().toISOString(),
     updatedAt: overrides.updatedAt ?? new Date().toISOString(),
-    attemptCount: overrides.attemptCount ?? 1,
-    maxAttempts: overrides.maxAttempts ?? 3,
-    resultRef: overrides.resultRef,
   };
 }
 
@@ -318,5 +317,194 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
     const [firstEvent] = lineagePartialEvents;
     expect(firstEvent).toBeDefined();
     expect((firstEvent?.[0] as { payload: { resolvedCount: number } }).payload.resolvedCount).toBe(1);
+  });
+
+  it('taskKind not dreamer fails closed and releases lease', async () => {
+    const wrongKindTask = makeTask({ taskKind: 'philosopher' });
+    (deps.stateManager as unknown as Record<string, unknown>).acquireLease = vi.fn().mockResolvedValue(wrongKindTask);
+
+    const runner = new DreamerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-001');
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('input_invalid');
+    expect(result.failureReason).toContain("must be 'dreamer'");
+    expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
+      'task-dreamer-001',
+      'input_invalid',
+    );
+  });
+});
+
+describe('DreamerRunner with DefaultDreamerValidator (PRI-87)', () => {
+  let artifactStore: PIArtifactStore = new MemoryPIArtifactStore();
+
+  beforeEach(() => {
+    artifactStore = new MemoryPIArtifactStore();
+  });
+
+  function createMockDepsWithStrictValidator(artifactStoreOverride?: PIArtifactStore): DreamerRunnerDeps {
+    const store = artifactStoreOverride ?? artifactStore;
+    const mockTask = makeTask();
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(mockTask),
+      getTask: vi.fn().mockResolvedValue(mockTask),
+      getRunsByTask: vi.fn().mockResolvedValue([{
+        runId: 'run-001',
+        taskId: 'task-dreamer-001',
+        runtimeKind: 'dreamer' as const,
+        startedAt: new Date().toISOString(),
+      }]),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    const runHandle: RunHandle = { runId: 'run-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
+    const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-001' };
+
+    const runtimeAdapter = {
+      startRun: vi.fn().mockResolvedValue(runHandle),
+      pollRun: vi.fn().mockResolvedValue(succeededStatus),
+      fetchOutput: vi.fn().mockResolvedValue({
+        payload: makeDreamerOutput(),
+      }),
+      cancelRun: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PDRuntimeAdapter;
+
+    const eventEmitter = {
+      emitTelemetry: vi.fn(),
+    } as unknown as StoreEventEmitter;
+
+    const validator = new DefaultDreamerValidator();
+
+    return { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore: store };
+  }
+
+  it('valid Dreamer output is accepted by DefaultDreamerValidator', async () => {
+    const deps = createMockDepsWithStrictValidator();
+    const runner = new DreamerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-001');
+    expect(result.status).toBe('succeeded');
+  });
+
+  it('malformed output with taskId mismatch is rejected, no artifact written', async () => {
+    const deps = createMockDepsWithStrictValidator();
+    const malformedOutput: DreamerOutput = {
+      valid: true,
+      taskId: 'wrong-task-id',
+      candidates: [{
+        candidateIndex: 0,
+        badDecision: 'Bad',
+        betterDecision: 'Better',
+        rationale: 'Why',
+        confidence: 0.5,
+        riskLevel: 'low',
+        strategicPerspective: 'test',
+      }],
+      contextRefs: [],
+      generatedAt: new Date().toISOString(),
+    };
+
+    (deps.runtimeAdapter as unknown as { fetchOutput: ReturnType<typeof vi.fn> }).fetchOutput
+      = vi.fn().mockResolvedValue({ payload: malformedOutput });
+
+    const runner = new DreamerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-001');
+    expect(result.status).toBe('failed');
+
+    const artifacts = await artifactStore.listBySourceTaskId('task-dreamer-001');
+    expect(artifacts).toHaveLength(0);
+
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('malformed output with invalid confidence is rejected, no artifact written', async () => {
+    const deps = createMockDepsWithStrictValidator();
+    const malformedOutput = makeDreamerOutput();
+    (malformedOutput.candidates[0] as unknown as Record<string, unknown>).confidence = 1.5;
+
+    (deps.runtimeAdapter as unknown as { fetchOutput: ReturnType<typeof vi.fn> }).fetchOutput
+      = vi.fn().mockResolvedValue({ payload: malformedOutput });
+
+    const runner = new DreamerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-001');
+    expect(result.status).toBe('failed');
+
+    const artifacts = await artifactStore.listBySourceTaskId('task-dreamer-001');
+    expect(artifacts).toHaveLength(0);
+  });
+
+  it('malformed output with unknown riskLevel is rejected, no artifact written', async () => {
+    const deps = createMockDepsWithStrictValidator();
+    const malformedOutput = makeDreamerOutput();
+    (malformedOutput.candidates[0] as unknown as Record<string, unknown>).riskLevel = 'critical';
+
+    (deps.runtimeAdapter as unknown as { fetchOutput: ReturnType<typeof vi.fn> }).fetchOutput
+      = vi.fn().mockResolvedValue({ payload: malformedOutput });
+
+    const runner = new DreamerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-001');
+    expect(result.status).toBe('failed');
+
+    const artifacts = await artifactStore.listBySourceTaskId('task-dreamer-001');
+    expect(artifacts).toHaveLength(0);
+  });
+
+  it('malformed output does not mark task succeeded, goes to retry/fail', async () => {
+    const deps = createMockDepsWithStrictValidator();
+    const malformedOutput: DreamerOutput = {
+      valid: true,
+      taskId: 'task-dreamer-001',
+      candidates: [],
+      contextRefs: [],
+      generatedAt: new Date().toISOString(),
+    };
+
+    (deps.runtimeAdapter as unknown as { fetchOutput: ReturnType<typeof vi.fn> }).fetchOutput
+      = vi.fn().mockResolvedValue({ payload: malformedOutput });
+
+    const runner = new DreamerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-001');
+    expect(result.status).toBe('failed');
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
 });

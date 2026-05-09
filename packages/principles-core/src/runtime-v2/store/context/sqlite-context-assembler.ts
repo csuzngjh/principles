@@ -131,7 +131,7 @@ export class SqliteContextAssembler implements ContextAssembler {
    * onto the base record to produce a full DiagnosticianTaskRecord.
    */
   private static reconstructDiagnosticianRecord(task: TaskRecord): DiagnosticianTaskRecord {
-    const base = task as TaskRecord & { diagnosticJson?: string; workspaceDir?: string };
+    const base = task as TaskRecord & { workspaceDir?: string };
     let extra: Partial<DiagnosticianTaskRecord> = {};
 
     if (base.diagnosticJson) {

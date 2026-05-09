@@ -13,7 +13,7 @@ import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task-st
 export class SqliteTaskStore implements TaskStore {
   constructor(private readonly connection: SqliteConnection) {}
 
-  async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'> & { diagnosticJson?: string }): Promise<TaskRecord> {
+  async createTask(record: Omit<TaskRecord, 'createdAt' | 'updatedAt'>): Promise<TaskRecord> {
     const db = this.connection.getDb();
     const now = new Date().toISOString();
 
@@ -33,7 +33,7 @@ export class SqliteTaskStore implements TaskStore {
       record.lastError ?? null,
       record.inputRef ?? null,
       record.resultRef ?? null,
-      (record as { diagnosticJson?: string }).diagnosticJson ?? null,
+      record.diagnosticJson ?? null,
     );
 
     return (await this.getTask(record.taskId)) as TaskRecord;
@@ -106,7 +106,7 @@ export class SqliteTaskStore implements TaskStore {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private rowToRecord(this: SqliteTaskStore, row: Record<string, unknown>): TaskRecord {
     const taskId = String(row.task_id);
-    const record: TaskRecord & { diagnosticJson?: string } = {
+    const record: TaskRecord = {
       taskId,
       taskKind: String(row.task_kind),
       status: String(row.status) as PDTaskStatus,

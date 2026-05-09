@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
 
+const VALID_DREAMER_CANDIDATES = [{ candidateIndex: 0, badDecision: 'Ignored validation', betterDecision: 'Validate inputs', rationale: 'Prevents errors', confidence: 0.9, riskLevel: 'low' as const, strategicPerspective: 'defensive-programming' }];
+
 const mockWakeOnce = vi.fn();
 const mockRun = vi.fn();
+const mockCommitNextTaskProposal = vi.fn().mockResolvedValue({ decision: 'no_successor', sourceTaskId: '', reason: '' });
 const mockClose = vi.fn().mockResolvedValue(undefined);
 const mockInitialize = vi.fn().mockResolvedValue(undefined);
 const mockPiArtifactStore = {
@@ -29,15 +32,24 @@ vi.mock('@principles/core/runtime-v2', () => ({
     };
   }),
   InternalizationOrchestrator: vi.fn().mockImplementation(function () {
-    return { wakeOnce: mockWakeOnce };
+    return { wakeOnce: mockWakeOnce, commitNextTaskProposal: mockCommitNextTaskProposal };
   }),
   DreamerRunner: vi.fn().mockImplementation(function () {
+    return { run: mockRun };
+  }),
+  PhilosopherRunner: vi.fn().mockImplementation(function () {
     return { run: mockRun };
   }),
   StoreEventEmitter: vi.fn().mockImplementation(function () {
     return { emitTelemetry: vi.fn() };
   }),
   PassThroughDreamerValidator: vi.fn().mockImplementation(function () {
+    return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
+  }),
+  DefaultDreamerValidator: vi.fn().mockImplementation(function () {
+    return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
+  }),
+  DefaultPhilosopherValidator: vi.fn().mockImplementation(function () {
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
   TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () {
@@ -130,7 +142,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-task-dreamer-001-run-001',
       resultRef: 'dreamer://run-001',
       contextHash: 'ctx-abc',
-      output: { valid: true, taskId: 'task-dreamer-001', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -153,7 +165,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-task-dreamer-001-run-001',
       resultRef: 'dreamer://run-001',
       contextHash: 'ctx-abc',
-      output: { valid: true, taskId: 'task-dreamer-001', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -163,7 +175,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('unsupported runner kind: exits 1 with error', async () => {
-    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'philosopher', runtime: 'test-double', allowTestDouble: true });
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'scribe', runtime: 'test-double', allowTestDouble: true });
 
     expect(process.exitCode).toBe(1);
     expect(consoleErrorSpy.mock.calls.some((c: string[]) => c[0].includes('unsupported runner kind'))).toBe(true);
@@ -197,7 +209,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-task-dreamer-001-run-001',
       resultRef: 'dreamer://run-001',
       contextHash: 'ctx-abc',
-      output: { valid: true, taskId: 'task-dreamer-001', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -268,7 +280,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-task-dreamer-003-run-003',
       resultRef: 'dreamer://run-003',
       contextHash: 'ctx-def',
-      output: { valid: true, taskId: 'task-dreamer-003', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-003', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -429,5 +441,243 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     const resolvedWorkspace = path.resolve(customWs);
     const expectedStateDir = path.join(resolvedWorkspace, '.state');
     expect(ResolveConfigMock).toHaveBeenCalledWith(expectedStateDir);
+  });
+
+  it('--runner philosopher dispatches PhilosopherRunner', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-phil-001',
+      taskKind: 'philosopher',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-phil-001',
+      runId: 'run-phil-001',
+      artifactId: 'pi-art-task-phil-001-run-phil-001',
+      resultRef: 'philosopher://run-phil-001',
+      contextHash: 'ctx-phil-abc',
+      output: {
+        taskId: 'task-phil-001',
+        sourceDreamerArtifactId: 'pi-art-dreamer-001',
+        thesis: 'Test thesis',
+        principleCandidate: { title: 'T', rationale: 'R', scope: 'S', confidence: 0.9 },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'philosopher', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const PhilosopherRunnerMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.PhilosopherRunner),
+    );
+    expect(PhilosopherRunnerMock).toHaveBeenCalled();
+    expect(mockRun).toHaveBeenCalledWith('task-phil-001');
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.runnerKind).toBe('philosopher');
+    expect(output.taskId).toBe('task-phil-001');
+    expect(output.runId).toBe('run-phil-001');
+    expect(output.artifactId).toBe('pi-art-task-phil-001-run-phil-001');
+    expect(output.resultRef).toBe('philosopher://run-phil-001');
+    expect(output.runnerResult.status).toBe('succeeded');
+  });
+
+  it('--runner philosopher with text output includes key IDs', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-phil-002',
+      taskKind: 'philosopher',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-phil-002',
+      runId: 'run-phil-002',
+      artifactId: 'pi-art-task-phil-002-run-phil-002',
+      resultRef: 'philosopher://run-phil-002',
+      contextHash: 'ctx-phil-def',
+      output: {
+        taskId: 'task-phil-002',
+        sourceDreamerArtifactId: 'pi-art-dreamer-002',
+        thesis: 'Test thesis',
+        principleCandidate: { title: 'T', rationale: 'R', scope: 'S', confidence: 0.9 },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'philosopher', runtime: 'test-double', allowTestDouble: true, json: false });
+
+    const text = consoleLogSpy.mock.calls.map((c: string[]) => c[0]).join('\n');
+    expect(text).toContain('task-phil-002');
+    expect(text).toContain('succeeded');
+    expect(text).toContain('runId: run-phil-002');
+    expect(text).toContain('artifactId: pi-art-task-phil-002-run-phil-002');
+    expect(text).toContain('resultRef: philosopher://run-phil-002');
+  });
+
+  it('successful dreamer + --enqueue-next returns successorTaskId', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-enq-001',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-enq-001',
+      runId: 'run-enq-001',
+      artifactId: 'pi-art-enq-001',
+      resultRef: 'dreamer://run-enq-001',
+      contextHash: 'ctx-enq',
+      output: { valid: true, taskId: 'task-dreamer-enq-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'successor_created',
+      sourceTaskId: 'task-dreamer-enq-001',
+      successorTaskId: 'task-phil-enq-001',
+      successorKind: 'philosopher',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, enqueueNext: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.enqueueDecision).toBe('successor_created');
+    expect(output.successorTaskId).toBe('task-phil-enq-001');
+    expect(output.successorKind).toBe('philosopher');
+  });
+
+  it('repeated --enqueue-next returns existing successorTaskId', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-enq-002',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-enq-002',
+      runId: 'run-enq-002',
+      artifactId: 'pi-art-enq-002',
+      resultRef: 'dreamer://run-enq-002',
+      contextHash: 'ctx-enq2',
+      output: { valid: true, taskId: 'task-dreamer-enq-002', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'successor_exists',
+      sourceTaskId: 'task-dreamer-enq-002',
+      successorTaskId: 'task-phil-enq-002',
+      successorKind: 'philosopher',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, enqueueNext: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.enqueueDecision).toBe('successor_exists');
+    expect(output.successorTaskId).toBe('task-phil-enq-002');
+    expect(output.successorKind).toBe('philosopher');
+  });
+
+  it('--enqueue-next with no_successor does not set successorTaskId', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-enq-003',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-enq-003',
+      runId: 'run-enq-003',
+      artifactId: 'pi-art-enq-003',
+      resultRef: 'dreamer://run-enq-003',
+      contextHash: 'ctx-enq3',
+      output: { valid: true, taskId: 'task-dreamer-enq-003', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'no_successor',
+      sourceTaskId: 'task-dreamer-enq-003',
+      reason: 'terminal runner',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, enqueueNext: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.enqueueDecision).toBe('no_successor');
+    expect(output.successorTaskId).toBeUndefined();
+  });
+
+  it('--enqueue-next with failed run does not call commitNextTaskProposal', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-enq-004',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'failed',
+      taskId: 'task-dreamer-enq-004',
+      errorCategory: 'execution_failed',
+      failureReason: 'Runtime unavailable',
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, enqueueNext: true, json: true });
+
+    expect(mockCommitNextTaskProposal).not.toHaveBeenCalled();
+  });
+
+  it('--enqueue-next without --allow-test-double still blocked', async () => {
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', enqueueNext: true });
+
+    expect(process.exitCode).toBe(1);
+    expect(mockWakeOnce).not.toHaveBeenCalled();
+  });
+
+  it('test-double with --runner philosopher requires --allow-test-double', async () => {
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'philosopher', runtime: 'test-double' });
+
+    expect(process.exitCode).toBe(1);
+    expect(consoleErrorSpy.mock.calls.some((c: string[]) => c[0].includes('test-double runtime mutates real queue state'))).toBe(true);
+    expect(mockWakeOnce).not.toHaveBeenCalled();
+  });
+
+  it('JSON output includes runnerKind field', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-rk',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-rk',
+      runId: 'run-rk',
+      artifactId: 'pi-art-rk',
+      resultRef: 'dreamer://run-rk',
+      contextHash: 'ctx-rk',
+      output: { valid: true, taskId: 'task-dreamer-rk', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.runnerKind).toBe('dreamer');
+    expect(output.decision).toBe('would_lease');
+    expect(output.taskId).toBe('task-dreamer-rk');
+    expect(output.runId).toBe('run-rk');
+    expect(output.artifactId).toBe('pi-art-rk');
+    expect(output.resultRef).toBe('dreamer://run-rk');
   });
 });

@@ -3,15 +3,17 @@ import {
   RuntimeStateManager,
   InternalizationOrchestrator,
   DreamerRunner,
+  PhilosopherRunner,
   StoreEventEmitter,
-  PassThroughDreamerValidator,
+  DefaultDreamerValidator,
+  DefaultPhilosopherValidator,
   TestDoubleRuntimeAdapter,
   PiAiRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
   resolveRuntimeConfig,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
-import type { WakeOnceResult, DreamerRunnerResult, PDRuntimeAdapter } from '@principles/core/runtime-v2';
+import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface RunOnceOptions {
@@ -20,27 +22,34 @@ interface RunOnceOptions {
   runtime?: string;
   runner?: string;
   allowTestDouble?: boolean;
+  enqueueNext?: boolean;
 }
 
 const OWNER = 'pd-cli-internalization-run-once';
-const RUNTIME_KIND = 'internalization-engine';
+const RUNTIME_KIND = 'local-worker';
+
+const SUPPORTED_RUNNERS = new Set(['dreamer', 'philosopher']);
 
 interface RunOnceOutput {
   decision: string;
+  runnerKind?: string;
   taskId?: string;
   taskKind?: string;
   attemptCount?: number;
   runId?: string;
   artifactId?: string;
   resultRef?: string;
-  runnerResult?: DreamerRunnerResult;
+  runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult;
   skipReason?: string;
   conflictReason?: string;
   reason?: string;
   inspectedCount?: number;
+  successorTaskId?: string;
+  successorKind?: string;
+  enqueueDecision?: string;
 }
 
-function buildOutput(wakeResult: WakeOnceResult, runnerResult?: DreamerRunnerResult, skipReason?: string): RunOnceOutput {
+function buildOutput(wakeResult: WakeOnceResult, runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult, skipReason?: string): RunOnceOutput {
   const base: RunOnceOutput = { decision: wakeResult.decision };
 
   switch (wakeResult.decision) {
@@ -94,6 +103,10 @@ function formatTextOutput(output: RunOnceOutput): string {
 
   lines.push(`Internalization Run-Once: ${output.decision}`);
 
+  if (output.runnerKind) {
+    lines.push(`  runner: ${output.runnerKind}`);
+  }
+
   if (output.taskId) {
     lines.push(`  task: ${output.taskId} (${output.taskKind ?? 'unknown'})`);
   }
@@ -129,11 +142,52 @@ function formatTextOutput(output: RunOnceOutput): string {
     lines.push(`  reason: ${output.reason}`);
   }
 
+  if (output.successorTaskId) {
+    lines.push(`  successor: ${output.successorTaskId} (${output.successorKind ?? 'unknown'})`);
+  }
+
+  if (output.enqueueDecision) {
+    lines.push(`  enqueue: ${output.enqueueDecision}`);
+  }
+
   return lines.join('\n');
 }
 
-function resolveRuntimeAdapter(runtimeKind: string, taskId: string, workspaceDir: string): PDRuntimeAdapter {
-  if (runtimeKind === 'test-double') {
+interface ResolveAdapterOptions {
+  runtimeKind: string;
+  taskId: string;
+  workspaceDir: string;
+  runnerKind: string;
+}
+
+function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
+  if (opts.runtimeKind === 'test-double') {
+    if (opts.runnerKind === 'philosopher') {
+      return new TestDoubleRuntimeAdapter({
+        onPollRun: (_runId: string) => ({
+          runId: _runId,
+          status: 'succeeded',
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+        }),
+        onFetchOutput: (_runId: string) => ({
+          runId: _runId,
+          payload: {
+            taskId: opts.taskId,
+            sourceDreamerArtifactId: 'pi-art-test-dreamer',
+            thesis: 'Test thesis from test-double',
+            principleCandidate: {
+              title: 'Test Principle',
+              rationale: 'Test rationale',
+              scope: 'Test scope',
+              confidence: 0.8,
+            },
+            risks: [],
+            generatedAt: new Date().toISOString(),
+          },
+        }),
+      });
+    }
     return new TestDoubleRuntimeAdapter({
       onPollRun: (_runId: string) => ({
         runId: _runId,
@@ -145,8 +199,16 @@ function resolveRuntimeAdapter(runtimeKind: string, taskId: string, workspaceDir
         runId: _runId,
         payload: {
           valid: true,
-          taskId,
-          candidates: [],
+          taskId: opts.taskId,
+          candidates: [{
+            candidateIndex: 0,
+            badDecision: 'Ignored input validation requirement',
+            betterDecision: 'Validate all inputs against schema before processing',
+            rationale: 'Input validation prevents downstream errors and data corruption',
+            confidence: 0.85,
+            riskLevel: 'low',
+            strategicPerspective: 'defensive-programming',
+          }],
           contextRefs: [],
           generatedAt: new Date().toISOString(),
         },
@@ -154,10 +216,10 @@ function resolveRuntimeAdapter(runtimeKind: string, taskId: string, workspaceDir
     });
   }
 
-  const stateDir = path.join(workspaceDir, '.state');
+  const stateDir = path.join(opts.workspaceDir, '.state');
   const config = resolveRuntimeConfig(stateDir);
 
-  if (runtimeKind === 'pi-ai' || (runtimeKind === 'config' && config.runtimeKind === 'pi-ai')) {
+  if (opts.runtimeKind === 'pi-ai' || (opts.runtimeKind === 'config' && config.runtimeKind === 'pi-ai')) {
     validateRuntimeConfig(config);
     return new PiAiRuntimeAdapter({
       provider: String(config.provider),
@@ -166,18 +228,18 @@ function resolveRuntimeAdapter(runtimeKind: string, taskId: string, workspaceDir
       maxRetries: config.maxRetries,
       timeoutMs: config.timeoutMs,
       baseUrl: config.baseUrl,
-      workspace: workspaceDir,
+      workspace: opts.workspaceDir,
     });
   }
 
-  if (runtimeKind === 'openclaw-cli' || (runtimeKind === 'config' && config.runtimeKind === 'openclaw-cli')) {
+  if (opts.runtimeKind === 'openclaw-cli' || (opts.runtimeKind === 'config' && config.runtimeKind === 'openclaw-cli')) {
     return new OpenClawCliRuntimeAdapter({
       runtimeMode: 'local',
-      workspaceDir,
+      workspaceDir: opts.workspaceDir,
     });
   }
 
-  throw new Error(`Unsupported runtime kind: ${runtimeKind}. Supported: test-double, pi-ai, openclaw-cli, config`);
+  throw new Error(`Unsupported runtime kind: ${opts.runtimeKind}. Supported: test-double, pi-ai, openclaw-cli, config`);
 }
 
 export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions): Promise<void> {
@@ -193,8 +255,8 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     return;
   }
 
-  if (runnerKind !== 'dreamer') {
-    console.error(`Error: unsupported runner kind: ${runnerKind}. Supported: dreamer`);
+  if (!SUPPORTED_RUNNERS.has(runnerKind)) {
+    console.error(`Error: unsupported runner kind: ${runnerKind}. Supported: ${[...SUPPORTED_RUNNERS].join(', ')}`);
     process.exitCode = 1;
     return;
   }
@@ -218,26 +280,44 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       return;
     }
 
-    let runnerResult: DreamerRunnerResult | undefined = undefined;
+    let runnerResult: DreamerRunnerResult | PhilosopherRunnerResult | undefined = undefined;
     let skipReason: string | undefined = undefined;
 
     if (wakeResult.decision === 'would_lease' && wakeResult.taskKind === runnerKind) {
       const eventEmitter = new StoreEventEmitter();
       const artifactStore = stateManager.piArtifactStore;
-      const validator = new PassThroughDreamerValidator();
-      const runtimeAdapter = resolveRuntimeAdapter(runtimeKind, wakeResult.taskId, workspaceDir);
+      const runtimeAdapter = resolveRuntimeAdapter({ runtimeKind, taskId: wakeResult.taskId, workspaceDir, runnerKind });
 
-      const runner = new DreamerRunner(
-        { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-        { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: 300_000 },
-      );
-
-      runnerResult = await runner.run(wakeResult.taskId);
+      if (runnerKind === 'dreamer') {
+        const validator = new DefaultDreamerValidator();
+        const runner = new DreamerRunner(
+          { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+          { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: 300_000 },
+        );
+        runnerResult = await runner.run(wakeResult.taskId);
+      } else if (runnerKind === 'philosopher') {
+        const validator = new DefaultPhilosopherValidator();
+        const runner = new PhilosopherRunner(
+          { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+          { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: 300_000 },
+        );
+        runnerResult = await runner.run(wakeResult.taskId);
+      }
     } else if (wakeResult.decision === 'would_lease' && wakeResult.taskKind !== runnerKind) {
       skipReason = 'unsupported_runner_kind';
     }
 
     const output = buildOutput(wakeResult, runnerResult, skipReason);
+    output.runnerKind = runnerKind;
+
+    if (opts.enqueueNext && runnerResult?.status === 'succeeded' && wakeResult.decision === 'would_lease') {
+      const commitResult = await orchestrator.commitNextTaskProposal(wakeResult.taskId);
+      output.enqueueDecision = commitResult.decision;
+      if (commitResult.decision === 'successor_created' || commitResult.decision === 'successor_exists') {
+        output.successorTaskId = commitResult.successorTaskId;
+        output.successorKind = commitResult.successorKind;
+      }
+    }
 
     if (opts.json) {
       console.log(JSON.stringify(output, null, 2));

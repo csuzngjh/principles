@@ -517,4 +517,204 @@ describe('InternalizationOrchestrator', () => {
       expect(clean).toBe(true);
     });
   });
+
+  // ── PRI-88: commitNextTaskProposal ──────────────────────────────────────────
+
+  describe('commitNextTaskProposal (PRI-88)', () => {
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let createTaskFn: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockStateManager = createMockStateManager();
+      createTaskFn = vi.fn();
+      (mockStateManager as unknown as Record<string, unknown>).createTask = createTaskFn;
+    });
+
+    it('succeeded dreamer commit creates philosopher task', async () => {
+      const succeededDreamer = makeRawTask({
+        taskId: 'dreamer-1',
+        taskKind: 'dreamer',
+        status: 'succeeded',
+        outputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-dreamer-1' }],
+      });
+      mockStateManager.getTask.mockResolvedValue(succeededDreamer);
+      mockStateManager.listTasks.mockResolvedValue([]);
+      createTaskFn.mockResolvedValue({
+        taskId: 'philosopher-dreamer-1-prompt',
+        taskKind: 'philosopher',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.commitNextTaskProposal('dreamer-1');
+
+      expect(result.decision).toBe('successor_created');
+      if (result.decision === 'successor_created') {
+        expect(result.sourceTaskId).toBe('dreamer-1');
+        expect(result.successorKind).toBe('philosopher');
+        expect(result.successorTaskId).toBe('philosopher-dreamer-1-prompt');
+      }
+      expect(createTaskFn).toHaveBeenCalledOnce();
+    });
+
+    it('repeated commit returns successor_exists without creating duplicate', async () => {
+      const succeededDreamer = makeRawTask({
+        taskId: 'dreamer-1',
+        taskKind: 'dreamer',
+        status: 'succeeded',
+        outputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-dreamer-1' }],
+      });
+      const existingPhilosopher = makeRawTask({
+        taskId: 'philosopher-dreamer-1-prompt',
+        taskKind: 'philosopher',
+        status: 'pending',
+        parentTaskId: 'dreamer-1',
+        channel: 'prompt',
+      });
+
+      mockStateManager.getTask.mockResolvedValue(succeededDreamer);
+      mockStateManager.listTasks.mockResolvedValue([existingPhilosopher]);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.commitNextTaskProposal('dreamer-1');
+
+      expect(result.decision).toBe('successor_exists');
+      if (result.decision === 'successor_exists') {
+        expect(result.sourceTaskId).toBe('dreamer-1');
+        expect(result.successorTaskId).toBe('philosopher-dreamer-1-prompt');
+        expect(result.successorKind).toBe('philosopher');
+      }
+      expect(createTaskFn).not.toHaveBeenCalled();
+    });
+
+    it('source task not found returns task_not_found', async () => {
+      mockStateManager.getTask.mockResolvedValue(null);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.commitNextTaskProposal('nonexistent');
+
+      expect(result.decision).toBe('task_not_found');
+      if (result.decision === 'task_not_found') {
+        expect(result.taskId).toBe('nonexistent');
+      }
+    });
+
+    it('source task not succeeded returns source_not_succeeded', async () => {
+      const pendingTask = makeRawTask({
+        taskId: 'dreamer-1',
+        taskKind: 'dreamer',
+        status: 'pending',
+      });
+      mockStateManager.getTask.mockResolvedValue(pendingTask);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.commitNextTaskProposal('dreamer-1');
+
+      expect(result.decision).toBe('source_not_succeeded');
+      if (result.decision === 'source_not_succeeded') {
+        expect(result.taskId).toBe('dreamer-1');
+        expect(result.status).toBe('pending');
+      }
+    });
+
+    it('source task with invalid metadata returns invalid_task_metadata', async () => {
+      const invalidTask = {
+        ...makeRawTask({ taskId: 'bad-task', taskKind: 'dreamer', status: 'succeeded' }),
+        diagnosticJson: '{}',
+      } as TaskRecord;
+      mockStateManager.getTask.mockResolvedValue(invalidTask);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.commitNextTaskProposal('bad-task');
+
+      expect(result.decision).toBe('invalid_task_metadata');
+      if (result.decision === 'invalid_task_metadata') {
+        expect(result.taskId).toBe('bad-task');
+      }
+    });
+
+    it('terminal runner with no successor returns no_successor', async () => {
+      const succeededTrainer = makeRawTask({
+        taskId: 'trainer-1',
+        taskKind: 'trainer',
+        status: 'succeeded',
+        channel: 'model_training',
+      });
+      mockStateManager.getTask.mockResolvedValue(succeededTrainer);
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'trainer' }
+      );
+
+      const result = await orchestrator.commitNextTaskProposal('trainer-1');
+
+      expect(result.decision).toBe('no_successor');
+      if (result.decision === 'no_successor') {
+        expect(result.sourceTaskId).toBe('trainer-1');
+      }
+    });
+
+    it('created successor task has correct PI metadata in diagnosticJson', async () => {
+      const succeededDreamer = makeRawTask({
+        taskId: 'dreamer-1',
+        taskKind: 'dreamer',
+        status: 'succeeded',
+        channel: 'prompt',
+        outputArtifactRefs: [{ artifactType: 'principle', ref: 'artifact-dreamer-1' }],
+      });
+      mockStateManager.getTask.mockResolvedValue(succeededDreamer);
+      mockStateManager.listTasks.mockResolvedValue([]);
+      createTaskFn.mockImplementation((record: Record<string, unknown>) => Promise.resolve({
+        ...record,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }));
+
+      const orchestrator = new OrchestratorClass(
+        { stateManager: mockStateManager as unknown as RuntimeStateManager },
+        { owner: 'test-owner', runtimeKind: 'dreamer' }
+      );
+
+      const result = await orchestrator.commitNextTaskProposal('dreamer-1');
+
+      expect(result.decision).toBe('successor_created');
+      expect(createTaskFn).toHaveBeenCalledOnce();
+
+      const createArg = (createTaskFn.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
+      expect(createArg.taskKind).toBe('philosopher');
+      expect(createArg.status).toBe('pending');
+      expect(createArg.diagnosticJson).toBeDefined();
+
+      const parsed = JSON.parse(createArg.diagnosticJson as string);
+      expect(parsed.pi_metadata).toBeDefined();
+      expect(parsed.pi_metadata.parentTaskId).toBe('dreamer-1');
+      expect(parsed.pi_metadata.dependencyTaskIds).toEqual(['dreamer-1']);
+      expect(parsed.pi_metadata.channel).toBe('prompt');
+      expect(parsed.pi_metadata.inputArtifactRefs).toEqual([{ artifactType: 'principle', ref: 'artifact-dreamer-1' }]);
+    });
+  });
 });

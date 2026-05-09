@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
 import * as path from 'path';
 import {
   RuntimeStateManager,
+  SqliteConnection,
   candidateList,
   candidateShow,
   CandidateIntakeService,
@@ -20,6 +21,7 @@ import {
   loadLedger,
   getLedgerFilePathPublic,
   decideInternalizationRoute,
+  createPITaskDiagnosticJson,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
@@ -96,6 +98,59 @@ async function ensureConsumedAt(stateManager: RuntimeStateManager, candidateId: 
   return now;
 }
 
+interface ResolvedRecommendation {
+  kind: string;
+  description: string;
+  triggerPattern?: string;
+  action?: string;
+  abstractedPrinciple?: string;
+  usedFallback: boolean;
+}
+
+function resolveCandidateRecommendation(
+  candidate: { sourceRecommendationJson?: string; description?: string },
+  stateManager: RuntimeStateManager,
+  candidateId: string,
+): ResolvedRecommendation {
+  if (candidate.sourceRecommendationJson) {
+    try {
+      const parsed = JSON.parse(candidate.sourceRecommendationJson);
+      if (parsed?.kind) {
+        return {
+          kind: parsed.kind,
+          description: parsed.description ?? candidate.description ?? '',
+          triggerPattern: parsed.triggerPattern,
+          action: parsed.action,
+          abstractedPrinciple: parsed.abstractedPrinciple,
+          usedFallback: false,
+        };
+      }
+    } catch { /* fall through to column fallback */ }
+  }
+
+  const row = stateManager.connection.getDb().prepare(
+    'SELECT recommendation_kind, trigger_pattern, action, abstracted_principle FROM principle_candidates WHERE candidate_id = ?',
+  ).get(candidateId) as
+    { recommendation_kind: string; trigger_pattern: string | null; action: string | null; abstracted_principle: string | null } | undefined;
+
+  if (row) {
+    return {
+      kind: row.recommendation_kind,
+      description: candidate.description || '',
+      triggerPattern: row.trigger_pattern ?? undefined,
+      action: row.action ?? undefined,
+      abstractedPrinciple: row.abstracted_principle ?? undefined,
+      usedFallback: true,
+    };
+  }
+
+  return {
+    kind: 'defer',
+    description: candidate.description || 'No recommendation data available',
+    usedFallback: false,
+  };
+}
+
 // ── List ───────────────────────────────────────────────────────────────────────
 
 export async function handleCandidateList(opts: CandidateListOptions): Promise<void> {
@@ -131,6 +186,164 @@ export async function handleCandidateList(opts: CandidateListOptions): Promise<v
       console.log(`    Confidence:  ${candidate.confidence ?? 'N/A'}`);
       console.log(`    Status:      ${candidate.status}`);
       console.log(`    Description: ${candidate.description.substring(0, 100)}${candidate.description.length > 100 ? '...' : ''}`);
+      console.log('');
+    }
+  } finally {
+    await stateManager.close();
+  }
+}
+
+// ── Internalize (PRI-89) ──────────────────────────────────────────────────────
+
+interface CandidateInternalizeOptions {
+  candidateId: string;
+  workspace?: string;
+  json?: boolean;
+  dryRun?: boolean;
+}
+
+interface CandidateInternalizeResult {
+  candidateId: string;
+  route: string;
+  taskId?: string;
+  channel?: string;
+  status: 'created' | 'existing' | 'dry_run' | 'no_task_created';
+  reason?: string;
+}
+
+const ROUTE_CHANNEL_MAP: Record<string, string> = {
+  'principle-ledger': 'prompt',
+  'rule-candidate': 'code_tool_hook',
+  'implementation-candidate': 'skill',
+  'prompt-injection-candidate': 'prompt',
+};
+
+export async function handleCandidateInternalize(opts: CandidateInternalizeOptions): Promise<void> {
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+
+  try {
+    await stateManager.initialize();
+
+    const candidate = await stateManager.getCandidate(opts.candidateId);
+    if (!candidate) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: 'unknown',
+        status: 'no_task_created',
+        reason: `Candidate not found: ${opts.candidateId}`,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Candidate not found: ${opts.candidateId}`);
+      }
+      process.exit(1);
+      return;
+    }
+
+    const recommendation = resolveCandidateRecommendation(candidate, stateManager, opts.candidateId);
+
+    const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
+
+    if (!decision.ready || decision.route === 'deferred') {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: decision.route,
+        status: 'no_task_created',
+        reason: decision.reason,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\nCandidate Internalize: ${opts.candidateId}\n`);
+        console.log(`  Route:   ${decision.route}`);
+        console.log(`  Ready:   ${decision.ready}`);
+        console.log(`  Reason:  ${decision.reason}`);
+        console.log('');
+      }
+      return;
+    }
+
+    const channel = ROUTE_CHANNEL_MAP[decision.route] ?? 'prompt';
+
+    if (opts.dryRun) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: decision.route,
+        channel,
+        status: 'dry_run',
+        reason: 'Dry-run mode — no task created',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\nCandidate Internalize (dry-run): ${opts.candidateId}\n`);
+        console.log(`  Route:    ${decision.route}`);
+        console.log(`  Channel:  ${channel}`);
+        console.log(`  Would create: dreamer PI task`);
+        console.log('');
+      }
+      return;
+    }
+
+    const taskId = `dreamer-${opts.candidateId}-${channel}`;
+
+    const existingTask = await stateManager.getTask(taskId);
+    if (existingTask) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: decision.route,
+        taskId: existingTask.taskId,
+        channel,
+        status: 'existing',
+        reason: 'Task already exists for this candidate+channel combination',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\nCandidate Internalize: ${opts.candidateId}\n`);
+        console.log(`  Route:    ${decision.route}`);
+        console.log(`  Channel:  ${channel}`);
+        console.log(`  Task:     ${existingTask.taskId} (existing)`);
+        console.log('');
+      }
+      return;
+    }
+
+    const diagnosticJson = createPITaskDiagnosticJson({
+      dependencyTaskIds: [],
+      channel: channel as 'prompt' | 'skill' | 'code_tool_hook' | 'model_training',
+      timeoutMs: 300_000,
+      inputArtifactRefs: [{ artifactType: 'candidate', ref: `candidate://${opts.candidateId}` }],
+      outputArtifactRefs: [],
+      parentTaskId: undefined,
+      correlationId: opts.candidateId,
+    });
+
+    const task = await stateManager.createTask({
+      taskId,
+      taskKind: 'dreamer',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      diagnosticJson,
+    });
+
+    const result: CandidateInternalizeResult = {
+      candidateId: opts.candidateId,
+      route: decision.route,
+      taskId: task.taskId,
+      channel,
+      status: 'created',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`\nCandidate Internalize: ${opts.candidateId}\n`);
+      console.log(`  Route:    ${decision.route}`);
+      console.log(`  Channel:  ${channel}`);
+      console.log(`  Task:     ${task.taskId} (created)`);
       console.log('');
     }
   } finally {
@@ -313,28 +526,26 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
  */
 export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
-  const stateManager = new RuntimeStateManager({ workspaceDir });
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+  let conn: SqliteConnection | undefined;
 
   try {
-    await stateManager.initialize();
-
-    // Load all candidates from DB
     const dbPath = path.join(workspaceDir, '.pd', 'state.db');
     const ledgerStateDir = path.join(workspaceDir, '.state');
     const ledgerPath = getLedgerFilePathPublic(ledgerStateDir);
 
-    const db = stateManager.connection;
-    const consumedRows = db.getDb().prepare(
+    conn = new SqliteConnection({ workspaceDir, readonly: true });
+    const db = conn.getDb();
+
+    const consumedRows = db.prepare(
       "SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'"
     ).all() as { candidate_id: string }[];
 
     const consumedIds = consumedRows.map(r => r.candidate_id);
 
-    // Load ledger using core's loadLedger (same format as plugin)
     const ledger = loadLedger(ledgerStateDir);
     const ledgerPrinciples = ledger.tree.principles;
 
-    // Check each consumed candidate has ledger entry
     const missingLedgerEntryIds: string[] = [];
     for (const candidateId of consumedIds) {
       const found = Object.values(ledgerPrinciples).some((p) =>
@@ -373,8 +584,11 @@ export async function handleCandidateAudit(opts: CandidateAuditOptions): Promise
     if (result.status === 'degraded') {
       process.exit(1);
     }
+  } catch (err) {
+    console.error(`Audit failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
   } finally {
-    await stateManager.close();
+    try { conn?.close(); } catch { /* best-effort close */ }
   }
 }
 
@@ -489,46 +703,7 @@ export async function handleCandidateRoute(opts: CandidateRouteOptions): Promise
       return; // unreachable in production, needed for test mocks
     }
 
-    let recommendation: { kind: string; description: string; triggerPattern?: string; action?: string; abstractedPrinciple?: string } | undefined = undefined;
-    let usedFallback = false;
-
-    if (candidate.sourceRecommendationJson) {
-      try {
-        const parsed = JSON.parse(candidate.sourceRecommendationJson);
-        if (parsed?.kind) {
-          recommendation = {
-            kind: parsed.kind,
-            description: parsed.description ?? candidate.description,
-            triggerPattern: parsed.triggerPattern,
-            action: parsed.action,
-            abstractedPrinciple: parsed.abstractedPrinciple,
-          };
-        }
-      } catch { /* fall through to column fallback */ }
-    }
-
-    if (!recommendation) {
-      const row = stateManager.connection.getDb().prepare(
-        'SELECT recommendation_kind, trigger_pattern, action, abstracted_principle FROM principle_candidates WHERE candidate_id = ?',
-      ).get(opts.candidateId) as
-        { recommendation_kind: string; trigger_pattern: string | null; action: string | null; abstracted_principle: string | null } | undefined;
-
-      if (row) {
-        recommendation = {
-          kind: row.recommendation_kind,
-          description: candidate.description,
-          triggerPattern: row.trigger_pattern ?? undefined,
-          action: row.action ?? undefined,
-          abstractedPrinciple: row.abstracted_principle ?? undefined,
-        };
-        usedFallback = true;
-      } else {
-        recommendation = {
-          kind: 'defer' as const,
-          description: candidate.description || 'No recommendation data available',
-        };
-      }
-    }
+    const recommendation = resolveCandidateRecommendation(candidate, stateManager, opts.candidateId);
 
     const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
 
@@ -540,7 +715,7 @@ export async function handleCandidateRoute(opts: CandidateRouteOptions): Promise
       missingFields: decision.missingFields,
       reason: decision.reason,
       nextAction: decision.nextAction,
-      ...(usedFallback && { _meta: { source: 'column_fallback' } }),
+      ...(recommendation.usedFallback && { _meta: { source: 'column_fallback' } }),
     };
 
     if (opts.json) {
@@ -553,7 +728,7 @@ export async function handleCandidateRoute(opts: CandidateRouteOptions): Promise
       console.log(`  Missing Fields: ${result.missingFields.length > 0 ? result.missingFields.join(', ') : '(none)'}`);
       console.log(`  Reason:         ${result.reason}`);
       console.log(`  Next Action:    ${result.nextAction}`);
-      if (usedFallback) {
+      if (recommendation.usedFallback) {
         console.log(`  Source:         column_fallback (source_recommendation_json unavailable)`);
       }
       console.log('');

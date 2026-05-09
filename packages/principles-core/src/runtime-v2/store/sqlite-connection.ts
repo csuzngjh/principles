@@ -15,28 +15,60 @@ import Database from 'better-sqlite3';
 import { join } from 'path';
 import * as fs from 'fs';
 
+export interface SqliteConnectionOptions {
+  workspaceDir: string;
+  readonly?: boolean;
+}
+
 export class SqliteConnection {
   private db: Database.Database | null = null;
   private readonly dbPath: string;
+  private readonly readonlyMode: boolean;
 
-  constructor(workspaceDir: string) {
-    const pdDir = join(workspaceDir, '.pd');
+  constructor(workspaceDirOrOpts: string | SqliteConnectionOptions) {
+    const opts = typeof workspaceDirOrOpts === 'string'
+      ? { workspaceDir: workspaceDirOrOpts }
+      : workspaceDirOrOpts;
+    const pdDir = join(opts.workspaceDir, '.pd');
     if (!fs.existsSync(pdDir)) {
       fs.mkdirSync(pdDir, { recursive: true });
     }
     this.dbPath = join(pdDir, 'state.db');
+    this.readonlyMode = opts.readonly ?? false;
   }
 
-  /** Returns the underlying better-sqlite3 Database instance. */
   getDb(): Database.Database {
     if (this.db) return this.db;
 
-    this.db = new Database(this.dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('busy_timeout = 5000');
-    this.db.pragma('foreign_keys = ON');
+    this.db = this.readonlyMode
+      ? new Database(this.dbPath, { readonly: true } as Database.Options)
+      : new Database(this.dbPath);
 
-    this.initSchema();
+    if (!this.readonlyMode) {
+      try {
+        this.db.pragma('journal_mode = WAL');
+      } catch {
+        try {
+          this.db.pragma('journal_mode = MEMORY');
+        } catch {
+          try {
+            this.db.pragma('journal_mode = OFF');
+          } catch {
+            // Sandbox may block all journal modes — continue without journal
+          }
+        }
+      }
+      try {
+        this.db.pragma('busy_timeout = 5000');
+      } catch { /* non-critical */ }
+      try {
+        this.db.pragma('foreign_keys = ON');
+      } catch { /* non-critical */ }
+      try {
+        this.initSchema();
+      } catch { /* schema init may fail in restricted environments */ }
+    }
+
     return this.db;
   }
 
@@ -217,11 +249,13 @@ export class SqliteConnection {
 
   /** Closes the underlying database connection. */
   close(): void {
-    if (this.db) {
-      // Checkpoint WAL before closing so all data is flushed to the main DB file.
-      // TRUNCATE also shrinks the WAL file, preventing unbounded growth on Windows.
+    if (!this.db) return;
+    try {
       this.db.pragma('wal_checkpoint(TRUNCATE)');
       this.db.close();
+    } catch {
+      // ignore errors during close (e.g., if db file was removed externally)
+    } finally {
       this.db = null;
     }
   }
