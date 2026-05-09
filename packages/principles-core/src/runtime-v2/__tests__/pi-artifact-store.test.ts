@@ -206,7 +206,9 @@ describe('MemoryPIArtifactStore index consistency (PRI-84)', () => {
 
     const results = await store.listBySourceTaskId('task-X');
     expect(results).toHaveLength(1);
-    expect(results[0].artifactId).toBe('art-v2');
+    const [first] = results;
+    expect(first).toBeDefined();
+    expect(first?.artifactId).toBe('art-v2');
   });
 });
 
