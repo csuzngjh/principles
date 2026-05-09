@@ -159,7 +159,7 @@ describe('PhilosopherRunner (PRI-90)', () => {
     };
   }
 
-  it('taskKind not philosopher fails closed', async () => {
+  it('taskKind not philosopher fails closed and releases lease', async () => {
     const wrongKindTask = makePhilosopherTask({ taskKind: 'dreamer' });
     const deps = createMockDeps();
     (deps.stateManager as unknown as Record<string, unknown>).acquireLease = vi.fn().mockResolvedValue(wrongKindTask);
@@ -175,6 +175,10 @@ describe('PhilosopherRunner (PRI-90)', () => {
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('input_invalid');
     expect(result.failureReason).toContain("must be 'philosopher'");
+    expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
+      PHILOSOPHER_TASK_ID,
+      'input_invalid',
+    );
   });
 
   it('lease conflict is non-mutating', async () => {

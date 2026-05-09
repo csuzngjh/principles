@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
 
+const VALID_DREAMER_CANDIDATES = [{ id: 'c-1', description: 'Test', confidence: 0.9, riskLevel: 'low' as const, reasoning: 'Test' }];
+
 const mockWakeOnce = vi.fn();
 const mockRun = vi.fn();
 const mockCommitNextTaskProposal = vi.fn().mockResolvedValue({ decision: 'no_successor', sourceTaskId: '', reason: '' });
@@ -140,7 +142,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-task-dreamer-001-run-001',
       resultRef: 'dreamer://run-001',
       contextHash: 'ctx-abc',
-      output: { valid: true, taskId: 'task-dreamer-001', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -163,7 +165,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-task-dreamer-001-run-001',
       resultRef: 'dreamer://run-001',
       contextHash: 'ctx-abc',
-      output: { valid: true, taskId: 'task-dreamer-001', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -207,7 +209,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-task-dreamer-001-run-001',
       resultRef: 'dreamer://run-001',
       contextHash: 'ctx-abc',
-      output: { valid: true, taskId: 'task-dreamer-001', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -278,7 +280,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-task-dreamer-003-run-003',
       resultRef: 'dreamer://run-003',
       contextHash: 'ctx-def',
-      output: { valid: true, taskId: 'task-dreamer-003', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-003', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -532,7 +534,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-enq-001',
       resultRef: 'dreamer://run-enq-001',
       contextHash: 'ctx-enq',
-      output: { valid: true, taskId: 'task-dreamer-enq-001', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-enq-001', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -565,7 +567,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-enq-002',
       resultRef: 'dreamer://run-enq-002',
       contextHash: 'ctx-enq2',
-      output: { valid: true, taskId: 'task-dreamer-enq-002', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-enq-002', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -598,7 +600,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-enq-003',
       resultRef: 'dreamer://run-enq-003',
       contextHash: 'ctx-enq3',
-      output: { valid: true, taskId: 'task-dreamer-enq-003', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-enq-003', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 
@@ -664,7 +666,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       artifactId: 'pi-art-rk',
       resultRef: 'dreamer://run-rk',
       contextHash: 'ctx-rk',
-      output: { valid: true, taskId: 'task-dreamer-rk', candidates: [], contextRefs: [], generatedAt: new Date().toISOString() },
+      output: { valid: true, taskId: 'task-dreamer-rk', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
       attemptCount: 1,
     });
 

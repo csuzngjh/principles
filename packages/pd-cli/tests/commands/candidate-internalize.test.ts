@@ -219,4 +219,51 @@ describe('handleCandidateInternalize (PRI-89)', () => {
 
     consoleSpy.mockRestore();
   });
+
+  it('column fallback: sourceRecommendationJson empty but columns complete still creates task', async () => {
+    mockStateManager.getCandidate.mockResolvedValue({
+      candidateId: 'cand-fb-001',
+      artifactId: 'art-fb-001',
+      taskId: 'task-fb-001',
+      sourceRunId: 'run-fb-001',
+      title: 'Fallback Candidate',
+      description: 'Fallback desc',
+      confidence: 0.7,
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      sourceRecommendationJson: undefined,
+    });
+
+    const mockPrepare = vi.fn().mockReturnValue({
+      get: vi.fn().mockReturnValue({
+        recommendation_kind: 'principle',
+        trigger_pattern: null,
+        action: null,
+        abstracted_principle: 'Always validate inputs',
+      }),
+    });
+    mockStateManager.connection.getDb.mockReturnValue({ prepare: mockPrepare });
+
+    (decideInternalizationRoute as ReturnType<typeof vi.fn>).mockReturnValue({
+      ready: true,
+      route: 'principle-ledger',
+      missingFields: [],
+      reason: 'Principle ready (column fallback)',
+      nextAction: 'Proceed',
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await handleCandidateInternalize({
+      candidateId: 'cand-fb-001',
+      workspace: '/tmp/test',
+      json: true,
+    });
+
+    expect(mockStateManager.createTask).toHaveBeenCalledOnce();
+    const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.status).toBe('created');
+    expect(output.candidateId).toBe('cand-fb-001');
+
+    consoleSpy.mockRestore();
+  });
 });

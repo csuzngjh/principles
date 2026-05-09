@@ -41,7 +41,7 @@ export class SqliteConnection {
     if (this.db) return this.db;
 
     this.db = this.readonlyMode
-      ? new Database(this.dbPath, { readonly: true })
+      ? new Database(this.dbPath, { readonly: true } as Database.Options)
       : new Database(this.dbPath);
 
     if (!this.readonlyMode) {
@@ -49,9 +49,13 @@ export class SqliteConnection {
         this.db.pragma('journal_mode = WAL');
       } catch {
         try {
-          this.db.pragma('journal_mode = DELETE');
+          this.db.pragma('journal_mode = MEMORY');
         } catch {
-          // Sandbox may block all journal file creation — continue without journal
+          try {
+            this.db.pragma('journal_mode = OFF');
+          } catch {
+            // Sandbox may block all journal modes — continue without journal
+          }
         }
       }
       try {

@@ -16,12 +16,10 @@ function makeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   const base = createMinimalPITaskRecord('task-dreamer-001', 'dreamer', 'prompt');
   return {
     ...base,
+    ...overrides,
     status: overrides.status ?? 'leased',
     createdAt: overrides.createdAt ?? new Date().toISOString(),
     updatedAt: overrides.updatedAt ?? new Date().toISOString(),
-    attemptCount: overrides.attemptCount ?? 1,
-    maxAttempts: overrides.maxAttempts ?? 3,
-    resultRef: overrides.resultRef,
   };
 }
 
@@ -319,6 +317,27 @@ describe('DreamerRunner vertical slice (PRI-85)', () => {
     const [firstEvent] = lineagePartialEvents;
     expect(firstEvent).toBeDefined();
     expect((firstEvent?.[0] as { payload: { resolvedCount: number } }).payload.resolvedCount).toBe(1);
+  });
+
+  it('taskKind not dreamer fails closed and releases lease', async () => {
+    const wrongKindTask = makeTask({ taskKind: 'philosopher' });
+    (deps.stateManager as unknown as Record<string, unknown>).acquireLease = vi.fn().mockResolvedValue(wrongKindTask);
+
+    const runner = new DreamerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-001');
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('input_invalid');
+    expect(result.failureReason).toContain("must be 'dreamer'");
+    expect(deps.stateManager.markTaskFailed).toHaveBeenCalledWith(
+      'task-dreamer-001',
+      'input_invalid',
+    );
   });
 });
 

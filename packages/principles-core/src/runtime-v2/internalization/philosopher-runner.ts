@@ -188,6 +188,7 @@ export class PhilosopherRunner {
         expectedKind: 'philosopher',
         actualKind: leasedTask.taskKind,
       });
+      await this.stateManager.markTaskFailed(taskId, 'input_invalid');
       return {
         status: 'failed',
         taskId,
