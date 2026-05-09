@@ -8,8 +8,8 @@
 
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { PruningReadModel, appendPruningReview, listPruningReviews, buildMaskedPrincipleSet } from '@principles/core/runtime-v2';
-import type { PruningReviewDecision } from '@principles/core/runtime-v2';
+import { PruningReadModel, appendPruningReview, listPruningReviews, buildMaskedPrincipleSet, loadLedger, saveLedger } from '@principles/core/runtime-v2';
+import type { PruningReviewDecision, OrphanDerivedCandidate, OrphanDetectionResult } from '@principles/core/runtime-v2';
 
 interface PruningReportOptions {
   workspace?: string;
@@ -276,4 +276,152 @@ export function handlePruningRollback(opts: PruningRollbackOptions): void {
   console.log(`reviewedAt: ${record.reviewedAt}`);
   console.log('');
   console.log('Principle has been restored to injection.');
+}
+
+// ── Pruning orphans ───────────────────────────────────────────────────────────
+
+export interface PruningOrphansOptions {
+  workspace?: string;
+  dryRun?: boolean;
+  confirm?: boolean;
+  json?: boolean;
+}
+
+export interface OrphanCleanupResult {
+  orphanDerivedCandidateCount: number;
+  candidates: OrphanDerivedCandidate[];
+  dryRun: boolean;
+  dbReadable: boolean;
+  removedFromPrinciples?: { principleId: string; removedIds: string[] }[];
+}
+
+export function handlePruningOrphans(opts: PruningOrphansOptions): void {
+  const workspaceDir = opts.workspace
+    ? path.resolve(opts.workspace)
+    : resolveWorkspaceDir();
+
+  const model = new PruningReadModel({ workspaceDir });
+  const detection: OrphanDetectionResult = model.getOrphanDerivedCandidates();
+  const orphans = detection.candidates;
+  const isDryRun = !opts.confirm;
+
+  if (isDryRun) {
+    const result: OrphanCleanupResult = {
+      orphanDerivedCandidateCount: orphans.length,
+      candidates: orphans,
+      dryRun: true,
+      dbReadable: detection.dbReadable,
+    };
+
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    console.log(`orphanDerivedCandidateCount: ${orphans.length}`);
+    console.log(`dryRun: true`);
+    console.log(`dbReadable: ${detection.dbReadable}`);
+    console.log('');
+    if (!detection.dbReadable) {
+      console.log('⚠️  state.db is unreadable — orphan list may include valid candidates.');
+      console.log('   --confirm will be refused until the DB is accessible.');
+      console.log('');
+    }
+    if (orphans.length === 0) {
+      console.log('No orphan derived candidates found.');
+    } else {
+      console.log('── Orphan derived candidates ──');
+      for (const o of orphans) {
+        console.log(`  [${o.status ?? 'unknown'}] ${o.candidateId} → principle: ${o.principleId}`);
+        console.log(`    ↳ ${o.reason}`);
+      }
+      console.log('');
+      console.log('NOTE: This is a dry-run. No data was modified. Use --confirm to remove orphan references.');
+    }
+    return;
+  }
+
+  if (!detection.dbReadable) {
+    const result: OrphanCleanupResult = {
+      orphanDerivedCandidateCount: orphans.length,
+      candidates: orphans,
+      dryRun: false,
+      dbReadable: false,
+    };
+
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error('❌ REFUSED: state.db is unreadable — cannot safely confirm orphan cleanup.');
+      console.error('   All derivedFromPainIds would appear as orphans when the DB is inaccessible.');
+      console.error('   Fix the DB access issue and re-run.');
+    }
+    process.exit(1);
+    return;
+  }
+
+  const orphanIdsByPrinciple = new Map<string, Set<string>>();
+  for (const o of orphans) {
+    if (!orphanIdsByPrinciple.has(o.principleId)) {
+      orphanIdsByPrinciple.set(o.principleId, new Set());
+    }
+    orphanIdsByPrinciple.get(o.principleId)?.add(o.candidateId);
+  }
+
+  const stateDir = path.join(workspaceDir, '.state');
+  const ledger = loadLedger(stateDir);
+  const removedFromPrinciples: { principleId: string; removedIds: string[] }[] = [];
+
+  // Deep clone ledger to avoid mutating the loaded object (immutability requirement)
+  const nextLedger = JSON.parse(JSON.stringify(ledger)) as typeof ledger;
+
+  for (const [principleId, orphanIds] of orphanIdsByPrinciple) {
+    const entry = nextLedger.tree.principles[principleId];
+    if (!entry) continue;
+
+    const originalIds = entry.derivedFromPainIds ?? [];
+    const orphanIdSet = orphanIds;
+    const filteredIds = originalIds.filter((id: string) => !orphanIdSet.has(id));
+
+    if (filteredIds.length !== originalIds.length) {
+      entry.derivedFromPainIds = filteredIds;
+      removedFromPrinciples.push({
+        principleId,
+        removedIds: originalIds.filter((id: string) => orphanIdSet.has(id)),
+      });
+    }
+  }
+
+  if (removedFromPrinciples.length > 0) {
+    try {
+      saveLedger(stateDir, nextLedger);
+    } catch (err) {
+      console.error(`❌ Failed to save ledger: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+      return;
+    }
+  }
+
+  const result: OrphanCleanupResult = {
+    orphanDerivedCandidateCount: orphans.length,
+    candidates: orphans,
+    dryRun: false,
+    dbReadable: true,
+    removedFromPrinciples,
+  };
+
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`orphanDerivedCandidateCount: ${orphans.length}`);
+  console.log(`dryRun: false`);
+  console.log('');
+  for (const r of removedFromPrinciples) {
+    console.log(`principle: ${r.principleId}`);
+    console.log(`  removed: ${r.removedIds.join(', ')}`);
+  }
+  console.log('');
+  console.log(`${removedFromPrinciples.length} principles updated. ${orphans.length} orphan references removed.`);
 }

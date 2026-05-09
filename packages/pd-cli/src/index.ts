@@ -25,7 +25,7 @@ import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js'
 import { handleRuntimeProbe } from './commands/runtime.js';
 import { handleFlowShow } from './commands/flow.js';
 import { handleTraceShow } from './commands/trace.js';
-import { handlePruningReport, handlePruningExplain, handlePruningReview, handlePruningRollback } from './commands/runtime-pruning.js';
+import { handlePruningReport, handlePruningExplain, handlePruningReview, handlePruningRollback, handlePruningOrphans } from './commands/runtime-pruning.js';
 import { handleRuntimeHealthSnapshot } from './commands/runtime-health-snapshot.js';
 import { handleRuntimeGfiSnapshot } from './commands/runtime-gfi-snapshot.js';
 import { handleRuntimeUat } from './commands/runtime-uat.js';
@@ -473,6 +473,22 @@ pruningCmd
       note: opts.note,
       reviewer: opts.reviewer,
       workspace: opts.workspace,
+      json: opts.json,
+    });
+  });
+
+pruningCmd
+  .command('orphans')
+  .description('List orphan derived candidates not found in state.db')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Report only, no modifications (default)', true)
+  .option('--confirm', 'Actually remove orphan references from ledger')
+  .option('--json', 'Output raw JSON')
+  .action((opts) => {
+    handlePruningOrphans({
+      workspace: opts.workspace,
+      dryRun: !opts.confirm,
+      confirm: opts.confirm,
       json: opts.json,
     });
   });

@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type Database from 'better-sqlite3';
+import BetterSqlite3 from 'better-sqlite3';
 import { SqliteConnection } from './sqlite-connection.js';
 import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
@@ -617,5 +618,196 @@ describe('ArtifactRegistrySchema', () => {
     expect(run).not.toBeNull();
     expect(run?.runId).toBe('r-backward-compat');
     conn2.close();
+  });
+});
+
+describe('SchemaMigration', () => {
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+  let tmpdir: string;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+  let connection: SqliteConnection;
+
+  beforeEach(() => {
+    tmpdir = path.join(os.tmpdir(), `pd-migration-test-${process.pid}-${Date.now()}`);
+    fs.mkdirSync(tmpdir, { recursive: true });
+  });
+
+  afterEach(() => {
+    try { connection.close(); } catch { /* best-effort */ }
+    fs.rmSync(tmpdir, { force: true, recursive: true });
+  });
+
+  function createOldSchemaDb(): void {
+    const dbPath = path.join(tmpdir, '.pd', 'state.db');
+    fs.mkdirSync(path.join(tmpdir, '.pd'), { recursive: true });
+    const rawDb = new BetterSqlite3(dbPath);
+    rawDb.exec(`
+      CREATE TABLE tasks (
+        task_id TEXT PRIMARY KEY,
+        task_kind TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        lease_owner TEXT,
+        lease_expires_at TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        max_attempts INTEGER NOT NULL DEFAULT 3,
+        last_error TEXT,
+        input_ref TEXT,
+        result_ref TEXT
+      );
+      CREATE TABLE runs (
+        run_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        runtime_kind TEXT NOT NULL,
+        execution_status TEXT NOT NULL DEFAULT 'queued',
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        reason TEXT,
+        output_ref TEXT,
+        input_payload TEXT,
+        output_payload TEXT,
+        error_category TEXT,
+        attempt_number INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+      );
+      CREATE TABLE artifacts (
+        artifact_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        artifact_kind TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+      );
+      CREATE TABLE commits (
+        commit_id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        run_id TEXT NOT NULL UNIQUE,
+        artifact_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'committed',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
+        FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+        FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE
+      );
+      CREATE TABLE principle_candidates (
+        candidate_id TEXT PRIMARY KEY,
+        artifact_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        source_run_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        confidence REAL,
+        source_recommendation_json TEXT,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        consumed_at TEXT,
+        FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE,
+        FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
+        FOREIGN KEY (source_run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_candidates_status ON principle_candidates(status);
+      CREATE INDEX IF NOT EXISTS idx_candidates_source_run_id ON principle_candidates(source_run_id);
+      CREATE INDEX IF NOT EXISTS idx_candidates_task_id ON principle_candidates(task_id);
+    `);
+    rawDb.close();
+  }
+
+  it('old schema principle_candidates gets 4 new columns after migration', () => {
+    createOldSchemaDb();
+    connection = new SqliteConnection(tmpdir);
+    const db = connection.getDb();
+    const columns = db.prepare('PRAGMA table_info(principle_candidates)').all() as { name: string }[];
+    const names = columns.map((c) => c.name);
+    expect(names).toContain('recommendation_kind');
+    expect(names).toContain('trigger_pattern');
+    expect(names).toContain('action');
+    expect(names).toContain('abstracted_principle');
+    expect(columns).toHaveLength(16);
+  });
+
+  it('old table with existing candidate row preserves data after migration', () => {
+    createOldSchemaDb();
+    const dbPath = path.join(tmpdir, '.pd', 'state.db');
+    const rawDb = new BetterSqlite3(dbPath);
+    rawDb.exec(`
+      INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at)
+        VALUES ('t-mig', 'test', 'pending', '${new Date().toISOString()}', '${new Date().toISOString()}');
+      INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, attempt_number, created_at, updated_at)
+        VALUES ('r-mig', 't-mig', 'test', 'succeeded', '${new Date().toISOString()}', 1, '${new Date().toISOString()}', '${new Date().toISOString()}');
+      INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
+        VALUES ('a-mig', 'r-mig', 't-mig', 'test', '{}', '${new Date().toISOString()}');
+      INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, idempotency_key, status, created_at)
+        VALUES ('pc-mig', 'a-mig', 't-mig', 'r-mig', 'Test Title', 'Test Description', 'ik-mig-1', 'pending', '${new Date().toISOString()}');
+    `);
+    rawDb.close();
+
+    connection = new SqliteConnection(tmpdir);
+    const db = connection.getDb();
+    const row = db.prepare('SELECT title, description, status FROM principle_candidates WHERE candidate_id = ?').get('pc-mig') as { title: string; description: string; status: string };
+    expect(row.title).toBe('Test Title');
+    expect(row.description).toBe('Test Description');
+    expect(row.status).toBe('pending');
+
+    const kindRow = db.prepare('SELECT recommendation_kind FROM principle_candidates WHERE candidate_id = ?').get('pc-mig') as { recommendation_kind: string };
+    expect(kindRow.recommendation_kind).toBe('principle');
+  });
+
+  it('consecutive initialization does not error', () => {
+    createOldSchemaDb();
+    connection = new SqliteConnection(tmpdir);
+    connection.getDb();
+    connection.close();
+
+    const conn2 = new SqliteConnection(tmpdir);
+    expect(() => conn2.getDb()).not.toThrow();
+    const columns = conn2.getDb().prepare('PRAGMA table_info(principle_candidates)').all() as { name: string }[];
+    const names = columns.map((c) => c.name);
+    expect(names).toContain('recommendation_kind');
+    expect(names).toContain('trigger_pattern');
+    expect(names).toContain('action');
+    expect(names).toContain('abstracted_principle');
+    conn2.close();
+  });
+
+  it('new DB initialization still has all columns', () => {
+    connection = new SqliteConnection(tmpdir);
+    const db = connection.getDb();
+    const columns = db.prepare('PRAGMA table_info(principle_candidates)').all() as { name: string }[];
+    const names = columns.map((c) => c.name);
+    expect(names).toContain('candidate_id');
+    expect(names).toContain('recommendation_kind');
+    expect(names).toContain('trigger_pattern');
+    expect(names).toContain('action');
+    expect(names).toContain('abstracted_principle');
+    expect(columns).toHaveLength(16);
+  });
+
+  it('readonly connection does not run migration', () => {
+    createOldSchemaDb();
+    connection = new SqliteConnection({ workspaceDir: tmpdir, readonly: true });
+    const db = connection.getDb();
+    const columns = db.prepare('PRAGMA table_info(principle_candidates)').all() as { name: string }[];
+    const names = columns.map((c) => c.name);
+    expect(names).not.toContain('recommendation_kind');
+    expect(names).not.toContain('trigger_pattern');
+    expect(names).not.toContain('action');
+    expect(names).not.toContain('abstracted_principle');
+  });
+
+  it('recommendation_kind index is created for old schema DB after migration', () => {
+    createOldSchemaDb();
+    connection = new SqliteConnection(tmpdir);
+    const db = connection.getDb();
+    const indexes = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_candidates_recommendation_kind'"
+    ).all() as { name: string }[];
+    expect(indexes).toHaveLength(1);
+    expect(indexes[0]?.name).toBe('idx_candidates_recommendation_kind');
   });
 });

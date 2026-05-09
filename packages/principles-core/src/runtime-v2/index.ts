@@ -237,11 +237,11 @@ export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
 
 // Ledger file utilities (for audit/consistency checks)
-export { loadLedger, getLedgerFilePathPublic } from '../principle-tree-ledger.js';
+export { loadLedger, saveLedger, getLedgerFilePathPublic } from '../principle-tree-ledger.js';
 
 // Pruning read model (PRI-15)
 export { PruningReadModel } from './pruning-read-model.js';
-export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel } from './pruning-read-model.js';
+export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, OrphanDerivedCandidate, OrphanDetectionResult } from './pruning-read-model.js';
 
 // Pruning review audit log (PRI-24)
 export { appendPruningReview, listPruningReviews } from './pruning-review-log.js';

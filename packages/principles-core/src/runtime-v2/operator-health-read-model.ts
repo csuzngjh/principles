@@ -17,6 +17,11 @@ import { buildGfiWorkspaceSnapshot } from './gfi/gfi-read-model.js';
 import type { GfiWorkspaceSnapshot } from './gfi/gfi-read-model.js';
 import type { GfiSource } from './gfi/gfi-types.js';
 
+// ── Thresholds ────────────────────────────────────────────────────────────────
+
+const ORPHAN_DERIVED_CANDIDATE_COUNT_THRESHOLD = 10;
+const STALE_SESSION_COUNT_THRESHOLD = 20;
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type OverallHealthStatus = 'healthy' | 'degraded' | 'error';
@@ -182,6 +187,8 @@ export class OperatorHealthReadModel {
       audit.status === 'degraded'
       || watchCount > 0
       || reviewCount > 0
+      || orphanDerivedCandidateCount > ORPHAN_DERIVED_CANDIDATE_COUNT_THRESHOLD
+      || (gfi.staleSessionCount > STALE_SESSION_COUNT_THRESHOLD && gfi.activeSessionCount === 0)
       || lastSuccessfulChain === null
     ) {
       overallStatus = 'degraded';
@@ -202,6 +209,14 @@ export class OperatorHealthReadModel {
 
     if (watchCount > 0 || reviewCount > 0) {
       recommendedActions.push('Run `pd runtime pruning report --workspace <path> --json` for lifecycle signals.');
+    }
+
+    if (orphanDerivedCandidateCount > ORPHAN_DERIVED_CANDIDATE_COUNT_THRESHOLD) {
+      recommendedActions.push(`High orphan-derived-candidate count (${orphanDerivedCandidateCount}) — run pruning to clean up.`);
+    }
+
+    if (gfi.staleSessionCount > STALE_SESSION_COUNT_THRESHOLD && gfi.activeSessionCount === 0) {
+      recommendedActions.push(`Many stale sessions (${gfi.staleSessionCount}) with no active sessions — run cleanup or investigate session lifecycle.`);
     }
 
     if (lastSuccessfulChain === null && dbExists) {
