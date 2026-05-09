@@ -160,7 +160,7 @@ export class PruningReadModel {
     const pdDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     try {
       if (fs.existsSync(pdDbPath)) {
-        const db = new Database(pdDbPath, { readonly: true, immutable: true } as Database.Options);
+        const db = new Database(pdDbPath, { readonly: true });
         try {
           const rows = db.prepare(
             "SELECT candidate_id, created_at FROM principle_candidates WHERE status = 'consumed'"

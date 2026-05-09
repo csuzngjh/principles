@@ -27,7 +27,7 @@ export async function auditCandidateLedgerConsistency(workspaceDir: string): Pro
   }
 
   try {
-    const db = new Database(pdDbPath, { readonly: true, immutable: true } as Database.Options);
+    const db = new Database(pdDbPath, { readonly: true });
     try {
       const consumedRows = db.prepare(
         "SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'",

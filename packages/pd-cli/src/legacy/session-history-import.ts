@@ -49,7 +49,7 @@ interface ToolCall {
 }
 
 function openTrajectoryDb(dbPath: string): OpenClawTrajectoryDb {
-  const db = new Database(dbPath, { readonly: true, immutable: true } as Database.Options);
+  const db = new Database(dbPath, { readonly: true });
 
   return {
     getAssistantTurns(sessionId: string): AssistantTurn[] {
