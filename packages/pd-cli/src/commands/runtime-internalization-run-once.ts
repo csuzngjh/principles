@@ -4,16 +4,18 @@ import {
   InternalizationOrchestrator,
   DreamerRunner,
   PhilosopherRunner,
+  ScribeRunner,
   StoreEventEmitter,
   DefaultDreamerValidator,
   DefaultPhilosopherValidator,
+  DefaultScribeValidator,
   TestDoubleRuntimeAdapter,
   PiAiRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
   resolveRuntimeConfig,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
-import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, PDRuntimeAdapter } from '@principles/core/runtime-v2';
+import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface RunOnceOptions {
@@ -29,7 +31,7 @@ interface RunOnceOptions {
 const OWNER = 'pd-cli-internalization-run-once';
 const RUNTIME_KIND = 'local-worker';
 
-const SUPPORTED_RUNNERS = new Set(['dreamer', 'philosopher']);
+const SUPPORTED_RUNNERS = new Set(['dreamer', 'philosopher', 'scribe']);
 
 interface RunOnceOutput {
   decision: string;
@@ -40,7 +42,7 @@ interface RunOnceOutput {
   runId?: string;
   artifactId?: string;
   resultRef?: string;
-  runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult;
+  runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult;
   skipReason?: string;
   conflictReason?: string;
   reason?: string;
@@ -52,7 +54,7 @@ interface RunOnceOutput {
   timeoutSource?: string;
 }
 
-function buildOutput(wakeResult: WakeOnceResult, runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult, skipReason?: string): RunOnceOutput {
+function buildOutput(wakeResult: WakeOnceResult, runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult, skipReason?: string): RunOnceOutput {
   const base: RunOnceOutput = { decision: wakeResult.decision };
 
   switch (wakeResult.decision) {
@@ -200,6 +202,36 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
         }),
       });
     }
+    if (opts.runnerKind === 'scribe') {
+      return new TestDoubleRuntimeAdapter({
+        onPollRun: (_runId: string) => ({
+          runId: _runId,
+          status: 'succeeded',
+          startedAt: new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+        }),
+        onFetchOutput: (_runId: string) => ({
+          runId: _runId,
+          payload: {
+            taskId: opts.taskId,
+            sourcePhilosopherArtifactId: 'pi-art-test-philosopher',
+            principleDraft: {
+              title: 'Test Principle Draft',
+              statement: 'Test principle statement',
+              rationale: 'Test rationale',
+              applicability: ['All operations'],
+              antiPatterns: ['Ignoring validation'],
+              confidence: 0.8,
+            },
+            sourceTrace: {
+              philosopherArtifactId: 'pi-art-test-philosopher',
+            },
+            risks: [],
+            generatedAt: new Date().toISOString(),
+          },
+        }),
+      });
+    }
     return new TestDoubleRuntimeAdapter({
       onPollRun: (_runId: string) => ({
         runId: _runId,
@@ -304,7 +336,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       return;
     }
 
-    let runnerResult: DreamerRunnerResult | PhilosopherRunnerResult | undefined = undefined;
+    let runnerResult: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult | undefined = undefined;
     let skipReason: string | undefined = undefined;
 
     if (wakeResult.decision === 'would_lease' && wakeResult.taskKind === runnerKind) {
@@ -322,6 +354,13 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
       } else if (runnerKind === 'philosopher') {
         const validator = new DefaultPhilosopherValidator();
         const runner = new PhilosopherRunner(
+          { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+          { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
+        );
+        runnerResult = await runner.run(wakeResult.taskId);
+      } else if (runnerKind === 'scribe') {
+        const validator = new DefaultScribeValidator();
+        const runner = new ScribeRunner(
           { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
           { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
         );

@@ -489,6 +489,34 @@ export {
   DEFAULT_PHILOSOPHER_RUNNER_OPTIONS,
 } from './internalization/philosopher-runner.js';
 
+// ── Scribe Runner (PRI-109) ────────────────────────────────────────────────────
+
+export type {
+  ScribeOutputV1,
+  ScribePrincipleDraft,
+  ScribeSourceTrace,
+  ScribeValidationResult,
+  ScribeValidator,
+} from './internalization/scribe-output.js';
+
+export {
+  DefaultScribeValidator,
+} from './internalization/scribe-output.js';
+
+export type {
+  ScribeRunnerResultStatus,
+  ScribeRunnerResult,
+  ScribeRunnerOptions,
+  ResolvedScribeRunnerOptions,
+  ScribeRunnerDeps,
+} from './internalization/scribe-runner.js';
+
+export {
+  ScribeRunner,
+  resolveScribeRunnerOptions,
+  DEFAULT_SCRIBE_RUNNER_OPTIONS,
+} from './internalization/scribe-runner.js';
+
 // ── PIArtifact Durable Store (PRI-84) ────────────────────────────────────────
 
 export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
