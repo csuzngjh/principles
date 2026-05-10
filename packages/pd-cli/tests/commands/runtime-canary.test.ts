@@ -181,4 +181,16 @@ describe('runCanaryChecks', () => {
     expect(result.overallStatus).toBe('degraded');
     expect(result.recommendedNextActions.some(a => a.includes('pruning orphans') || a.includes('dry-run'))).toBe(true);
   });
+
+  it('opens RuntimeStateManager in readonly mode for queue check', async () => {
+    await runCanaryChecks(WS);
+
+    const RSM = vi.mocked(await import('@principles/core/runtime-v2')).RuntimeStateManager;
+    const calls = RSM.mock.calls;
+    const queueCall = calls.find(c => (c as Record<string, unknown>[])[0] && typeof (c[0] as Record<string, unknown>)?.readonly === 'boolean');
+    expect(queueCall).toBeTruthy();
+    if (queueCall) {
+      expect((queueCall[0] as Record<string, unknown>).readonly).toBe(true);
+    }
+  });
 });

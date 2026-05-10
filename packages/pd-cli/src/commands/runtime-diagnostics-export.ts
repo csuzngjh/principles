@@ -147,7 +147,7 @@ export async function exportDiagnosticsBundle(workspaceDir: string, outDir: stri
   } });
 
   await collectArtifact({ ...baseCtx, name: 'internalization-queue', fileName: 'internalization-queue.json', collector: async () => {
-    const stateManager = new RuntimeStateManager({ workspaceDir });
+    const stateManager = new RuntimeStateManager({ workspaceDir, readonly: true });
     await stateManager.initialize();
     try {
       const model = new InternalizationQueueReadModel(stateManager);

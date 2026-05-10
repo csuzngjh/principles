@@ -1,0 +1,86 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const mockExistsSync = vi.hoisted(() => vi.fn());
+const mockMkdirSync = vi.hoisted(() => vi.fn());
+
+vi.mock('fs', () => ({
+  existsSync: mockExistsSync,
+  mkdirSync: mockMkdirSync,
+  default: { existsSync: mockExistsSync, mkdirSync: mockMkdirSync },
+}));
+
+vi.mock('better-sqlite3', () => ({
+  default: vi.fn(function () {
+    return {
+      pragma: vi.fn(),
+      exec: vi.fn(),
+      prepare: vi.fn(() => ({ all: vi.fn(() => []), get: vi.fn() })),
+      close: vi.fn(),
+    };
+  }),
+}));
+
+import { SqliteConnection } from '../store/sqlite-connection.js';
+
+const { default: Database } = vi.mocked(await import('better-sqlite3'));
+
+const WS = '/fake/workspace';
+
+describe('SqliteConnection readonly mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(true);
+  });
+
+  it('creates .pd directory in writable mode', () => {
+    mockExistsSync.mockReturnValue(false);
+    new SqliteConnection({ workspaceDir: WS });
+    expect(mockMkdirSync).toHaveBeenCalledWith(
+      expect.stringContaining('.pd'),
+      { recursive: true },
+    );
+  });
+
+  it('does not create .pd directory in readonly mode', () => {
+    mockExistsSync.mockReturnValue(false);
+    new SqliteConnection({ workspaceDir: WS, readonly: true });
+    expect(mockMkdirSync).not.toHaveBeenCalled();
+  });
+
+  it('opens DB with readonly flag when readonly mode is set', () => {
+    const conn = new SqliteConnection({ workspaceDir: WS, readonly: true });
+    conn.getDb();
+    expect(Database).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ readonly: true }),
+    );
+  });
+
+  it('skips schema init in readonly mode', () => {
+    const mockExec = vi.fn();
+    const mockPragma = vi.fn();
+    Database.mockImplementation(function () {
+      return { exec: mockExec, pragma: mockPragma, prepare: vi.fn(() => ({ all: vi.fn(() => []), get: vi.fn() })), close: vi.fn() };
+    });
+
+    const conn = new SqliteConnection({ workspaceDir: WS, readonly: true });
+    conn.getDb();
+
+    expect(mockExec).not.toHaveBeenCalled();
+    expect(mockPragma).not.toHaveBeenCalledWith(expect.stringContaining('journal_mode'));
+  });
+
+  it('runs schema init in writable mode', () => {
+    const mockExec = vi.fn();
+    const mockPragma = vi.fn();
+    Database.mockImplementation(function () {
+      return { exec: mockExec, pragma: mockPragma, prepare: vi.fn(() => ({ all: vi.fn(() => []), get: vi.fn() })), close: vi.fn() };
+    });
+
+    const conn = new SqliteConnection({ workspaceDir: WS });
+    conn.getDb();
+
+    expect(mockExec).toHaveBeenCalled();
+    expect(mockPragma).toHaveBeenCalledWith(expect.stringContaining('journal_mode'));
+  });
+});

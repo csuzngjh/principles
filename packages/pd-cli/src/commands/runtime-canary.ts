@@ -160,7 +160,7 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
     })(),
     (async (): Promise<CanaryCheck> => {
       try {
-        const stateManager = new RuntimeStateManager({ workspaceDir });
+        const stateManager = new RuntimeStateManager({ workspaceDir, readonly: true });
         await stateManager.initialize();
         try {
           const model = new InternalizationQueueReadModel(stateManager);

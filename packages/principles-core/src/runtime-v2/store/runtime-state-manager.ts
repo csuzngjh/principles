@@ -58,6 +58,8 @@ export interface RuntimeStateManagerOptions {
   emitter?: StoreEventEmitter;
   /** Optional retry policy config */
   retryPolicyConfig?: RetryPolicyConfig;
+  /** Open DB in readonly mode — skips schema init/migration, no writes allowed */
+  readonly?: boolean;
 }
 
 // ── RuntimeStateManager ──────────────────────────────────────────────────────
@@ -86,7 +88,10 @@ export class RuntimeStateManager {
   async initialize(): Promise<void> {
     if (this._initialized) return;
 
-    this._connection = new SqliteConnectionClass(this.options.workspaceDir);
+    this._connection = new SqliteConnectionClass({
+      workspaceDir: this.options.workspaceDir,
+      readonly: this.options.readonly,
+    });
     this._taskStore = new SqliteTaskStore(this._connection);
     this._runStore = new SqliteRunStore(this._connection);
     this._commitStore = new SqliteCommitStore(this._connection);
@@ -94,22 +99,24 @@ export class RuntimeStateManager {
     this._artifactStore = new SqliteArtifactStore(this._connection);
     this._piArtifactStore = new SqlitePIArtifactStore(this._connection);
 
-    this.retryPolicy = new DefaultRetryPolicy(this.options.retryPolicyConfig);
+    if (!this.options.readonly) {
+      this.retryPolicy = new DefaultRetryPolicy(this.options.retryPolicyConfig);
 
-    this.leaseManager = new DefaultLeaseManager(
-      this._taskStore,
-      this._runStore,
-      this._connection,
-      { taskStore: this._taskStore, runStore: this._runStore, connection: this._connection, emitter: this.emitter },
-    );
+      this.leaseManager = new DefaultLeaseManager(
+        this._taskStore,
+        this._runStore,
+        this._connection,
+        { taskStore: this._taskStore, runStore: this._runStore, connection: this._connection, emitter: this.emitter },
+      );
 
-    this.recoverySweep = new DefaultRecoverySweep(
-      this._taskStore,
-      this.leaseManager,
-      this.retryPolicy,
-      this._connection,
-      this.emitter,
-    );
+      this.recoverySweep = new DefaultRecoverySweep(
+        this._taskStore,
+        this.leaseManager,
+        this.retryPolicy,
+        this._connection,
+        this.emitter,
+      );
+    }
 
     this._initialized = true;
   }
