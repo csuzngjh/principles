@@ -39,6 +39,7 @@ import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
+import { PhilosopherPromptBuilder } from './philosopher-prompt-builder.js';
 
 // ── Result Types ──────────────────────────────────────────────────────────────
 
@@ -327,11 +328,27 @@ export class PhilosopherRunner {
     return latestRun.runId;
   }
 
-  private async invokeRuntime(taskId: string, contextHash: string, dreamerArtifact: string): Promise<RunHandle> {
+  private async invokeRuntime(taskId: string, contextHash: string, dreamerArtifact: string | null): Promise<RunHandle> {
+    let parsedDreamerArtifact: unknown = null;
+    if (dreamerArtifact) {
+      try {
+        parsedDreamerArtifact = JSON.parse(dreamerArtifact);
+      } catch {
+        parsedDreamerArtifact = dreamerArtifact;
+      }
+    }
+
+    const builder = new PhilosopherPromptBuilder();
+    const { message } = builder.buildPrompt({
+      taskId,
+      contextHash,
+      dreamerArtifact: parsedDreamerArtifact,
+    });
+
     const startInput: StartRunInput = {
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
-      inputPayload: JSON.stringify({ taskId, contextHash, dreamerArtifact }),
+      inputPayload: message,
       contextItems: [],
       outputSchemaRef: 'philosopher-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
