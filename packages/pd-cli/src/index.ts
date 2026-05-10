@@ -34,6 +34,9 @@ import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-interna
 import { handleRuntimeInternalizationRunOnce } from './commands/runtime-internalization-run-once.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
+import { handleRuntimeCanary } from './commands/runtime-canary.js';
+import { handleRuntimeInternalizationIntegrity } from './commands/runtime-internalization-integrity.js';
+import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 
 const program = new Command();
 
@@ -285,6 +288,15 @@ const runtimeCmd = program
   .description('Runtime inspection and health checks');
 
 runtimeCmd
+  .command('canary')
+  .description('One-shot control plane health canary')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeCanary({ workspace: opts.workspace, json: opts.json });
+  });
+
+runtimeCmd
   .command('probe')
   .description('Probe runtime health and capabilities (HG-01 HARD GATE)')
   .requiredOption('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli' or 'pi-ai'")
@@ -414,6 +426,29 @@ internalizationCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext });
+  });
+
+internalizationCmd
+  .command('integrity')
+  .description('Check internalization chain integrity')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeInternalizationIntegrity({ workspace: opts.workspace, json: opts.json });
+  });
+
+const diagnosticsCmd = runtimeCmd
+  .command('diagnostics')
+  .description('Control plane diagnostic bundle operations');
+
+diagnosticsCmd
+  .command('export')
+  .description('Export diagnostic bundle for AI assistant analysis')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--out <dir>', 'Output directory (must be within workspace)')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeDiagnosticsExport({ workspace: opts.workspace, out: opts.out, json: opts.json });
   });
 
 const pruningCmd = runtimeCmd
