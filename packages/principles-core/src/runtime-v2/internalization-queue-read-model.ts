@@ -42,11 +42,17 @@ export interface ReadyTask {
   channel: InternalizationChannel;
 }
 
-export type QueueNoReadyTasksReason = 'no_candidates' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed';
+export type QueueNoReadyTasksReason = 'no_candidates' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_retry_wait_pending';
 
 export interface NoReadyTasksDiagnosis {
   reason: QueueNoReadyTasksReason;
   inspectedCount: number;
+}
+
+export interface RetryWaitPendingSample {
+  taskId: string;
+  taskKind: PeerRunnerKind;
+  retryAfter: string;
 }
 
 export interface InternalizationQueueSnapshot {
@@ -58,6 +64,7 @@ export interface InternalizationQueueSnapshot {
   sampleInvalidTaskIds: string[];
   blockedSummary: { count: number; samples: BlockedSample[] };
   dependencyFailedSummary: { count: number; samples: DependencyFailedSample[] };
+  retryWaitPendingSummary: { count: number; samples: RetryWaitPendingSample[] };
   readyTasks: ReadyTask[];
   noReadyTasks: NoReadyTasksDiagnosis | null;
 }
@@ -90,11 +97,15 @@ export class InternalizationQueueReadModel {
     const sampleInvalidTaskIds: string[] = [];
     const blockedSamples: BlockedSample[] = [];
     const dependencyFailedSamples: DependencyFailedSample[] = [];
+    const retryWaitPendingSamples: RetryWaitPendingSample[] = [];
     const readyTasks: ReadyTask[] = [];
 
     let hydrationFailures = 0;
     let blockedCount = 0;
     let dependencyFailures = 0;
+    let retryWaitPendingCount = 0;
+
+    const nowMs = Date.now();
 
     for (const rawTask of peerTasks) {
       const piTask = hydratePITaskRecord(rawTask);
@@ -114,7 +125,19 @@ export class InternalizationQueueReadModel {
 
       // Resolve dependencies for gate evaluation
       const dependencies = await this.resolveDependencies(piTask.dependencyTaskIds);
-      const gateResult = validateInternalizationTaskReady(piTask, dependencies);
+      const gateResult = validateInternalizationTaskReady(piTask, dependencies, nowMs);
+
+      if (gateResult.decision === 'retry_wait_pending') {
+        retryWaitPendingCount++;
+        if (retryWaitPendingSamples.length < MAX_SAMPLES) {
+          retryWaitPendingSamples.push({
+            taskId: piTask.taskId,
+            taskKind: piTask.taskKind,
+            retryAfter: gateResult.retryAfter ?? piTask.leaseExpiresAt ?? '',
+          });
+        }
+        continue;
+      }
 
       if (gateResult.decision === 'blocked') {
         blockedCount++;
@@ -150,11 +173,13 @@ export class InternalizationQueueReadModel {
         noReadyTasks = { reason: 'no_candidates', inspectedCount };
       } else {
         const reason: QueueNoReadyTasksReason =
-          hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount
-            ? 'all_hydration_failed'
-            : dependencyFailures >= blockedCount
-              ? 'all_dependency_failed'
-              : 'all_blocked';
+          retryWaitPendingCount > 0 && retryWaitPendingCount >= hydrationFailures && retryWaitPendingCount >= dependencyFailures && retryWaitPendingCount >= blockedCount
+            ? 'all_retry_wait_pending'
+            : hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount
+              ? 'all_hydration_failed'
+              : dependencyFailures >= blockedCount
+                ? 'all_dependency_failed'
+                : 'all_blocked';
         noReadyTasks = { reason, inspectedCount };
       }
     }
@@ -168,6 +193,7 @@ export class InternalizationQueueReadModel {
       sampleInvalidTaskIds,
       blockedSummary: { count: blockedCount, samples: blockedSamples },
       dependencyFailedSummary: { count: dependencyFailures, samples: dependencyFailedSamples },
+      retryWaitPendingSummary: { count: retryWaitPendingCount, samples: retryWaitPendingSamples },
       readyTasks,
       noReadyTasks,
     };

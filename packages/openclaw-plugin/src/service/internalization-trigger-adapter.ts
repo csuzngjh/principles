@@ -47,9 +47,10 @@ type TriggerBlockedEvent = {
   workspaceDir: string;
   taskId: string;
   taskKind: string;
-  gateDecision: 'blocked' | 'dependency_failed';
+  gateDecision: 'blocked' | 'dependency_failed' | 'retry_wait_pending';
   blockedBy?: string[];
   failedDependencies?: string[];
+  retryAfter?: string;
   timestamp: string;
 };
 
@@ -219,7 +220,7 @@ export function createInternalizationTrigger(
           });
           hasReadyTask = true;
         } else {
-          // blocked or dependency_failed — debug visibility for operators
+          // blocked, dependency_failed, or retry_wait_pending — debug visibility for operators
           emitLog(logger, {
             event: 'INTERNALIZATION_TRIGGER_BLOCKED',
             workspaceDir: ctx.workspaceDir,
@@ -228,6 +229,7 @@ export function createInternalizationTrigger(
             gateDecision: gateResult.decision,
             blockedBy: gateResult.decision === 'blocked' ? gateResult.blockedBy : undefined,
             failedDependencies: gateResult.decision === 'dependency_failed' ? gateResult.failedDependencies : undefined,
+            retryAfter: gateResult.decision === 'retry_wait_pending' ? gateResult.retryAfter : undefined,
             timestamp: new Date().toISOString(),
           });
         }

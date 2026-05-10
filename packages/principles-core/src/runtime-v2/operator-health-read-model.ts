@@ -13,14 +13,13 @@ import type { PainChainTrace } from './pain-chain-read-model.js';
 import { PruningReadModel } from './pruning-read-model.js';
 import { auditCandidateLedgerConsistency } from './candidate-audit.js';
 import type { CandidateAuditResult } from './candidate-audit.js';
-import { buildGfiWorkspaceSnapshot } from './gfi/gfi-read-model.js';
+import { buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from './gfi/gfi-read-model.js';
 import type { GfiWorkspaceSnapshot } from './gfi/gfi-read-model.js';
 import type { GfiSource } from './gfi/gfi-types.js';
 
 // ── Thresholds ────────────────────────────────────────────────────────────────
 
 const ORPHAN_DERIVED_CANDIDATE_COUNT_THRESHOLD = 10;
-const STALE_SESSION_COUNT_THRESHOLD = 20;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -179,6 +178,7 @@ export class OperatorHealthReadModel {
     })();
 
     // ── Compute overallStatus ─────────────────────────────────────────────
+    const gfiHealth = classifyGfiWorkspaceHealth(gfi);
     let overallStatus: OverallHealthStatus = 'healthy';
 
     if (!dbExists || audit.status === 'error') {
@@ -188,7 +188,7 @@ export class OperatorHealthReadModel {
       || watchCount > 0
       || reviewCount > 0
       || orphanDerivedCandidateCount > ORPHAN_DERIVED_CANDIDATE_COUNT_THRESHOLD
-      || (gfi.staleSessionCount > STALE_SESSION_COUNT_THRESHOLD && gfi.activeSessionCount === 0)
+      || gfiHealth.status === 'degraded'
       || lastSuccessfulChain === null
     ) {
       overallStatus = 'degraded';
@@ -215,8 +215,8 @@ export class OperatorHealthReadModel {
       recommendedActions.push(`High orphan-derived-candidate count (${orphanDerivedCandidateCount}) — run pruning to clean up.`);
     }
 
-    if (gfi.staleSessionCount > STALE_SESSION_COUNT_THRESHOLD && gfi.activeSessionCount === 0) {
-      recommendedActions.push(`Many stale sessions (${gfi.staleSessionCount}) with no active sessions — run cleanup or investigate session lifecycle.`);
+    if (gfiHealth.status === 'degraded') {
+      recommendedActions.push(`GFI degraded: ${gfiHealth.reason} — run cleanup or investigate session lifecycle.`);
     }
 
     if (lastSuccessfulChain === null && dbExists) {

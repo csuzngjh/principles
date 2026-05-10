@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { OperatorHealthReadModel, SchemaConformanceReadModel, PruningReadModel, InternalizationQueueReadModel, auditCandidateLedgerConsistency, buildGfiWorkspaceSnapshot } from '@principles/core/runtime-v2';
+import { OperatorHealthReadModel, SchemaConformanceReadModel, PruningReadModel, InternalizationQueueReadModel, auditCandidateLedgerConsistency, buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from '@principles/core/runtime-v2';
 import type { OperatorHealthSnapshot, SchemaConformanceResult, OrphanDetectionResult, InternalizationQueueSnapshot, GfiWorkspaceSnapshot, CandidateAuditResult } from '@principles/core/runtime-v2';
 import { RuntimeStateManager } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -48,7 +48,7 @@ function buildRecommendedActions(checks: CanaryCheck[]): string[] {
         actions.push('Run `pd candidate audit --workspace <path> --json` for details.');
         break;
       case 'gfi_snapshot':
-        actions.push('Investigate stale GFI sessions — consider cleanup or session lifecycle review.');
+        actions.push('Investigate GFI sessions — consider cleanup or session lifecycle review.');
         break;
       case 'pruning_orphans':
         actions.push('Run `pd runtime pruning orphans --workspace <path> --dry-run` to inspect orphan candidates.');
@@ -128,14 +128,15 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
           }
         }
         const snapshot: GfiWorkspaceSnapshot = buildGfiWorkspaceSnapshot({ sessions, nowMs: Date.now() });
-        const status = snapshot.staleSessionCount > 20 && snapshot.activeSessionCount === 0 ? 'degraded' : 'healthy';
+        const health = classifyGfiWorkspaceHealth(snapshot);
+        const {status} = health;
         return {
           name: 'gfi_snapshot',
           status,
           summary: status === 'healthy'
             ? `GFI snapshot OK. ${snapshot.activeSessionCount} active, ${snapshot.staleSessionCount} stale sessions.`
-            : `GFI degraded: ${snapshot.staleSessionCount} stale sessions with no active sessions.`,
-          details: snapshot,
+            : `GFI degraded: ${health.reason}`,
+          details: { ...snapshot, healthAssessment: health },
         };
       } catch (err) {
         return { name: 'gfi_snapshot', status: 'error', summary: 'GFI snapshot check failed.', error: String(err) };
@@ -152,7 +153,7 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
           summary: status === 'healthy'
             ? 'No orphan derived candidates found.'
             : `${result.candidates.length} orphan derived candidate(s) found. dbReadable: ${result.dbReadable}`,
-          details: { orphanCount: result.candidates.length, dbReadable: result.dbReadable, samples: result.candidates.slice(0, 5) },
+          details: { orphanDerivedCandidateCount: result.candidates.length, dbReadable: result.dbReadable, samples: result.candidates.slice(0, 5) },
         };
       } catch (err) {
         return { name: 'pruning_orphans', status: 'error', summary: 'Pruning orphan check failed.', error: String(err) };

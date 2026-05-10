@@ -19,6 +19,27 @@ import type { PITaskRecord, PIArtifact } from './peer-runner-contracts.js';
 // ── Lease Acquisition Guards ─────────────────────────────────────────────────
 
 /**
+ * Returns true if a retry_wait task's backoff period has expired and it can
+ * be re-leased now.
+ *
+ * When a task enters retry_wait, recovery-sweep sets leaseExpiresAt to
+ * now + backoffMs (the "retry-after" deadline). The task should NOT be
+ * re-leased until that deadline has passed.
+ *
+ * For non-retry_wait tasks, always returns true (no backoff gating needed).
+ *
+ * @param task - The task record to evaluate
+ * @param nowMs - Current time in milliseconds (default: Date.now())
+ */
+export function canRetryNow(task: PITaskRecord, nowMs: number = Date.now()): boolean {
+  if (task.status !== 'retry_wait') return true;
+  if (!task.leaseExpiresAt) return true;
+  const retryAfterMs = new Date(task.leaseExpiresAt).getTime();
+  if (Number.isNaN(retryAfterMs)) return true;
+  return retryAfterMs <= nowMs;
+}
+
+/**
  * Returns true if the task status allows acquiring a lease.
  *
  * Only `pending` and `retry_wait` can be leased:
@@ -27,6 +48,9 @@ import type { PITaskRecord, PIArtifact } from './peer-runner-contracts.js';
  *
  * Terminal states (succeeded/failed) are not leaseable.
  * `leased` tasks already have an active lease and cannot be re-leased.
+ *
+ * Note: This does NOT check backoff timing. Use canRetryNow() to gate
+ * retry_wait tasks whose backoff period has not yet expired.
  */
 export function canAcquireLease(task: PITaskRecord): boolean {
   return task.status === 'pending' || task.status === 'retry_wait';

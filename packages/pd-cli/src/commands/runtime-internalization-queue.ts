@@ -52,6 +52,13 @@ function formatTextOutput(snap: InternalizationQueueSnapshot): string {
     }
   }
 
+  if (snap.retryWaitPendingSummary.count > 0) {
+    lines.push(`  retry_wait_pending: ${snap.retryWaitPendingSummary.count}`);
+    for (const s of snap.retryWaitPendingSummary.samples.slice(0, 3)) {
+      lines.push(`    ${s.taskId} (${s.taskKind}) retry_after: ${s.retryAfter}`);
+    }
+  }
+
   if (snap.noReadyTasks) {
     lines.push(`  no_ready_tasks: ${snap.noReadyTasks.reason} (inspected: ${snap.noReadyTasks.inspectedCount})`);
   }
