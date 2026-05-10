@@ -406,11 +406,22 @@ describe('PiAiRuntimeAdapter', () => {
       });
     });
 
-    it('throws PDRuntimeError("output_invalid") when parsed JSON does not match DiagnosticianOutputV1 schema', async () => {
-      await expectStartRunError('output_invalid', () => {
-        mockComplete.mockReset();
-        mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify({ valid: true, missing: 'fields' })));
-      });
+    it('skips schema validation when no outputSchemaRef is provided (backward compatible)', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify({ valid: true, missing: 'fields' })));
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeStartRunInput());
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ valid: true, missing: 'fields' });
+    });
+
+    it('throws PDRuntimeError("output_invalid") when parsed JSON does not match schema for given outputSchemaRef', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify({ valid: true, missing: 'fields' })));
+      const adapter = makeAdapter();
+      await expect(adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'diagnostician-output-v1',
+      }))).rejects.toMatchObject({ category: 'output_invalid' });
     });
 
     it('throws PDRuntimeError("execution_failed") after retry exhaustion on network error', async () => {
@@ -505,14 +516,18 @@ describe('PiAiRuntimeAdapter', () => {
     });
 
     it('does not retry on PDRuntimeError (output_invalid)', async () => {
-      // Schema validation failure — not transient
-      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ valid: true })));
+      mockComplete.mockReset();
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ valid: true })))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ valid: true })));
 
       const adapter = makeAdapter({ maxRetries: 3 });
 
-      await expect(adapter.startRun(makeStartRunInput())).rejects.toThrow(PDRuntimeError);
-      // complete should only be called once — no retries for schema errors
-      expect(mockComplete).toHaveBeenCalledTimes(1);
+      await expect(adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'diagnostician-output-v1',
+      }))).rejects.toThrow(PDRuntimeError);
+      // 1 original + 1 repair attempt = 2 calls (not 3+ retries)
+      expect(mockComplete).toHaveBeenCalledTimes(2);
     });
 
     it('does not retry on PDRuntimeError (runtime_unavailable)', async () => {
@@ -782,15 +797,16 @@ describe('PiAiRuntimeAdapter', () => {
       expect(mockComplete).toHaveBeenCalledTimes(2);
     });
 
-    it('skips repair for non-diagnostician outputSchemaRef', async () => {
+    it('skips repair for unknown outputSchemaRef (not in registry)', async () => {
       mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ valid: true, missing: 'fields' })));
 
       const adapter = makeAdapter();
-      await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
-        category: 'output_invalid',
-      });
-      // Only 1 call — no repair attempted because outputSchemaRef is undefined
+      const handle = await adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'custom-unknown-v1',
+      }));
       expect(mockComplete).toHaveBeenCalledTimes(1);
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ valid: true, missing: 'fields' });
     });
 
     it('skips repair for non-JSON output (no schema errors to report)', async () => {
@@ -873,6 +889,150 @@ describe('PiAiRuntimeAdapter', () => {
       });
       // 1 original + 1 repair = 2 calls total (not infinite)
       expect(mockComplete).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ── startRun() schema dispatch by outputSchemaRef ──
+
+  describe('startRun() schema dispatch by outputSchemaRef', () => {
+    const VALID_DREAMER_OUTPUT = {
+      valid: true,
+      taskId: 'task-dreamer-1',
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Ignored error handling',
+          betterDecision: 'Add try/catch around API calls',
+          rationale: 'Prevents unhandled rejections',
+          confidence: 0.85,
+          riskLevel: 'low',
+          strategicPerspective: 'Defensive programming',
+        },
+      ],
+      contextRefs: [],
+      generatedAt: '2025-01-01T00:00:00.000Z',
+    };
+
+    const VALID_PHILOSOPHER_OUTPUT = {
+      taskId: 'task-philosopher-1',
+      sourceDreamerArtifactId: 'pi-art-dreamer-1',
+      thesis: 'Error handling is essential for reliability',
+      principleCandidate: {
+        title: 'Always handle API errors',
+        rationale: 'Unhandled errors cause cascading failures',
+        scope: 'All external API calls',
+        confidence: 0.9,
+      },
+      risks: ['May add boilerplate'],
+      generatedAt: '2025-01-01T00:00:00.000Z',
+    };
+
+    it('validates dreamer-output-v1 with DreamerOutputV1Schema', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DREAMER_OUTPUT)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'dreamer-output-v1',
+        taskRef: { taskId: 'task-dreamer-1' },
+      }));
+
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ valid: true, taskId: 'task-dreamer-1' });
+    });
+
+    it('rejects invalid dreamer output with output_invalid', async () => {
+      const invalidDreamerOutput = { valid: true, taskId: 'task-dreamer-1', candidates: 'not-array' };
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(invalidDreamerOutput)));
+
+      const adapter = makeAdapter();
+      await expect(adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'dreamer-output-v1',
+        taskRef: { taskId: 'task-dreamer-1' },
+      }))).rejects.toMatchObject({ category: 'output_invalid' });
+    });
+
+    it('validates philosopher-output-v1 with PhilosopherOutputV1Schema', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_PHILOSOPHER_OUTPUT)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'philosopher-output-v1',
+        taskRef: { taskId: 'task-philosopher-1' },
+      }));
+
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ taskId: 'task-philosopher-1', thesis: 'Error handling is essential for reliability' });
+    });
+
+    it('rejects invalid philosopher output with output_invalid', async () => {
+      const invalidPhilosopherOutput = { taskId: 'task-philosopher-1', principleCandidate: null };
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(invalidPhilosopherOutput)));
+
+      const adapter = makeAdapter();
+      await expect(adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'philosopher-output-v1',
+        taskRef: { taskId: 'task-philosopher-1' },
+      }))).rejects.toMatchObject({ category: 'output_invalid' });
+    });
+
+    it('falls back to DiagnosticianOutputV1Schema for diagnostician-output-v1', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'diagnostician-output-v1',
+        taskRef: { taskId: 'task-test-1' },
+      }));
+
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ valid: true, diagnosisId: 'diag-test-1' });
+    });
+
+    it('unknown outputSchemaRef skips schema validation and succeeds', async () => {
+      const arbitraryOutput = { foo: 'bar', baz: 42 };
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(arbitraryOutput)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'custom-output-v1',
+      }));
+
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject(arbitraryOutput);
+    });
+
+    it('no outputSchemaRef skips schema validation (backward compatible)', async () => {
+      const arbitraryOutput = { anything: 'goes' };
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(arbitraryOutput)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeStartRunInput());
+
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject(arbitraryOutput);
+    });
+
+    it('attempts repair for dreamer-output-v1 schema errors', async () => {
+      const invalidDreamerOutput = {
+        valid: true,
+        taskId: 'task-dreamer-1',
+        candidates: [{ candidateIndex: 0, badDecision: 'test', betterDecision: 'test', rationale: 'test', confidence: '85%', riskLevel: 'low', strategicPerspective: 'test' }],
+        contextRefs: [],
+        generatedAt: '2025-01-01T00:00:00.000Z',
+      };
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(invalidDreamerOutput)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DREAMER_OUTPUT)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'dreamer-output-v1',
+        taskRef: { taskId: 'task-dreamer-1' },
+      }));
+
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ valid: true, taskId: 'task-dreamer-1' });
     });
   });
 });

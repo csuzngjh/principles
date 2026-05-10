@@ -8,6 +8,8 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 
+import { Type, type Static } from '@sinclair/typebox';
+
 // ── Output Types ──────────────────────────────────────────────────────────────
 
 export interface PhilosopherPrincipleCandidate {
@@ -25,6 +27,26 @@ export interface PhilosopherOutputV1 {
   readonly risks: readonly string[];
   readonly generatedAt: string;
 }
+
+// ── TypeBox Schema ──────────────────────────────────────────────────────────
+
+export const PhilosopherPrincipleCandidateSchema = Type.Object({
+  title: Type.String({ minLength: 1 }),
+  rationale: Type.String({ minLength: 1 }),
+  scope: Type.String({ minLength: 1 }),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+});
+
+export const PhilosopherOutputV1Schema = Type.Object({
+  taskId: Type.String({ minLength: 1 }),
+  sourceDreamerArtifactId: Type.String({ minLength: 1 }),
+  thesis: Type.String({ minLength: 1 }),
+  principleCandidate: PhilosopherPrincipleCandidateSchema,
+  risks: Type.Array(Type.String()),
+  generatedAt: Type.String({ minLength: 1 }),
+});
+
+export type PhilosopherOutputV1TB = Static<typeof PhilosopherOutputV1Schema>;
 
 // ── Validation ────────────────────────────────────────────────────────────────
 

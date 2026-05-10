@@ -17,9 +17,12 @@
 import { getModel, getProviders, complete } from '@mariozechner/pi-ai';
 import type { KnownProvider, Context, UserMessage, AssistantMessage, Model } from '@mariozechner/pi-ai';
 import { Value } from '@sinclair/typebox/value';
+import type { TSchema } from '@sinclair/typebox';
 import { PDRuntimeError } from '../error-categories.js';
 import { extractJsonObject } from './json-extractor.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
+import { DreamerOutputV1Schema } from '../internalization/dreamer-output.js';
+import { PhilosopherOutputV1Schema } from '../internalization/philosopher-output.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair } from './structured-output-repair.js';
@@ -177,6 +180,12 @@ interface RunState {
   reason?: string;
   output?: StructuredRunOutput;
 }
+
+const OUTPUT_SCHEMA_REGISTRY = new Map<string, TSchema>([
+  ['diagnostician-output-v1', DiagnosticianOutputV1Schema as TSchema],
+  ['dreamer-output-v1', DreamerOutputV1Schema as TSchema],
+  ['philosopher-output-v1', PhilosopherOutputV1Schema as TSchema],
+]);
 
 export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private readonly config: PiAiRuntimeAdapterConfig;
@@ -383,50 +392,50 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         throw new PDRuntimeError('output_invalid', 'No valid JSON found in LLM response');
       }
 
-      // Validate with DiagnosticianOutputV1Schema
-      if (!Value.Check(DiagnosticianOutputV1Schema, validatedOutput)) {
-        // PRI-71: Attempt structured output repair before throwing
+      // Validate with schema from registry (keyed by outputSchemaRef)
+      const schemaRef = input.outputSchemaRef;
+      const schema = schemaRef ? OUTPUT_SCHEMA_REGISTRY.get(schemaRef) : undefined;
+
+      if (schema && !Value.Check(schema, validatedOutput)) {
         let repairSucceeded = false;
         let schemaErrors: { path: string; message: string; value: unknown }[] = [];
 
-        if (input.outputSchemaRef === 'diagnostician-output-v1') {
-          schemaErrors = [...Value.Errors(DiagnosticianOutputV1Schema, validatedOutput)]
-            .map(e => ({ path: e.path, message: e.message, value: e.value }));
+        schemaErrors = [...Value.Errors(schema, validatedOutput)]
+          .map(e => ({ path: e.path, message: e.message, value: e.value }));
 
-          if (schemaErrors.length > 0) {
-            const repairResult = await attemptStructuredOutputRepair<Record<string, unknown>>(
-              validatedOutput,
-              schemaErrors,
-              {
-                llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey }),
-                schemaCheck: (value: unknown) => Value.Check(DiagnosticianOutputV1Schema, value),
-              },
-            );
+        if (schemaErrors.length > 0) {
+          const repairResult = await attemptStructuredOutputRepair<Record<string, unknown>>(
+            validatedOutput,
+            schemaErrors,
+            {
+              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey }),
+              schemaCheck: (value: unknown) => Value.Check(schema, value),
+            },
+          );
 
-            this.eventEmitter.emitTelemetry({
-              eventType: 'output_repair_attempted',
-              traceId: input.taskRef?.taskId ?? runId,
-              timestamp: new Date().toISOString(),
-              sessionId: 'pi-ai-adapter',
-              agentId: 'pi-ai-adapter',
-              payload: {
-                runId,
-                runtimeKind: 'pi-ai',
-                repaired: repairResult.repaired,
-                attemptsUsed: repairResult.attemptsUsed,
-                repairSummary: repairResult.repairSummary,
-              },
-            });
+          this.eventEmitter.emitTelemetry({
+            eventType: 'output_repair_attempted',
+            traceId: input.taskRef?.taskId ?? runId,
+            timestamp: new Date().toISOString(),
+            sessionId: 'pi-ai-adapter',
+            agentId: 'pi-ai-adapter',
+            payload: {
+              runId,
+              runtimeKind: 'pi-ai',
+              outputSchemaRef: schemaRef ?? 'unknown',
+              repaired: repairResult.repaired,
+              attemptsUsed: repairResult.attemptsUsed,
+              repairSummary: repairResult.repairSummary,
+            },
+          });
 
-            if (repairResult.repaired && repairResult.output) {
-              validatedOutput = repairResult.output;
-              repairSucceeded = true;
-            }
+          if (repairResult.repaired && repairResult.output) {
+            validatedOutput = repairResult.output;
+            repairSucceeded = true;
           }
         }
 
         if (!repairSucceeded) {
-          // Emit telemetry for repair failure even when skipped paths are not hit above
           if (schemaErrors.length > 0) {
             this.eventEmitter.emitTelemetry({
               eventType: 'output_repair_attempted',
@@ -437,15 +446,16 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               payload: {
                 runId,
                 runtimeKind: 'pi-ai',
+                outputSchemaRef: schemaRef ?? 'unknown',
                 repaired: false,
                 attemptsUsed: 0,
-                repairSummary: `Repair skipped: schemaErrors exist but repair was not attempted (outputSchemaRef=${input.outputSchemaRef})`,
+                repairSummary: `Repair failed for outputSchemaRef=${schemaRef}`,
               },
             });
           }
           throw new PDRuntimeError(
             'output_invalid',
-            'LLM output does not match DiagnosticianOutputV1 schema',
+            `LLM output does not match ${schemaRef ?? 'unknown'} schema`,
           );
         }
       }
