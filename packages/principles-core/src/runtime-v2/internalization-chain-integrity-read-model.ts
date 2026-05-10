@@ -29,7 +29,7 @@ export interface InternalizationChainIntegrityReadModelOptions {
   workspaceDir: string;
 }
 
-function extractPIMetadata(diagJson: string | null): { parentTaskId?: string; dependencyTaskIds?: string[] } {
+export function extractPIMetadata(diagJson: string | null): { parentTaskId?: string; dependencyTaskIds?: string[] } {
   if (!diagJson) return {};
   try {
     const parsed = JSON.parse(diagJson);

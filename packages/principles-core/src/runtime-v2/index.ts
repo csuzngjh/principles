@@ -537,7 +537,7 @@ export type { SchemaConformanceResult, SchemaConformanceTableResult, SchemaConfo
 
 // ── Internalization Chain Integrity Read Model (PRI-97) ─────────────────────
 
-export { InternalizationChainIntegrityReadModel } from './internalization-chain-integrity-read-model.js';
+export { InternalizationChainIntegrityReadModel, extractPIMetadata } from './internalization-chain-integrity-read-model.js';
 export type { BrokenLink, ChainIntegrityResult, InternalizationChainIntegrityReadModelOptions } from './internalization-chain-integrity-read-model.js';
 
 export { InternalizationIntegrityRemediation } from './internalization-integrity-remediation.js';

@@ -44,6 +44,11 @@ export async function handleRuntimeInternalizationIntegrityRepair(opts: Internal
     ? path.resolve(opts.workspace)
     : resolveWorkspaceDir();
 
+  if (opts.dryRun && opts.confirm) {
+    console.error('Error: --dry-run and --confirm are mutually exclusive. Specify one or the other.');
+    process.exit(1);
+  }
+
   const isDryRun = !opts.confirm;
 
   const remediation = new InternalizationIntegrityRemediation({ workspaceDir });

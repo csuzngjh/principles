@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
+import { extractPIMetadata } from './internalization-chain-integrity-read-model.js';
 
 export interface RemediationAction {
   taskId: string;
@@ -178,18 +179,15 @@ export class InternalizationIntegrityRemediation {
 
       const philosopherParentIds = new Set<string>();
       for (const pt of philosopherTasks) {
-        try {
-          const parsed = pt.diagnostic_json ? JSON.parse(pt.diagnostic_json) : null;
-          const meta = parsed?.pi_metadata ?? parsed;
-          if (meta?.dependencyTaskIds) {
-            for (const depId of meta.dependencyTaskIds) {
-              philosopherParentIds.add(depId);
-            }
+        const meta = extractPIMetadata(pt.diagnostic_json);
+        if (meta.dependencyTaskIds) {
+          for (const depId of meta.dependencyTaskIds) {
+            philosopherParentIds.add(depId);
           }
-          if (meta?.parentTaskId) {
-            philosopherParentIds.add(meta.parentTaskId);
-          }
-        } catch { /* skip */ }
+        }
+        if (meta.parentTaskId) {
+          philosopherParentIds.add(meta.parentTaskId);
+        }
       }
 
       const results: BrokenDreamer[] = [];
@@ -228,12 +226,9 @@ export class InternalizationIntegrityRemediation {
   private requeueTask(taskId: string): void {
     const db = new Database(this.dbPath);
     try {
-      const now = new Date();
-      const retryAfter = new Date(now.getTime() + 60_000);
-
       db.prepare(
-        `UPDATE tasks SET status = 'retry_wait', attempt_count = 0, lease_owner = NULL, lease_expires_at = ?, result_ref = NULL, updated_at = datetime('now') WHERE task_id = ?`,
-      ).run(retryAfter.toISOString(), taskId);
+        `UPDATE tasks SET status = 'retry_wait', attempt_count = 0, lease_owner = NULL, lease_expires_at = NULL, result_ref = NULL, updated_at = datetime('now') WHERE task_id = ?`,
+      ).run(taskId);
     } finally {
       db.close();
     }
@@ -247,13 +242,10 @@ export class InternalizationIntegrityRemediation {
       ).all() as { task_id: string; diagnostic_json: string | null }[];
 
       for (const pt of philosopherTasks) {
-        try {
-          const parsed = pt.diagnostic_json ? JSON.parse(pt.diagnostic_json) : null;
-          const meta = parsed?.pi_metadata ?? parsed;
-          if (meta?.dependencyTaskIds?.includes(dreamerTaskId) || meta?.parentTaskId === dreamerTaskId) {
-            return pt.task_id;
-          }
-        } catch { /* skip */ }
+        const meta = extractPIMetadata(pt.diagnostic_json);
+        if (meta.dependencyTaskIds?.includes(dreamerTaskId) || meta.parentTaskId === dreamerTaskId) {
+          return pt.task_id;
+        }
       }
 
       const successorTaskId = `philosopher-${dreamerTaskId}-prompt`;
@@ -272,19 +264,24 @@ export class InternalizationIntegrityRemediation {
     const db = new Database(this.dbPath);
     try {
       const successorTaskId = `philosopher-${dreamerTaskId}-prompt`;
+
+      const artifactRow = db.prepare(
+        "SELECT artifact_id FROM pi_artifacts WHERE source_task_id = ? AND artifact_kind = 'principle' LIMIT 1",
+      ).get(dreamerTaskId) as { artifact_id: string } | undefined;
+
       const metadata = {
         dependencyTaskIds: [dreamerTaskId],
         channel: 'prompt',
         timeoutMs: 300_000,
-        inputArtifactRefs: [],
+        inputArtifactRefs: artifactRow ? [{ artifactId: artifactRow.artifact_id, kind: 'principle' }] : [],
         outputArtifactRefs: [],
         parentTaskId: dreamerTaskId,
       };
 
       db.prepare(
-        `INSERT OR IGNORE INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, diagnostic_json)
-         VALUES (?, 'philosopher', 'pending', 0, 3, ?)`,
-      ).run(successorTaskId, JSON.stringify(metadata));
+        `INSERT OR IGNORE INTO tasks (task_id, task_kind, status, attempt_count, max_attempts, input_ref, diagnostic_json, created_at, updated_at)
+         VALUES (?, 'philosopher', 'pending', 0, 3, ?, ?, datetime('now'), datetime('now'))`,
+      ).run(successorTaskId, artifactRow?.artifact_id ?? null, JSON.stringify(metadata));
 
       return successorTaskId;
     } finally {
