@@ -66,6 +66,17 @@ export class PainChainReadModel {
     }
   }
 
+  async getTotalTaskCount(): Promise<number> {
+    try {
+      const manager = await this.getStateManager();
+      const db = manager.connection.getDb();
+      const row = db.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number };
+      return row?.count ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
   private initialized = false;
 
   private async getStateManager(): Promise<RuntimeStateManager> {

@@ -68,6 +68,7 @@ function healthySnapshot() {
     },
     overallStatus: 'healthy' as const,
     recommendedActions: [],
+    totalTaskCount: 1,
   };
 }
 

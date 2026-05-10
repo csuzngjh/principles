@@ -59,6 +59,9 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-67
   'internalization/dreamer-output.ts',
   'internalization/dreamer-runner.ts',
+  // PRI-109
+  'internalization/scribe-output.ts',
+  'internalization/scribe-runner.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../prompt-builder/routing-guidance.ts',
   // PRI-81 Phase A
@@ -92,6 +95,8 @@ const REQUIRED_TEST_FILES = [
   'pitask-metadata.test.ts',
   // PRI-67
   'dreamer-runner.test.ts',
+  // PRI-109
+  'scribe-runner-vslice.test.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../../prompt-builder/__tests__/routing-guidance.test.ts',
   // PRI-81 Phase A
