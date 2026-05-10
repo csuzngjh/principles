@@ -22,20 +22,9 @@
  *   - Track principle value ranking (pain prevented, adherence rate)
  */
 
-import type { PrincipleDetectorSpec } from '../core/evolution-types.js';
+import type { Principle as CorePrinciple, PrincipleDetectorSpec } from '@principles/core/runtime-v2';
 
-// Import core Principle and re-export leaf types from core (PRI-51)
-import type {
-  Principle as CorePrinciple,
-  PrinciplePriority,
-  PrincipleScope,
-  PrincipleEvaluability,
-  RuleStatus,
-  RuleType,
-  ImplementationLifecycleState,
-  ImplementationType,
-} from '@principles/core/runtime-v2';
-
+// Re-exported from core (PRI-51) for plugin consumers
 export type {
   PrinciplePriority,
   PrincipleScope,
