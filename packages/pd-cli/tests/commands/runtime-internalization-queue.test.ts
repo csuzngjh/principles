@@ -37,6 +37,7 @@ function emptySnapshot() {
     sampleInvalidTaskIds: [],
     blockedSummary: { count: 0, samples: [] },
     dependencyFailedSummary: { count: 0, samples: [] },
+    retryWaitPendingSummary: { count: 0, samples: [] },
     readyTasks: [],
     noReadyTasks: { reason: 'no_candidates', inspectedCount: 0 },
   };

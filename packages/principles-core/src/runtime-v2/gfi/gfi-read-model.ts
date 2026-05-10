@@ -57,6 +57,51 @@ export interface GfiWorkspaceSnapshot {
 
 const DEFAULT_STALE_CUTOFF_MS = 2 * 60 * 60 * 1000; // 2 hours
 
+const DEFAULT_STALE_GFI_DEGRADED_THRESHOLD = 40;
+
+export interface GfiWorkspaceHealthAssessment {
+  status: 'healthy' | 'degraded';
+  reason: string;
+  staleGfiDegradedThreshold: number;
+}
+
+export function classifyGfiWorkspaceHealth(
+  snapshot: GfiWorkspaceSnapshot,
+  options?: { staleGfiDegradedThreshold?: number },
+): GfiWorkspaceHealthAssessment {
+  const staleGfiDegradedThreshold = options?.staleGfiDegradedThreshold ?? DEFAULT_STALE_GFI_DEGRADED_THRESHOLD;
+
+  if (snapshot.active !== null && snapshot.active.currentGfi >= staleGfiDegradedThreshold) {
+    return {
+      status: 'degraded',
+      reason: `Active session has elevated GFI (${snapshot.active.currentGfi})`,
+      staleGfiDegradedThreshold,
+    };
+  }
+
+  if (snapshot.activeSessionCount === 0 && snapshot.staleSessionCount > 0) {
+    const maxStaleGfi = snapshot.staleGfiRange?.max ?? 0;
+    if (maxStaleGfi >= staleGfiDegradedThreshold) {
+      return {
+        status: 'degraded',
+        reason: `No active sessions, ${snapshot.staleSessionCount} stale sessions with high GFI (max: ${maxStaleGfi})`,
+        staleGfiDegradedThreshold,
+      };
+    }
+    return {
+      status: 'healthy',
+      reason: `No active sessions, ${snapshot.staleSessionCount} stale sessions with low GFI (max: ${maxStaleGfi})`,
+      staleGfiDegradedThreshold,
+    };
+  }
+
+  return {
+    status: 'healthy',
+    reason: `${snapshot.activeSessionCount} active, ${snapshot.staleSessionCount} stale sessions`,
+    staleGfiDegradedThreshold,
+  };
+}
+
 /**
  * Convert a session's fields to a GfiState for snapshot creation.
  * Note: lastErrorHash is not persisted across sessions, so we omit it.

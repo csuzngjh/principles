@@ -52,7 +52,7 @@ describe('OperatorHealthReadModel GFI health checks (CANARY-02)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('flags degraded when staleSessionCount > 20 and no active sessions', async () => {
+  it('0 active + stale low GFI → healthy (not degraded)', async () => {
     const pdDir = path.join(tmpDir, '.pd');
     fs.mkdirSync(pdDir, { recursive: true });
     initMinimalDb(pdDir);
@@ -82,7 +82,79 @@ describe('OperatorHealthReadModel GFI health checks (CANARY-02)', () => {
       const s = await model.getSnapshot();
       expect(s.gfi.staleSessionCount).toBeGreaterThanOrEqual(20);
       expect(s.gfi.activeSessionCount).toBe(0);
+      expect(s.overallStatus).toBe('healthy');
+    } finally {
+      await model.close();
+    }
+  });
+
+  it('0 active + stale high GFI → degraded', async () => {
+    const pdDir = path.join(tmpDir, '.pd');
+    fs.mkdirSync(pdDir, { recursive: true });
+    initMinimalDb(pdDir);
+
+    const sessionDir = path.join(tmpDir, '.state', 'sessions');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const nowMs = Date.now();
+    for (let i = 0; i < 25; i++) {
+      fs.writeFileSync(path.join(sessionDir, `stale-${i}.json`), JSON.stringify({
+        sessionId: `stale-${i}`,
+        currentGfi: 50,
+        consecutiveErrors: 3,
+        lastActivityAt: nowMs - (4 * 60 * 60 * 1000),
+      }));
+    }
+
+    const chain = {
+      getLastSuccessfulChain: () => Promise.resolve(healthyChain()),
+      close: () => Promise.resolve(),
+    };
+
+    const model = new OperatorHealthReadModel({
+      workspaceDir: tmpDir,
+      painChainReadModel: chain as unknown as PainChainReadModel,
+    });
+    try {
+      const s = await model.getSnapshot();
+      expect(s.gfi.staleSessionCount).toBeGreaterThanOrEqual(20);
+      expect(s.gfi.activeSessionCount).toBe(0);
       expect(s.overallStatus).toBe('degraded');
+      expect(s.recommendedActions.some(a => a.includes('GFI degraded'))).toBe(true);
+    } finally {
+      await model.close();
+    }
+  });
+
+  it('recommendedActions only includes GFI cleanup when truly degraded', async () => {
+    const pdDir = path.join(tmpDir, '.pd');
+    fs.mkdirSync(pdDir, { recursive: true });
+    initMinimalDb(pdDir);
+
+    const sessionDir = path.join(tmpDir, '.state', 'sessions');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const nowMs = Date.now();
+    for (let i = 0; i < 30; i++) {
+      fs.writeFileSync(path.join(sessionDir, `stale-${i}.json`), JSON.stringify({
+        sessionId: `stale-${i}`,
+        currentGfi: 3,
+        consecutiveErrors: 0,
+        lastActivityAt: nowMs - (4 * 60 * 60 * 1000),
+      }));
+    }
+
+    const chain = {
+      getLastSuccessfulChain: () => Promise.resolve(healthyChain()),
+      close: () => Promise.resolve(),
+    };
+
+    const model = new OperatorHealthReadModel({
+      workspaceDir: tmpDir,
+      painChainReadModel: chain as unknown as PainChainReadModel,
+    });
+    try {
+      const s = await model.getSnapshot();
+      expect(s.overallStatus).toBe('healthy');
+      expect(s.recommendedActions.some(a => a.includes('GFI degraded'))).toBe(false);
     } finally {
       await model.close();
     }
