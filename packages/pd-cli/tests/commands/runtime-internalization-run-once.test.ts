@@ -680,4 +680,146 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.artifactId).toBe('pi-art-rk');
     expect(output.resultRef).toBe('dreamer://run-rk');
   });
+
+  it('--timeout-ms passes effectiveTimeoutMs to DreamerRunner and output', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-tm',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-tm',
+      runId: 'run-tm',
+      artifactId: 'pi-art-tm',
+      resultRef: 'dreamer://run-tm',
+      contextHash: 'ctx-tm',
+      output: { valid: true, taskId: 'task-dreamer-tm', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, timeoutMs: 180_000, json: true });
+
+    const DreamerRunnerMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.DreamerRunner),
+    );
+    const lastCall = DreamerRunnerMock.mock.calls[DreamerRunnerMock.mock.calls.length - 1];
+    if (lastCall) {
+      const opts = lastCall[1] as { timeoutMs?: number };
+      expect(opts.timeoutMs).toBe(180_000);
+    }
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.effectiveTimeoutMs).toBe(180_000);
+  });
+
+  it('default timeoutMs is 300000 when --timeout-ms not provided', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-dt',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-dt',
+      runId: 'run-dt',
+      artifactId: 'pi-art-dt',
+      resultRef: 'dreamer://run-dt',
+      contextHash: 'ctx-dt',
+      output: { valid: true, taskId: 'task-dreamer-dt', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const DreamerRunnerMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.DreamerRunner),
+    );
+    const lastCall = DreamerRunnerMock.mock.calls[DreamerRunnerMock.mock.calls.length - 1];
+    if (lastCall) {
+      const opts = lastCall[1] as { timeoutMs?: number };
+      expect(opts.timeoutMs).toBe(300_000);
+    }
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.effectiveTimeoutMs).toBe(300_000);
+  });
+
+  it('timeout source extracted from failureReason on timeout', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-ts',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'failed',
+      taskId: 'task-dreamer-ts',
+      errorCategory: 'timeout',
+      failureReason: '[timeout] LLM request timed out after 300000ms (timeoutSource=provider_request)',
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, timeoutMs: 300_000, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.timeoutSource).toBe('provider_request');
+    expect(output.effectiveTimeoutMs).toBe(300_000);
+  });
+
+  it('timeout source extracted as runner_poll from abort timeout', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-rp',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'failed',
+      taskId: 'task-dreamer-rp',
+      errorCategory: 'timeout',
+      failureReason: '[timeout] LLM request timed out after 300000ms (timeoutSource=runner_poll)',
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.timeoutSource).toBe('runner_poll');
+  });
+
+  it('--timeout-ms overrides workflows.yaml timeoutMs for PiAiRuntimeAdapter', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-ov',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-ov',
+      runId: 'run-ov',
+      artifactId: 'pi-art-ov',
+      resultRef: 'dreamer://run-ov',
+      contextHash: 'ctx-ov',
+      output: { valid: true, taskId: 'task-dreamer-ov', candidates: VALID_DREAMER_CANDIDATES, contextRefs: [], generatedAt: new Date().toISOString() },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'config', timeoutMs: 240_000, json: true });
+
+    const PiAiMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.PiAiRuntimeAdapter),
+    );
+    const lastCall = PiAiMock.mock.calls[PiAiMock.mock.calls.length - 1];
+    if (lastCall) {
+      const config = lastCall[0] as { timeoutMs?: number };
+      expect(config.timeoutMs).toBe(240_000);
+    }
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.effectiveTimeoutMs).toBe(240_000);
+  });
 });

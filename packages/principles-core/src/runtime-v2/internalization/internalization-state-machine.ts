@@ -29,6 +29,7 @@ import { getAllowedSuccessors, isAcyclic, validateEdge } from './internalization
 import {
   canAcquireLease,
   canTransitionTo,
+  canRetryNow,
 } from './internalization-task-guards.js';
 
 // ── Dependency Gate Types ─────────────────────────────────────────────────────
@@ -40,7 +41,7 @@ import {
  *   blocked:            Dependencies not yet satisfied — wait for them
  *   dependency_failed:   At least one dependency has failed — escalate policy needed
  */
-export type DependencyGateDecision = 'proceed' | 'blocked' | 'dependency_failed';
+export type DependencyGateDecision = 'proceed' | 'blocked' | 'dependency_failed' | 'retry_wait_pending';
 
 export interface DependencyGateResult {
   decision: DependencyGateDecision;
@@ -50,6 +51,8 @@ export interface DependencyGateResult {
   blockedBy: string[];
   /** Task IDs that have failed — for escalation policy decision */
   failedDependencies: string[];
+  /** For retry_wait_pending: ISO timestamp when the task can be retried */
+  retryAfter?: string;
 }
 
 // ── Transition Validation Types ───────────────────────────────────────────────
@@ -137,6 +140,7 @@ export interface GraphValidationResult {
 export function validateInternalizationTaskReady(
   task: PITaskRecord,
   dependencies: readonly TaskRecord[],
+  nowMs?: number,
 ): DependencyGateResult {
   const blockedBy: string[] = [];
   const failedDependencies: string[] = [];
@@ -149,6 +153,17 @@ export function validateInternalizationTaskReady(
       ready: false,
       blockedBy: [],
       failedDependencies: [],
+    };
+  }
+
+  // Check if retry_wait backoff period has expired
+  if (!canRetryNow(task, nowMs)) {
+    return {
+      decision: 'retry_wait_pending',
+      ready: false,
+      blockedBy: [],
+      failedDependencies: [],
+      retryAfter: task.leaseExpiresAt,
     };
   }
 

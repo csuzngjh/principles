@@ -33,7 +33,7 @@ export interface NoReadyTasksResult {
   decision: 'no_ready_tasks';
   inspectedCount: number;
   /** Why no task could be leased: specific diagnosis */
-  reason: 'no_candidates' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_lease_conflict';
+  reason: 'no_candidates' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_lease_conflict' | 'all_retry_wait_pending';
 }
 
 export interface BlockedResult {
@@ -182,6 +182,7 @@ export class InternalizationOrchestrator {
     let hydrationFailures = 0;
     let blockedCount = 0;
     let dependencyFailures = 0;
+    let retryWaitPendingCount = 0;
     let leaseConflictCount = 0;
 
     for (const rawTask of candidates) {
@@ -208,6 +209,11 @@ export class InternalizationOrchestrator {
       if (gateResult.decision === 'dependency_failed') {
         // Non-terminal — skip and try next candidate
         dependencyFailures++;
+        continue;
+      }
+
+      if (gateResult.decision === 'retry_wait_pending') {
+        retryWaitPendingCount++;
         continue;
       }
 
@@ -255,15 +261,17 @@ export class InternalizationOrchestrator {
     // by specificity priority (hydration > dependency > blocked > lease).
     // Hydration participates when it is the highest count (not just 100%).
     const reason: NoReadyTasksResult['reason'] =
-      hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount && hydrationFailures >= leaseConflictCount
-        ? 'all_hydration_failed'
-        : dependencyFailures >= blockedCount && dependencyFailures >= leaseConflictCount
-          ? 'all_dependency_failed'
-          : blockedCount >= leaseConflictCount
-            ? 'all_blocked'
-            : leaseConflictCount > 0
-              ? 'all_lease_conflict'
-              : 'no_candidates';
+      retryWaitPendingCount > 0 && retryWaitPendingCount >= hydrationFailures && retryWaitPendingCount >= dependencyFailures && retryWaitPendingCount >= blockedCount && retryWaitPendingCount >= leaseConflictCount
+        ? 'all_retry_wait_pending'
+        : hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount && hydrationFailures >= leaseConflictCount
+          ? 'all_hydration_failed'
+          : dependencyFailures >= blockedCount && dependencyFailures >= leaseConflictCount
+            ? 'all_dependency_failed'
+            : blockedCount >= leaseConflictCount
+              ? 'all_blocked'
+              : leaseConflictCount > 0
+                ? 'all_lease_conflict'
+                : 'no_candidates';
 
     return {
       decision: 'no_ready_tasks',

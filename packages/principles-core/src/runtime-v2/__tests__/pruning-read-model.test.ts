@@ -157,8 +157,8 @@ const LEDGER_DEPRECATED: LedgerStore = {
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
 let mockLedgerData: LedgerStore = LEDGER_EMPTY;
-let mockCandidateRows: { candidate_id: string; created_at: string }[] = [];
-let mockAllCandidateRows: { candidate_id: string; status: string }[] = [];
+let _mockCandidateRows: { candidate_id: string; created_at: string }[] = [];
+let mockAllCandidateRows: { candidate_id: string; status: string; created_at?: string }[] = [];
 let mockDbExists = false;
 let mockDbShouldThrow = false;
 
@@ -173,11 +173,15 @@ vi.mock('better-sqlite3', () => ({
     }
     this.prepare = vi.fn((sql: string) => ({
       all: vi.fn(() => {
-        if (sql.includes('consumed')) {
-          return mockCandidateRows;
+        if (sql.includes('status') && sql.includes('created_at')) {
+          return mockAllCandidateRows.map(r => ({
+            candidate_id: r.candidate_id,
+            status: r.status,
+            created_at: r.created_at ?? '2026-01-15T00:00:00.000Z',
+          }));
         }
         if (sql.includes('FROM principle_candidates')) {
-          return mockAllCandidateRows;
+          return mockAllCandidateRows.map(r => ({ candidate_id: r.candidate_id }));
         }
         return [];
       }),
@@ -194,7 +198,7 @@ vi.mock('fs', () => ({
 
 function reset() {
   mockLedgerData = LEDGER_EMPTY;
-  mockCandidateRows = [];
+  _mockCandidateRows = [];
   mockAllCandidateRows = [];
   mockDbExists = false;
   mockDbShouldThrow = false;
@@ -297,8 +301,11 @@ describe('PruningReadModel', () => {
         },
       },
     };
-    mockCandidateRows = [
+    _mockCandidateRows = [
       { candidate_id: 'c_in_db', created_at: '2026-01-15T00:00:00.000Z' },
+    ];
+    mockAllCandidateRows = [
+      { candidate_id: 'c_in_db', status: 'consumed', created_at: '2026-01-15T00:00:00.000Z' },
     ];
     mockDbExists = true;
 
@@ -340,7 +347,7 @@ describe('PruningReadModel', () => {
         },
       },
     };
-    mockCandidateRows = [];
+    _mockCandidateRows = [];
     mockDbExists = true;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
@@ -381,7 +388,7 @@ describe('PruningReadModel', () => {
         },
       },
     };
-    mockCandidateRows = [];
+    _mockCandidateRows = [];
     mockDbExists = true;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
@@ -459,8 +466,11 @@ describe('PruningReadModel', () => {
         },
       },
     };
-    mockCandidateRows = [
+    _mockCandidateRows = [
       { candidate_id: 'c_recent1', created_at: '2026-01-15T00:00:00.000Z' },
+    ];
+    mockAllCandidateRows = [
+      { candidate_id: 'c_recent1', status: 'consumed', created_at: '2026-01-15T00:00:00.000Z' },
     ];
     mockDbExists = true;
 
@@ -571,7 +581,7 @@ describe('PruningReadModel', () => {
 
   it('getHealthSummary reuses signals without duplicate DB query', () => {
     mockLedgerData = LEDGER_MIXED;
-    mockCandidateRows = [];
+    _mockCandidateRows = [];
     mockDbExists = true;
 
     const model = new PruningReadModel({ workspaceDir: WORKSPACE });
@@ -579,6 +589,90 @@ describe('PruningReadModel', () => {
 
     expect(summary.totalPrinciples).toBe(4);
     expect(summary.orphanDerivedCandidateCount).toBe(1);
+  });
+
+  it('orphan count matches getOrphanDerivedCandidates for same data', () => {
+    mockLedgerData = {
+      tree: {
+        principles: {
+          p1: {
+            id: 'p1',
+            status: 'active',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            derivedFromPainIds: ['c_consumed', 'c_pending', 'c_missing'],
+            ruleIds: [],
+            conflictsWithPrincipleIds: [],
+            version: 1,
+            text: '',
+            triggerPattern: '',
+            action: '',
+            priority: 'P1',
+            scope: 'general',
+            evaluability: 'deterministic',
+            valueScore: 0,
+            adherenceRate: 0,
+            painPreventedCount: 0,
+          } as LedgerPrinciple,
+        },
+      },
+    };
+    _mockCandidateRows = [
+      { candidate_id: 'c_consumed', created_at: '2026-01-15T00:00:00.000Z' },
+    ];
+    mockAllCandidateRows = [
+      { candidate_id: 'c_consumed', status: 'consumed', created_at: '2026-01-15T00:00:00.000Z' },
+      { candidate_id: 'c_pending', status: 'pending', created_at: '2026-01-15T00:00:00.000Z' },
+    ];
+    mockDbExists = true;
+
+    const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+    const summary = model.getHealthSummary();
+    const orphanResult = model.getOrphanDerivedCandidates();
+
+    expect(summary.orphanDerivedCandidateCount).toBe(orphanResult.candidates.length);
+    expect(orphanResult.candidates.length).toBe(1);
+    expect(orphanResult.candidates[0]?.candidateId).toBe('c_missing');
+  });
+
+  it('pending candidate in DB is not counted as orphan', () => {
+    mockLedgerData = {
+      tree: {
+        principles: {
+          p1: {
+            id: 'p1',
+            status: 'active',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            derivedFromPainIds: ['c_pending'],
+            ruleIds: [],
+            conflictsWithPrincipleIds: [],
+            version: 1,
+            text: '',
+            triggerPattern: '',
+            action: '',
+            priority: 'P1',
+            scope: 'general',
+            evaluability: 'deterministic',
+            valueScore: 0,
+            adherenceRate: 0,
+            painPreventedCount: 0,
+          } as LedgerPrinciple,
+        },
+      },
+    };
+    _mockCandidateRows = [];
+    mockAllCandidateRows = [
+      { candidate_id: 'c_pending', status: 'pending', created_at: '2026-01-15T00:00:00.000Z' },
+    ];
+    mockDbExists = true;
+
+    const model = new PruningReadModel({ workspaceDir: WORKSPACE });
+    const signals = model.getPrincipleSignals();
+    const summary = model.getHealthSummary();
+
+    expect(signals[0]?.orphanCandidateCount).toBe(0);
+    expect(summary.orphanDerivedCandidateCount).toBe(0);
   });
 
   describe('getOrphanDerivedCandidates', () => {
@@ -608,7 +702,7 @@ describe('PruningReadModel', () => {
           },
         },
       };
-      mockCandidateRows = [];
+      _mockCandidateRows = [];
       mockAllCandidateRows = [];
       mockDbExists = true;
 
@@ -650,11 +744,11 @@ describe('PruningReadModel', () => {
           },
         },
       };
-      mockCandidateRows = [
+      _mockCandidateRows = [
         { candidate_id: 'c_exists', created_at: '2026-01-15T00:00:00.000Z' },
       ];
       mockAllCandidateRows = [
-        { candidate_id: 'c_exists', status: 'consumed' },
+        { candidate_id: 'c_exists', status: 'consumed', created_at: '2026-01-15T00:00:00.000Z' },
       ];
       mockDbExists = true;
 
@@ -703,7 +797,7 @@ describe('PruningReadModel', () => {
           },
         },
       };
-      mockCandidateRows = [];
+      _mockCandidateRows = [];
       mockAllCandidateRows = [];
       mockDbExists = false;
 
@@ -741,7 +835,7 @@ describe('PruningReadModel', () => {
           },
         },
       };
-      mockCandidateRows = [];
+      _mockCandidateRows = [];
       mockAllCandidateRows = [];
       mockDbExists = true;
       mockDbShouldThrow = true;

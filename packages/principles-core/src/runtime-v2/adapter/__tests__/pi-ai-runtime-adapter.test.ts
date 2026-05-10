@@ -297,15 +297,14 @@ describe('PiAiRuntimeAdapter', () => {
       }
     });
 
-    it('passes apiKey, timeoutMs from config, and maxRetries: 0 to complete options', async () => {
+    it('passes apiKey, effectiveTimeoutMs (input > config > default), and maxRetries: 0 to complete options', async () => {
       const adapter = makeAdapter({ maxRetries: 3, timeoutMs: 120_000 });
       await adapter.startRun(makeStartRunInput({ timeoutMs: 90_000 }));
 
       const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
       expect(options.apiKey).toBe('test-key-123');
       expect(options.maxRetries).toBe(0);
-      // completeWithRetry uses this.config.timeoutMs (120_000), not input.timeoutMs
-      expect(options.timeoutMs).toBe(120_000);
+      expect(options.timeoutMs).toBe(90_000);
     });
 
     it('returns RunHandle with runId, runtimeKind="pi-ai", and valid ISO startedAt', async () => {
