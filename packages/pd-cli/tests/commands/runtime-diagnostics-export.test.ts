@@ -124,6 +124,13 @@ describe('exportDiagnosticsBundle', () => {
     ).rejects.toThrow('Output path must be within workspace directory');
   });
 
+  it('rejects sibling path that starts with workspace prefix', async () => {
+    const siblingDir = tempDir + '-backup';
+    await expect(
+      exportDiagnosticsBundle(tempDir, siblingDir),
+    ).rejects.toThrow('Output path must be within workspace directory');
+  });
+
   it('manifest contains path and status for each artifact', async () => {
     const outDir = path.join(tempDir, 'snapshots');
     const manifest = await exportDiagnosticsBundle(tempDir, outDir);

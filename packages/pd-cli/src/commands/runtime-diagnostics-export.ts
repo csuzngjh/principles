@@ -34,12 +34,13 @@ export interface DiagnosticsExportOptions {
 }
 
 function validateOutputPath(outDir: string, workspaceDir: string): string {
-  const resolvedOut = path.resolve(outDir).toLowerCase();
-  const resolvedWs = path.resolve(workspaceDir).toLowerCase();
-  if (!resolvedOut.startsWith(resolvedWs)) {
+  const resolvedOut = path.resolve(outDir);
+  const resolvedWs = path.resolve(workspaceDir);
+  const relative = path.relative(resolvedWs, resolvedOut);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error('Output path must be within workspace directory');
   }
-  return path.resolve(outDir);
+  return resolvedOut;
 }
 
 function sanitizeForExport(data: unknown): unknown {
