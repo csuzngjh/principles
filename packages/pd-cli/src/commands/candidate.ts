@@ -321,9 +321,14 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
       correlationId: opts.candidateId,
     });
 
-    const diagObj = JSON.parse(diagnosticJson);
-    diagObj.candidateId = opts.candidateId;
-    const finalDiagnosticJson = JSON.stringify(diagObj);
+    let finalDiagnosticJson = diagnosticJson;
+    try {
+      const diagObj = JSON.parse(diagnosticJson);
+      diagObj.candidateId = opts.candidateId;
+      finalDiagnosticJson = JSON.stringify(diagObj);
+    } catch {
+      finalDiagnosticJson = diagnosticJson;
+    }
 
     const task = await stateManager.createTask({
       taskId,

@@ -335,7 +335,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
     // AbortSignal.timeout for clean timeout control
     // Priority: input.timeoutMs (runner) > config.timeoutMs (workflows.yaml) > 300_000 (default)
-    const effectiveTimeoutMs = input.timeoutMs || this.config.timeoutMs || 300_000;
+    const effectiveTimeoutMs = input.timeoutMs ?? this.config.timeoutMs ?? 300_000;
     const signal = AbortSignal.timeout(effectiveTimeoutMs);
 
     // Build pi-ai Context from inputPayload

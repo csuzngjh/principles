@@ -54,6 +54,11 @@ function formatTextOutput(output: RecoverySweepOutput): string {
 }
 
 export async function handleRuntimeRecoverySweep(opts: RecoverySweepOptions): Promise<void> {
+  if (opts.dryRun && opts.confirm) {
+    console.error('Error: --dry-run and --confirm are mutually exclusive');
+    process.exitCode = 1;
+    return;
+  }
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const isConfirm = opts.confirm ?? false;
   const isDryRun = !isConfirm;
@@ -75,10 +80,23 @@ export async function handleRuntimeRecoverySweep(opts: RecoverySweepOptions): Pr
     };
 
     if (isConfirm && expiredLeaseTaskIds.length > 0) {
-      const result = await stateManager.runRecoverySweep();
-      output.recoveredCount = result.recovered;
-      output.errors = result.errors;
-      output.failedCount = result.errors.length;
+      for (const taskId of expiredLeaseTaskIds) {
+        try {
+          const result = await stateManager.recoverTask(taskId);
+          if (result) {
+            output.recoveredCount++;
+            output.samples.push({
+              taskId,
+              previousStatus: result.previousStatus,
+              newStatus: result.newStatus,
+              wasLeaseExpired: true,
+            });
+          }
+        } catch (err) {
+          output.failedCount++;
+          output.errors.push(`${taskId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
     }
 
     if (opts.json) {

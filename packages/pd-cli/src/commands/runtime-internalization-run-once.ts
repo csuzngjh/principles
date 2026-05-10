@@ -263,6 +263,11 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
 
   // Resolve effective timeout: CLI flag > runner default (300_000)
   const cliTimeoutMs = opts.timeoutMs;
+  if (cliTimeoutMs !== undefined && (!Number.isFinite(cliTimeoutMs) || cliTimeoutMs <= 0)) {
+    console.error(`Error: --timeout-ms must be a positive integer, got: ${opts.timeoutMs}`);
+    process.exitCode = 1;
+    return;
+  }
   const defaultRunnerTimeoutMs = 300_000;
   const effectiveTimeoutMs = cliTimeoutMs ?? defaultRunnerTimeoutMs;
 

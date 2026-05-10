@@ -34,7 +34,9 @@ import type { PITaskRecord, PIArtifact } from './peer-runner-contracts.js';
 export function canRetryNow(task: PITaskRecord, nowMs: number = Date.now()): boolean {
   if (task.status !== 'retry_wait') return true;
   if (!task.leaseExpiresAt) return true;
-  return new Date(task.leaseExpiresAt).getTime() <= nowMs;
+  const retryAfterMs = new Date(task.leaseExpiresAt).getTime();
+  if (Number.isNaN(retryAfterMs)) return true;
+  return retryAfterMs <= nowMs;
 }
 
 /**
