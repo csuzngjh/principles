@@ -203,7 +203,7 @@ export class ScribeRunner {
       const output = await this.fetchAndParseOutput(runHandle.runId);
 
       this.phase = RunnerPhase.Validating;
-      const validationResult = await this.validator.validate(output, taskId);
+      const validationResult = await this.validator.validate(output, taskId, sourcePhilosopherArtifactId ?? undefined);
       if (!validationResult.valid) {
         return await this.handleValidationError({
           taskId,
@@ -631,7 +631,7 @@ export class ScribeRunner {
   }
 
   private readonly PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set(
-    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid'] as const),
+    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid', 'output_invalid'] as const),
   );
 
   private isPermanentError(category: PDErrorCategory): boolean {

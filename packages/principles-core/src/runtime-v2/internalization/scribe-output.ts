@@ -66,12 +66,12 @@ export interface ScribeValidationResult {
 }
 
 export interface ScribeValidator {
-  validate(output: ScribeOutputV1, taskId: string): Promise<ScribeValidationResult>;
+  validate(output: ScribeOutputV1, taskId: string, expectedSourcePhilosopherArtifactId?: string): Promise<ScribeValidationResult>;
 }
 
 export class DefaultScribeValidator implements ScribeValidator {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async validate(output: ScribeOutputV1, taskId: string): Promise<ScribeValidationResult> {
+  async validate(output: ScribeOutputV1, taskId: string, expectedSourcePhilosopherArtifactId?: string): Promise<ScribeValidationResult> {
     const errors: string[] = [];
 
     if (typeof output !== 'object' || output === null) {
@@ -84,6 +84,8 @@ export class DefaultScribeValidator implements ScribeValidator {
 
     if (typeof output.sourcePhilosopherArtifactId !== 'string' || output.sourcePhilosopherArtifactId.trim() === '') {
       errors.push('sourcePhilosopherArtifactId must be non-empty string');
+    } else if (expectedSourcePhilosopherArtifactId && output.sourcePhilosopherArtifactId !== expectedSourcePhilosopherArtifactId) {
+      errors.push(`sourcePhilosopherArtifactId mismatch: expected ${expectedSourcePhilosopherArtifactId}, got ${output.sourcePhilosopherArtifactId}`);
     }
 
     if (typeof output.principleDraft !== 'object' || output.principleDraft === null) {
@@ -107,6 +109,8 @@ export class DefaultScribeValidator implements ScribeValidator {
       const st = output.sourceTrace as unknown as Record<string, unknown>;
       if (typeof st.philosopherArtifactId !== 'string' || (st.philosopherArtifactId).trim() === '') {
         errors.push('sourceTrace.philosopherArtifactId must be non-empty string');
+      } else if (expectedSourcePhilosopherArtifactId && st.philosopherArtifactId !== expectedSourcePhilosopherArtifactId) {
+        errors.push(`sourceTrace.philosopherArtifactId mismatch: expected ${expectedSourcePhilosopherArtifactId}, got ${st.philosopherArtifactId}`);
       }
     }
 

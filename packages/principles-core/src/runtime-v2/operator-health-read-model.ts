@@ -45,6 +45,8 @@ export interface OperatorHealthSnapshot {
   gfi: GfiWorkspaceSnapshot;
   overallStatus: OverallHealthStatus;
   recommendedActions: string[];
+  /** Total number of tasks in the workspace DB. Used to distinguish cold-start (0 tasks) from real degradation (tasks exist but no successful chain). */
+  totalTaskCount: number;
 }
 
 export interface OperatorHealthReadModelOptions {
@@ -122,16 +124,25 @@ export class OperatorHealthReadModel {
     // ── Candidate/ledger audit ────────────────────────────────────────────
     const audit: CandidateAuditResult = await auditCandidateLedgerConsistency(this.workspaceDir);
 
-    // ── Pain chain ────────────────────────────────────────────────────────
-    let lastSuccessfulChain: PainChainTrace | null = null;
-    let failureCategory: string | null = null;
-
+    // ── Pain chain read model (also used for task-count) ───────────────────
     const painChainReadModel = this.injectedPainChainReadModel
       ?? new PainChainReadModel({ workspaceDir: this.workspaceDir });
 
     if (!this.injectedPainChainReadModel) {
       this.ownedPainChainReadModel = painChainReadModel;
     }
+
+    // ── Task count (for cold-start vs. real-degradation discrimination) ───
+    let totalTaskCount = 0;
+    try {
+      totalTaskCount = await painChainReadModel.getTotalTaskCount();
+    } catch {
+      // graceful — task count stays 0
+    }
+
+    // ── Pain chain ────────────────────────────────────────────────────────
+    let lastSuccessfulChain: PainChainTrace | null = null;
+    let failureCategory: string | null = null;
 
     try {
       const chain = await painChainReadModel.getLastSuccessfulChain();
@@ -189,7 +200,7 @@ export class OperatorHealthReadModel {
       || reviewCount > 0
       || orphanDerivedCandidateCount > ORPHAN_DERIVED_CANDIDATE_COUNT_THRESHOLD
       || gfiHealth.status === 'degraded'
-      || lastSuccessfulChain === null
+      || (lastSuccessfulChain === null && totalTaskCount > 0)
     ) {
       overallStatus = 'degraded';
     }
@@ -219,7 +230,7 @@ export class OperatorHealthReadModel {
       recommendedActions.push(`GFI degraded: ${gfiHealth.reason} — run cleanup or investigate session lifecycle.`);
     }
 
-    if (lastSuccessfulChain === null && dbExists) {
+    if (lastSuccessfulChain === null && dbExists && totalTaskCount > 0) {
       recommendedActions.push('Run `pd runtime uat --workspace <path> --count 3` to establish baseline.');
     }
 
@@ -236,6 +247,7 @@ export class OperatorHealthReadModel {
       gfi,
       overallStatus,
       recommendedActions,
+      totalTaskCount,
     };
   }
 

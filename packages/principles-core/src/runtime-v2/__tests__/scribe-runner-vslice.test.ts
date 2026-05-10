@@ -366,6 +366,35 @@ describe('ScribeRunner (PRI-109)', () => {
     expect(result.status).toBe('failed');
     expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
+
+  it('mismatched sourcePhilosopherArtifactId does not write artifact or mark succeeded', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makePhilosopherArtifact());
+    const deps = createMockDeps({ artifactStore: store });
+
+    const mismatchedOutput = makeScribeOutput();
+    (mismatchedOutput as unknown as Record<string, unknown>).sourcePhilosopherArtifactId = 'wrong-artifact-id';
+    (mismatchedOutput.sourceTrace as unknown as Record<string, unknown>).philosopherArtifactId = 'wrong-artifact-id';
+
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
+      payload: mismatchedOutput,
+    });
+
+    const runner = new ScribeRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'scribe',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(SCRIBE_TASK_ID);
+    expect(result.status).toBe('failed');
+    expect(result.errorCategory).toBe('output_invalid');
+
+    const artifacts = await store.listBySourceTaskId(SCRIBE_TASK_ID);
+    expect(artifacts).toHaveLength(0);
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+  });
 });
 
 describe('DefaultScribeValidator (PRI-109)', () => {
@@ -451,5 +480,27 @@ describe('DefaultScribeValidator (PRI-109)', () => {
     const result = await validator.validate(output, SCRIBE_TASK_ID);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('risks must be an array of strings'))).toBe(true);
+  });
+
+  it('rejects mismatched sourcePhilosopherArtifactId when expected is provided', async () => {
+    const output = makeScribeOutput();
+    (output as unknown as Record<string, unknown>).sourcePhilosopherArtifactId = 'wrong-artifact-id';
+    const result = await validator.validate(output, SCRIBE_TASK_ID, 'pi-art-philosopher-001-run-001');
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('sourcePhilosopherArtifactId mismatch'))).toBe(true);
+  });
+
+  it('rejects mismatched sourceTrace.philosopherArtifactId when expected is provided', async () => {
+    const output = makeScribeOutput();
+    (output.sourceTrace as unknown as Record<string, unknown>).philosopherArtifactId = 'wrong-artifact-id';
+    const result = await validator.validate(output, SCRIBE_TASK_ID, 'pi-art-philosopher-001-run-001');
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('sourceTrace.philosopherArtifactId mismatch'))).toBe(true);
+  });
+
+  it('accepts valid output with matching expectedSourcePhilosopherArtifactId', async () => {
+    const output = makeScribeOutput();
+    const result = await validator.validate(output, SCRIBE_TASK_ID, 'pi-art-philosopher-001-run-001');
+    expect(result.valid).toBe(true);
   });
 });
