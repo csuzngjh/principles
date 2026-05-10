@@ -28,6 +28,7 @@ const MINIMAL_INPUT = {
     contextRefs: ['ref-diag-001'],
     generatedAt: '2026-05-01T00:00:00Z',
   },
+  sourceDreamerArtifactId: 'pi-art-dreamer-001-run-001',
 };
 
 describe('PhilosopherPromptBuilder', () => {
@@ -60,6 +61,13 @@ describe('PhilosopherPromptBuilder', () => {
       const result = builder.buildPrompt(MINIMAL_INPUT);
 
       expect(result.promptInput.dreamerArtifact).toEqual(MINIMAL_INPUT.dreamerArtifact);
+    });
+
+    it('maps sourceDreamerArtifactId from input to top-level promptInput.sourceDreamerArtifactId', () => {
+      const builder = new PhilosopherPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_INPUT);
+
+      expect(result.promptInput.sourceDreamerArtifactId).toBe('pi-art-dreamer-001-run-001');
     });
 
     it('message field is valid JSON (JSON.parse succeeds)', () => {
@@ -123,6 +131,22 @@ describe('PhilosopherPromptBuilder', () => {
       expect(instruction).toMatch(/no markdown/i);
     });
 
+    it('philosopherInstruction tells LLM to copy sourceDreamerArtifactId from input', () => {
+      const builder = new PhilosopherPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_INPUT);
+
+      const instruction = result.promptInput.philosopherInstruction;
+      expect(instruction).toContain('input.sourceDreamerArtifactId');
+    });
+
+    it('sourceDreamerArtifactId appears at top level of serialized JSON message', () => {
+      const builder = new PhilosopherPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_INPUT);
+
+      const parsed = JSON.parse(result.message);
+      expect(parsed.sourceDreamerArtifactId).toBe('pi-art-dreamer-001-run-001');
+    });
+
     it('buildPrompt() is a pure function — same input produces same output', () => {
       const builder = new PhilosopherPromptBuilder();
       const result1 = builder.buildPrompt(MINIMAL_INPUT);
@@ -133,11 +157,12 @@ describe('PhilosopherPromptBuilder', () => {
     });
 
     it('handles null dreamerArtifact gracefully', () => {
-      const input = { ...MINIMAL_INPUT, dreamerArtifact: null };
+      const input = { ...MINIMAL_INPUT, dreamerArtifact: null, sourceDreamerArtifactId: '' };
       const builder = new PhilosopherPromptBuilder();
       const result = builder.buildPrompt(input);
 
       expect(result.promptInput.dreamerArtifact).toBeNull();
+      expect(result.promptInput.sourceDreamerArtifactId).toBe('');
       expect(() => JSON.parse(result.message)).not.toThrow();
     });
 
@@ -149,6 +174,7 @@ describe('PhilosopherPromptBuilder', () => {
       expect(parsed).toHaveProperty('taskId');
       expect(parsed).toHaveProperty('contextHash');
       expect(parsed).toHaveProperty('dreamerArtifact');
+      expect(parsed).toHaveProperty('sourceDreamerArtifactId');
       expect(parsed).toHaveProperty('philosopherInstruction');
     });
   });

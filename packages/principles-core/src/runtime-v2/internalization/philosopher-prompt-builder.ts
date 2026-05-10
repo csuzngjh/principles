@@ -21,12 +21,14 @@ export interface PhilosopherPromptBuilderInput {
   taskId: string;
   contextHash: string;
   dreamerArtifact: unknown;
+  sourceDreamerArtifactId: string;
 }
 
 export interface PhilosopherPromptInput {
   taskId: string;
   contextHash: string;
   dreamerArtifact: unknown;
+  sourceDreamerArtifactId: string;
   philosopherInstruction: string;
 }
 
@@ -47,7 +49,7 @@ PROTOCOL:
 OUTPUT FORMAT (pure JSON, no markdown):
 {
   "taskId": "<from input>",
-  "sourceDreamerArtifactId": "<ID of the dreamer artifact you analyzed>",
+  "sourceDreamerArtifactId": "<copy exactly from input.sourceDreamerArtifactId>",
   "thesis": "<philosophical thesis synthesizing the Dreamer's analysis>",
   "principleCandidate": {
     "title": "<concise principle title, <=100 chars>",
@@ -67,7 +69,7 @@ CONSTRAINTS:
 - principleCandidate.scope MUST be a non-empty string describing applicability
 - principleCandidate.confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
 - risks MUST be an array of strings (can be empty if no risks identified)
-- sourceDreamerArtifactId MUST be a non-empty string referencing the dreamer artifact
+- sourceDreamerArtifactId MUST be copied exactly from input.sourceDreamerArtifactId (non-empty string)
 - generatedAt MUST be an ISO-8601 timestamp string
 `;
 
@@ -78,6 +80,7 @@ export class PhilosopherPromptBuilder {
       taskId: input.taskId,
       contextHash: input.contextHash,
       dreamerArtifact: input.dreamerArtifact,
+      sourceDreamerArtifactId: input.sourceDreamerArtifactId,
       philosopherInstruction: PHILOSOPHER_PROTOCOL_INSTRUCTION,
     };
 
