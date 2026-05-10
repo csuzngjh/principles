@@ -428,4 +428,28 @@ describe('DefaultScribeValidator (PRI-109)', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('sourceTrace.philosopherArtifactId'))).toBe(true);
   });
+
+  it('rejects applicability with non-string elements', async () => {
+    const output = makeScribeOutput();
+    (output.principleDraft as unknown as Record<string, unknown>).applicability = [1, 2];
+    const result = await validator.validate(output, SCRIBE_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('applicability must be an array of strings'))).toBe(true);
+  });
+
+  it('rejects antiPatterns with non-string elements', async () => {
+    const output = makeScribeOutput();
+    (output.principleDraft as unknown as Record<string, unknown>).antiPatterns = [true];
+    const result = await validator.validate(output, SCRIBE_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('antiPatterns must be an array of strings'))).toBe(true);
+  });
+
+  it('rejects risks with non-string elements', async () => {
+    const output = makeScribeOutput();
+    (output as unknown as Record<string, unknown>).risks = [42];
+    const result = await validator.validate(output, SCRIBE_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('risks must be an array of strings'))).toBe(true);
+  });
 });

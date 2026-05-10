@@ -1,3 +1,14 @@
+/**
+ * ScribeOutputV1 — Output schema for the Scribe peer runner.
+ *
+ * The Scribe reads a Philosopher artifact and produces a formal principle
+ * draft with statement, rationale, applicability, and anti-patterns.
+ * This is the third stage in the internalization pipeline
+ * (Dreamer → Philosopher → Scribe → Artificer).
+ *
+ * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
+ */
+
 import { Type, type Static } from '@sinclair/typebox';
 
 export interface ScribePrincipleDraft {
@@ -83,7 +94,9 @@ export class DefaultScribeValidator implements ScribeValidator {
       if (typeof pd.statement !== 'string' || (pd.statement).trim() === '') errors.push('principleDraft.statement must be non-empty string');
       if (typeof pd.rationale !== 'string' || (pd.rationale).trim() === '') errors.push('principleDraft.rationale must be non-empty string');
       if (!Array.isArray(pd.applicability)) errors.push('principleDraft.applicability must be an array');
+      else if (!(pd.applicability as unknown[]).every(e => typeof e === 'string')) errors.push('principleDraft.applicability must be an array of strings');
       if (!Array.isArray(pd.antiPatterns)) errors.push('principleDraft.antiPatterns must be an array');
+      else if (!(pd.antiPatterns as unknown[]).every(e => typeof e === 'string')) errors.push('principleDraft.antiPatterns must be an array of strings');
       if (typeof pd.confidence !== 'number') errors.push('principleDraft.confidence must be number');
       else if (pd.confidence < 0 || pd.confidence > 1) errors.push('principleDraft.confidence must be in [0, 1]');
     }
@@ -99,6 +112,8 @@ export class DefaultScribeValidator implements ScribeValidator {
 
     if (!Array.isArray(output.risks)) {
       errors.push('risks must be an array');
+    } else if (!(output.risks as unknown[]).every(e => typeof e === 'string')) {
+      errors.push('risks must be an array of strings');
     }
 
     if (typeof output.generatedAt !== 'string' || output.generatedAt.trim() === '') {

@@ -246,6 +246,7 @@ export class ScribeRunner {
     for (const depId of deps) {
       const depTask = await this.stateManager.getTask(depId);
       if (!depTask) continue;
+      if (depTask.taskKind !== 'philosopher') continue;
       if (depTask.status !== 'succeeded') {
         this.emitScribeEvent('scribe_dependency_not_succeeded', taskId, {
           depTaskId: depId,
