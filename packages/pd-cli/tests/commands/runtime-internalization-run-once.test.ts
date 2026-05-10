@@ -40,6 +40,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
   PhilosopherRunner: vi.fn().mockImplementation(function () {
     return { run: mockRun };
   }),
+  ScribeRunner: vi.fn().mockImplementation(function () {
+    return { run: mockRun };
+  }),
   StoreEventEmitter: vi.fn().mockImplementation(function () {
     return { emitTelemetry: vi.fn() };
   }),
@@ -50,6 +53,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
   DefaultPhilosopherValidator: vi.fn().mockImplementation(function () {
+    return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
+  }),
+  DefaultScribeValidator: vi.fn().mockImplementation(function () {
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
   TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () {
@@ -175,7 +181,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('unsupported runner kind: exits 1 with error', async () => {
-    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'scribe', runtime: 'test-double', allowTestDouble: true });
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'artificer', runtime: 'test-double', allowTestDouble: true });
 
     expect(process.exitCode).toBe(1);
     expect(consoleErrorSpy.mock.calls.some((c: string[]) => c[0].includes('unsupported runner kind'))).toBe(true);
@@ -821,5 +827,96 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.effectiveTimeoutMs).toBe(240_000);
+  });
+
+  it('--runner scribe dispatches ScribeRunner', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-scribe-001',
+      taskKind: 'scribe',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-scribe-001',
+      runId: 'run-scribe-001',
+      artifactId: 'pi-art-task-scribe-001-run-scribe-001',
+      resultRef: 'scribe://run-scribe-001',
+      contextHash: 'ctx-scribe-abc',
+      output: {
+        taskId: 'task-scribe-001',
+        sourcePhilosopherArtifactId: 'pi-art-phil-001',
+        principleDraft: { title: 'T', statement: 'S', rationale: 'R', applicability: [], antiPatterns: [], confidence: 0.9 },
+        sourceTrace: { philosopherArtifactId: 'pi-art-phil-001' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'scribe', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const ScribeRunnerMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.ScribeRunner),
+    );
+    expect(ScribeRunnerMock).toHaveBeenCalled();
+    expect(mockRun).toHaveBeenCalledWith('task-scribe-001');
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.runnerKind).toBe('scribe');
+    expect(output.taskId).toBe('task-scribe-001');
+    expect(output.runId).toBe('run-scribe-001');
+    expect(output.artifactId).toBe('pi-art-task-scribe-001-run-scribe-001');
+    expect(output.resultRef).toBe('scribe://run-scribe-001');
+    expect(output.runnerResult.status).toBe('succeeded');
+  });
+
+  it('--runner scribe --enqueue-next creates artificer successor', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-scribe-enq-001',
+      taskKind: 'scribe',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-scribe-enq-001',
+      runId: 'run-scribe-enq-001',
+      artifactId: 'pi-art-scribe-enq-001',
+      resultRef: 'scribe://run-scribe-enq-001',
+      contextHash: 'ctx-enq',
+      output: {
+        taskId: 'task-scribe-enq-001',
+        sourcePhilosopherArtifactId: 'pi-art-phil-enq-001',
+        principleDraft: { title: 'T', statement: 'S', rationale: 'R', applicability: [], antiPatterns: [], confidence: 0.9 },
+        sourceTrace: { philosopherArtifactId: 'pi-art-phil-enq-001' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'successor_created',
+      sourceTaskId: 'task-scribe-enq-001',
+      successorTaskId: 'task-artificer-enq-001',
+      successorKind: 'artificer',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'scribe', runtime: 'test-double', allowTestDouble: true, enqueueNext: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.enqueueDecision).toBe('successor_created');
+    expect(output.successorTaskId).toBe('task-artificer-enq-001');
+    expect(output.successorKind).toBe('artificer');
+  });
+
+  it('run-once source has no direct ScribeRunner to ArtificerRunner import', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const srcPath = resolve(__dirname, '../../src/commands/runtime-internalization-run-once.ts');
+    if (!existsSync(srcPath)) return;
+    const src = readFileSync(srcPath, 'utf-8');
+    expect(src).not.toContain('ArtificerRunner');
   });
 });

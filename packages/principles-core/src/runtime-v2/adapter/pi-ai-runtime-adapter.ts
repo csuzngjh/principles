@@ -23,6 +23,7 @@ import { extractJsonObject } from './json-extractor.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
 import { DreamerOutputV1Schema } from '../internalization/dreamer-output.js';
 import { PhilosopherOutputV1Schema } from '../internalization/philosopher-output.js';
+import { ScribeOutputV1Schema } from '../internalization/scribe-output.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair } from './structured-output-repair.js';
@@ -185,6 +186,7 @@ const OUTPUT_SCHEMA_REGISTRY = new Map<string, TSchema>([
   ['diagnostician-output-v1', DiagnosticianOutputV1Schema as TSchema],
   ['dreamer-output-v1', DreamerOutputV1Schema as TSchema],
   ['philosopher-output-v1', PhilosopherOutputV1Schema as TSchema],
+  ['scribe-output-v1', ScribeOutputV1Schema as TSchema],
 ]);
 
 export class PiAiRuntimeAdapter implements PDRuntimeAdapter {

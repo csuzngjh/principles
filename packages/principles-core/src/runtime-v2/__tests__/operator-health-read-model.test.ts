@@ -43,8 +43,12 @@ function cleanPruning() {
   };
 }
 
-function createModel() {
-  const painChain = { getLastSuccessfulChain: vi.fn(), close: vi.fn().mockResolvedValue(undefined) };
+function createModel(taskCount = 0) {
+  const painChain = {
+    getLastSuccessfulChain: vi.fn(),
+    getTotalTaskCount: vi.fn().mockResolvedValue(taskCount),
+    close: vi.fn().mockResolvedValue(undefined),
+  };
   const pruning = { getHealthSummary: vi.fn() };
   const model = new OperatorHealthReadModel({
     workspaceDir: WS,
@@ -101,7 +105,7 @@ describe('OperatorHealthReadModel.getSnapshot', () => {
   });
 
   it('returns degraded and recommends UAT when no chain', async () => {
-    const { model, painChain, pruning } = createModel();
+    const { model, painChain, pruning } = createModel(1);
     painChain.getLastSuccessfulChain.mockResolvedValue(undefined);
     pruning.getHealthSummary.mockReturnValue(cleanPruning());
 
@@ -126,7 +130,7 @@ describe('OperatorHealthReadModel.getSnapshot', () => {
 
   it('accumulates multiple recommendedActions', async () => {
     mockAuditFn.mockResolvedValue({ status: 'degraded', consumedCount: 3, orphanCandidateCount: 2, missingLedgerCount: 2 });
-    const { model, painChain, pruning } = createModel();
+    const { model, painChain, pruning } = createModel(1);
     painChain.getLastSuccessfulChain.mockResolvedValue(undefined);
     pruning.getHealthSummary.mockReturnValue({ ...cleanPruning(), watchCount: 2, reviewCount: 0 });
 

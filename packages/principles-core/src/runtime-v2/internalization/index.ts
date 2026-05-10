@@ -204,6 +204,34 @@ export {
   DEFAULT_PHILOSOPHER_RUNNER_OPTIONS,
 } from './philosopher-runner.js';
 
+// ── Scribe Runner (PRI-109) ────────────────────────────────────────────────────
+
+export type {
+  ScribeOutputV1,
+  ScribePrincipleDraft,
+  ScribeSourceTrace,
+  ScribeValidationResult,
+  ScribeValidator,
+} from './scribe-output.js';
+
+export {
+  DefaultScribeValidator,
+} from './scribe-output.js';
+
+export type {
+  ScribeRunnerResultStatus,
+  ScribeRunnerResult,
+  ScribeRunnerOptions,
+  ResolvedScribeRunnerOptions,
+  ScribeRunnerDeps,
+} from './scribe-runner.js';
+
+export {
+  ScribeRunner,
+  resolveScribeRunnerOptions,
+  DEFAULT_SCRIBE_RUNNER_OPTIONS,
+} from './scribe-runner.js';
+
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
 
 export type {
