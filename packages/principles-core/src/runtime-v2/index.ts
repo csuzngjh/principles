@@ -528,3 +528,18 @@ export type {
 
 export { buildGfiWorkspaceSnapshot } from './gfi/index.js';
 export type { GfiReadModelInput, GfiWorkspaceSnapshot } from './gfi/index.js';
+
+// ── Schema Conformance Read Model (PRI-95) ──────────────────────────────────
+
+export { SchemaConformanceReadModel } from './schema-conformance-read-model.js';
+export type { SchemaConformanceResult, SchemaConformanceTableResult, SchemaConformanceReadModelOptions } from './schema-conformance-read-model.js';
+
+// ── Internalization Chain Integrity Read Model (PRI-97) ─────────────────────
+
+export { InternalizationChainIntegrityReadModel } from './internalization-chain-integrity-read-model.js';
+export type { BrokenLink, ChainIntegrityResult, InternalizationChainIntegrityReadModelOptions } from './internalization-chain-integrity-read-model.js';
+
+// ── Control Plane Triage (PRI-99) ───────────────────────────────────────────
+
+export { classifyCanaryFindings } from './control-plane-triage.js';
+export type { TriageCategory, TriageCategoryName, TriagePlan } from './control-plane-triage.js';
