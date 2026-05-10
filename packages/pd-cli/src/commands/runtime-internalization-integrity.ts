@@ -10,7 +10,7 @@ interface InternalizationIntegrityOptions {
 
 function formatTextOutput(result: ChainIntegrityResult): string {
   const lines: string[] = [];
-  const icon = result.overallStatus === 'ok' ? '✓' : '✗';
+  const icon = result.overallStatus === 'ok' ? '✓' : result.overallStatus === 'degraded' ? '⚠' : '✗';
 
   lines.push('Internalization Chain Integrity Report');
   lines.push(`generatedAt: ${result.generatedAt}`);
