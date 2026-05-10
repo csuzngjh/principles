@@ -29,6 +29,20 @@ export interface InternalizationChainIntegrityReadModelOptions {
   workspaceDir: string;
 }
 
+export function extractPIMetadata(diagJson: string | null): { parentTaskId?: string; dependencyTaskIds?: string[] } {
+  if (!diagJson) return {};
+  try {
+    const parsed = JSON.parse(diagJson);
+    const meta = parsed?.pi_metadata ?? parsed;
+    return {
+      parentTaskId: meta?.parentTaskId,
+      dependencyTaskIds: meta?.dependencyTaskIds,
+    };
+  } catch {
+    return {};
+  }
+}
+
 export class InternalizationChainIntegrityReadModel {
   private readonly dbPath: string;
 
@@ -116,25 +130,21 @@ export class InternalizationChainIntegrityReadModel {
         if (dreamerTask.status !== 'succeeded') continue;
 
         const hasDreamerArtifact = piArtifacts.some(
-          a => a.source_task_id === dreamerTask.task_id && a.artifact_kind === 'dreamer_pi'
+          a => a.source_task_id === dreamerTask.task_id && a.artifact_kind === 'principle'
         );
         if (!hasDreamerArtifact) {
           brokenLinks.push({
             type: 'missing_dreamer_pi_artifact',
             severity: 'error',
             taskId: dreamerTask.task_id,
-            reason: `Succeeded dreamer task ${dreamerTask.task_id} has no dreamer_pi artifact`,
+            reason: `Succeeded dreamer task ${dreamerTask.task_id} has no principle artifact`,
             recommendedAction: 'Re-run the dreamer task or investigate artifact commit failure.',
           });
         }
 
         const hasPhilosopherSuccessor = philosopherTasks.some(pt => {
-          try {
-            const diag = pt.diagnostic_json ? JSON.parse(pt.diagnostic_json) : null;
-            return diag?.parentTaskId === dreamerTask.task_id || diag?.dependencyTaskIds?.includes(dreamerTask.task_id);
-          } catch {
-            return false;
-          }
+          const meta = extractPIMetadata(pt.diagnostic_json);
+          return meta.parentTaskId === dreamerTask.task_id || meta.dependencyTaskIds?.includes(dreamerTask.task_id);
         });
         if (!hasPhilosopherSuccessor) {
           brokenLinks.push({
@@ -150,12 +160,10 @@ export class InternalizationChainIntegrityReadModel {
       for (const philosopherTask of philosopherTasks) {
         if (philosopherTask.status === 'pending' || philosopherTask.status === 'leased') {
           let hasDreamerDependency = false;
-          try {
-            const diag = philosopherTask.diagnostic_json ? JSON.parse(philosopherTask.diagnostic_json) : null;
-            if (diag?.dependencyTaskIds?.length > 0) {
-              hasDreamerDependency = diag.dependencyTaskIds.some((id: string) => taskMap.has(id) && taskMap.get(id)?.task_kind === 'dreamer');
-            }
-          } catch { /* skip */ }
+          const philMeta = extractPIMetadata(philosopherTask.diagnostic_json);
+          if (philMeta.dependencyTaskIds && philMeta.dependencyTaskIds.length > 0) {
+            hasDreamerDependency = philMeta.dependencyTaskIds.some((id: string) => taskMap.has(id) && taskMap.get(id)?.task_kind === 'dreamer');
+          }
 
           if (!hasDreamerDependency) {
             const candidateForPhilosopher = consumedCandidates.find(c => c.task_id === philosopherTask.task_id);
@@ -170,14 +178,14 @@ export class InternalizationChainIntegrityReadModel {
               });
               if (dreamerForCandidate) {
                 const hasDreamerPi = piArtifacts.some(
-                  a => a.source_task_id === dreamerForCandidate.task_id && a.artifact_kind === 'dreamer_pi'
+                  a => a.source_task_id === dreamerForCandidate.task_id && a.artifact_kind === 'principle'
                 );
                 if (!hasDreamerPi) {
                   brokenLinks.push({
                     type: 'philosopher_missing_dreamer_artifact',
                     severity: 'warning',
                     taskId: philosopherTask.task_id,
-                    reason: `Philosopher task ${philosopherTask.task_id} depends on dreamer task ${dreamerForCandidate.task_id} which has no dreamer_pi artifact`,
+                    reason: `Philosopher task ${philosopherTask.task_id} depends on dreamer task ${dreamerForCandidate.task_id} which has no principle artifact`,
                     recommendedAction: 'Ensure dreamer task has completed and committed artifacts before philosopher runs.',
                   });
                 }
