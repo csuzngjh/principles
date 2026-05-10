@@ -30,11 +30,11 @@ export class SqliteConnection {
       ? { workspaceDir: workspaceDirOrOpts }
       : workspaceDirOrOpts;
     const pdDir = join(opts.workspaceDir, '.pd');
-    if (!fs.existsSync(pdDir)) {
+    this.readonlyMode = opts.readonly ?? false;
+    if (!this.readonlyMode && !fs.existsSync(pdDir)) {
       fs.mkdirSync(pdDir, { recursive: true });
     }
     this.dbPath = join(pdDir, 'state.db');
-    this.readonlyMode = opts.readonly ?? false;
   }
 
   getDb(): Database.Database {
