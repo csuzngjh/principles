@@ -39,6 +39,7 @@ import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
+import { PhilosopherPromptBuilder } from './philosopher-prompt-builder.js';
 
 // ── Result Types ──────────────────────────────────────────────────────────────
 
@@ -207,7 +208,7 @@ export class PhilosopherRunner {
       const storeRunId = await this.resolveStoreRunId(taskId);
 
       this.phase = RunnerPhase.BuildingContext;
-      const { contextHash, dreamerArtifact } = await this.buildContext(taskId);
+      const { contextHash, dreamerArtifact, sourceDreamerArtifactId } = await this.buildContext(taskId);
 
       if (!dreamerArtifact) {
         return this.retryOrFail({
@@ -221,7 +222,7 @@ export class PhilosopherRunner {
       this.emitPhilosopherEvent('philosopher_context_built', taskId, { contextHash });
 
       this.phase = RunnerPhase.Invoking;
-      const runHandle = await this.invokeRuntime(taskId, contextHash, dreamerArtifact);
+      const runHandle = await this.invokeRuntime({ taskId, contextHash, dreamerArtifact, sourceDreamerArtifactId });
 
       this.emitPhilosopherEvent('philosopher_run_started', taskId, {
         runtimeKind: this.resolvedOptions.runtimeKind,
@@ -266,7 +267,7 @@ export class PhilosopherRunner {
 
   // ── Phase methods ─────────────────────────────────────────────────────────
 
-  private async buildContext(taskId: string): Promise<{ contextHash: string; dreamerArtifact: string | null }> {
+  private async buildContext(taskId: string): Promise<{ contextHash: string; dreamerArtifact: string | null; sourceDreamerArtifactId: string | null }> {
     const task = await this.stateManager.getTask(taskId);
     if (!task) {
       throw new PDRuntimeError('input_invalid', `Task ${taskId} not found`);
@@ -277,7 +278,7 @@ export class PhilosopherRunner {
 
     if (deps.length === 0) {
       this.emitPhilosopherEvent('philosopher_no_dependencies', taskId, {});
-      return { contextHash: 'empty', dreamerArtifact: null };
+      return { contextHash: 'empty', dreamerArtifact: null, sourceDreamerArtifactId: null };
     }
 
     for (const depId of deps) {
@@ -300,12 +301,13 @@ export class PhilosopherRunner {
         return {
           contextHash: PhilosopherRunner.hashContextRefs([artifactRef]),
           dreamerArtifact: firstArtifact.contentJson,
+          sourceDreamerArtifactId: firstArtifact.artifactId,
         };
       }
     }
 
     this.emitPhilosopherEvent('philosopher_no_dreamer_artifact', taskId, {});
-    return { contextHash: 'empty', dreamerArtifact: null };
+    return { contextHash: 'empty', dreamerArtifact: null, sourceDreamerArtifactId: null };
   }
 
   private static hashContextRefs(refs: readonly string[]): string {
@@ -327,11 +329,33 @@ export class PhilosopherRunner {
     return latestRun.runId;
   }
 
-  private async invokeRuntime(taskId: string, contextHash: string, dreamerArtifact: string): Promise<RunHandle> {
+  private async invokeRuntime(params: {
+    taskId: string;
+    contextHash: string;
+    dreamerArtifact: string | null;
+    sourceDreamerArtifactId: string | null;
+  }): Promise<RunHandle> {
+    let parsedDreamerArtifact: unknown = null;
+    if (params.dreamerArtifact) {
+      try {
+        parsedDreamerArtifact = JSON.parse(params.dreamerArtifact);
+      } catch {
+        parsedDreamerArtifact = params.dreamerArtifact;
+      }
+    }
+
+    const builder = new PhilosopherPromptBuilder();
+    const { message } = builder.buildPrompt({
+      taskId: params.taskId,
+      contextHash: params.contextHash,
+      dreamerArtifact: parsedDreamerArtifact,
+      sourceDreamerArtifactId: params.sourceDreamerArtifactId ?? '',
+    });
+
     const startInput: StartRunInput = {
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
-      taskRef: { taskId },
-      inputPayload: JSON.stringify({ taskId, contextHash, dreamerArtifact }),
+      taskRef: { taskId: params.taskId },
+      inputPayload: message,
       contextItems: [],
       outputSchemaRef: 'philosopher-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
