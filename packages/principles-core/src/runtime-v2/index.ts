@@ -540,6 +540,9 @@ export type { SchemaConformanceResult, SchemaConformanceTableResult, SchemaConfo
 export { InternalizationChainIntegrityReadModel } from './internalization-chain-integrity-read-model.js';
 export type { BrokenLink, ChainIntegrityResult, InternalizationChainIntegrityReadModelOptions } from './internalization-chain-integrity-read-model.js';
 
+export { InternalizationIntegrityRemediation } from './internalization-integrity-remediation.js';
+export type { RemediationAction, RemediationResult, InternalizationIntegrityRemediationOptions } from './internalization-integrity-remediation.js';
+
 // ── Control Plane Triage (PRI-99) ───────────────────────────────────────────
 
 export { classifyCanaryFindings } from './control-plane-triage.js';

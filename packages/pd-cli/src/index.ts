@@ -36,6 +36,7 @@ import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handle
 import { handleArtifactShow } from './commands/artifact.js';
 import { handleRuntimeCanary } from './commands/runtime-canary.js';
 import { handleRuntimeInternalizationIntegrity } from './commands/runtime-internalization-integrity.js';
+import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-internalization-integrity-repair.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 
@@ -437,6 +438,17 @@ internalizationCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeInternalizationIntegrity({ workspace: opts.workspace, json: opts.json });
+  });
+
+internalizationCmd
+  .command('integrity-repair')
+  .description('Repair broken internalization chain links (operator repair path)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Report only, no modifications (default)', true)
+  .option('--confirm', 'Actually repair broken links')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeInternalizationIntegrityRepair({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
   });
 
 const diagnosticsCmd = runtimeCmd
