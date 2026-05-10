@@ -39,6 +39,7 @@ import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import type { TelemetryEvent } from '../../telemetry-event.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
+import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
 
 // ── Result Types ─────────────────────────────────────────────────────────────
 
@@ -218,13 +219,13 @@ export class DreamerRunner {
 
       // 2. Build context from predecessor task outputs (no ContextAssembler)
       this.phase = RunnerPhase.BuildingContext;
-      const { contextHash } = await this.buildContext(taskId);
+      const { contextHash, contextRefs, predecessorOutput } = await this.buildContext(taskId);
 
       this.emitDreamerEvent('dreamer_context_built', taskId, { contextHash });
 
       // 3. Invoke runtime
       this.phase = RunnerPhase.Invoking;
-      const runHandle = await this.invokeRuntime(taskId, contextHash);
+      const runHandle = await this.invokeRuntime({ taskId, contextHash, contextRefs, predecessorOutput });
 
       this.emitDreamerEvent('dreamer_run_started', taskId, {
         runtimeKind: this.resolvedOptions.runtimeKind,
@@ -294,8 +295,7 @@ export class DreamerRunner {
    *
    * @see hydratePITaskRecord (PRI-65) for fail-closed PI metadata access
    */
-  private async buildContext(taskId: string): Promise<{ contextHash: string }> {
-    // Get the task to read dependencyTaskIds
+  private async buildContext(taskId: string): Promise<{ contextHash: string; contextRefs: string[]; predecessorOutput: unknown }> {
     const task = await this.stateManager.getTask(taskId);
     if (!task) {
       throw new PDRuntimeError('input_invalid', `Task ${taskId} not found`);
@@ -304,9 +304,9 @@ export class DreamerRunner {
     const piTask = hydratePITaskRecord(task);
     const deps = piTask?.dependencyTaskIds ?? [];
 
-    // Resolve each dependency and collect result refs
     const contextRefs: string[] = [];
     const rejectedDeps: string[] = [];
+    let predecessorOutput: unknown = null;
     if (deps.length > 0) {
       const results = await Promise.allSettled(
         deps.map((depId) => this.stateManager.getTask(depId)),
@@ -325,6 +325,16 @@ export class DreamerRunner {
           if (depPiTask?.outputArtifactRefs) {
             contextRefs.push(...depPiTask.outputArtifactRefs.map((a) => a.ref));
           }
+          if (result.value.status === 'succeeded' && predecessorOutput === null) {
+            const artifacts = await this.artifactStore.listBySourceTaskId(depId);
+            if (artifacts.length > 0 && artifacts[0]) {
+              try {
+                predecessorOutput = JSON.parse(artifacts[0].contentJson);
+              } catch {
+                predecessorOutput = artifacts[0].contentJson;
+              }
+            }
+          }
         }
       }
     }
@@ -336,10 +346,9 @@ export class DreamerRunner {
       });
     }
 
-    // Compute context hash from collected refs
     const contextHash = DreamerRunner.hashContextRefs(contextRefs);
 
-    return { contextHash };
+    return { contextHash, contextRefs, predecessorOutput };
   }
 
   /**
@@ -392,11 +401,24 @@ export class DreamerRunner {
     return { ids: lineageIds, hasRejected };
   }
 
-  private async invokeRuntime(taskId: string, contextHash: string): Promise<RunHandle> {
+  private async invokeRuntime(params: {
+    taskId: string;
+    contextHash: string;
+    contextRefs: readonly string[];
+    predecessorOutput: unknown;
+  }): Promise<RunHandle> {
+    const builder = new DreamerPromptBuilder();
+    const { message } = builder.buildPrompt({
+      taskId: params.taskId,
+      contextHash: params.contextHash,
+      contextRefs: params.contextRefs,
+      predecessorOutput: params.predecessorOutput,
+    });
+
     const startInput: StartRunInput = {
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
-      taskRef: { taskId },
-      inputPayload: JSON.stringify({ taskId, contextHash }),
+      taskRef: { taskId: params.taskId },
+      inputPayload: message,
       contextItems: [],
       outputSchemaRef: 'dreamer-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
