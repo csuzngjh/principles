@@ -140,10 +140,7 @@ export class SchemaConformanceReadModel {
             extraInfo: 'Table does not exist',
           };
           missingIndexes.push(...expected.indexes);
-          for (const col of expected.columns) {
-            const migrationKey = COLUMN_MIGRATION_MAP[col];
-            if (migrationKey) migrationsNeeded.push(migrationKey);
-          }
+          migrationsNeeded.push(`create_table_${tableName}`);
           continue;
         }
 

@@ -159,6 +159,9 @@ describe('SchemaConformanceReadModel', () => {
     expect(result.tables.commits?.exists).toBe(false);
     expect(result.tables.principle_candidates?.exists).toBe(false);
     expect(result.tables.pi_artifacts?.exists).toBe(false);
+    expect(result.migrationsNeeded).toContain('create_table_tasks');
+    expect(result.migrationsNeeded).toContain('create_table_principle_candidates');
+    expect(result.migrationsNeeded).not.toContain('add_recommendation_kind');
   });
 
   it('reports missing columns for old schema', () => {

@@ -217,7 +217,7 @@ export function classifyCanaryFindings(canaryOutput: CanaryOutputInput): TriageP
         findings.push({ category: 'internalization_chain_broken', ...CATEGORY_DEFINITIONS.internalization_chain_broken });
         break;
       case 'runtime_health':
-        if (check.error?.includes('Cannot open') || check.error?.includes('IO') || check.error?.includes('SQLITE_IO')) {
+        if (check.error?.includes('Cannot open') || check.error?.includes('SQLITE_IO') || check.error?.includes('SQLITE_BUSY') || check.error?.includes('I/O')) {
           findings.push({ category: 'sqlite_io_error', ...CATEGORY_DEFINITIONS.sqlite_io_error });
         } else {
           findings.push({ category: 'unknown', ...CATEGORY_DEFINITIONS.unknown });

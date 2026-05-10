@@ -158,16 +158,45 @@ export class InternalizationChainIntegrityReadModel {
           } catch { /* skip */ }
 
           if (!hasDreamerDependency) {
-            const dreamerArtifacts = piArtifacts.filter(
-              a => a.artifact_kind === 'dreamer_pi'
-            );
-            if (dreamerArtifacts.length === 0) {
+            const candidateForPhilosopher = consumedCandidates.find(c => c.task_id === philosopherTask.task_id);
+            if (candidateForPhilosopher) {
+              const dreamerForCandidate = dreamerTasks.find(dt => {
+                try {
+                  const diag = dt.diagnostic_json ? JSON.parse(dt.diagnostic_json) : null;
+                  return diag?.candidateId === candidateForPhilosopher.candidate_id;
+                } catch {
+                  return false;
+                }
+              });
+              if (dreamerForCandidate) {
+                const hasDreamerPi = piArtifacts.some(
+                  a => a.source_task_id === dreamerForCandidate.task_id && a.artifact_kind === 'dreamer_pi'
+                );
+                if (!hasDreamerPi) {
+                  brokenLinks.push({
+                    type: 'philosopher_missing_dreamer_artifact',
+                    severity: 'warning',
+                    taskId: philosopherTask.task_id,
+                    reason: `Philosopher task ${philosopherTask.task_id} depends on dreamer task ${dreamerForCandidate.task_id} which has no dreamer_pi artifact`,
+                    recommendedAction: 'Ensure dreamer task has completed and committed artifacts before philosopher runs.',
+                  });
+                }
+              } else {
+                brokenLinks.push({
+                  type: 'philosopher_missing_dreamer_artifact',
+                  severity: 'warning',
+                  taskId: philosopherTask.task_id,
+                  reason: `Philosopher task ${philosopherTask.task_id} has no dreamer task for candidate ${candidateForPhilosopher.candidate_id}`,
+                  recommendedAction: 'Seed a dreamer task for the candidate before philosopher runs.',
+                });
+              }
+            } else {
               brokenLinks.push({
-                type: 'philosopher_missing_dreamer_artifact',
+                type: 'philosopher_dependency_unverifiable',
                 severity: 'warning',
                 taskId: philosopherTask.task_id,
-                reason: `Philosopher task ${philosopherTask.task_id} cannot find dreamer artifact dependency`,
-                recommendedAction: 'Ensure dreamer tasks have completed and committed artifacts before philosopher runs.',
+                reason: `Philosopher task ${philosopherTask.task_id} has no dependencyTaskIds and no candidate link; dependency chain unverifiable`,
+                recommendedAction: 'Add dependencyTaskIds to diagnostic_json or verify candidate linkage.',
               });
             }
           }
@@ -210,13 +239,18 @@ export class InternalizationChainIntegrityReadModel {
 
         if (task.status === 'leased' && task.lease_expires_at) {
           const expiresAt = new Date(task.lease_expires_at).getTime();
-          if (expiresAt < Date.now()) {
+          if (Number.isNaN(expiresAt) || expiresAt < Date.now()) {
+            const reasonSuffix = Number.isNaN(expiresAt)
+              ? `has unparseable lease_expires_at: ${task.lease_expires_at}`
+              : `lease expired at ${task.lease_expires_at}`;
             brokenLinks.push({
               type: 'lease_stuck',
               severity: 'warning',
               taskId: task.task_id,
-              reason: `Task ${task.task_id} is leased but lease expired at ${task.lease_expires_at}`,
-              recommendedAction: 'Run recovery sweep or manually release the lease.',
+              reason: `Task ${task.task_id} is leased but ${reasonSuffix}`,
+              recommendedAction: Number.isNaN(expiresAt)
+                ? 'Fix the unparseable lease_expires_at timestamp or manually release the lease.'
+                : 'Run recovery sweep or manually release the lease.',
             });
           }
         }
