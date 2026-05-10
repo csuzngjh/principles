@@ -10,6 +10,7 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 import type { PDErrorCategory } from '../error-categories.js';
+import { Type, type Static } from '@sinclair/typebox';
 
 // ── Output Types ─────────────────────────────────────────────────────────────
 
@@ -61,6 +62,31 @@ export interface DreamerOutput {
   /** Human-readable explanation when valid=false */
   readonly reason?: string;
 }
+
+// ── TypeBox Schema ──────────────────────────────────────────────────────────
+
+export const DreamerCandidateSchema = Type.Object({
+  candidateIndex: Type.Number(),
+  badDecision: Type.String({ minLength: 1 }),
+  betterDecision: Type.String({ minLength: 1 }),
+  rationale: Type.String({ minLength: 1 }),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  riskLevel: Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')]),
+  strategicPerspective: Type.String({ minLength: 1 }),
+});
+
+export const DreamerOutputV1Schema = Type.Object({
+  valid: Type.Boolean(),
+  taskId: Type.String({ minLength: 1 }),
+  candidates: Type.Array(DreamerCandidateSchema, { minItems: 1, maxItems: 5 }),
+  sourcePrincipleId: Type.Optional(Type.String()),
+  sourcePainId: Type.Optional(Type.String()),
+  contextRefs: Type.Array(Type.String()),
+  generatedAt: Type.String({ minLength: 1 }),
+  reason: Type.Optional(Type.String()),
+});
+
+export type DreamerOutputV1 = Static<typeof DreamerOutputV1Schema>;
 
 // ── Validation Result ────────────────────────────────────────────────────────
 
