@@ -444,11 +444,11 @@ internalizationCmd
   .command('integrity-repair')
   .description('Repair broken internalization chain links (operator repair path)')
   .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--dry-run', 'Report only, no modifications (default)', true)
+  .option('--dry-run', 'Report only, no modifications')
   .option('--confirm', 'Actually repair broken links')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    await handleRuntimeInternalizationIntegrityRepair({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
+    await handleRuntimeInternalizationIntegrityRepair({ workspace: opts.workspace, confirm: opts.confirm, dryRun: opts.dryRun, json: opts.json });
   });
 
 const diagnosticsCmd = runtimeCmd
