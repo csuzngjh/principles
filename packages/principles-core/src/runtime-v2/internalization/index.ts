@@ -113,6 +113,7 @@ export {
 
 export {
   canAcquireLease,
+  canRetryNow,
   areDependenciesMet,
   canTransitionTo,
   isResultRefImmutable,

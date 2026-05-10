@@ -321,13 +321,17 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
       correlationId: opts.candidateId,
     });
 
+    const diagObj = JSON.parse(diagnosticJson);
+    diagObj.candidateId = opts.candidateId;
+    const finalDiagnosticJson = JSON.stringify(diagObj);
+
     const task = await stateManager.createTask({
       taskId,
       taskKind: 'dreamer',
       status: 'pending',
       attemptCount: 0,
       maxAttempts: 3,
-      diagnosticJson,
+      diagnosticJson: finalDiagnosticJson,
     });
 
     const result: CandidateInternalizeResult = {
@@ -670,6 +674,166 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
       console.error(`Repair failed: ${String(err)}`);
     }
     process.exit(1);
+  } finally {
+    await stateManager.close();
+  }
+}
+
+// ── Internalization Backfill (consumed candidates missing dreamer tasks) ──────
+
+interface CandidateBackfillOptions {
+  workspace?: string;
+  json?: boolean;
+  dryRun?: boolean;
+  confirm?: boolean;
+}
+
+interface BackfillCandidateResult {
+  candidateId: string;
+  route: string;
+  status: 'would_create' | 'created' | 'existing' | 'deferred' | 'error';
+  taskId?: string;
+  channel?: string;
+  reason?: string;
+}
+
+interface BackfillOutput {
+  mode: 'dry-run' | 'confirm';
+  totalConsumed: number;
+  missingDreamerTask: number;
+  alreadyHaveTask: number;
+  deferred: number;
+  created: number;
+  errors: number;
+  results: BackfillCandidateResult[];
+}
+
+export async function handleCandidateInternalizationBackfill(opts: CandidateBackfillOptions): Promise<void> {
+  const workspaceDir = resolveWorkspaceDir(opts.workspace);
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+  const isConfirm = opts.confirm ?? false;
+
+  try {
+    await stateManager.initialize();
+
+    const db = stateManager.connection.getDb();
+
+    const consumedRows = db.prepare(
+      "SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'"
+    ).all() as { candidate_id: string }[];
+
+    const output: BackfillOutput = {
+      mode: isConfirm ? 'confirm' : 'dry-run',
+      totalConsumed: consumedRows.length,
+      missingDreamerTask: 0,
+      alreadyHaveTask: 0,
+      deferred: 0,
+      created: 0,
+      errors: 0,
+      results: [],
+    };
+
+    for (const row of consumedRows) {
+      const candidateId = row.candidate_id;
+
+      const candidate = await stateManager.getCandidate(candidateId);
+      if (!candidate) {
+        output.errors++;
+        output.results.push({ candidateId, route: 'unknown', status: 'error', reason: 'Candidate not found in DB' });
+        continue;
+      }
+
+      const recommendation = resolveCandidateRecommendation(candidate, stateManager, candidateId);
+      const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
+
+      if (!decision.ready || decision.route === 'deferred') {
+        output.deferred++;
+        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason: decision.reason });
+        continue;
+      }
+
+      const channel = ROUTE_CHANNEL_MAP[decision.route] ?? 'prompt';
+      const taskId = `dreamer-${candidateId}-${channel}`;
+
+      const existingTask = await stateManager.getTask(taskId);
+      if (existingTask) {
+        if (isConfirm && existingTask.diagnosticJson) {
+          try {
+            const diagObj = JSON.parse(existingTask.diagnosticJson);
+            if (!diagObj.candidateId) {
+              diagObj.candidateId = candidateId;
+              await stateManager.updateTaskDiagnosticJson(taskId, JSON.stringify(diagObj));
+            }
+          } catch { /* best-effort */ }
+        }
+        output.alreadyHaveTask++;
+        output.results.push({ candidateId, route: decision.route, status: 'existing', taskId: existingTask.taskId, channel });
+        continue;
+      }
+
+      output.missingDreamerTask++;
+
+      if (!isConfirm) {
+        output.results.push({ candidateId, route: decision.route, status: 'would_create', taskId, channel });
+        continue;
+      }
+
+      try {
+        const diagnosticJson = createPITaskDiagnosticJson({
+          dependencyTaskIds: [],
+          channel: channel as 'prompt' | 'skill' | 'code_tool_hook' | 'model_training',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [{ artifactType: 'candidate', ref: `candidate://${candidateId}` }],
+          outputArtifactRefs: [],
+          parentTaskId: undefined,
+          correlationId: candidateId,
+        });
+
+        const diagObj = JSON.parse(diagnosticJson);
+        diagObj.candidateId = candidateId;
+        const finalDiagnosticJson = JSON.stringify(diagObj);
+
+        const task = await stateManager.createTask({
+          taskId,
+          taskKind: 'dreamer',
+          status: 'pending',
+          attemptCount: 0,
+          maxAttempts: 3,
+          diagnosticJson: finalDiagnosticJson,
+        });
+
+        output.created++;
+        output.results.push({ candidateId, route: decision.route, status: 'created', taskId: task.taskId, channel });
+      } catch (err) {
+        output.errors++;
+        output.results.push({ candidateId, route: decision.route, status: 'error', reason: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify(output, null, 2));
+    } else {
+      console.log(`\nCandidate Internalization Backfill (${output.mode})\n`);
+      console.log(`  total_consumed:      ${output.totalConsumed}`);
+      console.log(`  missing_dreamer:     ${output.missingDreamerTask}`);
+      console.log(`  already_have_task:   ${output.alreadyHaveTask}`);
+      console.log(`  deferred:            ${output.deferred}`);
+      if (isConfirm) {
+        console.log(`  created:             ${output.created}`);
+        console.log(`  errors:              ${output.errors}`);
+      }
+      for (const r of output.results) {
+        console.log(`  ${r.candidateId}: ${r.status} (${r.route})${r.taskId ? ` → ${r.taskId}` : ''}${r.reason ? ` — ${r.reason}` : ''}`);
+      }
+      if (!isConfirm && output.missingDreamerTask > 0) {
+        console.log(`\n  (use --confirm to create missing dreamer tasks)`);
+      }
+      console.log('');
+    }
+
+    if (output.missingDreamerTask > 0 && !isConfirm) {
+      process.exitCode = 1;
+    }
   } finally {
     await stateManager.close();
   }

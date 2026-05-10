@@ -170,16 +170,20 @@ export class PruningReadModel {
     }
 
     const candidateCreatedAtMap = new Map<string, string>();
+    const allCandidateIdSet = new Set<string>();
     const pdDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     try {
       if (fs.existsSync(pdDbPath)) {
         const db = new Database(pdDbPath, { readonly: true });
         try {
-          const rows = db.prepare(
-            "SELECT candidate_id, created_at FROM principle_candidates WHERE status = 'consumed'"
-          ).all() as { candidate_id: string; created_at: string }[];
-          for (const r of rows) {
-            candidateCreatedAtMap.set(r.candidate_id, r.created_at);
+          const allRows = db.prepare(
+            'SELECT candidate_id, status, created_at FROM principle_candidates'
+          ).all() as { candidate_id: string; status: string; created_at: string }[];
+          for (const r of allRows) {
+            allCandidateIdSet.add(r.candidate_id);
+            if (r.status === 'consumed') {
+              candidateCreatedAtMap.set(r.candidate_id, r.created_at);
+            }
           }
         } finally {
           db.close();
@@ -199,10 +203,10 @@ export class PruningReadModel {
       let recentCandidateCount = 0;
       let orphanCandidateCount = 0;
       for (const cid of p.derivedFromPainIds ?? []) {
-        const cAt = candidateCreatedAtMap.get(cid);
-        if (cAt) {
+        if (allCandidateIdSet.has(cid)) {
           matchedCandidateCount++;
-          if (cAt >= recentCutoff) recentCandidateCount++;
+          const cAt = candidateCreatedAtMap.get(cid);
+          if (cAt && cAt >= recentCutoff) recentCandidateCount++;
         } else {
           orphanCandidateCount++;
         }
