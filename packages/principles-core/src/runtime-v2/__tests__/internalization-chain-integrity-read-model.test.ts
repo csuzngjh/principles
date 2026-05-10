@@ -89,7 +89,7 @@ describe('InternalizationChainIntegrityReadModel', () => {
         return { all: vi.fn(() => [{ run_id: 'run1', task_id: 't1', execution_status: 'succeeded' }]), get: vi.fn(() => undefined) };
       }
       if (sql.includes('FROM pi_artifacts') && !sql.includes('WHERE')) {
-        return { all: vi.fn(() => [{ artifact_id: 'pia1', artifact_kind: 'dreamer_pi', source_task_id: 't1' }]), get: vi.fn(() => undefined) };
+        return { all: vi.fn(() => [{ artifact_id: 'pia1', artifact_kind: 'principle', source_task_id: 't1' }]), get: vi.fn(() => undefined) };
       }
       return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
     });
