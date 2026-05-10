@@ -32,11 +32,12 @@ import { handleRuntimeUat } from './commands/runtime-uat.js';
 import { handleRuntimeInternalizationQueue } from './commands/runtime-internalization-queue.js';
 import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-internalization-wake-once.js';
 import { handleRuntimeInternalizationRunOnce } from './commands/runtime-internalization-run-once.js';
-import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize } from './commands/candidate.js';
+import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize, handleCandidateInternalizationBackfill } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 import { handleRuntimeCanary } from './commands/runtime-canary.js';
 import { handleRuntimeInternalizationIntegrity } from './commands/runtime-internalization-integrity.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
+import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 
 const program = new Command();
 
@@ -423,9 +424,10 @@ internalizationCmd
   .option('--runtime <kind>', 'Runtime adapter kind: config (from workflows.yaml), pi-ai, openclaw-cli, test-double (default: config)', 'config')
   .option('--allow-test-double', 'Acknowledge that test-double runtime will mutate real queue state')
   .option('--enqueue-next', 'After successful runner execution, commit successor task to queue')
+  .option('--timeout-ms <ms>', 'Runner timeout in milliseconds (default: 300000, overrides workflows.yaml)', parseInt)
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext });
+    await handleRuntimeInternalizationRunOnce({ workspace: opts.workspace, json: opts.json, runtime: opts.runtime, runner: opts.runner, allowTestDouble: opts.allowTestDouble, enqueueNext: opts.enqueueNext, timeoutMs: opts.timeoutMs });
   });
 
 internalizationCmd
@@ -440,6 +442,21 @@ internalizationCmd
 const diagnosticsCmd = runtimeCmd
   .command('diagnostics')
   .description('Control plane diagnostic bundle operations');
+
+const recoveryCmd = runtimeCmd
+  .command('recovery')
+  .description('Runtime V2 lease recovery operations');
+
+recoveryCmd
+  .command('sweep')
+  .description('Detect and optionally recover expired leases')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Report only, no modifications (default)', true)
+  .option('--confirm', 'Actually recover expired leases')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeRecoverySweep({ workspace: opts.workspace, dryRun: !opts.confirm, confirm: opts.confirm, json: opts.json });
+  });
 
 diagnosticsCmd
   .command('export')
@@ -545,12 +562,24 @@ candidateCmd
   });
 
 candidateCmd
-  .command('show <candidateId>')
+  .command('show [candidateId]')
   .description('Show detail for a single principle candidate')
   .requiredOption('-w, --workspace <path>', 'Workspace directory')
+  .option('--candidate-id <id>', 'Candidate ID (alternative to positional arg)')
   .option('--json', 'Output raw JSON')
   .action(async (candidateId, opts) => {
-    await handleCandidateShow({ candidateId, ...opts });
+    const resolvedId = opts.candidateId ?? candidateId;
+    if (!resolvedId) {
+      console.error('Error: candidate ID is required (positional or --candidate-id)');
+      process.exitCode = 1;
+      return;
+    }
+    if (candidateId && opts.candidateId && candidateId !== opts.candidateId) {
+      console.error(`Error: conflicting candidate IDs: positional="${candidateId}", --candidate-id="${opts.candidateId}"`);
+      process.exitCode = 1;
+      return;
+    }
+    await handleCandidateShow({ candidateId: resolvedId, ...opts });
   });
 
 candidateCmd
@@ -602,6 +631,21 @@ candidateCmd
   .option('--dry-run', 'Preview without writing to database')
   .action(async (opts) => {
     await handleCandidateInternalize(opts);
+  });
+
+const candidateInternalizationCmd = candidateCmd
+  .command('internalization')
+  .description('Internalization pipeline operations for candidates');
+
+candidateInternalizationCmd
+  .command('backfill')
+  .description('Backfill dreamer tasks for consumed candidates created before Internalization Engine')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Report only, no modifications (default)', true)
+  .option('--confirm', 'Actually create missing dreamer tasks')
+  .option('--json', 'Output as JSON')
+  .action(async (opts) => {
+    await handleCandidateInternalizationBackfill({ workspace: opts.workspace, dryRun: !opts.confirm, confirm: opts.confirm, json: opts.json });
   });
 
 // ── Artifact inspection commands ────────────────────────────────────────────

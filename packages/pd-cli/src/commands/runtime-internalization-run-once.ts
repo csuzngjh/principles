@@ -23,6 +23,7 @@ interface RunOnceOptions {
   runner?: string;
   allowTestDouble?: boolean;
   enqueueNext?: boolean;
+  timeoutMs?: number;
 }
 
 const OWNER = 'pd-cli-internalization-run-once';
@@ -47,6 +48,8 @@ interface RunOnceOutput {
   successorTaskId?: string;
   successorKind?: string;
   enqueueDecision?: string;
+  effectiveTimeoutMs?: number;
+  timeoutSource?: string;
 }
 
 function buildOutput(wakeResult: WakeOnceResult, runnerResult?: DreamerRunnerResult | PhilosopherRunnerResult, skipReason?: string): RunOnceOutput {
@@ -150,6 +153,14 @@ function formatTextOutput(output: RunOnceOutput): string {
     lines.push(`  enqueue: ${output.enqueueDecision}`);
   }
 
+  if (output.effectiveTimeoutMs) {
+    lines.push(`  timeout: ${output.effectiveTimeoutMs}ms`);
+  }
+
+  if (output.timeoutSource) {
+    lines.push(`  timeoutSource: ${output.timeoutSource}`);
+  }
+
   return lines.join('\n');
 }
 
@@ -158,6 +169,7 @@ interface ResolveAdapterOptions {
   taskId: string;
   workspaceDir: string;
   runnerKind: string;
+  timeoutMs?: number;
 }
 
 function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
@@ -221,12 +233,14 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
 
   if (opts.runtimeKind === 'pi-ai' || (opts.runtimeKind === 'config' && config.runtimeKind === 'pi-ai')) {
     validateRuntimeConfig(config);
+    // CLI --timeout-ms overrides workflows.yaml timeoutMs
+    const adapterTimeoutMs = opts.timeoutMs ?? config.timeoutMs;
     return new PiAiRuntimeAdapter({
       provider: String(config.provider),
       model: String(config.model),
       apiKeyEnv: String(config.apiKeyEnv),
       maxRetries: config.maxRetries,
-      timeoutMs: config.timeoutMs,
+      timeoutMs: adapterTimeoutMs,
       baseUrl: config.baseUrl,
       workspace: opts.workspaceDir,
     });
@@ -246,6 +260,16 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const runtimeKind = opts.runtime ?? 'config';
   const runnerKind = opts.runner ?? 'dreamer';
+
+  // Resolve effective timeout: CLI flag > runner default (300_000)
+  const cliTimeoutMs = opts.timeoutMs;
+  if (cliTimeoutMs !== undefined && (!Number.isFinite(cliTimeoutMs) || cliTimeoutMs <= 0)) {
+    console.error(`Error: --timeout-ms must be a positive integer, got: ${opts.timeoutMs}`);
+    process.exitCode = 1;
+    return;
+  }
+  const defaultRunnerTimeoutMs = 300_000;
+  const effectiveTimeoutMs = cliTimeoutMs ?? defaultRunnerTimeoutMs;
 
   if (runtimeKind === 'test-double' && !opts.allowTestDouble) {
     console.error('Error: test-double runtime mutates real queue state (leases tasks, marks them succeeded with empty output).');
@@ -286,20 +310,20 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     if (wakeResult.decision === 'would_lease' && wakeResult.taskKind === runnerKind) {
       const eventEmitter = new StoreEventEmitter();
       const artifactStore = stateManager.piArtifactStore;
-      const runtimeAdapter = resolveRuntimeAdapter({ runtimeKind, taskId: wakeResult.taskId, workspaceDir, runnerKind });
+      const runtimeAdapter = resolveRuntimeAdapter({ runtimeKind, taskId: wakeResult.taskId, workspaceDir, runnerKind, timeoutMs: cliTimeoutMs });
 
       if (runnerKind === 'dreamer') {
         const validator = new DefaultDreamerValidator();
         const runner = new DreamerRunner(
           { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-          { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: 300_000 },
+          { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
         );
         runnerResult = await runner.run(wakeResult.taskId);
       } else if (runnerKind === 'philosopher') {
         const validator = new DefaultPhilosopherValidator();
         const runner = new PhilosopherRunner(
           { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
-          { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: 300_000 },
+          { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
         );
         runnerResult = await runner.run(wakeResult.taskId);
       }
@@ -309,6 +333,14 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
 
     const output = buildOutput(wakeResult, runnerResult, skipReason);
     output.runnerKind = runnerKind;
+    output.effectiveTimeoutMs = effectiveTimeoutMs;
+    if (runnerResult?.failureReason?.includes('timeoutSource=')) {
+      const match = /timeoutSource=(\w+)/.exec(runnerResult.failureReason);
+      if (match) {
+        const [, source] = match;
+        output.timeoutSource = source;
+      }
+    }
 
     if (opts.enqueueNext && runnerResult?.status === 'succeeded' && wakeResult.decision === 'would_lease') {
       const commitResult = await orchestrator.commitNextTaskProposal(wakeResult.taskId);

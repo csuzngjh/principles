@@ -306,6 +306,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   /**
    * One-shot run: call LLM via pi-ai complete(), parse and validate output.
    * Blocks until LLM responds (or times out). Run is terminal on return.
+   *
+   * Timeout priority: input.timeoutMs (from runner) > this.config.timeoutMs (from workflows.yaml) > 300_000 (default)
+   * The resolved effectiveTimeoutMs is passed through to completeWithRetry and pi-ai complete()
+   * so that the provider request timeout always matches the runner's intent.
    */
   async startRun(input: StartRunInput): Promise<RunHandle> {
     const runId = crypto.randomUUID();
@@ -330,7 +334,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     this.runs.set(runId, runState);
 
     // AbortSignal.timeout for clean timeout control
-    const effectiveTimeoutMs = input.timeoutMs || this.config.timeoutMs || 300_000;
+    // Priority: input.timeoutMs (runner) > config.timeoutMs (workflows.yaml) > 300_000 (default)
+    const effectiveTimeoutMs = input.timeoutMs ?? this.config.timeoutMs ?? 300_000;
     const signal = AbortSignal.timeout(effectiveTimeoutMs);
 
     // Build pi-ai Context from inputPayload
@@ -364,8 +369,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     });
 
     try {
-      // Call LLM with retry
-      const response = await this.completeWithRetry(model, context, { signal, apiKey });
+      // Call LLM with retry — pass effectiveTimeoutMs so provider request uses runner timeout
+      const response = await this.completeWithRetry(model, context, { signal, apiKey, effectiveTimeoutMs });
 
       // extractAssistantTextOrThrow normalizes resolved-error responses
       // (e.g., stopReason:'error' + errorMessage:'401 Unauthorized')
@@ -470,7 +475,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
       if (isAbortError(err, signal)) {
         runState.status = 'timed_out';
-        runState.reason = `LLM request timed out after ${effectiveTimeoutMs}ms`;
+        runState.reason = `[timeout] LLM request timed out after ${effectiveTimeoutMs}ms (timeoutSource=runner_poll)`;
       } else if (err instanceof PDRuntimeError) {
         runState.status = 'failed';
         runState.reason = err.message;
@@ -606,10 +611,11 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private async completeWithRetry(
     model: ReturnType<typeof resolveModel>,
     context: Context,
-    options: { signal: AbortSignal; apiKey: string },
+    options: { signal: AbortSignal; apiKey: string; effectiveTimeoutMs?: number },
   ): Promise<AssistantMessage> {
     const maxRetries = this.config.maxRetries ?? 2;
-    const effectiveTimeoutMs = this.config.timeoutMs ?? 300_000;
+    // Use the timeout resolved in startRun (runner > config > default) — never re-derive from config alone
+    const effectiveTimeoutMs = options.effectiveTimeoutMs ?? this.config.timeoutMs ?? 300_000;
     let lastError: unknown = undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -631,7 +637,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             || /abort/i.test(rawMessage);
 
           if (isTimeout) {
-            throw new PDRuntimeError('timeout', `LLM request timed out after ${effectiveTimeoutMs}ms`);
+            throw new PDRuntimeError('timeout', `[timeout] LLM request timed out after ${effectiveTimeoutMs}ms (timeoutSource=provider_request)`);
           }
 
           // execution_failed — retryable if attempts remain

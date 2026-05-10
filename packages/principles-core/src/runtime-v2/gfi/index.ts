@@ -8,7 +8,7 @@ export {
   createGfiSnapshot,
 } from './gfi-kernel.js';
 
-export { buildGfiWorkspaceSnapshot } from './gfi-read-model.js';
+export { buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from './gfi-read-model.js';
 
 export type {
   GfiState,
@@ -19,4 +19,4 @@ export type {
   GfiSnapshot,
 } from './gfi-types.js';
 
-export type { GfiReadModelInput, GfiWorkspaceSnapshot } from './gfi-read-model.js';
+export type { GfiReadModelInput, GfiWorkspaceSnapshot, GfiWorkspaceHealthAssessment } from './gfi-read-model.js';

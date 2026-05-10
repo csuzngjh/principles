@@ -378,6 +378,7 @@ export {
 
 export {
   canAcquireLease,
+  canRetryNow,
   areDependenciesMet,
   canTransitionTo,
   isResultRefImmutable,
@@ -526,8 +527,8 @@ export type {
 
 // ── GFI Workspace Read Model (PRI-78) ──────────────────────────────────────
 
-export { buildGfiWorkspaceSnapshot } from './gfi/index.js';
-export type { GfiReadModelInput, GfiWorkspaceSnapshot } from './gfi/index.js';
+export { buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from './gfi/index.js';
+export type { GfiReadModelInput, GfiWorkspaceSnapshot, GfiWorkspaceHealthAssessment } from './gfi/index.js';
 
 // ── Schema Conformance Read Model (PRI-95) ──────────────────────────────────
 

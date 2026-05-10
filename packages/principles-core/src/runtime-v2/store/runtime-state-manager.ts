@@ -22,7 +22,7 @@ import type { TaskStore, TaskStoreFilter, TaskStoreUpdatePatch } from './task/ta
 import type { RunStore, RunRecord } from './run/run-store.js';
 import type { LeaseManager, AcquireLeaseOptions } from './lifecycle/lease-manager.js';
 import type { RetryPolicy, RetryPolicyConfig } from './lifecycle/retry-policy.js';
-import type { RecoverySweep } from './lifecycle/recovery-sweep.js';
+import type { RecoverySweep, RecoveryResult } from './lifecycle/recovery-sweep.js';
 import type { PDErrorCategory } from '../error-categories.js';
 import type { TaskRecord } from '../task-status.js';
 import { storeEmitter, type StoreEventEmitter } from './event-emitter.js';
@@ -297,15 +297,23 @@ export class RuntimeStateManager {
     return updated;
   }
 
-  /** Mark a task as retry_wait and emit task_retried event. Per D-03: retry with backoff. */
+  /** Mark a task as retry_wait and emit task_retried event. Per D-03: retry with backoff.
+   *  Sets leaseExpiresAt to now + backoffMs so that canRetryNow() gates correctly.
+   */
   async markTaskRetryWait(taskId: string, errorCategory: PDErrorCategory): Promise<TaskRecord> {
     this.assertInitialized();
     const now = new Date().toISOString();
 
+    // Fetch current task to compute backoff from attemptCount
+    const currentTask = await this._taskStore.getTask(taskId);
+    const attemptCount = currentTask?.attemptCount ?? 0;
+    const backoffMs = this.retryPolicy.calculateBackoff(attemptCount + 1);
+    const retryAfter = new Date(Date.now() + backoffMs).toISOString();
+
     const updated = await this._taskStore.updateTask(taskId, {
       status: 'retry_wait',
       leaseOwner: null,
-      leaseExpiresAt: null,
+      leaseExpiresAt: retryAfter,
       lastError: errorCategory,
     });
 
@@ -363,6 +371,21 @@ export class RuntimeStateManager {
   async runRecoverySweep(): Promise<{ recovered: number; errors: string[] }> {
     this.assertInitialized();
     return this.recoverySweep.recoverAll();
+  }
+
+  async detectExpiredLeases(): Promise<string[]> {
+    this.assertInitialized();
+    return this.recoverySweep.detectExpiredLeases();
+  }
+
+  async recoverTask(taskId: string): Promise<RecoveryResult | null> {
+    this.assertInitialized();
+    return this.recoverySweep.recoverTask(taskId);
+  }
+
+  async updateTaskDiagnosticJson(taskId: string, diagnosticJson: string): Promise<void> {
+    this.assertInitialized();
+    await this._taskStore.updateTask(taskId, { diagnosticJson });
   }
 
   getRetryPolicy(): RetryPolicy {

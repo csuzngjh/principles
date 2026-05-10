@@ -10,6 +10,7 @@ const {
   mockStateManagerClose,
   mockAuditConsistency,
   mockBuildGfiSnapshot,
+  mockClassifyGfiHealth,
 } = vi.hoisted(() => ({
   mockSchemaCheck: vi.fn(),
   mockHealthSnapshot: vi.fn(),
@@ -20,6 +21,7 @@ const {
   mockStateManagerClose: vi.fn().mockResolvedValue(undefined),
   mockAuditConsistency: vi.fn(),
   mockBuildGfiSnapshot: vi.fn(),
+  mockClassifyGfiHealth: vi.fn(),
 }));
 
 vi.mock('../../src/resolve-workspace.js', () => ({
@@ -44,6 +46,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   }),
   auditCandidateLedgerConsistency: mockAuditConsistency,
   buildGfiWorkspaceSnapshot: mockBuildGfiSnapshot,
+  classifyGfiWorkspaceHealth: mockClassifyGfiHealth,
 }));
 
 import { runCanaryChecks } from '../../src/commands/runtime-canary.js';
@@ -108,6 +111,7 @@ describe('runCanaryChecks', () => {
     mockStateManagerClose.mockResolvedValue(undefined);
     mockAuditConsistency.mockResolvedValue({ status: 'ok', consumedCount: 0, orphanCandidateCount: 0, missingLedgerCount: 0 });
     mockBuildGfiSnapshot.mockReturnValue(healthyGfiSnapshot());
+    mockClassifyGfiHealth.mockReturnValue({ status: 'healthy', reason: '0 active, 0 stale sessions', staleGfiDegradedThreshold: 40 });
   });
 
   it('returns healthy when all checks are healthy', async () => {
