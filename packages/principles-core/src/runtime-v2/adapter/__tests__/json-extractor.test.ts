@@ -88,4 +88,10 @@ describe('extractJsonObject', () => {
     const result = extractJsonObject(input);
     expect(result).toBeNull();
   });
+
+  it('parses JSON with braces inside string values', () => {
+    const input = '{"taskId":"t1","summary":"Use {braces} for objects","score":0.5}';
+    const result = extractJsonObject(input);
+    expect(result).toEqual({ taskId: 't1', summary: 'Use {braces} for objects', score: 0.5 });
+  });
 });

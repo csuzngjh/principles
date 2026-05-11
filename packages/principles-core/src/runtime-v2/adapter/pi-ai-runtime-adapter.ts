@@ -404,6 +404,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           payload: {
             runId,
             runtimeKind: 'pi-ai',
+            provider: this.config.provider,
+            model: this.config.model,
             outputSchemaRef: input.outputSchemaRef ?? 'unknown',
             rawOutputPreview: text.slice(0, 500),
           },

@@ -105,13 +105,19 @@ describe('EvaluatorPromptBuilder', () => {
     expect(evaluation).toHaveProperty('decision');
     expect(evaluation).toHaveProperty('summary');
     expect(evaluation).toHaveProperty('score');
+    expect(typeof evaluation.score).toBe('number');
     expect(evaluation).toHaveProperty('strengths');
+    expect(Array.isArray(evaluation.strengths)).toBe(true);
     expect(evaluation).toHaveProperty('concerns');
+    expect(Array.isArray(evaluation.concerns)).toBe(true);
     expect(evaluation).toHaveProperty('requiredChanges');
+    expect(Array.isArray(evaluation.requiredChanges)).toBe(true);
     expect(example).toHaveProperty('sourceTrace');
     const sourceTrace = example.sourceTrace as Record<string, unknown>;
     expect(sourceTrace).toHaveProperty('artificerArtifactId');
+    expect(sourceTrace.artificerArtifactId).toBe(example.sourceArtificerArtifactId);
     expect(example).toHaveProperty('risks');
+    expect(Array.isArray(example.risks)).toBe(true);
     expect(example).toHaveProperty('generatedAt');
   });
 

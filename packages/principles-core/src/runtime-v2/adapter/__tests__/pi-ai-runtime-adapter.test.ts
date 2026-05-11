@@ -820,7 +820,8 @@ describe('PiAiRuntimeAdapter', () => {
     });
 
     it('emits output_extraction_failed telemetry when extractJsonObject returns null', async () => {
-      mockComplete.mockResolvedValueOnce(makeAssistantMessage('I evaluated the plan and it looks good. The implementation is solid.'));
+      const proseOutput = 'I evaluated the plan and it looks good. The implementation is solid.';
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(proseOutput));
 
       const adapter = makeAdapter();
       try { await adapter.startRun(makeDiagnosticianInput()); } catch { /* expected */ }
@@ -829,8 +830,9 @@ describe('PiAiRuntimeAdapter', () => {
       expect(extractionEvent).toBeDefined();
       const payload = extractionEvent?.payload as Record<string, unknown>;
       expect(payload.outputSchemaRef).toBe('diagnostician-output-v1');
-      expect(typeof payload.rawOutputPreview).toBe('string');
-      expect((payload.rawOutputPreview as string).length).toBeGreaterThan(0);
+      expect(payload.provider).toBe('openrouter');
+      expect(payload.model).toBe('anthropic/claude-sonnet-4');
+      expect(payload.rawOutputPreview).toBe(proseOutput);
     });
 
     it('emits output_repair_attempted telemetry on repair attempt', async () => {
