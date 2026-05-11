@@ -1,69 +1,197 @@
-# ADR-0004: L2 硬内化升级 —— 自动修正与轨迹回放测试 (Auto-Correction & Trajectory Replay)
+# ADR-0004: L2 Auto-Correction & GoldenTrace Replay
 
-> **状态**: 接受 (Accepted)
-> **日期**: 2026-05-11
-> **相关**: DOMAIN_MODEL.md, PD_System_Dynamics_Model.md (L2 内化层)
+> **Status**: Accepted
+> **Date**: 2026-05-11 (revised)
+> **Replaces**: ADR-0004 v1 (2026-05-11)
+> **Related**: [ADR-0001](./0001-runtime-v2-service-boundaries.md), [ADR-0003](./0003-peer-agent-state-machine-orchestration.md), DOMAIN_MODEL.md
 
-## 1. 背景与痛点 (Context)
+## 1. Context
 
-在当前的 PD 架构中，L2 级硬内化（Code/Hook/Tool）由 `PrincipleCompiler` 编译并在 `RuleHost` 中执行。但在实际运行中暴露出两个核心缺陷：
-1. **消极拦截 (Passive Blocking)**：`RuleHost` 的裁决只有 `allow`, `block`, `requireApproval`。当 Agent 犯了微小的语法错误（如漏传参数），`block` 会直接打断任务流，迫使大模型消耗大量上下文去反思和重试，效率极低。
-2. **缺乏防退化保护 (No Regression Protection)**：`PrincipleCompiler` 依赖大模型一次性生成 JavaScript 沙盒代码，直接进入 `probation`（试用期）面对真实流量。如果生成的逻辑有 Bug（例如正则表达式过于宽泛），会导致严重的误拦截（False Positive），使得 Agent “变笨”。
+L2 hard internalization (Code/Hook/Tool) compiles principles into sandboxed JS via `PrincipleCompiler` and executes them in `RuleHost`. Two core deficiencies exist:
 
-受“Heuristic Learning”思想启发，L2 层必须具备**残差修正（Auto-Correction）**能力，且其生成过程必须是**可回归测试（Regression-testable）**的。
+1. **Passive Blocking**: `RuleHost` decisions are limited to `allow`, `block`, `requireApproval`. When an agent makes a minor syntax error (e.g. missing parameter), `block` disrupts the task flow and forces the LLM to burn context on reflection and retry.
+2. **No Regression Protection**: `PrincipleCompiler` generates JS sandbox code in one LLM shot and enters `probation` directly against live traffic. If the generated logic has bugs (e.g. overly broad regex), it causes severe false-positive blocking.
 
-## 2. 决策详情 (Decisions)
+L2 needs **residual auto-correction** capability, and its generation process must be **regression-testable**.
 
-### 决策一：扩展 RuleHost 协议，支持主动“残差修正”
+## 2. Decisions
 
-我们决定将 `RuleHost` 从单纯的门禁，升级为能够直接篡改（mutate）底层 Tool 执行参数的中间件。
+### Decision 1: Correction Proposal Contract (not mutation)
 
-**技术契约变更**：
-在 `RuleHostResult` 中新增 `auto_correct` 决策类型：
+The original ADR allowed RuleHost to **directly mutate** `event.params`. This is rejected as unsafe for production. Instead, we introduce a **proposed correction** contract where RuleHost proposes parameter changes but **never applies them directly**.
+
+**Technical Contract**:
 
 ```typescript
-// packages/openclaw-plugin/src/core/rule-host-types.ts
-export type RuleDecision = 'allow' | 'block' | 'requireApproval' | 'auto_correct';
+// @principles/core — correction proposal (pure domain model)
+export type CorrectionApplicationMode = 'shadow' | 'live';
 
-export interface RuleHostResult {
-  decision: RuleDecision;
-  reason?: string;
-  ruleId?: string;
+export interface CorrectionProposal {
+  /** The corrected parameter set — RuleHost proposes, does not apply */
+  proposedParams: Record<string, unknown>;
+  /** Which fields changed and why */
+  correctedFields: Array<{
+    field: string;
+    original: unknown;
+    proposed: unknown;
+    reason: string;
+  }>;
+  /** Shadow mode = log only, no actual parameter replacement.
+   *  Live mode = hook applies proposedParams before tool execution.
+   *  Default: 'shadow' */
+  applicationMode: CorrectionApplicationMode;
+  /** Confidence in the correction (0–1) */
+  confidence: number;
+  /** Rule that produced this proposal */
+  ruleId: string;
   principleId?: string;
-  // 当 decision 为 'auto_correct' 时，提供修正后的参数
-  modifiedParams?: Record<string, unknown>;
-  // 是否向 LLM 发送一条系统通知，告知参数被底层系统修正（隐性学习）
-  notifyAgent?: boolean;
+}
+
+export interface CorrectionAuditEvent {
+  /** Unique event ID for replay */
+  eventId: string;
+  /** Timestamp (ISO 8601) */
+  timestamp: string;
+  /** The proposal that triggered this event */
+  proposal: CorrectionProposal;
+  /** Original tool call params (immutable snapshot) */
+  originalParams: Record<string, unknown>;
+  /** What actually happened */
+  outcome: 'applied' | 'shadow_logged' | 'rejected_by_hook' | 'rejected_by_confidence';
+  /** Session context for telemetry correlation */
+  sessionId?: string;
+  /** Tool name that was intercepted */
+  toolName: string;
 }
 ```
 
-**执行流调整**：
-在感知与门控层（`hooks/gate.ts` `before_tool_call`）中：
-* 如果 `RuleHost` 返回 `auto_correct`，Hook 将**悄悄替换** `event.params` 为 `modifiedParams`，然后返回 `allow` 继续执行。
-* 如果 `notifyAgent` 为 `true`，Hook 会将这次“修正记录”注入到 `after_tool_call` 的结果中，提醒 Agent 底层进行了自动修复。
+**Extended RuleHostResult** (in `rule-host-contracts.ts`):
 
-### 决策二：引入基于轨迹的“影子回放测试”
+```typescript
+export type RuleHostDecision = 'allow' | 'block' | 'requireApproval' | 'propose_correction';
 
-我们决定在 `PrincipleCompiler` 管道中强制加入局部验证环（Local Sandbox Testing）。未经测试证明能够“拦截过去错误”的代码，不准进入账本。
+export interface RuleHostResult {
+  decision: RuleHostDecision;
+  matched: boolean;
+  reason: string;
+  diagnostics?: Record<string, unknown>;
+  ruleId?: string;
+  principleId?: string;
+  /** Present when decision is 'propose_correction' */
+  correctionProposal?: CorrectionProposal;
+}
+```
 
-**技术契约变更**：
-引入一个新的领域实体：**`GoldenTrace`（黄金测试集）**。
-1. **测试用例提取**：`Diagnostician` 在输出 Rule 建议时，必须同步提取触发该痛点时的**原始 `tool_call` 快照**（Negative Case）和一个**期望的 `tool_call` 快照**（Positive Case）。
-2. **编译器本地验证 (Compiler Validator)**：
-   在 `PrincipleCompiler` 生成 JS 代码之后、写入 Ledger 之前，强制执行两项沙盒验证：
-   * **Test 1 (拦截/修正测试)**：输入 Negative Case，断言输出必须为 `block` 或 `auto_correct`。
-   * **Test 2 (防误伤测试)**：输入 Positive Case，断言输出必须为 `allow`。
+**Execution flow** (plugin hook layer ONLY):
 
-**执行流调整**：
-如果生成的代码未能通过验证，`PrincipleCompiler` 会将报错反馈给大模型进行有限次数的自循环修复（Self-Correction）。若重试耗尽仍未通过，则放弃编译该 Rule，降级保留为 L1 软提示词。
+1. RuleHost returns `propose_correction` with a `CorrectionProposal`.
+2. The **plugin hook** (`hooks/gate.ts`) is the **only layer** allowed to apply corrections to OpenClaw `event.params`.
+3. If `applicationMode === 'shadow'`, the hook **logs the CorrectionAuditEvent** but does NOT modify `event.params`. Tool executes with original params.
+4. If `applicationMode === 'live'` AND the hook's local policy allows it, the hook replaces `event.params` with `proposedParams`, emits the audit event, and returns `allow`.
+5. Every correction — shadow or live — emits a `CorrectionAuditEvent` for telemetry and replay.
 
-## 3. 架构收益 (Consequences)
+**Safety invariants**:
 
-### 积极影响 (Pros)
-* **大幅降低 Token 消耗与幻觉**：Agent 不需要自己去纠正低级拼写或规范错误，底层系统（L2）自动修正。
-* **物理隔离的安全性增强**：每一条硬规则在上线前都经过了其对应的历史痛点（Pain Trace）的严格断言测试，降低“误拦截”风险。真正做到了“防遗忘”。
-* **对齐 SD 模型**：补齐了《PD_System_Dynamics_Model.md》中 L2 层的“残差修正”系统动力学特性。
+| Invariant | Enforcement |
+|-----------|-------------|
+| Default mode is `shadow` | Hook MUST treat missing `applicationMode` as `'shadow'` |
+| No silent production mutation | Audit event is emitted even in shadow mode |
+| RuleHost never mutates params | `CorrectionProposal` is a read-only data structure |
+| Only plugin hook applies corrections | Core has no OpenClaw event access |
+| Confidence gate | Hook rejects proposals below configurable threshold |
 
-### 潜在风险 (Cons / Mitigations)
-* *风险*：自动修正可能会让 Agent 产生“我写得是对的”的错觉。
-* *缓解*：必须配套实现 `notifyAgent` 机制，在工具调用返回时附加上下文告警。
+### Decision 2: GoldenTrace as Independent L2 Artifact
+
+GoldenTrace is an **L2 artifact and read model**, not a field in `DiagnosticianOutputV1`.
+
+**Key decoupling**:
+- `DiagnosticianOutputV1` is NOT modified. It continues to produce `recommendations` with `kind: 'rule'`.
+- GoldenTrace extraction is a **separate pipeline step** that consumes pain signals and tool call history, not Diagnostician output directly.
+- GoldenTrace has its own domain model (`GoldenTrace` / `GoldenTraceCase`) in `@principles/core`.
+
+**GoldenTrace domain model** (defined in `@principles/core/runtime-v2/internalization/golden-trace.ts`):
+
+```typescript
+export interface GoldenTraceCase {
+  /** Unique case ID */
+  caseId: string;
+  /** 'negative' = the original failure; 'positive' = a known-safe invocation */
+  kind: 'negative' | 'positive';
+  /** Captured tool call snapshot */
+  toolName: string;
+  params: Record<string, unknown>;
+  /** What the compiled rule should decide for this case */
+  expectedDecision: 'allow' | 'block' | 'propose_correction';
+  /** When expectedDecision is 'propose_correction', the expected corrected params */
+  expectedCorrectedParams?: Record<string, unknown>;
+}
+
+export interface GoldenTrace {
+  traceId: string;
+  /** Source references — traceability to pain/candidate/artifact */
+  sourcePainId?: string;
+  sourceCandidateId?: string;
+  sourceArtifactId?: string;
+  /** The test cases — must contain at least one negative and one positive */
+  cases: GoldenTraceCase[];
+  /** Metadata */
+  createdAt: string;
+  version: 1;
+}
+```
+
+**Compiler validation loop**:
+After `PrincipleCompiler` generates JS code, before writing to ledger:
+1. **Test 1 (catch test)**: Input negative case, assert output is `block` or `propose_correction`.
+2. **Test 2 (no-false-positive test)**: Input positive case, assert output is `allow`.
+
+If the generated code fails validation, the compiler feeds errors back to the LLM for bounded self-correction. If retries exhaust, the rule is abandoned and the principle remains at L1 soft-prompt level.
+
+### Decision 3: Shadow-First Rollout
+
+Auto-correction MUST operate in **shadow mode by default** before any live activation:
+
+1. **Phase 1 — Shadow only**: All `propose_correction` results are logged as `CorrectionAuditEvent` with `outcome: 'shadow_logged'`. No params are modified.
+2. **Phase 2 — Graduated live**: After shadow metrics show acceptable precision/recall, individual rules can be promoted to `live` mode via operator configuration.
+3. **Phase 3 — Audit & Replay**: Every `CorrectionAuditEvent` is replayable. Operators can replay shadow-mode corrections to verify correctness before promotion.
+
+## 3. Explicit Non-Goals
+
+This ADR does **NOT**:
+- Implement live auto-correction immediately (shadow-first rollout)
+- Modify `DiagnosticianOutputV1` schema
+- Mutate the principle ledger
+- Execute generated rule code in production (only in compiler sandbox)
+- Require `notifyAgent` injection into LLM context (deferred to future ADR)
+
+## 4. Consequences
+
+### Positive
+
+| Benefit | Mechanism |
+|---------|-----------|
+| Reduced token waste | L2 auto-corrects minor errors instead of blocking and forcing LLM retry |
+| Regression safety | Every compiled rule passes GoldenTrace before entering probation |
+| Audit trail | `CorrectionAuditEvent` ensures every correction is observable and replayable |
+| Safe default | Shadow mode prevents silent production mutation |
+| Architecture alignment | Follows ADR-0001 service boundaries (core proposes, plugin applies) |
+| State machine alignment | Uses ADR-0003 peer runner pattern for GoldenTrace compilation |
+
+### Risks & Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Agent confusion ("I wrote correct code") | `CorrectionAuditEvent` enables operator visibility; `notifyAgent` deferred to future work |
+| Overly aggressive corrections | Confidence threshold + shadow-first rollout |
+| GoldenTrace drift from real failures | GoldenTrace is versioned; operators can refresh from recent pain signals |
+
+## 5. Implementation Sequence
+
+| Step | Scope | ADR Section |
+|------|-------|-------------|
+| 1 | ADR-0004 revision (this document) | All |
+| 2 | GoldenTrace domain model + validation + fixture | Decision 2 |
+| 3 | CorrectionProposal + CorrectionAuditEvent core types | Decision 1 |
+| 4 | Plugin hook shadow-mode integration | Decision 1, 3 |
+| 5 | Compiler validation loop with GoldenTrace | Decision 2 |
+| 6 | Live mode promotion + confidence gating | Decision 3 |
