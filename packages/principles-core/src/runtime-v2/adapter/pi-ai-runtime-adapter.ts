@@ -14,8 +14,8 @@
  *   Missing apiKeyEnv → runtime_unavailable
  *   Retries exhausted → execution_failed
  */
-import { getModel, getProviders, complete } from '@mariozechner/pi-ai';
-import type { KnownProvider, Context, UserMessage, AssistantMessage, Model } from '@mariozechner/pi-ai';
+import { getModel, getProviders, completeSimple } from '@mariozechner/pi-ai';
+import type { KnownProvider, Context, UserMessage, AssistantMessage, Model, SimpleStreamOptions } from '@mariozechner/pi-ai';
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
 import { PDRuntimeError } from '../error-categories.js';
@@ -65,6 +65,8 @@ export interface PiAiRuntimeAdapterConfig {
   workspace?: string;
   /** Optional StoreEventEmitter for telemetry. Falls back to global storeEmitter. */
   eventEmitter?: StoreEventEmitter;
+  /** Reasoning/thinking level. Set to false to disable thinking for models that enable it by default (e.g., MiniMax). Default: undefined (use model default). */
+  reasoning?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | false;
 }
 
 /**
@@ -167,9 +169,19 @@ function extractAssistantTextOrThrow(
     );
   }
 
+  // Find text content (may be mixed with thinking content from reasoning-enabled models)
   const textContent = response.content.find(c => c.type === 'text');
   if (!textContent || textContent.type !== 'text' || !textContent.text) {
-    throw new PDRuntimeError('output_invalid', 'No text content in LLM response');
+    // Check if there is ANY text content at all
+    const hasAnyText = response.content.some(c => c.type === 'text' && c.text && c.text.trim().length > 0);
+    if (hasAnyText) {
+      const validTextContent = response.content.find(c => c.type === 'text' && c.text && c.text.trim().length > 0);
+      if (validTextContent && validTextContent.type === 'text' && validTextContent.text) {
+        return validTextContent.text;
+      }
+    }
+    // No valid text content found
+    throw new PDRuntimeError('output_invalid', `No text content in LLM response. Content types: ${response.content.map(c => c.type).join(', ')}`);
   }
 
   return textContent.text;
@@ -259,11 +271,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         }],
       };
 
-      const response = await complete(model, probeContext, {
+      const response = await completeSimple(model, probeContext, {
         signal,
         apiKey,
         timeoutMs,
         maxRetries: 0,
+        reasoning: false,
       });
 
       // extractAssistantTextOrThrow normalizes resolved-error responses
@@ -615,11 +628,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     };
     const repairContext: Context = { messages: [repairMessage] };
 
-    const response = await complete(model, repairContext, {
+    const response = await completeSimple(model, repairContext, {
       signal: repairSignal,
       apiKey: options.apiKey,
       timeoutMs: REPAIR_TIMEOUT_MS,
       maxRetries: 0,
+      reasoning: false,
     });
 
     // extractAssistantTextOrThrow throws:
@@ -653,12 +667,16 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const response = await complete(model, context, {
+        const completeOptions: SimpleStreamOptions = {
           signal: options.signal,
           apiKey: options.apiKey,
           timeoutMs: effectiveTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
-        });
+        };
+        if (this.config.reasoning !== undefined) {
+          completeOptions.reasoning = this.config.reasoning;
+        }
+        const response = await completeSimple(model, context, completeOptions);
 
         // If provider resolved with an error response, classify and potentially retry.
         // Only retry execution_failed (transient provider errors); timeout/output_invalid are not retryable.
