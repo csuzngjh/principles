@@ -26,6 +26,7 @@ import { PhilosopherOutputV1Schema } from '../internalization/philosopher-output
 import { ScribeOutputV1Schema } from '../internalization/scribe-output.js';
 import { ArtificerOutputV1Schema } from '../internalization/artificer-output.js';
 import { EvaluatorOutputV1Schema } from '../internalization/evaluator-output.js';
+import { RolloutReviewerOutputV1Schema } from '../internalization/rollout-reviewer-output.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair } from './structured-output-repair.js';
@@ -191,6 +192,7 @@ const OUTPUT_SCHEMA_REGISTRY = new Map<string, TSchema>([
   ['scribe-output-v1', ScribeOutputV1Schema as TSchema],
   ['artificer-output-v1', ArtificerOutputV1Schema as TSchema],
   ['evaluator-output-v1', EvaluatorOutputV1Schema as TSchema],
+  ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema as TSchema],
 ]);
 
 export class PiAiRuntimeAdapter implements PDRuntimeAdapter {

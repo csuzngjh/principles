@@ -49,6 +49,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
   EvaluatorRunner: vi.fn().mockImplementation(function () {
     return { run: mockRun };
   }),
+  RolloutReviewerRunner: vi.fn().mockImplementation(function () {
+    return { run: mockRun };
+  }),
   StoreEventEmitter: vi.fn().mockImplementation(function () {
     return { emitTelemetry: vi.fn() };
   }),
@@ -68,6 +71,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
   DefaultEvaluatorValidator: vi.fn().mockImplementation(function () {
+    return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
+  }),
+  DefaultRolloutReviewerValidator: vi.fn().mockImplementation(function () {
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
   TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () {
@@ -1142,5 +1148,98 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.enqueueDecision).toBe('successor_created');
     expect(output.successorTaskId).toBe('task-rollout-reviewer-enq-001');
     expect(output.successorKind).toBe('rollout_reviewer');
+  });
+
+  it('--runner rollout_reviewer dispatches RolloutReviewerRunner', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-rollout-reviewer-001',
+      taskKind: 'rollout_reviewer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-rollout-reviewer-001',
+      runId: 'run-rollout-reviewer-001',
+      artifactId: 'pi-art-task-rollout-reviewer-001-run-rollout-reviewer-001',
+      resultRef: 'rollout-reviewer://run-rollout-reviewer-001',
+      contextHash: 'ctx-rr-abc',
+      output: {
+        taskId: 'task-rollout-reviewer-001',
+        sourceEvaluatorArtifactId: 'pi-art-evaluator-001',
+        review: {
+          decision: 'approve_rollout',
+          summary: 'Test rollout review summary',
+          confidence: 0.9,
+          requiredChanges: [],
+          rolloutRisks: [],
+          safetyChecks: ['Verify feature flag is properly configured'],
+        },
+        sourceTrace: { evaluatorArtifactId: 'pi-art-evaluator-001' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'rollout_reviewer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const RolloutReviewerRunnerMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.RolloutReviewerRunner),
+    );
+    expect(RolloutReviewerRunnerMock).toHaveBeenCalled();
+    expect(mockRun).toHaveBeenCalledWith('task-rollout-reviewer-001');
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.runnerKind).toBe('rollout_reviewer');
+    expect(output.taskId).toBe('task-rollout-reviewer-001');
+    expect(output.runId).toBe('run-rollout-reviewer-001');
+    expect(output.artifactId).toBe('pi-art-task-rollout-reviewer-001-run-rollout-reviewer-001');
+    expect(output.resultRef).toBe('rollout-reviewer://run-rollout-reviewer-001');
+    expect(output.runnerResult.status).toBe('succeeded');
+  });
+
+  it('--runner rollout_reviewer --enqueue-next returns no_successor for prompt channel', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-rollout-reviewer-enq-001',
+      taskKind: 'rollout_reviewer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-rollout-reviewer-enq-001',
+      runId: 'run-rollout-reviewer-enq-001',
+      artifactId: 'pi-art-rollout-reviewer-enq-001',
+      resultRef: 'rollout-reviewer://run-rollout-reviewer-enq-001',
+      contextHash: 'ctx-enq',
+      output: {
+        taskId: 'task-rollout-reviewer-enq-001',
+        sourceEvaluatorArtifactId: 'pi-art-evaluator-enq-001',
+        review: {
+          decision: 'approve_rollout',
+          summary: 'Test rollout review summary',
+          confidence: 0.9,
+          requiredChanges: [],
+          rolloutRisks: [],
+          safetyChecks: ['Verify feature flag is properly configured'],
+        },
+        sourceTrace: { evaluatorArtifactId: 'pi-art-evaluator-enq-001' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'no_successor',
+      sourceTaskId: 'task-rollout-reviewer-enq-001',
+      reason: 'No valid successor in job graph for this task kind and channel',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'rollout_reviewer', runtime: 'test-double', allowTestDouble: true, enqueueNext: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.enqueueDecision).toBe('no_successor');
   });
 });

@@ -46,29 +46,15 @@ PROTOCOL:
 4. Assign a confidence score (0.0 to 1.0) and risk level (low, medium, or high) to each candidate
 5. Provide a strategic perspective for each candidate
 
-OUTPUT FORMAT (pure JSON, no markdown):
-{
-  "valid": true,
-  "taskId": "<from input>",
-  "candidates": [
-    {
-      "candidateIndex": 0,
-      "badDecision": "<what the agent did wrong>",
-      "betterDecision": "<what the agent should have done>",
-      "rationale": "<why the better decision is superior>",
-      "confidence": 0.85,
-      "riskLevel": "low",
-      "strategicPerspective": "<strategic lens: e.g., defensive_programming, fail_fast, graceful_degradation>"
-    }
-  ],
-  "sourcePrincipleId": "<optional: principle ID if applicable>",
-  "sourcePainId": "<optional: pain signal ID if applicable>",
-  "contextRefs": ["<from input contextRefs>"],
-  "generatedAt": "<ISO-8601 timestamp>"
-}
+CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
+
+COMPLETE EXAMPLE OUTPUT (follow this exact structure):
+{"valid":true,"taskId":"task-dreamer-001","candidates":[{"candidateIndex":0,"badDecision":"Ignored null check on user input before processing","betterDecision":"Add null/undefined guard before accessing user input properties","rationale":"Defensive programming prevents runtime crashes from unexpected null values","confidence":0.9,"riskLevel":"low","strategicPerspective":"defensive_programming"},{"candidateIndex":1,"badDecision":"Used synchronous file read in request handler","betterDecision":"Replace with async fs.readFile to avoid blocking the event loop","rationale":"Non-blocking I/O preserves server responsiveness under load","confidence":0.85,"riskLevel":"medium","strategicPerspective":"fail_fast"}],"sourcePrincipleId":"pri-042","sourcePainId":"pain-null-crash","contextRefs":["pi-art-diag-001"],"generatedAt":"2026-05-11T12:00:00.000Z"}
 
 CONSTRAINTS:
-- Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
+- Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
+- Do NOT wrap the JSON in \`\`\`json or any other code fence markers
+- Do NOT add any commentary or explanation outside the JSON object
 - candidates MUST have 1-5 items
 - candidateIndex MUST be a number (0-based)
 - badDecision, betterDecision, rationale, strategicPerspective MUST be non-empty strings
@@ -77,6 +63,7 @@ CONSTRAINTS:
 - contextRefs MUST be copied from the input contextRefs array
 - generatedAt MUST be an ISO-8601 timestamp string
 - valid MUST be true on success
+- sourcePrincipleId and sourcePainId are optional strings
 `;
 
 export class DreamerPromptBuilder {
