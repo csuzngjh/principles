@@ -25,6 +25,8 @@ import { DreamerOutputV1Schema } from '../internalization/dreamer-output.js';
 import { PhilosopherOutputV1Schema } from '../internalization/philosopher-output.js';
 import { ScribeOutputV1Schema } from '../internalization/scribe-output.js';
 import { ArtificerOutputV1Schema } from '../internalization/artificer-output.js';
+import { EvaluatorOutputV1Schema } from '../internalization/evaluator-output.js';
+import { RolloutReviewerOutputV1Schema } from '../internalization/rollout-reviewer-output.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair } from './structured-output-repair.js';
@@ -189,6 +191,8 @@ const OUTPUT_SCHEMA_REGISTRY = new Map<string, TSchema>([
   ['philosopher-output-v1', PhilosopherOutputV1Schema as TSchema],
   ['scribe-output-v1', ScribeOutputV1Schema as TSchema],
   ['artificer-output-v1', ArtificerOutputV1Schema as TSchema],
+  ['evaluator-output-v1', EvaluatorOutputV1Schema as TSchema],
+  ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema as TSchema],
 ]);
 
 export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
@@ -393,6 +397,21 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       // Parse response — handles prose-wrapped and code-fenced JSON
       let validatedOutput: unknown = extractJsonObject(text);
       if (!validatedOutput) {
+        this.eventEmitter.emitTelemetry({
+          eventType: 'output_extraction_failed',
+          traceId: input.taskRef?.taskId ?? runId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'pi-ai-adapter',
+          agentId: 'pi-ai-adapter',
+          payload: {
+            runId,
+            runtimeKind: 'pi-ai',
+            provider: this.config.provider,
+            model: this.config.model,
+            outputSchemaRef: input.outputSchemaRef ?? 'unknown',
+            rawOutputPreview: text.slice(0, 500),
+          },
+        });
         throw new PDRuntimeError('output_invalid', 'No valid JSON found in LLM response');
       }
 

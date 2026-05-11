@@ -8,8 +8,9 @@
  * Phase: m6-03
  */
 import { describe, it, expect } from 'vitest';
-import { DiagnosticianPromptBuilder } from '../../diagnostician-prompt-builder.js';
+import { DiagnosticianPromptBuilder, DIAGNOSTIC_PROTOCOL_INSTRUCTION } from '../../diagnostician-prompt-builder.js';
 import type { DiagnosticianContextPayload } from '../../context-payload.js';
+import { extractJsonObject } from '../../adapter/json-extractor.js';
 
 const MINIMAL_PAYLOAD: DiagnosticianContextPayload = {
   contextId: 'ctx-1',
@@ -245,8 +246,7 @@ describe('DiagnosticianPromptBuilder', () => {
       const builder = new DiagnosticianPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_PAYLOAD);
       const instruction = result.promptInput.diagnosticInstruction;
-      // All 5 kinds should appear in the taxonomy definitions
-      const taxonomyBlock = (/TAXONOMY[\s\S]*?OUTPUT FORMAT/.exec(instruction))?.[0] ?? '';
+      const taxonomyBlock = (/TAXONOMY[\s\S]*?CRITICAL/.exec(instruction))?.[0] ?? '';
       expect(taxonomyBlock).toContain('"rule"');
       expect(taxonomyBlock).toContain('"principle"');
       expect(taxonomyBlock).toContain('"implementation"');
@@ -288,11 +288,83 @@ describe('DiagnosticianPromptBuilder', () => {
       const builder = new DiagnosticianPromptBuilder();
       const result = builder.buildPrompt(MINIMAL_PAYLOAD);
       const instruction = result.promptInput.diagnosticInstruction;
-      // Should contain a concrete decimal like 0.85 in the OUTPUT FORMAT section
-      const outputFormat = (/OUTPUT FORMAT[\s\S]*?CONSTRAINTS/.exec(instruction))?.[0] ?? '';
-      expect(outputFormat).toMatch(/"confidence":\s*0\.\d+/);
-      // Should NOT use range notation like 0.0-1.0 in the JSON example
-      expect(outputFormat).not.toMatch(/"confidence":\s*0\.0-1\.0/);
+      const exampleSection = (/COMPLETE EXAMPLE OUTPUT[\s\S]*?CONSTRAINTS/.exec(instruction))?.[0] ?? '';
+      expect(exampleSection).toMatch(/"confidence":\s*0\.\d+/);
+      expect(exampleSection).not.toMatch(/"confidence":\s*0\.0-1\.0/);
+    });
+  });
+
+  describe('prompt contract hardening (PRI-109)', () => {
+    it('instruction contains CRITICAL JSON-only emphasis', () => {
+      expect(DIAGNOSTIC_PROTOCOL_INSTRUCTION).toContain('CRITICAL');
+      expect(DIAGNOSTIC_PROTOCOL_INSTRUCTION).toContain('ENTIRE response must be ONLY the JSON object');
+    });
+
+    it('instruction prohibits markdown code fences', () => {
+      expect(DIAGNOSTIC_PROTOCOL_INSTRUCTION).toContain('Do NOT wrap the JSON in markdown code fences');
+    });
+
+    it('instruction prohibits prose before or after JSON', () => {
+      expect(DIAGNOSTIC_PROTOCOL_INSTRUCTION).toContain('Do NOT include any text before or after the JSON');
+      expect(DIAGNOSTIC_PROTOCOL_INSTRUCTION).toContain('Do NOT add explanatory prose');
+    });
+
+    it('instruction contains complete JSON example parseable by extractJsonObject', () => {
+      const parsed = extractJsonObject(DIAGNOSTIC_PROTOCOL_INSTRUCTION);
+      expect(parsed).not.toBeNull();
+    });
+
+    it('JSON example has all required DiagnosticianOutputV1 fields', () => {
+      const example = extractJsonObject(DIAGNOSTIC_PROTOCOL_INSTRUCTION) as Record<string, unknown>;
+      expect(example).toHaveProperty('valid');
+      expect(typeof example.valid).toBe('boolean');
+      expect(example).toHaveProperty('diagnosisId');
+      expect(example).toHaveProperty('taskId');
+      expect(example).toHaveProperty('summary');
+      expect(example).toHaveProperty('rootCause');
+      expect(example).toHaveProperty('violatedPrinciples');
+      expect(Array.isArray(example.violatedPrinciples)).toBe(true);
+      expect(example).toHaveProperty('evidence');
+      expect(Array.isArray(example.evidence)).toBe(true);
+      expect(example).toHaveProperty('recommendations');
+      expect(Array.isArray(example.recommendations)).toBe(true);
+      expect(example).toHaveProperty('confidence');
+      expect(typeof example.confidence).toBe('number');
+      expect(example.confidence).toBeGreaterThanOrEqual(0);
+      expect(example.confidence).toBeLessThanOrEqual(1);
+    });
+
+    it('JSON example recommendations cover all 5 taxonomy kinds', () => {
+      const example = extractJsonObject(DIAGNOSTIC_PROTOCOL_INSTRUCTION) as Record<string, unknown>;
+      const recs = example.recommendations as Record<string, unknown>[];
+      const kinds = recs.map(r => r.kind);
+      expect(kinds).toContain('rule');
+      expect(kinds).toContain('principle');
+      expect(kinds).toContain('implementation');
+      expect(kinds).toContain('prompt');
+      expect(kinds).toContain('defer');
+    });
+
+    it('JSON example rule recommendation has triggerPattern and action', () => {
+      const example = extractJsonObject(DIAGNOSTIC_PROTOCOL_INSTRUCTION) as Record<string, unknown>;
+      const recs = example.recommendations as Record<string, unknown>[];
+      const rule = recs.find(r => r.kind === 'rule');
+      expect(rule).toBeDefined();
+      expect(rule).toHaveProperty('triggerPattern');
+      expect(rule).toHaveProperty('action');
+    });
+
+    it('JSON example principle recommendation has abstractedPrinciple', () => {
+      const example = extractJsonObject(DIAGNOSTIC_PROTOCOL_INSTRUCTION) as Record<string, unknown>;
+      const recs = example.recommendations as Record<string, unknown>[];
+      const principle = recs.find(r => r.kind === 'principle');
+      expect(principle).toBeDefined();
+      expect(principle).toHaveProperty('abstractedPrinciple');
+    });
+
+    it('CONSTRAINTS section includes no code fences and no prose emphasis', () => {
+      expect(DIAGNOSTIC_PROTOCOL_INSTRUCTION).toMatch(/no code fences/);
+      expect(DIAGNOSTIC_PROTOCOL_INSTRUCTION).toMatch(/no prose before or after/);
     });
   });
 });

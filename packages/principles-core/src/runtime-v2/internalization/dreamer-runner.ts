@@ -242,7 +242,7 @@ export class DreamerRunner {
 
       // 6. Fetch output
       this.phase = RunnerPhase.FetchingOutput;
-      const output = await this.fetchAndParseOutput(runHandle.runId);
+      const output = await this.fetchAndParseOutput(runHandle.runId, taskId);
 
       // 7. Validate
       this.phase = RunnerPhase.Validating;
@@ -454,12 +454,39 @@ export class DreamerRunner {
     throw new PDRuntimeError('timeout', `Run ${runHandle.runId} timed out after ${this.resolvedOptions.timeoutMs}ms${cancelNote}`);
   }
 
-  private async fetchAndParseOutput(runId: string): Promise<DreamerOutput> {
-    const result = await this.runtimeAdapter.fetchOutput(runId);
+  private async fetchAndParseOutput(runId: string, taskId: string): Promise<DreamerOutput> {
+    const result = await this.fetchOutputWithTelemetry(runId, taskId);
     if (!result || !result.payload) {
+      this.emitDreamerEvent('dreamer_output_extraction_failed', taskId, {
+        runId,
+        stage: 'payload_missing',
+        errorMessage: `No output available for run ${runId}`,
+      });
       throw new PDRuntimeError('output_invalid', `No output available for run ${runId}`);
     }
+    const payload = result.payload as Record<string, unknown>;
+    if (typeof payload !== 'object' || payload === null) {
+      this.emitDreamerEvent('dreamer_output_extraction_failed', taskId, {
+        runId,
+        stage: 'payload_not_object',
+        errorMessage: `Output payload is not an object for run ${runId}`,
+      });
+      throw new PDRuntimeError('output_invalid', `Output payload is not an object for run ${runId}`);
+    }
     return result.payload as DreamerOutput;
+  }
+
+  private async fetchOutputWithTelemetry(runId: string, taskId: string): Promise<Awaited<ReturnType<PDRuntimeAdapter['fetchOutput']>>> {
+    try {
+      return await this.runtimeAdapter.fetchOutput(runId);
+    } catch (fetchErr) {
+      this.emitDreamerEvent('dreamer_output_extraction_failed', taskId, {
+        runId,
+        stage: 'fetchOutput',
+        errorMessage: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+      });
+      throw fetchErr;
+    }
   }
 
   private async succeedTask(ctx: SucceedContext): Promise<DreamerRunnerResult> {

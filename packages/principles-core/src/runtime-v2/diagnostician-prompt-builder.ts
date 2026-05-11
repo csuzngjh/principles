@@ -144,30 +144,15 @@ TAXONOMY DEFINITIONS:
 4. "prompt": Context/Skill injection. Use to influence the agent's workflow habits.
 5. "defer": Insufficient evidence. Use for network timeouts or noise.
 
-OUTPUT FORMAT (pure JSON, no markdown):
-{
-  "valid": true,
-  "diagnosisId": "<generate UUID>",
-  "taskId": "<from input>",
-  "summary": "<one line root cause summary>",
-  "rootCause": "<Design|People|Assumption|Tooling>: <specific root cause>",
-  "violatedPrinciples": [{"rationale": "<why this principle was violated>"}],
-  "evidence": [{"sourceRef": "<sourceRef from context>", "note": "<what this shows>"}],
-  "recommendations": [
-    {"kind": "principle", "description": "<high-level guideline>", "abstractedPrinciple": "<one sentence, <=200 chars>"},
-    {"kind": "rule", "description": "<deterministic constraint>", "triggerPattern": "<regex/keywords>", "action": "<what to do>"},
-    {"kind": "implementation", "description": "<specific code change>"},
-    {"kind": "prompt", "description": "<workflow habit change>"},
-    {"kind": "defer", "description": "<why evidence is insufficient>"}
-  ],
-  "confidence": 0.85,
-  "ambiguityNotes": ["<optional: anything uncertain>"]
-}
+CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
-IMPORTANT: The examples above are ILLUSTRATIVE ONLY. Your recommendations MUST be based on the actual root cause analysis and evidence in this context — do not copy the example text verbatim.
+COMPLETE EXAMPLE OUTPUT (follow this exact structure):
+{"valid":true,"diagnosisId":"diag-550e8400-e29b-41d4-a716-446655440000","taskId":"task-abc123","summary":"Missing input validation caused null pointer exception in handler","rootCause":"Design: No null check on input parameter before processing","violatedPrinciples":[{"rationale":"The defensive programming principle was violated by not validating inputs at the boundary"}],"evidence":[{"sourceRef":"src:handler.ts:L42","note":"Null dereference without guard check"},{"sourceRef":"log:error-trace","note":"NullPointerException at handler.process()"}],"recommendations":[{"kind":"rule","description":"Add null check at handler entry point","triggerPattern":"function process(","action":"Insert null guard returning error response"},{"kind":"principle","description":"Validate all external inputs at system boundaries","abstractedPrinciple":"Never trust external data without validation at entry points"},{"kind":"implementation","description":"Add input validation middleware before handler"},{"kind":"prompt","description":"Add defensive validation step to agent workflow"},{"kind":"defer","description":"Upstream caller validation status unclear from available logs"}],"confidence":0.82,"ambiguityNotes":["Stack trace may indicate upstream caller also missing validation"]}
+
+IMPORTANT: The example above is ILLUSTRATIVE ONLY. Your recommendations MUST be based on the actual root cause analysis and evidence in this context — do not copy the example text verbatim.
 
 CONSTRAINTS:
-- Output ONLY valid JSON (no markdown, no explanatory text)
+- Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
 - Do NOT read files, call tools, or write to any database
 - rootCause MUST include category prefix: "Design: ..." or "People: ..." etc.
 - confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
