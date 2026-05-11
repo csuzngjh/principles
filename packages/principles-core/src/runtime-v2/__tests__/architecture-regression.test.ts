@@ -69,6 +69,10 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/evaluator-output.ts',
   'internalization/evaluator-runner.ts',
   'internalization/evaluator-prompt-builder.ts',
+  // PRI-RR
+  'internalization/rollout-reviewer-output.ts',
+  'internalization/rollout-reviewer-runner.ts',
+  'internalization/rollout-reviewer-prompt-builder.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../prompt-builder/routing-guidance.ts',
   // PRI-81 Phase A
@@ -108,6 +112,8 @@ const REQUIRED_TEST_FILES = [
   'artificer-runner-vslice.test.ts',
   // PRI-EVAL
   'evaluator-runner-vslice.test.ts',
+  // PRI-RR
+  'rollout-reviewer-runner-vslice.test.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../../prompt-builder/__tests__/routing-guidance.test.ts',
   // PRI-81 Phase A
@@ -1694,5 +1700,69 @@ describe('PRI-EVAL EvaluatorRunner boundary', () => {
     const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
     expect(src).toContain('evaluator-output-v1');
     expect(src).toContain('EvaluatorOutputV1Schema');
+  });
+});
+
+// ── PRI-RR: RolloutReviewerRunner boundary guards ──────────────────────────────
+
+describe('PRI-RR RolloutReviewerRunner boundary', () => {
+  it('rollout_reviewer source files exist in internalization directory', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'rollout-reviewer-runner.ts'))).toBe(true);
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'rollout-reviewer-output.ts'))).toBe(true);
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'rollout-reviewer-prompt-builder.ts'))).toBe(true);
+  });
+
+  it('rollout_reviewer test file exists', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, 'rollout-reviewer-runner-vslice.test.ts'))).toBe(true);
+  });
+
+  it('CORE_NO_FORBIDDEN_IMPORTS: rollout-reviewer-output.ts has no openclaw-plugin, fs, path imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'rollout-reviewer-output.ts'), 'utf-8');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+  });
+
+  it('CORE_NO_FORBIDDEN_IMPORTS: rollout-reviewer-runner.ts has no openclaw-plugin, TrainerRunner, nocturnal-trinity imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'rollout-reviewer-runner.ts'), 'utf-8');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('TrainerRunner');
+    expect(src).not.toContain('nocturnal-trinity');
+    expect(src).not.toContain('InternalizationOrchestrator');
+    expect(src).not.toContain('createTask');
+    expect(src).not.toContain('enqueueTask');
+  });
+
+  it('CORE_NO_SCHEDULING: rollout-reviewer-runner.ts has no node:fs, node:cron imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'rollout-reviewer-runner.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:cron');
+  });
+
+  it('BARREL_EXPORTS: internalization/index.ts exports RolloutReviewerRunner and RolloutReviewerOutput', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
+    expect(src).toContain('RolloutReviewerRunner');
+    expect(src).toContain('RolloutReviewerOutput');
+    expect(src).toContain('DefaultRolloutReviewerValidator');
+  });
+
+  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers rollout-reviewer-output-v1 schema', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
+    expect(src).toContain('rollout-reviewer-output-v1');
+    expect(src).toContain('RolloutReviewerOutputV1Schema');
   });
 });

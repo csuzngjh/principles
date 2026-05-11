@@ -134,6 +134,51 @@ describe('DreamerPromptBuilder', () => {
       expect(instruction).toMatch(/no markdown/i);
     });
 
+    it('dreamerInstruction contains CRITICAL JSON-only directive', () => {
+      const builder = new DreamerPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_INPUT);
+
+      const instruction = result.promptInput.dreamerInstruction;
+      expect(instruction).toContain('CRITICAL');
+      expect(instruction).toContain('ONLY valid JSON');
+      expect(instruction).toContain('no code fences');
+      expect(instruction).toContain('no prose');
+    });
+
+    it('dreamerInstruction contains COMPLETE EXAMPLE OUTPUT with concrete values', () => {
+      const builder = new DreamerPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_INPUT);
+
+      const instruction = result.promptInput.dreamerInstruction;
+      expect(instruction).toContain('COMPLETE EXAMPLE OUTPUT');
+      expect(instruction).toContain('"valid":true');
+      expect(instruction).toContain('"taskId":"task-dreamer-001"');
+      expect(instruction).toContain('"badDecision"');
+      expect(instruction).toContain('"betterDecision"');
+      expect(instruction).toContain('"rationale"');
+      expect(instruction).toContain('"strategicPerspective"');
+    });
+
+    it('dreamerInstruction example output is parseable JSON', () => {
+      const builder = new DreamerPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_INPUT);
+
+      const instruction = result.promptInput.dreamerInstruction;
+      const exampleMatch = /\{"valid":true[^}]+generatedAt":"[^"]+"\}/s.exec(instruction);
+      expect(exampleMatch).toBeDefined();
+      if (exampleMatch) {
+        expect(() => JSON.parse(exampleMatch[0])).not.toThrow();
+      }
+    });
+
+    it('dreamerInstruction explicitly prohibits code fences', () => {
+      const builder = new DreamerPromptBuilder();
+      const result = builder.buildPrompt(MINIMAL_INPUT);
+
+      const instruction = result.promptInput.dreamerInstruction;
+      expect(instruction).toMatch(/Do NOT wrap.*code fence/);
+    });
+
     it('buildPrompt() is a pure function — same input produces same output', () => {
       const builder = new DreamerPromptBuilder();
       const result1 = builder.buildPrompt(MINIMAL_INPUT);
