@@ -276,7 +276,6 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         apiKey,
         timeoutMs,
         maxRetries: 0,
-        reasoning: false,
       });
 
       // extractAssistantTextOrThrow normalizes resolved-error responses
@@ -633,7 +632,6 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       apiKey: options.apiKey,
       timeoutMs: REPAIR_TIMEOUT_MS,
       maxRetries: 0,
-      reasoning: false,
     });
 
     // extractAssistantTextOrThrow throws:
@@ -673,7 +671,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           timeoutMs: effectiveTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
         };
-        if (this.config.reasoning !== undefined) {
+        if (this.config.reasoning !== undefined && this.config.reasoning !== false) {
           completeOptions.reasoning = this.config.reasoning;
         }
         const response = await completeSimple(model, context, completeOptions);

@@ -166,11 +166,13 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
 
     if (result.output?.candidates && result.output.candidates.length > 0) {
       const [candidate] = result.output.candidates;
-      expect(candidate.badDecision).toBeDefined();
-      expect(candidate.betterDecision).toBeDefined();
-      expect(candidate.rationale).toBeDefined();
-      expect(typeof candidate.confidence).toBe('number');
-      expect(candidate.riskLevel).toMatch(/^(low|medium|high)$/);
+      if (candidate) {
+        expect(candidate.badDecision).toBeDefined();
+        expect(candidate.betterDecision).toBeDefined();
+        expect(candidate.rationale).toBeDefined();
+        expect(typeof candidate.confidence).toBe('number');
+        expect(candidate.riskLevel).toMatch(/^(low|medium|high)$/);
+      }
     }
 
     console.log(`✅ Schema validation passed: ${result.output?.candidates?.length} candidates`);

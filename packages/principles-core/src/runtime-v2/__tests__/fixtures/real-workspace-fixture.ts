@@ -1,10 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import type { PIArtifactStore } from '../internalization/pi-artifact.js';
-import { RuntimeStateManager as SqliteRuntimeStateManager } from '../store/runtime-state-manager.js';
-import { SqlitePIArtifactStore } from '../store/artifact/sqlite-pi-artifact-store.js';
+import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
+import { MemoryPIArtifactStore } from '../../internalization/pi-artifact-store.js';
+import type { PIArtifactStore } from '../../internalization/pi-artifact.js';
 
 export class RealWorkspaceFixture {
   readonly workspaceDir: string;
@@ -16,14 +15,12 @@ export class RealWorkspaceFixture {
   }
 
   async init(): Promise<{ stateManager: RuntimeStateManager; artifactStore: PIArtifactStore }> {
-    this._stateManager = new SqliteRuntimeStateManager({
+    this._stateManager = new RuntimeStateManager({
       workspaceDir: this.workspaceDir,
     });
     await this._stateManager.initialize();
 
-    this._artifactStore = new SqlitePIArtifactStore({
-      workspaceDir: this.workspaceDir,
-    });
+    this._artifactStore = new MemoryPIArtifactStore();
 
     return {
       stateManager: this._stateManager,
@@ -46,14 +43,11 @@ export class RealWorkspaceFixture {
   }
 
   async close(): Promise<void> {
-    if (this._artifactStore) {
-      await this._artifactStore.close();
-      this._artifactStore = null;
-    }
     if (this._stateManager) {
-      await this._stateManager.close();
+      this._stateManager.close();
       this._stateManager = null;
     }
+    this._artifactStore = null;
   }
 
   destroy(): void {
