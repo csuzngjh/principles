@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { TasksPage } from "./pages/TasksPage.js";
+import { SettingsPage } from "./pages/SettingsPage.js";
 
 type Route = "tasks" | "status" | "settings";
 
@@ -39,15 +41,6 @@ const CONTENT_STYLE: React.CSSProperties = {
   padding: "24px",
 };
 
-function TasksPage() {
-  return (
-    <div>
-      <h1>待办事项</h1>
-      <p>任务列表将在此显示</p>
-    </div>
-  );
-}
-
 function StatusPage() {
   return (
     <div>
@@ -57,7 +50,7 @@ function StatusPage() {
   );
 }
 
-function SettingsPage() {
+function SettingsPagePlaceholder() {
   return (
     <div>
       <h1>设置</h1>
