@@ -15,6 +15,7 @@ import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import type { TaskRecord } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
+import type { PeerRunnerKind } from '../internalization/peer-runner-contracts.js';
 import { PDRuntimeError } from '../error-categories.js';
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
@@ -558,9 +559,13 @@ describe('InternalizationOrchestrator', () => {
         expect((result as { taskId: string }).taskId).toBe('dreamer-1');
       });
 
-      it('wakeOnce("evaluator") with no evaluator candidates returns no_ready_tasks', async () => {
+      it('wakeOnce("evaluator") with no evaluator candidates returns no_ready_tasks with filtered_out reason', async () => {
         const dreamerTask = makeRawTask({ taskId: 'dreamer-1', taskKind: 'dreamer', status: 'pending' });
         mockStateManager.listTasks
+          .mockResolvedValueOnce([dreamerTask])
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([dreamerTask])
+          .mockResolvedValueOnce([])
           .mockResolvedValueOnce([dreamerTask])
           .mockResolvedValueOnce([]);
 
@@ -573,6 +578,35 @@ describe('InternalizationOrchestrator', () => {
 
         expect(result.decision).toBe('no_ready_tasks');
         expect((result as { inspectedCount: number }).inspectedCount).toBe(0);
+        expect((result as { reason: string }).reason).toBe('filtered_out');
+      });
+
+      it('wakeOnce("evaluator") with completely empty queue returns no_ready_tasks with no_candidates reason', async () => {
+        mockStateManager.listTasks
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([]);
+
+        const orchestrator = new OrchestratorClass(
+          { stateManager: mockStateManager as unknown as RuntimeStateManager },
+          { owner: 'test-owner', runtimeKind: 'evaluator', dryRun: false },
+        );
+
+        const result = await orchestrator.wakeOnce('evaluator');
+
+        expect(result.decision).toBe('no_ready_tasks');
+        expect((result as { inspectedCount: number }).inspectedCount).toBe(0);
+        expect((result as { reason: string }).reason).toBe('no_candidates');
+      });
+
+      it('wakeOnce with invalid taskKind throws PDRuntimeError input_invalid', async () => {
+        const orchestrator = new OrchestratorClass(
+          { stateManager: mockStateManager as unknown as RuntimeStateManager },
+          { owner: 'test-owner', runtimeKind: 'dreamer', dryRun: false },
+        );
+
+        await expect(orchestrator.wakeOnce('diagnostician' as unknown as PeerRunnerKind)).rejects.toThrow('invalid taskKind filter');
       });
 
       it('wakeOnce() without taskKind returns first leasable task regardless of kind (backward compat)', async () => {

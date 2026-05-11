@@ -383,6 +383,10 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     let skipReason: string | undefined = undefined;
 
     if (wakeResult.decision === 'would_lease') {
+      if (wakeResult.taskKind !== runnerKind) {
+        throw new Error(`Invariant violation: wakeOnce returned taskKind=${wakeResult.taskKind} but runnerKind=${runnerKind}`);
+      }
+
       const eventEmitter = new StoreEventEmitter();
       const artifactStore = stateManager.piArtifactStore;
       const runtimeAdapter = resolveRuntimeAdapter({ runtimeKind, taskId: wakeResult.taskId, workspaceDir, runnerKind, timeoutMs: cliTimeoutMs });
@@ -415,6 +419,8 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
         );
         runnerResult = await runner.run(wakeResult.taskId);
+      } else {
+        skipReason = 'no_runner_implemented';
       }
     }
 

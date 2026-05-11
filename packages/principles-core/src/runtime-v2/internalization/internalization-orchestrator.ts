@@ -33,7 +33,7 @@ export interface NoReadyTasksResult {
   decision: 'no_ready_tasks';
   inspectedCount: number;
   /** Why no task could be leased: specific diagnosis */
-  reason: 'no_candidates' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_lease_conflict' | 'all_retry_wait_pending';
+  reason: 'no_candidates' | 'filtered_out' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_lease_conflict' | 'all_retry_wait_pending';
 }
 
 export interface BlockedResult {
@@ -172,10 +172,11 @@ export class InternalizationOrchestrator {
     const inspectedCount = candidates.length;
 
     if (inspectedCount === 0) {
+      const allPeerCount = taskKind ? (await this.findCandidates()).length : 0;
       return {
         decision: 'no_ready_tasks',
         inspectedCount: 0,
-        reason: 'no_candidates',
+        reason: allPeerCount > 0 ? 'filtered_out' : 'no_candidates',
       };
     }
 
@@ -459,6 +460,10 @@ export class InternalizationOrchestrator {
    * Filters to only PeerRunnerKind taskKinds and hydrates to PITaskRecord.
    */
   private async findCandidates(taskKind?: PeerRunnerKind): Promise<TaskRecord[]> {
+    if (taskKind && !isPeerRunnerKind(taskKind)) {
+      throw new PDRuntimeError('input_invalid', `findCandidates: invalid taskKind filter: ${taskKind}`);
+    }
+
     const allCandidates: TaskRecord[] = [];
     try {
       const pending = await this.stateManager.listTasks({ status: 'pending' });
