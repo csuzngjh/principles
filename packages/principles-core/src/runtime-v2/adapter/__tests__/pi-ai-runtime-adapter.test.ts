@@ -14,7 +14,7 @@ import { PDRuntimeError } from '../../error-categories.js';
 vi.mock('@mariozechner/pi-ai', () => ({
   getModel: vi.fn(),
   getProviders: vi.fn(() => ['openrouter', 'anthropic', 'openai', 'google']),
-  complete: vi.fn(),
+  completeSimple: vi.fn(),
 }));
 
 // Mock store/event-emitter to capture telemetry calls
@@ -22,13 +22,13 @@ vi.mock('../../store/event-emitter.js', () => ({
   storeEmitter: { emitTelemetry: vi.fn() },
 }));
 
-import { getModel, complete } from '@mariozechner/pi-ai';
+import { getModel, completeSimple } from '@mariozechner/pi-ai';
 import { storeEmitter } from '../../store/event-emitter.js';
 import { PiAiRuntimeAdapter } from '../pi-ai-runtime-adapter.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
 
 const mockGetModel = getModel as ReturnType<typeof vi.fn>;
-const mockComplete = complete as ReturnType<typeof vi.fn>;
+const mockComplete = completeSimple as ReturnType<typeof vi.fn>;
 const mockEmitTelemetry = storeEmitter.emitTelemetry as ReturnType<typeof vi.fn>;
 
 // ── Fixtures ──
