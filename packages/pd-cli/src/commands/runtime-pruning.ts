@@ -10,6 +10,8 @@ import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { PruningReadModel, appendPruningReview, listPruningReviews, buildMaskedPrincipleSet, loadLedger, saveLedger } from '@principles/core/runtime-v2';
 import type { PruningReviewDecision, OrphanDerivedCandidate, OrphanDetectionResult } from '@principles/core/runtime-v2';
+import { createRemediationResult, remediationAction } from './remediation-output.js';
+import type { RemediationResult } from './remediation-output.js';
 
 interface PruningReportOptions {
   workspace?: string;
@@ -287,15 +289,22 @@ export interface PruningOrphansOptions {
   json?: boolean;
 }
 
-export interface OrphanCleanupResult {
-  orphanDerivedCandidateCount: number;
-  candidates: OrphanDerivedCandidate[];
-  dryRun: boolean;
-  dbReadable: boolean;
-  removedFromPrinciples?: { principleId: string; removedIds: string[] }[];
+function orphanActions(orphans: OrphanDerivedCandidate[]) {
+  return orphans.map((orphan) => remediationAction({
+    action: 'remove_orphan_reference',
+    targetId: orphan.candidateId,
+    previousState: orphan.status ?? 'unknown',
+    nextState: 'removed_from_ledger_reference',
+    reason: `${orphan.reason} (principle: ${orphan.principleId})`,
+  }));
 }
 
 export function handlePruningOrphans(opts: PruningOrphansOptions): void {
+  if (opts.dryRun && opts.confirm) {
+    console.error('Error: --dry-run and --confirm are mutually exclusive');
+    process.exit(1);
+  }
+
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
     : resolveWorkspaceDir();
@@ -306,15 +315,23 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
   const isDryRun = !opts.confirm;
 
   if (isDryRun) {
-    const result: OrphanCleanupResult = {
-      orphanDerivedCandidateCount: orphans.length,
-      candidates: orphans,
-      dryRun: true,
-      dbReadable: detection.dbReadable,
-    };
+    const result: RemediationResult = createRemediationResult({
+      mode: 'dry_run',
+      repairedCount: 0,
+      skippedCount: 0,
+      actions: orphanActions(orphans),
+      warnings: detection.dbReadable ? [] : ['state.db is unreadable; --confirm will be refused until DB access is restored.'],
+      safeToConfirm: detection.dbReadable && orphans.length > 0,
+      includeLegacyDryRun: true,
+    });
 
     if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
+      console.log(JSON.stringify({
+        ...result,
+        orphanDerivedCandidateCount: orphans.length,
+        candidates: orphans,
+        dbReadable: detection.dbReadable,
+      }, null, 2));
       return;
     }
 
@@ -342,15 +359,24 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
   }
 
   if (!detection.dbReadable) {
-    const result: OrphanCleanupResult = {
-      orphanDerivedCandidateCount: orphans.length,
-      candidates: orphans,
-      dryRun: false,
-      dbReadable: false,
-    };
+    const result: RemediationResult = createRemediationResult({
+      mode: 'confirm',
+      status: 'refused',
+      safeToConfirm: false,
+      repairedCount: 0,
+      skippedCount: orphans.length,
+      actions: orphanActions(orphans),
+      warnings: ['state.db is unreadable; refusing orphan cleanup because candidates cannot be verified.'],
+      includeLegacyDryRun: true,
+    });
 
     if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
+      console.log(JSON.stringify({
+        ...result,
+        orphanDerivedCandidateCount: orphans.length,
+        candidates: orphans,
+        dbReadable: false,
+      }, null, 2));
     } else {
       console.error('❌ REFUSED: state.db is unreadable — cannot safely confirm orphan cleanup.');
       console.error('   All derivedFromPainIds would appear as orphans when the DB is inaccessible.');
@@ -402,16 +428,24 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
     }
   }
 
-  const result: OrphanCleanupResult = {
-    orphanDerivedCandidateCount: orphans.length,
-    candidates: orphans,
-    dryRun: false,
-    dbReadable: true,
-    removedFromPrinciples,
-  };
+  const removedCount = removedFromPrinciples.reduce((sum, item) => sum + item.removedIds.length, 0);
+  const result: RemediationResult = createRemediationResult({
+    mode: 'confirm',
+    repairedCount: removedCount,
+    skippedCount: Math.max(0, orphans.length - removedCount),
+    actions: orphanActions(orphans),
+    warnings: [],
+    includeLegacyDryRun: true,
+  });
 
   if (opts.json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({
+      ...result,
+      orphanDerivedCandidateCount: orphans.length,
+      candidates: orphans,
+      dbReadable: true,
+      removedFromPrinciples,
+    }, null, 2));
     return;
   }
 

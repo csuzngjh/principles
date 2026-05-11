@@ -463,11 +463,11 @@ recoveryCmd
   .command('sweep')
   .description('Detect and optionally recover expired leases')
   .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--dry-run', 'Report only, no modifications (default)', true)
+  .option('--dry-run', 'Report only, no modifications (default)')
   .option('--confirm', 'Actually recover expired leases')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
-    await handleRuntimeRecoverySweep({ workspace: opts.workspace, dryRun: !opts.confirm, confirm: opts.confirm, json: opts.json });
+    await handleRuntimeRecoverySweep({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
   });
 
 diagnosticsCmd
@@ -545,13 +545,13 @@ pruningCmd
   .command('orphans')
   .description('List orphan derived candidates not found in state.db')
   .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--dry-run', 'Report only, no modifications (default)', true)
+  .option('--dry-run', 'Report only, no modifications (default)')
   .option('--confirm', 'Actually remove orphan references from ledger')
   .option('--json', 'Output raw JSON')
   .action((opts) => {
     handlePruningOrphans({
       workspace: opts.workspace,
-      dryRun: !opts.confirm,
+      dryRun: opts.dryRun,
       confirm: opts.confirm,
       json: opts.json,
     });
@@ -653,11 +653,11 @@ candidateInternalizationCmd
   .command('backfill')
   .description('Backfill dreamer tasks for consumed candidates created before Internalization Engine')
   .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--dry-run', 'Report only, no modifications (default)', true)
+  .option('--dry-run', 'Report only, no modifications (default)')
   .option('--confirm', 'Actually create missing dreamer tasks')
   .option('--json', 'Output as JSON')
   .action(async (opts) => {
-    await handleCandidateInternalizationBackfill({ workspace: opts.workspace, dryRun: !opts.confirm, confirm: opts.confirm, json: opts.json });
+    await handleCandidateInternalizationBackfill({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
   });
 
 // ── Artifact inspection commands ────────────────────────────────────────────

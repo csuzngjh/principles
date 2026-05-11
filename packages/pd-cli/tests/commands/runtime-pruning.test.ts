@@ -71,6 +71,19 @@ vi.mock('@principles/core/runtime-v2', () => ({
   PruningReadModel: vi.fn().mockImplementation(function () {
     return new MockPruningReadModel();
   }),
+  createRemediationResult: vi.fn((input) => ({
+    mode: input.mode,
+    status: input.status ?? (input.mode === 'dry_run'
+      ? (input.actions?.length > 0 ? 'would_change' : 'no_op')
+      : (input.repairedCount > 0 ? 'changed' : 'no_op')),
+    safeToConfirm: input.safeToConfirm ?? false,
+    repairedCount: input.repairedCount ?? 0,
+    skippedCount: input.skippedCount ?? 0,
+    actions: input.actions ?? [],
+    warnings: input.warnings ?? [],
+    ...(input.includeLegacyDryRun ? { dryRun: input.mode === 'dry_run' } : {}),
+  })),
+  remediationAction: vi.fn((input) => input),
   appendPruningReview: mockAppendPruningReview,
   listPruningReviews: mockListPruningReviews,
   buildMaskedPrincipleSet: mockBuildMaskedPrincipleSet,
@@ -513,6 +526,9 @@ describe('pd runtime pruning orphans', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     handlePruningOrphans({ json: true, dryRun: true, confirm: false });
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.mode).toBe('dry_run');
+    expect(output.status).toBe('would_change');
+    expect(output.safeToConfirm).toBe(true);
     expect(output.orphanDerivedCandidateCount).toBe(2);
     expect(output.dryRun).toBe(true);
     expect(output.dbReadable).toBe(true);
@@ -525,6 +541,8 @@ describe('pd runtime pruning orphans', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     handlePruningOrphans({ json: true });
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.mode).toBe('dry_run');
+    expect(output.status).toBe('no_op');
     expect(output.dryRun).toBe(true);
     expect(mockSaveLedger).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
@@ -565,6 +583,9 @@ describe('pd runtime pruning orphans', () => {
     const savedLedgerArg = mockSaveLedger.mock.calls[0]![1];
     expect(savedLedgerArg.tree.principles.p1.derivedFromPainIds).toEqual(['c_valid1']);
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.mode).toBe('confirm');
+    expect(output.status).toBe('changed');
+    expect(output.repairedCount).toBe(1);
     expect(output.dryRun).toBe(false);
     expect(output.dbReadable).toBe(true);
     expect(output.removedFromPrinciples).toHaveLength(1);
@@ -663,6 +684,8 @@ describe('pd runtime pruning orphans', () => {
     expect(processSpy).toHaveBeenCalledWith(1);
     expect(mockSaveLedger).not.toHaveBeenCalled();
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.status).toBe('refused');
+    expect(output.safeToConfirm).toBe(false);
     expect(output.dbReadable).toBe(false);
     expect(output.dryRun).toBe(false); // operation was refused, not a dry-run
     consoleSpy.mockRestore();

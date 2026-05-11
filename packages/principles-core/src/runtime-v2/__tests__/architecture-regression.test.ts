@@ -90,6 +90,8 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/pi-artifact-store.ts',
   // PRI-113
   'golden-trace.ts',
+  // PRI-105
+  'remediation-contract.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -128,6 +130,8 @@ const REQUIRED_TEST_FILES = [
   '../gfi/__tests__/gfi-kernel.test.ts',
   // PRI-113
   'golden-trace.test.ts',
+  // PRI-105
+  'remediation-contract.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
