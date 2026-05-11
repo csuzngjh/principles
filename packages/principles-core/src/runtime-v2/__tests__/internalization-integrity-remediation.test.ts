@@ -3,7 +3,8 @@ import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { InternalizationIntegrityRemediation, type RemediationAction } from '../internalization-integrity-remediation.js';
+import { InternalizationIntegrityRemediation } from '../internalization-integrity-remediation.js';
+import type { RemediationAction } from '../remediation-contract.js';
 
 describe('InternalizationIntegrityRemediation', () => {
   let tmpDir = '';

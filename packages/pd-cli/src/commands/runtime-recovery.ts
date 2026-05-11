@@ -1,6 +1,8 @@
 import * as path from 'path';
 import { RuntimeStateManager } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createRemediationResult, remediationAction } from './remediation-output.js';
+import type { RemediationResult } from './remediation-output.js';
 
 interface RecoverySweepOptions {
   workspace?: string;
@@ -9,45 +11,28 @@ interface RecoverySweepOptions {
   json?: boolean;
 }
 
-interface RecoverySweepOutput {
-  mode: 'dry-run' | 'confirm';
-  expiredLeaseCount: number;
-  expiredLeaseTaskIds: string[];
-  recoveredCount: number;
-  failedCount: number;
-  errors: string[];
-  samples: {
-    taskId: string;
-    previousStatus: string;
-    newStatus: string;
-    wasLeaseExpired: boolean;
-  }[];
-}
-
-function formatTextOutput(output: RecoverySweepOutput): string {
+function formatTextOutput(output: RemediationResult): string {
   const lines: string[] = [];
 
   lines.push(`Recovery Sweep (${output.mode})`);
-  lines.push(`  expired_leases: ${output.expiredLeaseCount}`);
+  lines.push(`  status: ${output.status}`);
+  lines.push(`  safeToConfirm: ${output.safeToConfirm}`);
+  lines.push(`  repairedCount: ${output.repairedCount}`);
+  lines.push(`  skippedCount: ${output.skippedCount}`);
 
-  if (output.expiredLeaseCount > 0) {
-    lines.push(`  task_ids: ${output.expiredLeaseTaskIds.join(', ')}`);
+  if (output.warnings.length > 0) {
+    lines.push(`  warnings:`);
+    for (const warning of output.warnings) lines.push(`    - ${warning}`);
   }
-
-  if (output.mode === 'confirm') {
-    lines.push(`  recovered: ${output.recoveredCount}`);
-    lines.push(`  failed: ${output.failedCount}`);
-    if (output.errors.length > 0) {
-      lines.push(`  errors:`);
-      for (const err of output.errors) {
-        lines.push(`    - ${err}`);
-      }
-    }
-    for (const sample of output.samples.slice(0, 5)) {
-      lines.push(`  ${sample.taskId}: ${sample.previousStatus} → ${sample.newStatus}`);
-    }
-  } else {
+  for (const action of output.actions.slice(0, 5)) {
+    lines.push(`  ${action.targetId}: ${action.previousState ?? '(unknown)'} → ${action.nextState ?? '(unknown)'}`);
+    lines.push(`    action: ${action.action}`);
+    lines.push(`    reason: ${action.reason}`);
+  }
+  if (output.mode === 'dry_run' && output.actions.length > 0) {
     lines.push(`  (use --confirm to recover expired leases)`);
+  } else if (output.actions.length === 0) {
+    lines.push(`  no expired leases found`);
   }
 
   return lines.join('\n');
@@ -69,35 +54,44 @@ export async function handleRuntimeRecoverySweep(opts: RecoverySweepOptions): Pr
   try {
     const expiredLeaseTaskIds = await stateManager.detectExpiredLeases();
 
-    const output: RecoverySweepOutput = {
-      mode: isDryRun ? 'dry-run' : 'confirm',
-      expiredLeaseCount: expiredLeaseTaskIds.length,
-      expiredLeaseTaskIds,
-      recoveredCount: 0,
-      failedCount: 0,
-      errors: [],
-      samples: [],
-    };
+    const actions = expiredLeaseTaskIds.map((taskId) => remediationAction({
+      action: 'recover_expired_lease',
+      targetId: taskId,
+      previousState: 'leased',
+      nextState: 'retry_wait',
+      reason: 'Task lease is expired and can be recovered by the operator sweep.',
+    }));
+    const warnings: string[] = [];
+    let repairedCount = 0;
+    let failedCount = 0;
 
     if (isConfirm && expiredLeaseTaskIds.length > 0) {
       for (const taskId of expiredLeaseTaskIds) {
         try {
           const result = await stateManager.recoverTask(taskId);
           if (result) {
-            output.recoveredCount++;
-            output.samples.push({
-              taskId,
-              previousStatus: result.previousStatus,
-              newStatus: result.newStatus,
-              wasLeaseExpired: true,
-            });
+            repairedCount++;
+            const action = actions.find((a) => a.targetId === taskId);
+            if (action) {
+              action.previousState = result.previousStatus;
+              action.nextState = result.newStatus;
+            }
           }
         } catch (err) {
-          output.failedCount++;
-          output.errors.push(`${taskId}: ${err instanceof Error ? err.message : String(err)}`);
+          failedCount++;
+          warnings.push(`${taskId}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     }
+    const output = createRemediationResult({
+      mode: isDryRun ? 'dry_run' : 'confirm',
+      repairedCount,
+      skippedCount: failedCount,
+      actions,
+      warnings,
+      status: failedCount > 0 && repairedCount === 0 ? 'error' : undefined,
+      safeToConfirm: isDryRun && expiredLeaseTaskIds.length > 0,
+    });
 
     if (opts.json) {
       console.log(JSON.stringify(output, null, 2));
