@@ -37,6 +37,8 @@ const ZONE_TITLES: Record<string, string> = {
   recentActivity: "最近动态",
 };
 
+const LOCALE = "zh-CN" as const;
+
 function zoneTitle(key: string): string {
   return ZONE_TITLES[key] ?? key;
 }
@@ -56,4 +58,4 @@ function userFacingText(template: string): string {
   return result;
 }
 
-export { TERM_MAP, translate, userFacingText, zoneTitle };
+export { TERM_MAP, translate, userFacingText, zoneTitle, LOCALE };

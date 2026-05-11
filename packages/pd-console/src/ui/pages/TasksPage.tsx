@@ -72,12 +72,12 @@ function TasksPageInner() {
 
   async function loadData() {
     const result = await fetchTasks();
-    if (result.success && result.data) {
+    if (!result.success) {
+      setError(result.error ?? "加载失败");
+    } else {
       setZones(result.data);
       setLastUpdated(new Date());
       setError(null);
-    } else {
-      setError(result.error ?? "加载失败");
     }
     setLoading(false);
   }
@@ -115,9 +115,13 @@ function TasksPageInner() {
     const task = zones[zone].find(t => t.id === taskId);
     if (!task) return;
     setZones(prev => ({ ...prev, [zone]: prev[zone].filter(t => t.id !== taskId) }));
-    const timer = setTimeout(() => {
-      approveTask(taskId);
+    const timer = setTimeout(async () => {
       setUndoMap(prev => { const n = new Map(prev); n.delete(taskId); return n; });
+      const result = await approveTask(taskId);
+      if (!result.success) {
+        setZones(prev => ({ ...prev, [zone]: [task, ...prev[zone]] }));
+        setError(`操作失败: ${result.error ?? "未知错误"}`);
+      }
     }, 5000);
     setUndoMap(prev => { const n = new Map(prev); n.set(taskId, { task, zone, timer, action: "approve", countdown: 5 }); return n; });
   }
@@ -126,9 +130,13 @@ function TasksPageInner() {
     const task = zones[zone].find(t => t.id === taskId);
     if (!task) return;
     setZones(prev => ({ ...prev, [zone]: prev[zone].filter(t => t.id !== taskId) }));
-    const timer = setTimeout(() => {
-      rejectTask(taskId);
+    const timer = setTimeout(async () => {
       setUndoMap(prev => { const n = new Map(prev); n.delete(taskId); return n; });
+      const result = await rejectTask(taskId);
+      if (!result.success) {
+        setZones(prev => ({ ...prev, [zone]: [task, ...prev[zone]] }));
+        setError(`操作失败: ${result.error ?? "未知错误"}`);
+      }
     }, 5000);
     setUndoMap(prev => { const n = new Map(prev); n.set(taskId, { task, zone, timer, action: "reject", countdown: 5 }); return n; });
   }
@@ -143,6 +151,7 @@ function TasksPageInner() {
 
   async function handleBatchCleanup() {
     const cleanupTasks = zones.suggestedAttention.filter(t => t.kind === "cleanup");
+    let failed = 0;
     for (const t of cleanupTasks) {
       const result = await cleanupTask(t.id);
       if (result.success) {
@@ -150,7 +159,12 @@ function TasksPageInner() {
           ...prev,
           suggestedAttention: prev.suggestedAttention.filter(st => st.id !== t.id),
         }));
+      } else {
+        failed++;
       }
+    }
+    if (failed > 0) {
+      setError(`批量清理完成，${failed}/${cleanupTasks.length} 项失败`);
     }
   }
 

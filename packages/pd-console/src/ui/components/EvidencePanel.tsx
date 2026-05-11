@@ -1,5 +1,5 @@
 import type { TaskEvidence } from "../../types.js";
-import { userFacingText } from "../i18n.js";
+import { userFacingText, LOCALE } from "../i18n.js";
 
 interface EvidencePanelProps {
   evidence: TaskEvidence | null;
@@ -76,8 +76,8 @@ export function EvidencePanel({ evidence, loading }: EvidencePanelProps) {
         <div style={SECTION_STYLE}>
           <div style={SECTION_LABEL}>证据</div>
           {evidence.evidence.map((item, i) => (
-            <div key={i} style={EVIDENCE_ITEM}>
-              <span style={TIMESTAMP}>{new Date(item.timestamp).toLocaleTimeString("zh-CN")}</span>
+            <div key={`${item.timestamp}-${item.operation}-${i}`} style={EVIDENCE_ITEM}>
+              <span style={TIMESTAMP}>{new Date(item.timestamp).toLocaleTimeString(LOCALE)}</span>
               <span>{userFacingText(item.operation)}</span>
               <span style={{ color: "#999" }}>{userFacingText(item.problem)}</span>
             </div>
