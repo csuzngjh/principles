@@ -651,6 +651,8 @@ export type {
   ReadyTask,
   BlockedSample,
   DependencyFailedSample,
+  RetryWaitPendingSample,
+  LeaseConflictSample,
 } from './internalization-queue-read-model.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────
