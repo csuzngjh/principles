@@ -49,6 +49,7 @@ describe('GoldenTraceCase', () => {
     params: { command: 'rm -rf /' },
     expectedDecision: 'propose_correction',
     expectedProposedParams: { command: 'rm -rf ./dist' },
+    expectedApplicationMode: 'shadow',
   };
 
   it('accepts valid negative case', () => {
@@ -78,7 +79,7 @@ describe('GoldenTraceCase', () => {
 
   it('rejects case with invalid kind', () => {
     const invalid = { ...validNegativeCase, kind: 'neutral' };
-    const result = validateGoldenTraceCase(invalid as unknown as GoldenTraceCase);
+    const result = validateGoldenTraceCase(invalid);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('kind'))).toBe(true);
   });
@@ -92,7 +93,7 @@ describe('GoldenTraceCase', () => {
 
   it('rejects case with invalid expectedDecision', () => {
     const invalid = { ...validNegativeCase, expectedDecision: 'maybe' };
-    const result = validateGoldenTraceCase(invalid as unknown as GoldenTraceCase);
+    const result = validateGoldenTraceCase(invalid);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('expectedDecision'))).toBe(true);
   });
@@ -100,14 +101,22 @@ describe('GoldenTraceCase', () => {
   it('rejects correction case without expectedProposedParams', () => {
     const invalid = { ...validCorrectionCase };
     delete (invalid as Record<string, unknown>).expectedProposedParams;
-    const result = validateGoldenTraceCase(invalid as GoldenTraceCase);
+    const result = validateGoldenTraceCase(invalid);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('expectedProposedParams'))).toBe(true);
   });
 
+  it('rejects correction case without expectedApplicationMode', () => {
+    const invalid = { ...validCorrectionCase };
+    delete (invalid as Record<string, unknown>).expectedApplicationMode;
+    const result = validateGoldenTraceCase(invalid);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('expectedApplicationMode'))).toBe(true);
+  });
+
   it('rejects case with non-object params', () => {
     const invalid = { ...validNegativeCase, params: 'not-an-object' };
-    const result = validateGoldenTraceCase(invalid as unknown as GoldenTraceCase);
+    const result = validateGoldenTraceCase(invalid);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('params'))).toBe(true);
   });
@@ -217,6 +226,13 @@ describe('GoldenTrace', () => {
     const result = validateGoldenTrace(invalid);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('createdAt'))).toBe(true);
+  });
+
+  it('rejects trace with unparseable createdAt', () => {
+    const invalid = { ...validTrace, createdAt: 'not-a-date' };
+    const result = validateGoldenTrace(invalid);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('createdAt') && e.includes('parseable'))).toBe(true);
   });
 
   it('rejects trace with invalid case inside', () => {
@@ -355,6 +371,7 @@ describe('createGoldenTraceFixture', () => {
     const negativeCase = trace.cases[0] as GoldenTraceCase;
     expect(negativeCase.expectedDecision).toBe('propose_correction');
     expect(negativeCase.expectedProposedParams).toEqual({ command: 'rm -rf ./dist' });
+    expect(negativeCase.expectedApplicationMode).toBe('shadow');
   });
 
   it('accepts source refs', () => {

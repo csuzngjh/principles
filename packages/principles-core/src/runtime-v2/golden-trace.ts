@@ -3,6 +3,7 @@ import { Value } from '@sinclair/typebox/value';
 import type { RuleHostInput } from './internalization/rule-host-contracts.js';
 
 const UnknownRecordSchema = Type.Record(Type.String(), Type.Unknown());
+const ISO_8601_UTC_PATTERN = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$';
 
 export const CorrectionApplicationModeSchema = Type.Union([
   Type.Literal('shadow'),
@@ -42,7 +43,7 @@ export const GoldenTraceSchema = Type.Object({
   sourceCandidateId: Type.Optional(Type.String({ minLength: 1 })),
   sourceArtifactId: Type.Optional(Type.String({ minLength: 1 })),
   cases: Type.Array(GoldenTraceCaseSchema, { minItems: 1 }),
-  createdAt: Type.String({ minLength: 1 }),
+  createdAt: Type.String({ pattern: ISO_8601_UTC_PATTERN }),
   version: Type.Literal(1),
 });
 
@@ -94,11 +95,18 @@ function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'case';
 }
 
+function isParseableTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+
 export function validateGoldenTraceCase(input: unknown): GoldenTraceValidationResult {
   const errors = collectSchemaErrors(GoldenTraceCaseSchema, input);
   if (errors.length === 0 && isRecord(input)) {
     if (input.expectedDecision === 'propose_correction' && !isRecord(input.expectedProposedParams)) {
       errors.push('expectedProposedParams is required when expectedDecision is propose_correction');
+    }
+    if (input.expectedDecision === 'propose_correction' && input.expectedApplicationMode === undefined) {
+      errors.push('expectedApplicationMode is required when expectedDecision is propose_correction');
     }
     if (input.kind === 'positive' && input.expectedDecision !== 'allow') {
       errors.push('positive cases must expect allow');
@@ -111,6 +119,10 @@ export function validateGoldenTrace(input: unknown): GoldenTraceValidationResult
   const errors = collectSchemaErrors(GoldenTraceSchema, input);
   if (!isRecord(input)) {
     return { valid: false, errors };
+  }
+
+  if ('createdAt' in input && !isParseableTimestamp(input.createdAt)) {
+    errors.push('createdAt must be a parseable ISO-8601 timestamp');
   }
 
   if (Array.isArray(input.cases)) {
