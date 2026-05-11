@@ -50,8 +50,8 @@ export class RealWorkspaceFixture {
     this._artifactStore = null;
   }
 
-  destroy(): void {
-    void this.close();
+  async destroy(): Promise<void> {
+    await this.close();
     fs.rmSync(this.workspaceDir, { recursive: true, force: true });
   }
 }

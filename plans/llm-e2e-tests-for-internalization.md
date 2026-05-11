@@ -53,11 +53,11 @@ TrainerRunner → model training
 ## 架构决策
 
 - **测试目标**：原则内化核心链路（Dreamer → Philosopher → Scribe）
-- **LLM 提供商**：MiniMax API（`MiniMax-M2.7` 模型，baseUrl: `api.minimax.chat`）
+- **LLM 提供商**：MiniMax API（`MiniMax-M2.7` 模型，provider: `minimax-cn`）
 - **测试环境隔离**：每个测试使用独立临时目录
 - **Mock 策略**：仅 Mock 不相关的外部依赖（文件系统），真实调用 LLM API
-- **超时控制**：LLM 调用 60s 超时，Runner 5 分钟超时
-- **API Key 环境变量**：`MINIMAX_API_KEY`
+- **超时控制**：LLM 调用 120s 超时，Runner 5 分钟超时
+- **API Key 环境变量**：`MINIMAX_CN_API_KEY`
 
 ---
 
@@ -199,28 +199,24 @@ TrainerRunner → model training
 // llm-e2e-config.ts 示例
 export interface MiniMaxTestConfig {
   apiKey: string;
-  baseUrl: 'api.minimax.chat';
   model: 'MiniMax-M2.7';
+  provider: 'minimax-cn';
+  apiKeyEnv: 'MINIMAX_CN_API_KEY';
   timeoutMs: number;
+  maxRetries: number;
 }
 
 export function getMiniMaxConfig(): MiniMaxTestConfig | null {
-  const apiKey = process.env.MINIMAX_API_KEY;
+  const apiKey = process.env.MINIMAX_CN_API_KEY;
   if (!apiKey) return null;
   return {
     apiKey,
-    baseUrl: 'api.minimax.chat',
     model: 'MiniMax-M2.7',
-    timeoutMs: 60_000,
+    provider: 'minimax-cn',
+    apiKeyEnv: 'MINIMAX_CN_API_KEY',
+    timeoutMs: 120_000,
+    maxRetries: 2,
   };
-}
-
-export function skipIfNoMiniMaxApiKey(testInfo: { skip: (reason: string) => void }) {
-  const config = getMiniMaxConfig();
-  if (!config) {
-    testInfo.skip('MINIMAX_API_KEY environment variable not set');
-  }
-  return config!;
 }
 ```
 
@@ -234,13 +230,13 @@ on:
   schedule:
     - cron: '0 2 * * *'  # Daily at 2 AM
 env:
-  MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+  MINIMAX_CN_API_KEY: ${{ secrets.MINIMAX_CN_API_KEY }}
 ```
 
 ### 测试跳过条件
 
-- 无 `MINIMAX_API_KEY` 环境变量时跳过真实 LLM 测试
-- 使用 `skipIfNoMiniMaxApiKey()` 辅助函数
+- 无 `MINIMAX_CN_API_KEY` 环境变量时跳过真实 LLM 测试
+- 使用 `describe.skipIf(!hasApiKey)` 在 describe 级别跳过
 
 ---
 

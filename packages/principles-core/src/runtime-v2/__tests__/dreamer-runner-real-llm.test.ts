@@ -11,35 +11,40 @@ import { StoreEventEmitter } from '../store/event-emitter.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import { getMiniMaxConfig } from './fixtures/llm-e2e-config.js';
+import type { MiniMaxTestConfig } from './fixtures/llm-e2e-config.js';
 
 const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-dreamer-${process.pid}`);
+const hasApiKey = !!process.env.MINIMAX_CN_API_KEY;
 
-function makeAdapterConfig() {
-  const config = getMiniMaxConfig();
-  if (!config) return null;
-  return {
+async function runWithRetry<T extends { status: string }>(
+  runner: { run(id: string): Promise<T> },
+  taskId: string,
+  maxRetries = 3,
+): Promise<T> {
+  let result = await runner.run(taskId);
+  for (let retry = 0; retry < maxRetries && result.status === 'retried'; retry++) {
+    await new Promise(r => setTimeout(r, 3000));
+    result = await runner.run(taskId);
+  }
+  return result;
+}
+
+describe.skipIf(!hasApiKey)('DreamerRunner Real LLM E2E (MiniMax)', () => {
+  const config = getMiniMaxConfig() as MiniMaxTestConfig;
+  const adapterConfig = {
     provider: config.provider,
     model: config.model,
     apiKeyEnv: config.apiKeyEnv,
     maxRetries: config.maxRetries,
     timeoutMs: config.timeoutMs,
   };
-}
 
-describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
   let testDir = '';
-  let stateManager: RuntimeStateManager | null = null;
-  let artifactStore: PIArtifactStore | null = null;
-  let _eventEmitter: StoreEventEmitter | null = null;
-  let _runtimeAdapter: PiAiRuntimeAdapter | null = null;
-  let runner: DreamerRunner | null = null;
+  let stateManager = null as unknown as RuntimeStateManager;
+  let _artifactStore = null as unknown as PIArtifactStore;
+  let runner = null as unknown as DreamerRunner;
 
   beforeEach(async () => {
-    const adapterConfig = makeAdapterConfig();
-    if (!adapterConfig) {
-      return;
-    }
-
     testDir = path.join(TMP_ROOT, `dreamer-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
     fs.mkdirSync(testDir, { recursive: true });
 
@@ -48,13 +53,10 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
     stateManager = sm;
 
     const as = new MemoryPIArtifactStore();
-    artifactStore = as;
+    _artifactStore = as;
 
     const ee = new StoreEventEmitter();
-    _eventEmitter = ee;
-
     const ra = new PiAiRuntimeAdapter(adapterConfig);
-    _runtimeAdapter = ra;
 
     runner = new DreamerRunner(
       {
@@ -74,9 +76,7 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
   });
 
   afterEach(async () => {
-    if (stateManager) {
-      stateManager.close();
-    }
+    stateManager.close();
     try {
       fs.rmSync(TMP_ROOT, { recursive: true, force: true });
     } catch {
@@ -85,12 +85,6 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
   });
 
   it('should succeed with valid DreamerOutput from real MiniMax LLM', async () => {
-    const config = getMiniMaxConfig();
-    if (!config || !stateManager || !artifactStore || !runner) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const taskId = `dreamer-e2e-${Date.now()}`;
     await stateManager.createTask({
       taskId,
@@ -107,7 +101,7 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
       }),
     });
 
-    const result = await runner.run(taskId);
+    const result = await runWithRetry(runner, taskId);
 
     console.log('DreamerRunner result:', JSON.stringify({
       status: result.status,
@@ -122,7 +116,7 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
     expect(result.artifactId).toBeDefined();
     expect(result.resultRef).toContain('dreamer://');
 
-    const artifacts = await artifactStore.listBySourceTaskId(taskId);
+    const artifacts = await _artifactStore.listBySourceTaskId(taskId);
     expect(artifacts.length).toBeGreaterThan(0);
     const [firstArtifact] = artifacts;
     expect(firstArtifact?.artifactKind).toBe('principle');
@@ -134,12 +128,6 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
   }, 120_000);
 
   it('should handle real LLM output and validate DreamerOutputV1 schema', async () => {
-    const config = getMiniMaxConfig();
-    if (!config || !stateManager || !runner) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const taskId = `dreamer-schema-${Date.now()}`;
     await stateManager.createTask({
       taskId,
@@ -156,7 +144,7 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
       }),
     });
 
-    const result = await runner.run(taskId);
+    const result = await runWithRetry(runner, taskId);
 
     expect(result.status).toBe('succeeded');
     expect(result.output).toBeDefined();
@@ -179,12 +167,6 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
   }, 120_000);
 
   it('should correctly transition task state through the pipeline', async () => {
-    const config = getMiniMaxConfig();
-    if (!config || !stateManager || !runner) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const taskId = `dreamer-state-${Date.now()}`;
     await stateManager.createTask({
       taskId,
@@ -204,7 +186,7 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
     const pendingTask = await stateManager.getTask(taskId);
     expect(pendingTask?.status).toBe('pending');
 
-    await runner.run(taskId);
+    await runWithRetry(runner, taskId);
 
     const succeededTask = await stateManager.getTask(taskId);
     expect(succeededTask?.status).toBe('succeeded');
@@ -213,18 +195,4 @@ describe('DreamerRunner Real LLM E2E (MiniMax)', () => {
 
     console.log(`✅ State transition: pending → leased → succeeded`);
   }, 120_000);
-});
-
-describe('DreamerRunner Real LLM E2E — Skip without API Key', () => {
-  it('should skip when MINIMAX_CN_API_KEY is not set', () => {
-    const originalApiKey = process.env.MINIMAX_CN_API_KEY;
-    delete process.env.MINIMAX_CN_API_KEY;
-
-    const config = getMiniMaxConfig();
-    expect(config).toBeNull();
-
-    if (originalApiKey) {
-      process.env.MINIMAX_CN_API_KEY = originalApiKey;
-    }
-  });
 });

@@ -15,37 +15,42 @@ import { StoreEventEmitter } from '../store/event-emitter.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import { getMiniMaxConfig } from './fixtures/llm-e2e-config.js';
+import type { MiniMaxTestConfig } from './fixtures/llm-e2e-config.js';
 
 const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-scribe-${process.pid}`);
+const hasApiKey = !!process.env.MINIMAX_CN_API_KEY;
 
-function makeAdapterConfig() {
-  const config = getMiniMaxConfig();
-  if (!config) return null;
-  return {
+async function runWithRetry<T extends { status: string }>(
+  runner: { run(id: string): Promise<T> },
+  taskId: string,
+  maxRetries = 3,
+): Promise<T> {
+  let result = await runner.run(taskId);
+  for (let retry = 0; retry < maxRetries && result.status === 'retried'; retry++) {
+    await new Promise(r => setTimeout(r, 3000));
+    result = await runner.run(taskId);
+  }
+  return result;
+}
+
+describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
+  const config = getMiniMaxConfig() as MiniMaxTestConfig;
+  const adapterConfig = {
     provider: config.provider,
     model: config.model,
     apiKeyEnv: config.apiKeyEnv,
     maxRetries: config.maxRetries,
     timeoutMs: config.timeoutMs,
   };
-}
 
-describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
   let testDir = '';
-  let stateManager: RuntimeStateManager | null = null;
-  let _artifactStore: PIArtifactStore | null = null;
-  let _eventEmitter: StoreEventEmitter | null = null;
-  let _runtimeAdapter: PiAiRuntimeAdapter | null = null;
-  let dreamerRunner: DreamerRunner | null = null;
-  let philosopherRunner: PhilosopherRunner | null = null;
-  let scribeRunner: ScribeRunner | null = null;
+  let stateManager = null as unknown as RuntimeStateManager;
+  let _artifactStore = null as unknown as PIArtifactStore;
+  let dreamerRunner = null as unknown as DreamerRunner;
+  let philosopherRunner = null as unknown as PhilosopherRunner;
+  let scribeRunner = null as unknown as ScribeRunner;
 
   beforeEach(async () => {
-    const adapterConfig = makeAdapterConfig();
-    if (!adapterConfig) {
-      return;
-    }
-
     testDir = path.join(TMP_ROOT, `scribe-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
     fs.mkdirSync(testDir, { recursive: true });
 
@@ -57,10 +62,7 @@ describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
     _artifactStore = as;
 
     const ee = new StoreEventEmitter();
-    _eventEmitter = ee;
-
     const ra = new PiAiRuntimeAdapter(adapterConfig);
-    _runtimeAdapter = ra;
 
     dreamerRunner = new DreamerRunner(
       { stateManager: sm, runtimeAdapter: ra, eventEmitter: ee, validator: new DefaultDreamerValidator(), artifactStore: as },
@@ -79,9 +81,7 @@ describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
   });
 
   afterEach(async () => {
-    if (stateManager) {
-      stateManager.close();
-    }
+    stateManager.close();
     try {
       fs.rmSync(TMP_ROOT, { recursive: true, force: true });
     } catch {
@@ -89,11 +89,7 @@ describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
     }
   });
 
-  async function runDreamerPhilosopherChain(config: { timeoutMs: number }) {
-    if (!stateManager || !dreamerRunner || !philosopherRunner) {
-      throw new Error('Missing dependencies');
-    }
-
+  async function runDreamerPhilosopherChain() {
     const dreamerTaskId = `dreamer-for-scribe-${Date.now()}`;
     await stateManager.createTask({
       taskId: dreamerTaskId,
@@ -110,11 +106,7 @@ describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
       }),
     });
 
-    let dreamerResult = await dreamerRunner.run(dreamerTaskId);
-    for (let retry = 0; retry < 3 && dreamerResult.status === 'retried'; retry++) {
-      await new Promise(r => setTimeout(r, 3000));
-      dreamerResult = await dreamerRunner.run(dreamerTaskId);
-    }
+    const dreamerResult = await runWithRetry(dreamerRunner, dreamerTaskId);
     expect(dreamerResult.status).toBe('succeeded');
     console.log(`Dreamer succeeded: artifact=${dreamerResult.artifactId}`);
 
@@ -134,11 +126,7 @@ describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
       }),
     });
 
-    let philosopherResult = await philosopherRunner.run(philosopherTaskId);
-    for (let retry = 0; retry < 3 && philosopherResult.status === 'retried'; retry++) {
-      await new Promise(r => setTimeout(r, 3000));
-      philosopherResult = await philosopherRunner.run(philosopherTaskId);
-    }
+    const philosopherResult = await runWithRetry(philosopherRunner, philosopherTaskId);
     expect(philosopherResult.status).toBe('succeeded');
     console.log(`Philosopher succeeded: artifact=${philosopherResult.artifactId}`);
 
@@ -146,13 +134,7 @@ describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
   }
 
   it('should succeed with valid ScribeOutput from real MiniMax LLM after Dreamer→Philosopher', async () => {
-    const config = getMiniMaxConfig();
-    if (!config || !stateManager || !scribeRunner) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const { philosopherTaskId } = await runDreamerPhilosopherChain(config);
+    const { philosopherTaskId } = await runDreamerPhilosopherChain();
 
     const scribeTaskId = `scribe-e2e-${Date.now()}`;
     await stateManager.createTask({
@@ -170,11 +152,7 @@ describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
       }),
     });
 
-    let scribeResult = await scribeRunner.run(scribeTaskId);
-    for (let retry = 0; retry < 3 && scribeResult.status === 'retried'; retry++) {
-      await new Promise(r => setTimeout(r, 3000));
-      scribeResult = await scribeRunner.run(scribeTaskId);
-    }
+    const scribeResult = await runWithRetry(scribeRunner, scribeTaskId);
 
     console.log('ScribeRunner result:', JSON.stringify({
       status: scribeResult.status,
@@ -193,13 +171,7 @@ describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
   }, 360_000);
 
   it('should validate ScribeOutputV1 schema with real LLM output', async () => {
-    const config = getMiniMaxConfig();
-    if (!config || !stateManager || !scribeRunner) {
-      expect(true).toBe(true);
-      return;
-    }
-
-    const { philosopherTaskId } = await runDreamerPhilosopherChain(config);
+    const { philosopherTaskId } = await runDreamerPhilosopherChain();
 
     const scribeTaskId = `scribe-schema-${Date.now()}`;
     await stateManager.createTask({
@@ -217,11 +189,7 @@ describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
       }),
     });
 
-    let scribeResult = await scribeRunner.run(scribeTaskId);
-    for (let retry = 0; retry < 3 && scribeResult.status === 'retried'; retry++) {
-      await new Promise(r => setTimeout(r, 3000));
-      scribeResult = await scribeRunner.run(scribeTaskId);
-    }
+    const scribeResult = await runWithRetry(scribeRunner, scribeTaskId);
 
     expect(scribeResult.status).toBe('succeeded');
     expect(scribeResult.output).toBeDefined();
@@ -236,18 +204,4 @@ describe('ScribeRunner Real LLM E2E (MiniMax)', () => {
 
     console.log(`✅ Scribe schema validation passed: title="${String(scribeResult.output?.principleDraft?.title).slice(0, 50)}"`);
   }, 360_000);
-});
-
-describe('ScribeRunner Real LLM E2E — Skip without API Key', () => {
-  it('should skip when MINIMAX_CN_API_KEY is not set', () => {
-    const originalApiKey = process.env.MINIMAX_CN_API_KEY;
-    delete process.env.MINIMAX_CN_API_KEY;
-
-    const config = getMiniMaxConfig();
-    expect(config).toBeNull();
-
-    if (originalApiKey) {
-      process.env.MINIMAX_CN_API_KEY = originalApiKey;
-    }
-  });
 });

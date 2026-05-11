@@ -170,17 +170,8 @@ function extractAssistantTextOrThrow(
   }
 
   // Find text content (may be mixed with thinking content from reasoning-enabled models)
-  const textContent = response.content.find(c => c.type === 'text');
+  const textContent = response.content.find(c => c.type === 'text' && c.text && c.text.trim().length > 0);
   if (!textContent || textContent.type !== 'text' || !textContent.text) {
-    // Check if there is ANY text content at all
-    const hasAnyText = response.content.some(c => c.type === 'text' && c.text && c.text.trim().length > 0);
-    if (hasAnyText) {
-      const validTextContent = response.content.find(c => c.type === 'text' && c.text && c.text.trim().length > 0);
-      if (validTextContent && validTextContent.type === 'text' && validTextContent.text) {
-        return validTextContent.text;
-      }
-    }
-    // No valid text content found
     throw new PDRuntimeError('output_invalid', `No text content in LLM response. Content types: ${response.content.map(c => c.type).join(', ')}`);
   }
 

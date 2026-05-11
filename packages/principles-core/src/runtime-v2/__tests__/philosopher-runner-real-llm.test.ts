@@ -13,36 +13,41 @@ import { StoreEventEmitter } from '../store/event-emitter.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import { getMiniMaxConfig } from './fixtures/llm-e2e-config.js';
+import type { MiniMaxTestConfig } from './fixtures/llm-e2e-config.js';
 
 const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-philosopher-${process.pid}`);
+const hasApiKey = !!process.env.MINIMAX_CN_API_KEY;
 
-function makeAdapterConfig() {
-  const config = getMiniMaxConfig();
-  if (!config) return null;
-  return {
+async function runWithRetry<T extends { status: string }>(
+  runner: { run(id: string): Promise<T> },
+  taskId: string,
+  maxRetries = 3,
+): Promise<T> {
+  let result = await runner.run(taskId);
+  for (let retry = 0; retry < maxRetries && result.status === 'retried'; retry++) {
+    await new Promise(r => setTimeout(r, 3000));
+    result = await runner.run(taskId);
+  }
+  return result;
+}
+
+describe.skipIf(!hasApiKey)('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
+  const config = getMiniMaxConfig() as MiniMaxTestConfig;
+  const adapterConfig = {
     provider: config.provider,
     model: config.model,
     apiKeyEnv: config.apiKeyEnv,
     maxRetries: config.maxRetries,
     timeoutMs: config.timeoutMs,
   };
-}
 
-describe('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
   let testDir = '';
-  let stateManager: RuntimeStateManager | null = null;
-  let artifactStore: PIArtifactStore | null = null;
-  let _eventEmitter: StoreEventEmitter | null = null;
-  let _runtimeAdapter: PiAiRuntimeAdapter | null = null;
-  let dreamerRunner: DreamerRunner | null = null;
-  let philosopherRunner: PhilosopherRunner | null = null;
+  let stateManager = null as unknown as RuntimeStateManager;
+  let _artifactStore = null as unknown as PIArtifactStore;
+  let dreamerRunner = null as unknown as DreamerRunner;
+  let philosopherRunner = null as unknown as PhilosopherRunner;
 
   beforeEach(async () => {
-    const adapterConfig = makeAdapterConfig();
-    if (!adapterConfig) {
-      return;
-    }
-
     testDir = path.join(TMP_ROOT, `philosopher-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
     fs.mkdirSync(testDir, { recursive: true });
 
@@ -51,13 +56,10 @@ describe('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
     stateManager = sm;
 
     const as = new MemoryPIArtifactStore();
-    artifactStore = as;
+    _artifactStore = as;
 
     const ee = new StoreEventEmitter();
-    _eventEmitter = ee;
-
     const ra = new PiAiRuntimeAdapter(adapterConfig);
-    _runtimeAdapter = ra;
 
     dreamerRunner = new DreamerRunner(
       {
@@ -93,9 +95,7 @@ describe('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
   });
 
   afterEach(async () => {
-    if (stateManager) {
-      stateManager.close();
-    }
+    stateManager.close();
     try {
       fs.rmSync(TMP_ROOT, { recursive: true, force: true });
     } catch {
@@ -104,12 +104,6 @@ describe('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
   });
 
   it('should succeed with valid PhilosopherOutput from real MiniMax LLM after Dreamer', async () => {
-    const config = getMiniMaxConfig();
-    if (!config || !stateManager || !artifactStore || !dreamerRunner || !philosopherRunner) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const dreamerTaskId = `dreamer-for-philosopher-${Date.now()}`;
     await stateManager.createTask({
       taskId: dreamerTaskId,
@@ -126,13 +120,7 @@ describe('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
       }),
     });
 
-    let dreamerResult = await dreamerRunner.run(dreamerTaskId);
-    if (dreamerResult.status === 'retried') {
-      const retriedTask = await stateManager.getTask(dreamerTaskId);
-      console.log(`Dreamer retried (attempt ${retriedTask?.attemptCount}), waiting and retrying...`);
-      await new Promise(r => setTimeout(r, 2000));
-      dreamerResult = await dreamerRunner.run(dreamerTaskId);
-    }
+    const dreamerResult = await runWithRetry(dreamerRunner, dreamerTaskId);
     expect(dreamerResult.status).toBe('succeeded');
     console.log(`Dreamer succeeded: artifact=${dreamerResult.artifactId}`);
 
@@ -152,11 +140,7 @@ describe('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
       }),
     });
 
-    let philosopherResult = await philosopherRunner.run(philosopherTaskId);
-    if (philosopherResult.status === 'retried') {
-      await new Promise(r => setTimeout(r, 2000));
-      philosopherResult = await philosopherRunner.run(philosopherTaskId);
-    }
+    const philosopherResult = await runWithRetry(philosopherRunner, philosopherTaskId);
 
     console.log('PhilosopherRunner result:', JSON.stringify({
       status: philosopherResult.status,
@@ -175,12 +159,6 @@ describe('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
   }, 240_000);
 
   it('should validate PhilosopherOutputV1 schema with real LLM output', async () => {
-    const config = getMiniMaxConfig();
-    if (!config || !stateManager || !artifactStore || !dreamerRunner || !philosopherRunner) {
-      expect(true).toBe(true);
-      return;
-    }
-
     const dreamerTaskId = `dreamer-for-schema-${Date.now()}`;
     await stateManager.createTask({
       taskId: dreamerTaskId,
@@ -197,11 +175,7 @@ describe('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
       }),
     });
 
-    let dreamerResult = await dreamerRunner.run(dreamerTaskId);
-    if (dreamerResult.status === 'retried') {
-      await new Promise(r => setTimeout(r, 2000));
-      dreamerResult = await dreamerRunner.run(dreamerTaskId);
-    }
+    const dreamerResult = await runWithRetry(dreamerRunner, dreamerTaskId);
     expect(dreamerResult.status).toBe('succeeded');
 
     const philosopherTaskId = `philosopher-schema-${Date.now()}`;
@@ -220,11 +194,7 @@ describe('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
       }),
     });
 
-    let philosopherResult = await philosopherRunner.run(philosopherTaskId);
-    if (philosopherResult.status === 'retried') {
-      await new Promise(r => setTimeout(r, 2000));
-      philosopherResult = await philosopherRunner.run(philosopherTaskId);
-    }
+    const philosopherResult = await runWithRetry(philosopherRunner, philosopherTaskId);
 
     expect(philosopherResult.status).toBe('succeeded');
     expect(philosopherResult.output).toBeDefined();
@@ -237,18 +207,4 @@ describe('PhilosopherRunner Real LLM E2E (MiniMax)', () => {
 
     console.log(`✅ Philosopher schema validation passed: thesis="${String(philosopherResult.output?.thesis).slice(0, 50)}..."`);
   }, 240_000);
-});
-
-describe('PhilosopherRunner Real LLM E2E — Skip without API Key', () => {
-  it('should skip when MINIMAX_CN_API_KEY is not set', () => {
-    const originalApiKey = process.env.MINIMAX_CN_API_KEY;
-    delete process.env.MINIMAX_CN_API_KEY;
-
-    const config = getMiniMaxConfig();
-    expect(config).toBeNull();
-
-    if (originalApiKey) {
-      process.env.MINIMAX_CN_API_KEY = originalApiKey;
-    }
-  });
 });
