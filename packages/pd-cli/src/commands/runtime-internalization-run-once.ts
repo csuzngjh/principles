@@ -17,7 +17,7 @@ import {
   resolveRuntimeConfig,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
-import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, PDRuntimeAdapter } from '@principles/core/runtime-v2';
+import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, PDRuntimeAdapter, PeerRunnerKind } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface RunOnceOptions {
@@ -371,7 +371,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
 
     let wakeResult: WakeOnceResult = { decision: 'no_ready_tasks', reason: 'no_candidates', inspectedCount: 0 };
     try {
-      wakeResult = await orchestrator.wakeOnce();
+      wakeResult = await orchestrator.wakeOnce(runnerKind as PeerRunnerKind);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Error: wake-once failed: ${message}`);
@@ -382,7 +382,11 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     let runnerResult: DreamerRunnerResult | PhilosopherRunnerResult | ScribeRunnerResult | ArtificerRunnerResult | undefined = undefined;
     let skipReason: string | undefined = undefined;
 
-    if (wakeResult.decision === 'would_lease' && wakeResult.taskKind === runnerKind) {
+    if (wakeResult.decision === 'would_lease') {
+      if (wakeResult.taskKind !== runnerKind) {
+        throw new Error(`Invariant violation: wakeOnce returned taskKind=${wakeResult.taskKind} but runnerKind=${runnerKind}`);
+      }
+
       const eventEmitter = new StoreEventEmitter();
       const artifactStore = stateManager.piArtifactStore;
       const runtimeAdapter = resolveRuntimeAdapter({ runtimeKind, taskId: wakeResult.taskId, workspaceDir, runnerKind, timeoutMs: cliTimeoutMs });
@@ -415,9 +419,9 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           { owner: OWNER, runtimeKind: RUNTIME_KIND, pollIntervalMs: 100, timeoutMs: effectiveTimeoutMs },
         );
         runnerResult = await runner.run(wakeResult.taskId);
+      } else {
+        skipReason = 'no_runner_implemented';
       }
-    } else if (wakeResult.decision === 'would_lease' && wakeResult.taskKind !== runnerKind) {
-      skipReason = 'unsupported_runner_kind';
     }
 
     const output = buildOutput(wakeResult, runnerResult, skipReason);
