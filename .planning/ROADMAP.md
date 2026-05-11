@@ -68,6 +68,19 @@ pain → PD task/run store → DiagnosticianRunner → **PiAiRuntimeAdapter** (p
 - LOCKED-02: M9 success = ledger probation entry exists. LLM response success alone ≠ success.
 - LOCKED-03: workflows.yaml is runtime SSOT.
 
+### Phase 3: Frontend Skeleton + Todo Page
+
+**Goal:** Implement the full interactive Todo page (待办事项) with 3 priority zones, task card expand/collapse, approve/reject with undo, cleanup batch, 30s auto-refresh, and i18n.
+
+**Requirements:** UI-01, UI-02, UI-03, UI-04, UI-05, UI-06, UI-07, UI-08
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Fix api.ts type mismatch + build TasksPage with 3 zones and TaskCard
+- [ ] 03-02-PLAN.md — EvidencePanel + approve/reject with optimistic UI + 30s polling + batch cleanup
+- [ ] 03-03-PLAN.md — Settings page token input + TasksPage auth gate
+
 ## Backlog: Future Milestones
 
 ### v2.9 M10 — Nocturnal Artificer LLM Upgrade — IN PROGRESS
@@ -101,4 +114,4 @@ pain → Diagnostician → principle → Nocturnal Trinity Reflection → **Arti
 
 ---
 
-_Last updated: 2026-04-29 after M9 shipped_
+_Last updated: 2026-05-11 after Phase 3 planned_
