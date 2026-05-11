@@ -1,6 +1,6 @@
 import type {
   ApiResponse,
-  TaskItem,
+  TaskZones,
   TaskEvidence,
   SystemStatus,
   ActivityEvent,
@@ -50,8 +50,8 @@ async function request<T>(
   }
 }
 
-async function fetchTasks(): Promise<ApiResponse<TaskItem[]>> {
-  return request<TaskItem[]>("/api/tasks");
+async function fetchTasks(): Promise<ApiResponse<TaskZones>> {
+  return request<TaskZones>("/api/tasks");
 }
 
 async function fetchTaskEvidence(id: string): Promise<ApiResponse<TaskEvidence>> {

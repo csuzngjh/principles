@@ -42,6 +42,12 @@ export interface ActivityEvent {
   timestamp: string;
 }
 
+export interface TaskZones {
+  needsConfirmation: TaskItem[];
+  suggestedAttention: TaskItem[];
+  recentActivity: TaskItem[];
+}
+
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
