@@ -20,6 +20,20 @@ export class MemoryCandidateStore implements CandidateStore {
     return this.candidates.get(candidateId) ?? null;
   }
 
+  async updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<boolean> {
+    const existing = this.candidates.get(candidateId);
+    if (!existing) return false;
+    this.candidates.set(candidateId, { ...existing, status: patch.status });
+    return true;
+  }
+
+  async transitionCandidateStatus(candidateId: string, expectedStatus: CandidateRecord['status'], newStatus: CandidateRecord['status']): Promise<boolean> {
+    const existing = this.candidates.get(candidateId);
+    if (!existing || existing.status !== expectedStatus) return false;
+    this.candidates.set(candidateId, { ...existing, status: newStatus });
+    return true;
+  }
+
   insert(record: CandidateRecord): void {
     this.candidates.set(record.candidateId, record);
   }

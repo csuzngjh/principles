@@ -1,6 +1,6 @@
 import type {
   ApiResponse,
-  TaskItem,
+  TaskZones,
   TaskEvidence,
   SystemStatus,
   ActivityEvent,
@@ -37,11 +37,20 @@ async function request<T>(
     });
 
     if (!response.ok) {
-      return { success: false, error: `HTTP ${response.status}` };
+      let errorMessage = `HTTP ${response.status}`;
+      try {
+        const parsed = await response.json() as { error?: string };
+        if (parsed && typeof parsed.error === 'string') {
+          errorMessage = parsed.error;
+        }
+      } catch {
+        // ignore parse errors
+      }
+      return { success: false, error: errorMessage };
     }
 
-    const data: ApiResponse<T> = await response.json();
-    return data;
+    const data: T = await response.json() as T;
+    return { success: true, data };
   } catch (err) {
     return {
       success: false,
@@ -50,8 +59,8 @@ async function request<T>(
   }
 }
 
-async function fetchTasks(): Promise<ApiResponse<TaskItem[]>> {
-  return request<TaskItem[]>("/api/tasks");
+async function fetchTasks(): Promise<ApiResponse<TaskZones>> {
+  return request<TaskZones>("/api/tasks");
 }
 
 async function fetchTaskEvidence(id: string): Promise<ApiResponse<TaskEvidence>> {
