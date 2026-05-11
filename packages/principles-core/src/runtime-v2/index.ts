@@ -517,6 +517,37 @@ export {
   DEFAULT_SCRIBE_RUNNER_OPTIONS,
 } from './internalization/scribe-runner.js';
 
+// ── Artificer Runner (PRI-111) ────────────────────────────────────────────────
+
+export type {
+  ArtificerOutputV1,
+  ArtificerImplementationPlan,
+  ArtificerSourceTrace,
+  ArtificerValidationResult,
+  ArtificerValidator,
+} from './internalization/artificer-output.js';
+
+export {
+  DefaultArtificerValidator,
+  ArtificerOutputV1Schema,
+  ArtificerImplementationPlanSchema,
+  ArtificerSourceTraceSchema,
+} from './internalization/artificer-output.js';
+
+export type {
+  ArtificerRunnerResultStatus,
+  ArtificerRunnerResult,
+  ArtificerRunnerOptions,
+  ResolvedArtificerRunnerOptions,
+  ArtificerRunnerDeps,
+} from './internalization/artificer-runner.js';
+
+export {
+  ArtificerRunner,
+  resolveArtificerRunnerOptions,
+  DEFAULT_ARTIFICER_RUNNER_OPTIONS,
+} from './internalization/artificer-runner.js';
+
 // ── PIArtifact Durable Store (PRI-84) ────────────────────────────────────────
 
 export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
