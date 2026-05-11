@@ -260,24 +260,6 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.runnerResult.errorCategory).toBe('execution_failed');
   });
 
-  it('would_lease non-dreamer task: no lease acquired, reports unsupported (no stuck lease)', async () => {
-    mockWakeOnce.mockResolvedValue({
-      decision: 'would_lease',
-      taskId: 'task-phil-001',
-      taskKind: 'philosopher',
-    });
-
-    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'test-double', allowTestDouble: true, json: true });
-
-    expect(mockRun).not.toHaveBeenCalled();
-
-    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
-    expect(output.decision).toBe('would_lease');
-    expect(output.taskId).toBe('task-phil-001');
-    expect(output.runnerResult).toBeUndefined();
-    expect(output.skipReason).toBe('unsupported_runner_kind');
-  });
-
   it('text output for succeeded dreamer run includes runId/artifactId/resultRef', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
@@ -1020,5 +1002,42 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.enqueueDecision).toBe('successor_created');
     expect(output.successorTaskId).toBe('task-evaluator-enq-001');
     expect(output.successorKind).toBe('evaluator');
+  });
+
+  it('wakeOnce is called with runnerKind as taskKind filter', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-artificer-filter',
+      taskKind: 'artificer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-artificer-filter',
+      runId: 'run-filter',
+      artifactId: 'pi-art-filter',
+      resultRef: 'artificer://run-filter',
+      contextHash: 'ctx-filter',
+      output: {
+        taskId: 'task-artificer-filter',
+        sourceScribeArtifactId: 'pi-art-scribe-filter',
+        implementationPlan: {
+          summary: 'Test',
+          targetSurface: 'src/test.ts',
+          changes: [],
+          tests: [],
+          rolloutNotes: [],
+          confidence: 0.8,
+        },
+        sourceTrace: { scribeArtifactId: 'pi-art-scribe-filter' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'artificer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    expect(mockWakeOnce).toHaveBeenCalledWith('artificer');
   });
 });
