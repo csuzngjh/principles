@@ -106,6 +106,8 @@ const REQUIRED_TEST_FILES = [
   'pitask-metadata.test.ts',
   // PRI-67
   'dreamer-runner.test.ts',
+  // PRI-104
+  'task-state-semantics.test.ts',
   // PRI-109
   'scribe-runner-vslice.test.ts',
   // PRI-111
