@@ -263,6 +263,50 @@ export {
   DEFAULT_ARTIFICER_RUNNER_OPTIONS,
 } from './artificer-runner.js';
 
+// ── Evaluator Runner (PRI-EVAL) ────────────────────────────────────────────────
+
+export type {
+  EvaluatorEvaluation,
+  EvaluatorSourceTrace,
+  EvaluatorOutputV1,
+  EvaluatorValidationResult,
+  EvaluatorValidator,
+} from './evaluator-output.js';
+
+export {
+  DefaultEvaluatorValidator,
+  EvaluatorOutputV1Schema,
+  EvaluatorEvaluationSchema,
+  EvaluatorSourceTraceSchema,
+  EVALUATOR_DECISIONS,
+} from './evaluator-output.js';
+
+export type {
+  EvaluatorRunnerResultStatus,
+  EvaluatorRunnerResult,
+  EvaluatorRunnerOptions,
+  ResolvedEvaluatorRunnerOptions,
+  EvaluatorRunnerDeps,
+} from './evaluator-runner.js';
+
+export {
+  EvaluatorRunner,
+  resolveEvaluatorRunnerOptions,
+  DEFAULT_EVALUATOR_RUNNER_OPTIONS,
+} from './evaluator-runner.js';
+
+export {
+  EvaluatorPromptBuilder,
+  EVALUATOR_PROTOCOL_INSTRUCTION,
+  EVALUATOR_PROMPT_CONTRACT_VERSION,
+} from './evaluator-prompt-builder.js';
+
+export type {
+  EvaluatorPromptBuilderInput,
+  EvaluatorPromptInput,
+  EvaluatorPromptBuildResult,
+} from './evaluator-prompt-builder.js';
+
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
 
 export type {

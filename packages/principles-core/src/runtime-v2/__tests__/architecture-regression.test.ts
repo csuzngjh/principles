@@ -65,6 +65,10 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-111
   'internalization/artificer-output.ts',
   'internalization/artificer-runner.ts',
+  // PRI-EVAL
+  'internalization/evaluator-output.ts',
+  'internalization/evaluator-runner.ts',
+  'internalization/evaluator-prompt-builder.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../prompt-builder/routing-guidance.ts',
   // PRI-81 Phase A
@@ -102,6 +106,8 @@ const REQUIRED_TEST_FILES = [
   'scribe-runner-vslice.test.ts',
   // PRI-111
   'artificer-runner-vslice.test.ts',
+  // PRI-EVAL
+  'evaluator-runner-vslice.test.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../../prompt-builder/__tests__/routing-guidance.test.ts',
   // PRI-81 Phase A
@@ -1624,5 +1630,69 @@ describe('PRI-111 ArtificerRunner boundary', () => {
     const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
     expect(src).toContain('artificer-output-v1');
     expect(src).toContain('ArtificerOutputV1Schema');
+  });
+});
+
+// ── PRI-EVAL: EvaluatorRunner boundary guards ──────────────────────────────────
+
+describe('PRI-EVAL EvaluatorRunner boundary', () => {
+  it('evaluator source files exist in internalization directory', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'evaluator-runner.ts'))).toBe(true);
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'evaluator-output.ts'))).toBe(true);
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'evaluator-prompt-builder.ts'))).toBe(true);
+  });
+
+  it('evaluator test file exists', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, 'evaluator-runner-vslice.test.ts'))).toBe(true);
+  });
+
+  it('CORE_NO_FORBIDDEN_IMPORTS: evaluator-output.ts has no openclaw-plugin, fs, path imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'evaluator-output.ts'), 'utf-8');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+  });
+
+  it('CORE_NO_FORBIDDEN_IMPORTS: evaluator-runner.ts has no openclaw-plugin, RolloutReviewerRunner, nocturnal-trinity imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'evaluator-runner.ts'), 'utf-8');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('RolloutReviewerRunner');
+    expect(src).not.toContain('nocturnal-trinity');
+    expect(src).not.toContain('InternalizationOrchestrator');
+    expect(src).not.toContain('createTask');
+    expect(src).not.toContain('enqueueTask');
+  });
+
+  it('CORE_NO_SCHEDULING: evaluator-runner.ts has no node:fs, node:cron imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'evaluator-runner.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:cron');
+  });
+
+  it('BARREL_EXPORTS: internalization/index.ts exports EvaluatorRunner and EvaluatorOutput', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
+    expect(src).toContain('EvaluatorRunner');
+    expect(src).toContain('EvaluatorOutput');
+    expect(src).toContain('DefaultEvaluatorValidator');
+  });
+
+  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers evaluator-output-v1 schema', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
+    expect(src).toContain('evaluator-output-v1');
+    expect(src).toContain('EvaluatorOutputV1Schema');
   });
 });

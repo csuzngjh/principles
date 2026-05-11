@@ -548,6 +548,50 @@ export {
   DEFAULT_ARTIFICER_RUNNER_OPTIONS,
 } from './internalization/artificer-runner.js';
 
+// ── Evaluator Runner (PRI-EVAL) ────────────────────────────────────────────────
+
+export type {
+  EvaluatorEvaluation,
+  EvaluatorSourceTrace,
+  EvaluatorOutputV1,
+  EvaluatorValidationResult,
+  EvaluatorValidator,
+} from './internalization/evaluator-output.js';
+
+export {
+  DefaultEvaluatorValidator,
+  EvaluatorOutputV1Schema,
+  EvaluatorEvaluationSchema,
+  EvaluatorSourceTraceSchema,
+  EVALUATOR_DECISIONS,
+} from './internalization/evaluator-output.js';
+
+export type {
+  EvaluatorRunnerResultStatus,
+  EvaluatorRunnerResult,
+  EvaluatorRunnerOptions,
+  ResolvedEvaluatorRunnerOptions,
+  EvaluatorRunnerDeps,
+} from './internalization/evaluator-runner.js';
+
+export {
+  EvaluatorRunner,
+  resolveEvaluatorRunnerOptions,
+  DEFAULT_EVALUATOR_RUNNER_OPTIONS,
+} from './internalization/evaluator-runner.js';
+
+export {
+  EvaluatorPromptBuilder,
+  EVALUATOR_PROTOCOL_INSTRUCTION,
+  EVALUATOR_PROMPT_CONTRACT_VERSION,
+} from './internalization/evaluator-prompt-builder.js';
+
+export type {
+  EvaluatorPromptBuilderInput,
+  EvaluatorPromptInput,
+  EvaluatorPromptBuildResult,
+} from './internalization/evaluator-prompt-builder.js';
+
 // ── PIArtifact Durable Store (PRI-84) ────────────────────────────────────────
 
 export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
