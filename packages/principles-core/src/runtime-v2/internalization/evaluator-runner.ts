@@ -96,6 +96,10 @@ interface ValidationErrorContext {
   readonly errorCategory?: string;
 }
 
+const EVALUATOR_PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set<PDErrorCategory>([
+  'storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid', 'output_invalid',
+]);
+
 export class EvaluatorRunner {
   private phase: RunnerPhase = RunnerPhase.Idle;
   private readonly resolvedOptions: ResolvedEvaluatorRunnerOptions;
@@ -153,14 +157,12 @@ export class EvaluatorRunner {
         expectedKind: 'evaluator',
         actualKind: leasedTask.taskKind,
       });
-      await this.stateManager.markTaskFailed(taskId, 'input_invalid');
-      return {
-        status: 'failed',
+      return this.retryOrFail({
         taskId,
+        task: leasedTask,
         errorCategory: 'input_invalid',
         failureReason: `Task kind must be 'evaluator', got '${leasedTask.taskKind}'`,
-        attemptCount: leasedTask.attemptCount,
-      };
+      });
     }
 
     this.emitEvaluatorEvent('evaluator_task_leased', taskId, {
@@ -343,6 +345,13 @@ export class EvaluatorRunner {
       await this.sleep(this.resolvedOptions.pollIntervalMs);
     }
 
+    try {
+      const finalPoll = await this.runtimeAdapter.pollRun(runHandle.runId);
+      if (terminalStatuses.includes(finalPoll.status)) {
+        return finalPoll;
+      }
+    } catch { /* fall through to cancel/timeout */ }
+
     let cancelFailed = false;
     try {
       await this.runtimeAdapter.cancelRun(runHandle.runId);
@@ -361,6 +370,13 @@ export class EvaluatorRunner {
     const result = await this.runtimeAdapter.fetchOutput(runId);
     if (!result || !result.payload) {
       throw new PDRuntimeError('output_invalid', `No output available for run ${runId}`);
+    }
+    const payload = result.payload as Record<string, unknown>;
+    if (typeof payload !== 'object' || payload === null) {
+      throw new PDRuntimeError('output_invalid', `Output payload is not an object for run ${runId}`);
+    }
+    if (typeof payload.evaluation !== 'object' || payload.evaluation === null) {
+      throw new PDRuntimeError('output_invalid', `Output payload missing evaluation object for run ${runId}`);
     }
     return result.payload as EvaluatorOutputV1;
   }
@@ -635,12 +651,9 @@ export class EvaluatorRunner {
     };
   }
 
-  private readonly PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set(
-    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid', 'output_invalid'] as const),
-  );
-
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private isPermanentError(category: PDErrorCategory): boolean {
-    return this.PERMANENT_ERROR_CATEGORIES.has(category);
+    return EVALUATOR_PERMANENT_ERROR_CATEGORIES.has(category);
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this

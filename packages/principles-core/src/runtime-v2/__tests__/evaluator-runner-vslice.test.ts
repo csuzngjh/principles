@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { EvaluatorRunner } from '../internalization/evaluator-runner.js';
 import type { EvaluatorRunnerDeps } from '../internalization/evaluator-runner.js';
 import type { PIArtifactStore, PIArtifactRecord } from '../internalization/pi-artifact.js';
@@ -106,13 +106,8 @@ function makeArtificerArtifact(): PIArtifactRecord {
 }
 
 describe('EvaluatorRunner (vertical slice)', () => {
-  let artifactStore: PIArtifactStore = new MemoryPIArtifactStore();
-
-  beforeEach(() => {
-    artifactStore = new MemoryPIArtifactStore();
-  });
-
   function createMockDeps(overrides: Partial<EvaluatorRunnerDeps> = {}): EvaluatorRunnerDeps {
+    const artifactStore = overrides.artifactStore ?? new MemoryPIArtifactStore();
     const evaluatorTask = makeEvaluatorTask();
     const artificerTask = makeArtificerTask();
 
@@ -614,7 +609,7 @@ describe('EvaluatorRunner integration: test-double captures sourceArtificerArtif
 
     const evaluatorTask = makeEvaluatorTask();
 
-    let capturedSourceArtificerArtifactId: string = ARTIFICER_ART_ID;
+    let capturedSourceArtificerArtifactId: string | undefined = undefined;
     const runtimeAdapter = new TestDoubleRuntimeAdapter({
       onStartRun: (input) => {
         try {
@@ -633,25 +628,25 @@ describe('EvaluatorRunner integration: test-double captures sourceArtificerArtif
         endedAt: new Date().toISOString(),
       }),
       onFetchOutput: (_runId: string) => ({
-        runId: _runId,
-        payload: {
-          taskId: EVALUATOR_TASK_ID,
-          sourceArtificerArtifactId: capturedSourceArtificerArtifactId,
-          evaluation: {
-            decision: 'approved',
-            summary: 'Implementation plan is well-structured',
-            score: 0.85,
-            strengths: ['Clear change descriptions'],
-            concerns: [],
-            requiredChanges: [],
+          runId: _runId,
+          payload: {
+            taskId: EVALUATOR_TASK_ID,
+            sourceArtificerArtifactId: capturedSourceArtificerArtifactId ?? ARTIFICER_ART_ID,
+            evaluation: {
+              decision: 'approved',
+              summary: 'Implementation plan is well-structured',
+              score: 0.85,
+              strengths: ['Clear change descriptions'],
+              concerns: [],
+              requiredChanges: [],
+            },
+            sourceTrace: {
+              artificerArtifactId: capturedSourceArtificerArtifactId ?? ARTIFICER_ART_ID,
+            },
+            risks: [],
+            generatedAt: new Date().toISOString(),
           },
-          sourceTrace: {
-            artificerArtifactId: capturedSourceArtificerArtifactId,
-          },
-          risks: [],
-          generatedAt: new Date().toISOString(),
-        },
-      }),
+        }),
     });
 
     const stateManager = {
