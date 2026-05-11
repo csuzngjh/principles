@@ -690,7 +690,20 @@ export { InternalizationChainIntegrityReadModel, extractPIMetadata } from './int
 export type { BrokenLink, ChainIntegrityResult, InternalizationChainIntegrityReadModelOptions } from './internalization-chain-integrity-read-model.js';
 
 export { InternalizationIntegrityRemediation } from './internalization-integrity-remediation.js';
-export type { RemediationAction, RemediationResult, InternalizationIntegrityRemediationOptions } from './internalization-integrity-remediation.js';
+export type { InternalizationIntegrityRemediationOptions } from './internalization-integrity-remediation.js';
+
+export {
+  createRemediationResult,
+  remediationAction,
+} from './remediation-contract.js';
+
+export type {
+  RemediationAction,
+  RemediationMode,
+  RemediationResult,
+  RemediationStatus,
+  CreateRemediationResultInput,
+} from './remediation-contract.js';
 
 // ── Control Plane Triage (PRI-99) ───────────────────────────────────────────
 

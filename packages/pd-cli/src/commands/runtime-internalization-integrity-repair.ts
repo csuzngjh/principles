@@ -1,7 +1,7 @@
 import * as path from 'path';
 import { InternalizationIntegrityRemediation } from '@principles/core/runtime-v2';
-import type { RemediationResult } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import type { RemediationResult } from './remediation-output.js';
 
 interface InternalizationIntegrityRepairOptions {
   workspace?: string;
@@ -15,7 +15,9 @@ function formatTextOutput(result: RemediationResult): string {
 
   lines.push('Internalization Integrity Repair Report');
   lines.push(`generatedAt: ${result.generatedAt}`);
-  lines.push(`mode: ${result.dryRun ? 'DRY-RUN' : 'CONFIRM'}`);
+  lines.push(`mode: ${result.mode === 'dry_run' ? 'DRY-RUN' : 'CONFIRM'}`);
+  lines.push(`status: ${result.status}`);
+  lines.push(`safeToConfirm: ${result.safeToConfirm}`);
   lines.push(`repairedCount: ${result.repairedCount}`);
   lines.push(`skippedCount: ${result.skippedCount}`);
   lines.push('');
@@ -26,9 +28,9 @@ function formatTextOutput(result: RemediationResult): string {
     lines.push(`Actions (${result.actions.length}):`);
     for (const action of result.actions) {
       const icon = action.severity === 'error' ? '✗' : '⚠';
-      lines.push(`  ${icon} [${action.type}] ${action.taskId}`);
-      lines.push(`    ${action.previousStatus} → ${action.newStatus}`);
-      lines.push(`    action: ${action.recommendedAction}`);
+      lines.push(`  ${icon} [${action.type ?? action.action}] ${action.taskId ?? action.targetId}`);
+      lines.push(`    ${action.previousState ?? action.previousStatus ?? '(unknown)'} → ${action.nextState ?? action.newStatus ?? '(unknown)'}`);
+      lines.push(`    action: ${action.action}`);
       lines.push(`    reason: ${action.reason}`);
       if (action.successorTaskId) {
         lines.push(`    successorTaskId: ${action.successorTaskId}`);
@@ -52,7 +54,7 @@ export async function handleRuntimeInternalizationIntegrityRepair(opts: Internal
   const isDryRun = !opts.confirm;
 
   const remediation = new InternalizationIntegrityRemediation({ workspaceDir });
-  const result = remediation.repair({ dryRun: isDryRun });
+  const result = remediation.repair({ dryRun: isDryRun }) as unknown as RemediationResult;
 
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
