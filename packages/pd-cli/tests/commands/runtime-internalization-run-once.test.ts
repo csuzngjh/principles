@@ -46,6 +46,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
   ArtificerRunner: vi.fn().mockImplementation(function () {
     return { run: mockRun };
   }),
+  EvaluatorRunner: vi.fn().mockImplementation(function () {
+    return { run: mockRun };
+  }),
   StoreEventEmitter: vi.fn().mockImplementation(function () {
     return { emitTelemetry: vi.fn() };
   }),
@@ -62,6 +65,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
   DefaultArtificerValidator: vi.fn().mockImplementation(function () {
+    return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
+  }),
+  DefaultEvaluatorValidator: vi.fn().mockImplementation(function () {
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
   TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () {
@@ -187,7 +193,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('unsupported runner kind: exits 1 with error', async () => {
-    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'evaluator', runtime: 'test-double', allowTestDouble: true });
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'trainer', runtime: 'test-double', allowTestDouble: true });
 
     expect(process.exitCode).toBe(1);
     expect(consoleErrorSpy.mock.calls.some((c: string[]) => c[0].includes('unsupported runner kind'))).toBe(true);
@@ -899,13 +905,14 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.successorKind).toBe('artificer');
   });
 
-  it('run-once source has no direct EvaluatorRunner import', async () => {
+  it('run-once source imports EvaluatorRunner for dispatch', async () => {
     const { existsSync, readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const srcPath = resolve(__dirname, '../../src/commands/runtime-internalization-run-once.ts');
     if (!existsSync(srcPath)) return;
     const src = readFileSync(srcPath, 'utf-8');
-    expect(src).not.toContain('EvaluatorRunner');
+    expect(src).toContain('EvaluatorRunner');
+    expect(src).toContain('DefaultEvaluatorValidator');
   });
 
   it('--runner artificer dispatches ArtificerRunner', async () => {
@@ -1039,5 +1046,101 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'artificer', runtime: 'test-double', allowTestDouble: true, json: true });
 
     expect(mockWakeOnce).toHaveBeenCalledWith('artificer');
+  });
+
+  it('--runner evaluator dispatches EvaluatorRunner', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-evaluator-001',
+      taskKind: 'evaluator',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-evaluator-001',
+      runId: 'run-evaluator-001',
+      artifactId: 'pi-art-task-evaluator-001-run-evaluator-001',
+      resultRef: 'evaluator://run-evaluator-001',
+      contextHash: 'ctx-evaluator-abc',
+      output: {
+        taskId: 'task-evaluator-001',
+        sourceArtificerArtifactId: 'pi-art-artificer-001',
+        evaluation: {
+          decision: 'approved',
+          summary: 'Test evaluation summary',
+          score: 0.85,
+          strengths: ['Well-structured plan'],
+          concerns: [],
+          requiredChanges: [],
+        },
+        sourceTrace: { artificerArtifactId: 'pi-art-artificer-001' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'evaluator', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const EvaluatorRunnerMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.EvaluatorRunner),
+    );
+    expect(EvaluatorRunnerMock).toHaveBeenCalled();
+    expect(mockRun).toHaveBeenCalledWith('task-evaluator-001');
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.runnerKind).toBe('evaluator');
+    expect(output.taskId).toBe('task-evaluator-001');
+    expect(output.runId).toBe('run-evaluator-001');
+    expect(output.artifactId).toBe('pi-art-task-evaluator-001-run-evaluator-001');
+    expect(output.resultRef).toBe('evaluator://run-evaluator-001');
+    expect(output.runnerResult.status).toBe('succeeded');
+  });
+
+  it('--runner evaluator --enqueue-next returns successor decision', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-evaluator-enq-001',
+      taskKind: 'evaluator',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-evaluator-enq-001',
+      runId: 'run-evaluator-enq-001',
+      artifactId: 'pi-art-evaluator-enq-001',
+      resultRef: 'evaluator://run-evaluator-enq-001',
+      contextHash: 'ctx-enq',
+      output: {
+        taskId: 'task-evaluator-enq-001',
+        sourceArtificerArtifactId: 'pi-art-artificer-enq-001',
+        evaluation: {
+          decision: 'approved',
+          summary: 'Test evaluation summary',
+          score: 0.85,
+          strengths: ['Well-structured plan'],
+          concerns: [],
+          requiredChanges: [],
+        },
+        sourceTrace: { artificerArtifactId: 'pi-art-artificer-enq-001' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'successor_created',
+      sourceTaskId: 'task-evaluator-enq-001',
+      successorTaskId: 'task-rollout-reviewer-enq-001',
+      successorKind: 'rollout_reviewer',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'evaluator', runtime: 'test-double', allowTestDouble: true, enqueueNext: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.enqueueDecision).toBe('successor_created');
+    expect(output.successorTaskId).toBe('task-rollout-reviewer-enq-001');
+    expect(output.successorKind).toBe('rollout_reviewer');
   });
 });
