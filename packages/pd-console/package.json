@@ -1,0 +1,24 @@
+{
+  "name": "@principles/pd-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:ui": "node scripts/build-ui.mjs",
+    "build": "npm run build:ui && npx tsc --noEmit",
+    "dev": "npx tsx src/server.ts --port 3100",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@principles/core": "*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.0"
+  }
+}
