@@ -409,6 +409,11 @@ export class RuntimeStateManager {
     return this._candidateStore.getCandidate(candidateId);
   }
 
+  async updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<void> {
+    this.assertInitialized();
+    return this._candidateStore.updateCandidateStatus(candidateId, patch);
+  }
+
   async getArtifact(artifactId: string): Promise<ArtifactRecord | null> {
     this.assertInitialized();
     return this._artifactStore.getArtifact(artifactId);

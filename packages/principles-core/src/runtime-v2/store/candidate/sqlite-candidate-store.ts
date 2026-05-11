@@ -54,4 +54,10 @@ export class SqliteCandidateStore implements CandidateStore {
       createdAt: row.created_at,
     };
   }
+
+  async updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<void> {
+    const db = this.connection.getDb();
+    db.prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ?')
+      .run(patch.status, candidateId);
+  }
 }

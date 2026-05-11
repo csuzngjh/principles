@@ -237,7 +237,7 @@ export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
 
 // Ledger file utilities (for audit/consistency checks)
-export { loadLedger, saveLedger, getLedgerFilePathPublic } from '../principle-tree-ledger.js';
+export { loadLedger, saveLedger, getLedgerFilePathPublic, updatePrinciple } from '../principle-tree-ledger.js';
 
 // Pruning read model (PRI-15)
 export { PruningReadModel } from './pruning-read-model.js';

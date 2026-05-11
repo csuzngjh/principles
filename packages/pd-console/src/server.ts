@@ -10,7 +10,24 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
 import { fileURLToPath } from 'url';
-import { OperatorHealthReadModel } from '@principles/core/runtime-v2';
+import {
+  OperatorHealthReadModel,
+  PainChainReadModel,
+  PruningReadModel,
+  RuntimeStateManager,
+  CandidateIntakeService,
+  PrincipleTreeLedgerAdapter,
+  listPruningReviews,
+  appendPruningReview,
+  updatePrinciple,
+} from '@principles/core/runtime-v2';
+import type {
+  SystemStatus,
+  TaskItem,
+  EvidenceItem,
+  TaskEvidence,
+  ActivityEvent,
+} from './types.js';
 
 // ── ESM __dirname equivalent ───────────────────────────────────────────────────────────────
 
@@ -22,12 +39,14 @@ const __dirname = path.dirname(__filename);
 interface ServerOptions {
   workspace: string;
   port: number;
+  noAuth: boolean;
 }
 
 function parseArgs(argv: string[]): ServerOptions {
   const args = argv.slice(2);
   let workspace = process.cwd();
   let port = 3100;
+  let noAuth = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--workspace' && i + 1 < args.length) {
@@ -41,6 +60,8 @@ function parseArgs(argv: string[]): ServerOptions {
       }
       port = parsed;
       i++;
+    } else if (args[i] === '--no-auth') {
+      noAuth = true;
     }
   }
 
@@ -49,7 +70,7 @@ function parseArgs(argv: string[]): ServerOptions {
     process.exit(1);
   }
 
-  return { workspace, port };
+  return { workspace, port, noAuth };
 }
 
 // ── Token loading ────────────────────────────────────────────────────────────────────────
@@ -181,13 +202,71 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
   return true;
 }
 
-// ── Route handler ───────────────────────────────────────────────────────────────────
+// ── Route handler ───────────────────────────────────────────────────────────
 
 const WEB_ROOT = path.resolve(__dirname, '..', 'dist', 'web');
 
+// ── Application services ─────────────────────────────────────────────────
+
+interface AppServices {
+  stateManager: RuntimeStateManager;
+  healthReadModel: OperatorHealthReadModel;
+  painChainReadModel: PainChainReadModel;
+  pruningReadModel: PruningReadModel;
+  candidateIntakeService: CandidateIntakeService;
+  workspaceDir: string;
+}
+
+async function initServices(workspaceDir: string): Promise<AppServices> {
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+  await stateManager.initialize();
+
+  const painChainReadModel = new PainChainReadModel({ workspaceDir, stateManager });
+  const pruningReadModel = new PruningReadModel({ workspaceDir });
+  const healthReadModel = new OperatorHealthReadModel({
+    workspaceDir,
+    painChainReadModel,
+    pruningReadModel,
+  });
+
+  const stateDir = path.join(workspaceDir, '.state');
+  const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
+  const candidateIntakeService = new CandidateIntakeService({
+    stateManager,
+    ledgerAdapter,
+  });
+
+  return {
+    stateManager,
+    healthReadModel,
+    painChainReadModel,
+    pruningReadModel,
+    candidateIntakeService,
+    workspaceDir,
+  };
+}
+
+async function closeServices(services: AppServices): Promise<void> {
+  try {
+    await services.healthReadModel.close();
+  } catch (err: unknown) {
+    console.error('[pd-console] Failed to close health read model', err);
+  }
+  try {
+    await services.painChainReadModel.close();
+  } catch (err: unknown) {
+    console.error('[pd-console] Failed to close pain chain read model', err);
+  }
+  try {
+    await services.stateManager.close();
+  } catch (err: unknown) {
+    console.error('[pd-console] Failed to close state manager', err);
+  }
+}
+
 function handleRequest(
   expectedToken: string | null,
-  workspaceDir: string,
+  services: AppServices,
 ): (req: http.IncomingMessage, res: http.ServerResponse) => void {
   return (req: http.IncomingMessage, res: http.ServerResponse): void => {
     const urlPath = req.url?.split('?')[0] ?? '/';
@@ -217,6 +296,10 @@ function handleRequest(
 
     // GET /api/health
     if (urlPath === '/api/health') {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { success: false, error: 'Method not allowed' });
+        return;
+      }
       if (!isAuthenticated(req, expectedToken)) {
         sendJson(res, 401, { error: 'unauthorized' });
         return;
@@ -227,25 +310,413 @@ function handleRequest(
 
     // GET /api/status
     if (urlPath === '/api/status') {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { success: false, error: 'Method not allowed' });
+        return;
+      }
       if (!isAuthenticated(req, expectedToken)) {
         sendJson(res, 401, { error: 'unauthorized' });
         return;
       }
 
       (async (): Promise<void> => {
-        const readModel = new OperatorHealthReadModel({ workspaceDir });
         try {
-          const snapshot = await readModel.getSnapshot();
-          sendJson(res, 200, snapshot);
+          const snapshot = await services.healthReadModel.getSnapshot();
+          const pruningSummary = services.pruningReadModel.getHealthSummary();
+
+          const {byStatus} = pruningSummary;
+          const principleActive = (byStatus.active ?? 0) + (byStatus.candidate ?? 0);
+          const principlePending = (byStatus.probation ?? 0) + (byStatus.deprecated ?? 0);
+
+          const status: 'healthy' | 'attention' | 'problem' =
+            snapshot.overallStatus === 'healthy' ? 'healthy'
+            : snapshot.overallStatus === 'degraded' ? 'attention'
+            : 'problem';
+
+          const result: SystemStatus = {
+            status,
+            principleTotal: pruningSummary.totalPrinciples,
+            principleActive,
+            principlePending,
+            // TODO: compute weekly delta from pruning review history
+            weeklyChange: 0,
+          };
+
+          sendJson(res, 200, { success: true, data: result });
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : 'Unknown error';
-          sendJson(res, 500, { status: 'error', message });
-        } finally {
-          try {
-            await readModel.close();
-          } catch (closeErr) {
-            console.error('[pd-console] Failed to close read model', closeErr);
+          sendJson(res, 500, { success: false, error: message });
+        }
+      })();
+
+      return;
+    }
+
+    // GET /api/tasks
+    if (urlPath === '/api/tasks') {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { success: false, error: 'Method not allowed' });
+        return;
+      }
+      if (!isAuthenticated(req, expectedToken)) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      (async (): Promise<void> => {
+        try {
+          const [pendingTasks, pruningSignals] = await Promise.all([
+            services.stateManager.listTasks({ status: 'pending' }),
+            Promise.resolve(services.pruningReadModel.getPrincipleSignals()),
+          ]);
+
+          const needsConfirmation: TaskItem[] = [];
+          const candidateBatches = await Promise.all(
+            pendingTasks.map((t) => services.stateManager.getCandidatesByTaskId(t.taskId)),
+          );
+          for (const candidates of candidateBatches) {
+            for (const c of candidates) {
+              if (c.status !== 'pending') continue;
+              needsConfirmation.push({
+                id: c.candidateId,
+                title: c.title,
+                sourceSummary: c.description,
+                priority: 'needs_confirmation',
+                kind: 'approval',
+                createdAt: c.createdAt,
+              });
+            }
           }
+
+          const suggestedAttention: TaskItem[] = pruningSignals
+            .filter((s) => s.riskLevel === 'watch' || s.riskLevel === 'review')
+            .map((s) => ({
+              id: s.principleId,
+              title: `Principle "${s.principleId}" needs attention`,
+              sourceSummary: s.reasons.join('; '),
+              priority: 'suggested_attention' as const,
+              kind: 'cleanup' as const,
+              createdAt: s.createdAt,
+              lastTriggeredAt: s.updatedAt,
+              triggerCount: s.derivedPainCount,
+            }));
+
+          const recentTasks = await services.stateManager.listTasks({
+            status: 'succeeded',
+            limit: 5,
+          });
+          const recentActivity: TaskItem[] = recentTasks.map((t) => ({
+            id: t.taskId,
+            title: t.taskKind,
+            sourceSummary: t.resultRef ?? '',
+            priority: 'recent_activity' as const,
+            kind: 'approval' as const,
+            createdAt: t.createdAt,
+          }));
+
+          sendJson(res, 200, {
+            success: true,
+            data: { needsConfirmation, suggestedAttention, recentActivity },
+          });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          sendJson(res, 500, { success: false, error: message });
+        }
+      })();
+
+      return;
+    }
+
+    // GET /api/tasks/:id/evidence
+    if (urlPath.startsWith('/api/tasks/') && urlPath.endsWith('/evidence')) {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { success: false, error: 'Method not allowed' });
+        return;
+      }
+      if (!isAuthenticated(req, expectedToken)) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      const parts = urlPath.split('/');
+      const [, , , id] = parts; // /api/tasks/:id/evidence
+
+      if (!id) {
+        sendJson(res, 400, { success: false, error: 'Missing task ID' });
+        return;
+      }
+
+      (async (): Promise<void> => {
+        try {
+          // Try candidate lookup first
+          const candidate = await services.stateManager.getCandidate(id);
+
+          if (candidate) {
+            const trace = await services.painChainReadModel.traceByPainId(
+              candidate.taskId.replace('diagnosis_', ''),
+            );
+
+            const evidence: EvidenceItem[] = [];
+            if (trace.runId) {
+              evidence.push({
+                timestamp: trace.checkedAt,
+                operation: 'run',
+                problem: trace.missingLinks.join('; ') || 'run completed',
+              });
+            }
+            for (const cid of trace.candidateIds) {
+              evidence.push({
+                timestamp: trace.checkedAt,
+                operation: 'candidate_generated',
+                problem: `candidate: ${cid}`,
+              });
+            }
+            for (const lid of trace.ledgerEntryIds) {
+              evidence.push({
+                timestamp: trace.checkedAt,
+                operation: 'ledger_written',
+                problem: `principle: ${lid}`,
+              });
+            }
+
+            const result: TaskEvidence = {
+              taskId: id,
+              summary: candidate.title,
+              why: candidate.description,
+              whatHappensIf: `If declined, this candidate will expire. Status: ${candidate.status}.`,
+              evidence,
+            };
+
+            sendJson(res, 200, { success: true, data: result });
+            return;
+          }
+
+          // Try pruning signal lookup
+          const signals = services.pruningReadModel.getPrincipleSignals();
+          const signal = signals.find((s) => s.principleId === id);
+
+          if (signal) {
+            const result: TaskEvidence = {
+              taskId: id,
+              summary: `Principle lifecycle signal for "${signal.principleId}"`,
+              why: signal.reasons.join('; '),
+              whatHappensIf: `Risk level: ${signal.riskLevel}. Age: ${signal.ageDays} days.`,
+              evidence: signal.reasons.map((reason) => ({
+                timestamp: signal.updatedAt,
+                operation: 'pruning_signal',
+                problem: reason,
+              })),
+            };
+
+            sendJson(res, 200, { success: true, data: result });
+            return;
+          }
+
+          sendJson(res, 404, { success: false, error: 'Not found' });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          sendJson(res, 500, { success: false, error: message });
+        }
+      })();
+
+      return;
+    }
+
+    // GET /api/activity
+    if (urlPath === '/api/activity') {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { success: false, error: 'Method not allowed' });
+        return;
+      }
+      if (!isAuthenticated(req, expectedToken)) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      (async (): Promise<void> => {
+        try {
+          const [recentTasks, pruningReviews] = await Promise.all([
+            services.stateManager.listTasks({ limit: 20 }),
+            Promise.resolve(listPruningReviews(services.workspaceDir)),
+          ]);
+
+          const events: ActivityEvent[] = [];
+
+          for (const t of recentTasks) {
+            const eventType: 'error' | 'learned' | 'approved' =
+              t.status === 'failed' ? 'error'
+              : t.status === 'succeeded' ? 'learned'
+              : 'approved';
+            events.push({
+              id: t.taskId,
+              type: eventType,
+              description: `${t.taskKind} (${t.status})`,
+              timestamp: t.updatedAt,
+            });
+          }
+
+          for (const r of pruningReviews) {
+            const eventType: 'error' | 'learned' | 'approved' =
+              r.decision === 'keep' ? 'approved'
+              : r.decision === 'archive-candidate' ? 'error'
+              : 'learned';
+            events.push({
+              id: r.reviewId,
+              type: eventType,
+              description: `Pruning review: ${r.decision} for ${r.principleId}`,
+              timestamp: r.reviewedAt,
+            });
+          }
+
+          events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+          sendJson(res, 200, { success: true, data: events });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          sendJson(res, 500, { success: false, error: message });
+        }
+      })();
+
+      return;
+    }
+
+    // POST /api/tasks/:id/approve
+    if (urlPath.startsWith('/api/tasks/') && urlPath.endsWith('/approve')) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { success: false, error: 'Method not allowed' });
+        return;
+      }
+      if (!isAuthenticated(req, expectedToken)) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      const parts = urlPath.split('/');
+      const [, , , id] = parts;
+
+      if (!id) {
+        sendJson(res, 400, { success: false, error: 'Missing task ID' });
+        return;
+      }
+
+      (async (): Promise<void> => {
+        try {
+          const candidate = await services.stateManager.getCandidate(id);
+          if (!candidate) {
+            sendJson(res, 404, { success: false, error: 'Candidate not found' });
+            return;
+          }
+          if (candidate.status !== 'pending') {
+            sendJson(res, 409, { success: false, error: `Candidate is not pending (status: ${candidate.status})` });
+            return;
+          }
+
+          const entry = await services.candidateIntakeService.intake(id);
+          await services.stateManager.updateCandidateStatus(id, { status: 'consumed' });
+
+          sendJson(res, 200, { success: true, data: { principleId: entry.id } });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          sendJson(res, 500, { success: false, error: message });
+        }
+      })();
+
+      return;
+    }
+
+    // POST /api/tasks/:id/reject
+    if (urlPath.startsWith('/api/tasks/') && urlPath.endsWith('/reject')) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { success: false, error: 'Method not allowed' });
+        return;
+      }
+      if (!isAuthenticated(req, expectedToken)) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      const parts = urlPath.split('/');
+      const [, , , id] = parts;
+
+      if (!id) {
+        sendJson(res, 400, { success: false, error: 'Missing task ID' });
+        return;
+      }
+
+      (async (): Promise<void> => {
+        try {
+          const candidate = await services.stateManager.getCandidate(id);
+          if (!candidate) {
+            sendJson(res, 404, { success: false, error: 'Candidate not found' });
+            return;
+          }
+          if (candidate.status !== 'pending') {
+            sendJson(res, 409, { success: false, error: `Candidate is not pending (status: ${candidate.status})` });
+            return;
+          }
+
+          await services.stateManager.updateCandidateStatus(id, { status: 'expired' });
+
+          sendJson(res, 200, { success: true, data: { success: true } });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          sendJson(res, 500, { success: false, error: message });
+        }
+      })();
+
+      return;
+    }
+
+    // POST /api/tasks/:id/cleanup
+    if (urlPath.startsWith('/api/tasks/') && urlPath.endsWith('/cleanup')) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { success: false, error: 'Method not allowed' });
+        return;
+      }
+      if (!isAuthenticated(req, expectedToken)) {
+        sendJson(res, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      const parts = urlPath.split('/');
+      const [, , , id] = parts;
+
+      if (!id) {
+        sendJson(res, 400, { success: false, error: 'Missing principle ID' });
+        return;
+      }
+
+      (async (): Promise<void> => {
+        try {
+          const signals = services.pruningReadModel.getPrincipleSignals();
+          const signal = signals.find((s) => s.principleId === id);
+          if (!signal) {
+            sendJson(res, 404, { success: false, error: 'Principle not found in review signals' });
+            return;
+          }
+
+          const stateDir = path.join(services.workspaceDir, '.state');
+          try {
+            updatePrinciple(stateDir, id, {
+              status: 'archived',
+              updatedAt: new Date().toISOString(),
+            });
+          } catch {
+            sendJson(res, 404, { success: false, error: 'Principle not found in ledger' });
+            return;
+          }
+
+          appendPruningReview(services.workspaceDir, {
+            principleId: id,
+            decision: 'archive-candidate',
+            note: 'Archived via PD Console',
+            reviewer: 'operator',
+          });
+
+          sendJson(res, 200, { success: true, data: { success: true } });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          sendJson(res, 500, { success: false, error: message });
         }
       })();
 
@@ -257,19 +728,40 @@ function handleRequest(
   };
 }
 
-// ── Server startup ───────────────────────────────────────────────────────────────────
+// ── Server startup ───────────────────────────────────────────────────────────
 
-function main(): void {
-  const { workspace, port } = parseArgs(process.argv);
+async function main(): Promise<void> {
+  const { workspace, port, noAuth } = parseArgs(process.argv);
   const expectedToken = loadGatewayToken();
 
-  const server = http.createServer(handleRequest(expectedToken, workspace));
+  if (expectedToken === null && !noAuth) {
+    console.error('[pd-console] No auth token found. Start with --no-auth to disable authentication.');
+    process.exit(1);
+  }
+
+  const services = await initServices(workspace);
+
+  const server = http.createServer(handleRequest(noAuth ? null : expectedToken, services));
+
+  // Graceful shutdown
+  const shutdown = async (signal: string): Promise<void> => {
+    console.log(`[pd-console] Received ${signal}, shutting down...`);
+    server.close();
+    await closeServices(services);
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
 
   server.listen(port, () => {
     console.log('[pd-console] Listening on http://localhost:' + port);
     console.log('[pd-console] Workspace: ' + workspace);
-    console.log('[pd-console] Auth: ' + (expectedToken ? 'enabled' : 'disabled (no token)'));
+    console.log('[pd-console] Auth: ' + (expectedToken ? 'enabled' : 'disabled (--no-auth)'));
   });
 }
 
-main();
+main().catch((err: unknown) => {
+  console.error('[pd-console] Fatal startup error:', err);
+  process.exit(1);
+});

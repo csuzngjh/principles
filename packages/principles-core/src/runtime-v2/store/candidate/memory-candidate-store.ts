@@ -20,6 +20,13 @@ export class MemoryCandidateStore implements CandidateStore {
     return this.candidates.get(candidateId) ?? null;
   }
 
+  async updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<void> {
+    const existing = this.candidates.get(candidateId);
+    if (existing) {
+      this.candidates.set(candidateId, { ...existing, status: patch.status });
+    }
+  }
+
   insert(record: CandidateRecord): void {
     this.candidates.set(record.candidateId, record);
   }

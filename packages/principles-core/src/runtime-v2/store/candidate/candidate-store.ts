@@ -24,4 +24,9 @@ export interface CandidateStore {
    * Returns a single candidate by ID, or null if not found.
    */
   getCandidate(candidateId: string): Promise<CandidateRecord | null>;
+
+  /**
+   * Updates the status of a candidate by ID.
+   */
+  updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<void>;
 }
