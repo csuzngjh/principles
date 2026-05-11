@@ -43,6 +43,8 @@ import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { CommitRecord } from './commit/commit-store.js';
 import type { CandidateRecord } from './candidate/candidate-store.js';
 import type { ArtifactRecord, ArtifactWithCandidates } from './artifact/artifact-store.js';
+import * as path from 'path';
+import { updatePrinciple } from '../../principle-tree-ledger.js';
 
 // Re-export M5 types for backward compatibility
 export type { CommitRecord } from './commit/commit-store.js';
@@ -407,6 +409,30 @@ export class RuntimeStateManager {
   async getCandidate(candidateId: string): Promise<CandidateRecord | null> {
     this.assertInitialized();
     return this._candidateStore.getCandidate(candidateId);
+  }
+
+  async updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<boolean> {
+    this.assertInitialized();
+    return this._candidateStore.updateCandidateStatus(candidateId, patch);
+  }
+
+  async transitionCandidateStatus(candidateId: string, expectedStatus: CandidateRecord['status'], newStatus: CandidateRecord['status']): Promise<boolean> {
+    this.assertInitialized();
+    return this._candidateStore.transitionCandidateStatus(candidateId, expectedStatus, newStatus);
+  }
+
+  async archivePrinciple(principleId: string): Promise<boolean> {
+    this.assertInitialized();
+    const stateDir = path.join(this.options.workspaceDir, '.state');
+    try {
+      updatePrinciple(stateDir, principleId, {
+        status: 'archived',
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      return false;
+    }
+    return true;
   }
 
   async getArtifact(artifactId: string): Promise<ArtifactRecord | null> {
