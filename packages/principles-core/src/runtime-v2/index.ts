@@ -651,6 +651,8 @@ export type {
   ReadyTask,
   BlockedSample,
   DependencyFailedSample,
+  RetryWaitPendingSample,
+  LeaseConflictSample,
 } from './internalization-queue-read-model.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────
@@ -694,3 +696,29 @@ export type { RemediationAction, RemediationResult, InternalizationIntegrityReme
 
 export { classifyCanaryFindings } from './control-plane-triage.js';
 export type { TriageCategory, TriageCategoryName, TriagePlan } from './control-plane-triage.js';
+
+// ── GoldenTrace L2 artifact model (PRI-113) ────────────────────────────────
+
+export {
+  GoldenTraceCaseSchema,
+  GoldenTraceSchema,
+  CorrectionApplicationModeSchema,
+  GoldenTraceDecisionSchema,
+  GoldenTraceCaseKindSchema,
+  validateGoldenTraceCase,
+  validateGoldenTrace,
+  createSyntheticRuleHostInput,
+  createGoldenTraceFixture,
+} from './golden-trace.js';
+
+export type {
+  CorrectionApplicationMode,
+  GoldenTraceDecision,
+  GoldenTraceCaseKind,
+  GoldenTraceCase,
+  GoldenTrace,
+  GoldenTraceValidationResult,
+  ToolCallSnapshot,
+  SyntheticRuleHostInputOverrides,
+  GoldenTraceFixtureInput,
+} from './golden-trace.js';
