@@ -508,3 +508,128 @@ describe('DreamerRunner with DefaultDreamerValidator (PRI-87)', () => {
     expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
 });
+
+describe('DreamerRunner output_extraction_failed telemetry', () => {
+  function createMinimalDeps() {
+    const artifactStore = new MemoryPIArtifactStore();
+    const task: TaskRecord = {
+      taskId: 'task-dreamer-ext-001',
+      taskKind: 'dreamer',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(task),
+      getTask: vi.fn().mockResolvedValue(task),
+      getRunsByTask: vi.fn().mockResolvedValue([{
+        runId: 'run-ext-001',
+        taskId: 'task-dreamer-ext-001',
+        runtimeKind: 'dreamer',
+        startedAt: new Date().toISOString(),
+      }]),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    const runHandle: RunHandle = { runId: 'run-ext-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
+    const succeededStatus: RunStatus = { status: 'succeeded', runId: 'run-ext-001' };
+
+    const runtimeAdapter = {
+      startRun: vi.fn().mockResolvedValue(runHandle),
+      pollRun: vi.fn().mockResolvedValue(succeededStatus),
+      fetchOutput: vi.fn().mockResolvedValue({ payload: null }),
+      cancelRun: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PDRuntimeAdapter;
+
+    const eventEmitter = {
+      emitTelemetry: vi.fn(),
+    } as unknown as StoreEventEmitter;
+
+    return { stateManager, runtimeAdapter, eventEmitter, validator: new DefaultDreamerValidator(), artifactStore };
+  }
+
+  it('emits dreamer_output_extraction_failed when fetchOutput returns null payload', async () => {
+    const deps = createMinimalDeps();
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({ payload: null });
+
+    const runner = new DreamerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-ext-001');
+    expect(result.status).toBe('failed');
+
+    const telemetryCalls = (deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> }).emitTelemetry.mock.calls;
+    const extractionFailedCalls = telemetryCalls.filter((call: unknown[]) => {
+      const evt = call[0] as Record<string, unknown>;
+      return evt && evt.eventType === 'dreamer_output_extraction_failed';
+    });
+    expect(extractionFailedCalls.length).toBeGreaterThanOrEqual(1);
+    const evt = extractionFailedCalls[0]?.[0] as Record<string, unknown>;
+    expect(evt).toBeDefined();
+    const evtPayload = evt?.payload as Record<string, unknown> | undefined;
+    expect(evtPayload?.stage).toBe('payload_missing');
+  });
+
+  it('emits dreamer_output_extraction_failed when fetchOutput returns non-object payload', async () => {
+    const deps = createMinimalDeps();
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({ payload: 'not-json' });
+
+    const runner = new DreamerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-ext-001');
+    expect(result.status).toBe('failed');
+
+    const telemetryCalls = (deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> }).emitTelemetry.mock.calls;
+    const extractionFailedCalls = telemetryCalls.filter((call: unknown[]) => {
+      const evt = call[0] as Record<string, unknown>;
+      return evt && evt.eventType === 'dreamer_output_extraction_failed';
+    });
+    expect(extractionFailedCalls.length).toBeGreaterThanOrEqual(1);
+    const evt = extractionFailedCalls[0]?.[0] as Record<string, unknown>;
+    expect(evt).toBeDefined();
+    const evtPayload = evt?.payload as Record<string, unknown> | undefined;
+    expect(evtPayload?.stage).toBe('payload_not_object');
+  });
+
+  it('emits dreamer_output_extraction_failed when fetchOutput throws', async () => {
+    const deps = createMinimalDeps();
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockRejectedValue(new Error('Network timeout'));
+
+    const runner = new DreamerRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'dreamer',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run('task-dreamer-ext-001');
+    expect(result.status).toBe('failed');
+
+    const telemetryCalls = (deps.eventEmitter as unknown as { emitTelemetry: ReturnType<typeof vi.fn> }).emitTelemetry.mock.calls;
+    const extractionFailedCalls = telemetryCalls.filter((call: unknown[]) => {
+      const evt = call[0] as Record<string, unknown>;
+      return evt && evt.eventType === 'dreamer_output_extraction_failed';
+    });
+    expect(extractionFailedCalls.length).toBeGreaterThanOrEqual(1);
+    const evt = extractionFailedCalls[0]?.[0] as Record<string, unknown>;
+    expect(evt).toBeDefined();
+    const evtPayload = evt?.payload as Record<string, unknown> | undefined;
+    expect(evtPayload?.stage).toBe('fetchOutput');
+  });
+});

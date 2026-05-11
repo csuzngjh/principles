@@ -307,6 +307,50 @@ export type {
   EvaluatorPromptBuildResult,
 } from './evaluator-prompt-builder.js';
 
+// ── Rollout Reviewer Runner (PRI-RR) ────────────────────────────────────────
+
+export type {
+  RolloutReviewerReview,
+  RolloutReviewerSourceTrace,
+  RolloutReviewerOutputV1,
+  RolloutReviewerValidationResult,
+  RolloutReviewerValidator,
+} from './rollout-reviewer-output.js';
+
+export {
+  DefaultRolloutReviewerValidator,
+  RolloutReviewerOutputV1Schema,
+  RolloutReviewerReviewSchema,
+  RolloutReviewerSourceTraceSchema,
+  ROLLOUT_REVIEWER_DECISIONS,
+} from './rollout-reviewer-output.js';
+
+export type {
+  RolloutReviewerRunnerResultStatus,
+  RolloutReviewerRunnerResult,
+  RolloutReviewerRunnerOptions,
+  ResolvedRolloutReviewerRunnerOptions,
+  RolloutReviewerRunnerDeps,
+} from './rollout-reviewer-runner.js';
+
+export {
+  RolloutReviewerRunner,
+  resolveRolloutReviewerRunnerOptions,
+  DEFAULT_ROLLOUT_REVIEWER_RUNNER_OPTIONS,
+} from './rollout-reviewer-runner.js';
+
+export {
+  RolloutReviewerPromptBuilder,
+  ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION,
+  ROLLOUT_REVIEWER_PROMPT_CONTRACT_VERSION,
+} from './rollout-reviewer-prompt-builder.js';
+
+export type {
+  RolloutReviewerPromptBuilderInput,
+  RolloutReviewerPromptInput,
+  RolloutReviewerPromptBuildResult,
+} from './rollout-reviewer-prompt-builder.js';
+
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
 
 export type {
