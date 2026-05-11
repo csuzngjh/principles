@@ -18,11 +18,16 @@ import { handleRuntimeInternalizationIntegrityRepair } from '../../src/commands/
 const WS = '/fake/workspace';
 
 function makeResult(overrides: Partial<{ dryRun: boolean; repairedCount: number; skippedCount: number; actions: unknown[] }> = {}) {
+  const dryRun = overrides.dryRun ?? true;
   return {
-    dryRun: overrides.dryRun ?? true,
+    mode: dryRun ? 'dry_run' : 'confirm',
+    status: dryRun ? 'no_op' : (overrides.repairedCount ?? 0) > 0 ? 'changed' : 'no_op',
+    safeToConfirm: false,
+    dryRun,
     repairedCount: overrides.repairedCount ?? 0,
     skippedCount: overrides.skippedCount ?? 0,
     actions: overrides.actions ?? [],
+    warnings: [],
     generatedAt: new Date().toISOString(),
   };
 }
