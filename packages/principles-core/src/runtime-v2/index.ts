@@ -592,6 +592,50 @@ export type {
   EvaluatorPromptBuildResult,
 } from './internalization/evaluator-prompt-builder.js';
 
+// ── Rollout Reviewer Runner (PRI-RR) ────────────────────────────────────────
+
+export type {
+  RolloutReviewerReview,
+  RolloutReviewerSourceTrace,
+  RolloutReviewerOutputV1,
+  RolloutReviewerValidationResult,
+  RolloutReviewerValidator,
+} from './internalization/rollout-reviewer-output.js';
+
+export {
+  DefaultRolloutReviewerValidator,
+  RolloutReviewerOutputV1Schema,
+  RolloutReviewerReviewSchema,
+  RolloutReviewerSourceTraceSchema,
+  ROLLOUT_REVIEWER_DECISIONS,
+} from './internalization/rollout-reviewer-output.js';
+
+export type {
+  RolloutReviewerRunnerResultStatus,
+  RolloutReviewerRunnerResult,
+  RolloutReviewerRunnerOptions,
+  ResolvedRolloutReviewerRunnerOptions,
+  RolloutReviewerRunnerDeps,
+} from './internalization/rollout-reviewer-runner.js';
+
+export {
+  RolloutReviewerRunner,
+  resolveRolloutReviewerRunnerOptions,
+  DEFAULT_ROLLOUT_REVIEWER_RUNNER_OPTIONS,
+} from './internalization/rollout-reviewer-runner.js';
+
+export {
+  RolloutReviewerPromptBuilder,
+  ROLLOUT_REVIEWER_PROTOCOL_INSTRUCTION,
+  ROLLOUT_REVIEWER_PROMPT_CONTRACT_VERSION,
+} from './internalization/rollout-reviewer-prompt-builder.js';
+
+export type {
+  RolloutReviewerPromptBuilderInput,
+  RolloutReviewerPromptInput,
+  RolloutReviewerPromptBuildResult,
+} from './internalization/rollout-reviewer-prompt-builder.js';
+
 // ── PIArtifact Durable Store (PRI-84) ────────────────────────────────────────
 
 export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
