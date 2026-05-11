@@ -42,7 +42,13 @@ export interface ReadyTask {
   channel: InternalizationChannel;
 }
 
-export type QueueNoReadyTasksReason = 'no_candidates' | 'all_hydration_failed' | 'all_blocked' | 'all_dependency_failed' | 'all_retry_wait_pending';
+export type QueueNoReadyTasksReason =
+  | 'no_candidates'
+  | 'all_hydration_failed'
+  | 'all_blocked'
+  | 'all_dependency_failed'
+  | 'all_retry_wait_pending'
+  | 'all_lease_conflict';
 
 export interface NoReadyTasksDiagnosis {
   reason: QueueNoReadyTasksReason;
@@ -55,6 +61,13 @@ export interface RetryWaitPendingSample {
   retryAfter: string;
 }
 
+export interface LeaseConflictSample {
+  taskId: string;
+  taskKind: PeerRunnerKind;
+  leaseOwner: string;
+  leaseExpiresAt: string;
+}
+
 export interface InternalizationQueueSnapshot {
   pendingCount: number;
   retryWaitCount: number;
@@ -64,6 +77,7 @@ export interface InternalizationQueueSnapshot {
   sampleInvalidTaskIds: string[];
   blockedSummary: { count: number; samples: BlockedSample[] };
   dependencyFailedSummary: { count: number; samples: DependencyFailedSample[] };
+  leaseConflictSummary: { count: number; samples: LeaseConflictSample[]; sampleTaskIds: string[] };
   retryWaitPendingSummary: { count: number; samples: RetryWaitPendingSample[] };
   readyTasks: ReadyTask[];
   noReadyTasks: NoReadyTasksDiagnosis | null;
@@ -72,6 +86,17 @@ export interface InternalizationQueueSnapshot {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const MAX_SAMPLES = 3;
+
+function hasUnexpiredLease(
+  task: { status: string; leaseOwner?: string; leaseExpiresAt?: string },
+  nowMs: number,
+): boolean {
+  if (task.status !== 'pending') return false;
+  if (!task.leaseOwner || !task.leaseExpiresAt) return false;
+  const leaseExpiresAtMs = new Date(task.leaseExpiresAt).getTime();
+  if (Number.isNaN(leaseExpiresAtMs)) return false;
+  return leaseExpiresAtMs > nowMs;
+}
 
 // ── Read Model ───────────────────────────────────────────────────────────────
 
@@ -97,12 +122,14 @@ export class InternalizationQueueReadModel {
     const sampleInvalidTaskIds: string[] = [];
     const blockedSamples: BlockedSample[] = [];
     const dependencyFailedSamples: DependencyFailedSample[] = [];
+    const leaseConflictSamples: LeaseConflictSample[] = [];
     const retryWaitPendingSamples: RetryWaitPendingSample[] = [];
     const readyTasks: ReadyTask[] = [];
 
     let hydrationFailures = 0;
     let blockedCount = 0;
     let dependencyFailures = 0;
+    let leaseConflicts = 0;
     let retryWaitPendingCount = 0;
 
     const nowMs = Date.now();
@@ -122,6 +149,19 @@ export class InternalizationQueueReadModel {
       // Aggregate counts
       countsByTaskKind[piTask.taskKind] = (countsByTaskKind[piTask.taskKind] ?? 0) + 1;
       countsByChannel[piTask.channel] = (countsByChannel[piTask.channel] ?? 0) + 1;
+
+      if (hasUnexpiredLease(piTask, nowMs)) {
+        leaseConflicts++;
+        if (leaseConflictSamples.length < MAX_SAMPLES) {
+          leaseConflictSamples.push({
+            taskId: piTask.taskId,
+            taskKind: piTask.taskKind,
+            leaseOwner: piTask.leaseOwner ?? '',
+            leaseExpiresAt: piTask.leaseExpiresAt ?? '',
+          });
+        }
+        continue;
+      }
 
       // Resolve dependencies for gate evaluation
       const dependencies = await this.resolveDependencies(piTask.dependencyTaskIds);
@@ -175,6 +215,8 @@ export class InternalizationQueueReadModel {
         const reason: QueueNoReadyTasksReason =
           retryWaitPendingCount > 0 && retryWaitPendingCount >= hydrationFailures && retryWaitPendingCount >= dependencyFailures && retryWaitPendingCount >= blockedCount
             ? 'all_retry_wait_pending'
+            : leaseConflicts > 0 && leaseConflicts >= hydrationFailures && leaseConflicts >= dependencyFailures && leaseConflicts >= blockedCount
+              ? 'all_lease_conflict'
             : hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount
               ? 'all_hydration_failed'
               : dependencyFailures >= blockedCount
@@ -193,6 +235,11 @@ export class InternalizationQueueReadModel {
       sampleInvalidTaskIds,
       blockedSummary: { count: blockedCount, samples: blockedSamples },
       dependencyFailedSummary: { count: dependencyFailures, samples: dependencyFailedSamples },
+      leaseConflictSummary: {
+        count: leaseConflicts,
+        samples: leaseConflictSamples,
+        sampleTaskIds: leaseConflictSamples.map((sample) => sample.taskId),
+      },
       retryWaitPendingSummary: { count: retryWaitPendingCount, samples: retryWaitPendingSamples },
       readyTasks,
       noReadyTasks,
