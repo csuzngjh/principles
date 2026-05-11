@@ -76,7 +76,7 @@
     "js-yaml": "^4.1.1",
     "lucide-react": "^1.7.0",
     "micromatch": "^4.0.8",
-    "react": "^19.2.0",
+    "react": "^19.2.6",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.9.4"
   }
