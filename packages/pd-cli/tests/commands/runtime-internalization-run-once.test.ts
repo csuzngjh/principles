@@ -43,6 +43,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
   ScribeRunner: vi.fn().mockImplementation(function () {
     return { run: mockRun };
   }),
+  ArtificerRunner: vi.fn().mockImplementation(function () {
+    return { run: mockRun };
+  }),
   StoreEventEmitter: vi.fn().mockImplementation(function () {
     return { emitTelemetry: vi.fn() };
   }),
@@ -56,6 +59,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
   DefaultScribeValidator: vi.fn().mockImplementation(function () {
+    return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
+  }),
+  DefaultArtificerValidator: vi.fn().mockImplementation(function () {
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),
   TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () {
@@ -181,7 +187,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('unsupported runner kind: exits 1 with error', async () => {
-    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'artificer', runtime: 'test-double', allowTestDouble: true });
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'evaluator', runtime: 'test-double', allowTestDouble: true });
 
     expect(process.exitCode).toBe(1);
     expect(consoleErrorSpy.mock.calls.some((c: string[]) => c[0].includes('unsupported runner kind'))).toBe(true);
@@ -911,12 +917,108 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.successorKind).toBe('artificer');
   });
 
-  it('run-once source has no direct ScribeRunner to ArtificerRunner import', async () => {
+  it('run-once source has no direct EvaluatorRunner import', async () => {
     const { existsSync, readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const srcPath = resolve(__dirname, '../../src/commands/runtime-internalization-run-once.ts');
     if (!existsSync(srcPath)) return;
     const src = readFileSync(srcPath, 'utf-8');
-    expect(src).not.toContain('ArtificerRunner');
+    expect(src).not.toContain('EvaluatorRunner');
+  });
+
+  it('--runner artificer dispatches ArtificerRunner', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-artificer-001',
+      taskKind: 'artificer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-artificer-001',
+      runId: 'run-artificer-001',
+      artifactId: 'pi-art-task-artificer-001-run-artificer-001',
+      resultRef: 'artificer://run-artificer-001',
+      contextHash: 'ctx-artificer-abc',
+      output: {
+        taskId: 'task-artificer-001',
+        sourceScribeArtifactId: 'pi-art-scribe-001',
+        implementationPlan: {
+          summary: 'Test implementation summary',
+          targetSurface: 'src/test/*.ts',
+          changes: ['Add validation'],
+          tests: ['Unit test for validation'],
+          rolloutNotes: ['Deploy behind feature flag'],
+          confidence: 0.8,
+        },
+        sourceTrace: { scribeArtifactId: 'pi-art-scribe-001' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'artificer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const ArtificerRunnerMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.ArtificerRunner),
+    );
+    expect(ArtificerRunnerMock).toHaveBeenCalled();
+    expect(mockRun).toHaveBeenCalledWith('task-artificer-001');
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.runnerKind).toBe('artificer');
+    expect(output.taskId).toBe('task-artificer-001');
+    expect(output.runId).toBe('run-artificer-001');
+    expect(output.artifactId).toBe('pi-art-task-artificer-001-run-artificer-001');
+    expect(output.resultRef).toBe('artificer://run-artificer-001');
+    expect(output.runnerResult.status).toBe('succeeded');
+  });
+
+  it('--runner artificer --enqueue-next returns successor decision', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-artificer-enq-001',
+      taskKind: 'artificer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-artificer-enq-001',
+      runId: 'run-artificer-enq-001',
+      artifactId: 'pi-art-artificer-enq-001',
+      resultRef: 'artificer://run-artificer-enq-001',
+      contextHash: 'ctx-enq',
+      output: {
+        taskId: 'task-artificer-enq-001',
+        sourceScribeArtifactId: 'pi-art-scribe-enq-001',
+        implementationPlan: {
+          summary: 'Test implementation summary',
+          targetSurface: 'src/test/*.ts',
+          changes: ['Add validation'],
+          tests: ['Unit test for validation'],
+          rolloutNotes: ['Deploy behind feature flag'],
+          confidence: 0.8,
+        },
+        sourceTrace: { scribeArtifactId: 'pi-art-scribe-enq-001' },
+        risks: [],
+        generatedAt: new Date().toISOString(),
+      },
+      attemptCount: 1,
+    });
+
+    mockCommitNextTaskProposal.mockResolvedValue({
+      decision: 'successor_created',
+      sourceTaskId: 'task-artificer-enq-001',
+      successorTaskId: 'task-evaluator-enq-001',
+      successorKind: 'evaluator',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'artificer', runtime: 'test-double', allowTestDouble: true, enqueueNext: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.enqueueDecision).toBe('successor_created');
+    expect(output.successorTaskId).toBe('task-evaluator-enq-001');
+    expect(output.successorKind).toBe('evaluator');
   });
 });

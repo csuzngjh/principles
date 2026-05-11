@@ -232,6 +232,37 @@ export {
   DEFAULT_SCRIBE_RUNNER_OPTIONS,
 } from './scribe-runner.js';
 
+// ── Artificer Runner (PRI-111) ────────────────────────────────────────────────
+
+export type {
+  ArtificerOutputV1,
+  ArtificerImplementationPlan,
+  ArtificerSourceTrace,
+  ArtificerValidationResult,
+  ArtificerValidator,
+} from './artificer-output.js';
+
+export {
+  DefaultArtificerValidator,
+  ArtificerOutputV1Schema,
+  ArtificerImplementationPlanSchema,
+  ArtificerSourceTraceSchema,
+} from './artificer-output.js';
+
+export type {
+  ArtificerRunnerResultStatus,
+  ArtificerRunnerResult,
+  ArtificerRunnerOptions,
+  ResolvedArtificerRunnerOptions,
+  ArtificerRunnerDeps,
+} from './artificer-runner.js';
+
+export {
+  ArtificerRunner,
+  resolveArtificerRunnerOptions,
+  DEFAULT_ARTIFICER_RUNNER_OPTIONS,
+} from './artificer-runner.js';
+
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
 
 export type {

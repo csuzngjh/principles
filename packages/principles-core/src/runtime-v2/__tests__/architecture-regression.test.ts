@@ -62,6 +62,9 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-109
   'internalization/scribe-output.ts',
   'internalization/scribe-runner.ts',
+  // PRI-111
+  'internalization/artificer-output.ts',
+  'internalization/artificer-runner.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../prompt-builder/routing-guidance.ts',
   // PRI-81 Phase A
@@ -97,6 +100,8 @@ const REQUIRED_TEST_FILES = [
   'dreamer-runner.test.ts',
   // PRI-109
   'scribe-runner-vslice.test.ts',
+  // PRI-111
+  'artificer-runner-vslice.test.ts',
   // PRI-74 (follow-up to PRI-75 Phase 3)
   '../../prompt-builder/__tests__/routing-guidance.test.ts',
   // PRI-81 Phase A
@@ -1556,5 +1561,68 @@ describe('PRI-78 GFI observability boundary', () => {
       'utf-8'
     );
     expect(src).toContain("from '@principles/core/runtime-v2'");
+  });
+});
+
+// ── PRI-111: ArtificerRunner boundary guards ──────────────────────────────────
+
+describe('PRI-111 ArtificerRunner boundary', () => {
+  it('artificer source files exist in internalization directory', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'artificer-runner.ts'))).toBe(true);
+    expect(existsSync(resolve(__dirname, '..', 'internalization', 'artificer-output.ts'))).toBe(true);
+  });
+
+  it('artificer test file exists', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(resolve(__dirname, 'artificer-runner-vslice.test.ts'))).toBe(true);
+  });
+
+  it('CORE_NO_FORBIDDEN_IMPORTS: artificer-runner.ts has no openclaw-plugin, evaluator, nocturnal-trinity imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'artificer-runner.ts'), 'utf-8');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('EvaluatorRunner');
+    expect(src).not.toContain('nocturnal-trinity');
+    expect(src).not.toContain('InternalizationOrchestrator');
+    expect(src).not.toContain('createTask');
+    expect(src).not.toContain('enqueueTask');
+  });
+
+  it('CORE_NO_FORBIDDEN_IMPORTS: artificer-output.ts has no openclaw-plugin, fs, path imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'artificer-output.ts'), 'utf-8');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+  });
+
+  it('CORE_NO_SCHEDULING: artificer-runner.ts has no node:fs, node:cron, or cron-style scheduling', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'artificer-runner.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:cron');
+  });
+
+  it('BARREL_EXPORTS: internalization/index.ts exports ArtificerRunner and ArtificerOutput', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
+    expect(src).toContain('ArtificerRunner');
+    expect(src).toContain('ArtificerOutput');
+    expect(src).toContain('DefaultArtificerValidator');
+  });
+
+  it('SCHEMA_REGISTRY: pi-ai-runtime-adapter.ts registers artificer-output-v1 schema', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
+    expect(src).toContain('artificer-output-v1');
+    expect(src).toContain('ArtificerOutputV1Schema');
   });
 });
