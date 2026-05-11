@@ -516,6 +516,111 @@ describe('InternalizationOrchestrator', () => {
       const clean = await moduleHasNoForbiddenImports('internalization/internalization-orchestrator.ts');
       expect(clean).toBe(true);
     });
+
+    // ── Test 9-13: wakeOnce taskKind filtering (PRI-110) ────────────────────
+
+    describe('wakeOnce — taskKind filtering', () => {
+      it('wakeOnce("artificer") skips dreamer candidates and leases artificer task', async () => {
+        const dreamerTask = makeRawTask({ taskId: 'dreamer-1', taskKind: 'dreamer', status: 'pending' });
+        const artificerTask = makeRawTask({ taskId: 'artificer-1', taskKind: 'artificer', status: 'pending' });
+        mockStateManager.listTasks
+          .mockResolvedValueOnce([dreamerTask, artificerTask])
+          .mockResolvedValueOnce([]);
+        mockStateManager.acquireLease.mockResolvedValue({ ...artificerTask, status: 'leased' });
+
+        const orchestrator = new OrchestratorClass(
+          { stateManager: mockStateManager as unknown as RuntimeStateManager },
+          { owner: 'test-owner', runtimeKind: 'artificer', dryRun: false },
+        );
+
+        const result = await orchestrator.wakeOnce('artificer');
+
+        expect(result.decision).toBe('leased');
+        expect((result as { taskId: string }).taskId).toBe('artificer-1');
+      });
+
+      it('wakeOnce("dreamer") with mixed candidates only returns dreamer task', async () => {
+        const dreamerTask = makeRawTask({ taskId: 'dreamer-1', taskKind: 'dreamer', status: 'pending' });
+        const artificerTask = makeRawTask({ taskId: 'artificer-1', taskKind: 'artificer', status: 'pending' });
+        mockStateManager.listTasks
+          .mockResolvedValueOnce([artificerTask, dreamerTask])
+          .mockResolvedValueOnce([]);
+        mockStateManager.acquireLease.mockResolvedValue({ ...dreamerTask, status: 'leased' });
+
+        const orchestrator = new OrchestratorClass(
+          { stateManager: mockStateManager as unknown as RuntimeStateManager },
+          { owner: 'test-owner', runtimeKind: 'dreamer', dryRun: false },
+        );
+
+        const result = await orchestrator.wakeOnce('dreamer');
+
+        expect(result.decision).toBe('leased');
+        expect((result as { taskId: string }).taskId).toBe('dreamer-1');
+      });
+
+      it('wakeOnce("evaluator") with no evaluator candidates returns no_ready_tasks', async () => {
+        const dreamerTask = makeRawTask({ taskId: 'dreamer-1', taskKind: 'dreamer', status: 'pending' });
+        mockStateManager.listTasks
+          .mockResolvedValueOnce([dreamerTask])
+          .mockResolvedValueOnce([]);
+
+        const orchestrator = new OrchestratorClass(
+          { stateManager: mockStateManager as unknown as RuntimeStateManager },
+          { owner: 'test-owner', runtimeKind: 'evaluator', dryRun: false },
+        );
+
+        const result = await orchestrator.wakeOnce('evaluator');
+
+        expect(result.decision).toBe('no_ready_tasks');
+        expect((result as { inspectedCount: number }).inspectedCount).toBe(0);
+      });
+
+      it('wakeOnce() without taskKind returns first leasable task regardless of kind (backward compat)', async () => {
+        const dreamerTask = makeRawTask({ taskId: 'dreamer-1', taskKind: 'dreamer', status: 'pending' });
+        const artificerTask = makeRawTask({ taskId: 'artificer-1', taskKind: 'artificer', status: 'pending' });
+        mockStateManager.listTasks
+          .mockResolvedValueOnce([dreamerTask, artificerTask])
+          .mockResolvedValueOnce([]);
+        mockStateManager.acquireLease.mockResolvedValue({ ...dreamerTask, status: 'leased' });
+
+        const orchestrator = new OrchestratorClass(
+          { stateManager: mockStateManager as unknown as RuntimeStateManager },
+          { owner: 'test-owner', runtimeKind: 'dreamer', dryRun: false },
+        );
+
+        const result = await orchestrator.wakeOnce();
+
+        expect(result.decision).toBe('leased');
+        expect((result as { taskId: string }).taskId).toBe('dreamer-1');
+      });
+
+      it('wakeOnce("artificer") skips blocked artificer and finds ready artificer', async () => {
+        const blockedArtificer = makeRawTask({
+          taskId: 'artificer-blocked',
+          taskKind: 'artificer',
+          status: 'pending',
+          dependencyTaskIds: ['dep-1'],
+        });
+        const readyArtificer = makeRawTask({ taskId: 'artificer-ready', taskKind: 'artificer', status: 'pending' });
+        const pendingDep = makeRawTask({ taskId: 'dep-1', status: 'pending', taskKind: 'scribe' });
+
+        mockStateManager.listTasks
+          .mockResolvedValueOnce([blockedArtificer, readyArtificer])
+          .mockResolvedValueOnce([]);
+        mockStateManager.getTask.mockResolvedValue(pendingDep);
+        mockStateManager.acquireLease.mockResolvedValue({ ...readyArtificer, status: 'leased' });
+
+        const orchestrator = new OrchestratorClass(
+          { stateManager: mockStateManager as unknown as RuntimeStateManager },
+          { owner: 'test-owner', runtimeKind: 'artificer', dryRun: false },
+        );
+
+        const result = await orchestrator.wakeOnce('artificer');
+
+        expect(result.decision).toBe('leased');
+        expect((result as { taskId: string }).taskId).toBe('artificer-ready');
+      });
+    });
   });
 
   // ── PRI-88: commitNextTaskProposal ──────────────────────────────────────────

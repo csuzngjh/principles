@@ -167,8 +167,8 @@ export class InternalizationOrchestrator {
    *   5. On proceed + dryRun → would_lease; on proceed + !dryRun → acquireLease
    *   6. On lease_conflict PDRuntimeError → structured LeaseConflictResult
    */
-  async wakeOnce(): Promise<WakeOnceResult> {
-    const candidates = await this.findCandidates();
+  async wakeOnce(taskKind?: PeerRunnerKind): Promise<WakeOnceResult> {
+    const candidates = await this.findCandidates(taskKind);
     const inspectedCount = candidates.length;
 
     if (inspectedCount === 0) {
@@ -458,7 +458,7 @@ export class InternalizationOrchestrator {
    * Find candidate PI tasks by querying pending and retry_wait statuses.
    * Filters to only PeerRunnerKind taskKinds and hydrates to PITaskRecord.
    */
-  private async findCandidates(): Promise<TaskRecord[]> {
+  private async findCandidates(taskKind?: PeerRunnerKind): Promise<TaskRecord[]> {
     const allCandidates: TaskRecord[] = [];
     try {
       const pending = await this.stateManager.listTasks({ status: 'pending' });
@@ -469,8 +469,11 @@ export class InternalizationOrchestrator {
       throw new PDRuntimeError('runtime_unavailable', 'findCandidates failed', { cause: error });
     }
 
-    // Filter to PeerRunnerKind tasks only (skip diagnostician, etc.)
-    const peerTasks = allCandidates.filter(t => isPeerRunnerKind(t.taskKind));
+    let peerTasks = allCandidates.filter(t => isPeerRunnerKind(t.taskKind));
+
+    if (taskKind) {
+      peerTasks = peerTasks.filter(t => t.taskKind === taskKind);
+    }
 
     return peerTasks;
   }
