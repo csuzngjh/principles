@@ -88,6 +88,8 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-84
   'internalization/pi-artifact.ts',
   'internalization/pi-artifact-store.ts',
+  // PRI-113
+  'golden-trace.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -124,6 +126,8 @@ const REQUIRED_TEST_FILES = [
   '../../prompt-builder/__tests__/focus-compression.test.ts',
   // PRI-76
   '../gfi/__tests__/gfi-kernel.test.ts',
+  // PRI-113
+  'golden-trace.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -1575,6 +1579,28 @@ describe('PRI-78 GFI observability boundary', () => {
       'utf-8'
     );
     expect(src).toContain("from '@principles/core/runtime-v2'");
+  });
+});
+
+// ── PRI-113: GoldenTrace L2 artifact boundary ──────────────────────────────
+
+describe('PRI-113 GoldenTrace boundary', () => {
+  it('golden-trace.ts has zero plugin or infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'golden-trace.ts'), 'utf-8');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+  });
+
+  it('runtime-v2 barrel exports GoldenTrace public contract', async () => {
+    const mod = await import('../index.js');
+    expect(mod).toHaveProperty('GoldenTraceCaseSchema');
+    expect(mod).toHaveProperty('GoldenTraceSchema');
+    expect(mod).toHaveProperty('validateGoldenTrace');
+    expect(mod).toHaveProperty('createGoldenTraceFixture');
   });
 });
 
