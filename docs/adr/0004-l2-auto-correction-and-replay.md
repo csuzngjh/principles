@@ -31,9 +31,9 @@ export interface RuleHostResult {
   ruleId?: string;
   principleId?: string;
   // 当 decision 为 'auto_correct' 时，提供修正后的参数
-  modifiedParams?: Record<string, unknown>; 
+  modifiedParams?: Record<string, unknown>;
   // 是否向 LLM 发送一条系统通知，告知参数被底层系统修正（隐性学习）
-  notifyAgent?: boolean; 
+  notifyAgent?: boolean;
 }
 ```
 

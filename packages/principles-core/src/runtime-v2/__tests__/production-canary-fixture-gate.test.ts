@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import Database from 'better-sqlite3';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { InternalizationQueueReadModel } from '../internalization-queue-read-model.js';
 import { InternalizationChainIntegrityReadModel } from '../internalization-chain-integrity-read-model.js';
@@ -159,9 +160,57 @@ describe('PRI-102: Production canary fixture gate', () => {
         },
       ]);
 
+      const stateDir = path.join(fixture.workspaceDir, '.state');
+      fs.mkdirSync(stateDir, { recursive: true });
+      const orphanCandidateId = 'orphan-cand-999';
+      const ledgerContent = {
+        _tree: {
+          principles: {
+            'pri-orphan-test': {
+              id: 'pri-orphan-test',
+              version: 1,
+              text: 'test principle with orphan derived candidate',
+              triggerPattern: 'test',
+              action: 'test',
+              status: 'active',
+              priority: 'P2',
+              scope: 'general',
+              evaluability: 'manual_only',
+              valueScore: 0.5,
+              adherenceRate: 0.8,
+              painPreventedCount: 0,
+              derivedFromPainIds: [orphanCandidateId],
+              ruleIds: [],
+              conflictsWithPrincipleIds: [],
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          },
+          rules: {},
+          implementations: {},
+          metrics: {},
+          lastUpdated: new Date().toISOString(),
+        },
+      };
+      fs.writeFileSync(
+        path.join(stateDir, 'principle_training_state.json'),
+        JSON.stringify(ledgerContent, null, 2),
+      );
+
       const pruningModel = new PruningReadModel({ workspaceDir: fixture.workspaceDir });
-      const result = pruningModel.getOrphanDerivedCandidates();
-      expect(result.dbReadable).toBe(true);
+      const orphanResult = pruningModel.getOrphanDerivedCandidates();
+      expect(orphanResult.dbReadable).toBe(true);
+      expect(orphanResult.candidates.length).toBeGreaterThan(0);
+      expect(orphanResult.candidates[0]?.candidateId).toBe(orphanCandidateId);
+      expect(orphanResult.candidates[0]?.reason).toContain('not found in state.db');
+
+      const healthModel = new OperatorHealthReadModel({ workspaceDir: fixture.workspaceDir });
+      try {
+        const snapshot = await healthModel.getSnapshot();
+        expect(snapshot.overallStatus).toBe('degraded');
+      } finally {
+        await healthModel.close();
+      }
     });
 
     it('workspace with only failed tasks reports degraded', async () => {
@@ -188,7 +237,7 @@ describe('PRI-102: Production canary fixture gate', () => {
   });
 
   describe('integrity ok/brokenLinks', () => {
-    it('workspace with runtime tasks reports integrity status (may be degraded due to missing candidate tables)', async () => {
+    it('succeeded dreamer with no philosopher successor reports degraded with missing_philosopher_successor', async () => {
       await fixture.init();
       await fixture.seedTasks([
         {
@@ -202,9 +251,25 @@ describe('PRI-102: Production canary fixture gate', () => {
         },
       ]);
 
+      const dbPath = path.join(fixture.workspaceDir, '.pd', 'state.db');
+      const db = new Database(dbPath);
+      const now = new Date().toISOString();
+      db.prepare(
+        'INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, ended_at, reason, attempt_number, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run('run-dreamer-001', 'dreamer-001', 'dreamer', 'succeeded', now, now, 'task_completed', 1, now, now);
+      db.prepare(
+        'INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, content_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run('artifact-dreamer-001', 'principle', 'dreamer-001', '{}', now, now);
+      db.close();
+
       const model = new InternalizationChainIntegrityReadModel({ workspaceDir: fixture.workspaceDir });
       const result = model.check();
-      expect(['ok', 'degraded', 'error']).toContain(result.overallStatus);
+      expect(result.overallStatus).toBe('degraded');
+      expect(result.brokenLinks.length).toBeGreaterThan(0);
+      const missingPhil = result.brokenLinks.find(l => l.type === 'missing_philosopher_successor');
+      expect(missingPhil).toBeDefined();
+      expect(missingPhil?.taskId).toBe('dreamer-001');
+      expect(missingPhil?.severity).toBe('warning');
     });
 
     it('workspace with missing DB reports error', async () => {
