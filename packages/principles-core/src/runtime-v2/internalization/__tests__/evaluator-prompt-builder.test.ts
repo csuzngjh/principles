@@ -4,6 +4,7 @@ import {
   EVALUATOR_PROTOCOL_INSTRUCTION,
   EVALUATOR_PROMPT_CONTRACT_VERSION,
 } from '../evaluator-prompt-builder.js';
+import { extractJsonObject } from '../../adapter/json-extractor.js';
 
 describe('EvaluatorPromptBuilder', () => {
   const builder = new EvaluatorPromptBuilder();
@@ -91,5 +92,38 @@ describe('EvaluatorPromptBuilder', () => {
   it('evaluatorInstruction is included in prompt input', () => {
     const { promptInput } = builder.buildPrompt(input);
     expect(promptInput.evaluatorInstruction).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
+  });
+
+  it('instruction contains complete JSON example with all required fields', () => {
+    const parsed = extractJsonObject(EVALUATOR_PROTOCOL_INSTRUCTION);
+    expect(parsed).not.toBeNull();
+    const example = parsed as Record<string, unknown>;
+    expect(example).toHaveProperty('taskId');
+    expect(example).toHaveProperty('sourceArtificerArtifactId');
+    expect(example).toHaveProperty('evaluation');
+    const evaluation = example.evaluation as Record<string, unknown>;
+    expect(evaluation).toHaveProperty('decision');
+    expect(evaluation).toHaveProperty('summary');
+    expect(evaluation).toHaveProperty('score');
+    expect(evaluation).toHaveProperty('strengths');
+    expect(evaluation).toHaveProperty('concerns');
+    expect(evaluation).toHaveProperty('requiredChanges');
+    expect(example).toHaveProperty('sourceTrace');
+    const sourceTrace = example.sourceTrace as Record<string, unknown>;
+    expect(sourceTrace).toHaveProperty('artificerArtifactId');
+    expect(example).toHaveProperty('risks');
+    expect(example).toHaveProperty('generatedAt');
+  });
+
+  it('instruction says ENTIRE response must be ONLY the JSON object', () => {
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('ENTIRE response must be ONLY the JSON object');
+  });
+
+  it('instruction says no text before or after JSON', () => {
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('no prose before or after');
+  });
+
+  it('instruction says no markdown code fences', () => {
+    expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('Do NOT wrap the JSON in markdown code fences');
   });
 });

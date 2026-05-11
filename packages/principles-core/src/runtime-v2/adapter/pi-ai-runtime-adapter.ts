@@ -395,6 +395,19 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       // Parse response — handles prose-wrapped and code-fenced JSON
       let validatedOutput: unknown = extractJsonObject(text);
       if (!validatedOutput) {
+        this.eventEmitter.emitTelemetry({
+          eventType: 'output_extraction_failed',
+          traceId: input.taskRef?.taskId ?? runId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'pi-ai-adapter',
+          agentId: 'pi-ai-adapter',
+          payload: {
+            runId,
+            runtimeKind: 'pi-ai',
+            outputSchemaRef: input.outputSchemaRef ?? 'unknown',
+            rawOutputPreview: text.slice(0, 500),
+          },
+        });
         throw new PDRuntimeError('output_invalid', 'No valid JSON found in LLM response');
       }
 

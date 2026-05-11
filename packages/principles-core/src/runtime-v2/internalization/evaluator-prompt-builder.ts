@@ -30,30 +30,13 @@ PROTOCOL:
 6. Preserve the lineage trace from artificer, scribe, philosopher, and dreamer artifacts
 7. Identify risks associated with this evaluation
 
-OUTPUT FORMAT (pure JSON, no markdown):
-{
-  "taskId": "<from input>",
-  "sourceArtificerArtifactId": "<copy exactly from input.sourceArtificerArtifactId>",
-  "evaluation": {
-    "decision": "approved" | "needs_revision" | "rejected",
-    "summary": "<concise evaluation summary>",
-    "score": 0.85,
-    "strengths": ["<strength 1>", "<strength 2>"],
-    "concerns": ["<concern 1>", "<concern 2>"],
-    "requiredChanges": ["<change 1>", "<change 2>"]
-  },
-  "sourceTrace": {
-    "artificerArtifactId": "<copy exactly from input.sourceArtificerArtifactId>",
-    "scribeArtifactId": "<from artificer artifact if available, or omit>",
-    "philosopherArtifactId": "<from artificer artifact if available, or omit>",
-    "dreamerArtifactId": "<from artificer artifact if available, or omit>"
-  },
-  "risks": ["<risk 1>", "<risk 2>"],
-  "generatedAt": "<ISO-8601 timestamp>"
-}
+CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
+
+COMPLETE EXAMPLE OUTPUT (follow this exact structure):
+{"taskId":"task-123","sourceArtificerArtifactId":"pi-art-artificer-001","evaluation":{"decision":"approved","summary":"The implementation plan is well-structured and addresses the identified issues.","score":0.85,"strengths":["Clear change descriptions with specific file targets","Good test coverage plan"],"concerns":["Rollout notes could be more specific about monitoring"],"requiredChanges":[]},"sourceTrace":{"artificerArtifactId":"pi-art-artificer-001"},"risks":["May need additional integration tests"],"generatedAt":"2026-05-11T12:00:00.000Z"}
 
 CONSTRAINTS:
-- Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
+- Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
 - evaluation.decision MUST be one of: approved, needs_revision, rejected
 - evaluation.summary MUST be a non-empty string
 - evaluation.score MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)

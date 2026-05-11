@@ -819,6 +819,20 @@ describe('PiAiRuntimeAdapter', () => {
       expect(mockComplete).toHaveBeenCalledTimes(1);
     });
 
+    it('emits output_extraction_failed telemetry when extractJsonObject returns null', async () => {
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('I evaluated the plan and it looks good. The implementation is solid.'));
+
+      const adapter = makeAdapter();
+      try { await adapter.startRun(makeDiagnosticianInput()); } catch { /* expected */ }
+
+      const extractionEvent = findTelemetryEvent('output_extraction_failed');
+      expect(extractionEvent).toBeDefined();
+      const payload = extractionEvent?.payload as Record<string, unknown>;
+      expect(payload.outputSchemaRef).toBe('diagnostician-output-v1');
+      expect(typeof payload.rawOutputPreview).toBe('string');
+      expect((payload.rawOutputPreview as string).length).toBeGreaterThan(0);
+    });
+
     it('emits output_repair_attempted telemetry on repair attempt', async () => {
       mockComplete
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
@@ -889,6 +903,58 @@ describe('PiAiRuntimeAdapter', () => {
       });
       // 1 original + 1 repair = 2 calls total (not infinite)
       expect(mockComplete).toHaveBeenCalledTimes(2);
+    });
+
+    it('repairs evaluator-output-v1 with prose-wrapped JSON', async () => {
+      const EVALUATOR_OUTPUT_INVALID = {
+        taskId: 'task-eval-repair-1',
+        sourceArtificerArtifactId: 'pi-art-artificer-repair-1',
+        evaluation: {
+          decision: 'approved',
+          summary: 'Good plan',
+          score: '0.85',
+          strengths: ['Clear'],
+          concerns: [],
+          requiredChanges: [],
+        },
+        sourceTrace: {
+          artificerArtifactId: 'pi-art-artificer-repair-1',
+        },
+        risks: [],
+        generatedAt: '2026-05-11T12:00:00.000Z',
+      };
+
+      const EVALUATOR_OUTPUT_VALID = {
+        taskId: 'task-eval-repair-1',
+        sourceArtificerArtifactId: 'pi-art-artificer-repair-1',
+        evaluation: {
+          decision: 'approved',
+          summary: 'Good plan',
+          score: 0.85,
+          strengths: ['Clear'],
+          concerns: [],
+          requiredChanges: [],
+        },
+        sourceTrace: {
+          artificerArtifactId: 'pi-art-artificer-repair-1',
+        },
+        risks: [],
+        generatedAt: '2026-05-11T12:00:00.000Z',
+      };
+
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(EVALUATOR_OUTPUT_INVALID)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(EVALUATOR_OUTPUT_VALID)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'evaluator-output-v1',
+        taskRef: { taskId: 'task-eval-repair-1' },
+      }));
+
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ evaluation: { score: 0.85 } });
     });
   });
 
