@@ -55,9 +55,17 @@ export class SqliteCandidateStore implements CandidateStore {
     };
   }
 
-  async updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<void> {
+  async updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<boolean> {
     const db = this.connection.getDb();
-    db.prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ?')
+    const info = db.prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ?')
       .run(patch.status, candidateId);
+    return info.changes > 0;
+  }
+
+  async transitionCandidateStatus(candidateId: string, expectedStatus: CandidateRecord['status'], newStatus: CandidateRecord['status']): Promise<boolean> {
+    const db = this.connection.getDb();
+    const info = db.prepare('UPDATE principle_candidates SET status = ? WHERE candidate_id = ? AND status = ?')
+      .run(newStatus, candidateId, expectedStatus);
+    return info.changes > 0;
   }
 }

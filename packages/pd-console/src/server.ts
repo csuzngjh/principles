@@ -19,7 +19,6 @@ import {
   PrincipleTreeLedgerAdapter,
   listPruningReviews,
   appendPruningReview,
-  updatePrinciple,
 } from '@principles/core/runtime-v2';
 import type {
   SystemStatus,
@@ -85,19 +84,35 @@ function loadGatewayToken(): string | null {
 
   try {
     const raw = fs.readFileSync(configPath, 'utf8');
-    const config = JSON.parse(raw) as Record<string, unknown>;
-    const gateway = config.gateway as Record<string, unknown> | undefined;
-    const auth = typeof gateway === "object" ? (gateway).auth as Record<string, unknown> | undefined : undefined;
-    const token = typeof auth === "object" ? (auth).token : undefined;
+    const config: unknown = JSON.parse(raw);
 
+    if (typeof config !== 'object' || config === null) {
+      console.error('[auth] openclaw config is not a valid JSON object — FAILING CLOSED');
+      return null;
+    }
+
+    const {gateway} = (config as Record<string, unknown>);
+    if (typeof gateway !== 'object' || gateway === null) {
+      console.warn('[auth] No gateway object in config — skipping auth');
+      return null;
+    }
+
+    const {auth} = (gateway as Record<string, unknown>);
+    if (typeof auth !== 'object' || auth === null) {
+      console.warn('[auth] No gateway.auth object in config — skipping auth');
+      return null;
+    }
+
+    const {token} = (auth as Record<string, unknown>);
     if (typeof token !== 'string' || token.length === 0) {
       console.warn('[auth] No gateway.auth.token in config — skipping auth');
       return null;
     }
 
     return token;
-  } catch {
-    console.warn('[auth] Failed to read/parse openclaw config — skipping auth');
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`[auth] Failed to read/parse openclaw config: ${detail} — FAILING CLOSED`);
     return null;
   }
 }
@@ -173,8 +188,26 @@ function sendJson(res: http.ServerResponse, statusCode: number, payload: unknown
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(body, 'utf8'),
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Cache-Control': 'no-store',
   });
   res.end(body);
+}
+
+type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
+
+function asyncHandler(fn: AsyncRouteHandler): (req: http.IncomingMessage, res: http.ServerResponse) => void {
+  return (innerReq, innerRes) => {
+    fn(innerReq, innerRes).catch((err: unknown) => {
+      if (!innerRes.headersSent) {
+        const message = err instanceof Error ? err.message : 'Internal server error';
+        sendJson(innerRes, 500, { success: false, error: message });
+      } else {
+        console.error('[pd-console] Unhandled rejection after headers sent:', err);
+      }
+    });
+  };
 }
 
 function serveFile(res: http.ServerResponse, filePath: string): boolean {
@@ -187,19 +220,19 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
     if (!stat.isFile()) {
       return false;
     }
+
+    const contentType = contentTypeFor(filePath);
+    const data = fs.readFileSync(filePath);
+
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Length': data.length,
+    });
+    res.end(data);
+    return true;
   } catch {
     return false;
   }
-
-  const contentType = contentTypeFor(filePath);
-  const data = fs.readFileSync(filePath);
-
-  res.writeHead(200, {
-    'Content-Type': contentType,
-    'Content-Length': data.length,
-  });
-  res.end(data);
-  return true;
 }
 
 // ── Route handler ───────────────────────────────────────────────────────────
@@ -319,35 +352,29 @@ function handleRequest(
         return;
       }
 
-      (async (): Promise<void> => {
-        try {
-          const snapshot = await services.healthReadModel.getSnapshot();
-          const pruningSummary = services.pruningReadModel.getHealthSummary();
+      asyncHandler(async (_req, response) => {
+        const snapshot = await services.healthReadModel.getSnapshot();
+        const pruningSummary = services.pruningReadModel.getHealthSummary();
 
-          const {byStatus} = pruningSummary;
-          const principleActive = (byStatus.active ?? 0) + (byStatus.candidate ?? 0);
-          const principlePending = (byStatus.probation ?? 0) + (byStatus.deprecated ?? 0);
+        const {byStatus} = pruningSummary;
+        const principleActive = (byStatus.active ?? 0) + (byStatus.candidate ?? 0);
+        const principlePending = (byStatus.probation ?? 0) + (byStatus.deprecated ?? 0);
 
-          const status: 'healthy' | 'attention' | 'problem' =
-            snapshot.overallStatus === 'healthy' ? 'healthy'
-            : snapshot.overallStatus === 'degraded' ? 'attention'
-            : 'problem';
+        const status: 'healthy' | 'attention' | 'problem' =
+          snapshot.overallStatus === 'healthy' ? 'healthy'
+          : snapshot.overallStatus === 'degraded' ? 'attention'
+          : 'problem';
 
-          const result: SystemStatus = {
-            status,
-            principleTotal: pruningSummary.totalPrinciples,
-            principleActive,
-            principlePending,
-            // TODO: compute weekly delta from pruning review history
-            weeklyChange: 0,
-          };
+        const result: SystemStatus = {
+          status,
+          principleTotal: pruningSummary.totalPrinciples,
+          principleActive,
+          principlePending,
+          weeklyChange: 0,
+        };
 
-          sendJson(res, 200, { success: true, data: result });
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Unknown error';
-          sendJson(res, 500, { success: false, error: message });
-        }
-      })();
+        sendJson(response, 200, { success: true, data: result });
+      })(req, res);
 
       return;
     }
@@ -363,66 +390,59 @@ function handleRequest(
         return;
       }
 
-      (async (): Promise<void> => {
-        try {
-          const [pendingTasks, pruningSignals] = await Promise.all([
-            services.stateManager.listTasks({ status: 'pending' }),
-            Promise.resolve(services.pruningReadModel.getPrincipleSignals()),
-          ]);
+      asyncHandler(async (_req, response) => {
+        const pruningSignals = services.pruningReadModel.getPrincipleSignals();
+        const pendingTasks = await services.stateManager.listTasks({ status: 'pending' });
 
-          const needsConfirmation: TaskItem[] = [];
-          const candidateBatches = await Promise.all(
-            pendingTasks.map((t) => services.stateManager.getCandidatesByTaskId(t.taskId)),
-          );
-          for (const candidates of candidateBatches) {
-            for (const c of candidates) {
-              if (c.status !== 'pending') continue;
-              needsConfirmation.push({
-                id: c.candidateId,
-                title: c.title,
-                sourceSummary: c.description,
-                priority: 'needs_confirmation',
-                kind: 'approval',
-                createdAt: c.createdAt,
-              });
-            }
+        const needsConfirmation: TaskItem[] = [];
+        const candidateBatches = await Promise.all(
+          pendingTasks.map((t) => services.stateManager.getCandidatesByTaskId(t.taskId)),
+        );
+        for (const candidates of candidateBatches) {
+          for (const c of candidates) {
+            if (c.status !== 'pending') continue;
+            needsConfirmation.push({
+              id: c.candidateId,
+              title: c.title,
+              sourceSummary: c.description,
+              priority: 'needs_confirmation',
+              kind: 'approval',
+              createdAt: c.createdAt,
+            });
           }
+        }
 
-          const suggestedAttention: TaskItem[] = pruningSignals
-            .filter((s) => s.riskLevel === 'watch' || s.riskLevel === 'review')
-            .map((s) => ({
-              id: s.principleId,
-              title: `Principle "${s.principleId}" needs attention`,
-              sourceSummary: s.reasons.join('; '),
-              priority: 'suggested_attention' as const,
-              kind: 'cleanup' as const,
-              createdAt: s.createdAt,
-              lastTriggeredAt: s.updatedAt,
-              triggerCount: s.derivedPainCount,
-            }));
-
-          const recentTasks = await services.stateManager.listTasks({
-            status: 'succeeded',
-            limit: 5,
-          });
-          const recentActivity: TaskItem[] = recentTasks.map((t) => ({
-            id: t.taskId,
-            title: t.taskKind,
-            sourceSummary: t.resultRef ?? '',
-            priority: 'recent_activity' as const,
-            kind: 'approval' as const,
-            createdAt: t.createdAt,
+        const suggestedAttention: TaskItem[] = pruningSignals
+          .filter((s) => s.riskLevel === 'watch' || s.riskLevel === 'review')
+          .map((s) => ({
+            id: s.principleId,
+            title: `Principle "${s.principleId}" needs attention`,
+            sourceSummary: s.reasons.join('; '),
+            priority: 'suggested_attention' as const,
+            kind: 'cleanup' as const,
+            createdAt: s.createdAt,
+            lastTriggeredAt: s.updatedAt,
+            triggerCount: s.derivedPainCount,
           }));
 
-          sendJson(res, 200, {
-            success: true,
-            data: { needsConfirmation, suggestedAttention, recentActivity },
-          });
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Unknown error';
-          sendJson(res, 500, { success: false, error: message });
-        }
-      })();
+        const recentTasks = await services.stateManager.listTasks({
+          status: 'succeeded',
+          limit: 5,
+        });
+        const recentActivity: TaskItem[] = recentTasks.map((t) => ({
+          id: t.taskId,
+          title: t.taskKind,
+          sourceSummary: t.resultRef ?? '',
+          priority: 'recent_activity' as const,
+          kind: 'approval' as const,
+          createdAt: t.createdAt,
+        }));
+
+        sendJson(response, 200, {
+          success: true,
+          data: { needsConfirmation, suggestedAttention, recentActivity },
+        });
+      })(req, res);
 
       return;
     }
@@ -446,78 +466,73 @@ function handleRequest(
         return;
       }
 
-      (async (): Promise<void> => {
-        try {
-          // Try candidate lookup first
-          const candidate = await services.stateManager.getCandidate(id);
+      asyncHandler(async (_req, response) => {
+        // Try candidate lookup first
+        const candidate = await services.stateManager.getCandidate(id);
 
-          if (candidate) {
-            const trace = await services.painChainReadModel.traceByPainId(
-              candidate.taskId.replace('diagnosis_', ''),
-            );
+        if (candidate) {
+          const trace = await services.painChainReadModel.traceByPainId(
+            candidate.taskId.replace('diagnosis_', ''),
+          );
 
-            const evidence: EvidenceItem[] = [];
-            if (trace.runId) {
-              evidence.push({
-                timestamp: trace.checkedAt,
-                operation: 'run',
-                problem: trace.missingLinks.join('; ') || 'run completed',
-              });
-            }
-            for (const cid of trace.candidateIds) {
-              evidence.push({
-                timestamp: trace.checkedAt,
-                operation: 'candidate_generated',
-                problem: `candidate: ${cid}`,
-              });
-            }
-            for (const lid of trace.ledgerEntryIds) {
-              evidence.push({
-                timestamp: trace.checkedAt,
-                operation: 'ledger_written',
-                problem: `principle: ${lid}`,
-              });
-            }
-
-            const result: TaskEvidence = {
-              taskId: id,
-              summary: candidate.title,
-              why: candidate.description,
-              whatHappensIf: `If declined, this candidate will expire. Status: ${candidate.status}.`,
-              evidence,
-            };
-
-            sendJson(res, 200, { success: true, data: result });
-            return;
+          const evidence: EvidenceItem[] = [];
+          if (trace.runId) {
+            evidence.push({
+              timestamp: trace.checkedAt,
+              operation: 'run',
+              problem: trace.missingLinks.join('; ') || 'run completed',
+            });
+          }
+          for (const cid of trace.candidateIds) {
+            evidence.push({
+              timestamp: trace.checkedAt,
+              operation: 'candidate_generated',
+              problem: `candidate: ${cid}`,
+            });
+          }
+          for (const lid of trace.ledgerEntryIds) {
+            evidence.push({
+              timestamp: trace.checkedAt,
+              operation: 'ledger_written',
+              problem: `principle: ${lid}`,
+            });
           }
 
-          // Try pruning signal lookup
-          const signals = services.pruningReadModel.getPrincipleSignals();
-          const signal = signals.find((s) => s.principleId === id);
+          const result: TaskEvidence = {
+            taskId: id,
+            summary: candidate.title,
+            why: candidate.description,
+            whatHappensIf: `If declined, this candidate will expire. Status: ${candidate.status}.`,
+            evidence,
+          };
 
-          if (signal) {
-            const result: TaskEvidence = {
-              taskId: id,
-              summary: `Principle lifecycle signal for "${signal.principleId}"`,
-              why: signal.reasons.join('; '),
-              whatHappensIf: `Risk level: ${signal.riskLevel}. Age: ${signal.ageDays} days.`,
-              evidence: signal.reasons.map((reason) => ({
-                timestamp: signal.updatedAt,
-                operation: 'pruning_signal',
-                problem: reason,
-              })),
-            };
-
-            sendJson(res, 200, { success: true, data: result });
-            return;
-          }
-
-          sendJson(res, 404, { success: false, error: 'Not found' });
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Unknown error';
-          sendJson(res, 500, { success: false, error: message });
+          sendJson(response, 200, { success: true, data: result });
+          return;
         }
-      })();
+
+        // Try pruning signal lookup
+        const signals = services.pruningReadModel.getPrincipleSignals();
+        const signal = signals.find((s) => s.principleId === id);
+
+        if (signal) {
+          const result: TaskEvidence = {
+            taskId: id,
+            summary: `Principle lifecycle signal for "${signal.principleId}"`,
+            why: signal.reasons.join('; '),
+            whatHappensIf: `Risk level: ${signal.riskLevel}. Age: ${signal.ageDays} days.`,
+            evidence: signal.reasons.map((reason) => ({
+              timestamp: signal.updatedAt,
+              operation: 'pruning_signal',
+              problem: reason,
+            })),
+          };
+
+          sendJson(response, 200, { success: true, data: result });
+          return;
+        }
+
+        sendJson(response, 404, { success: false, error: 'Not found' });
+      })(req, res);
 
       return;
     }
@@ -533,49 +548,44 @@ function handleRequest(
         return;
       }
 
-      (async (): Promise<void> => {
-        try {
-          const [recentTasks, pruningReviews] = await Promise.all([
-            services.stateManager.listTasks({ limit: 20 }),
-            Promise.resolve(listPruningReviews(services.workspaceDir)),
-          ]);
+      asyncHandler(async (_req, response) => {
+        const [recentTasks, pruningReviews] = await Promise.all([
+          services.stateManager.listTasks({ limit: 20 }),
+          Promise.resolve(listPruningReviews(services.workspaceDir)),
+        ]);
 
-          const events: ActivityEvent[] = [];
+        const events: ActivityEvent[] = [];
 
-          for (const t of recentTasks) {
-            const eventType: 'error' | 'learned' | 'approved' =
-              t.status === 'failed' ? 'error'
-              : t.status === 'succeeded' ? 'learned'
-              : 'approved';
-            events.push({
-              id: t.taskId,
-              type: eventType,
-              description: `${t.taskKind} (${t.status})`,
-              timestamp: t.updatedAt,
-            });
-          }
-
-          for (const r of pruningReviews) {
-            const eventType: 'error' | 'learned' | 'approved' =
-              r.decision === 'keep' ? 'approved'
-              : r.decision === 'archive-candidate' ? 'error'
-              : 'learned';
-            events.push({
-              id: r.reviewId,
-              type: eventType,
-              description: `Pruning review: ${r.decision} for ${r.principleId}`,
-              timestamp: r.reviewedAt,
-            });
-          }
-
-          events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-
-          sendJson(res, 200, { success: true, data: events });
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Unknown error';
-          sendJson(res, 500, { success: false, error: message });
+        for (const t of recentTasks) {
+          const eventType: 'error' | 'learned' | 'approved' =
+            t.status === 'failed' ? 'error'
+            : t.status === 'succeeded' ? 'learned'
+            : 'approved';
+          events.push({
+            id: t.taskId,
+            type: eventType,
+            description: `${t.taskKind} (${t.status})`,
+            timestamp: t.updatedAt,
+          });
         }
-      })();
+
+        for (const r of pruningReviews) {
+          const eventType: 'error' | 'learned' | 'approved' =
+            r.decision === 'keep' ? 'approved'
+            : r.decision === 'archive-candidate' ? 'error'
+            : 'learned';
+          events.push({
+            id: r.reviewId,
+            type: eventType,
+            description: `Pruning review: ${r.decision} for ${r.principleId}`,
+            timestamp: r.reviewedAt,
+          });
+        }
+
+        events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+        sendJson(response, 200, { success: true, data: events });
+      })(req, res);
 
       return;
     }
@@ -599,27 +609,28 @@ function handleRequest(
         return;
       }
 
-      (async (): Promise<void> => {
-        try {
-          const candidate = await services.stateManager.getCandidate(id);
-          if (!candidate) {
-            sendJson(res, 404, { success: false, error: 'Candidate not found' });
-            return;
-          }
-          if (candidate.status !== 'pending') {
-            sendJson(res, 409, { success: false, error: `Candidate is not pending (status: ${candidate.status})` });
-            return;
-          }
-
-          const entry = await services.candidateIntakeService.intake(id);
-          await services.stateManager.updateCandidateStatus(id, { status: 'consumed' });
-
-          sendJson(res, 200, { success: true, data: { principleId: entry.id } });
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Unknown error';
-          sendJson(res, 500, { success: false, error: message });
+      asyncHandler(async (_req, response) => {
+        const candidate = await services.stateManager.getCandidate(id);
+        if (!candidate) {
+          sendJson(response, 404, { success: false, error: 'Candidate not found' });
+          return;
         }
-      })();
+
+        const transitioned = await services.stateManager.transitionCandidateStatus(id, 'pending', 'consumed');
+        if (!transitioned) {
+          const current = await services.stateManager.getCandidate(id);
+          sendJson(response, 409, { success: false, error: `Candidate is not pending (status: ${current?.status ?? 'unknown'})` });
+          return;
+        }
+
+        try {
+          const entry = await services.candidateIntakeService.intake(id);
+          sendJson(response, 200, { success: true, data: { principleId: entry.id } });
+        } catch (intakeErr: unknown) {
+          await services.stateManager.updateCandidateStatus(id, { status: 'pending' });
+          throw intakeErr;
+        }
+      })(req, res);
 
       return;
     }
@@ -643,26 +654,22 @@ function handleRequest(
         return;
       }
 
-      (async (): Promise<void> => {
-        try {
-          const candidate = await services.stateManager.getCandidate(id);
-          if (!candidate) {
-            sendJson(res, 404, { success: false, error: 'Candidate not found' });
-            return;
-          }
-          if (candidate.status !== 'pending') {
-            sendJson(res, 409, { success: false, error: `Candidate is not pending (status: ${candidate.status})` });
-            return;
-          }
-
-          await services.stateManager.updateCandidateStatus(id, { status: 'expired' });
-
-          sendJson(res, 200, { success: true, data: { success: true } });
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Unknown error';
-          sendJson(res, 500, { success: false, error: message });
+      asyncHandler(async (_req, response) => {
+        const candidate = await services.stateManager.getCandidate(id);
+        if (!candidate) {
+          sendJson(response, 404, { success: false, error: 'Candidate not found' });
+          return;
         }
-      })();
+
+        const transitioned = await services.stateManager.transitionCandidateStatus(id, 'pending', 'expired');
+        if (!transitioned) {
+          const current = await services.stateManager.getCandidate(id);
+          sendJson(response, 409, { success: false, error: `Candidate is not pending (status: ${current?.status ?? 'unknown'})` });
+          return;
+        }
+
+        sendJson(response, 200, { success: true, data: { success: true } });
+      })(req, res);
 
       return;
     }
@@ -686,39 +693,29 @@ function handleRequest(
         return;
       }
 
-      (async (): Promise<void> => {
-        try {
-          const signals = services.pruningReadModel.getPrincipleSignals();
-          const signal = signals.find((s) => s.principleId === id);
-          if (!signal) {
-            sendJson(res, 404, { success: false, error: 'Principle not found in review signals' });
-            return;
-          }
-
-          const stateDir = path.join(services.workspaceDir, '.state');
-          try {
-            updatePrinciple(stateDir, id, {
-              status: 'archived',
-              updatedAt: new Date().toISOString(),
-            });
-          } catch {
-            sendJson(res, 404, { success: false, error: 'Principle not found in ledger' });
-            return;
-          }
-
-          appendPruningReview(services.workspaceDir, {
-            principleId: id,
-            decision: 'archive-candidate',
-            note: 'Archived via PD Console',
-            reviewer: 'operator',
-          });
-
-          sendJson(res, 200, { success: true, data: { success: true } });
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Unknown error';
-          sendJson(res, 500, { success: false, error: message });
+      asyncHandler(async (_req, response) => {
+        const signals = services.pruningReadModel.getPrincipleSignals();
+        const signal = signals.find((s) => s.principleId === id);
+        if (!signal) {
+          sendJson(response, 404, { success: false, error: 'Principle not found in review signals' });
+          return;
         }
-      })();
+
+        appendPruningReview(services.workspaceDir, {
+          principleId: id,
+          decision: 'archive-candidate',
+          note: 'Archived via PD Console',
+          reviewer: 'operator',
+        });
+
+        const archived = await services.stateManager.archivePrinciple(id);
+        if (!archived) {
+          sendJson(response, 404, { success: false, error: 'Principle not found in ledger' });
+          return;
+        }
+
+        sendJson(response, 200, { success: true, data: { success: true } });
+      })(req, res);
 
       return;
     }

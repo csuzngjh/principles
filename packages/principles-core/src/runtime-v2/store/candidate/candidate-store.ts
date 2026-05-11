@@ -27,6 +27,15 @@ export interface CandidateStore {
 
   /**
    * Updates the status of a candidate by ID.
+   * @returns true if the candidate was found and updated; false if not found.
    */
-  updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<void>;
+  updateCandidateStatus(candidateId: string, patch: { status: CandidateRecord['status'] }): Promise<boolean>;
+
+  /**
+   * Atomically transitions a candidate's status from `expectedStatus` to `newStatus`.
+   * Prevents TOCTOU races by checking and updating in a single DB operation.
+   * @returns true if the transition succeeded; false if the candidate was not found
+   *          or its current status did not match `expectedStatus`.
+   */
+  transitionCandidateStatus(candidateId: string, expectedStatus: CandidateRecord['status'], newStatus: CandidateRecord['status']): Promise<boolean>;
 }
