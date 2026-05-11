@@ -2,25 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 import { extractPIMetadata } from './internalization-chain-integrity-read-model.js';
-
-export interface RemediationAction {
-  taskId: string;
-  type: string;
-  severity: 'error' | 'warning';
-  previousStatus: string;
-  newStatus: string;
-  recommendedAction: string;
-  reason: string;
-  successorTaskId?: string;
-}
-
-export interface RemediationResult {
-  dryRun: boolean;
-  repairedCount: number;
-  skippedCount: number;
-  actions: RemediationAction[];
-  generatedAt: string;
-}
+import { createRemediationResult, remediationAction } from './remediation-contract.js';
+import type { RemediationAction, RemediationResult } from './remediation-contract.js';
 
 export interface InternalizationIntegrityRemediationOptions {
   workspaceDir: string;
@@ -56,27 +39,35 @@ export class InternalizationIntegrityRemediation {
     for (const bd of brokenDreamers) {
       if (bd.missingArtifact) {
         if (params.dryRun) {
-          actions.push({
+          actions.push(remediationAction({
+            action: 'requeue',
+            targetId: bd.taskId,
             taskId: bd.taskId,
             type: 'missing_dreamer_pi_artifact',
             severity: 'error',
+            previousState: 'succeeded',
+            nextState: 'retry_wait',
             previousStatus: 'succeeded',
             newStatus: 'retry_wait',
             recommendedAction: 'requeue',
             reason: 'Succeeded dreamer missing dreamer_pi artifact — operator repair: requeue to retry_wait for re-execution',
-          });
+          }));
         } else {
           const currentStatus = this.getTaskStatus(bd.taskId);
           if (currentStatus !== 'succeeded') {
-            actions.push({
+            actions.push(remediationAction({
+              action: 'already_repaired',
+              targetId: bd.taskId,
               taskId: bd.taskId,
               type: 'missing_dreamer_pi_artifact',
               severity: 'error',
+              previousState: currentStatus,
+              nextState: currentStatus,
               previousStatus: currentStatus,
               newStatus: currentStatus,
               recommendedAction: 'already_repaired',
               reason: `Task already in ${currentStatus} — no repair needed`,
-            });
+            }));
             skippedCount++;
             continue;
           }
@@ -84,80 +75,101 @@ export class InternalizationIntegrityRemediation {
           this.requeueTask(bd.taskId);
           repairedCount++;
 
-          actions.push({
+          actions.push(remediationAction({
+            action: 'requeue',
+            targetId: bd.taskId,
             taskId: bd.taskId,
             type: 'missing_dreamer_pi_artifact',
             severity: 'error',
+            previousState: 'succeeded',
+            nextState: 'retry_wait',
             previousStatus: 'succeeded',
             newStatus: 'retry_wait',
             recommendedAction: 'requeue',
             reason: 'Succeeded dreamer missing dreamer_pi artifact — operator repair: requeue to retry_wait for re-execution',
-          });
+          }));
         }
       }
 
       if (bd.missingSuccessor) {
         if (!bd.hasArtifact) {
-          actions.push({
+          actions.push(remediationAction({
+            action: 'skip_missing_artifact',
+            targetId: bd.taskId,
             taskId: bd.taskId,
             type: 'missing_philosopher_successor',
             severity: 'warning',
+            previousState: this.getTaskStatus(bd.taskId),
+            nextState: this.getTaskStatus(bd.taskId),
             previousStatus: this.getTaskStatus(bd.taskId),
             newStatus: this.getTaskStatus(bd.taskId),
             recommendedAction: 'skip_missing_artifact',
             reason: 'Cannot create philosopher successor — dreamer has no dreamer_pi artifact. Fix artifact first.',
-          });
+          }));
           skippedCount++;
         } else if (params.dryRun) {
-          actions.push({
+          actions.push(remediationAction({
+            action: 'enqueue_successor',
+            targetId: bd.taskId,
             taskId: bd.taskId,
             type: 'missing_philosopher_successor',
             severity: 'warning',
+            previousState: 'succeeded',
+            nextState: 'succeeded',
             previousStatus: 'succeeded',
             newStatus: 'succeeded',
             recommendedAction: 'enqueue_successor',
             reason: 'Dreamer has artifact but no philosopher successor — would create philosopher task',
-          });
+          }));
         } else {
           const existingSuccessor = this.findExistingSuccessor(bd.taskId);
           if (existingSuccessor) {
-            actions.push({
+            actions.push(remediationAction({
+              action: 'successor_exists',
+              targetId: bd.taskId,
               taskId: bd.taskId,
               type: 'missing_philosopher_successor',
               severity: 'warning',
+              previousState: 'succeeded',
+              nextState: 'succeeded',
               previousStatus: 'succeeded',
               newStatus: 'succeeded',
               recommendedAction: 'successor_exists',
               reason: `Philosopher successor already exists: ${existingSuccessor}`,
               successorTaskId: existingSuccessor,
-            });
+            }));
             skippedCount++;
           } else {
             const successorTaskId = this.createPhilosopherSuccessor(bd.taskId);
             repairedCount++;
 
-            actions.push({
+            actions.push(remediationAction({
+              action: 'enqueue_successor',
+              targetId: bd.taskId,
               taskId: bd.taskId,
               type: 'missing_philosopher_successor',
               severity: 'warning',
+              previousState: 'succeeded',
+              nextState: 'succeeded',
               previousStatus: 'succeeded',
               newStatus: 'succeeded',
               recommendedAction: 'enqueue_successor',
               reason: 'Created philosopher successor task',
               successorTaskId,
-            });
+            }));
           }
         }
       }
     }
 
-    return {
-      dryRun: params.dryRun,
+    return createRemediationResult({
+      mode: params.dryRun ? 'dry_run' : 'confirm',
       repairedCount,
       skippedCount,
       actions,
       generatedAt,
-    };
+      includeLegacyDryRun: true,
+    });
   }
 
   private detectBrokenDreamers(): BrokenDreamer[] {

@@ -26,6 +26,8 @@ import {
 } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { createRemediationResult, remediationAction } from './remediation-output.js';
+import type { RemediationResult } from './remediation-output.js';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -713,7 +715,34 @@ interface BackfillOutput {
   results: BackfillCandidateResult[];
 }
 
+function createBackfillRemediationResult(output: BackfillOutput): RemediationResult {
+  const actions = output.results
+    .filter((result) => result.status === 'would_create' || result.status === 'created')
+    .map((result) => remediationAction({
+      action: result.status === 'created' ? 'create_dreamer_task' : 'would_create_dreamer_task',
+      targetId: result.candidateId,
+      previousState: 'consumed_candidate_without_dreamer',
+      nextState: result.status === 'created' ? 'dreamer_task_created' : 'dreamer_task_would_be_created',
+      reason: result.reason ?? `Backfill ${result.status === 'created' ? 'created' : 'would create'} dreamer task${result.taskId ? ` ${result.taskId}` : ''}`,
+    }));
+
+  return createRemediationResult({
+    mode: output.mode === 'confirm' ? 'confirm' : 'dry_run',
+    repairedCount: output.created,
+    skippedCount: output.alreadyHaveTask + output.deferred + output.errors,
+    actions,
+    warnings: output.errors > 0 ? [`${output.errors} candidate(s) could not be backfilled.`] : [],
+    status: output.errors > 0 && output.created === 0 ? 'error' : undefined,
+    safeToConfirm: output.mode === 'dry-run' && output.missingDreamerTask > 0 && output.errors === 0,
+  });
+}
+
 export async function handleCandidateInternalizationBackfill(opts: CandidateBackfillOptions): Promise<void> {
+  if (opts.dryRun && opts.confirm) {
+    console.error('Error: --dry-run and --confirm are mutually exclusive');
+    process.exit(1);
+  }
+
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const stateManager = new RuntimeStateManager({ workspaceDir });
   const isConfirm = opts.confirm ?? false;
@@ -816,9 +845,12 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
     }
 
     if (opts.json) {
-      console.log(JSON.stringify(output, null, 2));
+      console.log(JSON.stringify({ ...createBackfillRemediationResult(output), details: output }, null, 2));
     } else {
+      const remediation = createBackfillRemediationResult(output);
       console.log(`\nCandidate Internalization Backfill (${output.mode})\n`);
+      console.log(`  status:              ${remediation.status}`);
+      console.log(`  safe_to_confirm:     ${remediation.safeToConfirm}`);
       console.log(`  total_consumed:      ${output.totalConsumed}`);
       console.log(`  missing_dreamer:     ${output.missingDreamerTask}`);
       console.log(`  already_have_task:   ${output.alreadyHaveTask}`);
