@@ -3,13 +3,15 @@
  *
  * PURPOSE: Define the constrained interface through which active code
  * implementations are executed. Implementations receive a frozen snapshot
- * of context and return one of three decisions.
+ * of context and return one of four decisions.
  *
  * TRUST BOUNDARY:
  *   - RuleHostInput is a frozen snapshot — no live workspace handles
  *   - Implementations execute in a constrained vm context with minimal helpers
  *   - No filesystem, process, require, dynamic import, eval, or network access
  */
+
+import type { CorrectionProposal } from './correction-proposal.js';
 
 // ---------------------------------------------------------------------------
 // Input: Frozen snapshot provided to implementations
@@ -41,10 +43,10 @@ export interface RuleHostInput {
 }
 
 // ---------------------------------------------------------------------------
-// Decision: Limited to three outcomes
+// Decision: Four outcomes (PRI-114 adds auto_correct)
 // ---------------------------------------------------------------------------
 
-export type RuleHostDecision = 'allow' | 'block' | 'requireApproval';
+export type RuleHostDecision = 'allow' | 'block' | 'requireApproval' | 'auto_correct';
 
 // ---------------------------------------------------------------------------
 // Meta: Exported by each implementation for identification
@@ -68,6 +70,8 @@ export interface RuleHostResult {
   diagnostics?: Record<string, unknown>;
   ruleId?: string;
   principleId?: string;
+  /** Present when decision is 'auto_correct'. Must pass validateCorrectionProposal(). */
+  correctionProposal?: CorrectionProposal;
 }
 
 // ---------------------------------------------------------------------------
