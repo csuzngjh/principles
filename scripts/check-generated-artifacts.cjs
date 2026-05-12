@@ -23,12 +23,12 @@ const forbidden = [
 ];
 
 function gitLines(args) {
-  const output = execFileSync('git', args, { encoding: 'utf8' }).trim();
+  const output = execFileSync('git', args, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }).trim();
   return output.length === 0 ? [] : output.split(/\r?\n/u);
 }
 
-const tracked = gitLines(['ls-files']);
-const untracked = gitLines(['ls-files', '--others', '--exclude-standard']);
+const tracked = gitLines(['ls-files', 'packages/', '.pd/']);
+const untracked = gitLines(['ls-files', '--others', '--exclude-standard', 'packages/', '.pd/']);
 const files = [...new Set([...tracked, ...untracked])].map((file) => file.replace(/\\/gu, '/'));
 
 const violations = [];

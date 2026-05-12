@@ -27,9 +27,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "build:web": "node scripts/build-web.mjs",
-    "build:bundle": "node esbuild.config.js && node scripts/build-web.mjs",
-    "build:production": "node esbuild.config.js --production && node scripts/build-web.mjs --production && node scripts/verify-build.mjs",
+    "build:bundle": "node esbuild.config.js",
+    "build:production": "node esbuild.config.js --production && node scripts/verify-build.mjs",
     "test": "vitest run",
     "test:unit": "vitest run tests/core tests/service tests/hooks tests/commands tests/utils tests/scripts --exclude tests/commands/evolver.test.ts",
     "test:integration": "vitest run tests/integration/",
@@ -42,13 +41,10 @@
     "sync-plugin": "node scripts/sync-plugin.mjs"
   },
   "devDependencies": {
-    "@testing-library/react": "^16.3.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
     "@types/micromatch": "^4.0.10",
     "@types/node": "^25.6.2",
-    "@types/react": "^19.2.2",
-    "@types/react-dom": "^19.2.2",
     "@types/ws": "^8.5.13",
     "@typescript-eslint/eslint-plugin": "^8.58.2",
     "@typescript-eslint/parser": "^8.58.0",
@@ -74,10 +70,6 @@
     "better-sqlite3": "^12.9.0",
     "commander": "^12.0.0",
     "js-yaml": "^4.1.1",
-    "lucide-react": "^1.7.0",
-    "micromatch": "^4.0.8",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.0",
-    "react-router-dom": "^7.9.4"
+    "micromatch": "^4.0.8"
   }
 }
