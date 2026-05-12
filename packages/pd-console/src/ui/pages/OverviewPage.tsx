@@ -1,13 +1,7 @@
-import { useState, useEffect } from "react";
+import { useAutoRefresh } from "../hooks/useAutoRefresh.js";
 import { fetchOverview } from "../api.js";
 import type { OverviewData } from "../api.js";
-
-const CARD_STYLE: React.CSSProperties = {
-  border: "1px solid #e0e0e0",
-  borderRadius: "8px",
-  padding: "16px",
-  backgroundColor: "#fff",
-};
+import { COLORS, REFRESH_BAR, SHADOW_CARD } from "../styles/constants.js";
 
 const GRID_STYLE: React.CSSProperties = {
   display: "grid",
@@ -17,19 +11,19 @@ const GRID_STYLE: React.CSSProperties = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  healthy: "#52c41a",
-  degraded: "#faad14",
-  error: "#ff4d4f",
+  healthy: COLORS.success,
+  degraded: COLORS.warning,
+  error: COLORS.danger,
 };
 
 function HealthCard({ health }: { health: OverviewData["health"] }) {
   return (
-    <div style={{ ...CARD_STYLE, borderLeft: `4px solid ${STATUS_COLORS[health.status] ?? '#999'}` }}>
-      <div style={{ fontSize: "14px", color: "#888", marginBottom: "8px" }}>Health Status</div>
+    <div style={{ ...SHADOW_CARD, borderLeft: `4px solid ${STATUS_COLORS[health.status] ?? '#999'}` }}>
+      <div style={{ fontSize: "14px", color: COLORS.textMuted, marginBottom: "8px" }}>Health Status</div>
       <div style={{ fontSize: "24px", fontWeight: "bold", color: STATUS_COLORS[health.status] ?? '#999', textTransform: "capitalize" }}>
         {health.status}
       </div>
-      <div style={{ marginTop: "8px", fontSize: "13px", color: "#666" }}>
+      <div style={{ marginTop: "8px", fontSize: "13px", color: COLORS.textSecondary }}>
         GFI: {health.gfi.current} ({health.gfi.stage})
       </div>
     </div>
@@ -38,50 +32,53 @@ function HealthCard({ health }: { health: OverviewData["health"] }) {
 
 function StatCard({ label, value }: { label: string; value: number | string }) {
   return (
-    <div style={CARD_STYLE}>
-      <div style={{ fontSize: "14px", color: "#888", marginBottom: "4px" }}>{label}</div>
+    <div style={SHADOW_CARD}>
+      <div style={{ fontSize: "14px", color: COLORS.textMuted, marginBottom: "4px" }}>{label}</div>
       <div style={{ fontSize: "28px", fontWeight: "bold" }}>{value}</div>
     </div>
   );
 }
 
 export function OverviewPage() {
-  const [data, setData] = useState<OverviewData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, error, loading, refresh, lastUpdated } = useAutoRefresh<OverviewData>(fetchOverview, 30000);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    fetchOverview().then((result) => {
-      if (cancelled) return;
-      if (result.success) {
-        setData(result.data);
-      } else {
-        setError(result.error);
-      }
-      setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, []);
-
-  if (loading) {
-    return <div style={{ padding: "24px", textAlign: "center", color: "#888" }}>Loading...</div>;
+  if (loading && !data) {
+    return <div style={{ padding: "40px", textAlign: "center", color: COLORS.textMuted }}>Loading...</div>;
   }
 
-  if (error) {
-    return <div style={{ padding: "24px", color: "#ff4d4f" }}>Error: {error}</div>;
+  if (error && !data) {
+    return <div style={{ padding: "24px", color: COLORS.danger }}>Error: {error}</div>;
   }
 
   if (!data) {
-    return <div style={{ padding: "24px", color: "#888" }}>No data available</div>;
+    return <div style={{ padding: "24px", color: COLORS.textMuted }}>No data available</div>;
   }
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+      <div style={REFRESH_BAR}>
         <h1 style={{ margin: 0 }}>Overview</h1>
-        <span style={{ fontSize: "12px", color: "#999" }}>Updated: {new Date(data.generatedAt).toLocaleTimeString()}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          {lastUpdated && (
+            <span style={{ fontSize: "12px", color: COLORS.textMuted }}>
+              Updated: {new Date(lastUpdated).toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            onClick={refresh}
+            disabled={loading}
+            style={{
+              border: "1px solid #d9d9d9",
+              borderRadius: "6px",
+              padding: "6px 12px",
+              fontSize: "13px",
+              cursor: loading ? "not-allowed" : "pointer",
+              backgroundColor: "#fff",
+            }}
+          >
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
       </div>
 
       <HealthCard health={data.health} />

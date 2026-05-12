@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { TasksPage } from "./pages/TasksPage.js";
 import { OverviewPage } from "./pages/OverviewPage.js";
 import { FeedbackPage } from "./pages/FeedbackPage.js";
@@ -7,8 +7,12 @@ import { SamplesPage } from "./pages/SamplesPage.js";
 import { EvolutionPage } from "./pages/EvolutionPage.js";
 import { ThinkingModelsPage } from "./pages/ThinkingModelsPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
+import { CentralPage } from "./pages/CentralPage.js";
+import { LoginPage } from "./pages/LoginPage.js";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
+import { getToken, clearToken, checkAuth } from "./api.js";
 
-type Route = "overview" | "tasks" | "feedback" | "gates" | "samples" | "evolution" | "thinking-models" | "settings";
+type Route = "overview" | "tasks" | "feedback" | "gates" | "samples" | "evolution" | "thinking-models" | "settings" | "central";
 
 function routeFromHash(hash: string): Route {
   if (hash === "#/tasks") return "tasks";
@@ -18,11 +22,13 @@ function routeFromHash(hash: string): Route {
   if (hash === "#/evolution") return "evolution";
   if (hash === "#/thinking-models") return "thinking-models";
   if (hash === "#/settings") return "settings";
+  if (hash === "#/central") return "central";
   return "overview";
 }
 
 const NAV_ITEMS: { route: Route; href: string; label: string }[] = [
   { route: "overview", href: "#/", label: "Overview" },
+  { route: "central", href: "#/central", label: "Central" },
   { route: "tasks", href: "#/tasks", label: "Tasks" },
   { route: "feedback", href: "#/feedback", label: "Feedback" },
   { route: "gates", href: "#/gates", label: "Gates" },
@@ -74,11 +80,14 @@ const HEADER_STYLE: React.CSSProperties = {
   borderBottom: "1px solid #e0e0e0",
   fontSize: "12px",
   color: "#888",
-  textAlign: "right",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
 };
 
 const PAGE_MAP: Record<Route, () => React.JSX.Element> = {
   overview: OverviewPage,
+  central: CentralPage,
   tasks: TasksPage,
   feedback: FeedbackPage,
   gates: GatesPage,
@@ -90,6 +99,16 @@ const PAGE_MAP: Record<Route, () => React.JSX.Element> = {
 
 export function App() {
   const [route, setRoute] = useState<Route>(routeFromHash(window.location.hash));
+  const [authed, setAuthed] = useState<boolean | null>(null);
+
+  const verifyAuth = useCallback(async () => {
+    const valid = await checkAuth();
+    setAuthed(valid);
+  }, []);
+
+  useEffect(() => {
+    verifyAuth();
+  }, [verifyAuth]);
 
   useEffect(() => {
     function handleHashChange() {
@@ -98,6 +117,18 @@ export function App() {
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
+
+  if (authed === null) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }}>
+        Checking authentication...
+      </div>
+    );
+  }
+
+  if (!authed) {
+    return <LoginPage onAuthSuccess={() => setAuthed(true)} />;
+  }
 
   const PageComponent = PAGE_MAP[route];
 
@@ -116,9 +147,32 @@ export function App() {
         ))}
       </aside>
       <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        <header style={HEADER_STYLE}>PD Console v0.2</header>
+        <header style={HEADER_STYLE}>
+          <span>PD Console v0.2</span>
+          {getToken() && (
+            <button
+              onClick={() => {
+                clearToken();
+                setAuthed(false);
+              }}
+              style={{
+                border: "1px solid #d9d9d9",
+                borderRadius: "4px",
+                padding: "2px 10px",
+                fontSize: "12px",
+                cursor: "pointer",
+                backgroundColor: "#fff",
+                color: "#888",
+              }}
+            >
+              Sign Out
+            </button>
+          )}
+        </header>
         <main style={MAIN_STYLE}>
-          <PageComponent />
+          <ErrorBoundary>
+            <PageComponent />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

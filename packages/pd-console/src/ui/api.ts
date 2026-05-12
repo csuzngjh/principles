@@ -123,12 +123,27 @@ interface CentralOverview {
   workspaces: Array<{ name: string; path: string; status: 'healthy' | 'degraded' | 'error'; gfi: number; principleCount: number }>;
 }
 
+interface CentralHealth {
+  generatedAt: string;
+  overallStatus: 'healthy' | 'degraded' | 'error';
+  workspaces: Array<{ name: string; status: 'healthy' | 'degraded' | 'error'; gfi: number; activePrinciples: number; pendingTasks: number }>;
+}
+
 function getToken(): string | null {
   return sessionStorage.getItem("pd_token");
 }
 
 function setToken(token: string): void {
   sessionStorage.setItem("pd_token", token);
+}
+
+function clearToken(): void {
+  sessionStorage.removeItem("pd_token");
+}
+
+async function checkAuth(): Promise<boolean> {
+  const result = await request<unknown>("/api/health");
+  return result.success;
 }
 
 async function request<T>(
@@ -263,6 +278,10 @@ async function fetchCentralOverview(): Promise<ApiResponse<CentralOverview>> {
   return request<CentralOverview>("/api/central/overview");
 }
 
+async function fetchCentralHealth(): Promise<ApiResponse<CentralHealth>> {
+  return request<CentralHealth>("/api/central/health");
+}
+
 async function fetchSamples(status?: string, page?: number): Promise<ApiResponse<SamplesData>> {
   const params = new URLSearchParams();
   if (status && status !== 'all') params.set('status', status);
@@ -355,6 +374,8 @@ async function fetchThinkingModels(): Promise<ApiResponse<ThinkingModelOverview>
 export {
   getToken,
   setToken,
+  clearToken,
+  checkAuth,
   request,
   fetchTasks,
   fetchTaskEvidence,
@@ -375,6 +396,7 @@ export {
   removeWorkspace,
   syncWorkspace,
   fetchCentralOverview,
+  fetchCentralHealth,
   fetchSamples,
   fetchSampleDetail,
   reviewSample,
@@ -394,6 +416,7 @@ export type {
   GateBlockItem,
   WorkspaceEntry,
   CentralOverview,
+  CentralHealth,
   SampleListItem,
   SampleDetail,
   SamplesData,
