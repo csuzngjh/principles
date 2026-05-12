@@ -4,40 +4,40 @@
 
 You are working in the **Principles Disciple (PD)** monorepo. This system has STRICT architectural boundaries and an explicitly defined Domain Ontology. 
 
-Before proposing or making any code changes, you MUST read and comply with the following rules. Failure to do so will result in architecture degradation and PR rejection.
+Before proposing or making any code changes, you MUST comply with the following rules. Failure to do so will result in architecture degradation.
 
 ## 1. The Core Ontology (LOCKED)
-The system is built around a strict ontology. Do NOT invent synonymous terms (like Policy, Law, Guideline).
+Do NOT invent synonymous terms (like Policy, Law, Guideline).
 - **Principle**: A soft, highly abstract guideline (Why/What).
 - **Rule**: A hard, testable contract (When/Where/How).
 - **Implementation**: The physical code/hook that carries out the Rule.
-*For full details, see: `docs/architecture/DOMAIN_MODEL.md`*
+*Reference: `docs/architecture/DOMAIN_MODEL.md`*
 
 ## 2. Strict Physical Boundaries (THE RED LINE)
-This project separates the core engine from the host integration. You MUST NOT breach these boundaries:
+- **Core Layer (`@principles/core` in `packages/principles-core/`)**: Pure domain logic, state machines.
+  - ❌ **Incorrect**: `import { something } from 'openclaw-plugin'`
+  - ✅ **Correct**: `import { something } from '../contracts/...'`
+  - **Rule**: ABSOLUTELY NO imports from `openclaw-plugin`, `pd-cli`, or host layers. 
 
-- **Core Layer (`@principles/core`)** -> located in `packages/principles-core/`
-  - **Rule**: ABSOLUTELY NO imports from `openclaw-plugin`, `pd-cli`, or any host integration layers.
-  - **Rule**: Pure domain logic, state machines, and pure TS data structures only. Do not add framework-specific APIs here.
-- **Host Layer (`openclaw-plugin`)** -> located in `packages/openclaw-plugin/`
-  - **Rule**: ABSOLUTELY NO heavy domain logic, diagnosis algorithms, or principle evaluation logic.
-  - **Rule**: Hooks must be stateless and "dumb" - capture events, format data, and delegate to `@principles/core` Runners/Adapters.
+- **Host Layer (`openclaw-plugin` in `packages/openclaw-plugin/`)**: Stateless hooks and event formatting.
+  - ❌ **Incorrect**: Writing complex if/else business logic or diagnosis algorithms inside a hook.
+  - ✅ **Correct**: Extracting event payload and delegating to `@principles/core` Adapters/Runners.
 
 ## 3. Contract Centralization & Single Source of Truth
-- **Rule**: Do NOT define ad-hoc interfaces or schemas inside runner or hook files. 
-- All core entities (Tasks, DiagnosticianOutputs, PainSignals, RuleHostResults) MUST have their schemas and interfaces defined centrally (Target: `@principles/core/src/contracts` or `types`).
-- **Rule**: We use `TypeBox` for runtime validation at the boundaries. If you change a data structure, you must update the Schema, not just the TS interface.
+All core entities (Tasks, DiagnosticianOutputs, RuleHostResults) MUST have schemas defined centrally.
+- ❌ **Incorrect**: Defining an ad-hoc `interface TemporaryTask` inside a runner file.
+- ✅ **Correct**: Importing the TypeBox schema and interface from the centralized contracts/types directory.
 
 ## 4. State Machine Rigidity
-- **Rule**: NEVER mutate a state property directly via assignment (e.g., `task.status = 'succeeded'`).
-- All state transitions MUST flow through designated State Machine transition methods to ensure pre-condition checks.
+- ❌ **Incorrect**: `task.status = 'succeeded'` (Direct assignment is forbidden).
+- ✅ **Correct**: `taskStateMachine.transition(task, 'succeed')` (Use transition methods).
 
 ## 5. Pruning and Metabolism
-- **Rule**: `Pruning Review` is a read-only audit log and MUST NOT perform physical deletion or ledger mutation.
-- Real deletion/demotion is called `Pruning Action` and requires human confirmation and rollback plans.
+- `Pruning Review` is a **read-only audit log**. Do NOT write code that performs physical deletion based on a Pruning Review.
+- Real deletion/demotion is called `Pruning Action` (Future Scope) and requires dry-run & human confirmation.
 
 ## 📚 Required Reading for Major Changes
-If you are asked to make architectural changes, you MUST NOT proceed without human architect approval via an ADR (Architecture Decision Record). Always refer to:
-1. `docs/architecture/DOMAIN_MODEL.md` (Locked Ontology)
-2. `docs/architecture-governance/AI_DEVELOPMENT_GUARDRAILS.md` (Guardrails)
-3. `docs/architecture/PD_SYSTEM_ARCHITECTURE.md` (Blueprint)
+If asked to make architectural changes, you MUST refer to:
+1. `docs/architecture/DOMAIN_MODEL.md`
+2. `docs/architecture-governance/AI_DEVELOPMENT_GUARDRAILS.md`
+3. `docs/architecture/PD_SYSTEM_ARCHITECTURE.md`
