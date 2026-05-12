@@ -14,53 +14,12 @@ import { resolveRequiredWorkspaceDir } from '../core/workspace-dir-service.js';
 
 const ROUTE_PREFIX = '/plugins/principles';
 const API_PREFIX = `${ROUTE_PREFIX}/api`;
-const ASSETS_PREFIX = `${ROUTE_PREFIX}/assets`;
 
 function sendJson(res: unknown, statusCode: number, payload: unknown): void {
   const r = res as { statusCode?: number; setHeader: (n: string, v: string) => void; end: (b?: string) => void };
   r.statusCode = statusCode;
   r.setHeader('Content-Type', 'application/json; charset=utf-8');
   r.end(JSON.stringify(payload, null, 2));
-}
-
-function sendText(res: unknown, statusCode: number, body: string): void {
-  const r = res as { statusCode?: number; setHeader: (n: string, v: string) => void; end: (b?: string) => void };
-  r.statusCode = statusCode;
-  r.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  r.end(body);
-}
-
-function serveFile(res: unknown, filePath: string): boolean {
-  const r = res as { statusCode?: number; setHeader: (n: string, v: string) => void; end: (b?: string) => void };
-  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    return false;
-  }
-  r.statusCode = 200;
-  r.setHeader('Content-Type', contentTypeFor(filePath));
-  const stream = fs.createReadStream(filePath);
-  stream.on('error', () => {
-    try { r.end(); } catch { /* ignore */ }
-  });
-  stream.pipe(res as unknown as NodeJS.WritableStream);
-  return true;
-}
-
-function contentTypeFor(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  switch (ext) {
-    case '.html':
-      return 'text/html; charset=utf-8';
-    case '.css':
-      return 'text/css; charset=utf-8';
-    case '.js':
-      return 'application/javascript; charset=utf-8';
-    case '.json':
-      return 'application/json; charset=utf-8';
-    case '.svg':
-      return 'image/svg+xml';
-    default:
-      return 'application/octet-stream';
-  }
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -77,43 +36,22 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   }
 }
 
-function safeStaticPath(rootDir: string, requestPath: string): string | null {
-  const relative = requestPath.startsWith(ASSETS_PREFIX)
-    ? requestPath.slice(ASSETS_PREFIX.length).replace(/^\/+/, '')
-    : '';
-  const normalized = path.normalize(relative);
-  const webRoot = path.join(rootDir, 'dist', 'web');
-  const assetsRoot = path.join(webRoot, 'assets');
-  const target = path.join(assetsRoot, normalized);
-  const relativeTarget = path.relative(assetsRoot, target);
-  if (relativeTarget.startsWith('..') || path.isAbsolute(relativeTarget)) {
-    return null;
-  }
-  return target;
-}
-
 function createService(api: OpenClawPluginApi): ControlUiQueryService {
   const workspaceDir = resolveRequiredWorkspaceDir(api, { agentId: 'main' }, { source: 'principles_console.control_ui', fallbackAgentId: 'main' });
   return new ControlUiQueryService(workspaceDir);
 }
 
- 
- 
 function handleApiRoute(
   api: OpenClawPluginApi,
   pathname: string,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<boolean> | boolean {
-  // Check authentication for API routes
-   
-   
   if (!validateGatewayAuth(req)) {
     sendJson(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
     return true;
   }
 
-   
   let service: ControlUiQueryService;
   try {
     service = createService(api);
@@ -139,7 +77,6 @@ function handleApiRoute(
     }
   };
 
-  // Helper to parse and clamp days parameter
   const parseDays = (param: string | null): number => {
     const value = param ? Number(param) : 30;
     if (!Number.isFinite(value) || value < 1) return 30;
@@ -192,7 +129,6 @@ function handleApiRoute(
     });
   }
 
-  // === Central Health: per-workspace health indicators ===
   if (pathname === `${API_PREFIX}/central/health` && method === 'GET') {
     return done(() => {
       return new CentralHealthService().getAllWorkspaceHealth();
@@ -349,7 +285,6 @@ function handleApiRoute(
     }
   }
 
-  // === Evolution API ===
   const evolutionService = () => {
     const workspaceDir = resolveRequiredWorkspaceDir(api, { agentId: 'main' }, { source: 'principles_console.evolution', fallbackAgentId: 'main' });
     const trajectory = TrajectoryRegistry.get(workspaceDir);
@@ -409,7 +344,6 @@ function handleApiRoute(
     }
   }
 
-  // === Health Query API (v1.1 new endpoints) ===
   const healthService = () => {
     const workspaceDir = resolveRequiredWorkspaceDir(api, { agentId: 'main' }, { source: 'principles_console.health', fallbackAgentId: 'main' });
     return new HealthQueryService(workspaceDir);
@@ -562,7 +496,6 @@ function getGatewayToken(): string | null {
 function validateGatewayAuth(req: IncomingMessage): boolean {
   const gatewayToken = getGatewayToken();
   if (!gatewayToken) {
-    // No token configured, allow all requests
     return true;
   }
   const authHeader = (req.headers?.authorization as string) || '';
@@ -573,141 +506,27 @@ function validateGatewayAuth(req: IncomingMessage): boolean {
     return false;
   }
 
-  // Constant-time comparison to prevent timing attacks (per D-07)
-  // Use Buffer comparison — both tokens must be same length for timingSafeEqual
   const providedBuffer = Buffer.from(providedToken, 'utf8');
   const expectedBuffer = Buffer.from(gatewayToken, 'utf8');
 
   if (providedBuffer.length !== expectedBuffer.length) {
-    // Length mismatch — fail fast but without timing leak
-    // Return false immediately rather than letting timingSafeEqual throw
     return false;
   }
 
   return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
-/**
- * Create routes for Principles Console.
- * Returns an array of routes:
- * 1. Static files route (no auth required for HTML/CSS/JS)
- * 2. API route (gateway auth required)
- */
-export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawPluginHttpRouteParams[] {
-  // Route 1: Static files (HTML, CSS, JS) - no auth check
-  const staticRoute: OpenClawPluginHttpRouteParams = {
-    path: ROUTE_PREFIX,
-    auth: 'plugin',
-    match: 'prefix',
-
-    async handler(req: unknown, res: unknown) {
-      const httpReq = req as { url?: string; method?: string };
-      if (!api.rootDir) { sendText(res, 500, 'Plugin rootDir not available'); return true; }
-      const url = new URL(httpReq.url || ROUTE_PREFIX, 'http://127.0.0.1');
-      const {pathname} = url;
-      const method = (httpReq.method || 'GET').toUpperCase();
-
-      // Skip API routes - they'll be handled by the API route
-      if (pathname.startsWith(API_PREFIX)) {
-        return false; // Let the API route handle this
-      }
-
-      // Serve assets
-      if (pathname.startsWith(ASSETS_PREFIX)) {
-        if (method !== 'GET' && method !== 'HEAD') {
-          sendText(res, 405, 'Method Not Allowed');
-          return true;
-        }
-        const assetPath = safeStaticPath(api.rootDir, pathname);
-        if (!assetPath || !serveFile(res, assetPath)) {
-          sendText(res, 404, 'Asset Not Found');
-        }
-        return true;
-      }
-
-      // Serve index.html for the main route
-      if (method !== 'GET' && method !== 'HEAD') {
-        sendText(res, 405, 'Method Not Allowed');
-        return true;
-      }
-
-      const indexPath = path.join(api.rootDir, 'dist', 'web', 'index.html');
-      if (!serveFile(res, indexPath)) {
-        sendText(res, 503, 'Principles Console UI is not built yet.');
-      }
-      return true;
-    },
-  };
-
-  // Route 2: API endpoints - gateway auth required
-  const apiRoute: OpenClawPluginHttpRouteParams = {
+export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPluginHttpRouteParams {
+  return {
     path: API_PREFIX,
     auth: 'gateway',
     match: 'prefix',
+
     async handler(req: unknown, res: unknown) {
       const httpReq = req as { url?: string; method?: string };
       const url = new URL(httpReq.url || API_PREFIX, 'http://127.0.0.1');
-      const {pathname} = url;
+      const { pathname } = url;
       return handleApiRoute(api, pathname, req as IncomingMessage, res as ServerResponse);
-    },
-  };
-
-  return [staticRoute, apiRoute];
-}
-
-// Legacy export for backwards compatibility
-export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPluginHttpRouteParams {
-  // Side effect: registers all console routes via createPrinciplesConsoleRoutes
-  createPrinciplesConsoleRoutes(api);
-  // Return the combined behavior - this will be called from index.ts
-  return {
-    path: ROUTE_PREFIX,
-    auth: 'plugin',
-    match: 'prefix',
-
-    async handler(req: unknown, res: unknown) {
-      const httpReq = req as { url?: string; method?: string };
-      if (!api.rootDir) { sendText(res, 500, 'Plugin rootDir not available'); return true; }
-      const url = new URL(httpReq.url || ROUTE_PREFIX, 'http://127.0.0.1');
-      const {pathname} = url;
-      const method = (httpReq.method || 'GET').toUpperCase();
-
-      if (!pathname.startsWith(ROUTE_PREFIX)) {
-        return false;
-      }
-
-      // For API routes, check auth manually
-      if (pathname.startsWith(API_PREFIX)) {
-        if (!validateGatewayAuth(req as IncomingMessage)) {
-          sendJson(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
-          return true;
-        }
-        return handleApiRoute(api, pathname, req as IncomingMessage, res as ServerResponse);
-      }
-
-      // Static files - no auth required
-      if (pathname.startsWith(ASSETS_PREFIX)) {
-        if (method !== 'GET' && method !== 'HEAD') {
-          sendText(res, 405, 'Method Not Allowed');
-          return true;
-        }
-        const assetPath = safeStaticPath(api.rootDir, pathname);
-        if (!assetPath || !serveFile(res, assetPath)) {
-          sendText(res, 404, 'Asset Not Found');
-        }
-        return true;
-      }
-
-      if (method !== 'GET' && method !== 'HEAD') {
-        sendText(res, 405, 'Method Not Allowed');
-        return true;
-      }
-
-      const indexPath = path.join(api.rootDir, 'dist', 'web', 'index.html');
-      if (!serveFile(res, indexPath)) {
-        sendText(res, 503, 'Principles Console UI is not built yet.');
-      }
-      return true;
     },
   };
 }
