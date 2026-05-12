@@ -14,6 +14,10 @@ function getModel(workspaceDir: string): SampleConsoleModel {
   return model;
 }
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export async function handleSamplesRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -31,8 +35,8 @@ export async function handleSamplesRoute(
         pageSize: safeParseInt(query.pageSize, 20, 1, 100),
       });
       sendSuccess(res, result);
-    } catch (err: any) {
-      sendError(res, 500, 'samples_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'samples_error', getErrorMessage(err));
     }
     return;
   }
@@ -47,8 +51,8 @@ export async function handleSamplesRoute(
         return;
       }
       sendSuccess(res, detail);
-    } catch (err: any) {
-      sendError(res, 500, 'sample_detail_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'sample_detail_error', getErrorMessage(err));
     }
     return;
   }
@@ -81,15 +85,16 @@ export async function handleSamplesRoute(
         note: parsed.note,
       });
       sendSuccess(res, result);
-    } catch (err: any) {
-      if (err.message === 'Request body too large') {
-        sendError(res, 413, 'payload_too_large', err.message);
-      } else if (err.message.includes('not found')) {
-        sendNotFound(res, err.message);
-      } else if (err.message.includes('not pending')) {
-        sendError(res, 409, 'conflict', err.message);
+    } catch (err: unknown) {
+      const message = getErrorMessage(err);
+      if (message === 'Request body too large') {
+        sendError(res, 413, 'payload_too_large', message);
+      } else if (message.includes('not found')) {
+        sendNotFound(res, message);
+      } else if (message.includes('not pending')) {
+        sendError(res, 409, 'conflict', message);
       } else {
-        sendError(res, 500, 'review_error', err.message);
+        sendError(res, 500, 'review_error', message);
       }
     }
     return;

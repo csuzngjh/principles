@@ -14,9 +14,6 @@ import {
 } from '@principles/core/runtime-v2';
 import { AuthConfig } from './config/AuthConfig.js';
 import { WorkspaceConfigStore } from './config/WorkspaceConfigStore.js';
-import { OverviewConsoleModel } from './models/OverviewConsoleModel.js';
-import { GateConsoleModel } from './models/GateConsoleModel.js';
-import { FeedbackConsoleModel } from './models/FeedbackConsoleModel.js';
 import { WorkspaceService } from './models/WorkspaceService.js';
 import { handleOverviewRoute, disposeOverviewModels } from './routes/overview.js';
 import { handleGatesRoute, disposeGateModels } from './routes/gates.js';
@@ -215,7 +212,7 @@ async function closeServices(services: AppServices): Promise<void> {
 // ── Route handler ───────────────────────────────────────────────────────────
 
 function handleRequest(services: AppServices): (req: http.IncomingMessage, res: http.ServerResponse) => void {
-  const { handleWorkspacesRoute } = createWorkspacesRoutes(services.configStore);
+  const { handleWorkspacesRoute } = createWorkspacesRoutes(services.configStore, services.workspaceService);
   const { handleCentralRoute } = createCentralRoutes(services.workspaceService);
 
   return (req: http.IncomingMessage, res: http.ServerResponse): void => {
@@ -613,7 +610,7 @@ export async function main(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`[pd-console] Received ${signal}, shutting down...`);
-    server.close();
+    await new Promise<void>((resolve) => { server.close(() => resolve()); });
     await closeServices(services);
     process.exit(0);
   };

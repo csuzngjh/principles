@@ -1,6 +1,10 @@
-import { buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from '@principles/core/runtime-v2';
-import type { GfiReadModelInput } from '@principles/core/runtime-v2';
-import { PainChainReadModel, RuntimeStateManager } from '@principles/core/runtime-v2';
+import {
+  OperatorHealthReadModel,
+  PainChainReadModel,
+  PruningReadModel,
+  RuntimeStateManager,
+  classifyGfiWorkspaceHealth,
+} from '@principles/core/runtime-v2';
 import type { GateBlockItem } from '../types/index.js';
 
 export interface GateStatsOutput {
@@ -28,7 +32,7 @@ export interface GateStatsOutput {
     current: number;
     peakToday: number;
     threshold: number;
-    trend: Array<{ hour: string; value: number }>;
+    trend: { hour: string; value: number }[];
     sources: Record<string, number>;
     stage: 'stable' | 'elevated' | 'critical' | 'saturated';
   };
@@ -36,22 +40,22 @@ export interface GateStatsOutput {
 
 export class GateConsoleModel {
   private readonly workspaceDir: string;
+  private healthReadModel: OperatorHealthReadModel | null = null;
   private painChainReadModel: PainChainReadModel | null = null;
+  private pruningReadModel: PruningReadModel | null = null;
   private stateManager: RuntimeStateManager | null = null;
+  private ownsHealthReadModel = false;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
   }
 
-  async getGateStats(sessions: GfiReadModelInput['sessions']): Promise<GateStatsOutput> {
-    const snapshot = buildGfiWorkspaceSnapshot({
-      sessions,
-      nowMs: Date.now(),
-    });
-
-    const active = snapshot.active;
+  async getGateStats(): Promise<GateStatsOutput> {
+    const snapshot = await this.getHealthReadModel().getSnapshot();
+    const gfiSnapshot = snapshot.gfi;
+    const active = gfiSnapshot.active;
     const currentGfi = active?.currentGfi ?? 0;
-    const health = classifyGfiWorkspaceHealth(snapshot);
+    const health = classifyGfiWorkspaceHealth(gfiSnapshot);
 
     const trustStatus: 'healthy' | 'warning' | 'critical' =
       health.status === 'degraded' ? 'warning' : 'healthy';
@@ -98,12 +102,29 @@ export class GateConsoleModel {
   }
 
   dispose(): void {
+    if (this.healthReadModel && this.ownsHealthReadModel) {
+      this.healthReadModel.close().catch(() => {});
+    }
     if (this.painChainReadModel) {
       this.painChainReadModel.close().catch(() => {});
     }
     if (this.stateManager) {
       this.stateManager.close().catch(() => {});
     }
+  }
+
+  private getHealthReadModel(): OperatorHealthReadModel {
+    if (!this.healthReadModel) {
+      const painChainReadModel = this.getPainChainReadModel();
+      const pruningReadModel = this.getPruningReadModel();
+      this.healthReadModel = new OperatorHealthReadModel({
+        workspaceDir: this.workspaceDir,
+        painChainReadModel,
+        pruningReadModel,
+      });
+      this.ownsHealthReadModel = true;
+    }
+    return this.healthReadModel;
   }
 
   private getPainChainReadModel(): PainChainReadModel {
@@ -114,6 +135,15 @@ export class GateConsoleModel {
       });
     }
     return this.painChainReadModel;
+  }
+
+  private getPruningReadModel(): PruningReadModel {
+    if (!this.pruningReadModel) {
+      this.pruningReadModel = new PruningReadModel({
+        workspaceDir: this.workspaceDir,
+      });
+    }
+    return this.pruningReadModel;
   }
 
   private getStateManager(): RuntimeStateManager {

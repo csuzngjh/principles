@@ -1,8 +1,13 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { WorkspaceConfigStore } from '../config/WorkspaceConfigStore.js';
-import { sendSuccess, sendError, sendNotFound, sendMethodNotAllowed, sendBadRequest } from '../utils/response.js';
+import type { WorkspaceService } from '../models/WorkspaceService.js';
+import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
 
-export function createWorkspacesRoutes(configStore: WorkspaceConfigStore) {
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, workspaceService: WorkspaceService) {
   async function handleWorkspacesRoute(
     req: IncomingMessage,
     res: ServerResponse,
@@ -33,8 +38,8 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore) {
         configStore.addWorkspace(parsed.name, parsed.path);
         const entry = configStore.getWorkspace(parsed.name);
         sendSuccess(res, entry);
-      } catch (err: any) {
-        sendError(res, 409, 'workspace_exists', err.message);
+      } catch (err: unknown) {
+        sendError(res, 409, 'workspace_exists', getErrorMessage(err));
       }
       return;
     }
@@ -65,8 +70,8 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore) {
         configStore.updateWorkspace(wsName, updates);
         const entry = configStore.getWorkspace(wsName);
         sendSuccess(res, entry);
-      } catch (err: any) {
-        sendError(res, 404, 'workspace_not_found', err.message);
+      } catch (err: unknown) {
+        sendError(res, 404, 'workspace_not_found', getErrorMessage(err));
       }
       return;
     }
@@ -75,24 +80,19 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore) {
       try {
         configStore.removeWorkspace(wsName);
         sendSuccess(res, { removed: wsName });
-      } catch (err: any) {
-        sendError(res, 404, 'workspace_not_found', err.message);
+      } catch (err: unknown) {
+        sendError(res, 404, 'workspace_not_found', getErrorMessage(err));
       }
       return;
     }
 
     if (req.method === 'POST' && rest === '/sync') {
-      const entry = configStore.getWorkspace(wsName);
-      if (!entry) {
-        sendNotFound(res, `Workspace "${wsName}" not found`);
-        return;
+      try {
+        const result = await workspaceService.syncWorkspace(wsName);
+        sendSuccess(res, result);
+      } catch (err: unknown) {
+        sendError(res, 404, 'workspace_not_found', getErrorMessage(err));
       }
-      configStore.updateSyncTime(wsName);
-      sendSuccess(res, {
-        success: true,
-        syncedAt: new Date().toISOString(),
-        items: {},
-      });
       return;
     }
 

@@ -13,7 +13,7 @@ export class AuthConfig {
 
   constructor(opts: AuthConfigOptions = {}) {
     const token = opts.cliToken ?? opts.envToken ?? null;
-    this.enabled = !opts.noAuth && token !== null;
+    this.enabled = !opts.noAuth && token !== null && token.length > 0;
     this.token = token;
   }
 

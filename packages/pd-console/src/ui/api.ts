@@ -29,8 +29,8 @@ interface OverviewData {
     taskOutcomes: number;
   };
   health: OverviewHealth;
-  dailyTrend: Array<{ day: string; toolCalls: number; failures: number; userCorrections: number; painEvents: number }>;
-  topRegressions: Array<{ toolName: string; errorType: string; occurrences: number }>;
+  dailyTrend: { day: string; toolCalls: number; failures: number; userCorrections: number; painEvents: number }[];
+  topRegressions: { toolName: string; errorType: string; occurrences: number }[];
   sampleQueue: { counters: Record<string, number>; preview: unknown[] };
 }
 
@@ -43,7 +43,7 @@ interface GateStats {
     current: number;
     peakToday: number;
     threshold: number;
-    trend: Array<{ hour: string; value: number }>;
+    trend: { hour: string; value: number }[];
     sources: Record<string, number>;
     stage: 'stable' | 'elevated' | 'critical' | 'saturated';
   };
@@ -53,7 +53,7 @@ interface FeedbackGfi {
   current: number;
   peakToday: number;
   threshold: number;
-  trend: Array<{ hour: string; value: number }>;
+  trend: { hour: string; value: number }[];
   sources: Record<string, number>;
 }
 
@@ -120,13 +120,13 @@ interface SamplesData {
 interface CentralOverview {
   generatedAt: string;
   workspaceCount: number;
-  workspaces: Array<{ name: string; path: string; status: 'healthy' | 'degraded' | 'error'; gfi: number; principleCount: number }>;
+  workspaces: { name: string; path: string; status: 'healthy' | 'degraded' | 'error'; gfi: number; principleCount: number }[];
 }
 
 interface CentralHealth {
   generatedAt: string;
   overallStatus: 'healthy' | 'degraded' | 'error';
-  workspaces: Array<{ name: string; status: 'healthy' | 'degraded' | 'error'; gfi: number; activePrinciples: number; pendingTasks: number }>;
+  workspaces: { name: string; status: 'healthy' | 'degraded' | 'error'; gfi: number; activePrinciples: number; pendingTasks: number }[];
 }
 
 function getToken(): string | null {
@@ -307,7 +307,7 @@ interface EvolutionStats {
   inProgress: number;
   completed: number;
   failed: number;
-  stageDistribution: Array<{ stage: string; count: number }>;
+  stageDistribution: { stage: string; count: number }[];
 }
 
 interface EvolutionTaskItem {
@@ -326,7 +326,7 @@ interface EvolutionTasksData {
 
 interface EvolutionPrinciplesData {
   summary: { candidate: number; probation: number; active: number; deprecated: number; archived: number; total: number };
-  recent: Array<{ principleId: string; status: string; text: string; triggerPattern: string; action: string; evaluability: string; createdAt: string; updatedAt: string }>;
+  recent: { principleId: string; status: string; text: string; triggerPattern: string; action: string; evaluability: string; createdAt: string; updatedAt: string }[];
 }
 
 interface QueueHealthData {
@@ -363,7 +363,7 @@ async function fetchEvolutionQueue(): Promise<ApiResponse<QueueHealthData>> {
 
 interface ThinkingModelOverview {
   totalModels: number;
-  models: Array<{ id: string; name: string; trigger: string; must: string; forbidden: string }>;
+  models: { id: string; name: string; trigger: string; must: string; forbidden: string }[];
   source: string;
 }
 

@@ -13,6 +13,10 @@ function getModel(workspaceDir: string): FeedbackConsoleModel {
   return model;
 }
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export async function handleFeedbackRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -22,16 +26,16 @@ export async function handleFeedbackRoute(
   const model = getModel(workspaceDir);
 
   if (req.method !== 'GET') {
-    sendNotFound(res, 'Method not allowed');
+    sendError(res, 405, 'method_not_allowed', 'Method not allowed');
     return;
   }
 
   if (subPath === '/gfi') {
     try {
-      const gfi = await model.getGfi([]);
+      const gfi = await model.getGfi();
       sendSuccess(res, gfi);
-    } catch (err: any) {
-      sendError(res, 500, 'gfi_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'gfi_error', getErrorMessage(err));
     }
     return;
   }
@@ -43,8 +47,8 @@ export async function handleFeedbackRoute(
       const limit = Number.isNaN(parsedLimit) || parsedLimit < 1 ? 100 : Math.min(parsedLimit, 500);
       const events = await model.getEmpathyEvents(limit);
       sendSuccess(res, events);
-    } catch (err: any) {
-      sendError(res, 500, 'empathy_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'empathy_error', getErrorMessage(err));
     }
     return;
   }
@@ -56,8 +60,8 @@ export async function handleFeedbackRoute(
       const limit = Number.isNaN(parsedLimit) || parsedLimit < 1 ? 100 : Math.min(parsedLimit, 500);
       const blocks = await model.getGateBlocks(limit);
       sendSuccess(res, blocks);
-    } catch (err: any) {
-      sendError(res, 500, 'gate_blocks_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'gate_blocks_error', getErrorMessage(err));
     }
     return;
   }

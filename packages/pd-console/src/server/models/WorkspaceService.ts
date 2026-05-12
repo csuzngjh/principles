@@ -76,7 +76,9 @@ export class WorkspaceService {
       try {
         const model = this.getModel(ws);
         const health = await model.getHealth();
-        if (health.status !== 'healthy') {
+        if (health.status === 'error') {
+          overallStatus = 'error';
+        } else if (health.status !== 'healthy' && overallStatus === 'healthy') {
           overallStatus = 'degraded';
         }
         results.push({

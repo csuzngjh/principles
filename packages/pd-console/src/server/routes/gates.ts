@@ -13,6 +13,10 @@ function getModel(workspaceDir: string): GateConsoleModel {
   return model;
 }
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export async function handleGatesRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -22,16 +26,16 @@ export async function handleGatesRoute(
   const model = getModel(workspaceDir);
 
   if (req.method !== 'GET') {
-    sendNotFound(res, 'Method not allowed');
+    sendError(res, 405, 'method_not_allowed', 'Method not allowed');
     return;
   }
 
   if (subPath === '/stats' || subPath === '') {
     try {
-      const stats = await model.getGateStats([]);
+      const stats = await model.getGateStats();
       sendSuccess(res, stats);
-    } catch (err: any) {
-      sendError(res, 500, 'gate_stats_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'gate_stats_error', getErrorMessage(err));
     }
     return;
   }
@@ -43,8 +47,8 @@ export async function handleGatesRoute(
       const limit = Number.isNaN(parsedLimit) || parsedLimit < 1 ? 100 : Math.min(parsedLimit, 500);
       const blocks = await model.getGateBlocks(limit);
       sendSuccess(res, blocks);
-    } catch (err: any) {
-      sendError(res, 500, 'gate_blocks_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'gate_blocks_error', getErrorMessage(err));
     }
     return;
   }

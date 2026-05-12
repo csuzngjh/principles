@@ -26,6 +26,12 @@ export class WorkspaceConfigStore {
   }
 
   addWorkspace(name: string, workspacePath: string): void {
+    if (!name || name.length > 128) {
+      throw new Error('Workspace name must be between 1 and 128 characters');
+    }
+    if (name.includes('/') || name.includes('\\')) {
+      throw new Error('Workspace name cannot contain slashes');
+    }
     if (this.entries.some(e => e.name === name)) {
       throw new Error(`Workspace "${name}" already exists`);
     }

@@ -32,12 +32,18 @@ export class SampleConsoleModel {
   }
 
   private async ensureInitialized(): Promise<RuntimeStateManager> {
-    if (!this.stateManager) {
-      this.stateManager = new RuntimeStateManager({ workspaceDir: this.workspaceDir });
-      this.initPromise = this.stateManager.initialize();
+    if (this.initPromise) {
+      await this.initPromise;
+      return this.stateManager!;
     }
+    this.stateManager = new RuntimeStateManager({ workspaceDir: this.workspaceDir });
+    this.initPromise = this.stateManager.initialize().catch((err) => {
+      this.stateManager = null;
+      this.initPromise = null;
+      throw err;
+    });
     await this.initPromise;
-    return this.stateManager;
+    return this.stateManager!;
   }
 
   private async getIntakeService(): Promise<CandidateIntakeService> {
@@ -184,10 +190,11 @@ export class SampleConsoleModel {
         try {
           await mgr.updateCandidateStatus(sampleId, { status: 'pending' });
         } catch (rollbackErr) {
-          throw new Error(
-            `Intake failed and rollback also failed. Sample ${sampleId} may be in inconsistent state. ` +
-            `Intake error: ${intakeErr instanceof Error ? intakeErr.message : String(intakeErr)}`
+          const combinedError = new Error(
+            `Intake failed and rollback also failed. Sample ${sampleId} may be in inconsistent state.`
           );
+          combinedError.cause = { intakeErr, rollbackErr };
+          throw combinedError;
         }
         throw intakeErr;
       }
@@ -207,7 +214,9 @@ export class SampleConsoleModel {
 
   dispose(): void {
     if (this.stateManager) {
-      this.stateManager.close().catch(() => {});
+      this.stateManager.close().catch((err) => {
+        console.error('[SampleConsoleModel] Failed to close state manager:', err);
+      });
       this.stateManager = null;
     }
     this.intakeService = null;

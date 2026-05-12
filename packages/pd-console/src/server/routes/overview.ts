@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { OverviewConsoleModel } from '../models/OverviewConsoleModel.js';
-import { sendSuccess, sendError, sendNotFound, sendMethodNotAllowed } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
 const models = new Map<string, OverviewConsoleModel>();
 
@@ -13,6 +13,10 @@ function getModel(workspaceDir: string): OverviewConsoleModel {
   return model;
 }
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export async function handleOverviewRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -21,22 +25,27 @@ export async function handleOverviewRoute(
 ): Promise<void> {
   const model = getModel(workspaceDir);
 
-  if (req.method === 'GET' && (subPath === '' || subPath === '/')) {
+  if (req.method !== 'GET') {
+    sendError(res, 405, 'method_not_allowed', 'Only GET is allowed for this route');
+    return;
+  }
+
+  if (subPath === '' || subPath === '/') {
     try {
       const overview = await model.getOverview();
       sendSuccess(res, overview);
-    } catch (err: any) {
-      sendError(res, 500, 'overview_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'overview_error', getErrorMessage(err));
     }
     return;
   }
 
-  if (req.method === 'GET' && subPath === '/health') {
+  if (subPath === '/health') {
     try {
       const health = await model.getHealth();
       sendSuccess(res, health);
-    } catch (err: any) {
-      sendError(res, 500, 'health_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'health_error', getErrorMessage(err));
     }
     return;
   }

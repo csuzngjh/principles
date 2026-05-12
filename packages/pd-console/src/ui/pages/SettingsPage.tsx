@@ -106,7 +106,7 @@ function WorkspaceManager() {
     if (!newName.trim() || !newPath.trim()) return;
     const result = await addWorkspace(newName.trim(), newPath.trim());
     if (result.success) {
-      setWorkspaces([...workspaces, result.data]);
+      setWorkspaces((prev) => [...prev, result.data]);
       setNewName("");
       setNewPath("");
       showMessage("success", `Workspace "${newName}" added`);
@@ -118,7 +118,7 @@ function WorkspaceManager() {
   async function handleRemove(name: string) {
     const result = await removeWorkspace(name);
     if (result.success) {
-      setWorkspaces(workspaces.filter(w => w.name !== name));
+      setWorkspaces((prev) => prev.filter(w => w.name !== name));
       showMessage("success", `Workspace "${name}" removed`);
     } else {
       showMessage("error", result.error);
