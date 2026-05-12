@@ -169,6 +169,19 @@ export class DefaultTrainerValidator implements TrainerValidator {
       if (!isAutoCorrect && hasProposedCorrection) {
         errors.push('ruleCandidate.proposedCorrection must not exist when proposedDecision is not auto_correct');
       }
+      if (hasProposedCorrection) {
+        const pc = rc.proposedCorrection as Record<string, unknown>;
+        if (typeof pc !== 'object' || pc === null) {
+          errors.push('ruleCandidate.proposedCorrection must be an object');
+        } else {
+          if (typeof pc.description !== 'string' || (pc.description).trim() === '') {
+            errors.push('ruleCandidate.proposedCorrection.description must be a non-empty string');
+          }
+          if (pc.proposedParams === undefined) {
+            errors.push('ruleCandidate.proposedCorrection.proposedParams is required');
+          }
+        }
+      }
     }
 
     if (typeof output.safety !== 'object' || output.safety === null) {
@@ -236,6 +249,24 @@ export class DefaultTrainerValidator implements TrainerValidator {
     if (output.inlineGoldenTraceCases !== undefined) {
       if (!Array.isArray(output.inlineGoldenTraceCases)) {
         errors.push('inlineGoldenTraceCases must be an array');
+      } else {
+        const VALID_CASE_KINDS = ['negative', 'positive'];
+        const VALID_EXPECTED_DECISIONS = ['allow', 'block', 'propose_correction'];
+        for (let i = 0; i < output.inlineGoldenTraceCases.length; i++) {
+          const tc = output.inlineGoldenTraceCases[i] as unknown as Record<string, unknown>;
+          if (typeof tc.caseId !== 'string' || (tc.caseId).trim() === '') {
+            errors.push(`inlineGoldenTraceCases[${i}].caseId must be a non-empty string`);
+          }
+          if (!VALID_CASE_KINDS.includes(tc.kind as string)) {
+            errors.push(`inlineGoldenTraceCases[${i}].kind must be one of ${VALID_CASE_KINDS.join('/')}, got ${String(tc.kind)}`);
+          }
+          if (typeof tc.toolName !== 'string' || (tc.toolName).trim() === '') {
+            errors.push(`inlineGoldenTraceCases[${i}].toolName must be a non-empty string`);
+          }
+          if (!VALID_EXPECTED_DECISIONS.includes(tc.expectedDecision as string)) {
+            errors.push(`inlineGoldenTraceCases[${i}].expectedDecision must be one of ${VALID_EXPECTED_DECISIONS.join('/')}, got ${String(tc.expectedDecision)}`);
+          }
+        }
       }
     }
 

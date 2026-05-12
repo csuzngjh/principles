@@ -392,9 +392,11 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
               triggerCondition: 'TypeScript file edit with schema mismatch',
               proposedDecision: 'auto_correct',
               proposedCorrection: {
-                type: 'add_validation',
-                action: 'prepend',
-                snippet: 'const validated = schema.parse(input); if (!validated.success) throw new ValidationError(validated.error);',
+                description: 'Auto-correct by adding input validation before processing',
+                proposedParams: {
+                  strategy: 'prepend',
+                  snippet: 'const validated = schema.parse(input); if (!validated.success) throw new ValidationError(validated.error);',
+                },
               },
               rationale: 'Auto-correct validates input before processing to prevent downstream errors',
               confidence: 0.88,
