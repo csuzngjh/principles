@@ -477,6 +477,15 @@ function handleApiRoute(
     }
   }
 
+  if (pathname.startsWith(`${ROUTE_PREFIX}/assets/`)) {
+    if (method !== 'GET') {
+      sendJson(res, 405, { error: 'method_not_allowed', message: 'Only GET is allowed for assets.' });
+      return true;
+    }
+    sendJson(res, 404, { error: 'not_found', message: 'Asset not found.' });
+    return true;
+  }
+
   service.dispose();
   sendJson(res, 404, { error: 'not_found', message: 'Unknown Principles Console API route.' });
   return true;
