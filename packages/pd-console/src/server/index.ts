@@ -23,6 +23,7 @@ import { handleGatesRoute, disposeGateModels } from './routes/gates.js';
 import { handleFeedbackRoute, disposeFeedbackModels } from './routes/feedback.js';
 import { handleSamplesRoute, disposeSampleModels } from './routes/samples.js';
 import { handleEvolutionRoute, disposeEvolutionModels } from './routes/evolution.js';
+import { handleThinkingModelsRoute, disposeThinkingModelsModels } from './routes/thinking-models.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
@@ -203,6 +204,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeFeedbackModels();
   disposeSampleModels();
   disposeEvolutionModels();
+  disposeThinkingModelsModels();
   services.workspaceService.dispose();
 
   try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }
@@ -283,6 +285,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/evolution' || urlPath.startsWith('/api/evolution/')) {
         const subPath = urlPath.slice('/api/evolution'.length);
         asyncHandler(() => handleEvolutionRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // GET /api/thinking-models, /api/thinking-models/:id
+      if (urlPath === '/api/thinking-models' || urlPath.startsWith('/api/thinking-models/')) {
+        const subPath = urlPath.slice('/api/thinking-models'.length);
+        asyncHandler(() => handleThinkingModelsRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 

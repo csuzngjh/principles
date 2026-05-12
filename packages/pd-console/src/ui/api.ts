@@ -342,6 +342,16 @@ async function fetchEvolutionQueue(): Promise<ApiResponse<QueueHealthData>> {
   return request<QueueHealthData>("/api/evolution/queue");
 }
 
+interface ThinkingModelOverview {
+  totalModels: number;
+  models: Array<{ id: string; name: string; trigger: string; must: string; forbidden: string }>;
+  source: string;
+}
+
+async function fetchThinkingModels(): Promise<ApiResponse<ThinkingModelOverview>> {
+  return request<ThinkingModelOverview>("/api/thinking-models");
+}
+
 export {
   getToken,
   setToken,
@@ -372,6 +382,7 @@ export {
   fetchEvolutionTasks,
   fetchEvolutionPrinciples,
   fetchEvolutionQueue,
+  fetchThinkingModels,
 };
 
 export type {
@@ -391,4 +402,5 @@ export type {
   EvolutionTasksData,
   EvolutionPrinciplesData,
   QueueHealthData,
+  ThinkingModelOverview,
 };
