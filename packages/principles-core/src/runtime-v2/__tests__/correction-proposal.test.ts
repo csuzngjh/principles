@@ -273,4 +273,80 @@ describe('validateCorrectionProposal', () => {
     const result = validateCorrectionProposal(proposal);
     expect(result.valid).toBe(true);
   });
+
+
+  // PRI-114 review: throwing getter does not crash validateCorrectionProposal
+  it('validateCorrectionProposal handles throwing getter gracefully', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const proposal = {
+      proposedParams: new Proxy({}, {
+        get(_target, prop) { if (prop === 'something') throw new Error('boom'); return undefined; }
+      }),
+      correctedFields: [{ field: 'x', original: 'a', proposed: 'b', reason: 'fix' }],
+      applicationMode: 'shadow',
+      confidence: 0.8,
+      ruleId: 'R_throw',
+      notifyAgent: false,
+    };
+    const result = validateCorrectionProposal(proposal);
+    expect(result).toBeDefined();
+    expect(typeof result.valid).toBe('boolean');
+  });
+
+  // PRI-114 review: NaN confidence
+  it('rejects NaN confidence', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: {},
+      correctedFields: [],
+      applicationMode: 'shadow',
+      confidence: NaN,
+      ruleId: 'R_nan',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('confidence'))).toBe(true);
+  });
+
+  // PRI-114 review: Infinity confidence
+  it('rejects Infinity confidence', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: {},
+      correctedFields: [],
+      applicationMode: 'shadow',
+      confidence: Infinity,
+      ruleId: 'R_inf',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('confidence'))).toBe(true);
+  });
+
+  // PRI-114 review: Negative infinity confidence
+  it('rejects -Infinity confidence', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: {},
+      correctedFields: [],
+      applicationMode: 'shadow',
+      confidence: -Infinity,
+      ruleId: 'R_ninf',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('confidence'))).toBe(true);
+  });
+
+  // PRI-114 review: sessionId in proposedParams identity protection
+  it('validateProposedParams rejects sessionId modification', async () => {
+    const { validateProposedParams } = await getModule();
+    const result = validateProposedParams(
+      { content: 'old', sessionId: 's1' },
+      { content: 'old', sessionId: 's1' },
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('sessionId'))).toBe(true);
+  });
+
 });

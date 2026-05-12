@@ -157,7 +157,12 @@ export function handleBeforeToolCall(
 
     if (hostResult?.decision === 'auto_correct' && hostResult.correctionProposal) {
       const proposal = hostResult.correctionProposal;
-      const validation = validateCorrectionProposal(proposal);
+      let validation: { valid: boolean; errors: string[] };
+      try {
+        validation = validateCorrectionProposal(proposal);
+      } catch (validationError: unknown) {
+        validation = { valid: false, errors: [`Validator threw: ${String(validationError)}`] };
+      }
 
       try {
         const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
@@ -182,6 +187,23 @@ export function handleBeforeToolCall(
       // SAFETY: Never modify event.params. Shadow mode is enforced at hook level.
       // Even if applicationMode === 'live', current implementation is shadow-only.
       // Live mutation requires a future feature gate (PRI-115+).
+    } else if (hostResult?.decision === 'auto_correct') {
+      // auto_correct without correctionProposal — emit telemetry for observability
+      try {
+        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+        eventLog.recordRuleHostAutoCorrectProposed({
+          toolName: event.toolName,
+          filePath: relPath,
+          ruleId: hostResult.ruleId ?? 'unknown',
+          confidence: 0,
+          reason: hostResult.reason ?? 'auto_correct without correctionProposal',
+          applicationMode: 'shadow',
+          correctedFields: [],
+          validationValid: false,
+        });
+      } catch (evErr) {
+        logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_proposed (no proposal): ${String(evErr)}`);
+      }
     }
   } catch (hostError: unknown) {
     logger.warn?.(`[PD_GATE:RULE_HOST] Host evaluation failed, allowing conservatively: ${String(hostError)}`);

@@ -454,6 +454,8 @@ export class EventLog {
       stats.evolution.rulehostBlocked++;
     } else if (entry.type === 'rulehost_requireApproval') {
       stats.evolution.rulehostRequireApproval++;
+    } else if (entry.type === 'rulehost_auto_correct_proposed') {
+      stats.evolution.rulehostAutoCorrectProposed++;
     }
   }
 

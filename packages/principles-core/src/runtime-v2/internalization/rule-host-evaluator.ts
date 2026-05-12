@@ -1,5 +1,5 @@
 /**
- * Rule Host Evaluator — Pure decision merge logic
+ * Rule Host Evaluator �?Pure decision merge logic
  *
  * PURPOSE: Iterate loaded code implementations and merge their decisions.
  * Block short-circuits, auto_correct collects (validated), requireApproval
@@ -74,7 +74,7 @@ export function mergeDecisions(
         } else if (result.decision === 'requireApproval') {
           approvals.push(result);
         }
-        // 'allow' is implicit — no action needed
+        // 'allow' is implicit �?no action needed
       } catch (evalError: unknown) {
         logger?.warn?.(
           `[RuleHost] Implementation ${impl.implId} evaluation failed: ${String(evalError)}`
@@ -90,20 +90,26 @@ export function mergeDecisions(
     if (autoCorrects.length > 0) {
       for (const ac of autoCorrects) {
         if (ac.correctionProposal) {
-          const validation = validateCorrectionProposal(ac.correctionProposal);
-          if (validation.valid) {
-            return ac;
+          try {
+            const validation = validateCorrectionProposal(ac.correctionProposal);
+            if (validation.valid) {
+              return ac;
+            }
+            logger?.warn?.(
+              `[RuleHost] auto_correct proposal from ${ac.ruleId ?? 'unknown'} failed validation: ${validation.errors.join('; ')}`
+            );
+          } catch (validationError: unknown) {
+            logger?.warn?.(
+              `[RuleHost] auto_correct proposal from ${ac.ruleId ?? 'unknown'} threw during validation (fail-closed): ${String(validationError)}`
+            );
           }
-          logger?.warn?.(
-            `[RuleHost] auto_correct proposal from ${ac.ruleId ?? 'unknown'} failed validation: ${validation.errors.join('; ')}`
-          );
         } else {
           logger?.warn?.(
             `[RuleHost] auto_correct decision from ${ac.ruleId ?? 'unknown'} missing correctionProposal`
           );
         }
       }
-      // All auto_correct proposals invalid — fall through to requireApproval
+      // All auto_correct proposals invalid �?fall through to requireApproval
     }
 
     if (approvals.length > 0) {

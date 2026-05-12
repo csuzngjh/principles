@@ -246,4 +246,24 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
     expect(result).toBeUndefined();
     expect(event.params).toEqual(paramsCopy);
   });
+
+
+  // PRI-114 review: auto_correct without correctionProposal still emits telemetry
+  it('auto_correct without correctionProposal emits telemetry with validationValid false', () => {
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix but no proposal',
+      ruleId: 'R_no_prop',
+    });
+
+    const result = handleBeforeToolCall(makeWriteEvent(), makeCtx());
+
+    expect(result).toBeUndefined();
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectProposed).toHaveBeenCalledTimes(1);
+    const call = mockEventLogInstance.recordRuleHostAutoCorrectProposed.mock.calls[0][0];
+    expect(call.validationValid).toBe(false);
+    expect(call.reason).toContain('no proposal');
+  });
+
 });

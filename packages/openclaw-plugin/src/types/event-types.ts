@@ -423,6 +423,7 @@ export interface EvolutionStats {
   rulehostEvaluated: number;
   rulehostBlocked: number;
   rulehostRequireApproval: number;
+  rulehostAutoCorrectProposed: number;
 }
 
 export interface HookStats {
@@ -560,6 +561,7 @@ export function createEmptyDailyStats(date: string): DailyStats {
       rulehostEvaluated: 0,
       rulehostBlocked: 0,
       rulehostRequireApproval: 0,
+      rulehostAutoCorrectProposed: 0,
     },
     hooks: {
       total: 0,

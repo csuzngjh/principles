@@ -515,4 +515,38 @@ describe('mergeDecisions — auto_correct (PRI-114)', () => {
     const result = mergeDecisions(impls, makeInput114(), logger);
     expect(result?.decision).toBe('requireApproval');
   });
+
+
+  // 22. auto_correct with throwing getter proposal — does not crash merge
+  it('auto_correct with throwing getter proposal does not crash mergeDecisions', async () => {
+    const { mergeDecisions } = await getModule();
+    const logger = { warn: vi.fn() };
+    const maliciousProposal = new Proxy({}, {
+      get(_target, prop) { if (prop === 'proposedParams') throw new Error('getter boom'); return undefined; }
+    });
+    const impls = [
+      makeImpl114({
+        implId: 'malicious',
+        evaluate: () => ({
+          decision: 'auto_correct' as const,
+          matched: true,
+          reason: 'fix',
+          correctionProposal: maliciousProposal as unknown as RuleHostResult['correctionProposal'],
+        }),
+      }),
+      makeImpl114({
+        implId: 'approval-fallback',
+        evaluate: () => ({
+          decision: 'requireApproval' as const,
+          matched: true,
+          reason: 'needs review',
+        }),
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput114(), logger);
+    // Should not throw, falls through to requireApproval (fail-closed)
+    expect(result?.decision).toBe('requireApproval');
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
 });
