@@ -199,7 +199,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('unsupported runner kind: exits 1 with error', async () => {
-    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'trainer', runtime: 'test-double', allowTestDouble: true });
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'invalid-runner', runtime: 'test-double', allowTestDouble: true });
 
     expect(process.exitCode).toBe(1);
     expect(consoleErrorSpy.mock.calls.some((c: string[]) => c[0].includes('unsupported runner kind'))).toBe(true);

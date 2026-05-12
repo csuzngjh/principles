@@ -639,6 +639,52 @@ export type {
   RolloutReviewerPromptBuildResult,
 } from './internalization/rollout-reviewer-prompt-builder.js';
 
+// ── Trainer Runner (PRI-116) ────────────────────────────────────────────────
+
+export type {
+  TrainerRuleCandidate,
+  TrainerSafety,
+  TrainerSourceTrace,
+  TrainerOutputV1,
+  TrainerValidationResult,
+  TrainerValidator,
+} from './internalization/trainer-output.js';
+
+export {
+  DefaultTrainerValidator,
+  TrainerOutputV1Schema,
+  TrainerRuleCandidateSchema,
+  TrainerSafetySchema,
+  TrainerSourceTraceSchema,
+  TRAINER_DECISIONS,
+} from './internalization/trainer-output.js';
+
+export type {
+  TrainerRunnerResultStatus,
+  TrainerRunnerResult,
+  TrainerRunnerOptions,
+  ResolvedTrainerRunnerOptions,
+  TrainerRunnerDeps,
+} from './internalization/trainer-runner.js';
+
+export {
+  TrainerRunner,
+  resolveTrainerRunnerOptions,
+  DEFAULT_TRAINER_RUNNER_OPTIONS,
+} from './internalization/trainer-runner.js';
+
+export {
+  TrainerPromptBuilder,
+  TRAINER_PROTOCOL_INSTRUCTION,
+  TRAINER_PROMPT_CONTRACT_VERSION,
+} from './internalization/trainer-prompt-builder.js';
+
+export type {
+  TrainerPromptBuilderInput,
+  TrainerPromptInput,
+  TrainerPromptBuildResult,
+} from './internalization/trainer-prompt-builder.js';
+
 // ── PIArtifact Durable Store (PRI-84) ────────────────────────────────────────
 
 export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
