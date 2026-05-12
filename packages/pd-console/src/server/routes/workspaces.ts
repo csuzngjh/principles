@@ -21,6 +21,14 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore) {
         sendBadRequest(res, 'name and path are required');
         return;
       }
+      if (typeof parsed.name !== 'string' || parsed.name.length > 128 || /[\/\\]/.test(parsed.name)) {
+        sendBadRequest(res, 'name must be a non-empty string without slashes (max 128 chars)');
+        return;
+      }
+      if (typeof parsed.path !== 'string' || parsed.path.length === 0) {
+        sendBadRequest(res, 'path must be a non-empty string');
+        return;
+      }
       try {
         configStore.addWorkspace(parsed.name, parsed.path);
         const entry = configStore.getWorkspace(parsed.name);

@@ -39,7 +39,8 @@ export async function handleGatesRoute(
   if (subPath === '/blocks') {
     try {
       const limitParam = new URL(req.url!, `http://localhost`).searchParams.get('limit');
-      const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+      const parsedLimit = limitParam ? parseInt(limitParam, 10) : 100;
+      const limit = Number.isNaN(parsedLimit) || parsedLimit < 1 ? 100 : Math.min(parsedLimit, 500);
       const blocks = await model.getGateBlocks(limit);
       sendSuccess(res, blocks);
     } catch (err: any) {

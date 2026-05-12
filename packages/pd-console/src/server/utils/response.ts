@@ -8,6 +8,7 @@ export function sendJson(res: ServerResponse, statusCode: number, payload: unkno
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'Cache-Control': 'no-store',
+    'Referrer-Policy': 'no-referrer',
   });
   res.end(body);
 }

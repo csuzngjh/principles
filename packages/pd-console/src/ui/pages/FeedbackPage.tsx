@@ -19,7 +19,8 @@ const SEVERITY_COLORS: Record<string, string> = {
 function GfiGauge({ gfi }: { gfi: FeedbackGfi | null }) {
   if (!gfi) return <div style={CARD_STYLE}>Loading GFI...</div>;
 
-  const percentage = Math.min((gfi.current / gfi.threshold) * 100, 100);
+  const threshold = gfi.threshold || 1;
+  const percentage = Math.min((gfi.current / threshold) * 100, 100);
   const color = percentage < 50 ? "#52c41a" : percentage < 80 ? "#faad14" : "#ff4d4f";
 
   return (
