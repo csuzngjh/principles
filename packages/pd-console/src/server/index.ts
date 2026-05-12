@@ -22,6 +22,7 @@ import { handleOverviewRoute, disposeOverviewModels } from './routes/overview.js
 import { handleGatesRoute, disposeGateModels } from './routes/gates.js';
 import { handleFeedbackRoute, disposeFeedbackModels } from './routes/feedback.js';
 import { handleSamplesRoute, disposeSampleModels } from './routes/samples.js';
+import { handleEvolutionRoute, disposeEvolutionModels } from './routes/evolution.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
@@ -201,6 +202,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeGateModels();
   disposeFeedbackModels();
   disposeSampleModels();
+  disposeEvolutionModels();
   services.workspaceService.dispose();
 
   try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }
@@ -274,6 +276,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/samples' || urlPath.startsWith('/api/samples/')) {
         const subPath = urlPath.slice('/api/samples'.length);
         asyncHandler(() => handleSamplesRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // GET /api/evolution/stats, /api/evolution/tasks, /api/evolution/principles, /api/evolution/queue
+      if (urlPath === '/api/evolution' || urlPath.startsWith('/api/evolution/')) {
+        const subPath = urlPath.slice('/api/evolution'.length);
+        asyncHandler(() => handleEvolutionRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 

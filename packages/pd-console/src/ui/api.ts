@@ -282,6 +282,66 @@ async function reviewSample(sampleId: string, decision: 'approved' | 'rejected')
   });
 }
 
+interface EvolutionStats {
+  total: number;
+  pending: number;
+  inProgress: number;
+  completed: number;
+  failed: number;
+  stageDistribution: Array<{ stage: string; count: number }>;
+}
+
+interface EvolutionTaskItem {
+  taskId: string;
+  taskKind: string;
+  status: string;
+  createdAt: string;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+}
+
+interface EvolutionTasksData {
+  items: EvolutionTaskItem[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+interface EvolutionPrinciplesData {
+  summary: { candidate: number; probation: number; active: number; deprecated: number; archived: number; total: number };
+  recent: Array<{ principleId: string; status: string; text: string; triggerPattern: string; action: string; evaluability: string; createdAt: string; updatedAt: string }>;
+}
+
+interface QueueHealthData {
+  pendingCount: number;
+  retryWaitCount: number;
+  countsByTaskKind: Record<string, number>;
+  countsByChannel: Record<string, number>;
+  invalidMetadataCount: number;
+  blockedCount: number;
+  dependencyFailedCount: number;
+  readyTaskCount: number;
+  noReadyTasksReason: string | null;
+}
+
+async function fetchEvolutionStats(): Promise<ApiResponse<EvolutionStats>> {
+  return request<EvolutionStats>("/api/evolution/stats");
+}
+
+async function fetchEvolutionTasks(status?: string, page?: number): Promise<ApiResponse<EvolutionTasksData>> {
+  const params = new URLSearchParams();
+  if (status && status !== 'all') params.set('status', status);
+  if (page) params.set('page', String(page));
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return request<EvolutionTasksData>(`/api/evolution/tasks${query}`);
+}
+
+async function fetchEvolutionPrinciples(): Promise<ApiResponse<EvolutionPrinciplesData>> {
+  return request<EvolutionPrinciplesData>("/api/evolution/principles");
+}
+
+async function fetchEvolutionQueue(): Promise<ApiResponse<QueueHealthData>> {
+  return request<QueueHealthData>("/api/evolution/queue");
+}
+
 export {
   getToken,
   setToken,
@@ -308,6 +368,10 @@ export {
   fetchSamples,
   fetchSampleDetail,
   reviewSample,
+  fetchEvolutionStats,
+  fetchEvolutionTasks,
+  fetchEvolutionPrinciples,
+  fetchEvolutionQueue,
 };
 
 export type {
@@ -322,4 +386,9 @@ export type {
   SampleListItem,
   SampleDetail,
   SamplesData,
+  EvolutionStats,
+  EvolutionTaskItem,
+  EvolutionTasksData,
+  EvolutionPrinciplesData,
+  QueueHealthData,
 };
