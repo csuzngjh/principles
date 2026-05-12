@@ -83,6 +83,40 @@ interface WorkspaceEntry {
   config: { workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean } | null;
 }
 
+interface SampleListItem {
+  sampleId: string;
+  taskId: string;
+  title: string;
+  description: string;
+  reviewStatus: "pending" | "approved" | "rejected";
+  confidence: number | null;
+  createdAt: string;
+}
+
+interface SampleDetail {
+  sampleId: string;
+  taskId: string;
+  title: string;
+  description: string;
+  reviewStatus: "pending" | "approved" | "rejected";
+  confidence: number | null;
+  createdAt: string;
+  artifactContent: Record<string, unknown> | null;
+  recommendation: {
+    title?: string;
+    text?: string;
+    triggerPattern?: string;
+    action?: string;
+    abstractedPrinciple?: string;
+  } | null;
+}
+
+interface SamplesData {
+  counters: Record<string, number>;
+  items: SampleListItem[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
 interface CentralOverview {
   generatedAt: string;
   workspaceCount: number;
@@ -229,6 +263,25 @@ async function fetchCentralOverview(): Promise<ApiResponse<CentralOverview>> {
   return request<CentralOverview>("/api/central/overview");
 }
 
+async function fetchSamples(status?: string, page?: number): Promise<ApiResponse<SamplesData>> {
+  const params = new URLSearchParams();
+  if (status && status !== 'all') params.set('status', status);
+  if (page) params.set('page', String(page));
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return request<SamplesData>(`/api/samples${query}`);
+}
+
+async function fetchSampleDetail(sampleId: string): Promise<ApiResponse<SampleDetail>> {
+  return request<SampleDetail>(`/api/samples/${encodeURIComponent(sampleId)}`);
+}
+
+async function reviewSample(sampleId: string, decision: 'approved' | 'rejected'): Promise<ApiResponse<{ success: boolean; reviewStatus: string }>> {
+  return request<{ success: boolean; reviewStatus: string }>(`/api/samples/${encodeURIComponent(sampleId)}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  });
+}
+
 export {
   getToken,
   setToken,
@@ -252,6 +305,9 @@ export {
   removeWorkspace,
   syncWorkspace,
   fetchCentralOverview,
+  fetchSamples,
+  fetchSampleDetail,
+  reviewSample,
 };
 
 export type {
@@ -263,4 +319,7 @@ export type {
   GateBlockItem,
   WorkspaceEntry,
   CentralOverview,
+  SampleListItem,
+  SampleDetail,
+  SamplesData,
 };

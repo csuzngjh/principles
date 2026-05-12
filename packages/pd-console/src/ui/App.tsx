@@ -3,14 +3,16 @@ import { TasksPage } from "./pages/TasksPage.js";
 import { OverviewPage } from "./pages/OverviewPage.js";
 import { FeedbackPage } from "./pages/FeedbackPage.js";
 import { GatesPage } from "./pages/GatesPage.js";
+import { SamplesPage } from "./pages/SamplesPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 
-type Route = "overview" | "tasks" | "feedback" | "gates" | "settings";
+type Route = "overview" | "tasks" | "feedback" | "gates" | "samples" | "settings";
 
 function routeFromHash(hash: string): Route {
   if (hash === "#/tasks") return "tasks";
   if (hash === "#/feedback") return "feedback";
   if (hash === "#/gates") return "gates";
+  if (hash === "#/samples") return "samples";
   if (hash === "#/settings") return "settings";
   return "overview";
 }
@@ -20,6 +22,7 @@ const NAV_ITEMS: { route: Route; href: string; label: string }[] = [
   { route: "tasks", href: "#/tasks", label: "Tasks" },
   { route: "feedback", href: "#/feedback", label: "Feedback" },
   { route: "gates", href: "#/gates", label: "Gates" },
+  { route: "samples", href: "#/samples", label: "Samples" },
   { route: "settings", href: "#/settings", label: "Settings" },
 ];
 
@@ -73,6 +76,7 @@ const PAGE_MAP: Record<Route, () => React.JSX.Element> = {
   tasks: TasksPage,
   feedback: FeedbackPage,
   gates: GatesPage,
+  samples: SamplesPage,
   settings: SettingsPage,
 };
 

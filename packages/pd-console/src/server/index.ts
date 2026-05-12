@@ -21,6 +21,7 @@ import { WorkspaceService } from './models/WorkspaceService.js';
 import { handleOverviewRoute, disposeOverviewModels } from './routes/overview.js';
 import { handleGatesRoute, disposeGateModels } from './routes/gates.js';
 import { handleFeedbackRoute, disposeFeedbackModels } from './routes/feedback.js';
+import { handleSamplesRoute, disposeSampleModels } from './routes/samples.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
@@ -199,6 +200,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeOverviewModels();
   disposeGateModels();
   disposeFeedbackModels();
+  disposeSampleModels();
   services.workspaceService.dispose();
 
   try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }
@@ -265,6 +267,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/feedback' || urlPath.startsWith('/api/feedback/')) {
         const subPath = urlPath.slice('/api/feedback'.length);
         asyncHandler(() => handleFeedbackRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // GET /api/samples, /api/samples/:id, /api/samples/:id/review
+      if (urlPath === '/api/samples' || urlPath.startsWith('/api/samples/')) {
+        const subPath = urlPath.slice('/api/samples'.length);
+        asyncHandler(() => handleSamplesRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 

@@ -98,3 +98,47 @@ export interface SamplePreview {
   reviewStatus: string;
   createdAt: string;
 }
+
+export interface SampleListItem {
+  sampleId: string;
+  taskId: string;
+  title: string;
+  description: string;
+  reviewStatus: 'pending' | 'approved' | 'rejected';
+  confidence: number | null;
+  createdAt: string;
+}
+
+export interface SampleDetail {
+  sampleId: string;
+  taskId: string;
+  title: string;
+  description: string;
+  reviewStatus: 'pending' | 'approved' | 'rejected';
+  confidence: number | null;
+  createdAt: string;
+  artifactContent: unknown;
+  recommendation: {
+    title?: string;
+    text?: string;
+    triggerPattern?: string;
+    action?: string;
+    abstractedPrinciple?: string;
+  } | null;
+}
+
+export interface SamplesListOutput {
+  counters: Record<string, number>;
+  items: SampleListItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface SampleReviewInput {
+  decision: 'approved' | 'rejected';
+  note?: string;
+}
