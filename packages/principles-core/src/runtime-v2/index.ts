@@ -784,3 +784,26 @@ export type {
   SyntheticRuleHostInputOverrides,
   GoldenTraceFixtureInput,
 } from './golden-trace.js';
+// ── GoldenTrace Replay Validator (PRI-115) ────────────────────────────────
+
+export {
+  replayGoldenTrace,
+  DEFAULT_REPLAY_VALIDATOR_CONFIG,
+} from './golden-trace-replay-validator.js';
+
+export type {
+  ReplayValidatorCaseResult,
+  ReplayValidatorResult,
+  ReplayValidatorConfig,
+  ReplayEvaluateFn,
+} from './golden-trace-replay-validator.js';
+
+export {
+  replayValidateCode,
+} from './golden-trace-replay-adapter.js';
+
+export type {
+  ReplayCodeInput,
+  SandboxEvaluateLoader,
+} from './golden-trace-replay-adapter.js';
+

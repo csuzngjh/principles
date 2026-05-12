@@ -88,6 +88,9 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-84
   'internalization/pi-artifact.ts',
   'internalization/pi-artifact-store.ts',
+  // PRI-115
+  'golden-trace-replay-validator.ts',
+  'golden-trace-replay-adapter.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -122,6 +125,8 @@ const REQUIRED_TEST_FILES = [
   '../../prompt-builder/__tests__/focus-compression.test.ts',
   // PRI-76
   '../gfi/__tests__/gfi-kernel.test.ts',
+  // PRI-115
+  'golden-trace-replay-validator.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -1876,3 +1881,4 @@ describe('PRI-114: correction-proposal boundary', () => {
     expect(src).toContain("from './internalization/correction-proposal.js'");
   });
 });
+
