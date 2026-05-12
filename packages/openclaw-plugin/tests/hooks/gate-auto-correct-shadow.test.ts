@@ -54,6 +54,13 @@ vi.mock('../../src/core/principle-tree-ledger.js', () => ({
   listImplementationsByLifecycleState: vi.fn(() => []),
 }));
 
+vi.mock('../../src/hooks/gate-block-helper.js', () => ({
+  recordGateBlockAndReturn: vi.fn(() => ({
+    block: true as const,
+    reason: 'mocked block',
+  })),
+}));
+
 function makeValidProposal(overrides: Record<string, unknown> = {}) {
   return {
     proposedParams: { content: 'fixed content' },
