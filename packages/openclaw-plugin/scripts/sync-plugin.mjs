@@ -641,7 +641,7 @@ function ensureInstallDir() {
  * Reads the manifest to find declared skill paths, resolves them relative to
  * source root, then copies each to the install target.
  */
-function syncSkillDirs() {
+function syncSkillDirs(lang) {
     const manifestPath = join(SOURCE_DIR, 'openclaw.plugin.json');
     if (!existsSync(manifestPath)) return;
 
@@ -655,8 +655,16 @@ function syncSkillDirs() {
 
     if (!skillsPaths || !Array.isArray(skillsPaths)) return;
 
+    const selectedLang = lang || 'zh';
+    const langPrefix = `templates/langs/${selectedLang}/skills`;
+
     for (const sp of skillsPaths) {
         if (typeof sp !== 'string') continue;
+        // Only copy skills matching the selected language
+        if (!sp.startsWith(langPrefix)) {
+            console.log(`  ⏭️  skipping ${sp} (lang: ${selectedLang})`);
+            continue;
+        }
         const source = join(SOURCE_DIR, sp);
         const name = sp.split('/').pop();
         const target = join(INSTALL_DIR, 'skills', name);
@@ -667,6 +675,38 @@ function syncSkillDirs() {
         if (existsSync(target)) rmSync(target, { recursive: true, force: true });
         cpSync(source, target, { recursive: true });
         console.log(`  📄 skills/${name} (from ${sp})`);
+    }
+}
+
+/**
+ * Update the installed openclaw.plugin.json to only reference skills
+ * matching the selected language, preventing OpenClaw from loading
+ * both en and zh skill directories simultaneously.
+ */
+function filterInstalledManifestSkills(lang) {
+    const installedManifestPath = join(INSTALL_DIR, 'openclaw.plugin.json');
+    if (!existsSync(installedManifestPath)) return;
+
+    try {
+        const manifest = JSON.parse(readFileSync(installedManifestPath, 'utf-8'));
+        if (!manifest.skills || !Array.isArray(manifest.skills)) return;
+
+        const selectedLang = lang || 'zh';
+        const filtered = manifest.skills.filter(sp => {
+            if (typeof sp !== 'string') return false;
+            return sp.includes(`/langs/${selectedLang}/`);
+        });
+
+        if (filtered.length === 0) {
+            console.warn(`  ⚠️  No skills match language "${selectedLang}" in installed manifest`);
+            return;
+        }
+
+        manifest.skills = filtered;
+        writeFileSync(installedManifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+        console.log(`  📄 openclaw.plugin.json skills filtered to lang: ${selectedLang}`);
+    } catch (err) {
+        console.warn(`  ⚠️  Failed to filter installed manifest skills: ${err.message}`);
     }
 }
 
@@ -1134,7 +1174,8 @@ function main() {
 
     console.log('\n📦 Syncing files to OpenClaw...');
     for (const item of SYNC_ITEMS) syncItem(item);
-    syncSkillDirs();
+    syncSkillDirs(args.lang);
+    filterInstalledManifestSkills(args.lang);
     syncPdCli();
 
     injectLocalWorkspacePackages();

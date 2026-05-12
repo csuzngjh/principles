@@ -143,16 +143,16 @@ export class DefaultTrainerValidator implements TrainerValidator {
       errors.push('ruleCandidate must be an object');
     } else {
       const rc = output.ruleCandidate as unknown as Record<string, unknown>;
-      if (typeof rc.toolScope !== 'string' || (rc.toolScope as string).trim() === '') {
+      if (typeof rc.toolScope !== 'string' || (rc.toolScope).trim() === '') {
         errors.push('ruleCandidate.toolScope must be non-empty string');
       }
-      if (typeof rc.triggerCondition !== 'string' || (rc.triggerCondition as string).trim() === '') {
+      if (typeof rc.triggerCondition !== 'string' || (rc.triggerCondition).trim() === '') {
         errors.push('ruleCandidate.triggerCondition must be non-empty string');
       }
       if (!TRAINER_DECISIONS.includes(rc.proposedDecision as 'allow' | 'block' | 'require_approval' | 'auto_correct')) {
         errors.push(`ruleCandidate.proposedDecision must be one of ${TRAINER_DECISIONS.join('/')}, got ${String(rc.proposedDecision)}`);
       }
-      if (typeof rc.rationale !== 'string' || (rc.rationale as string).trim() === '') {
+      if (typeof rc.rationale !== 'string' || (rc.rationale).trim() === '') {
         errors.push('ruleCandidate.rationale must be non-empty string');
       }
       if (typeof rc.confidence !== 'number' || !Number.isFinite(rc.confidence)) {
@@ -196,7 +196,7 @@ export class DefaultTrainerValidator implements TrainerValidator {
       errors.push('sourceTrace must be an object');
     } else {
       const st = output.sourceTrace as unknown as Record<string, unknown>;
-      if (typeof st.rolloutReviewerArtifactId !== 'string' || (st.rolloutReviewerArtifactId as string).trim() === '') {
+      if (typeof st.rolloutReviewerArtifactId !== 'string' || (st.rolloutReviewerArtifactId).trim() === '') {
         errors.push('sourceTrace.rolloutReviewerArtifactId must be non-empty string');
       } else if (expectedSourceRolloutReviewerArtifactId && st.rolloutReviewerArtifactId !== expectedSourceRolloutReviewerArtifactId) {
         errors.push(`sourceTrace.rolloutReviewerArtifactId mismatch: expected ${expectedSourceRolloutReviewerArtifactId}, got ${st.rolloutReviewerArtifactId}`);
