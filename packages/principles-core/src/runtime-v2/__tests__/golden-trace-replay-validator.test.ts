@@ -189,4 +189,59 @@ describe('replayGoldenTrace', () => {
     const failed = result.perCaseResults.find(c => !c.passed);
     expect(failed?.caseId).toBe('neg-bash-force');
   });
+  it('requireApproval accepted as valid block decision', () => {
+    const requireApprovalEvaluate: ReplayEvaluateFn = () => ({
+      decision: 'requireApproval' as const,
+      matched: true,
+      reason: 'requires manual approval',
+      confidence: 0.9,
+    });
+    const cases: GoldenTraceCase[] = [
+      {
+        caseId: 'block-ra',
+        kind: 'negative',
+        toolName: 'bash',
+        params: { command: 'rm -rf /' },
+        expectedDecision: 'block',
+      },
+    ];
+    const result = replayGoldenTrace(requireApprovalEvaluate, cases);
+    expect(result.passed).toBe(true);
+    expect(result.perCaseResults[0]?.actualDecision).toBe('requireApproval');
+  });
+
+  it('applicationMode mismatch fails with repair hint', () => {
+    const liveModeEvaluate: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct' as const,
+      matched: true,
+      reason: 'auto-corrected params',
+      confidence: 0.9,
+      correctionProposal: {
+        proposedParams: { command: 'rm -i /tmp/safe' },
+        correctedFields: [{ field: 'command', original: null, proposed: 'rm -i /tmp/safe', reason: 'corrected' }],
+        applicationMode: 'live' as const,
+        confidence: 0.9,
+        ruleId: 'test-rule',
+        notifyAgent: true,
+      },
+    });
+    const cases: GoldenTraceCase[] = [
+      {
+        caseId: 'ac-mode-mismatch',
+        kind: 'negative',
+        toolName: 'bash',
+        params: { command: 'rm -rf /' },
+        expectedDecision: 'propose_correction',
+        expectedProposedParams: { command: 'rm -i /tmp/safe' },
+        expectedApplicationMode: 'shadow',
+      },
+    ];
+    const result = replayGoldenTrace(liveModeEvaluate, cases);
+    expect(result.passed).toBe(false);
+    const [caseResult] = result.perCaseResults;
+    expect(caseResult?.applicationModeMatch).toBe(false);
+    expect(caseResult?.failureReason).toContain('applicationMode mismatch');
+    expect(caseResult?.repairHint).toContain('applicationMode');
+  });
+
 });

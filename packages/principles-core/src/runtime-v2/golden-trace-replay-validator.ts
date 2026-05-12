@@ -205,15 +205,18 @@ function validateCase(
   }
 
   const result = evalOutcome.value;
-  baseResult.actualDecision = result.decision;
+  const caseResult = {
+    ...baseResult,
+    actualDecision: result.decision,
+  };
 
   switch (traceCase.expectedDecision) {
     case 'allow':
-      return validateAllowCase(baseResult, result);
+      return validateAllowCase(caseResult, result);
     case 'block':
-      return validateBlockCase(baseResult, result);
+      return validateBlockCase(caseResult, result);
     case 'propose_correction':
-      return validateProposeCorrectionCase(baseResult, result, traceCase);
+      return validateProposeCorrectionCase(caseResult, result, traceCase);
     default:
       return {
         ...baseResult,

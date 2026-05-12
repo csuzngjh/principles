@@ -37,19 +37,6 @@ export function replayValidateCode(
   loadEvaluate: SandboxEvaluateLoader,
 ): ReplayValidatorResult {
   const config = { ...DEFAULT_REPLAY_VALIDATOR_CONFIG, ...input.config };
-
-  if (input.cases.length === 0) {
-    return {
-      passed: true,
-      totalCases: 0,
-      passedCases: 0,
-      failedCases: 0,
-      perCaseResults: [],
-      failureReasons: [],
-      repairHints: [],
-    };
-  }
-
   const evaluateFn = loadEvaluate(input.code);
   return replayGoldenTrace(evaluateFn, input.cases, config);
 }

@@ -211,11 +211,24 @@ export class PrincipleCompiler {
     // Step 4.5: Replay validation against GoldenTrace (PRI-115)
     const replayCases = this.buildGoldenTraceCases(patterns, context);
     if (replayCases.length > 0) {
+      let moduleExports: { evaluate?: unknown };
       try {
-        const moduleExports = loadRuleImplementationModule(code, `replay-${principleId}.js`);
-        if (typeof moduleExports.evaluate !== 'function') {
-          return { success: false, principleId, reason: 'replay: no evaluate export', degraded: true };
-        }
+        moduleExports = loadRuleImplementationModule(code, `replay-${principleId}.js`);
+      } catch (err) {
+        return {
+          success: false,
+          principleId,
+          reason: `module_load_error: ${(err as Error).message}`,
+          code,
+          degraded: true,
+        };
+      }
+
+      if (typeof moduleExports.evaluate !== 'function') {
+        return { success: false, principleId, reason: 'replay: no evaluate export', degraded: true };
+      }
+
+      try {
         const evaluateFn = moduleExports.evaluate as ReplayEvaluateFn;
         const replayResult = replayGoldenTrace(evaluateFn, replayCases);
         if (!replayResult.passed) {
@@ -233,6 +246,7 @@ export class PrincipleCompiler {
           success: false,
           principleId,
           reason: `replay_error: ${(err as Error).message}`,
+          code,
           degraded: true,
         };
       }
@@ -275,7 +289,8 @@ export class PrincipleCompiler {
     // Skip replay when the pattern has no regex qualifier -- the generated template
     // blocks ALL calls to the tool, making it impossible to construct a passing
     // positive case. Replay is only meaningful when the template is selective.
-    if (!pattern.commandRegex && !pattern.pathRegex && !pattern.contentRegex) return [];
+    // Also skip contentRegex-only patterns: synthetic content params are not meaningful.
+    if (!pattern.commandRegex && !pattern.pathRegex) return [];
     const negativeParams: Record<string, unknown> = {};
     if (pattern.commandRegex) negativeParams.command = 'rm -rf /';
     else negativeParams.path = '/etc/passwd';
