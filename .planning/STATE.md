@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.9
 milestone_name: M10 — Nocturnal Artificer LLM Upgrade — IN PROGRESS
 status: completed
-last_updated: "2026-05-07T00:58:20.623Z"
+last_updated: "2026-05-12T07:15:03.515Z"
 last_activity: 2026-04-30 -- M10 Artificer LLM upgrade complete on fix/nocturnal-artificer-llm-upgrade
 progress:
-  total_phases: 81
-  completed_phases: 71
-  total_plans: 139
-  completed_plans: 148
-  percent: 100
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 3
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State: Principles
