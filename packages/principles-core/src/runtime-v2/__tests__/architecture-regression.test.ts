@@ -1605,6 +1605,7 @@ describe('PRI-113 GoldenTrace boundary', () => {
     expect(mod).toHaveProperty('GoldenTraceSchema');
     expect(mod).toHaveProperty('validateGoldenTrace');
     expect(mod).toHaveProperty('createGoldenTraceFixture');
+    expect(mod).toHaveProperty('createSyntheticRuleHostInput');
   });
 });
 

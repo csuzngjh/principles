@@ -16,6 +16,11 @@ export interface MiniMaxTestConfig {
   maxRetries: number;
 }
 
+export interface RetryOptions {
+  maxRetries?: number;
+  delayMs?: number;
+}
+
 export function getMiniMaxConfig(): MiniMaxTestConfig | null {
   const apiKey = process.env.MINIMAX_CN_API_KEY;
   if (!apiKey) {
@@ -29,12 +34,4 @@ export function getMiniMaxConfig(): MiniMaxTestConfig | null {
     timeoutMs: 120_000,
     maxRetries: 2,
   };
-}
-
-export function skipIfNoMiniMaxApiKey(context: { skip: (reason: string) => void }): MiniMaxTestConfig {
-  const config = getMiniMaxConfig();
-  if (!config) {
-    context.skip('MINIMAX_CN_API_KEY environment variable not set — skipping real LLM E2E test');
-  }
-  return config as MiniMaxTestConfig;
 }
