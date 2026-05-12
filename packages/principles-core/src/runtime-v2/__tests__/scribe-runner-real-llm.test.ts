@@ -14,33 +14,21 @@ import { PiAiRuntimeAdapter } from '../adapter/pi-ai-runtime-adapter.js';
 import { StoreEventEmitter } from '../store/event-emitter.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
-import { getMiniMaxConfig } from './fixtures/llm-e2e-config.js';
-import type { MiniMaxTestConfig } from './fixtures/llm-e2e-config.js';
+import { getMiniMaxConfig, runWithRetry } from './fixtures/index.js';
+import type { MiniMaxTestConfig } from './fixtures/index.js';
 
-const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-scribe-${process.pid}`);
-const hasApiKey = !!process.env.MINIMAX_CN_API_KEY;
+const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-scribe-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
 
-async function runWithRetry<T extends { status: string }>(
-  runner: { run(id: string): Promise<T> },
-  taskId: string,
-  maxRetries = 3,
-): Promise<T> {
-  let result = await runner.run(taskId);
-  for (let retry = 0; retry < maxRetries && result.status === 'retried'; retry++) {
-    await new Promise(r => setTimeout(r, 3000));
-    result = await runner.run(taskId);
-  }
-  return result;
-}
+const config = getMiniMaxConfig();
 
-describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
-  const config = getMiniMaxConfig() as MiniMaxTestConfig;
+describe.skipIf(!config)('ScribeRunner Real LLM E2E (MiniMax)', () => {
+  const cfg = config as MiniMaxTestConfig;
   const adapterConfig = {
-    provider: config.provider,
-    model: config.model,
-    apiKeyEnv: config.apiKeyEnv,
-    maxRetries: config.maxRetries,
-    timeoutMs: config.timeoutMs,
+    provider: cfg.provider,
+    model: cfg.model,
+    apiKeyEnv: cfg.apiKeyEnv,
+    maxRetries: cfg.maxRetries,
+    timeoutMs: cfg.timeoutMs,
   };
 
   let testDir = '';
@@ -81,11 +69,15 @@ describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
   });
 
   afterEach(async () => {
-    stateManager.close();
     try {
-      fs.rmSync(TMP_ROOT, { recursive: true, force: true });
-    } catch {
-      // ignore
+      stateManager.close();
+    } catch (err) {
+      console.warn(`[afterEach] stateManager.close() failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    } catch (err) {
+      console.warn(`[afterEach] Failed to clean test dir ${testDir}: ${err instanceof Error ? err.message : String(err)}`);
     }
   });
 
@@ -100,7 +92,7 @@ describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [],
         channel: 'prompt',
-        timeoutMs: config.timeoutMs,
+        timeoutMs: cfg.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -108,7 +100,6 @@ describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
 
     const dreamerResult = await runWithRetry(dreamerRunner, dreamerTaskId);
     expect(dreamerResult.status).toBe('succeeded');
-    console.log(`Dreamer succeeded: artifact=${dreamerResult.artifactId}`);
 
     const philosopherTaskId = `philosopher-for-scribe-${Date.now()}`;
     await stateManager.createTask({
@@ -120,7 +111,7 @@ describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [dreamerTaskId],
         channel: 'prompt',
-        timeoutMs: config.timeoutMs,
+        timeoutMs: cfg.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -128,7 +119,6 @@ describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
 
     const philosopherResult = await runWithRetry(philosopherRunner, philosopherTaskId);
     expect(philosopherResult.status).toBe('succeeded');
-    console.log(`Philosopher succeeded: artifact=${philosopherResult.artifactId}`);
 
     return { dreamerTaskId, philosopherTaskId };
   }
@@ -146,7 +136,7 @@ describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [philosopherTaskId],
         channel: 'prompt',
-        timeoutMs: config.timeoutMs,
+        timeoutMs: cfg.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -154,20 +144,10 @@ describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
 
     const scribeResult = await runWithRetry(scribeRunner, scribeTaskId);
 
-    console.log('ScribeRunner result:', JSON.stringify({
-      status: scribeResult.status,
-      taskId: scribeResult.taskId,
-      errorCategory: scribeResult.errorCategory,
-      failureReason: scribeResult.failureReason,
-      attemptCount: scribeResult.attemptCount,
-    }, null, 2));
-
     expect(scribeResult.status).toBe('succeeded');
     expect(scribeResult.taskId).toBe(scribeTaskId);
     expect(scribeResult.artifactId).toBeDefined();
     expect(scribeResult.resultRef).toContain('scribe://');
-
-    console.log(`✅ ScribeRunner succeeded with artifact: ${scribeResult.artifactId}`);
   }, 360_000);
 
   it('should validate ScribeOutputV1 schema with real LLM output', async () => {
@@ -183,7 +163,7 @@ describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [philosopherTaskId],
         channel: 'prompt',
-        timeoutMs: config.timeoutMs,
+        timeoutMs: cfg.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -201,7 +181,5 @@ describe.skipIf(!hasApiKey)('ScribeRunner Real LLM E2E (MiniMax)', () => {
     expect(Array.isArray(scribeResult.output?.principleDraft?.antiPatterns)).toBe(true);
     expect(typeof scribeResult.output?.principleDraft?.confidence).toBe('number');
     expect(scribeResult.output?.sourceTrace?.philosopherArtifactId).toBeDefined();
-
-    console.log(`✅ Scribe schema validation passed: title="${String(scribeResult.output?.principleDraft?.title).slice(0, 50)}"`);
   }, 360_000);
 });

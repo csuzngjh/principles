@@ -20,33 +20,21 @@ import { PiAiRuntimeAdapter } from '../adapter/pi-ai-runtime-adapter.js';
 import { StoreEventEmitter } from '../store/event-emitter.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
-import { getMiniMaxConfig } from './fixtures/llm-e2e-config.js';
-import type { MiniMaxTestConfig } from './fixtures/llm-e2e-config.js';
+import { getMiniMaxConfig, runWithRetry } from './fixtures/index.js';
+import type { MiniMaxTestConfig } from './fixtures/index.js';
 
-const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-full-chain-${process.pid}`);
-const hasApiKey = !!process.env.MINIMAX_CN_API_KEY;
+const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-full-chain-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
 
-async function runWithRetry<T extends { status: string }>(
-  runner: { run(id: string): Promise<T> },
-  taskId: string,
-  maxRetries = 5,
-): Promise<T> {
-  let result = await runner.run(taskId);
-  for (let retry = 0; retry < maxRetries && result.status === 'retried'; retry++) {
-    await new Promise(r => setTimeout(r, 5000));
-    result = await runner.run(taskId);
-  }
-  return result;
-}
+const config = getMiniMaxConfig();
 
-describe.skipIf(!hasApiKey)('Full Internalization Chain Real LLM E2E (MiniMax)', () => {
-  const config = getMiniMaxConfig() as MiniMaxTestConfig;
+describe.skipIf(!config)('Full Internalization Chain Real LLM E2E (MiniMax)', () => {
+  const cfg = config as MiniMaxTestConfig;
   const adapterConfig = {
-    provider: config.provider,
-    model: config.model,
-    apiKeyEnv: config.apiKeyEnv,
-    maxRetries: config.maxRetries,
-    timeoutMs: config.timeoutMs,
+    provider: cfg.provider,
+    model: cfg.model,
+    apiKeyEnv: cfg.apiKeyEnv,
+    maxRetries: cfg.maxRetries,
+    timeoutMs: cfg.timeoutMs,
   };
 
   let testDir = '';
@@ -97,13 +85,19 @@ describe.skipIf(!hasApiKey)('Full Internalization Chain Real LLM E2E (MiniMax)',
   });
 
   afterEach(async () => {
-    stateManager.close();
     try {
-      fs.rmSync(TMP_ROOT, { recursive: true, force: true });
-    } catch {
-      // ignore
+      stateManager.close();
+    } catch (err) {
+      console.warn(`[afterEach] stateManager.close() failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    } catch (err) {
+      console.warn(`[afterEach] Failed to clean test dir ${testDir}: ${err instanceof Error ? err.message : String(err)}`);
     }
   });
+
+  const retryOpts = { maxRetries: 5, delayMs: 5000 };
 
   async function createTask(taskKind: string, depTaskIds: string[]) {
     const taskId = `${taskKind}-e2e-${Date.now()}`;
@@ -116,7 +110,7 @@ describe.skipIf(!hasApiKey)('Full Internalization Chain Real LLM E2E (MiniMax)',
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: depTaskIds,
         channel: 'prompt',
-        timeoutMs: config.timeoutMs,
+        timeoutMs: cfg.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -126,90 +120,65 @@ describe.skipIf(!hasApiKey)('Full Internalization Chain Real LLM E2E (MiniMax)',
 
   it('should complete full Dreamer→Philosopher→Scribe→Artificer→Evaluator→RolloutReviewer chain', async () => {
     const dreamerTaskId = await createTask('dreamer', []);
-    const dreamerResult = await runWithRetry(dreamerRunner, dreamerTaskId);
-    if (dreamerResult.status !== 'succeeded') {
-      console.error('Dreamer failed:', JSON.stringify(dreamerResult, null, 2));
-    }
+    const dreamerResult = await runWithRetry(dreamerRunner, dreamerTaskId, retryOpts);
     expect(dreamerResult.status).toBe('succeeded');
-    console.log(`✅ Step 1/6 Dreamer: ${dreamerResult.artifactId}`);
 
     const philosopherTaskId = await createTask('philosopher', [dreamerTaskId]);
-    const philosopherResult = await runWithRetry(philosopherRunner, philosopherTaskId);
+    const philosopherResult = await runWithRetry(philosopherRunner, philosopherTaskId, retryOpts);
     expect(philosopherResult.status).toBe('succeeded');
-    console.log(`✅ Step 2/6 Philosopher: ${philosopherResult.artifactId}`);
 
     const scribeTaskId = await createTask('scribe', [philosopherTaskId]);
-    const scribeResult = await runWithRetry(scribeRunner, scribeTaskId);
+    const scribeResult = await runWithRetry(scribeRunner, scribeTaskId, retryOpts);
     expect(scribeResult.status).toBe('succeeded');
-    console.log(`✅ Step 3/6 Scribe: ${scribeResult.artifactId}`);
 
     const artificerTaskId = await createTask('artificer', [scribeTaskId]);
-    const artificerResult = await runWithRetry(artificerRunner, artificerTaskId);
+    const artificerResult = await runWithRetry(artificerRunner, artificerTaskId, retryOpts);
     expect(artificerResult.status).toBe('succeeded');
-    console.log(`✅ Step 4/6 Artificer: ${artificerResult.artifactId}`);
 
     const evaluatorTaskId = await createTask('evaluator', [artificerTaskId]);
-    const evaluatorResult = await runWithRetry(evaluatorRunner, evaluatorTaskId);
-    if (evaluatorResult.status !== 'succeeded') {
-      console.error('Evaluator failed:', JSON.stringify(evaluatorResult, null, 2));
-    }
+    const evaluatorResult = await runWithRetry(evaluatorRunner, evaluatorTaskId, retryOpts);
     expect(evaluatorResult.status).toBe('succeeded');
-    console.log(`✅ Step 5/6 Evaluator: ${evaluatorResult.artifactId}`);
 
     const rolloutTaskId = await createTask('rollout_reviewer', [evaluatorTaskId]);
-    const rolloutResult = await runWithRetry(rolloutReviewerRunner, rolloutTaskId);
-    if (rolloutResult.status !== 'succeeded') {
-      console.error('RolloutReviewer failed:', JSON.stringify(rolloutResult, null, 2));
-    }
+    const rolloutResult = await runWithRetry(rolloutReviewerRunner, rolloutTaskId, retryOpts);
     expect(rolloutResult.status).toBe('succeeded');
-    console.log(`✅ Step 6/6 RolloutReviewer: ${rolloutResult.artifactId}`);
-
-    console.log('🎉 Full internalization chain completed successfully!');
   }, 720_000);
 
   it('should validate output schemas at each chain step', async () => {
     const dreamerTaskId = await createTask('dreamer', []);
-    const dreamerResult = await runWithRetry(dreamerRunner, dreamerTaskId);
+    const dreamerResult = await runWithRetry(dreamerRunner, dreamerTaskId, retryOpts);
     expect(dreamerResult.status).toBe('succeeded');
     expect(dreamerResult.output?.valid).toBe(true);
     expect(Array.isArray(dreamerResult.output?.candidates)).toBe(true);
 
     const philosopherTaskId = await createTask('philosopher', [dreamerTaskId]);
-    const philosopherResult = await runWithRetry(philosopherRunner, philosopherTaskId);
+    const philosopherResult = await runWithRetry(philosopherRunner, philosopherTaskId, retryOpts);
     expect(philosopherResult.status).toBe('succeeded');
     expect(philosopherResult.output?.thesis).toBeDefined();
     expect(philosopherResult.output?.principleCandidate?.title).toBeDefined();
 
     const scribeTaskId = await createTask('scribe', [philosopherTaskId]);
-    const scribeResult = await runWithRetry(scribeRunner, scribeTaskId);
+    const scribeResult = await runWithRetry(scribeRunner, scribeTaskId, retryOpts);
     expect(scribeResult.status).toBe('succeeded');
     expect(scribeResult.output?.principleDraft?.title).toBeDefined();
     expect(scribeResult.output?.principleDraft?.statement).toBeDefined();
 
     const artificerTaskId = await createTask('artificer', [scribeTaskId]);
-    const artificerResult = await runWithRetry(artificerRunner, artificerTaskId);
+    const artificerResult = await runWithRetry(artificerRunner, artificerTaskId, retryOpts);
     expect(artificerResult.status).toBe('succeeded');
     expect(artificerResult.output?.implementationPlan?.summary).toBeDefined();
     expect(artificerResult.output?.implementationPlan?.targetSurface).toBeDefined();
 
     const evaluatorTaskId = await createTask('evaluator', [artificerTaskId]);
-    const evaluatorResult = await runWithRetry(evaluatorRunner, evaluatorTaskId);
-    if (evaluatorResult.status !== 'succeeded') {
-      console.error('Evaluator (schema test) failed:', JSON.stringify(evaluatorResult, null, 2));
-    }
+    const evaluatorResult = await runWithRetry(evaluatorRunner, evaluatorTaskId, retryOpts);
     expect(evaluatorResult.status).toBe('succeeded');
     expect(evaluatorResult.output?.evaluation?.decision).toMatch(/^(approved|needs_revision|rejected)$/);
     expect(typeof evaluatorResult.output?.evaluation?.score).toBe('number');
 
     const rolloutTaskId = await createTask('rollout_reviewer', [evaluatorTaskId]);
-    const rolloutResult = await runWithRetry(rolloutReviewerRunner, rolloutTaskId);
-    if (rolloutResult.status !== 'succeeded') {
-      console.error('RolloutReviewer (schema test) failed:', JSON.stringify(rolloutResult, null, 2));
-    }
+    const rolloutResult = await runWithRetry(rolloutReviewerRunner, rolloutTaskId, retryOpts);
     expect(rolloutResult.status).toBe('succeeded');
     expect(rolloutResult.output?.review?.decision).toMatch(/^(approve_rollout|needs_revision|reject)$/);
     expect(typeof rolloutResult.output?.review?.confidence).toBe('number');
-
-    console.log('🎉 All output schemas validated across 6-step chain!');
   }, 720_000);
 });

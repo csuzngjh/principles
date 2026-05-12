@@ -10,33 +10,21 @@ import { PiAiRuntimeAdapter } from '../adapter/pi-ai-runtime-adapter.js';
 import { StoreEventEmitter } from '../store/event-emitter.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
-import { getMiniMaxConfig } from './fixtures/llm-e2e-config.js';
-import type { MiniMaxTestConfig } from './fixtures/llm-e2e-config.js';
+import { getMiniMaxConfig, runWithRetry } from './fixtures/index.js';
+import type { MiniMaxTestConfig } from './fixtures/index.js';
 
-const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-dreamer-${process.pid}`);
-const hasApiKey = !!process.env.MINIMAX_CN_API_KEY;
+const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-dreamer-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
 
-async function runWithRetry<T extends { status: string }>(
-  runner: { run(id: string): Promise<T> },
-  taskId: string,
-  maxRetries = 3,
-): Promise<T> {
-  let result = await runner.run(taskId);
-  for (let retry = 0; retry < maxRetries && result.status === 'retried'; retry++) {
-    await new Promise(r => setTimeout(r, 3000));
-    result = await runner.run(taskId);
-  }
-  return result;
-}
+const config = getMiniMaxConfig();
 
-describe.skipIf(!hasApiKey)('DreamerRunner Real LLM E2E (MiniMax)', () => {
-  const config = getMiniMaxConfig() as MiniMaxTestConfig;
+describe.skipIf(!config)('DreamerRunner Real LLM E2E (MiniMax)', () => {
+  const cfg = config as MiniMaxTestConfig;
   const adapterConfig = {
-    provider: config.provider,
-    model: config.model,
-    apiKeyEnv: config.apiKeyEnv,
-    maxRetries: config.maxRetries,
-    timeoutMs: config.timeoutMs,
+    provider: cfg.provider,
+    model: cfg.model,
+    apiKeyEnv: cfg.apiKeyEnv,
+    maxRetries: cfg.maxRetries,
+    timeoutMs: cfg.timeoutMs,
   };
 
   let testDir = '';
@@ -76,11 +64,15 @@ describe.skipIf(!hasApiKey)('DreamerRunner Real LLM E2E (MiniMax)', () => {
   });
 
   afterEach(async () => {
-    stateManager.close();
     try {
-      fs.rmSync(TMP_ROOT, { recursive: true, force: true });
-    } catch {
-      // ignore
+      stateManager.close();
+    } catch (err) {
+      console.warn(`[afterEach] stateManager.close() failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    try {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    } catch (err) {
+      console.warn(`[afterEach] Failed to clean test dir ${testDir}: ${err instanceof Error ? err.message : String(err)}`);
     }
   });
 
@@ -95,21 +87,13 @@ describe.skipIf(!hasApiKey)('DreamerRunner Real LLM E2E (MiniMax)', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [],
         channel: 'prompt',
-        timeoutMs: config.timeoutMs,
+        timeoutMs: cfg.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
     });
 
     const result = await runWithRetry(runner, taskId);
-
-    console.log('DreamerRunner result:', JSON.stringify({
-      status: result.status,
-      taskId: result.taskId,
-      errorCategory: result.errorCategory,
-      failureReason: result.failureReason,
-      attemptCount: result.attemptCount,
-    }, null, 2));
 
     expect(result.status).toBe('succeeded');
     expect(result.taskId).toBe(taskId);
@@ -123,8 +107,6 @@ describe.skipIf(!hasApiKey)('DreamerRunner Real LLM E2E (MiniMax)', () => {
 
     const updatedTask = await stateManager.getTask(taskId);
     expect(updatedTask?.status).toBe('succeeded');
-
-    console.log(`✅ DreamerRunner succeeded with artifact: ${result.artifactId}`);
   }, 120_000);
 
   it('should handle real LLM output and validate DreamerOutputV1 schema', async () => {
@@ -138,7 +120,7 @@ describe.skipIf(!hasApiKey)('DreamerRunner Real LLM E2E (MiniMax)', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [],
         channel: 'prompt',
-        timeoutMs: config.timeoutMs,
+        timeoutMs: cfg.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -162,8 +144,6 @@ describe.skipIf(!hasApiKey)('DreamerRunner Real LLM E2E (MiniMax)', () => {
         expect(candidate.riskLevel).toMatch(/^(low|medium|high)$/);
       }
     }
-
-    console.log(`✅ Schema validation passed: ${result.output?.candidates?.length} candidates`);
   }, 120_000);
 
   it('should correctly transition task state through the pipeline', async () => {
@@ -177,7 +157,7 @@ describe.skipIf(!hasApiKey)('DreamerRunner Real LLM E2E (MiniMax)', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [],
         channel: 'prompt',
-        timeoutMs: config.timeoutMs,
+        timeoutMs: cfg.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -192,7 +172,5 @@ describe.skipIf(!hasApiKey)('DreamerRunner Real LLM E2E (MiniMax)', () => {
     expect(succeededTask?.status).toBe('succeeded');
     expect(succeededTask?.resultRef).toContain('dreamer://');
     expect(succeededTask?.attemptCount).toBe(1);
-
-    console.log(`✅ State transition: pending → leased → succeeded`);
   }, 120_000);
 });
