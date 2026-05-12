@@ -6,7 +6,7 @@
   "scripts": {
     "build:ui": "node scripts/build-ui.mjs",
     "build": "npm run build:ui && npx tsc --noEmit",
-    "dev": "npx tsx src/server.ts --port 3100",
+    "dev": "npx tsx src/server/index.ts --port 3100",
     "start": "node dist/server.js"
   },
   "dependencies": {
@@ -15,6 +15,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.7.0",

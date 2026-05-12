@@ -6,6 +6,89 @@ import type {
   ActivityEvent,
 } from "../types.js";
 
+interface OverviewHealth {
+  status: 'healthy' | 'degraded' | 'error';
+  gfi: { current: number; stage: string; peakToday: number; threshold: number };
+  trust: { stage: number; score: number };
+  principles: { candidate: number; probation: number; active: number; deprecated: number };
+  queue: { pending: number; inProgress: number; completed: number };
+}
+
+interface OverviewData {
+  workspaceDir: string;
+  generatedAt: string;
+  dataFreshness: 'fresh' | 'stale' | 'error';
+  summary: {
+    repeatErrorRate: number;
+    userCorrectionRate: number;
+    pendingSamples: number;
+    approvedSamples: number;
+    painEvents: number;
+    principleEventCount: number;
+    gateBlocks: number;
+    taskOutcomes: number;
+  };
+  health: OverviewHealth;
+  dailyTrend: Array<{ day: string; toolCalls: number; failures: number; userCorrections: number; painEvents: number }>;
+  topRegressions: Array<{ toolName: string; errorType: string; occurrences: number }>;
+  sampleQueue: { counters: Record<string, number>; preview: unknown[] };
+}
+
+interface GateStats {
+  generatedAt: string;
+  today: { gfiBlocks: number; stageBlocks: number; bypassAttempts: number };
+  trust: { stage: number; score: number; status: 'healthy' | 'warning' | 'critical' };
+  evolution: { tier: string; points: number; status: string };
+  gfi: {
+    current: number;
+    peakToday: number;
+    threshold: number;
+    trend: Array<{ hour: string; value: number }>;
+    sources: Record<string, number>;
+    stage: 'stable' | 'elevated' | 'critical' | 'saturated';
+  };
+}
+
+interface FeedbackGfi {
+  current: number;
+  peakToday: number;
+  threshold: number;
+  trend: Array<{ hour: string; value: number }>;
+  sources: Record<string, number>;
+}
+
+interface EmpathyEvent {
+  timestamp: string;
+  severity: 'low' | 'medium' | 'high';
+  score: number;
+  reason: string;
+  origin: string;
+  gfiAfter: number;
+}
+
+interface GateBlockItem {
+  timestamp: string;
+  toolName: string;
+  filePath: string | null;
+  reason: string;
+  gateType: 'gfi' | 'stage' | 'p03' | 'other';
+  gfi: number;
+  trustStage: number;
+}
+
+interface WorkspaceEntry {
+  name: string;
+  path: string;
+  lastSync: string | null;
+  config: { workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean } | null;
+}
+
+interface CentralOverview {
+  generatedAt: string;
+  workspaceCount: number;
+  workspaces: Array<{ name: string; path: string; status: 'healthy' | 'degraded' | 'error'; gfi: number; principleCount: number }>;
+}
+
 function getToken(): string | null {
   return sessionStorage.getItem("pd_token");
 }
@@ -39,8 +122,10 @@ async function request<T>(
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}`;
       try {
-        const parsed = await response.json() as { error?: string };
-        if (parsed && typeof parsed.error === 'string') {
+        const parsed = await response.json() as { error?: string; message?: string };
+        if (parsed && typeof parsed.message === 'string') {
+          errorMessage = parsed.message;
+        } else if (parsed && typeof parsed.error === 'string') {
           errorMessage = parsed.error;
         }
       } catch {
@@ -49,8 +134,11 @@ async function request<T>(
       return { success: false, error: errorMessage };
     }
 
-    const data: T = await response.json() as T;
-    return { success: true, data };
+    const json = await response.json() as { success?: boolean; data?: T };
+    if (json.success === true && json.data !== undefined) {
+      return { success: true, data: json.data };
+    }
+    return { success: true, data: json as unknown as T };
   } catch (err) {
     return {
       success: false,
@@ -67,28 +155,16 @@ async function fetchTaskEvidence(id: string): Promise<ApiResponse<TaskEvidence>>
   return request<TaskEvidence>(`/api/tasks/${id}/evidence`);
 }
 
-async function approveTask(
-  id: string,
-): Promise<ApiResponse<{ success: boolean }>> {
-  return request<{ success: boolean }>(`/api/tasks/${id}/approve`, {
-    method: "POST",
-  });
+async function approveTask(id: string): Promise<ApiResponse<{ success: boolean }>> {
+  return request<{ success: boolean }>(`/api/tasks/${id}/approve`, { method: "POST" });
 }
 
-async function rejectTask(
-  id: string,
-): Promise<ApiResponse<{ success: boolean }>> {
-  return request<{ success: boolean }>(`/api/tasks/${id}/reject`, {
-    method: "POST",
-  });
+async function rejectTask(id: string): Promise<ApiResponse<{ success: boolean }>> {
+  return request<{ success: boolean }>(`/api/tasks/${id}/reject`, { method: "POST" });
 }
 
-async function cleanupTask(
-  id: string,
-): Promise<ApiResponse<{ success: boolean }>> {
-  return request<{ success: boolean }>(`/api/tasks/${id}/cleanup`, {
-    method: "POST",
-  });
+async function cleanupTask(id: string): Promise<ApiResponse<{ success: boolean }>> {
+  return request<{ success: boolean }>(`/api/tasks/${id}/cleanup`, { method: "POST" });
 }
 
 async function fetchStatus(): Promise<ApiResponse<SystemStatus>> {
@@ -97,6 +173,60 @@ async function fetchStatus(): Promise<ApiResponse<SystemStatus>> {
 
 async function fetchActivity(): Promise<ApiResponse<ActivityEvent[]>> {
   return request<ActivityEvent[]>("/api/activity");
+}
+
+async function fetchOverview(): Promise<ApiResponse<OverviewData>> {
+  return request<OverviewData>("/api/overview");
+}
+
+async function fetchOverviewHealth(): Promise<ApiResponse<OverviewHealth>> {
+  return request<OverviewHealth>("/api/overview/health");
+}
+
+async function fetchGateStats(): Promise<ApiResponse<GateStats>> {
+  return request<GateStats>("/api/gate/stats");
+}
+
+async function fetchGateBlocks(limit?: number): Promise<ApiResponse<GateBlockItem[]>> {
+  const query = limit ? `?limit=${limit}` : '';
+  return request<GateBlockItem[]>(`/api/gate/blocks${query}`);
+}
+
+async function fetchFeedbackGfi(): Promise<ApiResponse<FeedbackGfi>> {
+  return request<FeedbackGfi>("/api/feedback/gfi");
+}
+
+async function fetchEmpathyEvents(limit?: number): Promise<ApiResponse<EmpathyEvent[]>> {
+  const query = limit ? `?limit=${limit}` : '';
+  return request<EmpathyEvent[]>(`/api/feedback/empathy-events${query}`);
+}
+
+async function fetchFeedbackGateBlocks(limit?: number): Promise<ApiResponse<GateBlockItem[]>> {
+  const query = limit ? `?limit=${limit}` : '';
+  return request<GateBlockItem[]>(`/api/feedback/gate-blocks${query}`);
+}
+
+async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntry[]>> {
+  return request<WorkspaceEntry[]>("/api/workspaces");
+}
+
+async function addWorkspace(name: string, path: string): Promise<ApiResponse<WorkspaceEntry>> {
+  return request<WorkspaceEntry>("/api/workspaces", {
+    method: "POST",
+    body: JSON.stringify({ name, path }),
+  });
+}
+
+async function removeWorkspace(name: string): Promise<ApiResponse<{ removed: string }>> {
+  return request<{ removed: string }>(`/api/workspaces/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+async function syncWorkspace(name: string): Promise<ApiResponse<{ success: boolean; syncedAt: string }>> {
+  return request<{ success: boolean; syncedAt: string }>(`/api/workspaces/${encodeURIComponent(name)}/sync`, { method: "POST" });
+}
+
+async function fetchCentralOverview(): Promise<ApiResponse<CentralOverview>> {
+  return request<CentralOverview>("/api/central/overview");
 }
 
 export {
@@ -110,4 +240,27 @@ export {
   cleanupTask,
   fetchStatus,
   fetchActivity,
+  fetchOverview,
+  fetchOverviewHealth,
+  fetchGateStats,
+  fetchGateBlocks,
+  fetchFeedbackGfi,
+  fetchEmpathyEvents,
+  fetchFeedbackGateBlocks,
+  fetchWorkspaces,
+  addWorkspace,
+  removeWorkspace,
+  syncWorkspace,
+  fetchCentralOverview,
+};
+
+export type {
+  OverviewData,
+  OverviewHealth,
+  GateStats,
+  FeedbackGfi,
+  EmpathyEvent,
+  GateBlockItem,
+  WorkspaceEntry,
+  CentralOverview,
 };

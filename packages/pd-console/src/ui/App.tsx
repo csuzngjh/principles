@@ -1,80 +1,88 @@
 import { useState, useEffect } from "react";
 import { TasksPage } from "./pages/TasksPage.js";
+import { OverviewPage } from "./pages/OverviewPage.js";
+import { FeedbackPage } from "./pages/FeedbackPage.js";
+import { GatesPage } from "./pages/GatesPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 
-type Route = "tasks" | "status" | "settings";
+type Route = "overview" | "tasks" | "feedback" | "gates" | "settings";
 
 function routeFromHash(hash: string): Route {
-  if (hash === "#/status") return "status";
+  if (hash === "#/tasks") return "tasks";
+  if (hash === "#/feedback") return "feedback";
+  if (hash === "#/gates") return "gates";
   if (hash === "#/settings") return "settings";
-  return "tasks";
+  return "overview";
 }
 
 const NAV_ITEMS: { route: Route; href: string; label: string }[] = [
-  { route: "tasks", href: "#/", label: "待办事项" },
-  { route: "status", href: "#/status", label: "系统状态" },
-  { route: "settings", href: "#/settings", label: "设置" },
+  { route: "overview", href: "#/", label: "Overview" },
+  { route: "tasks", href: "#/tasks", label: "Tasks" },
+  { route: "feedback", href: "#/feedback", label: "Feedback" },
+  { route: "gates", href: "#/gates", label: "Gates" },
+  { route: "settings", href: "#/settings", label: "Settings" },
 ];
 
-const NAV_STYLE: React.CSSProperties = {
+const LAYOUT_STYLE: React.CSSProperties = {
   display: "flex",
-  gap: "16px",
-  padding: "12px 24px",
-  borderBottom: "1px solid #e0e0e0",
+  minHeight: "100vh",
+  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+};
+
+const SIDEBAR_STYLE: React.CSSProperties = {
+  width: "200px",
+  borderRight: "1px solid #e0e0e0",
   backgroundColor: "#fafafa",
+  padding: "16px 0",
+  flexShrink: 0,
 };
 
-const LINK_STYLE: React.CSSProperties = {
+const SIDEBAR_LINK_STYLE: React.CSSProperties = {
+  display: "block",
+  padding: "10px 20px",
   textDecoration: "none",
-  color: "#333",
-  padding: "4px 8px",
+  color: "#555",
+  fontSize: "14px",
+  transition: "background-color 0.15s",
 };
 
-const ACTIVE_LINK_STYLE: React.CSSProperties = {
-  ...LINK_STYLE,
-  fontWeight: "bold",
+const SIDEBAR_ACTIVE_STYLE: React.CSSProperties = {
+  ...SIDEBAR_LINK_STYLE,
+  backgroundColor: "#e6f4ff",
   color: "#1677ff",
-  borderBottom: "2px solid #1677ff",
+  fontWeight: "bold",
+  borderRight: "3px solid #1677ff",
 };
 
-const CONTENT_STYLE: React.CSSProperties = {
+const MAIN_STYLE: React.CSSProperties = {
+  flex: 1,
   padding: "24px",
+  overflowY: "auto",
 };
 
-function StatusPage() {
-  return (
-    <div>
-      <h1>系统状态</h1>
-      <p>系统状态信息将在此显示</p>
-    </div>
-  );
-}
-
-function SettingsPagePlaceholder() {
-  return (
-    <div>
-      <h1>设置</h1>
-      <p>设置选项将在此显示</p>
-    </div>
-  );
-}
+const HEADER_STYLE: React.CSSProperties = {
+  padding: "12px 20px",
+  borderBottom: "1px solid #e0e0e0",
+  fontSize: "12px",
+  color: "#888",
+  textAlign: "right",
+};
 
 const PAGE_MAP: Record<Route, () => React.JSX.Element> = {
+  overview: OverviewPage,
   tasks: TasksPage,
-  status: StatusPage,
+  feedback: FeedbackPage,
+  gates: GatesPage,
   settings: SettingsPage,
 };
 
 export function App() {
-  const [route, setRoute] = useState<Route>(
-    routeFromHash(window.location.hash),
-  );
+  const [route, setRoute] = useState<Route>(routeFromHash(window.location.hash));
 
   useEffect(() => {
     function handleHashChange() {
       setRoute(routeFromHash(window.location.hash));
     }
-
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
@@ -82,21 +90,25 @@ export function App() {
   const PageComponent = PAGE_MAP[route];
 
   return (
-    <div>
-      <nav style={NAV_STYLE}>
+    <div style={LAYOUT_STYLE}>
+      <aside style={SIDEBAR_STYLE}>
+        <div style={{ padding: "0 20px 16px", fontSize: "16px", fontWeight: "bold", color: "#333" }}>PD Console</div>
         {NAV_ITEMS.map((item) => (
           <a
             key={item.route}
             href={item.href}
-            style={item.route === route ? ACTIVE_LINK_STYLE : LINK_STYLE}
+            style={item.route === route ? SIDEBAR_ACTIVE_STYLE : SIDEBAR_LINK_STYLE}
           >
             {item.label}
           </a>
         ))}
-      </nav>
-      <main style={CONTENT_STYLE}>
-        <PageComponent />
-      </main>
+      </aside>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        <header style={HEADER_STYLE}>PD Console v0.2</header>
+        <main style={MAIN_STYLE}>
+          <PageComponent />
+        </main>
+      </div>
     </div>
   );
 }
