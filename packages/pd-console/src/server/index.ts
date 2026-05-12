@@ -23,7 +23,7 @@ import { handleGatesRoute, disposeGateModels } from './routes/gates.js';
 import { handleFeedbackRoute, disposeFeedbackModels } from './routes/feedback.js';
 import { handleSamplesRoute, disposeSampleModels } from './routes/samples.js';
 import { handleEvolutionRoute, disposeEvolutionModels } from './routes/evolution.js';
-import { handleThinkingModelsRoute, disposeThinkingModelsModels } from './routes/thinking-models.js';
+import { handleThinkingModelsRoute, disposeThinkingModels } from './routes/thinking-models.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
@@ -204,7 +204,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeFeedbackModels();
   disposeSampleModels();
   disposeEvolutionModels();
-  disposeThinkingModelsModels();
+  disposeThinkingModels();
   services.workspaceService.dispose();
 
   try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }

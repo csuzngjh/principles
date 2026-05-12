@@ -107,6 +107,7 @@ export class EvolutionConsoleModel {
         case 'succeeded': completed++; break;
         case 'retry_wait': inProgress++; break;
         case 'failed': failed++; break;
+        default: break;
       }
       const stage = task.status;
       stageMap[stage] = (stageMap[stage] ?? 0) + 1;

@@ -175,7 +175,7 @@ export function EvolutionPage() {
                         </div>
                         <span style={{ fontSize: "11px", color: "#aaa" }}>{new Date(p.updatedAt).toLocaleString()}</span>
                       </div>
-                      <div style={{ fontSize: "12px", color: "#888", marginTop: "4px" }}>{p.text.slice(0, 100)}{p.text.length > 100 ? "..." : ""}</div>
+                      <div style={{ fontSize: "12px", color: "#888", marginTop: "4px" }}>{(p.text ?? "").slice(0, 100)}{(p.text ?? "").length > 100 ? "..." : ""}</div>
                     </div>
                   ))}
                 </div>

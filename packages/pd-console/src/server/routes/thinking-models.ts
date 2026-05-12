@@ -57,7 +57,7 @@ export async function handleThinkingModelsRoute(
   sendNotFound(res, `Route /api/thinking-models${subPath} not found`);
 }
 
-export function disposeThinkingModelsModels(): void {
+export function disposeThinkingModels(): void {
   for (const model of models.values()) {
     model.dispose();
   }

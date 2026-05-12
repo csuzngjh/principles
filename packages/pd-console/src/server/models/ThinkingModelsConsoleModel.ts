@@ -47,12 +47,20 @@ function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
 
 export class ThinkingModelsConsoleModel {
   private readonly workspaceDir: string;
+  private cachedOverview: ThinkingModelOverview | null = null;
+  private cacheTimestamp = 0;
+  private static readonly CACHE_TTL_MS = 5000;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
   }
 
   getOverview(): ThinkingModelOverview {
+    const now = Date.now();
+    if (this.cachedOverview && (now - this.cacheTimestamp) < ThinkingModelsConsoleModel.CACHE_TTL_MS) {
+      return this.cachedOverview;
+    }
+
     const candidates = [
       path.join(this.workspaceDir, 'THINKING_OS.md'),
       path.join(this.workspaceDir, '.state', 'THINKING_OS.md'),
@@ -65,7 +73,9 @@ export class ThinkingModelsConsoleModel {
           const content = fs.readFileSync(filePath, 'utf8');
           const models = parseThinkingOsMd(content);
           if (models.length > 0) {
-            return { totalModels: models.length, models, source: 'workspace' };
+            this.cachedOverview = { totalModels: models.length, models, source: 'workspace' };
+            this.cacheTimestamp = now;
+            return this.cachedOverview;
           }
         } catch {
           // try next candidate
@@ -73,7 +83,9 @@ export class ThinkingModelsConsoleModel {
       }
     }
 
-    return { totalModels: 0, models: [], source: 'none' };
+    this.cachedOverview = { totalModels: 0, models: [], source: 'none' };
+    this.cacheTimestamp = now;
+    return this.cachedOverview;
   }
 
   getModelDetail(modelId: string): ThinkingOsDirective | null {
@@ -82,6 +94,6 @@ export class ThinkingModelsConsoleModel {
   }
 
   dispose(): void {
-    // no resources to release
+    this.cachedOverview = null;
   }
 }

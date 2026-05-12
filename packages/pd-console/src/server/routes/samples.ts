@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { SampleConsoleModel } from '../models/SampleConsoleModel.js';
-import { sendSuccess, sendError, sendNotFound, sendMethodNotAllowed, sendBadRequest } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
+import { parseQuery, readBody, safeParseInt } from '../utils/request.js';
 
 const models = new Map<string, SampleConsoleModel>();
 
@@ -13,41 +14,6 @@ function getModel(workspaceDir: string): SampleConsoleModel {
   return model;
 }
 
-function parseQuery(url: string): Record<string, string> {
-  const query: Record<string, string> = {};
-  const searchIndex = url.indexOf('?');
-  if (searchIndex === -1) return query;
-  const search = url.slice(searchIndex + 1);
-  for (const pair of search.split('&')) {
-    const eqIndex = pair.indexOf('=');
-    if (eqIndex === -1) continue;
-    const key = decodeURIComponent(pair.slice(0, eqIndex));
-    const value = decodeURIComponent(pair.slice(eqIndex + 1));
-    query[key] = value;
-  }
-  return query;
-}
-
-const MAX_BODY_SIZE = 1024 * 64;
-
-async function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let totalSize = 0;
-    req.on('data', (chunk: Buffer) => {
-      totalSize += chunk.length;
-      if (totalSize > MAX_BODY_SIZE) {
-        reject(new Error('Request body too large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
-}
-
 export async function handleSamplesRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -56,16 +22,13 @@ export async function handleSamplesRoute(
 ): Promise<void> {
   const model = getModel(workspaceDir);
 
-  // GET /api/samples - list samples
   if (req.method === 'GET' && (subPath === '' || subPath === '/')) {
     try {
       const query = parseQuery(req.url ?? '');
-      const page = query.page ? Math.max(1, parseInt(query.page, 10) || 1) : undefined;
-      const pageSize = query.pageSize ? Math.min(Math.max(1, parseInt(query.pageSize, 10) || 20), 100) : undefined;
       const result = await model.listSamples({
         status: query.status,
-        page,
-        pageSize,
+        page: safeParseInt(query.page, 1, 1, 10000),
+        pageSize: safeParseInt(query.pageSize, 20, 1, 100),
       });
       sendSuccess(res, result);
     } catch (err: any) {
@@ -74,7 +37,6 @@ export async function handleSamplesRoute(
     return;
   }
 
-  // GET /api/samples/:id - get sample detail
   const detailMatch = subPath.match(/^\/([^/]+)$/);
   if (req.method === 'GET' && detailMatch) {
     const sampleId = decodeURIComponent(detailMatch[1]);
@@ -91,7 +53,6 @@ export async function handleSamplesRoute(
     return;
   }
 
-  // POST /api/samples/:id/review - review a sample
   const reviewMatch = subPath.match(/^\/([^/]+)\/review$/);
   if (req.method === 'POST' && reviewMatch) {
     const sampleId = decodeURIComponent(reviewMatch[1]);
