@@ -26,7 +26,7 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
         sendBadRequest(res, 'name and path are required');
         return;
       }
-      if (typeof parsed.name !== 'string' || parsed.name.length > 128 || /[\/\\]/.test(parsed.name)) {
+      if (typeof parsed.name !== 'string' || parsed.name.length > 128 || /[/\\]/.test(parsed.name)) {
         sendBadRequest(res, 'name must be a non-empty string without slashes (max 128 chars)');
         return;
       }

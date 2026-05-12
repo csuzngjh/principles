@@ -103,13 +103,19 @@ export class GateConsoleModel {
 
   dispose(): void {
     if (this.healthReadModel && this.ownsHealthReadModel) {
-      this.healthReadModel.close().catch(() => {});
+      this.healthReadModel.close().catch((err) => {
+        console.error('[GateConsoleModel] Failed to close health read model:', err);
+      });
     }
     if (this.painChainReadModel) {
-      this.painChainReadModel.close().catch(() => {});
+      this.painChainReadModel.close().catch((err) => {
+        console.error('[GateConsoleModel] Failed to close pain chain read model:', err);
+      });
     }
     if (this.stateManager) {
-      this.stateManager.close().catch(() => {});
+      this.stateManager.close().catch((err) => {
+        console.error('[GateConsoleModel] Failed to close state manager:', err);
+      });
     }
   }
 
