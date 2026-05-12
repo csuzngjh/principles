@@ -10,6 +10,10 @@ export const CorrectionApplicationModeSchema = Type.Union([
   Type.Literal('live'),
 ]);
 
+// GoldenTraceDecision represents test expectations, not runtime decisions.
+// Differs from RuleHostDecision ('allow'|'block'|'requireApproval'): 'propose_correction'
+// replaces 'requireApproval' per ADR-0004 shadow-first correction semantics.
+// PRI-114/115 will reconcile these via the replay engine.
 export const GoldenTraceDecisionSchema = Type.Union([
   Type.Literal('allow'),
   Type.Literal('block'),
@@ -81,6 +85,7 @@ export interface GoldenTraceFixtureInput {
   sourcePainId?: string;
   sourceCandidateId?: string;
   sourceArtifactId?: string;
+  createdAt?: string;
 }
 
 function collectSchemaErrors(schema: Parameters<typeof Value.Errors>[0], input: unknown): string[] {
@@ -183,7 +188,7 @@ export function createGoldenTraceFixture(input: GoldenTraceFixtureInput): Golden
     sourceCandidateId: input.sourceCandidateId,
     sourceArtifactId: input.sourceArtifactId,
     version: 1,
-    createdAt: '2026-05-11T00:00:00.000Z',
+    createdAt: input.createdAt ?? '2026-05-11T00:00:00.000Z',
     cases: [
       {
         caseId: 'negative-1',

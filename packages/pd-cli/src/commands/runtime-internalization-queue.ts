@@ -52,6 +52,13 @@ function formatTextOutput(snap: InternalizationQueueSnapshot): string {
     }
   }
 
+  if (snap.leaseConflictSummary.count > 0) {
+    lines.push(`  lease_conflict: ${snap.leaseConflictSummary.count}`);
+    for (const s of snap.leaseConflictSummary.samples.slice(0, 3)) {
+      lines.push(`    ${s.taskId} (${s.taskKind}) owner: ${s.leaseOwner}, expires: ${s.leaseExpiresAt}`);
+    }
+  }
+
   if (snap.retryWaitPendingSummary.count > 0) {
     lines.push(`  retry_wait_pending: ${snap.retryWaitPendingSummary.count}`);
     for (const s of snap.retryWaitPendingSummary.samples.slice(0, 3)) {

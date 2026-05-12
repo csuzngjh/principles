@@ -169,13 +169,14 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
           const hasBlocked = snapshot.blockedSummary.count > 0;
           const hasDepFailed = snapshot.dependencyFailedSummary.count > 0;
           const hasInvalid = snapshot.invalidMetadataCount > 0;
-          const status = (hasBlocked || hasDepFailed || hasInvalid) ? 'degraded' : 'healthy';
+          const hasLeaseConflicts = snapshot.leaseConflictSummary.count > 0;
+          const status = (hasBlocked || hasDepFailed || hasInvalid || hasLeaseConflicts) ? 'degraded' : 'healthy';
           return {
             name: 'internalization_queue',
             status,
             summary: status === 'healthy'
               ? `Queue OK. ${snapshot.readyTasks.length} ready, ${snapshot.pendingCount} pending, ${snapshot.retryWaitCount} retry_wait.`
-              : `Queue degraded: ${snapshot.blockedSummary.count} blocked, ${snapshot.dependencyFailedSummary.count} dep-failed, ${snapshot.invalidMetadataCount} invalid metadata.`,
+              : `Queue degraded: ${snapshot.blockedSummary.count} blocked, ${snapshot.dependencyFailedSummary.count} dep-failed, ${snapshot.invalidMetadataCount} invalid metadata, ${snapshot.leaseConflictSummary.count} lease conflicts.`,
             details: snapshot,
           };
         } finally {
