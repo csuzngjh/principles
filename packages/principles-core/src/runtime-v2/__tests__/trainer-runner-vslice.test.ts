@@ -339,7 +339,9 @@ describe('TrainerRunner (vertical slice)', () => {
 
   it('artifact write failure goes to retry/fail, not mark succeeded', async () => {
     const failingStore = {
-      listBySourceTaskId: vi.fn().mockResolvedValue([makeRolloutReviewerArtifact()]),
+      listBySourceTaskId: vi.fn().mockImplementation(async (sourceTaskId: string) => {
+        return sourceTaskId === ROLLOUT_REVIEWER_TASK_ID ? [makeRolloutReviewerArtifact()] : [];
+      }),
       upsertArtifact: vi.fn().mockRejectedValue(new Error('Disk full')),
     } as unknown as PIArtifactStore;
 
@@ -354,6 +356,8 @@ describe('TrainerRunner (vertical slice)', () => {
 
     const result = await runner.run(TRAINER_TASK_ID);
     expect(result.status).toBe('failed');
+    expect(failingStore.listBySourceTaskId).toHaveBeenCalledWith(ROLLOUT_REVIEWER_TASK_ID);
+    expect(failingStore.upsertArtifact).toHaveBeenCalled();
     expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
 

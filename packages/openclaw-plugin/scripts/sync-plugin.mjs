@@ -655,7 +655,11 @@ function syncSkillDirs(lang) {
 
     if (!skillsPaths || !Array.isArray(skillsPaths)) return;
 
-    const selectedLang = lang || 'zh';
+    const selectedLang = (lang || 'zh').toLowerCase();
+    if (!['zh', 'en'].includes(selectedLang)) {
+        console.error(`❌ Invalid language: ${selectedLang}. Expected zh or en.`);
+        process.exit(1);
+    }
     const langPrefix = `templates/langs/${selectedLang}/skills`;
 
     for (const sp of skillsPaths) {
@@ -691,15 +695,19 @@ function filterInstalledManifestSkills(lang) {
         const manifest = JSON.parse(readFileSync(installedManifestPath, 'utf-8'));
         if (!manifest.skills || !Array.isArray(manifest.skills)) return;
 
-        const selectedLang = lang || 'zh';
+        const selectedLang = (lang || 'zh').toLowerCase();
+        if (!['zh', 'en'].includes(selectedLang)) {
+            console.error(`❌ Invalid language: ${selectedLang}. Expected zh or en.`);
+            process.exit(1);
+        }
         const filtered = manifest.skills.filter(sp => {
             if (typeof sp !== 'string') return false;
             return sp.includes(`/langs/${selectedLang}/`);
         });
 
         if (filtered.length === 0) {
-            console.warn(`  ⚠️  No skills match language "${selectedLang}" in installed manifest`);
-            return;
+            console.error(`❌ No skills match language "${selectedLang}" in installed manifest`);
+            process.exit(1);
         }
 
         manifest.skills = filtered;
