@@ -300,7 +300,7 @@ export interface RuleHostRequireApprovalEventData {
 /**
  * rulehost_auto_correct_proposed — RuleHost proposed an auto-correction (PRI-114).
  * Emitted from gate.ts when hostResult.decision === 'auto_correct'.
- * Shadow mode only — params are never modified.
+ * Supports shadow/live proposal modes; application behavior is decided by gate policy.
  */
 export interface RuleHostAutoCorrectProposedEventData {
   toolName: string;
