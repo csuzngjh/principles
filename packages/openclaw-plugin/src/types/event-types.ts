@@ -30,7 +30,8 @@ export type EventType =
       // C: RuleHost funnel events (PD-FUNNEL-2.4)
       | 'rulehost_evaluated'
       | 'rulehost_blocked'
-      | 'rulehost_requireApproval';
+      | 'rulehost_requireApproval'
+      | 'rulehost_auto_correct_proposed';
 
 export type EventCategory =
   | 'success'
@@ -53,7 +54,8 @@ export type EventCategory =
       // C: New categories for RuleHost funnel (PD-FUNNEL-2.4) — completed/created already exist
       | 'evaluated'   // Used by: rulehost_evaluated
       | 'blocked'     // Used by: rulehost_blocked
-      | 'requireApproval';  // Used by: rulehost_requireApproval
+      | 'requireApproval'  // Used by: rulehost_requireApproval
+      | 'auto_correct';  // Used by: rulehost_auto_correct_proposed (PRI-114)
 
 /**
  * Base event structure for JSONL logging.
@@ -269,7 +271,7 @@ export interface RuleHostEvaluatedEventData {
   toolName: string;
   filePath: string;
   matched: boolean;
-  decision: 'allow' | 'block' | 'requireApproval';
+  decision: 'allow' | 'block' | 'requireApproval' | 'auto_correct';
   ruleId?: string;
 }
 
@@ -293,6 +295,23 @@ export interface RuleHostRequireApprovalEventData {
   filePath: string;
   reason: string;
   ruleId?: string;
+}
+
+/**
+ * rulehost_auto_correct_proposed — RuleHost proposed an auto-correction (PRI-114).
+ * Emitted from gate.ts when hostResult.decision === 'auto_correct'.
+ * Shadow mode only — params are never modified.
+ */
+export interface RuleHostAutoCorrectProposedEventData {
+  toolName: string;
+  filePath: string;
+  ruleId: string;
+  principleId?: string;
+  confidence: number;
+  reason: string;
+  applicationMode: 'shadow' | 'live';
+  correctedFields: string[];
+  validationValid: boolean;
 }
 
 // ============== Daily Statistics ==============

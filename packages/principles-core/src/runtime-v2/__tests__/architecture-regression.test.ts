@@ -90,6 +90,8 @@ const REQUIRED_SOURCE_FILES = [
   'internalization/pi-artifact-store.ts',
   // PRI-113
   'golden-trace.ts',
+  // PRI-114
+  'internalization/correction-proposal.ts',
   // PRI-105
   'remediation-contract.ts',
 ] as const;
@@ -130,6 +132,8 @@ const REQUIRED_TEST_FILES = [
   '../gfi/__tests__/gfi-kernel.test.ts',
   // PRI-113
   'golden-trace.test.ts',
+  // PRI-114
+  'correction-proposal.test.ts',
   // PRI-105
   'remediation-contract.test.ts',
 ];
@@ -1797,5 +1801,42 @@ describe('PRI-RR RolloutReviewerRunner boundary', () => {
     const src = readFileSync(resolve(__dirname, '..', 'adapter', 'pi-ai-runtime-adapter.ts'), 'utf-8');
     expect(src).toContain('rollout-reviewer-output-v1');
     expect(src).toContain('RolloutReviewerOutputV1Schema');
+  });
+});
+
+describe('PRI-114: correction-proposal boundary', () => {
+  it('CORE_PURE: correction-proposal.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'correction-proposal.ts'), 'utf-8');
+    expect(src).not.toContain('node:vm');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('require(');
+  });
+
+  it('CONTRACT_IMPORT: rule-host-contracts.ts imports CorrectionProposal from same directory', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'rule-host-contracts.ts'), 'utf-8');
+    expect(src).toContain("from './correction-proposal.js'");
+  });
+
+  it('EVALUATOR_IMPORT: rule-host-evaluator.ts imports validateCorrectionProposal from same directory', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'rule-host-evaluator.ts'), 'utf-8');
+    expect(src).toContain("from './correction-proposal.js'");
+    expect(src).toContain('validateCorrectionProposal');
+  });
+
+  it('BARREL_EXPORTS: runtime-v2/index.ts exports CorrectionProposal and validators', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('CorrectionProposal');
+    expect(src).toContain('validateProposedParams');
+    expect(src).toContain('validateCorrectionProposal');
+    expect(src).toContain("from './internalization/correction-proposal.js'");
   });
 });

@@ -2,9 +2,13 @@
  * Rule Host Evaluator — Pure decision merge logic
  *
  * PURPOSE: Iterate loaded code implementations and merge their decisions.
- * Block short-circuits, requireApproval collects, allow is implicit.
+ * Block short-circuits, auto_correct collects (validated), requireApproval
+ * collects, allow is implicit.
+ *
+ * Precedence: block > auto_correct > requireApproval > allow
  *
  * PRI-45: Pure function extracted from the plugin's RuleHost.evaluate().
+ * PRI-114: Added auto_correct handling with fail-closed validation.
  * No filesystem, no VM, no side effects.
  */
 
@@ -13,6 +17,7 @@ import type {
   RuleHostResult,
   LoadedImplementation,
 } from './rule-host-contracts.js';
+import { validateCorrectionProposal } from './correction-proposal.js';
 
 export interface DecisionMergeLogger {
   warn?: (_message: string) => void;
@@ -29,6 +34,8 @@ export type RuleHostLogger = DecisionMergeLogger;
  *
  * Rules:
  *   - If any implementation returns `block`, short-circuit and return block.
+ *   - `auto_correct` proposals are collected and validated.
+ *     First valid proposal wins. Invalid proposals are logged and skipped.
  *   - Collect all `requireApproval` results and merge their reasons/diagnostics.
  *   - `allow` results are ignored (no opinion).
  *   - Individual implementation errors are logged and skipped.
@@ -46,6 +53,7 @@ export function mergeDecisions(
   try {
 
     let blocked: RuleHostResult | undefined = undefined;
+    const autoCorrects: RuleHostResult[] = [];
     const approvals: RuleHostResult[] = [];
 
     for (const impl of implementations) {
@@ -61,7 +69,9 @@ export function mergeDecisions(
           break;
         }
 
-        if (result.decision === 'requireApproval') {
+        if (result.decision === 'auto_correct') {
+          autoCorrects.push(result);
+        } else if (result.decision === 'requireApproval') {
           approvals.push(result);
         }
         // 'allow' is implicit — no action needed
@@ -74,6 +84,26 @@ export function mergeDecisions(
 
     if (blocked) {
       return blocked;
+    }
+
+    // auto_correct takes precedence over requireApproval
+    if (autoCorrects.length > 0) {
+      for (const ac of autoCorrects) {
+        if (ac.correctionProposal) {
+          const validation = validateCorrectionProposal(ac.correctionProposal);
+          if (validation.valid) {
+            return ac;
+          }
+          logger?.warn?.(
+            `[RuleHost] auto_correct proposal from ${ac.ruleId ?? 'unknown'} failed validation: ${validation.errors.join('; ')}`
+          );
+        } else {
+          logger?.warn?.(
+            `[RuleHost] auto_correct decision from ${ac.ruleId ?? 'unknown'} missing correctionProposal`
+          );
+        }
+      }
+      // All auto_correct proposals invalid — fall through to requireApproval
     }
 
     if (approvals.length > 0) {

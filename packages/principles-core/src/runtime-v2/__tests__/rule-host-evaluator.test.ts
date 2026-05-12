@@ -232,3 +232,287 @@ describe('mergeDecisions', () => {
     expect(mergeDecisions(impls, makeInput())).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// PRI-114: auto_correct merge tests
+// ---------------------------------------------------------------------------
+
+describe('mergeDecisions — auto_correct (PRI-114)', () => {
+  async function getModule() {
+    return import('../internalization/rule-host-evaluator.js');
+  }
+
+  function makeInput114(): RuleHostInput {
+    return {
+      action: { toolName: 'write', normalizedPath: '/foo.ts', paramsSummary: {} },
+      workspace: { isRiskPath: false, planStatus: 'NONE', hasPlanFile: false },
+      session: { sessionId: 's1', currentGfi: 0, recentThinking: false },
+      evolution: { epTier: 0 },
+      derived: { estimatedLineChanges: 1, bashRisk: 'unknown' },
+    };
+  }
+
+  function makeImpl114(overrides: {
+    implId?: string;
+    ruleId?: string;
+    evaluate: (_input: RuleHostInput) => RuleHostResult;
+  }): LoadedImplementation {
+    return {
+      implId: overrides.implId ?? 'impl-1',
+      ruleId: overrides.ruleId ?? 'R_001',
+      meta: { name: 'Test', version: '1.0.0', ruleId: 'R_001', coversCondition: 'test' },
+      evaluate: overrides.evaluate,
+    };
+  }
+
+  // 13. Single auto_correct returns the proposal
+  it('returns auto_correct result when single impl returns auto_correct', async () => {
+    const { mergeDecisions } = await getModule();
+    const proposal = {
+      proposedParams: { content: 'fixed' },
+      correctedFields: [{ field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' }],
+      applicationMode: 'shadow' as const,
+      confidence: 0.9,
+      ruleId: 'R_auto_001',
+      notifyAgent: true,
+    };
+    const impls = [
+      makeImpl114({
+        evaluate: () => ({
+          decision: 'auto_correct' as const,
+          matched: true,
+          reason: 'fix typo',
+          correctionProposal: proposal,
+        }),
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput114());
+    expect(result?.decision).toBe('auto_correct');
+    expect(result?.correctionProposal).toEqual(proposal);
+  });
+
+  // 14. auto_correct + allow -> auto_correct wins
+  it('auto_correct takes precedence over allow', async () => {
+    const { mergeDecisions } = await getModule();
+    const proposal = {
+      proposedParams: { content: 'fixed' },
+      correctedFields: [{ field: 'content', original: 'bad', proposed: 'fixed', reason: 'fix' }],
+      applicationMode: 'shadow' as const,
+      confidence: 0.8,
+      ruleId: 'R_auto_002',
+      notifyAgent: false,
+    };
+    const impls = [
+      makeImpl114({
+        implId: 'allow-1',
+        evaluate: () => ({ decision: 'allow' as const, matched: true, reason: 'ok' }),
+      }),
+      makeImpl114({
+        implId: 'ac-1',
+        evaluate: () => ({
+          decision: 'auto_correct' as const,
+          matched: true,
+          reason: 'fix content',
+          correctionProposal: proposal,
+        }),
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput114());
+    expect(result?.decision).toBe('auto_correct');
+  });
+
+  // 15. auto_correct + requireApproval -> auto_correct wins
+  it('auto_correct takes precedence over requireApproval', async () => {
+    const { mergeDecisions } = await getModule();
+    const proposal = {
+      proposedParams: { content: 'fixed' },
+      correctedFields: [{ field: 'content', original: 'bad', proposed: 'fixed', reason: 'fix' }],
+      applicationMode: 'shadow' as const,
+      confidence: 0.8,
+      ruleId: 'R_auto_003',
+      notifyAgent: false,
+    };
+    const impls = [
+      makeImpl114({
+        implId: 'approval-1',
+        evaluate: () => ({ decision: 'requireApproval' as const, matched: true, reason: 'needs review' }),
+      }),
+      makeImpl114({
+        implId: 'ac-1',
+        evaluate: () => ({
+          decision: 'auto_correct' as const,
+          matched: true,
+          reason: 'fix it',
+          correctionProposal: proposal,
+        }),
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput114());
+    expect(result?.decision).toBe('auto_correct');
+  });
+
+  // 16. block + auto_correct -> block short-circuits
+  it('block short-circuits before auto_correct is evaluated', async () => {
+    const { mergeDecisions } = await getModule();
+    let acCalled = false;
+    const impls = [
+      makeImpl114({
+        implId: 'blocker',
+        evaluate: () => ({ decision: 'block' as const, matched: true, reason: 'dangerous' }),
+      }),
+      makeImpl114({
+        implId: 'ac-never',
+        evaluate: () => {
+          acCalled = true;
+          return {
+            decision: 'auto_correct' as const,
+            matched: true,
+            reason: 'fix',
+            correctionProposal: {
+              proposedParams: {},
+              correctedFields: [],
+              applicationMode: 'shadow',
+              confidence: 0.5,
+              ruleId: 'R_x',
+              notifyAgent: false,
+            },
+          };
+        },
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput114());
+    expect(result?.decision).toBe('block');
+    expect(acCalled).toBe(false);
+  });
+
+  // 17. auto_correct with invalid proposal -> skipped, falls through
+  it('invalid auto_correct proposal is skipped with warning', async () => {
+    const { mergeDecisions } = await getModule();
+    const logger = { warn: vi.fn() };
+    const impls = [
+      makeImpl114({
+        implId: 'bad-ac',
+        evaluate: () => ({
+          decision: 'auto_correct' as const,
+          matched: true,
+          reason: 'fix',
+          correctionProposal: {
+            proposedParams: 'not-an-object' as unknown as Record<string, unknown>,
+          } as RuleHostResult['correctionProposal'],
+        }),
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput114(), logger);
+    expect(result).toBeUndefined();
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  // 18. auto_correct with missing correctionProposal -> skipped
+  it('auto_correct without correctionProposal is skipped with warning', async () => {
+    const { mergeDecisions } = await getModule();
+    const logger = { warn: vi.fn() };
+    const impls = [
+      makeImpl114({
+        implId: 'no-proposal',
+        evaluate: () => ({
+          decision: 'auto_correct' as const,
+          matched: true,
+          reason: 'fix but no proposal',
+        }),
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput114(), logger);
+    expect(result).toBeUndefined();
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  // 19. Multiple auto_correct -> first valid one wins
+  it('first valid auto_correct proposal wins among multiple', async () => {
+    const { mergeDecisions } = await getModule();
+    const proposal1 = {
+      proposedParams: { content: 'fix1' },
+      correctedFields: [{ field: 'content', original: 'bad', proposed: 'fix1', reason: 'first' }],
+      applicationMode: 'shadow' as const,
+      confidence: 0.7,
+      ruleId: 'R_first',
+      notifyAgent: false,
+    };
+    const proposal2 = {
+      proposedParams: { content: 'fix2' },
+      correctedFields: [{ field: 'content', original: 'bad', proposed: 'fix2', reason: 'second' }],
+      applicationMode: 'shadow' as const,
+      confidence: 0.8,
+      ruleId: 'R_second',
+      notifyAgent: true,
+    };
+    const impls = [
+      makeImpl114({
+        implId: 'ac-first',
+        ruleId: 'R_first',
+        evaluate: () => ({
+          decision: 'auto_correct' as const,
+          matched: true,
+          reason: 'first fix',
+          correctionProposal: proposal1,
+        }),
+      }),
+      makeImpl114({
+        implId: 'ac-second',
+        ruleId: 'R_second',
+        evaluate: () => ({
+          decision: 'auto_correct' as const,
+          matched: true,
+          reason: 'second fix',
+          correctionProposal: proposal2,
+        }),
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput114());
+    expect(result?.decision).toBe('auto_correct');
+    expect(result?.correctionProposal?.ruleId).toBe('R_first');
+  });
+
+  // 20. auto_correct with matched:false -> ignored
+  it('auto_correct with matched:false is ignored', async () => {
+    const { mergeDecisions } = await getModule();
+    const impls = [
+      makeImpl114({
+        implId: 'unmatched-ac',
+        evaluate: () => ({
+          decision: 'auto_correct' as const,
+          matched: false,
+          reason: 'not applicable',
+        }),
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput114());
+    expect(result).toBeUndefined();
+  });
+
+  // 21. All auto_correct invalid -> falls through to requireApproval
+  it('all auto_correct invalid falls through to requireApproval', async () => {
+    const { mergeDecisions } = await getModule();
+    const logger = { warn: vi.fn() };
+    const impls = [
+      makeImpl114({
+        implId: 'bad-ac',
+        evaluate: () => ({
+          decision: 'auto_correct' as const,
+          matched: true,
+          reason: 'fix',
+          correctionProposal: { proposedParams: null } as unknown as RuleHostResult['correctionProposal'],
+        }),
+      }),
+      makeImpl114({
+        implId: 'approval',
+        evaluate: () => ({
+          decision: 'requireApproval' as const,
+          matched: true,
+          reason: 'needs review',
+        }),
+      }),
+    ];
+    const result = mergeDecisions(impls, makeInput114(), logger);
+    expect(result?.decision).toBe('requireApproval');
+  });
+});

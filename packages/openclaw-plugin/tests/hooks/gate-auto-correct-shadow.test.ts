@@ -1,0 +1,249 @@
+/**
+ * PRI-114: Gate auto_correct shadow mode tests
+ *
+ * Verify that auto_correct decision in gate.ts:
+ * - Never modifies event.params (shadow enforced)
+ * - Emits rulehost_auto_correct_proposed telemetry
+ * - Invalid proposals still emit telemetry (validationValid: false)
+ * - Existing allow/block/requireApproval unchanged
+ * - Config gate defaults to shadow even when live configured
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import * as sessionTracker from '../../src/core/session-tracker.js';
+import * as evolutionEngine from '../../src/core/evolution-engine.js';
+
+const workspaceDir = '/mock/workspace';
+const sessionId = 'test-ac-shadow';
+
+const mockEvolution = {
+  getTier: vi.fn().mockReturnValue(3),
+  getPoints: vi.fn().mockReturnValue(200),
+};
+
+vi.mock('../../src/core/session-tracker.js', () => ({
+  getSession: vi.fn(() => ({ currentGfi: 0 })),
+  trackBlock: vi.fn(),
+  hasRecentThinking: vi.fn(() => false),
+}));
+
+vi.mock('../../src/core/evolution-engine.js', () => ({
+  getEvolutionEngine: vi.fn(() => mockEvolution),
+}));
+
+const mockEventLogInstance = {
+  recordRuleHostEvaluated: vi.fn(),
+  recordRuleEnforced: vi.fn(),
+  recordRuleHostBlocked: vi.fn(),
+  recordRuleHostRequireApproval: vi.fn(),
+  recordRuleHostAutoCorrectProposed: vi.fn(),
+};
+vi.mock('../../src/core/event-log.js', () => ({
+  EventLogService: { get: vi.fn(() => mockEventLogInstance) },
+}));
+
+let _mockEvaluate = vi.fn().mockReturnValue(undefined);
+vi.mock('../../src/core/rule-host.js', () => ({
+  RuleHost: vi.fn(function(this: any, _stateDir: string, _logger: any) {
+    this.evaluate = _mockEvaluate;
+  }),
+}));
+
+vi.mock('../../src/core/principle-tree-ledger.js', () => ({
+  loadLedger: vi.fn(),
+  listImplementationsByLifecycleState: vi.fn(() => []),
+}));
+
+function makeValidProposal(overrides: Record<string, unknown> = {}) {
+  return {
+    proposedParams: { content: 'fixed content' },
+    correctedFields: [
+      { field: 'content', original: 'broken', proposed: 'fixed content', reason: 'typo' },
+    ],
+    applicationMode: 'shadow' as const,
+    confidence: 0.9,
+    ruleId: 'R_ac_test',
+    principleId: 'P_ac_test',
+    notifyAgent: true,
+    ...overrides,
+  };
+}
+
+function makeWriteEvent(params: Record<string, unknown> = {}) {
+  return {
+    toolName: 'write',
+    params: { file_path: '/mock/workspace/src/foo.ts', content: 'broken', ...params },
+  };
+}
+
+function makeCtx(overrides: Record<string, unknown> = {}) {
+  return {
+    workspaceDir,
+    sessionId,
+    logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    ...overrides,
+  };
+}
+
+describe('PRI-114: Gate auto_correct shadow mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _mockEvaluate = vi.fn().mockReturnValue(undefined);
+  });
+
+  it('auto_correct does NOT modify event.params', () => {
+    const originalParams = { file_path: '/mock/workspace/src/foo.ts', content: 'broken' };
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix typo in content',
+      ruleId: 'R_ac_001',
+      correctionProposal: makeValidProposal(),
+    });
+
+    const event = makeWriteEvent(originalParams);
+    const paramsCopy = { ...event.params };
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    // Shadow mode: returns undefined (allow), params unchanged
+    expect(result).toBeUndefined();
+    expect(event.params).toEqual(paramsCopy);
+  });
+
+  it('auto_correct with applicationMode live still does NOT modify params', () => {
+    const originalParams = { file_path: '/mock/workspace/src/foo.ts', content: 'broken' };
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix typo',
+      ruleId: 'R_ac_live',
+      correctionProposal: makeValidProposal({ applicationMode: 'live' }),
+    });
+
+    const event = makeWriteEvent(originalParams);
+    const paramsCopy = { ...event.params };
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    expect(result).toBeUndefined();
+    expect(event.params).toEqual(paramsCopy);
+  });
+
+  it('auto_correct emits rulehost_auto_correct_proposed telemetry', () => {
+    const proposal = makeValidProposal();
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix typo in content',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    handleBeforeToolCall(makeWriteEvent(), makeCtx());
+
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectProposed).toHaveBeenCalledTimes(1);
+    const call = mockEventLogInstance.recordRuleHostAutoCorrectProposed.mock.calls[0][0];
+    expect(call.toolName).toBe('write');
+    expect(call.ruleId).toBe(proposal.ruleId);
+    expect(call.principleId).toBe(proposal.principleId);
+    expect(call.confidence).toBe(0.9);
+    expect(call.reason).toBe('fix typo in content');
+    expect(call.applicationMode).toBe('shadow');
+    expect(call.correctedFields).toEqual(['content']);
+    expect(call.validationValid).toBe(true);
+  });
+
+  it('auto_correct with invalid proposal still emits telemetry with validationValid false', () => {
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        // Invalid: proposedParams is a string, missing fields
+        proposedParams: 'not-an-object',
+      },
+    });
+
+    handleBeforeToolCall(makeWriteEvent(), makeCtx());
+
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectProposed).toHaveBeenCalledTimes(1);
+    const call = mockEventLogInstance.recordRuleHostAutoCorrectProposed.mock.calls[0][0];
+    expect(call.validationValid).toBe(false);
+  });
+
+  it('block still takes precedence over auto_correct', () => {
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'block',
+      matched: true,
+      reason: 'dangerous operation',
+      ruleId: 'R_block',
+    });
+
+    const event = makeWriteEvent();
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    expect(result).toBeDefined();
+    expect(mockEventLogInstance.recordRuleHostBlocked).toHaveBeenCalled();
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectProposed).not.toHaveBeenCalled();
+  });
+
+  it('requireApproval still works unchanged', () => {
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'requireApproval',
+      matched: true,
+      reason: 'sensitive write',
+      ruleId: 'R_approval',
+    });
+
+    const result = handleBeforeToolCall(makeWriteEvent(), makeCtx());
+    expect(result).toBeUndefined();
+    expect(mockEventLogInstance.recordRuleHostRequireApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it('allow still works unchanged', () => {
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'allow',
+      matched: true,
+      reason: 'safe',
+    });
+
+    const result = handleBeforeToolCall(makeWriteEvent(), makeCtx());
+    expect(result).toBeUndefined();
+    expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledTimes(1);
+  });
+
+  it('missing pluginConfig defaults to shadow (no crash)', () => {
+    const proposal = makeValidProposal();
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent();
+    const paramsCopy = { ...event.params };
+    const result = handleBeforeToolCall(event, makeCtx({ pluginConfig: undefined }));
+
+    expect(result).toBeUndefined();
+    expect(event.params).toEqual(paramsCopy);
+  });
+
+  it('pluginConfig.autoCorrectLive true still shadow (current impl)', () => {
+    const proposal = makeValidProposal({ applicationMode: 'live' });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent();
+    const paramsCopy = { ...event.params };
+    const result = handleBeforeToolCall(event, makeCtx({
+      pluginConfig: { autoCorrectLive: true },
+    }));
+
+    expect(result).toBeUndefined();
+    expect(event.params).toEqual(paramsCopy);
+  });
+});

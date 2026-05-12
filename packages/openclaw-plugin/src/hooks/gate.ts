@@ -16,6 +16,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
 import type { RuleHostInput } from '@principles/core/runtime-v2';
+import { validateCorrectionProposal } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { getSession, hasRecentThinking } from '../core/session-tracker.js';
@@ -153,8 +154,36 @@ export function handleBeforeToolCall(
         logger?.warn?.(`[PD_GATE] Failed to record rule_enforced/rulehost_requireApproval: ${String(evErr)}`);
       }
     }
+
+    if (hostResult?.decision === 'auto_correct' && hostResult.correctionProposal) {
+      const proposal = hostResult.correctionProposal;
+      const validation = validateCorrectionProposal(proposal);
+
+      try {
+        const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+        const correctedFields = Array.isArray(proposal.correctedFields)
+          ? proposal.correctedFields.map((f: any) => typeof f === 'object' && f !== null ? String(f.field) : String(f))
+          : [];
+        eventLog.recordRuleHostAutoCorrectProposed({
+          toolName: event.toolName,
+          filePath: relPath,
+          ruleId: String(proposal.ruleId ?? 'unknown'),
+          principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
+          confidence: typeof proposal.confidence === 'number' ? proposal.confidence : 0,
+          reason: hostResult.reason,
+          applicationMode: proposal.applicationMode === 'live' ? 'live' : 'shadow',
+          correctedFields,
+          validationValid: validation.valid,
+        });
+      } catch (evErr) {
+        logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_proposed: ${String(evErr)}`);
+      }
+
+      // SAFETY: Never modify event.params. Shadow mode is enforced at hook level.
+      // Even if applicationMode === 'live', current implementation is shadow-only.
+      // Live mutation requires a future feature gate (PRI-115+).
+    }
   } catch (hostError: unknown) {
-    // D-08: Conservative degradation — log and allow on Rule Host failure
     logger.warn?.(`[PD_GATE:RULE_HOST] Host evaluation failed, allowing conservatively: ${String(hostError)}`);
   }
 
