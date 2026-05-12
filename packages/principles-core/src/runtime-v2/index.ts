@@ -265,6 +265,9 @@ export type {
 } from './internalization/rule-host-contracts.js';
 export type { RuleHostHelpers } from './internalization/rule-host-helpers.js';
 export { createRuleHostHelpers } from './internalization/rule-host-helpers.js';
+// Correction proposal (PRI-114)
+export type { CorrectionProposal, CorrectionProposalValidationResult } from './internalization/correction-proposal.js';
+export { validateProposedParams, validateCorrectionProposal } from './internalization/correction-proposal.js';
 
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization/internalization-route.js';
