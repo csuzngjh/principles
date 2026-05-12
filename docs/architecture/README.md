@@ -39,10 +39,11 @@
 | [DATA_ARCHITECTURE.md](./DATA_ARCHITECTURE.md) | **Active** | 数据存储架构，读写分离，迁移策略 |
 | [ERROR_ARCHITECTURE.md](./ERROR_ARCHITECTURE.md) | **Active** | PDErrorCategory 错误分类，PDRuntimeError，降级路径 |
 
-### 战略分析 (Reference)
+### 战略分析与治理 (Strategy & Governance)
 
 | 文档 | 状态 | 说明 |
 |------|------|------|
+| [../architecture-governance/AI_DEVELOPMENT_GUARDRAILS.md](../architecture-governance/AI_DEVELOPMENT_GUARDRAILS.md) | **Active** | AI 辅助开发护栏架构，防止大模型破坏系统边界和契约 |
 | [PD_System_Dynamics_Model.md](./PD_System_Dynamics_Model.md) | **Final** | 系统动力学视角，存量/流量/反馈回路分析 |
 
 ### 历史与废弃文档
