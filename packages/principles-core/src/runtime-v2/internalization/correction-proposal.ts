@@ -45,7 +45,13 @@ const IDENTITY_FIELDS = new Set(['toolName', 'sessionId']);
 // ---------------------------------------------------------------------------
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  try {
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  } catch {
+    return false;
+  }
 }
 
 function isJsonSerializable(value: unknown, seen: Set<unknown> = new Set()): boolean {
@@ -62,10 +68,16 @@ function isJsonSerializable(value: unknown, seen: Set<unknown> = new Set()): boo
     return false;
   }
   seen.add(value);
-  if (Array.isArray(value)) {
-    return value.every(item => isJsonSerializable(item, seen));
+  try {
+    if (Array.isArray(value)) {
+      return value.every(item => isJsonSerializable(item, seen));
+    }
+    return Object.values(value as Record<string, unknown>).every(v => isJsonSerializable(v, seen));
+  } catch {
+    return false;
+  } finally {
+    seen.delete(value);
   }
-  return Object.values(value as Record<string, unknown>).every(v => isJsonSerializable(v, seen));
 }
 
 // ---------------------------------------------------------------------------
@@ -77,6 +89,10 @@ export function validateProposedParams(
   originalParams: Record<string, unknown>,
 ): CorrectionProposalValidationResult {
   const errors: string[] = [];
+
+  if (!isPlainObject(originalParams)) {
+    return { valid: false, errors: ['originalParams must be a plain object'] };
+  }
 
   if (!isPlainObject(proposedParams)) {
     const type = proposedParams === null ? 'null'
@@ -141,11 +157,17 @@ export function validateCorrectionProposal(
     errors.push('proposedParams is not JSON-serializable');
   }
 
-  // correctedFields — required, must be array
+  // correctedFields — required, must be array of {field, reason}
   if (!('correctedFields' in proposal)) {
     errors.push('correctedFields is required');
   } else if (!Array.isArray(proposal.correctedFields)) {
     errors.push('correctedFields must be an array');
+  } else if (!proposal.correctedFields.every((f) =>
+    isPlainObject(f) &&
+    typeof f.field === 'string' && f.field.trim().length > 0 &&
+    typeof f.reason === 'string' && f.reason.trim().length > 0
+  )) {
+    errors.push('correctedFields must contain objects with non-empty field and reason');
   }
 
   // applicationMode — required, must be 'shadow' or 'live'
