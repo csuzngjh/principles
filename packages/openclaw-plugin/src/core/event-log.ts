@@ -31,6 +31,7 @@ import type {
   RuleHostEvaluatedEventData,
   RuleHostBlockedEventData,
   RuleHostRequireApprovalEventData,
+  RuleHostAutoCorrectProposedEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -244,6 +245,10 @@ export class EventLog {
     this.record('rulehost_requireApproval', 'requireApproval', undefined, data);
   }
 
+  recordRuleHostAutoCorrectProposed(data: RuleHostAutoCorrectProposedEventData): void {
+    this.record('rulehost_auto_correct_proposed', 'auto_correct', undefined, data);
+  }
+
   private record(
     type: EventType, 
     category: EventCategory, 
@@ -449,6 +454,8 @@ export class EventLog {
       stats.evolution.rulehostBlocked++;
     } else if (entry.type === 'rulehost_requireApproval') {
       stats.evolution.rulehostRequireApproval++;
+    } else if (entry.type === 'rulehost_auto_correct_proposed') {
+      stats.evolution.rulehostAutoCorrectProposed++;
     }
   }
 
