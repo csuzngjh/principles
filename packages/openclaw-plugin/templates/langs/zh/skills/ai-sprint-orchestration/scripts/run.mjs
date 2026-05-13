@@ -91,7 +91,7 @@ function configureRuntimeRoots(rootPath) {
 
 function checkAcpxAvailable() {
   return process.platform === 'win32'
-    ? spawnSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/c', `${acpxBin} --version`], {
+    ? spawnSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', `"${acpxBin}" --version`], {
         encoding: 'utf8',
         shell: false,
         timeout: 10_000,
@@ -141,7 +141,7 @@ function runSelfCheck() {
     for (const agentName of agentNames) {
       try {
         const agentCheck = process.platform === 'win32'
-          ? spawnSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/c', `${acpxBin} --format quiet --timeout 30 ${agentName} exec "echo available"`], { encoding: 'utf8', shell: false, timeout: 45_000 })
+          ? spawnSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', `"${acpxBin}" --format quiet --timeout 30 ${agentName} exec "echo available"`], { encoding: 'utf8', shell: false, timeout: 45_000 })
           : spawnSync(nodeBin, [acpxBin, '--format', 'quiet', '--timeout', '30', agentName, 'exec', 'echo available'], { encoding: 'utf8', shell: false, timeout: 45_000 });
         record(`agent:${agentName}`, agentCheck.status === 0, agentCheck.status === 0 ? 'available' : `status=${agentCheck.status}`);
       } catch (agentErr) {
@@ -474,8 +474,8 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
       result = spawnSync(
         comspec,
         [
-          '/d', '/c',
-          `${acpxBin} --cwd %AI_SPRINT_CWD% --approve-all --model %AI_SPRINT_MODEL% --timeout %AI_SPRINT_TIMEOUT% ${agent} exec -f %AI_SPRINT_PROMPT%`,
+          '/d', '/s', '/c',
+          `"${acpxBin}" --cwd "%AI_SPRINT_CWD%" --approve-all --model "%AI_SPRINT_MODEL%" --timeout "%AI_SPRINT_TIMEOUT%" ${agent} exec -f "%AI_SPRINT_PROMPT%"`,
         ],
         {
           cwd,
@@ -607,8 +607,8 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
       if (process.platform === 'win32') {
         const comspec = process.env.COMSPEC || 'cmd.exe';
         proc = spawn(comspec, [
-          '/d', '/c',
-          `${acpxBin} --cwd %AI_SPRINT_CWD% --approve-all --model %AI_SPRINT_MODEL% --timeout %AI_SPRINT_TIMEOUT% ${agent} exec -f %AI_SPRINT_PROMPT%`,
+          '/d', '/s', '/c',
+          `"${acpxBin}" --cwd "%AI_SPRINT_CWD%" --approve-all --model "%AI_SPRINT_MODEL%" --timeout "%AI_SPRINT_TIMEOUT%" ${agent} exec -f "%AI_SPRINT_PROMPT%"`,
         ], {
           cwd,
           encoding: 'utf8',
@@ -867,8 +867,8 @@ function runAgentWithProgressCheck({
       if (process.platform === 'win32') {
         const comspec = process.env.COMSPEC || 'cmd.exe';
         proc = spawn(comspec, [
-          '/d', '/c',
-          `${acpxBin} --cwd %AI_SPRINT_CWD% --approve-all --model %AI_SPRINT_MODEL% --timeout %AI_SPRINT_TIMEOUT% ${agent} exec -f %AI_SPRINT_PROMPT%`,
+          '/d', '/s', '/c',
+          `"${acpxBin}" --cwd "%AI_SPRINT_CWD%" --approve-all --model "%AI_SPRINT_MODEL%" --timeout "%AI_SPRINT_TIMEOUT%" ${agent} exec -f "%AI_SPRINT_PROMPT%"`,
         ], {
           cwd,
           encoding: 'utf8',
