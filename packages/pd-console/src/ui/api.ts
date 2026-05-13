@@ -6,12 +6,139 @@ import type {
   ActivityEvent,
 } from "../types.js";
 
+interface OverviewHealth {
+  status: 'healthy' | 'degraded' | 'error';
+  gfi: { current: number; stage: string; peakToday: number; threshold: number };
+  trust: { stage: number; score: number };
+  principles: { candidate: number; probation: number; active: number; deprecated: number };
+  queue: { pending: number; inProgress: number; completed: number };
+}
+
+interface OverviewData {
+  workspaceDir: string;
+  generatedAt: string;
+  dataFreshness: 'fresh' | 'stale' | 'error';
+  summary: {
+    repeatErrorRate: number;
+    userCorrectionRate: number;
+    pendingSamples: number;
+    approvedSamples: number;
+    painEvents: number;
+    principleEventCount: number;
+    gateBlocks: number;
+    taskOutcomes: number;
+  };
+  health: OverviewHealth;
+  dailyTrend: { day: string; toolCalls: number; failures: number; userCorrections: number; painEvents: number }[];
+  topRegressions: { toolName: string; errorType: string; occurrences: number }[];
+  sampleQueue: { counters: Record<string, number>; preview: unknown[] };
+}
+
+interface GateStats {
+  generatedAt: string;
+  today: { gfiBlocks: number; stageBlocks: number; bypassAttempts: number };
+  trust: { stage: number; score: number; status: 'healthy' | 'warning' | 'critical' };
+  evolution: { tier: string; points: number; status: string };
+  gfi: {
+    current: number;
+    peakToday: number;
+    threshold: number;
+    trend: { hour: string; value: number }[];
+    sources: Record<string, number>;
+    stage: 'stable' | 'elevated' | 'critical' | 'saturated';
+  };
+}
+
+interface FeedbackGfi {
+  current: number;
+  peakToday: number;
+  threshold: number;
+  trend: { hour: string; value: number }[];
+  sources: Record<string, number>;
+}
+
+interface EmpathyEvent {
+  timestamp: string;
+  severity: 'low' | 'medium' | 'high';
+  score: number;
+  reason: string;
+  origin: string;
+  gfiAfter: number;
+}
+
+interface GateBlockItem {
+  timestamp: string;
+  toolName: string;
+  filePath: string | null;
+  reason: string;
+  gateType: 'gfi' | 'stage' | 'p03' | 'other';
+  gfi: number;
+  trustStage: number;
+}
+
+interface WorkspaceEntry {
+  name: string;
+  path: string;
+  lastSync: string | null;
+  config: { workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean } | null;
+}
+
+interface SampleListItem {
+  sampleId: string;
+  taskId: string;
+  title: string;
+  description: string;
+  reviewStatus: "pending" | "approved" | "rejected";
+  confidence: number | null;
+  createdAt: string;
+}
+
+interface SampleDetail {
+  sampleId: string;
+  taskId: string;
+  title: string;
+  description: string;
+  reviewStatus: "pending" | "approved" | "rejected";
+  confidence: number | null;
+  createdAt: string;
+  artifactContent: Record<string, unknown> | null;
+  recommendation: {
+    title?: string;
+    text?: string;
+    triggerPattern?: string;
+    action?: string;
+    abstractedPrinciple?: string;
+  } | null;
+}
+
+interface SamplesData {
+  counters: Record<string, number>;
+  items: SampleListItem[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+interface CentralOverview {
+  generatedAt: string;
+  workspaceCount: number;
+  workspaces: { name: string; path: string; status: 'healthy' | 'degraded' | 'error'; gfi: number; principleCount: number }[];
+}
+
+interface CentralHealth {
+  generatedAt: string;
+  overallStatus: 'healthy' | 'degraded' | 'error';
+  workspaces: { name: string; status: 'healthy' | 'degraded' | 'error'; gfi: number; activePrinciples: number; pendingTasks: number }[];
+}
+
 function getToken(): string | null {
   return sessionStorage.getItem("pd_token");
 }
 
 function setToken(token: string): void {
   sessionStorage.setItem("pd_token", token);
+}
+
+function clearToken(): void {
+  sessionStorage.removeItem("pd_token");
 }
 
 async function request<T>(
@@ -39,8 +166,10 @@ async function request<T>(
     if (!response.ok) {
       let errorMessage = `HTTP ${response.status}`;
       try {
-        const parsed = await response.json() as { error?: string };
-        if (parsed && typeof parsed.error === 'string') {
+        const parsed = await response.json() as { error?: string; message?: string };
+        if (parsed && typeof parsed.message === 'string') {
+          errorMessage = parsed.message;
+        } else if (parsed && typeof parsed.error === 'string') {
           errorMessage = parsed.error;
         }
       } catch {
@@ -49,14 +178,22 @@ async function request<T>(
       return { success: false, error: errorMessage };
     }
 
-    const data: T = await response.json() as T;
-    return { success: true, data };
+    const json = await response.json() as { success?: boolean; data?: T };
+    if (json.success === true && json.data !== undefined) {
+      return { success: true, data: json.data };
+    }
+    return { success: true, data: json as unknown as T };
   } catch (err) {
     return {
       success: false,
       error: err instanceof Error ? err.message : "Network error",
     };
   }
+}
+
+async function checkAuth(): Promise<boolean> {
+  const result = await request<unknown>("/api/health");
+  return result.success;
 }
 
 async function fetchTasks(): Promise<ApiResponse<TaskZones>> {
@@ -67,28 +204,16 @@ async function fetchTaskEvidence(id: string): Promise<ApiResponse<TaskEvidence>>
   return request<TaskEvidence>(`/api/tasks/${id}/evidence`);
 }
 
-async function approveTask(
-  id: string,
-): Promise<ApiResponse<{ success: boolean }>> {
-  return request<{ success: boolean }>(`/api/tasks/${id}/approve`, {
-    method: "POST",
-  });
+async function approveTask(id: string): Promise<ApiResponse<{ success: boolean }>> {
+  return request<{ success: boolean }>(`/api/tasks/${id}/approve`, { method: "POST" });
 }
 
-async function rejectTask(
-  id: string,
-): Promise<ApiResponse<{ success: boolean }>> {
-  return request<{ success: boolean }>(`/api/tasks/${id}/reject`, {
-    method: "POST",
-  });
+async function rejectTask(id: string): Promise<ApiResponse<{ success: boolean }>> {
+  return request<{ success: boolean }>(`/api/tasks/${id}/reject`, { method: "POST" });
 }
 
-async function cleanupTask(
-  id: string,
-): Promise<ApiResponse<{ success: boolean }>> {
-  return request<{ success: boolean }>(`/api/tasks/${id}/cleanup`, {
-    method: "POST",
-  });
+async function cleanupTask(id: string): Promise<ApiResponse<{ success: boolean }>> {
+  return request<{ success: boolean }>(`/api/tasks/${id}/cleanup`, { method: "POST" });
 }
 
 async function fetchStatus(): Promise<ApiResponse<SystemStatus>> {
@@ -99,9 +224,158 @@ async function fetchActivity(): Promise<ApiResponse<ActivityEvent[]>> {
   return request<ActivityEvent[]>("/api/activity");
 }
 
+async function fetchOverview(): Promise<ApiResponse<OverviewData>> {
+  return request<OverviewData>("/api/overview");
+}
+
+async function fetchOverviewHealth(): Promise<ApiResponse<OverviewHealth>> {
+  return request<OverviewHealth>("/api/overview/health");
+}
+
+async function fetchGateStats(): Promise<ApiResponse<GateStats>> {
+  return request<GateStats>("/api/gate/stats");
+}
+
+async function fetchGateBlocks(limit?: number): Promise<ApiResponse<GateBlockItem[]>> {
+  const query = limit ? `?limit=${limit}` : '';
+  return request<GateBlockItem[]>(`/api/gate/blocks${query}`);
+}
+
+async function fetchFeedbackGfi(): Promise<ApiResponse<FeedbackGfi>> {
+  return request<FeedbackGfi>("/api/feedback/gfi");
+}
+
+async function fetchEmpathyEvents(limit?: number): Promise<ApiResponse<EmpathyEvent[]>> {
+  const query = limit ? `?limit=${limit}` : '';
+  return request<EmpathyEvent[]>(`/api/feedback/empathy-events${query}`);
+}
+
+async function fetchFeedbackGateBlocks(limit?: number): Promise<ApiResponse<GateBlockItem[]>> {
+  const query = limit ? `?limit=${limit}` : '';
+  return request<GateBlockItem[]>(`/api/feedback/gate-blocks${query}`);
+}
+
+async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntry[]>> {
+  return request<WorkspaceEntry[]>("/api/workspaces");
+}
+
+async function addWorkspace(name: string, path: string): Promise<ApiResponse<WorkspaceEntry>> {
+  return request<WorkspaceEntry>("/api/workspaces", {
+    method: "POST",
+    body: JSON.stringify({ name, path }),
+  });
+}
+
+async function removeWorkspace(name: string): Promise<ApiResponse<{ removed: string }>> {
+  return request<{ removed: string }>(`/api/workspaces/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+async function syncWorkspace(name: string): Promise<ApiResponse<{ success: boolean; syncedAt: string }>> {
+  return request<{ success: boolean; syncedAt: string }>(`/api/workspaces/${encodeURIComponent(name)}/sync`, { method: "POST" });
+}
+
+async function fetchCentralOverview(): Promise<ApiResponse<CentralOverview>> {
+  return request<CentralOverview>("/api/central/overview");
+}
+
+async function fetchCentralHealth(): Promise<ApiResponse<CentralHealth>> {
+  return request<CentralHealth>("/api/central/health");
+}
+
+async function fetchSamples(status?: string, page?: number): Promise<ApiResponse<SamplesData>> {
+  const params = new URLSearchParams();
+  if (status && status !== 'all') params.set('status', status);
+  if (page) params.set('page', String(page));
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return request<SamplesData>(`/api/samples${query}`);
+}
+
+async function fetchSampleDetail(sampleId: string): Promise<ApiResponse<SampleDetail>> {
+  return request<SampleDetail>(`/api/samples/${encodeURIComponent(sampleId)}`);
+}
+
+async function reviewSample(sampleId: string, decision: 'approved' | 'rejected'): Promise<ApiResponse<{ success: boolean; reviewStatus: string }>> {
+  return request<{ success: boolean; reviewStatus: string }>(`/api/samples/${encodeURIComponent(sampleId)}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  });
+}
+
+interface EvolutionStats {
+  total: number;
+  pending: number;
+  inProgress: number;
+  completed: number;
+  failed: number;
+  stageDistribution: { stage: string; count: number }[];
+}
+
+interface EvolutionTaskItem {
+  taskId: string;
+  taskKind: string;
+  status: string;
+  createdAt: string;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+}
+
+interface EvolutionTasksData {
+  items: EvolutionTaskItem[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+interface EvolutionPrinciplesData {
+  summary: { candidate: number; probation: number; active: number; deprecated: number; archived: number; total: number };
+  recent: { principleId: string; status: string; text: string; triggerPattern: string; action: string; evaluability: string; createdAt: string; updatedAt: string }[];
+}
+
+interface QueueHealthData {
+  pendingCount: number;
+  retryWaitCount: number;
+  countsByTaskKind: Record<string, number>;
+  countsByChannel: Record<string, number>;
+  invalidMetadataCount: number;
+  blockedCount: number;
+  dependencyFailedCount: number;
+  readyTaskCount: number;
+  noReadyTasksReason: string | null;
+}
+
+async function fetchEvolutionStats(): Promise<ApiResponse<EvolutionStats>> {
+  return request<EvolutionStats>("/api/evolution/stats");
+}
+
+async function fetchEvolutionTasks(status?: string, page?: number): Promise<ApiResponse<EvolutionTasksData>> {
+  const params = new URLSearchParams();
+  if (status && status !== 'all') params.set('status', status);
+  if (page) params.set('page', String(page));
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return request<EvolutionTasksData>(`/api/evolution/tasks${query}`);
+}
+
+async function fetchEvolutionPrinciples(): Promise<ApiResponse<EvolutionPrinciplesData>> {
+  return request<EvolutionPrinciplesData>("/api/evolution/principles");
+}
+
+async function fetchEvolutionQueue(): Promise<ApiResponse<QueueHealthData>> {
+  return request<QueueHealthData>("/api/evolution/queue");
+}
+
+interface ThinkingModelOverview {
+  totalModels: number;
+  models: { id: string; name: string; trigger: string; must: string; forbidden: string }[];
+  source: string;
+}
+
+async function fetchThinkingModels(): Promise<ApiResponse<ThinkingModelOverview>> {
+  return request<ThinkingModelOverview>("/api/thinking-models");
+}
+
 export {
   getToken,
   setToken,
+  clearToken,
+  checkAuth,
   request,
   fetchTasks,
   fetchTaskEvidence,
@@ -110,4 +384,46 @@ export {
   cleanupTask,
   fetchStatus,
   fetchActivity,
+  fetchOverview,
+  fetchOverviewHealth,
+  fetchGateStats,
+  fetchGateBlocks,
+  fetchFeedbackGfi,
+  fetchEmpathyEvents,
+  fetchFeedbackGateBlocks,
+  fetchWorkspaces,
+  addWorkspace,
+  removeWorkspace,
+  syncWorkspace,
+  fetchCentralOverview,
+  fetchCentralHealth,
+  fetchSamples,
+  fetchSampleDetail,
+  reviewSample,
+  fetchEvolutionStats,
+  fetchEvolutionTasks,
+  fetchEvolutionPrinciples,
+  fetchEvolutionQueue,
+  fetchThinkingModels,
+};
+
+export type {
+  OverviewData,
+  OverviewHealth,
+  GateStats,
+  FeedbackGfi,
+  EmpathyEvent,
+  GateBlockItem,
+  WorkspaceEntry,
+  CentralOverview,
+  CentralHealth,
+  SampleListItem,
+  SampleDetail,
+  SamplesData,
+  EvolutionStats,
+  EvolutionTaskItem,
+  EvolutionTasksData,
+  EvolutionPrinciplesData,
+  QueueHealthData,
+  ThinkingModelOverview,
 };

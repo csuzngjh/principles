@@ -3,12 +3,13 @@
  *
  * Orchestrates the full compilation flow:
  *   ReflectionContextCollector.collect() → extract patterns → generateFromTemplate()
- *   → validateGeneratedCode() → registerCompiledRule()
+ *   → validateGeneratedCode() → [replay validation] → registerCompiledRule()
  *
  * DESIGN DECISIONS:
  * - extractPatterns infers toolName from pain event reasons and session tool calls
  * - Groups by toolName into PainPattern objects
  * - If no patterns can be extracted, returns a 'no patterns' failure
+ * - PRI-115: Replay validation gate runs after code validation, before registration
  */
 
 import { ReflectionContextCollector } from '../reflection/reflection-context.js';
@@ -18,6 +19,9 @@ import { registerCompiledRule } from './ledger-registrar.js';
 import { createImplementationAssetDir } from '../code-implementation-storage.js';
 import type { TrajectoryDatabase } from '../trajectory.js';
 import type { CompileResult } from '@principles/core/runtime-v2';
+import { loadRuleImplementationModule } from '../rule-implementation-runtime.js';
+import { createGoldenTraceFixture, type GoldenTraceCase } from '@principles/core/runtime-v2';
+import { replayGoldenTrace, type ReplayEvaluateFn } from '@principles/core/runtime-v2';
 
 // Re-export CompileResult from core
 export type { CompileResult } from '@principles/core/runtime-v2';
@@ -171,6 +175,7 @@ export class PrincipleCompiler {
    * 2. Extract pain patterns
    * 3. Generate code from template
    * 4. Validate generated code
+   * 4.5. Replay validation against GoldenTrace (PRI-115)
    * 5. Register in ledger
    */
   compileOne(principleId: string): CompileResult {
@@ -203,6 +208,49 @@ export class PrincipleCompiler {
       };
     }
 
+    // Step 4.5: Replay validation against GoldenTrace (PRI-115)
+    const replayCases = this.buildGoldenTraceCases(patterns, context);
+    if (replayCases.length > 0) {
+      let moduleExports: { evaluate?: unknown };
+      try {
+        moduleExports = loadRuleImplementationModule(code, `replay-${principleId}.js`);
+      } catch (err) {
+        return {
+          success: false,
+          principleId,
+          reason: `module_load_error: ${(err as Error).message}`,
+          code,
+          degraded: true,
+        };
+      }
+
+      if (typeof moduleExports.evaluate !== 'function') {
+        return { success: false, principleId, reason: 'replay: no evaluate export', degraded: true };
+      }
+
+      try {
+        const evaluateFn = moduleExports.evaluate as ReplayEvaluateFn;
+        const replayResult = replayGoldenTrace(evaluateFn, replayCases);
+        if (!replayResult.passed) {
+          return {
+            success: false,
+            principleId,
+            reason: 'replay_validation_failed',
+            code,
+            replayResult,
+            degraded: true,
+          };
+        }
+      } catch (err) {
+        return {
+          success: false,
+          principleId,
+          reason: `replay_error: ${(err as Error).message}`,
+          code,
+          degraded: true,
+        };
+      }
+    }
     // Step 5: Register
     const registration = registerCompiledRule(this.stateDir, {
       principleId,
@@ -222,6 +270,43 @@ export class PrincipleCompiler {
       implementationId: registration.implementationId,
       code,
     };
+  }
+
+  /**
+   * Build GoldenTrace test cases from extracted pain patterns.
+   *
+   * Generates synthetic negative/positive parameter pairs based on whether
+   * the pattern targets commands (commandRegex) or paths (pathRegex).
+   * Returns an empty array when no patterns are available.
+   */
+  private buildGoldenTraceCases(
+    patterns: PainPattern[],
+    _context: { painEvents: Array<{ reason: string | null; source: string }> },
+  ): GoldenTraceCase[] {
+    if (patterns.length === 0) return [];
+
+    const pattern = patterns[0];
+    // Skip replay when the pattern has no regex qualifier -- the generated template
+    // blocks ALL calls to the tool, making it impossible to construct a passing
+    // positive case. Replay is only meaningful when the template is selective.
+    // Also skip contentRegex-only patterns: synthetic content params are not meaningful.
+    if (!pattern.commandRegex && !pattern.pathRegex) return [];
+    const negativeParams: Record<string, unknown> = {};
+    if (pattern.commandRegex) negativeParams.command = 'rm -rf /';
+    else negativeParams.path = '/etc/passwd';
+
+    const positiveParams: Record<string, unknown> = {};
+    if (pattern.commandRegex) positiveParams.command = 'echo hello';
+    else positiveParams.path = '/tmp/safe.txt';
+
+    const fixture = createGoldenTraceFixture({
+      toolName: pattern.toolName,
+      negativeParams,
+      positiveParams,
+      expectedDecision: 'block',
+    });
+
+    return fixture.cases;
   }
 
   /**

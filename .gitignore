@@ -96,3 +96,7 @@ gha-creds-*.json
 # Git worktrees
 .worktrees/
 .pd/
+
+# Symphony (external project copy)
+symphony/
+patches/
