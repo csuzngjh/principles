@@ -10,8 +10,8 @@ interface AutoRefreshState<T> {
 
 export function useAutoRefresh<T>(
   fetcher: () => Promise<{ success: boolean; data?: T; error?: string }>,
-  intervalMs: number = 30000,
-  enabled: boolean = true,
+  intervalMs = 30000,
+  enabled = true,
 ): AutoRefreshState<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);

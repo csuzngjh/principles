@@ -468,7 +468,7 @@ test('dynamic timeout: extension window scales with timeoutSeconds instead of fi
 });
 
 // ---------------------------------------------------------------------------
-// Isolation Report: iflow writes to tmp/sprint-agent/{runId}/{stage}-{role}/
+// Isolation Report: agent writes to tmp/sprint-agent/{runId}/{stage}-{role}/
 // Phase 2: Uses runId directly, not fragile timestamp extraction
 // ---------------------------------------------------------------------------
 
@@ -902,10 +902,10 @@ test('behavior: missing reviewer report persists reviewerFailures details', () =
       reviewerFailures: [
         {
           role: 'reviewer_b',
-          summary: 'primary=opencode/test-model: Agent opencode failed with status 1 | fallback=iflow/glm-4.7: timed out',
+          summary: 'primary=opencode/test-model: Agent opencode failed with status 1 | fallback=opencode/minimax-cn-coding-plan/MiniMax-M2.7: timed out',
           attempts: [
             { label: 'primary', agent: 'opencode', model: 'test-model', error: 'Agent opencode failed with status 1', timedOut: false },
-            { label: 'fallback', agent: 'iflow', model: 'glm-4.7', error: 'Agent iflow timed out', timedOut: true },
+            { label: 'fallback', agent: 'opencode', model: 'minimax-cn-coding-plan/MiniMax-M2.7', error: 'Agent opencode timed out', timedOut: true },
           ],
         },
       ],
@@ -919,7 +919,7 @@ test('behavior: missing reviewer report persists reviewerFailures details', () =
     assert.ok(decision.includes('primary=opencode/test-model'), 'decision should include reviewer failure summary');
     assert.ok(Array.isArray(scorecard.reviewerFailures), 'scorecard should persist reviewerFailures');
     assert.equal(scorecard.reviewerFailures[0].role, 'reviewer_b');
-    assert.ok(scorecard.reviewerFailures[0].summary.includes('fallback=iflow/glm-4.7'));
+    assert.ok(scorecard.reviewerFailures[0].summary.includes('fallback=opencode/minimax-cn-coding-plan/MiniMax-M2.7'));
   } finally {
     cleanupTempDir(tmp);
   }
@@ -1397,7 +1397,7 @@ test('acceptance checklist: file exists and has correct content', () => {
 
 test('preflight check validates acpx not agent names', () => {
   // The preflight code in run.mjs should check that acpx is available,
-  // NOT that agent names like "iflow" or "claude" exist as shell binaries.
+  // NOT that agent names like "opencode" or "claude" exist as shell binaries.
   const runPath = path.resolve(__dirname, '..', 'scripts', 'run.mjs');
   const content = fs.readFileSync(runPath, 'utf8');
   // Should NOT use "which" with agent names

@@ -33,19 +33,19 @@
   "stageTimeoutMinutes": 20,
   "stages": ["investigate", "implement-pass-1", "verify"],
   "producer": {
-    "agent": "iflow",
-    "model": "glm-4.7",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 240
   },
   "reviewerA": {
-    "agent": "iflow",
-    "model": "glm-4.7",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 120,
     "focus": "Validate feature behavior, acceptance criteria coverage, and architecture fit."
   },
   "reviewerB": {
-    "agent": "iflow",
-    "model": "glm-4.7",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 120,
     "focus": "Validate implementation scope, verification evidence, and regression risk."
   },

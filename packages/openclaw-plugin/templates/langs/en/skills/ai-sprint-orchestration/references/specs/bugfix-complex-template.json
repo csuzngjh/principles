@@ -33,19 +33,19 @@
   "stageTimeoutMinutes": 15,
   "stages": ["investigate", "implement-pass-1", "verify"],
   "producer": {
-    "agent": "iflow",
-    "model": "glm-4.7",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 180
   },
   "reviewerA": {
-    "agent": "iflow",
-    "model": "glm-4.7",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 120,
     "focus": "Validate root cause, behavioral change, and code correctness."
   },
   "reviewerB": {
-    "agent": "iflow",
-    "model": "glm-4.7",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 120,
     "focus": "Validate scope control, verification quality, and regression risk."
   },

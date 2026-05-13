@@ -53,7 +53,7 @@ export class GateConsoleModel {
   async getGateStats(): Promise<GateStatsOutput> {
     const snapshot = await this.getHealthReadModel().getSnapshot();
     const gfiSnapshot = snapshot.gfi;
-    const active = gfiSnapshot.active;
+    const {active} = gfiSnapshot;
     const currentGfi = active?.currentGfi ?? 0;
     const health = classifyGfiWorkspaceHealth(gfiSnapshot);
 
@@ -98,7 +98,7 @@ export class GateConsoleModel {
   }
 
   async getGateBlocks(_limit?: number): Promise<GateBlockItem[]> {
-    return [];
+    return this.getGateModel().getGateBlocks(_limit);
   }
 
   dispose(): void {

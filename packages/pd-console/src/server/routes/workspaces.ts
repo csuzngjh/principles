@@ -7,6 +7,23 @@ function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
+function safeParse(text: string): Record<string, unknown> {
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, workspaceService: WorkspaceService) {
   async function handleWorkspacesRoute(
     req: IncomingMessage,
@@ -50,13 +67,13 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
       return;
     }
 
-    const wsName = decodeURIComponent(nameMatch[1]);
-    const rest = nameMatch[2];
+    const [, wsName, rest] = nameMatch;
+    const decodedWsName = decodeURIComponent(wsName);
 
     if (req.method === 'GET' && (rest === '' || rest === '/')) {
-      const entry = configStore.getWorkspace(wsName);
+      const entry = configStore.getWorkspace(decodedWsName);
       if (!entry) {
-        sendNotFound(res, `Workspace "${wsName}" not found`);
+        sendNotFound(res, `Workspace "${decodedWsName}" not found`);
         return;
       }
       sendSuccess(res, entry);
@@ -67,8 +84,8 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
       const body = await readBody(req);
       const updates = safeParse(body);
       try {
-        configStore.updateWorkspace(wsName, updates);
-        const entry = configStore.getWorkspace(wsName);
+        configStore.updateWorkspace(decodedWsName, updates);
+        const entry = configStore.getWorkspace(decodedWsName);
         sendSuccess(res, entry);
       } catch (err: unknown) {
         sendError(res, 404, 'workspace_not_found', getErrorMessage(err));
@@ -78,8 +95,8 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
 
     if (req.method === 'DELETE' && (rest === '' || rest === '/')) {
       try {
-        configStore.removeWorkspace(wsName);
-        sendSuccess(res, { removed: wsName });
+        configStore.removeWorkspace(decodedWsName);
+        sendSuccess(res, { removed: decodedWsName });
       } catch (err: unknown) {
         sendError(res, 404, 'workspace_not_found', getErrorMessage(err));
       }
@@ -88,7 +105,7 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
 
     if (req.method === 'POST' && rest === '/sync') {
       try {
-        const result = await workspaceService.syncWorkspace(wsName);
+        const result = await workspaceService.syncWorkspace(decodedWsName);
         sendSuccess(res, result);
       } catch (err: unknown) {
         sendError(res, 404, 'workspace_not_found', getErrorMessage(err));
@@ -102,19 +119,3 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
   return { handleWorkspacesRoute };
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
-}
-
-function safeParse(text: string): Record<string, any> {
-  try {
-    return JSON.parse(text) as Record<string, any>;
-  } catch {
-    return {};
-  }
-}

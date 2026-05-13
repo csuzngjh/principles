@@ -5,25 +5,25 @@ import type { WorkspaceEntry, SyncResult } from '../types/index.js';
 export interface CentralOverviewOutput {
   generatedAt: string;
   workspaceCount: number;
-  workspaces: Array<{
+  workspaces: {
     name: string;
     path: string;
     status: 'healthy' | 'degraded' | 'error';
     gfi: number;
     principleCount: number;
-  }>;
+  }[];
 }
 
 export interface CentralHealthOutput {
   generatedAt: string;
   overallStatus: 'healthy' | 'degraded' | 'error';
-  workspaces: Array<{
+  workspaces: {
     name: string;
     status: 'healthy' | 'degraded' | 'error';
     gfi: number;
     activePrinciples: number;
     pendingTasks: number;
-  }>;
+  }[];
 }
 
 export class WorkspaceService {

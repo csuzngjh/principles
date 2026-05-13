@@ -4,6 +4,7 @@ tracker:
   # project_slug must be a Linear Project.slugId (found in project URL: .../project/<slugId>).
   # Using Project A slugId: d4fdb8223f27
   project_slug: "d4fdb8223f27"
+  team_key: "PRI"
   active_states:
     - Todo
     - In Progress
@@ -34,7 +35,7 @@ agent:
   model: sonnet
 codex:
   agent: "claude"
-  command: npx -y @agentclientprotocol/claude-agent-acp@^0.31.0
+  command: claude
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:

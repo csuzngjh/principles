@@ -18,6 +18,7 @@ function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/* eslint-disable @typescript-eslint/max-params */
 export async function handleSamplesRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -41,7 +42,7 @@ export async function handleSamplesRoute(
     return;
   }
 
-  const detailMatch = subPath.match(/^\/([^/]+)$/);
+  const detailMatch = /^\/([^/]+)$/.exec(subPath);
   if (req.method === 'GET' && detailMatch) {
     const sampleId = decodeURIComponent(detailMatch[1]);
     try {
@@ -57,14 +58,14 @@ export async function handleSamplesRoute(
     return;
   }
 
-  const reviewMatch = subPath.match(/^\/([^/]+)\/review$/);
+  const reviewMatch = /^\/([^/]+)\/review$/.exec(subPath);
   if (req.method === 'POST' && reviewMatch) {
     const sampleId = decodeURIComponent(reviewMatch[1]);
     try {
       const body = await readBody(req);
-      let parsed: { decision?: string; note?: string };
+      let parsed: { decision?: string; note?: string } | undefined = undefined;
       try {
-        parsed = JSON.parse(body);
+        parsed = JSON.parse(body) as { decision?: string; note?: string };
       } catch {
         sendBadRequest(res, 'Invalid JSON body');
         return;
@@ -81,7 +82,7 @@ export async function handleSamplesRoute(
       }
 
       const result = await model.reviewSample(sampleId, {
-        decision: parsed.decision as 'approved' | 'rejected',
+        decision: parsed.decision,
         note: parsed.note,
       });
       sendSuccess(res, result);

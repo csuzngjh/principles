@@ -29,6 +29,11 @@ const acpxBin = (() => {
   const r = spawnSync(cmd, ['acpx'], { encoding: 'utf8' });
   if (r.status === 0) {
     const lines = r.stdout.trim().split(/\r?\n/);
+    // On Windows, prefer .cmd file over the Unix shell script (no extension)
+    if (process.platform === 'win32') {
+      const cmdFile = lines.find(l => l.trim().toLowerCase().endsWith('.cmd'));
+      if (cmdFile) return cmdFile.trim();
+    }
     const symlink = lines[0].trim();
     try {
       return fs.realpathSync(symlink);
@@ -86,7 +91,7 @@ function configureRuntimeRoots(rootPath) {
 
 function checkAcpxAvailable() {
   return process.platform === 'win32'
-    ? spawnSync('powershell.exe', ['-NoProfile', '-Command', 'acpx --version'], {
+    ? spawnSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/c', `${acpxBin} --version`], {
         encoding: 'utf8',
         shell: false,
         timeout: 10_000,
@@ -128,6 +133,24 @@ function runSelfCheck() {
 
   const acpxCheck = checkAcpxAvailable();
   record('acpx_available', acpxCheck.status === 0, (acpxCheck.stdout || acpxCheck.stderr || '').trim() || `status=${acpxCheck.status}`);
+
+  // Check which agents are available by running a quick version check
+  try {
+    const registry = readJson(path.join(referencesRoot, 'agent-registry.json'));
+    const agentNames = Object.keys(registry.agents || {});
+    for (const agentName of agentNames) {
+      try {
+        const agentCheck = process.platform === 'win32'
+          ? spawnSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/c', `${acpxBin} --format quiet --timeout 30 ${agentName} exec "echo available"`], { encoding: 'utf8', shell: false, timeout: 45_000 })
+          : spawnSync(nodeBin, [acpxBin, '--format', 'quiet', '--timeout', '30', agentName, 'exec', 'echo available'], { encoding: 'utf8', shell: false, timeout: 45_000 });
+        record(`agent:${agentName}`, agentCheck.status === 0, agentCheck.status === 0 ? 'available' : `status=${agentCheck.status}`);
+      } catch (agentErr) {
+        record(`agent:${agentName}`, false, agentErr.message);
+      }
+    }
+  } catch (registryErr) {
+    record('agent_registry_read', false, registryErr.message);
+  }
 
   const probePath = path.join(runtimeRoot, '.self-check-write-probe.tmp');
   try {
@@ -273,7 +296,7 @@ function updateSummary(runDir, lines) {
 function inferFailureClassification({ summary = '', blockers = [], reviewerTimeouts = null, reviewerViolations = null }) {
   const combined = [summary, ...(blockers ?? [])].join(' ').toLowerCase();
 
-  if (/acpx|path|enoent|eacces|eprem|permission|writable|runtime root|command not found|not available/.test(combined)) {
+  if (/acpx|path|enoent|eacces|eprem|permission|writable|runtime root|command not found|not available|failed to spawn|spawn.*enoent|exit status|status 1|status 130|taskkill|comspec/.test(combined)) {
     return {
       failureClassification: 'environment issue',
       failureSource: 'runtime environment',
@@ -289,11 +312,19 @@ function inferFailureClassification({ summary = '', blockers = [], reviewerTimeo
     };
   }
 
-  if ((reviewerTimeouts?.length ?? 0) > 0 || (reviewerViolations?.length ?? 0) > 0 || /missing reports|schema violation|report invalidated|timed out|agent .*failed|verdict|dimensions/.test(combined)) {
+  if ((reviewerTimeouts?.length ?? 0) > 0 || (reviewerViolations?.length ?? 0) > 0 || /missing reports|schema violation|report invalidated|timed out|verdict|dimensions/.test(combined)) {
     return {
       failureClassification: 'agent behavior issue',
       failureSource: 'role execution or report quality',
       recommendedNextAction: 'Adjust agent profile, fallback, or prompt discipline; do not treat this as a product-side bug.',
+    };
+  }
+
+  if (/agent .*failed/.test(combined)) {
+    return {
+      failureClassification: 'environment issue',
+      failureSource: 'agent runtime',
+      recommendedNextAction: 'Check agent availability and environment setup before retrying.',
     };
   }
 
@@ -439,12 +470,12 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
   let result;
   try {
     if (process.platform === 'win32') {
+      const comspec = process.env.COMSPEC || 'cmd.exe';
       result = spawnSync(
-        'powershell.exe',
+        comspec,
         [
-          '-NoProfile',
-          '-Command',
-          `acpx --cwd $env:AI_SPRINT_CWD --approve-all --model $env:AI_SPRINT_MODEL --timeout $env:AI_SPRINT_TIMEOUT ${agent} exec -f $env:AI_SPRINT_PROMPT`,
+          '/d', '/c',
+          `${acpxBin} --cwd "%AI_SPRINT_CWD%" --approve-all --model "%AI_SPRINT_MODEL%" --timeout "%AI_SPRINT_TIMEOUT%" ${agent} exec -f "%AI_SPRINT_PROMPT%"`,
         ],
         {
           cwd,
@@ -574,9 +605,10 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
 
     try {
       if (process.platform === 'win32') {
-        proc = spawn('powershell.exe', [
-          '-NoProfile', '-Command',
-          `acpx --cwd $env:AI_SPRINT_CWD --approve-all --model $env:AI_SPRINT_MODEL --timeout $env:AI_SPRINT_TIMEOUT ${agent} exec -f $env:AI_SPRINT_PROMPT`,
+        const comspec = process.env.COMSPEC || 'cmd.exe';
+        proc = spawn(comspec, [
+          '/d', '/c',
+          `${acpxBin} --cwd "%AI_SPRINT_CWD%" --approve-all --model "%AI_SPRINT_MODEL%" --timeout "%AI_SPRINT_TIMEOUT%" ${agent} exec -f "%AI_SPRINT_PROMPT%"`,
         ], {
           cwd,
           encoding: 'utf8',
@@ -833,9 +865,10 @@ function runAgentWithProgressCheck({
     // Spawn the agent process
     try {
       if (process.platform === 'win32') {
-        proc = spawn('powershell.exe', [
-          '-NoProfile', '-Command',
-          `acpx --cwd $env:AI_SPRINT_CWD --approve-all --model $env:AI_SPRINT_MODEL --timeout $env:AI_SPRINT_TIMEOUT ${agent} exec -f $env:AI_SPRINT_PROMPT`,
+        const comspec = process.env.COMSPEC || 'cmd.exe';
+        proc = spawn(comspec, [
+          '/d', '/c',
+          `${acpxBin} --cwd "%AI_SPRINT_CWD%" --approve-all --model "%AI_SPRINT_MODEL%" --timeout "%AI_SPRINT_TIMEOUT%" ${agent} exec -f "%AI_SPRINT_PROMPT%"`,
         ], {
           cwd,
           encoding: 'utf8',
@@ -1176,8 +1209,8 @@ export function getIsolationDir(runId, stageName, role) {
 }
 
 /**
- * Find report in iflow isolation directory.
- * iflow writes to runtime/tmp/sprint-agent/{runId}/{stage}-{role}/{report}.md
+ * Find report in agent isolation directory.
+ * Agent writes to runtime/tmp/sprint-agent/{runId}/{stage}-{role}/{report}.md
  *
  * IMPORTANT: Uses runId directly for isolation lookup, not fragile timestamp extraction.
  * This ensures different runs have unique isolation directories and prevents cross-contamination.
@@ -2608,6 +2641,9 @@ async function executeStage(runDir, state, spec) {
         worktreePath: worktreeInfo?.worktreePath,
         worklogPath: producerWorklogPath,
       });
+      if (result.status !== 0) {
+        throw new Error(`Agent exited with status ${result.status}: ${result.stderr || 'no stderr'}`);
+      }
       producerOutput = result.stdout;
       extensionsUsed = result.extensionsUsed ?? 0;
       if (extensionsUsed > 0) {

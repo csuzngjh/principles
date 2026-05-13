@@ -34,7 +34,7 @@ export class SampleConsoleModel {
   private async ensureInitialized(): Promise<RuntimeStateManager> {
     if (this.initPromise) {
       await this.initPromise;
-      return this.stateManager!;
+      return this.stateManager as RuntimeStateManager;
     }
     this.stateManager = new RuntimeStateManager({ workspaceDir: this.workspaceDir });
     this.initPromise = this.stateManager.initialize().catch((err) => {
@@ -43,7 +43,7 @@ export class SampleConsoleModel {
       throw err;
     });
     await this.initPromise;
-    return this.stateManager!;
+    return this.stateManager;
   }
 
   private async getIntakeService(): Promise<CandidateIntakeService> {
@@ -84,7 +84,7 @@ export class SampleConsoleModel {
           title: c.title,
           description: c.description,
           reviewStatus,
-          confidence: c.confidence,
+          confidence: c.confidence ?? null,
           createdAt: c.createdAt,
         });
       }
@@ -159,7 +159,7 @@ export class SampleConsoleModel {
       title: candidate.title,
       description: candidate.description,
       reviewStatus,
-      confidence: candidate.confidence,
+      confidence: candidate.confidence ?? null,
       createdAt: candidate.createdAt,
       artifactContent,
       recommendation,
