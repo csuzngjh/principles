@@ -475,7 +475,7 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
         comspec,
         [
           '/d', '/c',
-          `${acpxBin} --cwd "%AI_SPRINT_CWD%" --approve-all --model "%AI_SPRINT_MODEL%" --timeout "%AI_SPRINT_TIMEOUT%" ${agent} exec -f "%AI_SPRINT_PROMPT%"`,
+          `${acpxBin} --cwd %AI_SPRINT_CWD% --approve-all --model %AI_SPRINT_MODEL% --timeout %AI_SPRINT_TIMEOUT% ${agent} exec -f %AI_SPRINT_PROMPT%`,
         ],
         {
           cwd,
@@ -608,7 +608,7 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
         const comspec = process.env.COMSPEC || 'cmd.exe';
         proc = spawn(comspec, [
           '/d', '/c',
-          `${acpxBin} --cwd "%AI_SPRINT_CWD%" --approve-all --model "%AI_SPRINT_MODEL%" --timeout "%AI_SPRINT_TIMEOUT%" ${agent} exec -f "%AI_SPRINT_PROMPT%"`,
+          `${acpxBin} --cwd %AI_SPRINT_CWD% --approve-all --model %AI_SPRINT_MODEL% --timeout %AI_SPRINT_TIMEOUT% ${agent} exec -f %AI_SPRINT_PROMPT%`,
         ], {
           cwd,
           encoding: 'utf8',
@@ -868,7 +868,7 @@ function runAgentWithProgressCheck({
         const comspec = process.env.COMSPEC || 'cmd.exe';
         proc = spawn(comspec, [
           '/d', '/c',
-          `${acpxBin} --cwd "%AI_SPRINT_CWD%" --approve-all --model "%AI_SPRINT_MODEL%" --timeout "%AI_SPRINT_TIMEOUT%" ${agent} exec -f "%AI_SPRINT_PROMPT%"`,
+          `${acpxBin} --cwd %AI_SPRINT_CWD% --approve-all --model %AI_SPRINT_MODEL% --timeout %AI_SPRINT_TIMEOUT% ${agent} exec -f %AI_SPRINT_PROMPT%`,
         ], {
           cwd,
           encoding: 'utf8',

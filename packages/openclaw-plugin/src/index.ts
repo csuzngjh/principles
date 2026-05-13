@@ -57,7 +57,6 @@ import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
-import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
 import { extractAgentIdFromSessionKey } from './utils/session-key.js';
 import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe } from './utils/workspace-resolver.js';
 import { computeRuntimeShadowTaskFingerprint, PD_LOCAL_PROFILES } from './utils/shadow-fingerprint.js';
@@ -82,7 +81,6 @@ const plugin = {
   register(api: OpenClawPluginApi) {
     api.logger.info(`Principles Disciple Plugin registered. (Path: ${api.rootDir ?? '(unknown)'})`);
     PathResolver.setExtensionRoot(api.rootDir ?? '.');
-    api.registerHttpRoute(createPrinciplesConsoleRoute(api));
 
     // ── Startup Health Check: Verify workspaceDir resolution ──
     // Catches OpenClaw context bugs early (e.g., missing workspaceDir in tool hooks)
