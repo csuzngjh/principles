@@ -94,7 +94,7 @@ function createPrincipleEvidence(
   };
 }
 
-describe('internalization-routing-policy', () => {
+describe('recommendLifecycleRoute', () => {
   it('recommends code for deterministic high-risk principles with repeated failures and sufficient replay evidence', () => {
     const recommendation = recommendLifecycleRoute(
       createPrincipleEvidence(
