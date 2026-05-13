@@ -10,19 +10,14 @@
   "stageTimeoutMinutes": 4,
   "stages": ["validate"],
   "producer": {
-    "agent": "iflow",
-    "model": "glm-4.7",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 90
   },
   "reviewerA": {
     "agent": "opencode",
     "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 45,
-    "fallback": {
-      "agent": "iflow",
-      "model": "glm-4.7",
-      "timeoutSeconds": 75
-    },
     "role": "schema_checker",
     "focus": "Verify report has all required sections, VERDICT format, DIMENSIONS format"
   },
@@ -30,11 +25,6 @@
     "agent": "opencode",
     "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 45,
-    "fallback": {
-      "agent": "iflow",
-      "model": "glm-4.7",
-      "timeoutSeconds": 75
-    },
     "role": "quality_checker",
     "focus": "Verify outputQuality is computed correctly, qualityReasons are meaningful"
   },
