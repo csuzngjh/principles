@@ -114,16 +114,18 @@ export async function handleTraceShow(opts: TraceOptions): Promise<void> {
 
     if (trace.status === 'not_found') {
       outputNoTask(opts, workspaceDir, trace.checkedAt);
+      return;
     }
 
     if (trace.status === 'error') {
+      const isConfigError = trace.failureCategory === 'config_missing';
       if (opts.json) {
         console.log(JSON.stringify({
           painId: trace.painId,
           taskId: trace.taskId,
           status: 'error',
           failureCategory: trace.failureCategory,
-          message: trace.missingLinks.includes('state_manager_init')
+          message: isConfigError
             ? 'Failed to initialize state manager'
             : 'Internal error during trace',
           checkedAt: trace.checkedAt,
@@ -131,7 +133,7 @@ export async function handleTraceShow(opts: TraceOptions): Promise<void> {
         }, null, 2));
         process.exit(1);
       }
-      console.error(`Error: ${trace.missingLinks.includes('state_manager_init') ? 'Failed to open workspace' : 'Internal error during trace'}`);
+      console.error(`Error: ${isConfigError ? 'Failed to open workspace' : 'Internal error during trace'}`);
       console.error(`  Workspace: ${workspaceDir}`);
       process.exit(1);
     }

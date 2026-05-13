@@ -335,5 +335,6 @@ export class PainChainReadModel {
       await this.stateManager.close();
     }
     this.stateManager = null;
+    this.initialized = false;
   }
 }
