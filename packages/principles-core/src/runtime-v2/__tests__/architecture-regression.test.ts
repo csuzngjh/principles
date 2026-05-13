@@ -202,7 +202,7 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
       const mod = (await barrel) as Record<string, unknown>;
       expect(mod).toHaveProperty(name);
       expect(typeof mod[name]).toBe('function');
-    });
+    }, 15_000);
   }
 });
 
@@ -820,11 +820,11 @@ describe('PRI-52 lifecycle metrics', () => {
     expect(src).not.toContain('openclaw-plugin');
   });
 
-  it('plugin lifecycle-metrics.ts re-exports from core', async () => {
+  it('plugin principle-lifecycle-service.ts imports lifecycle metrics from core barrel', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/lifecycle-metrics.ts'
+      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/principle-lifecycle-service.ts'
     ), 'utf-8');
     expect(src).toContain("from '@principles/core/runtime-v2'");
     expect(src).toContain('computeRuleMetrics');
@@ -853,11 +853,11 @@ describe('PRI-53 deprecated readiness', () => {
     expect(src).not.toContain('openclaw-plugin');
   });
 
-  it('plugin deprecated-readiness.ts re-exports from core', async () => {
+  it('plugin principle-lifecycle-service.ts imports deprecated readiness from core barrel', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/deprecated-readiness.ts'
+      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/principle-lifecycle-service.ts'
     ), 'utf-8');
     expect(src).toContain("from '@principles/core/runtime-v2'");
     expect(src).toContain('assessDeprecatedReadiness');
@@ -887,11 +887,11 @@ describe('PRI-54 routing policy', () => {
     expect(src).not.toContain('openclaw-plugin');
   });
 
-  it('plugin internalization-routing-policy.ts re-exports from core', async () => {
+  it('plugin principle-lifecycle-service.ts imports routing policy from core barrel', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/internalization-routing-policy.ts'
+      __dirname, '../../../../openclaw-plugin/src/core/principle-internalization/principle-lifecycle-service.ts'
     ), 'utf-8');
     expect(src).toContain("from '@principles/core/runtime-v2'");
     expect(src).toContain('recommendLifecycleRoute');

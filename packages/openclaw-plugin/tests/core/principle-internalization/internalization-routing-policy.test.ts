@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { recommendInternalizationRoute } from '../../../src/core/principle-internalization/internalization-routing-policy.js';
+import { recommendLifecycleRoute } from '@principles/core/runtime-v2';
 import type {
   PrincipleLifecycleEvidence,
   RuleLifecycleEvidence,
-} from '../../../src/core/principle-internalization/lifecycle-read-model.js';
+} from '@principles/core/runtime-v2';
 
 function createRuleEvidence(id: string, overrides: Partial<RuleLifecycleEvidence> = {}): RuleLifecycleEvidence {
   return {
@@ -96,7 +96,7 @@ function createPrincipleEvidence(
 
 describe('internalization-routing-policy', () => {
   it('recommends code for deterministic high-risk principles with repeated failures and sufficient replay evidence', () => {
-    const recommendation = recommendInternalizationRoute(
+    const recommendation = recommendLifecycleRoute(
       createPrincipleEvidence(
         [
           createRuleEvidence('R-001', {
@@ -156,7 +156,7 @@ describe('internalization-routing-policy', () => {
   });
 
   it('recommends skill when a cheaper non-code path is viable', () => {
-    const recommendation = recommendInternalizationRoute(
+    const recommendation = recommendLifecycleRoute(
       createPrincipleEvidence([
         createRuleEvidence('R-001', {
           rule: {
@@ -201,7 +201,7 @@ describe('internalization-routing-policy', () => {
   });
 
   it('recommends defer when evidence is too sparse to choose a route confidently', () => {
-    const recommendation = recommendInternalizationRoute(
+    const recommendation = recommendLifecycleRoute(
       createPrincipleEvidence([createRuleEvidence('R-001')]),
     );
 

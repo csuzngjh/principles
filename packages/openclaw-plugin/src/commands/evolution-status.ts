@@ -1,6 +1,6 @@
 import * as path from 'path';
 import type { EvolutionReducerImpl } from '../core/evolution-reducer.js';
-import type { LifecycleRouteRecommendation } from '../core/principle-internalization/internalization-routing-policy.js';
+import type { LifecycleRouteRecommendation } from '@principles/core/runtime-v2';
 import { WorkflowFunnelLoader } from '../core/workflow-funnel-loader.js';
 import { resolvePdPath } from '../core/paths.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
