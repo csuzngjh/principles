@@ -1,15 +1,12 @@
 ---
 tracker:
   kind: linear
-  # project_slug must be a Linear Project.slugId (found in project URL: .../project/<slugId>).
-  # Using Project A slugId: d4fdb8223f27
   project_slug: "d4fdb8223f27"
-  team_key: "PRI"
+  issue_identifiers:
+    - PRI-117
   active_states:
     - Todo
     - In Progress
-    - Merging
-    - Rework
   terminal_states:
     - Closed
     - Cancelled
@@ -21,21 +18,20 @@ polling:
 workspace:
   root: D:/code/principles-workspaces
 hooks:
-  # NOTE: after_create/before_remove hooks run via System.cmd("sh", ["-lc", command]).
-  # On Windows (where sh may not be in PATH), the Elixir runtime falls back to
-  # PowerShell or cmd automatically. Existing POSIX behavior is preserved when sh is available.
   after_create: |
     git clone --depth 1 https://github.com/csuzngjh/principles .
     npm install
   before_remove: |
     echo "Cleaning up workspace before removal"
 agent:
-  max_concurrent_agents: 5
-  max_turns: 20
+  max_concurrent_agents: 1
+  max_turns: 1
+  continuation_retry_delay_ms: 300000
   model: sonnet
 codex:
   agent: "claude"
   command: claude
+  turn_timeout_ms: 120000
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
