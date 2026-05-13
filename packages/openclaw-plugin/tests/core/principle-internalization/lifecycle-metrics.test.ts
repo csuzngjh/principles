@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computePrincipleAdherence,
   computeRuleMetrics,
-} from '../../../src/core/principle-internalization/lifecycle-metrics.js';
+} from '@principles/core/runtime-v2';
 import type {
   PrincipleLifecycleEvidence,
   RuleLifecycleEvidence,

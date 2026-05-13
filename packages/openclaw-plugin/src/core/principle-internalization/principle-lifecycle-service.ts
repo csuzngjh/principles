@@ -12,15 +12,15 @@ import {
   computeRuleMetrics,
   type PrincipleAdherenceResult,
   type RuleMetricResult,
-} from './lifecycle-metrics.js';
+} from '@principles/core/runtime-v2';
 import {
   assessDeprecatedReadiness,
   type DeprecatedReadinessAssessment,
-} from './deprecated-readiness.js';
+} from '@principles/core/runtime-v2';
 import {
   recommendLifecycleRoute,
   type LifecycleRouteRecommendation,
-} from './internalization-routing-policy.js';
+} from '@principles/core/runtime-v2';
 
 export interface RecomputedPrincipleLifecycle {
   principleId: string;
