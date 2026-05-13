@@ -25,9 +25,6 @@
 import type { Principle as CorePrinciple } from '@principles/core/runtime-v2';
 import type { PrincipleDetectorSpec } from '../core/evolution-types.js';
 import type {
-  PrinciplePriority,
-  PrincipleScope,
-  PrincipleEvaluability,
   RuleStatus,
   RuleType,
   ImplementationLifecycleState,
