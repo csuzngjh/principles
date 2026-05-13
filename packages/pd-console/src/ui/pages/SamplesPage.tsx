@@ -1,5 +1,13 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { fetchSamples, fetchSampleDetail, reviewSample } from "../api.js";
+import { PageHeader } from "../components/page-header.js";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card.js";
+import { Button } from "../components/ui/button.js";
+import { Badge } from "../components/ui/badge.js";
+import { Skeleton } from "../components/ui/skeleton.js";
+import { Separator } from "../components/ui/separator.js";
+import { Check, X, ChevronLeft, ChevronRight, ClipboardList } from "lucide-react";
 
 interface SampleListItem {
   sampleId: string;
@@ -35,32 +43,14 @@ interface SamplesData {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
-const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  pending: { bg: "#fff7e6", text: "#d48806" },
-  approved: { bg: "#f6ffed", text: "#52c41a" },
-  rejected: { bg: "#fff2f0", text: "#ff4d4f" },
+const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  pending: "outline",
+  approved: "default",
+  rejected: "destructive",
 };
 
-function Badge({ status }: { status: string }) {
-  const colors = STATUS_COLORS[status] ?? { bg: "#f0f0f0", text: "#666" };
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 8px",
-        borderRadius: "4px",
-        fontSize: "12px",
-        fontWeight: 500,
-        backgroundColor: colors.bg,
-        color: colors.text,
-      }}
-    >
-      {status}
-    </span>
-  );
-}
-
 export function SamplesPage() {
+  const { t } = useTranslation();
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<SamplesData | null>(null);
@@ -117,187 +107,216 @@ export function SamplesPage() {
 
   if (error && !data) {
     return (
-      <div style={{ padding: "24px", color: "#ff4d4f" }}>
-        <h3>Error</h3>
-        <p>{error}</p>
-        <button onClick={() => window.location.reload()}>Retry</button>
-      </div>
+      <Card>
+        <CardContent className="p-6">
+          <p className="text-destructive">{error}</p>
+          <Button variant="outline" className="mt-4" onClick={() => window.location.reload()}>
+            {t("components:errorBoundary.retry")}
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
   if (!data) {
-    return <div style={{ padding: "24px", color: "#888" }}>Loading samples...</div>;
+    return (
+      <div>
+        <Skeleton className="h-8 w-48 mb-6" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Card><CardContent className="p-6"><Skeleton className="h-40" /></CardContent></Card>
+          <Card><CardContent className="p-6"><Skeleton className="h-40" /></CardContent></Card>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-        <h2 style={{ margin: 0 }}>Samples</h2>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <label style={{ fontSize: "14px", color: "#666" }}>Status:</label>
-          <select
-            value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); setSelectedId(""); }}
-            style={{ padding: "4px 8px", borderRadius: "4px", border: "1px solid #d9d9d9" }}
-          >
-            <option value="all">All</option>
-            <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-          </select>
-        </div>
-      </div>
+      <PageHeader
+        title={t("pages:samples.title")}
+        description={t("pages:samples.description")}
+        actions={
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-muted-foreground">{t("pages:samples.filterByStatus")}:</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(1); setSelectedId(""); }}
+              className="px-3 py-1.5 rounded-md border border-input bg-background text-sm"
+            >
+              <option value="all">{t("common:all")}</option>
+              <option value="pending">{t("common:pending")}</option>
+              <option value="approved">{t("common:completed")}</option>
+              <option value="rejected">{t("common:failed")}</option>
+            </select>
+          </div>
+        }
+      />
 
       {Object.keys(data.counters).length > 0 && (
-        <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+        <div className="flex gap-2 mb-4 flex-wrap">
           {Object.entries(data.counters).map(([key, value]) => (
-            <span key={key} style={{ padding: "4px 12px", borderRadius: "4px", fontSize: "13px", backgroundColor: "#f5f5f5", color: "#555" }}>
-              {key}: <strong>{value}</strong>
-            </span>
+            <Badge key={key} variant="secondary">
+              {key}: <strong className="ml-1">{value}</strong>
+            </Badge>
           ))}
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-        <div style={{ border: "1px solid #e8e8e8", borderRadius: "8px", overflow: "hidden" }}>
-          <div style={{ padding: "12px 16px", borderBottom: "1px solid #e8e8e8", backgroundColor: "#fafafa", fontWeight: 600, fontSize: "14px" }}>
-            Sample Queue ({data.pagination.total})
-          </div>
-          <div style={{ maxHeight: "500px", overflowY: "auto" }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">
+              {t("pages:samples.title")} ({data.pagination.total})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="max-h-[500px] overflow-y-auto">
             {data.items.length === 0 && (
-              <div style={{ padding: "24px", textAlign: "center", color: "#999" }}>No samples found</div>
+              <p className="text-sm text-muted-foreground text-center py-8">
+                {t("components:zoneSection.empty")}
+              </p>
             )}
             {data.items.map((item) => (
               <div
                 key={item.sampleId}
                 onClick={() => setSelectedId(item.sampleId)}
-                style={{
-                  padding: "12px 16px",
-                  borderBottom: "1px solid #f0f0f0",
-                  cursor: "pointer",
-                  backgroundColor: selectedId === item.sampleId ? "#e6f4ff" : "transparent",
-                  transition: "background-color 0.15s",
-                }}
+                className={`p-3 border-b border-border cursor-pointer transition-colors duration-150 ${
+                  selectedId === item.sampleId
+                    ? "bg-primary/5 border-l-2 border-l-primary"
+                    : "hover:bg-accent"
+                }`}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ fontWeight: 500, fontSize: "14px", marginBottom: "4px" }}>{item.title || item.sampleId}</div>
-                    <div style={{ fontSize: "12px", color: "#888" }}>{item.description?.slice(0, 80)}{item.description && item.description.length > 80 ? "..." : ""}</div>
+                <div className="flex justify-between items-start">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">
+                      {item.title || item.sampleId}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                      {item.description}
+                    </p>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
-                    <Badge status={item.reviewStatus} />
+                  <div className="flex flex-col items-end gap-1 ml-2">
+                    <Badge variant={STATUS_VARIANT[item.reviewStatus] ?? "outline"}>
+                      {item.reviewStatus}
+                    </Badge>
                     {item.confidence !== null && (
-                      <span style={{ fontSize: "12px", color: "#888" }}>Score: {item.confidence}</span>
+                      <span className="text-xs text-muted-foreground">
+                        Score: {item.confidence}
+                      </span>
                     )}
                   </div>
                 </div>
-                <div style={{ fontSize: "11px", color: "#aaa", marginTop: "4px" }}>{new Date(item.createdAt).toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {new Date(item.createdAt).toLocaleString()}
+                </p>
               </div>
             ))}
-          </div>
+          </CardContent>
           {data.pagination.totalPages > 1 && (
-            <div style={{ display: "flex", justifyContent: "center", gap: "8px", padding: "12px", borderTop: "1px solid #e8e8e8" }}>
-              <button
+            <div className="flex justify-center items-center gap-3 p-3 border-t border-border">
+              <Button
+                variant="outline"
+                size="sm"
                 disabled={page <= 1}
                 onClick={() => setPage(page - 1)}
-                style={{ padding: "4px 12px", border: "1px solid #d9d9d9", borderRadius: "4px", cursor: page <= 1 ? "not-allowed" : "pointer", opacity: page <= 1 ? 0.5 : 1 }}
               >
-                Prev
-              </button>
-              <span style={{ lineHeight: "28px", fontSize: "13px", color: "#666" }}>
-                Page {data.pagination.page} / {data.pagination.totalPages}
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                {data.pagination.page} / {data.pagination.totalPages}
               </span>
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 disabled={page >= data.pagination.totalPages}
                 onClick={() => setPage(page + 1)}
-                style={{ padding: "4px 12px", border: "1px solid #d9d9d9", borderRadius: "4px", cursor: page >= data.pagination.totalPages ? "not-allowed" : "pointer", opacity: page >= data.pagination.totalPages ? 0.5 : 1 }}
               >
-                Next
-              </button>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
             </div>
           )}
-        </div>
+        </Card>
 
-        <div style={{ border: "1px solid #e8e8e8", borderRadius: "8px", overflow: "hidden" }}>
+        <Card>
           {!selected && (
-            <div style={{ padding: "48px 24px", textAlign: "center", color: "#999" }}>
-              <div style={{ fontSize: "32px", marginBottom: "8px" }}>📋</div>
-              <div>Select a sample to view details</div>
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <ClipboardList className="h-12 w-12 mb-3 opacity-50" />
+              <p className="text-sm">Select a sample to view details</p>
             </div>
           )}
           {selected && (
             <div>
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid #e8e8e8", backgroundColor: "#fafafa" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="p-4 border-b border-border bg-muted/30">
+                <div className="flex justify-between items-start">
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: "14px" }}>{selected.title || selected.sampleId}</div>
-                    <div style={{ fontSize: "12px", color: "#888", marginTop: "2px" }}>
-                      {selected.sampleId.slice(0, 12)}... | <Badge status={selected.reviewStatus} />
-                      {selected.confidence !== null && ` | Score: ${selected.confidence}`}
+                    <p className="font-semibold text-sm">
+                      {selected.title || selected.sampleId}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                      <span>{selected.sampleId.slice(0, 12)}...</span>
+                      <Badge variant={STATUS_VARIANT[selected.reviewStatus] ?? "outline"}>
+                        {selected.reviewStatus}
+                      </Badge>
+                      {selected.confidence !== null && (
+                        <span>Score: {selected.confidence}</span>
+                      )}
                     </div>
                   </div>
                   {selected.reviewStatus === "pending" && (
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <button
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
                         onClick={() => handleReview("approved")}
                         disabled={reviewLoading}
-                        style={{
-                          padding: "6px 16px",
-                          backgroundColor: "#52c41a",
-                          color: "white",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor: reviewLoading ? "not-allowed" : "pointer",
-                          fontSize: "13px",
-                          fontWeight: 500,
-                        }}
                       >
-                        {reviewLoading ? "..." : "Approve"}
-                      </button>
-                      <button
+                        <Check className="h-3 w-3 mr-1" />
+                        {reviewLoading ? "..." : t("components:taskCard.approve")}
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
                         onClick={() => handleReview("rejected")}
                         disabled={reviewLoading}
-                        style={{
-                          padding: "6px 16px",
-                          backgroundColor: "transparent",
-                          color: "#ff4d4f",
-                          border: "1px solid #ff4d4f",
-                          borderRadius: "4px",
-                          cursor: reviewLoading ? "not-allowed" : "pointer",
-                          fontSize: "13px",
-                          fontWeight: 500,
-                        }}
                       >
-                        {reviewLoading ? "..." : "Reject"}
-                      </button>
+                        <X className="h-3 w-3 mr-1" />
+                        {reviewLoading ? "..." : t("components:taskCard.reject")}
+                      </Button>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div style={{ padding: "16px", maxHeight: "450px", overflowY: "auto" }}>
+              <div className="p-4 max-h-[450px] overflow-y-auto">
                 {selected.description && (
-                  <div style={{ marginBottom: "16px" }}>
-                    <h4 style={{ margin: "0 0 8px", fontSize: "13px", color: "#666" }}>Description</h4>
-                    <p style={{ margin: 0, fontSize: "14px", lineHeight: 1.6 }}>{selected.description}</p>
+                  <div className="mb-4">
+                    <h4 className="text-xs font-medium text-muted-foreground mb-1">
+                      {t("common:description")}
+                    </h4>
+                    <p className="text-sm leading-relaxed">{selected.description}</p>
                   </div>
                 )}
 
                 {selected.recommendation && (
-                  <div style={{ marginBottom: "16px" }}>
-                    <h4 style={{ margin: "0 0 8px", fontSize: "13px", color: "#666" }}>Recommendation</h4>
-                    <div style={{ backgroundColor: "#f9f9f9", padding: "12px", borderRadius: "6px", fontSize: "13px" }}>
+                  <div className="mb-4">
+                    <h4 className="text-xs font-medium text-muted-foreground mb-1">
+                      {t("pages:samples.recommendation")}
+                    </h4>
+                    <div className="bg-muted/50 p-3 rounded-md text-sm space-y-2">
                       {selected.recommendation.title && (
-                        <div style={{ marginBottom: "8px" }}><strong>Title:</strong> {selected.recommendation.title}</div>
+                        <div><strong>Title:</strong> {selected.recommendation.title}</div>
                       )}
                       {selected.recommendation.text && (
-                        <div style={{ marginBottom: "8px" }}><strong>Text:</strong> {selected.recommendation.text}</div>
+                        <div><strong>Text:</strong> {selected.recommendation.text}</div>
                       )}
                       {selected.recommendation.triggerPattern && (
-                        <div style={{ marginBottom: "8px" }}><strong>Trigger Pattern:</strong> <code style={{ backgroundColor: "#f0f0f0", padding: "2px 6px", borderRadius: "3px" }}>{selected.recommendation.triggerPattern}</code></div>
+                        <div>
+                          <strong>Trigger Pattern:</strong>{" "}
+                          <code className="bg-muted px-1.5 py-0.5 rounded text-xs">
+                            {selected.recommendation.triggerPattern}
+                          </code>
+                        </div>
                       )}
                       {selected.recommendation.action && (
-                        <div style={{ marginBottom: "8px" }}><strong>Action:</strong> {selected.recommendation.action}</div>
+                        <div><strong>Action:</strong> {selected.recommendation.action}</div>
                       )}
                       {selected.recommendation.abstractedPrinciple && (
                         <div><strong>Abstracted Principle:</strong> {selected.recommendation.abstractedPrinciple}</div>
@@ -307,29 +326,23 @@ export function SamplesPage() {
                 )}
 
                 {selected.artifactContent && (
-                  <div>
-                    <h4 style={{ margin: "0 0 8px", fontSize: "13px", color: "#666" }}>Artifact Content</h4>
-                    <pre style={{
-                      backgroundColor: "#f5f5f5",
-                      padding: "12px",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      overflowX: "auto",
-                      maxHeight: "200px",
-                      margin: 0,
-                    }}>
+                  <div className="mb-4">
+                    <h4 className="text-xs font-medium text-muted-foreground mb-1">
+                      Artifact Content
+                    </h4>
+                    <pre className="bg-muted/50 p-3 rounded-md text-xs overflow-x-auto max-h-[200px]">
                       {JSON.stringify(selected.artifactContent, null, 2)}
                     </pre>
                   </div>
                 )}
 
-                <div style={{ marginTop: "16px", fontSize: "12px", color: "#aaa" }}>
+                <p className="text-xs text-muted-foreground mt-4">
                   Created: {new Date(selected.createdAt).toLocaleString()} | Task: {selected.taskId.slice(0, 12)}...
-                </div>
+                </p>
               </div>
             </div>
           )}
-        </div>
+        </Card>
       </div>
     </div>
   );

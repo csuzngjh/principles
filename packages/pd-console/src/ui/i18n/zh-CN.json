@@ -1,0 +1,222 @@
+{
+  "common": {
+    "loading": "加载中",
+    "refresh": "刷新",
+    "settings": "设置",
+    "overview": "概览",
+    "tasks": "任务",
+    "feedback": "反馈",
+    "gates": "门控",
+    "samples": "样本",
+    "evolution": "进化",
+    "thinking-models": "思维模型",
+    "central": "中央",
+    "login": "登录",
+    "logout": "登出",
+    "confirm": "确认",
+    "cancel": "取消",
+    "yes": "是",
+    "no": "否",
+    "save": "保存",
+    "delete": "删除",
+    "add": "添加",
+    "edit": "编辑",
+    "view": "查看",
+    "more": "更多",
+    "search": "搜索",
+    "filter": "筛选",
+    "sort": "排序",
+    "clear": "清除",
+    "apply": "应用",
+    "close": "关闭",
+    "submit": "提交",
+    "success": "成功",
+    "error": "错误",
+    "warning": "警告",
+    "info": "信息",
+    "total": "总计",
+    "active": "活跃",
+    "inactive": "非活跃",
+    "pending": "待处理",
+    "completed": "已完成",
+    "failed": "失败",
+    "unknown": "未知",
+    "all": "全部",
+    "none": "无",
+    "lastUpdated": "最后更新",
+    "status": "状态",
+    "name": "名称",
+    "description": "描述",
+    "type": "类型",
+    "date": "日期",
+    "time": "时间",
+    "actions": "操作"
+  },
+  "pages": {
+    "overview": {
+      "title": "概览",
+      "description": "系统状态总览",
+      "health": "健康状态",
+      "stats": "统计",
+      "principles": "原则",
+      "recentActivity": "最近活动",
+      "queue": "队列",
+      "trustLevel": "信任级别",
+      "gfi": "GFI",
+      "pendingTasks": "待处理任务",
+      "totalWorkspaces": "工作空间总数",
+      "activeWorkspaces": "活跃工作空间"
+    },
+    "tasks": {
+      "title": "任务",
+      "description": "管理待处理任务",
+      "needsConfirmation": "需要确认",
+      "suggestedAttention": "建议关注",
+      "recentActivity": "最近活动",
+      "approve": "批准",
+      "reject": "拒绝",
+      "cleanup": "清理",
+      "undo": "撤销",
+      "confirmAction": "确认操作",
+      "batchCleanup": "批量清理",
+      "noToken": "未配置认证令牌"
+    },
+    "feedback": {
+      "title": "反馈",
+      "description": "查看系统反馈",
+      "gfiGauge": "GFI 仪表盘",
+      "empathyEvents": "共情事件",
+      "gateBlocks": "门控阻断",
+      "severity": "严重程度",
+      "source": "来源",
+      "timestamp": "时间戳",
+      "count": "计数",
+      "totalGFI": "总 GFI"
+    },
+    "gates": {
+      "title": "门控",
+      "description": "管理安全门控",
+      "trustStatus": "信任状态",
+      "gfiStats": "GFI 统计",
+      "blockHistory": "阻断历史",
+      "totalBlocks": "总阻断数",
+      "todayBlocks": "今日阻断",
+      "blockRate": "阻断率",
+      "sourceBreakdown": "来源分布"
+    },
+    "samples": {
+      "title": "样本",
+      "description": "管理训练样本",
+      "filterByStatus": "按状态筛选",
+      "approveAll": "全部批准",
+      "rejectAll": "全部拒绝",
+      "recommendation": "建议",
+      "rejectReason": "拒绝原因",
+      "sampleCount": "样本数量",
+      "status": "状态"
+    },
+    "evolution": {
+      "title": "进化",
+      "description": "监控进化进程",
+      "taskStats": "任务统计",
+      "principleLifecycle": "原则生命周期",
+      "queueHealth": "队列健康",
+      "taskList": "任务列表",
+      "stage": "阶段",
+      "progress": "进度",
+      "completedTasks": "已完成任务",
+      "failedTasks": "失败任务",
+      "pendingTasks": "待处理任务"
+    },
+    "thinking-models": {
+      "title": "思维模型",
+      "description": "管理思维模型",
+      "modelList": "模型列表",
+      "trigger": "触发条件",
+      "must": "必须",
+      "forbidden": "禁止",
+      "noModels": "暂无思维模型"
+    },
+    "settings": {
+      "title": "设置",
+      "description": "配置控制台",
+      "auth": "认证",
+      "workspace": "工作空间",
+      "appearance": "外观",
+      "language": "语言",
+      "theme": "主题",
+      "apiToken": "API 令牌",
+      "addWorkspace": "添加工作空间",
+      "syncWorkspace": "同步工作空间",
+      "removeWorkspace": "移除工作空间",
+      "tokenSaved": "令牌已保存",
+      "workspaceAdded": "工作空间已添加",
+      "workspaceRemoved": "工作空间已移除"
+    },
+    "central": {
+      "title": "中央",
+      "description": "全局监控中心",
+      "overallStatus": "总体状态",
+      "workspaces": "工作空间",
+      "healthDetails": "健康详情",
+      "workspaceName": "工作空间名称",
+      "workspaceStatus": "工作空间状态",
+      "workspaceGFI": "工作空间 GFI",
+      "workspacePrinciples": "工作空间原则数"
+    },
+    "login": {
+      "title": "登录",
+      "description": "登录 PD Console",
+      "password": "密码",
+      "showPassword": "显示密码",
+      "hidePassword": "隐藏密码",
+      "signIn": "登录",
+      "errorInvalid": "密码错误",
+      "errorEmpty": "请输入密码"
+    }
+  },
+  "components": {
+    "errorBoundary": {
+      "title": "发生错误",
+      "description": "页面加载时发生错误",
+      "retry": "重试"
+    },
+    "zoneSection": {
+      "empty": "暂无数据",
+      "viewAll": "查看全部"
+    },
+    "taskCard": {
+      "approve": "批准",
+      "reject": "拒绝",
+      "cleanup": "清理",
+      "undo": "撤销",
+      "undoCountdown": "撤销 ({{count}}秒)",
+      "evidence": "证据",
+      "summary": "摘要",
+      "why": "原因",
+      "whatHappens": "影响"
+    },
+    "evidencePanel": {
+      "summary": "摘要",
+      "why": "原因",
+      "whatHappens": "影响",
+      "evidenceItems": "证据项"
+    },
+    "pageHeader": {
+      "refresh": "刷新",
+      "lastUpdated": "最后更新: {{time}}"
+    },
+    "themeToggle": {
+      "light": "亮色模式",
+      "dark": "暗色模式"
+    },
+    "languageSwitcher": {
+      "chinese": "中文",
+      "english": "English"
+    },
+    "sidebar": {
+      "collapse": "折叠侧边栏",
+      "expand": "展开侧边栏"
+    }
+  }
+}

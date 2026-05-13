@@ -1,21 +1,26 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { setToken, clearToken, checkAuth } from "../api.js";
-import { COLORS } from "../styles/constants.js";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card.js";
+import { Button } from "../components/ui/button.js";
+import { Dna, Eye, EyeOff } from "lucide-react";
 
 interface LoginPageProps {
   onAuthSuccess: () => void;
 }
 
 export function LoginPage({ onAuthSuccess }: LoginPageProps) {
+  const { t } = useTranslation();
   const [token, setTokenValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [showToken, setShowToken] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = token.trim();
     if (!trimmed) {
-      setError("Please enter a token");
+      setError(t("pages:login.errorEmpty"));
       return;
     }
 
@@ -30,119 +35,72 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
       onAuthSuccess();
     } else {
       clearToken();
-      setError("Invalid token. Please check and try again.");
+      setError(t("pages:login.errorInvalid"));
     }
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "#f5f5f5",
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-      }}
-    >
-      <div
-        style={{
-          width: "400px",
-          backgroundColor: "#fff",
-          borderRadius: "12px",
-          padding: "40px 32px",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-        }}
-      >
-        <div style={{ textAlign: "center", marginBottom: "32px" }}>
-          <div style={{ fontSize: "24px", fontWeight: 700, color: COLORS.textPrimary }}>
-            PD Console
-          </div>
-          <div style={{ fontSize: "14px", color: COLORS.textMuted, marginTop: "8px" }}>
-            Enter your access token to continue
-          </div>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          <label
-            style={{
-              display: "block",
-              fontSize: "13px",
-              fontWeight: 500,
-              color: COLORS.textSecondary,
-              marginBottom: "6px",
-            }}
-          >
-            Bearer Token
-          </label>
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => {
-              setTokenValue(e.target.value);
-              setError(null);
-            }}
-            placeholder="Enter access token"
-            autoFocus
-            style={{
-              width: "100%",
-              padding: "10px 12px",
-              border: error ? "1px solid #ff4d4f" : "1px solid #d9d9d9",
-              borderRadius: "6px",
-              fontSize: "14px",
-              boxSizing: "border-box",
-              outline: "none",
-            }}
-          />
-
-          {error && (
-            <div
-              style={{
-                marginTop: "8px",
-                fontSize: "13px",
-                color: COLORS.danger,
-              }}
-            >
-              {error}
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center pb-2">
+          <div className="flex justify-center mb-4">
+            <div className="p-3 rounded-full bg-primary/10">
+              <Dna className="h-8 w-8 text-primary" />
             </div>
-          )}
+          </div>
+          <CardTitle className="text-2xl">PD Console</CardTitle>
+          <CardDescription className="mt-2">
+            {t("pages:login.description")}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit}>
+            <label className="block text-sm font-medium mb-1.5">
+              Bearer Token
+            </label>
+            <div className="relative">
+              <input
+                type={showToken ? "text" : "password"}
+                value={token}
+                onChange={(e) => {
+                  setTokenValue(e.target.value);
+                  setError(null);
+                }}
+                placeholder="Enter access token"
+                autoFocus
+                className={`w-full px-3 py-2.5 rounded-md border text-sm focus:outline-none focus:ring-2 focus:ring-ring pr-10 ${
+                  error ? "border-destructive" : "border-input"
+                }`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowToken(!showToken)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
 
-          <button
-            type="submit"
-            disabled={checking || !token.trim()}
-            style={{
-              width: "100%",
-              marginTop: "20px",
-              padding: "10px",
-              border: "none",
-              borderRadius: "6px",
-              fontSize: "14px",
-              fontWeight: 600,
-              cursor: checking || !token.trim() ? "not-allowed" : "pointer",
-              backgroundColor: checking || !token.trim() ? "#d9d9d9" : COLORS.primary,
-              color: "#fff",
-              transition: "background-color 0.2s",
-            }}
-          >
-            {checking ? "Verifying..." : "Sign In"}
-          </button>
-        </form>
+            {error && (
+              <p className="mt-2 text-sm text-destructive">{error}</p>
+            )}
 
-        <div
-          style={{
-            marginTop: "24px",
-            paddingTop: "16px",
-            borderTop: "1px solid #f0f0f0",
-            fontSize: "12px",
-            color: COLORS.textMuted,
-            textAlign: "center",
-          }}
-        >
-          Token is stored in browser session only.
-          <br />
-          Use <code style={{ backgroundColor: "#f5f5f5", padding: "1px 4px", borderRadius: "3px" }}>--no-auth</code> flag to disable authentication.
-        </div>
-      </div>
+            <Button
+              type="submit"
+              disabled={checking || !token.trim()}
+              className="w-full mt-5"
+            >
+              {checking ? "Verifying..." : t("pages:login.signIn")}
+            </Button>
+          </form>
+
+          <div className="mt-6 pt-4 border-t border-border text-xs text-muted-foreground text-center">
+            Token is stored in browser session only.
+            <br />
+            Use <code className="bg-muted px-1 py-0.5 rounded text-xs">--no-auth</code> flag to disable authentication.
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
