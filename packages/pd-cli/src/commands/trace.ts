@@ -35,34 +35,23 @@ interface TraceOptions {
   json?: boolean;
 }
 
-function outputNoTask(opts: TraceOptions, workspaceDir: string, checkedAt: string): never {
+function formatNoTaskResult(opts: TraceOptions, workspaceDir: string, checkedAt: string) {
   const taskId = `diagnosis_${opts.painId}`;
-  const result = {
+  return {
     painId: opts.painId,
     taskId,
-    status: 'not_found',
+    status: 'not_found' as const,
     failureCategory: 'runtime_unavailable' as const,
     message: `No task found for painId: ${opts.painId}`,
     workspace: workspaceDir,
     checkedAt,
     missingLinks: ['task' as const],
   };
-  if (opts.json) {
-    console.log(JSON.stringify(result, null, 2));
-    process.exit(1);
-  }
-  console.error(`Error: No task found for painId: ${opts.painId}`);
-  console.error(`  Derived taskId: ${taskId}`);
-  console.error(`  Workspace: ${workspaceDir}`);
-  process.exit(1);
 }
 
 function outputResult(result: TraceResult, opts: TraceOptions): void {
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
-    if (result.status === 'error' || result.status === 'failed' || result.status === 'degraded') {
-      process.exit(1);
-    }
     return;
   }
 
@@ -91,16 +80,13 @@ function outputResult(result: TraceResult, opts: TraceOptions): void {
       console.log(`  - ${link}`);
     }
   }
-
-  if (result.status === 'failed' || result.status === 'degraded') {
-    process.exit(1);
-  }
 }
 
 export async function handleTraceShow(opts: TraceOptions): Promise<void> {
   if (!opts.painId) {
     console.error('Error: --pain-id <id> is required');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const workspaceDir = opts.workspace
@@ -113,7 +99,15 @@ export async function handleTraceShow(opts: TraceOptions): Promise<void> {
     const trace: PainChainTrace = await readModel.traceByPainId(opts.painId);
 
     if (trace.status === 'not_found') {
-      outputNoTask(opts, workspaceDir, trace.checkedAt);
+      const noTaskResult = formatNoTaskResult(opts, workspaceDir, trace.checkedAt);
+      if (opts.json) {
+        console.log(JSON.stringify(noTaskResult, null, 2));
+      } else {
+        console.error(`Error: No task found for painId: ${opts.painId}`);
+        console.error(`  Derived taskId: ${noTaskResult.taskId}`);
+        console.error(`  Workspace: ${workspaceDir}`);
+      }
+      process.exitCode = 1;
       return;
     }
 
@@ -131,11 +125,12 @@ export async function handleTraceShow(opts: TraceOptions): Promise<void> {
           checkedAt: trace.checkedAt,
           missingLinks: trace.missingLinks,
         }, null, 2));
-        process.exit(1);
+      } else {
+        console.error(`Error: ${isConfigError ? 'Failed to open workspace' : 'Internal error during trace'}`);
+        console.error(`  Workspace: ${workspaceDir}`);
       }
-      console.error(`Error: ${isConfigError ? 'Failed to open workspace' : 'Internal error during trace'}`);
-      console.error(`  Workspace: ${workspaceDir}`);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     const result: TraceResult = {
@@ -153,6 +148,10 @@ export async function handleTraceShow(opts: TraceOptions): Promise<void> {
     };
 
     outputResult(result, opts);
+
+    if (result.status === 'error' || result.status === 'failed' || result.status === 'degraded') {
+      process.exitCode = 1;
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (opts.json) {
@@ -165,10 +164,10 @@ export async function handleTraceShow(opts: TraceOptions): Promise<void> {
         checkedAt: new Date().toISOString(),
         missingLinks: ['internal_error'],
       }, null, 2));
-      process.exit(1);
+    } else {
+      console.error(`Error: ${msg}`);
     }
-    console.error(`Error: ${msg}`);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
     await readModel.close();
   }
