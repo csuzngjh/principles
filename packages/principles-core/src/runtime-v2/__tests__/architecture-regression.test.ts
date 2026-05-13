@@ -524,8 +524,18 @@ describe('pd-cli command boundaries', () => {
     expect(src).not.toContain('../candidate-audit');
   });
 
-  it.skip('trace.ts does not import RuntimeStateManager or loadLedger', async () => {
-    // TODO: Enable this guard once trace.ts is migrated to PainChainReadModel.
+  it('trace.ts does not import RuntimeStateManager or loadLedger', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const cmdPath = resolve(
+      __dirname,
+      '../../../../pd-cli/src/commands/trace.ts',
+    );
+    expect(existsSync(cmdPath)).toBe(true);
+    const src = readFileSync(cmdPath, 'utf-8');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).not.toContain('loadLedger');
+    expect(src).toContain('PainChainReadModel');
   });
 });
 
