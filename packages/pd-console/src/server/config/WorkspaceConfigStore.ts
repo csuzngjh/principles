@@ -9,7 +9,7 @@ const WORKSPACES_FILE = 'workspaces.json';
 export class WorkspaceConfigStore {
   private readonly configDir: string;
   private readonly configPath: string;
-  private entries: WorkspaceEntry[];
+  private readonly entries: WorkspaceEntry[];
 
   constructor(configDir?: string) {
     this.configDir = configDir ?? path.join(os.homedir(), CONFIG_DIR_NAME);

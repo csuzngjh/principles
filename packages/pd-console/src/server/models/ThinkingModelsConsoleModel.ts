@@ -25,7 +25,7 @@ function extractTag(content: string, tagName: string): string {
 function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
   const directives: ThinkingOsDirective[] = [];
   const directiveRegex = /<directive\s+([^>]*)>([\s\S]*?)<\/directive>/gi;
-  let match: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null = null; // eslint-disable-line no-useless-assignment
 
   while ((match = directiveRegex.exec(content)) !== null) {
     const [, attrs, body] = match;

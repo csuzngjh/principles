@@ -32,27 +32,27 @@
     ]
   },
   "producer": {
-    "agent": "iflow",
-    "model": "glm-5",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 1800
   },
   "reviewerA": {
-    "agent": "iflow",
-    "model": "glm-4.7",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 1200,
     "role": "code-quality",
     "focus": "Verify prompt changes are minimal, backward-compatible, and don't break existing arbiter validation"
   },
   "reviewerB": {
-    "agent": "iflow",
-    "model": "glm-4.7",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 1200,
     "role": "functional-correctness",
     "focus": "Verify tests pass and the new prompt constraints produce structurally valid Trinity output"
   },
   "escalationReviewer": {
-    "agent": "iflow",
-    "model": "glm-5",
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 1800
   },
   "stageGoals": {

@@ -49,19 +49,19 @@ export interface OverviewOutput {
 
   health: OverviewHealthOutput;
 
-  dailyTrend: Array<{
+  dailyTrend: {
     day: string;
     toolCalls: number;
     failures: number;
     userCorrections: number;
     painEvents: number;
-  }>;
+  }[];
 
-  topRegressions: Array<{
+  topRegressions: {
     toolName: string;
     errorType: string;
     occurrences: number;
-  }>;
+  }[];
 
   sampleQueue: {
     counters: Record<string, number>;

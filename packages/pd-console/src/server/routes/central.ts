@@ -17,8 +17,8 @@ export function createCentralRoutes(workspaceService: WorkspaceService) {
       try {
         const overview = await workspaceService.getCentralOverview();
         sendSuccess(res, overview);
-      } catch (err: any) {
-        sendError(res, 500, 'central_overview_error', err.message);
+      } catch (err: unknown) {
+        sendError(res, 500, 'central_overview_error', (err as Error).message);
       }
       return;
     }
@@ -27,8 +27,8 @@ export function createCentralRoutes(workspaceService: WorkspaceService) {
       try {
         const health = await workspaceService.getCentralHealth();
         sendSuccess(res, health);
-      } catch (err: any) {
-        sendError(res, 500, 'central_health_error', err.message);
+      } catch (err: unknown) {
+        sendError(res, 500, 'central_health_error', (err as Error).message);
       }
       return;
     }

@@ -35,7 +35,13 @@ export async function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-export function safeParseInt(value: string | undefined, defaultValue: number, min = 1, max = 100): number | undefined {
+/* eslint-disable @typescript-eslint/max-params */
+export function safeParseInt(
+  value: string | undefined,
+  defaultValue: number,
+  min: number,
+  max: number,
+): number | undefined {
   if (!value) return undefined;
   const parsed = parseInt(value, 10);
   if (Number.isNaN(parsed)) return defaultValue;
