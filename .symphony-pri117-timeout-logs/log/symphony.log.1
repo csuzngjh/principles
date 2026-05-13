@@ -1,0 +1,26 @@
+2026-05-13T15:39:39.570000+08:00 info: Running SymphonyElixirWeb.Endpoint with Bandit 1.10.3 at 127.0.0.1:4005 (http)
+2026-05-13T15:39:39.570000+08:00 info: Access SymphonyElixirWeb.Endpoint at http://127.0.0.1:4005
+2026-05-13T15:39:40.313000+08:00 info: Dispatching issue to agent: issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117 pid=#PID<0.1103.0> attempt=nil worker_host=local
+2026-05-13T15:39:40.314000+08:00 info: Starting agent run for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117 worker_host=local
+2026-05-13T15:39:40.314000+08:00 info: Starting worker attempt for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117 worker_host=local
+2026-05-13T15:39:40.322000+08:00 info: ACPX execution strategy: shell (c:/WINDOWS/system32/cmd.exe /S /C acpx)
+2026-05-13T15:39:40.322000+08:00 info: Ensuring acpx session: issue-83a96616-e29b-4a36-a496-14a9a2a6aa58 agent=claude
+2026-05-13T15:39:51.472000+08:00 info: Ensured acpx session: issue-83a96616-e29b-4a36-a496-14a9a2a6aa58 ->
+2026-05-13T15:39:51.510000+08:00 info: Sending acpx prompt: session=issue-83a96616-e29b-4a36-a496-14a9a2a6aa58 turn=0
+2026-05-13T15:40:03.090000+08:00 info: GET /api/v1/state
+2026-05-13T15:40:03.096000+08:00 debug: Processing with SymphonyElixirWeb.ObservabilityApiController.state/2, Parameters: %{}, Pipelines: []
+2026-05-13T15:40:03.103000+08:00 info: Sent 200 in 11ms
+2026-05-13T15:42:21.526000+08:00 warning: Agent prompt failed for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117 turn=1: :timeout
+2026-05-13T15:42:21.526000+08:00 info: Closing acpx session: issue-83a96616-e29b-4a36-a496-14a9a2a6aa58
+2026-05-13T15:42:21.741000+08:00 error: Agent run failed for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117: :timeout
+2026-05-13T15:42:21.741000+08:00 error: Task #PID<0.1103.0> started from SymphonyElixir.Orchestrator terminating, ** (RuntimeError) Agent run failed for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117: :timeout, (symphony_elixir 0.1.0) lib/symphony_elixir/agent_runner.ex:25: SymphonyElixir.AgentRunner.run/3, (elixir 1.19.5) lib/elixir/lib/task/supervised.ex:105: Task.Supervised.invoke_mfa/2, Function: #Function<25.64418614/0 in SymphonyElixir.Orchestrator.spawn_issue_on_worker_host/5>, Args: []
+2026-05-13T15:42:21.748000+08:00 warning: Agent task exited for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 session_id=n/a reason={%RuntimeError{message: "Agent run failed for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117: :timeout"}, [{SymphonyElixir.AgentRunner, :run, 3, [file: ~c"lib/symphony_elixir/agent_runner.ex", line: 25]}, {Task.Supervised, :invoke_mfa, 2, [file: ~c"lib/elixir/lib/task/supervised.ex", line: 105]}]}; scheduling retry
+2026-05-13T15:42:21.748000+08:00 warning: Retrying issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117 in 10000ms (attempt 1) error=agent exited: {%RuntimeError{message: "Agent run failed for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117: :timeout"}, [{SymphonyElixir.AgentRunner, :run, 3, [file: ~c"lib/symphony_elixir/agent_runner.ex", line: 25]}, {Task.Supervised, :invoke_mfa, 2, [file: ~c"lib/elixir/lib/task/supervised.ex", line: 105]}]}
+2026-05-13T15:42:21.748000+08:00 info: Agent task finished for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 session_id=n/a reason={%RuntimeError{message: "Agent run failed for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117: :timeout"}, [{SymphonyElixir.AgentRunner, :run, 3, [file: ~c"lib/symphony_elixir/agent_runner.ex", line: 25]}, {Task.Supervised, :invoke_mfa, 2, [file: ~c"lib/elixir/lib/task/supervised.ex", line: 105]}]}
+2026-05-13T15:42:32.395000+08:00 info: Dispatching issue to agent: issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117 pid=#PID<0.1108.0> attempt=1 worker_host=local
+2026-05-13T15:42:32.396000+08:00 info: Starting agent run for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117 worker_host=local
+2026-05-13T15:42:32.396000+08:00 info: Starting worker attempt for issue_id=83a96616-e29b-4a36-a496-14a9a2a6aa58 issue_identifier=PRI-117 worker_host=local
+2026-05-13T15:42:32.401000+08:00 info: ACPX execution strategy: shell (c:/WINDOWS/system32/cmd.exe /S /C acpx)
+2026-05-13T15:42:32.401000+08:00 info: Ensuring acpx session: issue-83a96616-e29b-4a36-a496-14a9a2a6aa58 agent=claude
+2026-05-13T15:42:32.681000+08:00 info: Ensured acpx session: issue-83a96616-e29b-4a36-a496-14a9a2a6aa58 ->
+2026-05-13T15:42:32.684000+08:00 info: Sending acpx prompt: session=issue-83a96616-e29b-4a36-a496-14a9a2a6aa58 turn=0
