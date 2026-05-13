@@ -134,19 +134,14 @@ $env:PATH = "$OtpDir;$ElixirDir;$env:PATH"
 
 Set-Location $SymphonyDir
 
-$allArgs = @(
-    "--i-understand-that-this-will-be-running-without-the-usual-guardrails",
-    $WorkflowPath
-)
+$env:SYMPHONY_WORKFLOW = $WorkflowPath
 
 if ($Port -gt 0) {
-    $allArgs += "--port"
-    $allArgs += $Port
+    $env:SYMPHONY_PORT = "$Port"
 }
 
 if ($LogsRoot -ne "") {
-    $allArgs += "--logs-root"
-    $allArgs += $LogsRoot
+    $env:SYMPHONY_LOGS_ROOT = $LogsRoot
 
     if (-not (Test-Path $LogsRoot)) {
         New-Item -ItemType Directory -Path $LogsRoot -Force | Out-Null
@@ -158,4 +153,4 @@ Write-Status "Starting Symphony..."
 Write-Status "  Press Ctrl+C to stop."
 Write-Host ""
 
-mix run start.exs -- $allArgs
+mix run --no-start start.exs
