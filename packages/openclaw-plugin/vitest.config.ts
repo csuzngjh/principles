@@ -33,8 +33,6 @@ const integrationTests = [
   'tests/service/nocturnal-target-selector.test.ts',
   'tests/service/evolution-worker.nocturnal.test.ts',
   'tests/service/evolution-worker.timeout.test.ts',
-  'tests/service/data-endpoints-regression.test.ts',
-  'tests/service/control-ui-query-service.test.ts',
   'tests/service/keyword-optimization-service.test.ts',
   // Hook tests with DB dependencies
   'tests/hooks/subagent.test.ts',
