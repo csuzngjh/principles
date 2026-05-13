@@ -141,8 +141,8 @@ function runSelfCheck() {
     for (const agentName of agentNames) {
       try {
         const agentCheck = process.platform === 'win32'
-          ? spawnSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/c', `${acpxBin} --format quiet --timeout 10 ${agentName} exec "echo available"`], { encoding: 'utf8', shell: false, timeout: 15_000 })
-          : spawnSync(nodeBin, [acpxBin, '--format', 'quiet', '--timeout', '10', agentName, 'exec', 'echo available'], { encoding: 'utf8', shell: false, timeout: 15_000 });
+          ? spawnSync(process.env.COMSPEC || 'cmd.exe', ['/d', '/c', `${acpxBin} --format quiet --timeout 30 ${agentName} exec "echo available"`], { encoding: 'utf8', shell: false, timeout: 45_000 })
+          : spawnSync(nodeBin, [acpxBin, '--format', 'quiet', '--timeout', '30', agentName, 'exec', 'echo available'], { encoding: 'utf8', shell: false, timeout: 45_000 });
         record(`agent:${agentName}`, agentCheck.status === 0, agentCheck.status === 0 ? 'available' : `status=${agentCheck.status}`);
       } catch (agentErr) {
         record(`agent:${agentName}`, false, agentErr.message);
@@ -470,6 +470,7 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
   let result;
   try {
     if (process.platform === 'win32') {
+      const comspec = process.env.COMSPEC || 'cmd.exe';
       result = spawnSync(
         comspec,
         [
