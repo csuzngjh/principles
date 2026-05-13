@@ -13,6 +13,7 @@ function getModel(workspaceDir: string): ThinkingModelsConsoleModel {
   return model;
 }
 
+/* eslint-disable @typescript-eslint/max-params */
 export async function handleThinkingModelsRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -31,14 +32,14 @@ export async function handleThinkingModelsRoute(
     try {
       const result = model.getOverview();
       sendSuccess(res, result);
-    } catch (err: any) {
-      sendError(res, 500, 'thinking_models_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'thinking_models_error', (err as Error).message);
     }
     return;
   }
 
   // GET /api/thinking-models/:id
-  const detailMatch = subPath.match(/^\/([^/]+)$/);
+  const detailMatch = /^\/([^/]+)$/.exec(subPath);
   if (detailMatch) {
     const modelId = decodeURIComponent(detailMatch[1]);
     try {
@@ -48,8 +49,8 @@ export async function handleThinkingModelsRoute(
         return;
       }
       sendSuccess(res, detail);
-    } catch (err: any) {
-      sendError(res, 500, 'thinking_model_detail_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'thinking_model_detail_error', (err as Error).message);
     }
     return;
   }

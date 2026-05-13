@@ -17,7 +17,13 @@ export function sendSuccess<T>(res: ServerResponse, data: T): void {
   sendJson(res, 200, { success: true, data });
 }
 
-export function sendError(res: ServerResponse, statusCode: number, error: string, message?: string): void {
+/* eslint-disable @typescript-eslint/max-params */
+export function sendError(
+  res: ServerResponse,
+  statusCode: number,
+  error: string,
+  message?: string,
+): void {
   sendJson(res, statusCode, { success: false, error, message: message ?? error });
 }
 

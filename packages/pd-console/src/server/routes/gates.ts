@@ -17,6 +17,7 @@ function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/* eslint-disable @typescript-eslint/max-params */
 export async function handleGatesRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -42,7 +43,7 @@ export async function handleGatesRoute(
 
   if (subPath === '/blocks') {
     try {
-      const limitParam = new URL(req.url!, `http://localhost`).searchParams.get('limit');
+      const limitParam = new URL(req.url ?? '/', 'http://localhost').searchParams.get('limit');
       const parsedLimit = limitParam ? parseInt(limitParam, 10) : 100;
       const limit = Number.isNaN(parsedLimit) || parsedLimit < 1 ? 100 : Math.min(parsedLimit, 500);
       const blocks = await model.getGateBlocks(limit);

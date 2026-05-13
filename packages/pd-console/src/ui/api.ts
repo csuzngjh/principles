@@ -141,11 +141,6 @@ function clearToken(): void {
   sessionStorage.removeItem("pd_token");
 }
 
-async function checkAuth(): Promise<boolean> {
-  const result = await request<unknown>("/api/health");
-  return result.success;
-}
-
 async function request<T>(
   path: string,
   options?: RequestInit,
@@ -194,6 +189,11 @@ async function request<T>(
       error: err instanceof Error ? err.message : "Network error",
     };
   }
+}
+
+async function checkAuth(): Promise<boolean> {
+  const result = await request<unknown>("/api/health");
+  return result.success;
 }
 
 async function fetchTasks(): Promise<ApiResponse<TaskZones>> {
