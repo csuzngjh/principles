@@ -1,7 +1,9 @@
 ---
 tracker:
   kind: linear
-  project_slug: "principles-d4d597b84d4d"
+  # project_slug must be a Linear Project.slugId (found in project URL: .../project/<slugId>).
+  # Using Project A slugId: d4fdb8223f27
+  project_slug: "d4fdb8223f27"
   active_states:
     - Todo
     - In Progress
@@ -18,6 +20,9 @@ polling:
 workspace:
   root: D:/code/principles-workspaces
 hooks:
+  # NOTE: after_create/before_remove hooks run via System.cmd("sh", ["-lc", command]).
+  # On Windows (where sh may not be in PATH), the Elixir runtime falls back to
+  # PowerShell or cmd automatically. Existing POSIX behavior is preserved when sh is available.
   after_create: |
     git clone --depth 1 https://github.com/csuzngjh/principles .
     npm install
