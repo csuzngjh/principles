@@ -1,14 +1,23 @@
+import * as React from "react";
 import { Sun, Moon } from "lucide-react";
 import { Button } from "./ui/button.js";
 import { useTheme } from "./theme-provider.js";
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
+  const [systemDark, setSystemDark] = React.useState(false);
+
+  React.useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemDark(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   const isDark =
     theme === "dark" ||
-    (theme === "system" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches);
+    (theme === "system" && systemDark);
 
   const toggleTheme = () => {
     if (theme === "light") {

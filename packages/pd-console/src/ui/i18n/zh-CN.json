@@ -204,7 +204,11 @@
     },
     "pageHeader": {
       "refresh": "刷新",
-      "lastUpdated": "最后更新: {{time}}"
+      "lastUpdated": "最后更新: {{time}}",
+      "justNow": "刚刚",
+      "minutesAgo": "{{count}}分钟前",
+      "hoursAgo": "{{count}}小时前",
+      "daysAgo": "{{count}}天前"
     },
     "themeToggle": {
       "light": "亮色模式",

@@ -30,10 +30,11 @@ const navItems = [
 
 interface AppSidebarProps {
   className?: string;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
-export function AppSidebar({ className }: AppSidebarProps) {
-  const [collapsed, setCollapsed] = React.useState(false);
+export function AppSidebar({ className, collapsed = false, onCollapsedChange }: AppSidebarProps) {
   const location = useLocation();
 
   const isActive = (href: string) => {
@@ -88,7 +89,7 @@ export function AppSidebar({ className }: AppSidebarProps) {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => onCollapsedChange?.(!collapsed)}
           className="w-full justify-center"
         >
           {collapsed ? (

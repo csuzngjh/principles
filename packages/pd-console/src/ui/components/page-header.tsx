@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 import { RefreshCw } from "lucide-react";
 import { cn } from "../../lib/utils.js";
 import { Button } from "./ui/button.js";
@@ -19,6 +20,7 @@ export function PageHeader({
   lastUpdated,
   actions,
 }: PageHeaderProps) {
+  const { t } = useTranslation();
   const [refreshing, setRefreshing] = React.useState(false);
 
   const handleRefresh = async () => {
@@ -38,10 +40,10 @@ export function PageHeader({
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
 
-    if (minutes < 1) return "刚刚";
-    if (minutes < 60) return `${minutes}分钟前`;
-    if (hours < 24) return `${hours}小时前`;
-    return `${days}天前`;
+    if (minutes < 1) return t("components:pageHeader.justNow");
+    if (minutes < 60) return t("components:pageHeader.minutesAgo", { count: minutes });
+    if (hours < 24) return t("components:pageHeader.hoursAgo", { count: hours });
+    return t("components:pageHeader.daysAgo", { count: days });
   };
 
   return (
@@ -67,7 +69,7 @@ export function PageHeader({
                   refreshing && "animate-spin"
                 )}
               />
-              刷新
+              {t("components:pageHeader.refresh")}
             </Button>
           )}
           {actions}
@@ -75,7 +77,7 @@ export function PageHeader({
       </div>
       {lastUpdated && (
         <div className="mt-3 flex items-center text-xs text-muted-foreground">
-          <span>最后更新: {formatTime(lastUpdated)}</span>
+          <span>{t("components:pageHeader.lastUpdated", { time: formatTime(lastUpdated) })}</span>
         </div>
       )}
       <Separator className="mt-4" />

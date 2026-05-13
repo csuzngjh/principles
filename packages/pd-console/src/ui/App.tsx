@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { HashRouter, Routes, Route } from "react-router-dom";
-import { I18nextProvider } from "react-i18next";
+import { I18nextProvider, useTranslation } from "react-i18next";
 import i18n from "./i18n/index.js";
 import { ThemeProvider } from "./components/theme-provider.js";
 import { ThemeToggle } from "./components/theme-toggle.js";
@@ -21,6 +21,7 @@ import { ErrorBoundary } from "./components/error-boundary.js";
 import { getToken, clearToken, checkAuth } from "./api.js";
 
 export function App() {
+  const { t } = useTranslation();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -66,10 +67,11 @@ export function App() {
         <HashRouter>
           <div className="min-h-screen bg-background text-foreground">
             <AppSidebar
-              className={sidebarCollapsed ? "w-16" : "w-56"}
+              collapsed={sidebarCollapsed}
+              onCollapsedChange={setSidebarCollapsed}
             />
             <div
-              className={`transition-all duration-300 ml-56 flex flex-col min-h-screen ${sidebarCollapsed ? "ml-16" : "ml-56"}`}
+              className={`transition-all duration-300 flex flex-col min-h-screen ${sidebarCollapsed ? "ml-16" : "ml-56"}`}
             >
               <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
                 <div className="flex items-center justify-between px-6 py-3">
@@ -87,7 +89,7 @@ export function App() {
                         size="sm"
                         onClick={handleSignOut}
                       >
-                        登出
+                        {t("common:logout")}
                       </Button>
                     )}
                   </div>

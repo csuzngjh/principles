@@ -204,7 +204,11 @@
     },
     "pageHeader": {
       "refresh": "Refresh",
-      "lastUpdated": "Last Updated: {{time}}"
+      "lastUpdated": "Last Updated: {{time}}",
+      "justNow": "just now",
+      "minutesAgo": "{{count}}m ago",
+      "hoursAgo": "{{count}}h ago",
+      "daysAgo": "{{count}}d ago"
     },
     "themeToggle": {
       "light": "Light Mode",

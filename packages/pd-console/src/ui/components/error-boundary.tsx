@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import i18n from "../i18n/index.js";
 import { Card, CardContent } from "./ui/card.js";
 import { Button } from "./ui/button.js";
 import { AlertCircle } from "lucide-react";
@@ -32,16 +33,18 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <CardContent className="p-6">
             <div className="flex items-center gap-3 mb-4">
               <AlertCircle className="h-5 w-5 text-destructive" />
-              <h3 className="font-semibold text-destructive">Something went wrong</h3>
+              <h3 className="font-semibold text-destructive">
+                {i18n.t("components:errorBoundary.title")}
+              </h3>
             </div>
             <p className="text-sm text-muted-foreground mb-4">
-              {this.state.error?.message ?? "An unexpected error occurred"}
+              {this.state.error?.message ?? i18n.t("components:errorBoundary.description")}
             </p>
             <Button
               variant="outline"
               onClick={() => this.setState({ hasError: false, error: null })}
             >
-              Try Again
+              {i18n.t("components:errorBoundary.retry")}
             </Button>
           </CardContent>
         </Card>
