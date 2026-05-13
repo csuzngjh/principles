@@ -375,10 +375,6 @@ function buildPlugin() {
             cwd: SOURCE_DIR,
             stdio: 'inherit'
         });
-        execSync('node scripts/build-web.mjs --production', {
-            cwd: SOURCE_DIR,
-            stdio: 'inherit'
-        });
     } catch (error) {
         console.error('\n❌ Build failed');
         console.error(`   ${error.message}`);
