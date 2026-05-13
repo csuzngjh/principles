@@ -40,9 +40,9 @@ export class AuthConfig {
       return false;
     }
 
-    const provided = match[1];
+    const [, provided] = match;
     const providedBuf = Buffer.from(provided, 'utf8');
-    const expectedBuf = Buffer.from(this.token!, 'utf8');
+    const expectedBuf = Buffer.from(this.token as string, 'utf8');
 
     if (providedBuf.length !== expectedBuf.length) {
       return false;

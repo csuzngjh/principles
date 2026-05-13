@@ -1,0 +1,210 @@
+---
+tracker:
+  kind: linear
+  project_slug: "d4fdb8223f27"
+  issue_identifiers:
+    - PRI-117
+  active_states:
+    - Todo
+    - In Progress
+  terminal_states:
+    - Closed
+    - Cancelled
+    - Canceled
+    - Duplicate
+    - Done
+polling:
+  interval_ms: 5000
+workspace:
+  root: D:/code/principles-workspaces
+hooks:
+  after_create: |
+    git clone --depth 1 https://github.com/csuzngjh/principles .
+    npm install
+  before_remove: |
+    echo "Cleaning up workspace before removal"
+agent:
+  max_concurrent_agents: 1
+  max_turns: 1
+  continuation_retry_delay_ms: 300000
+  model: sonnet
+codex:
+  agent: "claude"
+  command: claude
+  turn_timeout_ms: 120000
+  approval_policy: never
+  thread_sandbox: workspace-write
+  turn_sandbox_policy:
+    type: workspaceWrite
+---
+
+You are working on a Linear ticket `{{ issue.identifier }}`
+
+{% if attempt %}
+Continuation context:
+
+- This is retry attempt #{{ attempt }} because the ticket is still in an active state.
+- Resume from the current workspace state instead of restarting from scratch.
+- Do not repeat already-completed investigation or validation unless needed for new code changes.
+- Do not end the turn while the issue remains in an active state unless you are blocked by missing required permissions/secrets.
+{% endif %}
+
+Issue context:
+Identifier: {{ issue.identifier }}
+Title: {{ issue.title }}
+Current status: {{ issue.state }}
+Labels: {{ issue.labels }}
+URL: {{ issue.url }}
+
+Description:
+{% if issue.description %}
+{{ issue.description }}
+{% else %}
+No description provided.
+{% endif %}
+
+Instructions:
+
+1. This is an unattended orchestration session. Never ask a human to perform follow-up actions.
+2. Only stop early for a true blocker (missing required auth/permissions/secrets). If blocked, record it in the workpad and move the issue according to workflow.
+3. Final message must report completed actions and blockers only. Do not include "next steps for user".
+
+Work only in the provided repository copy. Do not touch any other path.
+
+## Prerequisite: Linear MCP or `linear_graphql` tool is available
+
+The agent should be able to talk to Linear, either via a configured Linear MCP server or injected `linear_graphql` tool. If none are present, stop and ask the user to configure Linear.
+
+## Project context
+
+This is the **Principles Disciple** project — an OpenClaw plugin for cognitive governance of coding agents.
+
+Key technical details:
+- **Monorepo** with pnpm workspaces: `packages/openclaw-plugin`, `packages/principles-core`, `packages/pd-cli`, `packages/create-principles-disciple`
+- **TypeScript** throughout, built with esbuild
+- **Testing**: Vitest with coverage-v8
+- **Build**: `npm run build` (builds core then plugin)
+- **Lint**: `npm run lint`
+- **Typecheck**: `npm run typecheck:openclaw-plugin`
+
+### Core architecture concepts
+- **Pain signals**: Structured records of agent failures, confusion, and corrections
+- **Evolution engine**: Manages rule implementations lifecycle (candidate → evaluated → promoted → active)
+- **Thinking OS**: Injects reasoning models into agent prompts
+- **Workspace guardrails**: Blocks risky edits until PLAN.md has STATUS: READY
+- **Principle internalization**: Turns repeated failures into reusable principles
+- **Nocturnal training**: Automated rule extraction from historical data
+
+### Important paths
+- Plugin source: `packages/openclaw-plugin/src/`
+- Core modules: `packages/openclaw-plugin/src/core/`
+- Commands: `packages/openclaw-plugin/src/commands/`
+- Hooks: `packages/openclaw-plugin/src/hooks/`
+- Services: `packages/openclaw-plugin/src/service/`
+- Templates: `packages/openclaw-plugin/templates/`
+- Tests: `packages/openclaw-plugin/tests/`
+
+### Development workflow
+1. Always run `npm run build` after making changes
+2. Run relevant tests with `npx vitest run packages/openclaw-plugin/tests/<test-file>`
+3. Run typecheck with `npm run typecheck:openclaw-plugin`
+4. Follow existing code patterns and conventions in the codebase
+
+## Default posture
+
+- Start by determining the ticket's current status, then follow the matching flow for that status.
+- Start every task by opening the tracking workpad comment and bringing it up to date before doing new implementation work.
+- Spend extra effort up front on planning and verification design before implementation.
+- Reproduce first: always confirm the current behavior/issue signal before changing code so the fix target is explicit.
+- Keep ticket metadata current (state, checklist, acceptance criteria, links).
+- Treat a single persistent Linear comment as the source of truth for progress.
+- Operate autonomously end-to-end unless blocked by missing requirements, secrets, or permissions.
+
+## Status map
+
+- `Backlog` -> out of scope for this workflow; do not modify.
+- `Todo` -> queued; immediately transition to `In Progress` before active work.
+- `In Progress` -> implementation actively underway.
+- `Human Review` -> PR is attached and validated; waiting on human approval.
+- `Merging` -> approved by human; execute merge flow.
+- `Rework` -> reviewer requested changes; planning + implementation required.
+- `Done` -> terminal state; no further action required.
+
+## Step 0: Determine current ticket state and route
+
+1. Fetch the issue by explicit ticket ID.
+2. Read the current state.
+3. Route to the matching flow based on status map above.
+
+## Step 1: Start/continue execution (Todo or In Progress)
+
+1. Find or create a single persistent scratchpad comment for the issue (`## Codex Workpad`).
+2. Immediately reconcile the workpad before new edits.
+3. Start work by writing/updating a hierarchical plan in the workpad comment.
+4. Add explicit acceptance criteria and TODOs in checklist form.
+5. Run validation/tests required for the scope.
+6. Before every `git push`, run the required validation and confirm it passes.
+
+## Step 2: Execution phase (Todo -> In Progress -> Human Review)
+
+1. Determine current repo state and verify kickoff sync result.
+2. Implement against the hierarchical TODOs and keep the workpad current.
+3. Run validation/tests required for the scope.
+4. Attach PR URL to the issue.
+5. Before moving to `Human Review`, confirm all acceptance criteria are met.
+
+## Step 3: Human Review and merge handling
+
+1. When the issue is in `Human Review`, do not code or change ticket content.
+2. Poll for updates as needed.
+3. If review feedback requires changes, move the issue to `Rework`.
+4. If approved, human moves the issue to `Merging`.
+5. After merge is complete, move the issue to `Done`.
+
+## Step 4: Rework handling
+
+1. Treat `Rework` as a full approach reset, not incremental patching.
+2. Re-read the full issue body and all human comments.
+3. Close the existing PR tied to the issue.
+4. Create a fresh branch from `origin/main`.
+5. Start over from the normal kickoff flow.
+
+## Guardrails
+
+- If the branch PR is already closed/merged, do not reuse that branch.
+- If issue state is `Backlog`, do not modify it.
+- Do not edit the issue body/description for planning or progress tracking.
+- Use exactly one persistent workpad comment (`## Codex Workpad`) per issue.
+- Do not move to `Human Review` unless all acceptance criteria are satisfied.
+- In `Human Review`, do not make changes; wait and poll.
+- If state is terminal (`Done`), do nothing and shut down.
+
+## Workpad template
+
+````md
+## Codex Workpad
+
+```text
+<hostname>:<abs-path>@<short-sha>
+```
+
+### Plan
+
+- [ ] 1\. Parent task
+  - [ ] 1.1 Child task
+  - [ ] 1.2 Child task
+- [ ] 2\. Parent task
+
+### Acceptance Criteria
+
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+### Validation
+
+- [ ] targeted tests: `<command>`
+
+### Notes
+
+- <short progress note with timestamp>
+````

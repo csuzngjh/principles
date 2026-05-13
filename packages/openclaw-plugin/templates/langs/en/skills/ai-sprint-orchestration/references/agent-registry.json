@@ -4,77 +4,6 @@
   "lastUpdated": "2026-04-04",
 
   "agents": {
-    "iflow": {
-      "command": "iflow --experimental-acp",
-      "description": "iFlow CLI with ACP support (智谱 Code Plan / MiniMax Code Plan 付费套餐更稳定，但以下模型全部免费)",
-      "version": "0.5.18",
-      "models": {
-        "glm-4.7": {
-          "description": "GLM-4.7 — official recommended model, fast",
-          "pricing": "free",
-          "recommendedTimeoutSeconds": 1200,
-          "features": ["recommended", "fast"],
-          "notes": "官方推荐模型，速度快"
-        },
-        "glm-5": {
-          "description": "GLM-5 — 744B parameters, long-context",
-          "pricing": "free",
-          "recommendedTimeoutSeconds": 1800,
-          "features": ["slow", "needs-extra-time"],
-          "notes": "744B 参数，运行明显较慢。Review 任务超时必须 ≥ 1800s"
-        },
-        "qwen3-coder-plus": {
-          "description": "Qwen3-Coder-Plus — efficient coding model",
-          "pricing": "free",
-          "recommendedTimeoutSeconds": 1200,
-          "features": ["fast", "coding-optimized"],
-          "notes": "通义编码模型"
-        },
-        "deepseek-v3.2": {
-          "description": "DeepSeek V3.2",
-          "pricing": "free",
-          "recommendedTimeoutSeconds": 1200,
-          "features": ["fast"],
-          "notes": ""
-        },
-        "minimax-m2.5": {
-          "description": "MiniMax M2.5",
-          "pricing": "free",
-          "recommendedTimeoutSeconds": 1200,
-          "features": ["fast"],
-          "notes": ""
-        },
-        "kimi-k2-thinking": {
-          "description": "Kimi K2 Thinking",
-          "pricing": "free",
-          "recommendedTimeoutSeconds": 1800,
-          "features": ["reasoning"],
-          "notes": "推理型模型"
-        },
-        "kimi-k2.5": {
-          "description": "Kimi K2.5",
-          "pricing": "free",
-          "recommendedTimeoutSeconds": 1200,
-          "features": ["fast"],
-          "notes": ""
-        },
-        "kimi-k2-0905": {
-          "description": "Kimi K2 0905",
-          "pricing": "free",
-          "recommendedTimeoutSeconds": 1200,
-          "features": ["fast"],
-          "notes": ""
-        },
-        "iflow-rome-30ba3b": {
-          "description": "iFlow ROME 30BA3B",
-          "pricing": "free",
-          "recommendedTimeoutSeconds": 1200,
-          "features": ["preview"],
-          "notes": "预览版本"
-        }
-      }
-    },
-
     "opencode": {
       "command": "npx -y opencode-ai acp",
       "description": "OpenCode ACP adapter",
@@ -209,6 +138,6 @@
     "codex": "codex-acp 在当前环境无法使用，不登记。",
     "kilocode": "kilocode ACP 是 server 模式（监听端口），不是 headless prompt-response，不兼容 acpx，不登记。",
     "qodercli": "qodercli 没有 --acp 标志，不登记。",
-    "model_discovery": "opencode 可通过 'opencode models' 自动列出模型。其他 agent（iflow, gemini, qwen）没有 CLI 列表命令，需手动维护。"
+    "model_discovery": "opencode 可通过 'opencode models' 自动列出模型。其他 agent（gemini, qwen）没有 CLI 列表命令，需手动维护。"
   }
 }

@@ -13,7 +13,7 @@ export interface EvolutionStats {
   inProgress: number;
   completed: number;
   failed: number;
-  stageDistribution: Array<{ stage: string; count: number }>;
+  stageDistribution: { stage: string; count: number }[];
 }
 
 export interface EvolutionTaskItem {
@@ -264,7 +264,7 @@ export class EvolutionConsoleModel {
 
   dispose(): void {
     if (this.stateManager) {
-      this.stateManager.close().catch(() => {});
+      this.stateManager.close().catch((_e: unknown): void => { /* noop */ });
       this.stateManager = null;
     }
     this.initPromise = null;

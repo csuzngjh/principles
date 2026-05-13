@@ -14,6 +14,7 @@ function getModel(workspaceDir: string): EvolutionConsoleModel {
   return model;
 }
 
+/* eslint-disable @typescript-eslint/max-params */
 export async function handleEvolutionRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -31,8 +32,8 @@ export async function handleEvolutionRoute(
     try {
       const result = await model.getStats();
       sendSuccess(res, result);
-    } catch (err: any) {
-      sendError(res, 500, 'evolution_stats_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'evolution_stats_error', (err as Error).message);
     }
     return;
   }
@@ -47,8 +48,8 @@ export async function handleEvolutionRoute(
         pageSize: safeParseInt(query.pageSize, 20, 1, 100),
       });
       sendSuccess(res, result);
-    } catch (err: any) {
-      sendError(res, 500, 'evolution_tasks_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'evolution_tasks_error', (err as Error).message);
     }
     return;
   }
@@ -57,8 +58,8 @@ export async function handleEvolutionRoute(
     try {
       const result = await model.getPrinciples();
       sendSuccess(res, result);
-    } catch (err: any) {
-      sendError(res, 500, 'evolution_principles_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'evolution_principles_error', (err as Error).message);
     }
     return;
   }
@@ -67,8 +68,8 @@ export async function handleEvolutionRoute(
     try {
       const result = await model.getQueueHealth();
       sendSuccess(res, result);
-    } catch (err: any) {
-      sendError(res, 500, 'evolution_queue_error', err.message);
+    } catch (err: unknown) {
+      sendError(res, 500, 'evolution_queue_error', (err as Error).message);
     }
     return;
   }

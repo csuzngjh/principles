@@ -44,7 +44,7 @@ function parseArgs(argv: string[]): ServerOptions {
   let workspace = process.cwd();
   let port = 3100;
   let noAuth = false;
-  let token: string | undefined;
+  let token: string | undefined = undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--workspace' && i + 1 < args.length) {
