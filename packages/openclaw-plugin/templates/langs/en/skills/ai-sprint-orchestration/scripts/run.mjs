@@ -1176,8 +1176,8 @@ export function getIsolationDir(runId, stageName, role) {
 }
 
 /**
- * Find report in iflow isolation directory.
- * iflow writes to runtime/tmp/sprint-agent/{runId}/{stage}-{role}/{report}.md
+ * Find report in agent isolation directory.
+ * Agent writes to runtime/tmp/sprint-agent/{runId}/{stage}-{role}/{report}.md
  *
  * IMPORTANT: Uses runId directly for isolation lookup, not fragile timestamp extraction.
  * This ensures different runs have unique isolation directories and prevents cross-contamination.
@@ -2608,6 +2608,9 @@ async function executeStage(runDir, state, spec) {
         worktreePath: worktreeInfo?.worktreePath,
         worklogPath: producerWorklogPath,
       });
+      if (result.status !== 0) {
+        throw new Error(`Agent exited with status ${result.status}: ${result.stderr || 'no stderr'}`);
+      }
       producerOutput = result.stdout;
       extensionsUsed = result.extensionsUsed ?? 0;
       if (extensionsUsed > 0) {
