@@ -1,7 +1,7 @@
 ---
 tracker:
   kind: linear
-  project_slug: "principles-d4d597b84d4d"
+  project_slug: "d4fdb8223f27"
   active_states:
     - Todo
     - In Progress
@@ -29,7 +29,7 @@ agent:
   model: sonnet
 codex:
   agent: "claude"
-  command: npx -y @agentclientprotocol/claude-agent-acp@^0.31.0
+  command: claude
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
