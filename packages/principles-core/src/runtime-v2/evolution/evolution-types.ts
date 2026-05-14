@@ -40,7 +40,7 @@ export const TIER_DEFINITIONS: TierDefinition[] = [
   { tier: EvolutionTier.Sprout,  name: 'Sprout',  requiredPoints: 50,   permissions: { maxLinesPerWrite: 300,  maxFilesPerTask: 5,  allowRiskPath: false, allowSubagentSpawn: true  }},
   { tier: EvolutionTier.Sapling, name: 'Sapling', requiredPoints: 200,  permissions: { maxLinesPerWrite: 500,  maxFilesPerTask: 10, allowRiskPath: true,  allowSubagentSpawn: true  }},
   { tier: EvolutionTier.Tree,    name: 'Tree',    requiredPoints: 500,  permissions: { maxLinesPerWrite: 1000, maxFilesPerTask: 20, allowRiskPath: true,  allowSubagentSpawn: true  }},
-  { tier: EvolutionTier.Forest,  name: 'Forest',  requiredPoints: 1000, permissions: { maxLinesPerWrite: Infinity, maxFilesPerTask: Infinity, allowRiskPath: true,  allowSubagentSpawn: true }},
+  { tier: EvolutionTier.Forest,  name: 'Forest',  requiredPoints: 1000, permissions: { maxLinesPerWrite: Number.MAX_SAFE_INTEGER, maxFilesPerTask: Number.MAX_SAFE_INTEGER, allowRiskPath: true,  allowSubagentSpawn: true }},
 ];
 
 export function getTierDefinition(tier: EvolutionTier): TierDefinition {
@@ -114,6 +114,11 @@ export interface EvolutionScorecard {
   recentEvents: EvolutionEvent[];
 
   lastUpdated: string;
+}
+
+export interface RecentFailureHashEntry {
+  key: string;
+  value: string;
 }
 
 export interface EvolutionStats {
@@ -230,10 +235,14 @@ export function isCompleteDetectorMetadata(
     Array.isArray(arr) &&
     arr.length > 0 &&
     arr.every((s) => typeof s === 'string' && s.length > 0);
+  const stringArray2d = (arr: unknown): boolean =>
+    Array.isArray(arr) &&
+    arr.every((inner) => Array.isArray(inner) && inner.every((s) => typeof s === 'string'));
   return (
     nonEmptyStringArray(m.applicabilityTags) &&
     nonEmptyStringArray(m.positiveSignals) &&
-    nonEmptyStringArray(m.negativeSignals)
+    nonEmptyStringArray(m.negativeSignals) &&
+    stringArray2d(m.toolSequenceHints)
   );
 }
 
@@ -444,6 +453,12 @@ export const EvolutionStatsSchema = Type.Object({
 });
 export type EvolutionStatsTB = Static<typeof EvolutionStatsSchema>;
 
+export const RecentFailureHashEntrySchema = Type.Object({
+  key: Type.String(),
+  value: Type.String(),
+});
+export type RecentFailureHashEntryTB = Static<typeof RecentFailureHashEntrySchema>;
+
 export const EvolutionScorecardSchema = Type.Object({
   version: Type.Literal('2.0'),
   agentId: Type.String(),
@@ -451,6 +466,7 @@ export const EvolutionScorecardSchema = Type.Object({
   availablePoints: Type.Number(),
   currentTier: EvolutionTierSchema,
   lastDoubleRewardTime: Type.Optional(Type.String()),
+  recentFailureHashes: Type.Array(RecentFailureHashEntrySchema),
   stats: EvolutionStatsSchema,
   recentEvents: Type.Array(EvolutionEventSchema),
   lastUpdated: Type.String(),
