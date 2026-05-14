@@ -21,6 +21,9 @@ import { handleFeedbackRoute, disposeFeedbackModels } from './routes/feedback.js
 import { handleSamplesRoute, disposeSampleModels } from './routes/samples.js';
 import { handleEvolutionRoute, disposeEvolutionModels } from './routes/evolution.js';
 import { handleThinkingModelsRoute, disposeThinkingModels } from './routes/thinking-models.js';
+import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
+import { handlePipelineRoute, disposePipelineModels } from './routes/pipeline.js';
+import { handleEventsRoute, disposeEventsModels } from './routes/events.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
@@ -28,7 +31,10 @@ import type { SystemStatus, TaskItem, EvidenceItem, TaskEvidence, ActivityEvent 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const WEB_ROOT = path.resolve(__dirname, '..', 'dist', 'web');
+const PKG_ROOT = __dirname.includes(path.join('src', 'server'))
+  ? path.resolve(__dirname, '..', '..')
+  : path.resolve(__dirname, '..');
+const WEB_ROOT = path.resolve(PKG_ROOT, 'dist', 'web');
 
 // ── CLI arg parsing ──────────────────────────────────────────────────────────────────────
 
@@ -131,18 +137,30 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
 
 // ── Async handler wrapper ──────────────────────────────────────────────────────────────
 
+const REQUEST_TIMEOUT_MS = 10000;
+
 type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
 
 function asyncHandler(fn: AsyncRouteHandler): (req: http.IncomingMessage, res: http.ServerResponse) => void {
   return (innerReq, innerRes) => {
-    fn(innerReq, innerRes).catch((err: unknown) => {
+    const timeoutId = setTimeout(() => {
       if (!innerRes.headersSent) {
-        const message = err instanceof Error ? err.message : 'Internal server error';
-        sendJson(innerRes, 500, { success: false, error: message });
-      } else {
-        console.error('[pd-console] Unhandled rejection after headers sent:', err);
+        sendJson(innerRes, 504, { success: false, error: 'Request timeout' });
+        innerRes.end();
       }
-    });
+    }, REQUEST_TIMEOUT_MS);
+
+    fn(innerReq, innerRes)
+      .finally(() => clearTimeout(timeoutId))
+      .catch((err: unknown) => {
+        clearTimeout(timeoutId);
+        if (!innerRes.headersSent) {
+          const message = err instanceof Error ? err.message : 'Internal server error';
+          sendJson(innerRes, 500, { success: false, error: message });
+        } else {
+          console.error('[pd-console] Unhandled rejection after headers sent:', err);
+        }
+      });
   };
 }
 
@@ -202,6 +220,9 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeSampleModels();
   disposeEvolutionModels();
   disposeThinkingModels();
+  disposeHealthModels();
+  disposePipelineModels();
+  disposeEventsModels();
   services.workspaceService.dispose();
 
   try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }
@@ -310,11 +331,20 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
 
       // GET /api/health
       if (urlPath === '/api/health') {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { success: false, error: 'Method not allowed' });
-          return;
-        }
-        sendSuccess(res, { status: 'ok', timestamp: new Date().toISOString() });
+        asyncHandler(() => handleHealthRoute(req, res, services.workspaceDir))(req, res);
+        return;
+      }
+
+      // GET /api/pipeline
+      if (urlPath === '/api/pipeline') {
+        asyncHandler(() => handlePipelineRoute(req, res, services.workspaceDir))(req, res);
+        return;
+      }
+
+      // GET /api/events
+      if (urlPath === '/api/events' || urlPath.startsWith('/api/events/')) {
+        const subPath = urlPath.slice('/api/events'.length);
+        asyncHandler(() => handleEventsRoute({ req, res, workspaceDir: services.workspaceDir, subPath }))(req, res);
         return;
       }
 

@@ -41,7 +41,7 @@ export class SqliteConnection {
     if (this.db) return this.db;
 
     this.db = this.readonlyMode
-      ? new Database(this.dbPath, { readonly: true } as Database.Options)
+      ? new Database(this.dbPath, { readonly: true })
       : new Database(this.dbPath);
 
     if (!this.readonlyMode) {

@@ -8,7 +8,7 @@ export class MemoryRunStore implements RunStore {
 
   async createRun(record: Omit<RunRecord, 'createdAt' | 'updatedAt'>): Promise<RunRecord> {
     const now = new Date().toISOString();
-    const full: RunRecord = { ...record, createdAt: now, updatedAt: now } as RunRecord;
+    const full: RunRecord = { ...record, createdAt: now, updatedAt: now };
     this.runs.set(record.runId, full);
     return full;
   }

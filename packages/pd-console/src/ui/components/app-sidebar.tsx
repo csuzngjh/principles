@@ -1,4 +1,4 @@
-import * as React from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -12,14 +12,22 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  AlertTriangle,
+  Activity,
+  FileText,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
 import { Button } from "./ui/button.js";
+import { Badge } from "./ui/badge.js";
+import { fetchSystemHealth } from "../api.js";
+import type { SystemHealthStatus } from "../api.js";
 
 const navItems = [
   { id: "overview", label: "概览", icon: LayoutDashboard, href: "/" },
   { id: "central", label: "中央", icon: Building2, href: "/central" },
   { id: "tasks", label: "任务", icon: ListTodo, href: "/tasks" },
+  { id: "data-flow", label: "数据流", icon: Activity, href: "/data-flow" },
+  { id: "event-log", label: "事件日志", icon: FileText, href: "/event-log" },
   { id: "feedback", label: "反馈", icon: MessageSquare, href: "/feedback" },
   { id: "gates", label: "门控", icon: Shield, href: "/gates" },
   { id: "samples", label: "样本", icon: FlaskConical, href: "/samples" },
@@ -36,10 +44,43 @@ interface AppSidebarProps {
 
 export function AppSidebar({ className, collapsed = false, onCollapsedChange }: AppSidebarProps) {
   const location = useLocation();
+  const [healthData, setHealthData] = useState<SystemHealthStatus | null>(null);
+  const [alertCount, setAlertCount] = useState(0);
+  const [healthError, setHealthError] = useState<string | null>(null);
 
   const isActive = (href: string) => {
     if (href === "/" && location.pathname === "/") return true;
     return location.pathname.startsWith(href);
+  };
+
+  useEffect(() => {
+    const fetchHealth = async () => {
+      try {
+        setHealthError(null);
+        const result = await fetchSystemHealth();
+        if (result.success && result.data) {
+          setHealthData(result.data);
+          const errorChecks = result.data.checks.filter(c => c.status === "error").length;
+          const warningChecks = result.data.checks.filter(c => c.status === "warning").length;
+          setAlertCount(errorChecks + warningChecks);
+        } else if (!result.success) {
+          setHealthError(result.error ?? "Failed to load health status");
+        }
+      } catch (err) {
+        setHealthError(err instanceof Error ? err.message : "Network error");
+      }
+    };
+
+    fetchHealth();
+    const interval = setInterval(fetchHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getAlertBadgeVariant = () => {
+    if (!healthData) return "secondary";
+    if (healthData.overall === "error") return "destructive";
+    if (healthData.overall === "degraded") return "secondary";
+    return "default";
   };
 
   return (
@@ -57,8 +98,34 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
             collapsed && "justify-center"
           )}
         >
-          <Dna className="h-6 w-6" />
-          {!collapsed && <span>PD Console</span>}
+          <div className="relative">
+            <Dna className="h-6 w-6" />
+            {alertCount > 0 && (
+              <Badge
+                variant={getAlertBadgeVariant()}
+                className="absolute -top-2 -right-2 h-5 min-w-5 flex items-center justify-center p-0 text-[10px]"
+              >
+                {alertCount}
+              </Badge>
+            )}
+          </div>
+          {!collapsed && (
+            <div className="flex items-center gap-2">
+              <span>PD Console</span>
+              {alertCount > 0 && (
+                <div className="flex items-center gap-1 text-xs text-destructive">
+                  <AlertTriangle className="h-3 w-3" />
+                  <span>{alertCount}</span>
+                </div>
+              )}
+              {healthError && (
+                <div className="flex items-center gap-1 text-xs text-destructive" title={healthError}>
+                  <AlertTriangle className="h-3 w-3" />
+                  <span>!</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
