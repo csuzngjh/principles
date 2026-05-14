@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Activity,
   FileText,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
 import { Button } from "./ui/button.js";
@@ -32,6 +33,7 @@ const navItems = [
   { id: "gates", label: "门控", icon: Shield, href: "/gates" },
   { id: "samples", label: "样本", icon: FlaskConical, href: "/samples" },
   { id: "evolution", label: "进化", icon: Dna, href: "/evolution" },
+  { id: "principles", label: "原则", icon: ScrollText, href: "/principles" },
   { id: "thinking-models", label: "思维模型", icon: Brain, href: "/thinking-models" },
   { id: "settings", label: "设置", icon: Settings, href: "/settings" },
 ];
