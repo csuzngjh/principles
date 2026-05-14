@@ -29,7 +29,8 @@ export class FeedbackConsoleModel {
   }
 
   async getEmpathyEvents(_limit?: number): Promise<EmpathyEvent[]> {
-    return this.getGateModel().getEmpathyEvents(_limit);
+    void this.workspaceDir;
+    return [];
   }
 
   async getGateBlocks(limit?: number): Promise<GateBlockItem[]> {

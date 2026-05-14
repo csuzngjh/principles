@@ -1,117 +1,110 @@
+import { useTranslation } from "react-i18next";
 import { useAutoRefresh } from "../hooks/useAutoRefresh.js";
 import { fetchCentralOverview, fetchCentralHealth } from "../api.js";
 import type { CentralOverview, CentralHealth } from "../api.js";
-import { COLORS, REFRESH_BAR, SHADOW_CARD } from "../styles/constants.js";
+import { PageHeader } from "../components/page-header.js";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.js";
+import { Badge } from "../components/ui/badge.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 
-const STATUS_COLORS: Record<string, string> = {
-  healthy: COLORS.success,
-  degraded: COLORS.warning,
-  error: COLORS.danger,
-};
-
-const STATUS_BG: Record<string, string> = {
-  healthy: "#f6ffed",
-  degraded: "#fffbe6",
-  error: "#fff2f0",
+const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
+  healthy: "default",
+  degraded: "secondary",
+  error: "destructive",
 };
 
 function OverallStatusBadge({ status }: { status: string }) {
   return (
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "8px",
-        padding: "8px 16px",
-        borderRadius: "20px",
-        backgroundColor: STATUS_BG[status] ?? "#f5f5f5",
-        border: `1px solid ${STATUS_COLORS[status] ?? "#d9d9d9"}`,
-      }}
-    >
+    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-border">
       <div
-        style={{
-          width: "10px",
-          height: "10px",
-          borderRadius: "50%",
-          backgroundColor: STATUS_COLORS[status] ?? "#999",
-        }}
+        className={`w-2.5 h-2.5 rounded-full ${
+          status === "healthy"
+            ? "bg-primary animate-pulse"
+            : status === "degraded"
+              ? "bg-amber-500"
+              : "bg-destructive"
+        }`}
       />
-      <span style={{ fontWeight: 600, color: STATUS_COLORS[status] ?? "#666", textTransform: "capitalize", fontSize: "14px" }}>
+      <Badge variant={STATUS_VARIANT[status] ?? "secondary"} className="capitalize">
         {status}
-      </span>
+      </Badge>
     </div>
   );
 }
 
 function WorkspaceCard({ ws }: { ws: CentralOverview["workspaces"][number] }) {
   return (
-    <div
-      style={{
-        ...SHADOW_CARD,
-        borderLeft: `4px solid ${STATUS_COLORS[ws.status] ?? "#999"}`,
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-      }}
+    <Card
+      className={`border-l-4 ${
+        ws.status === "healthy"
+          ? "border-l-primary"
+          : ws.status === "degraded"
+            ? "border-l-amber-500"
+            : "border-l-destructive"
+      }`}
     >
-      <div>
-        <div style={{ fontSize: "16px", fontWeight: 600, color: COLORS.textPrimary }}>
-          {ws.name}
-        </div>
-        <div style={{ fontSize: "12px", color: COLORS.textMuted, marginTop: "2px" }}>
-          {ws.path}
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: "24px", alignItems: "center" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "20px", fontWeight: 700, color: ws.gfi >= 0 ? COLORS.textPrimary : COLORS.textMuted }}>
-            {ws.gfi >= 0 ? ws.gfi : "N/A"}
+      <CardContent className="p-4">
+        <div className="flex justify-between items-center">
+          <div>
+            <p className="font-semibold">{ws.name}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{ws.path}</p>
           </div>
-          <div style={{ fontSize: "11px", color: COLORS.textMuted }}>GFI</div>
-        </div>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "20px", fontWeight: 700, color: COLORS.textPrimary }}>
-            {ws.principleCount}
+          <div className="flex gap-6 items-center">
+            <div className="text-center">
+              <div className="text-xl font-bold">
+                {ws.gfi >= 0 ? ws.gfi : "N/A"}
+              </div>
+              <div className="text-xs text-muted-foreground">GFI</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold">{ws.principleCount}</div>
+              <div className="text-xs text-muted-foreground">Principles</div>
+            </div>
+            <OverallStatusBadge status={ws.status} />
           </div>
-          <div style={{ fontSize: "11px", color: COLORS.textMuted }}>Principles</div>
         </div>
-        <OverallStatusBadge status={ws.status} />
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
 function HealthDetailCard({ ws }: { ws: CentralHealth["workspaces"][number] }) {
   return (
-    <div
-      style={{
-        ...SHADOW_CARD,
-        borderLeft: `4px solid ${STATUS_COLORS[ws.status] ?? "#999"}`,
-      }}
+    <Card
+      className={`border-l-4 ${
+        ws.status === "healthy"
+          ? "border-l-primary"
+          : ws.status === "degraded"
+            ? "border-l-amber-500"
+            : "border-l-destructive"
+      }`}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-        <span style={{ fontWeight: 600, fontSize: "15px", color: COLORS.textPrimary }}>{ws.name}</span>
-        <OverallStatusBadge status={ws.status} />
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
-        <div style={{ textAlign: "center", padding: "8px", backgroundColor: "#fafafa", borderRadius: "6px" }}>
-          <div style={{ fontSize: "18px", fontWeight: 700 }}>{ws.gfi >= 0 ? ws.gfi : "N/A"}</div>
-          <div style={{ fontSize: "11px", color: COLORS.textMuted }}>GFI</div>
+      <CardContent className="p-4">
+        <div className="flex justify-between items-center mb-3">
+          <span className="font-semibold">{ws.name}</span>
+          <OverallStatusBadge status={ws.status} />
         </div>
-        <div style={{ textAlign: "center", padding: "8px", backgroundColor: "#fafafa", borderRadius: "6px" }}>
-          <div style={{ fontSize: "18px", fontWeight: 700 }}>{ws.activePrinciples}</div>
-          <div style={{ fontSize: "11px", color: COLORS.textMuted }}>Active Principles</div>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="text-center p-2 rounded-md bg-muted/50">
+            <div className="text-lg font-bold">{ws.gfi >= 0 ? ws.gfi : "N/A"}</div>
+            <div className="text-xs text-muted-foreground">GFI</div>
+          </div>
+          <div className="text-center p-2 rounded-md bg-muted/50">
+            <div className="text-lg font-bold">{ws.activePrinciples}</div>
+            <div className="text-xs text-muted-foreground">Active</div>
+          </div>
+          <div className="text-center p-2 rounded-md bg-muted/50">
+            <div className="text-lg font-bold">{ws.pendingTasks}</div>
+            <div className="text-xs text-muted-foreground">Pending</div>
+          </div>
         </div>
-        <div style={{ textAlign: "center", padding: "8px", backgroundColor: "#fafafa", borderRadius: "6px" }}>
-          <div style={{ fontSize: "18px", fontWeight: 700 }}>{ws.pendingTasks}</div>
-          <div style={{ fontSize: "11px", color: COLORS.textMuted }}>Pending Tasks</div>
-        </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
 export function CentralPage() {
+  const { t } = useTranslation();
   const overview = useAutoRefresh<CentralOverview>(fetchCentralOverview, 30000);
   const health = useAutoRefresh<CentralHealth>(fetchCentralHealth, 30000);
 
@@ -121,19 +114,43 @@ export function CentralPage() {
   const hasError = overview.error && !overviewData;
 
   if (isLoading) {
-    return <div style={{ padding: "40px", textAlign: "center", color: COLORS.textMuted }}>Loading...</div>;
-  }
-
-  if (hasError) {
     return (
-      <div style={{ padding: "24px", color: COLORS.danger, backgroundColor: "#fff2f0", borderRadius: "8px" }}>
-        Error: {overview.error}
+      <div>
+        <Skeleton className="h-8 w-48 mb-6" />
+        <Card className="mb-6">
+          <CardContent className="p-6">
+            <Skeleton className="h-20 w-full" />
+          </CardContent>
+        </Card>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Card key={i} className="mb-3">
+            <CardContent className="p-4">
+              <Skeleton className="h-12 w-full" />
+            </CardContent>
+          </Card>
+        ))}
       </div>
     );
   }
 
+  if (hasError) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <p className="text-destructive">{overview.error}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (!overviewData) {
-    return <div style={{ padding: "24px", color: COLORS.textMuted }}>No workspace data available</div>;
+    return (
+      <Card>
+        <CardContent className="p-6 text-center text-muted-foreground">
+          No workspace data available
+        </CardContent>
+      </Card>
+    );
   }
 
   const overallStatus = healthData?.overallStatus ?? "error";
@@ -143,78 +160,76 @@ export function CentralPage() {
 
   return (
     <div>
-      <div style={REFRESH_BAR}>
-        <h1 style={{ margin: 0 }}>Central Overview</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          {overview.lastUpdated && (
-            <span style={{ fontSize: "12px", color: COLORS.textMuted }}>
-              Updated: {new Date(overview.lastUpdated).toLocaleTimeString()}
-            </span>
+      <PageHeader
+        title={t("pages:central.title")}
+        description={t("pages:central.description")}
+        onRefresh={() => { overview.refresh(); health.refresh(); }}
+        lastUpdated={overview.lastUpdated ? new Date(overview.lastUpdated) : undefined}
+      />
+
+      <Card className="mb-6">
+        <CardContent className="p-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-muted-foreground mb-2">
+                {t("pages:central.overallStatus")}
+              </p>
+              <OverallStatusBadge status={overallStatus} />
+            </div>
+            <div className="flex gap-6">
+              <div className="text-center">
+                <div className="text-3xl font-bold text-primary">{healthyCount}</div>
+                <div className="text-xs text-muted-foreground">Healthy</div>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl font-bold text-amber-500">{degradedCount}</div>
+                <div className="text-xs text-muted-foreground">Degraded</div>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl font-bold text-destructive">{errorCount}</div>
+                <div className="text-xs text-muted-foreground">Error</div>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl font-bold">{overviewData.workspaceCount}</div>
+                <div className="text-xs text-muted-foreground">Total</div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>{t("pages:central.workspaces")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {overviewData.workspaces.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              No workspaces configured. Go to Settings to add workspaces.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {overviewData.workspaces.map((ws) => (
+                <WorkspaceCard key={ws.name} ws={ws} />
+              ))}
+            </div>
           )}
-          <button
-            onClick={() => { overview.refresh(); health.refresh(); }}
-            style={{
-              border: "1px solid #d9d9d9",
-              borderRadius: "6px",
-              padding: "6px 12px",
-              fontSize: "13px",
-              cursor: "pointer",
-              backgroundColor: "#fff",
-            }}
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      <div
-        style={{
-          ...SHADOW_CARD,
-          padding: "20px 24px",
-          marginBottom: "24px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <div>
-          <div style={{ fontSize: "14px", color: COLORS.textMuted, marginBottom: "4px" }}>Overall System Status</div>
-          <OverallStatusBadge status={overallStatus} />
-        </div>
-        <div style={{ display: "flex", gap: "24px" }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "28px", fontWeight: 700, color: COLORS.success }}>{healthyCount}</div>
-            <div style={{ fontSize: "12px", color: COLORS.textMuted }}>Healthy</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "28px", fontWeight: 700, color: COLORS.warning }}>{degradedCount}</div>
-            <div style={{ fontSize: "12px", color: COLORS.textMuted }}>Degraded</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "28px", fontWeight: 700, color: COLORS.danger }}>{errorCount}</div>
-            <div style={{ fontSize: "12px", color: COLORS.textMuted }}>Error</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "28px", fontWeight: 700 }}>{overviewData.workspaceCount}</div>
-            <div style={{ fontSize: "12px", color: COLORS.textMuted }}>Total</div>
-          </div>
-        </div>
-      </div>
-
-      <h2 style={{ marginBottom: "16px" }}>Workspaces</h2>
-      {overviewData.workspaces.length === 0 ? (
-        <div style={{ padding: "24px", textAlign: "center", color: COLORS.textMuted }}>
-          No workspaces configured. Go to Settings to add workspaces.
-        </div>
-      ) : (
-        overviewData.workspaces.map((ws) => <WorkspaceCard key={ws.name} ws={ws} />)
-      )}
+        </CardContent>
+      </Card>
 
       {healthData && healthData.workspaces.length > 0 && (
-        <>
-          <h2 style={{ marginTop: "32px", marginBottom: "16px" }}>Health Details</h2>
-          {healthData.workspaces.map((ws) => <HealthDetailCard key={ws.name} ws={ws} />)}
-        </>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("pages:central.healthDetails")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {healthData.workspaces.map((ws) => (
+                <HealthDetailCard key={ws.name} ws={ws} />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

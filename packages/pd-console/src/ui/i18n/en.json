@@ -1,0 +1,226 @@
+{
+  "common": {
+    "loading": "Loading",
+    "refresh": "Refresh",
+    "settings": "Settings",
+    "overview": "Overview",
+    "tasks": "Tasks",
+    "feedback": "Feedback",
+    "gates": "Gates",
+    "samples": "Samples",
+    "evolution": "Evolution",
+    "thinking-models": "Thinking Models",
+    "central": "Central",
+    "login": "Login",
+    "logout": "Logout",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "yes": "Yes",
+    "no": "No",
+    "save": "Save",
+    "delete": "Delete",
+    "add": "Add",
+    "edit": "Edit",
+    "view": "View",
+    "more": "More",
+    "search": "Search",
+    "filter": "Filter",
+    "sort": "Sort",
+    "clear": "Clear",
+    "apply": "Apply",
+    "close": "Close",
+    "submit": "Submit",
+    "success": "Success",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info",
+    "total": "Total",
+    "active": "Active",
+    "inactive": "Inactive",
+    "pending": "Pending",
+    "completed": "Completed",
+    "failed": "Failed",
+    "unknown": "Unknown",
+    "all": "All",
+    "none": "None",
+    "lastUpdated": "Last Updated",
+    "status": "Status",
+    "name": "Name",
+    "description": "Description",
+    "type": "Type",
+    "date": "Date",
+    "time": "Time",
+    "actions": "Actions"
+  },
+  "pages": {
+    "overview": {
+      "title": "Overview",
+      "description": "System Status Overview",
+      "health": "Health Status",
+      "stats": "Stats",
+      "principles": "Principles",
+      "recentActivity": "Recent Activity",
+      "queue": "Queue",
+      "trustLevel": "Trust Level",
+      "gfi": "GFI",
+      "pendingTasks": "Pending Tasks",
+      "totalWorkspaces": "Total Workspaces",
+      "activeWorkspaces": "Active Workspaces"
+    },
+    "tasks": {
+      "title": "Tasks",
+      "description": "Manage Pending Tasks",
+      "needsConfirmation": "Needs Confirmation",
+      "suggestedAttention": "Suggested Attention",
+      "recentActivity": "Recent Activity",
+      "approve": "Approve",
+      "reject": "Reject",
+      "cleanup": "Cleanup",
+      "undo": "Undo",
+      "confirmAction": "Confirm Action",
+      "batchCleanup": "Batch Cleanup",
+      "noToken": "No authentication token configured"
+    },
+    "feedback": {
+      "title": "Feedback",
+      "description": "View System Feedback",
+      "gfiGauge": "GFI Gauge",
+      "empathyEvents": "Empathy Events",
+      "gateBlocks": "Gate Blocks",
+      "severity": "Severity",
+      "source": "Source",
+      "timestamp": "Timestamp",
+      "count": "Count",
+      "totalGFI": "Total GFI"
+    },
+    "gates": {
+      "title": "Gates",
+      "description": "Manage Security Gates",
+      "trustStatus": "Trust Status",
+      "gfiStats": "GFI Stats",
+      "blockHistory": "Block History",
+      "totalBlocks": "Total Blocks",
+      "todayBlocks": "Today Blocks",
+      "blockRate": "Block Rate",
+      "sourceBreakdown": "Source Breakdown"
+    },
+    "samples": {
+      "title": "Samples",
+      "description": "Manage Training Samples",
+      "filterByStatus": "Filter by Status",
+      "approveAll": "Approve All",
+      "rejectAll": "Reject All",
+      "recommendation": "Recommendation",
+      "rejectReason": "Reject Reason",
+      "sampleCount": "Sample Count",
+      "status": "Status"
+    },
+    "evolution": {
+      "title": "Evolution",
+      "description": "Monitor Evolution Process",
+      "taskStats": "Task Stats",
+      "principleLifecycle": "Principle Lifecycle",
+      "queueHealth": "Queue Health",
+      "taskList": "Task List",
+      "stage": "Stage",
+      "progress": "Progress",
+      "completedTasks": "Completed Tasks",
+      "failedTasks": "Failed Tasks",
+      "pendingTasks": "Pending Tasks"
+    },
+    "thinking-models": {
+      "title": "Thinking Models",
+      "description": "Manage Thinking Models",
+      "modelList": "Model List",
+      "trigger": "Trigger",
+      "must": "Must",
+      "forbidden": "Forbidden",
+      "noModels": "No thinking models"
+    },
+    "settings": {
+      "title": "Settings",
+      "description": "Configure Console",
+      "auth": "Authentication",
+      "workspace": "Workspace",
+      "appearance": "Appearance",
+      "language": "Language",
+      "theme": "Theme",
+      "apiToken": "API Token",
+      "addWorkspace": "Add Workspace",
+      "syncWorkspace": "Sync Workspace",
+      "removeWorkspace": "Remove Workspace",
+      "tokenSaved": "Token saved",
+      "workspaceAdded": "Workspace added",
+      "workspaceRemoved": "Workspace removed"
+    },
+    "central": {
+      "title": "Central",
+      "description": "Global Monitoring Center",
+      "overallStatus": "Overall Status",
+      "workspaces": "Workspaces",
+      "healthDetails": "Health Details",
+      "workspaceName": "Workspace Name",
+      "workspaceStatus": "Workspace Status",
+      "workspaceGFI": "Workspace GFI",
+      "workspacePrinciples": "Workspace Principles"
+    },
+    "login": {
+      "title": "Login",
+      "description": "Login to PD Console",
+      "password": "Password",
+      "showPassword": "Show password",
+      "hidePassword": "Hide password",
+      "signIn": "Sign In",
+      "errorInvalid": "Invalid password",
+      "errorEmpty": "Please enter password"
+    }
+  },
+  "components": {
+    "errorBoundary": {
+      "title": "An Error Occurred",
+      "description": "An error occurred while loading the page",
+      "retry": "Retry"
+    },
+    "zoneSection": {
+      "empty": "No data",
+      "viewAll": "View All"
+    },
+    "taskCard": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "cleanup": "Cleanup",
+      "undo": "Undo",
+      "undoCountdown": "Undo ({{count}}s)",
+      "evidence": "Evidence",
+      "summary": "Summary",
+      "why": "Why",
+      "whatHappens": "What Happens"
+    },
+    "evidencePanel": {
+      "summary": "Summary",
+      "why": "Why",
+      "whatHappens": "What Happens",
+      "evidenceItems": "Evidence Items"
+    },
+    "pageHeader": {
+      "refresh": "Refresh",
+      "lastUpdated": "Last Updated: {{time}}",
+      "justNow": "just now",
+      "minutesAgo": "{{count}}m ago",
+      "hoursAgo": "{{count}}h ago",
+      "daysAgo": "{{count}}d ago"
+    },
+    "themeToggle": {
+      "light": "Light Mode",
+      "dark": "Dark Mode"
+    },
+    "languageSwitcher": {
+      "chinese": "中文",
+      "english": "English"
+    },
+    "sidebar": {
+      "collapse": "Collapse Sidebar",
+      "expand": "Expand Sidebar"
+    }
+  }
+}
