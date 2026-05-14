@@ -1,23 +1,3 @@
-import type {
-  ArtificerTargetRuleScore,
-  ArtificerTargetRuleResolution,
-  TrinityArtificerContext,
-  TrinityDreamerCandidate,
-  TrinityDreamerOutput,
-  PhilosopherRiskAssessment,
-  Philosopher6DScores,
-  PhilosopherJudgment,
-  PhilosopherOutput,
-  TournamentTraceEntry,
-  RejectedAnalysis,
-  ChosenJustification,
-  ContrastiveAnalysis,
-  TrinityTelemetry,
-  TrinityStageFailure,
-  TrinityResult,
-  TrinityDraftArtifact,
-} from '@principles/core/runtime-v2';
-
 export type {
   ArtificerTargetRuleScore,
   ArtificerTargetRuleResolution,
@@ -28,7 +8,7 @@ export type {
   Philosopher6DScores,
   PhilosopherJudgment,
   PhilosopherOutput,
-  TournamentTraceEntry,
+  TrinityTournamentTraceEntry as TournamentTraceEntry,
   RejectedAnalysis,
   ChosenJustification,
   ContrastiveAnalysis,

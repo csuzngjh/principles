@@ -9,39 +9,6 @@
  *       Backward-compatible aliases are provided below.
  */
 
-import type {
-  TierPermissions,
-  TierDefinition,
-  TaskDifficulty,
-  TaskDifficultyConfig,
-  EvolutionEventType,
-  EvolutionEvent,
-  EvolutionScorecard,
-  EvolutionStats,
-  EvolutionStorage,
-  EvolutionConfig,
-  ArchivedEventStats,
-  GateDecision,
-  ToolCallContext,
-  TierPromotionEvent,
-  EvolutionPrincipleStatus,
-  PrincipleEvaluatorLevel,
-  Evaluability,
-  PrincipleDetectorSpec,
-  EvolutionPrinciple,
-  EvolutionPrincipleSuggestedRule,
-  EvolutionPrincipleValueMetricsSnapshot,
-  EvolutionLoopEventType,
-  EvolutionPainDetectedData,
-  CandidateCreatedData,
-  PrinciplePromotedData,
-  PrincipleDeprecatedData,
-  PrincipleRolledBackData,
-  CircuitBreakerOpenedData,
-  LegacyImportData,
-  EvolutionLoopEvent,
-} from '@principles/core/runtime-v2';
-
 import type { TaskKind, TaskPriority } from './trajectory-types.js';
 
 export {
