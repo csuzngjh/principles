@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { TaskZones, TaskItem, TaskEvidence } from "../../types.js";
-import { fetchTasks, fetchTaskEvidence, approveTask, rejectTask, cleanupTask, getToken } from "../api.js";
+import { fetchTasks, fetchTaskEvidence, approveTask, rejectTask, cleanupTask, checkAuth } from "../api.js";
 import { PageHeader } from "../components/page-header.js";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card.js";
 import { Button } from "../components/ui/button.js";
@@ -496,7 +496,25 @@ function TasksPageInner() {
 
 export function TasksPage() {
   const { t } = useTranslation();
-  const [hasToken] = useState(() => !!getToken());
+  const [hasToken, setHasToken] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    checkAuth().then((valid) => {
+      setHasToken(valid);
+      setChecking(false);
+    });
+  }, []);
+
+  if (checking) {
+    return (
+      <Card className="max-w-md mx-auto mt-12">
+        <CardContent className="p-8 text-center">
+          <div className="animate-pulse">Checking authentication...</div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (!hasToken) {
     return (

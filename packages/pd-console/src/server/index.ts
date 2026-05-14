@@ -24,6 +24,7 @@ import { handleThinkingModelsRoute, disposeThinkingModels } from './routes/think
 import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
 import { handlePipelineRoute, disposePipelineModels } from './routes/pipeline.js';
 import { handleEventsRoute, disposeEventsModels } from './routes/events.js';
+import { handlePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
@@ -31,10 +32,24 @@ import type { SystemStatus, TaskItem, EvidenceItem, TaskEvidence, ActivityEvent 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PKG_ROOT = __dirname.includes(path.join('src', 'server'))
-  ? path.resolve(__dirname, '..', '..')
-  : path.resolve(__dirname, '..');
-const WEB_ROOT = path.resolve(PKG_ROOT, 'dist', 'web');
+// WEB_ROOT calculation: server is at PKG_ROOT/dist/server/index.js
+// So PKG_ROOT is dirname(dirname(dirname(__filename)))
+// And WEB_ROOT is PKG_ROOT/dist/web
+// We compute it directly instead of through PKG_ROOT to avoid Windows path issues
+function computeWebRoot(dir: string): string {
+  const segments = dir.split(path.sep).filter(Boolean);
+  // If installed: [..., 'pd-console', 'dist', 'server'] -> [..., 'pd-console', 'dist', 'web']
+  // If dev:        [..., 'pd-console', 'src', 'server'] -> [..., 'pd-console', 'dist', 'web']
+  const distIdx = segments.lastIndexOf('dist');
+  if (distIdx !== -1 && distIdx < segments.length - 1 && segments[distIdx + 1] === 'server') {
+    // Installed mode: replace 'server' with 'web'
+    const base = segments.slice(0, distIdx + 1);
+    return path.join(...base, 'web');
+  }
+  // Fallback: use original computation
+  return path.resolve(dir, '..', '..', 'dist', 'web');
+}
+const WEB_ROOT = computeWebRoot(__dirname);
 
 // ── CLI arg parsing ──────────────────────────────────────────────────────────────────────
 
@@ -223,6 +238,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeHealthModels();
   disposePipelineModels();
   disposeEventsModels();
+  disposePrinciplesModels();
   services.workspaceService.dispose();
 
   try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }
@@ -303,6 +319,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/evolution' || urlPath.startsWith('/api/evolution/')) {
         const subPath = urlPath.slice('/api/evolution'.length);
         asyncHandler(() => handleEvolutionRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // GET /api/principles, /api/principles/:id
+      if (urlPath === '/api/principles' || urlPath.startsWith('/api/principles/')) {
+        const subPath = urlPath.slice('/api/principles'.length);
+        asyncHandler(() => handlePrinciplesRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 
