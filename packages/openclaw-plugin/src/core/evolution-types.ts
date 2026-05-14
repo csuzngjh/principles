@@ -9,40 +9,15 @@
  *       Backward-compatible aliases are provided below.
  */
 
-import type {
-  TierPermissions,
-  TierDefinition,
-  TaskDifficulty,
-  TaskDifficultyConfig,
-  EvolutionEventType,
-  EvolutionEvent,
-  EvolutionScorecard,
-  EvolutionStats,
-  EvolutionStorage,
-  EvolutionConfig,
-  ArchivedEventStats,
-  GateDecision,
-  ToolCallContext,
-  TierPromotionEvent,
-  EvolutionPrincipleStatus,
-  PrincipleEvaluatorLevel,
-  Evaluability,
-  PrincipleDetectorSpec,
-  EvolutionPrinciple,
-  EvolutionPrincipleSuggestedRule,
-  EvolutionPrincipleValueMetricsSnapshot,
-  EvolutionLoopEventType,
-  EvolutionPainDetectedData,
-  CandidateCreatedData,
-  PrinciplePromotedData,
-  PrincipleDeprecatedData,
-  PrincipleRolledBackData,
-  CircuitBreakerOpenedData,
-  LegacyImportData,
-  EvolutionLoopEvent,
-} from '@principles/core/runtime-v2';
-
 import type { TaskKind, TaskPriority } from './trajectory-types.js';
+
+import type {
+  EvolutionPrinciple as EvolutionPrincipleType,
+  EvolutionPrincipleStatus as EvolutionPrincipleStatusType,
+  EvolutionPrincipleSuggestedRule as EvolutionPrincipleSuggestedRuleType,
+  EvolutionPrincipleValueMetricsSnapshot as EvolutionPrincipleValueMetricsSnapshotType,
+  EvolutionPainDetectedData as EvolutionPainDetectedDataType,
+} from '@principles/core/runtime-v2';
 
 export {
   EvolutionTier,
@@ -90,19 +65,19 @@ export type {
 // ── Backward-compatible aliases ──────────────────────────────────────────────
 
 /** @deprecated Use EvolutionPrinciple instead. Alias for backward compatibility. */
-export type Principle = EvolutionPrinciple;
+export type Principle = EvolutionPrincipleType;
 
 /** @deprecated Use EvolutionPrincipleStatus instead. Alias for backward compatibility. */
-export type PrincipleStatus = EvolutionPrincipleStatus;
+export type PrincipleStatus = EvolutionPrincipleStatusType;
 
 /** @deprecated Use EvolutionPrincipleSuggestedRule instead. Alias for backward compatibility. */
-export type PrincipleSuggestedRule = EvolutionPrincipleSuggestedRule;
+export type PrincipleSuggestedRule = EvolutionPrincipleSuggestedRuleType;
 
 /** @deprecated Use EvolutionPrincipleValueMetricsSnapshot instead. Alias for backward compatibility. */
-export type PrincipleValueMetricsSnapshot = EvolutionPrincipleValueMetricsSnapshot;
+export type PrincipleValueMetricsSnapshot = EvolutionPrincipleValueMetricsSnapshotType;
 
 /** @deprecated Use EvolutionPainDetectedData instead. Alias for backward compatibility. */
-export type PainDetectedData = EvolutionPainDetectedData;
+export type PainDetectedData = EvolutionPainDetectedDataType;
 
 // ── V2 Queue Types (kept in plugin — depends on trajectory-types) ────────────
 

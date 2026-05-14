@@ -99,16 +99,16 @@ export const CorrectionKeywordSchema = Type.Object({
     Type.Literal('user'),
   ]),
   addedAt: Type.String(),
-  hitCount: Type.Optional(Type.Number()),
-  truePositiveCount: Type.Optional(Type.Number()),
-  falsePositiveCount: Type.Optional(Type.Number()),
+  hitCount: Type.Optional(Type.Number({ minimum: 0 })),
+  truePositiveCount: Type.Optional(Type.Number({ minimum: 0 })),
+  falsePositiveCount: Type.Optional(Type.Number({ minimum: 0 })),
   lastHitAt: Type.Optional(Type.String()),
 });
 export type CorrectionKeywordTB = Static<typeof CorrectionKeywordSchema>;
 
 export const CorrectionKeywordStoreSchema = Type.Object({
   keywords: Type.Array(CorrectionKeywordSchema),
-  version: Type.Number(),
+  version: Type.Integer({ minimum: 0 }),
   lastOptimizedAt: Type.String(),
 });
 export type CorrectionKeywordStoreTB = Static<typeof CorrectionKeywordStoreSchema>;
@@ -116,7 +116,7 @@ export type CorrectionKeywordStoreTB = Static<typeof CorrectionKeywordStoreSchem
 export const CorrectionMatchResultSchema = Type.Object({
   matched: Type.Boolean(),
   matchedTerms: Type.Array(Type.String()),
-  score: Type.Number(),
-  confidence: Type.Number(),
+  score: Type.Number({ minimum: 0, maximum: 1 }),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
 });
 export type CorrectionMatchResultTB = Static<typeof CorrectionMatchResultSchema>;
