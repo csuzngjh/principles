@@ -137,18 +137,30 @@ function serveFile(res: http.ServerResponse, filePath: string): boolean {
 
 // ── Async handler wrapper ──────────────────────────────────────────────────────────────
 
+const REQUEST_TIMEOUT_MS = 10000;
+
 type AsyncRouteHandler = (req: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
 
 function asyncHandler(fn: AsyncRouteHandler): (req: http.IncomingMessage, res: http.ServerResponse) => void {
   return (innerReq, innerRes) => {
-    fn(innerReq, innerRes).catch((err: unknown) => {
+    const timeoutId = setTimeout(() => {
       if (!innerRes.headersSent) {
-        const message = err instanceof Error ? err.message : 'Internal server error';
-        sendJson(innerRes, 500, { success: false, error: message });
-      } else {
-        console.error('[pd-console] Unhandled rejection after headers sent:', err);
+        sendJson(innerRes, 504, { success: false, error: 'Request timeout' });
+        innerRes.end();
       }
-    });
+    }, REQUEST_TIMEOUT_MS);
+
+    fn(innerReq, innerRes)
+      .finally(() => clearTimeout(timeoutId))
+      .catch((err: unknown) => {
+        clearTimeout(timeoutId);
+        if (!innerRes.headersSent) {
+          const message = err instanceof Error ? err.message : 'Internal server error';
+          sendJson(innerRes, 500, { success: false, error: message });
+        } else {
+          console.error('[pd-console] Unhandled rejection after headers sent:', err);
+        }
+      });
   };
 }
 

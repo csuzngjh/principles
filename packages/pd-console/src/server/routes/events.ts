@@ -3,15 +3,24 @@ import * as path from 'path';
 import { EventLogReadModel } from '../models/EventLogReadModel.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
-const models = new Map<string, EventLogReadModel>();
+const MAX_PAGE_SIZE = 1000;
+const MODEL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+interface CachedModel {
+  model: EventLogReadModel;
+  cachedAt: number;
+}
+
+const models = new Map<string, CachedModel>();
 
 function getModel(workspaceDir: string): EventLogReadModel {
   const stateDir = path.join(workspaceDir, '.state');
-  let model = models.get(stateDir);
-  if (!model) {
-    model = new EventLogReadModel(stateDir);
-    models.set(stateDir, model);
+  const cached = models.get(stateDir);
+  if (cached && Date.now() - cached.cachedAt < MODEL_CACHE_TTL_MS) {
+    return cached.model;
   }
+  const model = new EventLogReadModel(stateDir);
+  models.set(stateDir, { model, cachedAt: Date.now() });
   return model;
 }
 
@@ -42,7 +51,7 @@ export async function handleEventsRoute(ctx: EventsRouteContext): Promise<void> 
     const pageStr = searchParams.get('page');
     const pageSizeStr = searchParams.get('pageSize');
     const page = pageStr ? parseInt(pageStr, 10) : 1;
-    const pageSize = pageSizeStr ? parseInt(pageSizeStr, 10) : 50;
+    const pageSize = pageSizeStr ? Math.min(parseInt(pageSizeStr, 10), MAX_PAGE_SIZE) : 50;
 
     try {
       const result = await model.getEventsPaginated({
@@ -108,8 +117,8 @@ export async function handleEventsRoute(ctx: EventsRouteContext): Promise<void> 
 }
 
 export function disposeEventsModels(): void {
-  for (const model of models.values()) {
-    model.dispose();
+  for (const [, cached] of models) {
+    cached.model.dispose();
   }
   models.clear();
 }

@@ -162,10 +162,10 @@ export function DataFlowPage() {
     setError(null);
     try {
       const result = await fetchPipelineStats();
-      if (result.success && result.data) {
-        setData(result.data);
-      } else {
+      if (!result.success) {
         setError(result.error || 'Failed to fetch pipeline stats');
+      } else if (result.data) {
+        setData(result.data);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');

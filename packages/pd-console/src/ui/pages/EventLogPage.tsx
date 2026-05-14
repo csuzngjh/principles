@@ -1,10 +1,8 @@
-import { useState, useEffect } from 'react';
-import { PageHeader } from '../components/page-header';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Input } from '../components/ui/input';
-import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
-import { ScrollArea } from '../components/ui/scroll-area';
+import { useState, useEffect, type ChangeEvent } from 'react';
+import { PageHeader } from '../components/page-header.js';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card.js';
+import { Button } from '../components/ui/button.js';
+import { Badge } from '../components/ui/badge.js';
 import {
   ChevronLeft,
   ChevronRight,
@@ -13,9 +11,10 @@ import {
   Link,
   Clock,
   AlertTriangle,
+  Search,
 } from 'lucide-react';
-import { fetchEvents, fetchEventsGrouped, fetchRelatedEvents } from '../api';
-import type { EventLogEntry } from '../api';
+import { fetchEvents, fetchEventsGrouped, fetchRelatedEvents } from '../api.js';
+import type { EventLogEntry } from '../api.js';
 
 const EVENT_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   pain_signal: 'destructive',
@@ -64,13 +63,13 @@ export function EventLogPage() {
         page: newPage,
         pageSize,
       });
-      if (result.success && result.data) {
+      if (!result.success) {
+        setError(result.error || 'Failed to load events');
+      } else if (result.data) {
         setEvents(result.data.events);
         setTotal(result.data.total);
         setTotalPages(result.data.totalPages);
         setPage(newPage);
-      } else {
-        setError(result.error || 'Failed to load events');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -195,28 +194,35 @@ export function EventLogPage() {
             <div className="flex gap-4 flex-wrap">
               <div className="flex-1 min-w-[200px]">
                 <p className="text-sm text-muted-foreground mb-1">开始日期</p>
-                <Input
+                <input
                   type="date"
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setStartDate(e.target.value)}
+                  className="w-full h-9 px-3 py-1 text-sm border border-input bg-background rounded-md"
                 />
               </div>
               <div className="flex-1 min-w-[200px]">
                 <p className="text-sm text-muted-foreground mb-1">结束日期</p>
-                <Input
+                <input
                   type="date"
                   value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
+                  className="w-full h-9 px-3 py-1 text-sm border border-input bg-background rounded-md"
                 />
               </div>
               <div className="flex-1 min-w-[200px]">
                 <p className="text-sm text-muted-foreground mb-1">搜索</p>
                 <div className="flex gap-2">
-                  <Input
-                    placeholder="搜索事件内容..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input
+                      type="text"
+                      placeholder="搜索事件内容..."
+                      value={searchQuery}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                      className="w-full h-9 pl-8 pr-3 py-1 text-sm border border-input bg-background rounded-md"
+                    />
+                  </div>
                   <Button onClick={() => setSearchQuery('')} variant="ghost">
                     清除
                   </Button>
@@ -288,7 +294,7 @@ export function EventLogPage() {
 
           <Card>
             <CardContent className="p-0">
-              <ScrollArea className="h-[600px]">
+              <div className="h-[600px] overflow-y-auto">
                 {loading && !events.length ? (
                   <div className="p-8 text-center">
                     <div className="animate-pulse text-muted-foreground">加载中...</div>
@@ -330,7 +336,7 @@ export function EventLogPage() {
                     ))}
                   </div>
                 )}
-              </ScrollArea>
+              </div>
             </CardContent>
           </Card>
         </div>

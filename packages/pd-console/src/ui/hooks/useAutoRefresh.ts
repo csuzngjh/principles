@@ -18,15 +18,26 @@ export function useAutoRefresh<T>(
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
+  const mountedRef = useRef(true);
 
   const refresh = useCallback(() => {
+    if (!mountedRef.current) return;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     setLoading(true);
     setError(null);
+
     fetcherRef
       .current()
       .then((result) => {
+        if (!mountedRef.current) return;
         if (result.success && result.data !== undefined) {
           setData(result.data);
           setError(null);
@@ -37,21 +48,29 @@ export function useAutoRefresh<T>(
         setLoading(false);
       })
       .catch((err: unknown) => {
+        if (!mountedRef.current) return;
+        if (err instanceof Error && err.name === "AbortError") return;
         setError(err instanceof Error ? err.message : "Network error");
         setLoading(false);
       });
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     if (!enabled) return;
     refresh();
 
     timerRef.current = setInterval(refresh, intervalMs);
 
     return () => {
+      mountedRef.current = false;
       if (timerRef.current !== null) {
         clearInterval(timerRef.current);
         timerRef.current = null;
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
       }
     };
   }, [enabled, intervalMs, refresh]);

@@ -2,14 +2,22 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { HealthCheckModel } from '../models/HealthCheckModel.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 
-const models = new Map<string, HealthCheckModel>();
+const MODEL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+interface CachedModel {
+  model: HealthCheckModel;
+  cachedAt: number;
+}
+
+const models = new Map<string, CachedModel>();
 
 function getModel(workspaceDir: string): HealthCheckModel {
-  let model = models.get(workspaceDir);
-  if (!model) {
-    model = new HealthCheckModel(workspaceDir);
-    models.set(workspaceDir, model);
+  const cached = models.get(workspaceDir);
+  if (cached && Date.now() - cached.cachedAt < MODEL_CACHE_TTL_MS) {
+    return cached.model;
   }
+  const model = new HealthCheckModel(workspaceDir);
+  models.set(workspaceDir, { model, cachedAt: Date.now() });
   return model;
 }
 
@@ -34,8 +42,8 @@ export async function handleHealthRoute(
 }
 
 export function disposeHealthModels(): void {
-  for (const model of models.values()) {
-    model.dispose();
+  for (const [, cached] of models) {
+    cached.model.dispose();
   }
   models.clear();
 }

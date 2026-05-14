@@ -144,6 +144,7 @@ export interface SampleReviewInput {
 }
 
 export interface EventLogEntry {
+  id?: string;
   ts: string;
   date: string;
   type: string;

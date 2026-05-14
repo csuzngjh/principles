@@ -46,6 +46,7 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
   const location = useLocation();
   const [healthData, setHealthData] = useState<SystemHealthStatus | null>(null);
   const [alertCount, setAlertCount] = useState(0);
+  const [healthError, setHealthError] = useState<string | null>(null);
 
   const isActive = (href: string) => {
     if (href === "/" && location.pathname === "/") return true;
@@ -55,15 +56,18 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
   useEffect(() => {
     const fetchHealth = async () => {
       try {
+        setHealthError(null);
         const result = await fetchSystemHealth();
         if (result.success && result.data) {
           setHealthData(result.data);
           const errorChecks = result.data.checks.filter(c => c.status === "error").length;
           const warningChecks = result.data.checks.filter(c => c.status === "warning").length;
           setAlertCount(errorChecks + warningChecks);
+        } else if (!result.success) {
+          setHealthError(result.error ?? "Failed to load health status");
         }
-      } catch {
-        // ignore fetch errors
+      } catch (err) {
+        setHealthError(err instanceof Error ? err.message : "Network error");
       }
     };
 
@@ -112,6 +116,12 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
                 <div className="flex items-center gap-1 text-xs text-destructive">
                   <AlertTriangle className="h-3 w-3" />
                   <span>{alertCount}</span>
+                </div>
+              )}
+              {healthError && (
+                <div className="flex items-center gap-1 text-xs text-destructive" title={healthError}>
+                  <AlertTriangle className="h-3 w-3" />
+                  <span>!</span>
                 </div>
               )}
             </div>
