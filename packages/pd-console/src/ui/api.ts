@@ -371,6 +371,117 @@ async function fetchThinkingModels(): Promise<ApiResponse<ThinkingModelOverview>
   return request<ThinkingModelOverview>("/api/thinking-models");
 }
 
+interface HealthCheckItem {
+  id: string;
+  name: string;
+  status: 'healthy' | 'warning' | 'error';
+  message: string;
+  lastCheck: string;
+}
+
+interface PipelineTimestamps {
+  lastPainSignal: string | null;
+  lastTaskCreated: string | null;
+  lastCandidateGenerated: string | null;
+  lastPrincipleAdded: string | null;
+}
+
+interface SystemHealthStatus {
+  overall: 'healthy' | 'degraded' | 'error';
+  checks: HealthCheckItem[];
+  pipeline: PipelineTimestamps;
+  generatedAt: string;
+}
+
+async function fetchSystemHealth(): Promise<ApiResponse<SystemHealthStatus>> {
+  return request<SystemHealthStatus>("/api/health");
+}
+
+interface PipelineStage {
+  id: string;
+  name: string;
+  status: 'normal' | 'slow' | 'stuck';
+  count: number;
+  avgDuration: number | null;
+  lastProcessed: string | null;
+  gapMinutes: number | null;
+}
+
+interface Bottleneck {
+  fromStage: string;
+  toStage: string;
+  gapMinutes: number;
+  severity: 'warning' | 'critical';
+  description: string;
+}
+
+interface PipelineStats {
+  generatedAt: string;
+  stages: PipelineStage[];
+  bottlenecks: Bottleneck[];
+  totalProcessed: number;
+  throughput: number;
+}
+
+async function fetchPipelineStats(): Promise<ApiResponse<PipelineStats>> {
+  return request<PipelineStats>("/api/pipeline");
+}
+
+interface EventLogEntry {
+  id: string;
+  ts: string;
+  type: string;
+  category?: string;
+  data?: Record<string, unknown>;
+}
+
+interface EventsResponse {
+  events: EventLogEntry[];
+  total: number;
+  totalPages: number;
+}
+
+interface RelatedEventsResponse {
+  events: EventLogEntry[];
+}
+
+async function fetchEvents(options: {
+  types?: string[];
+  startDate?: string;
+  endDate?: string;
+  searchQuery?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<ApiResponse<EventsResponse>> {
+  const params = new URLSearchParams();
+  if (options.types) options.types.forEach(type => params.append('type', type));
+  if (options.startDate) params.set('startDate', options.startDate);
+  if (options.endDate) params.set('endDate', options.endDate);
+  if (options.searchQuery) params.set('q', options.searchQuery);
+  if (options.page) params.set('page', options.page.toString());
+  if (options.pageSize) params.set('pageSize', options.pageSize.toString());
+  const queryStr = params.toString() ? `?${params.toString()}` : '';
+  return request<EventsResponse>(`/api/events${queryStr}`);
+}
+
+async function fetchEventsGrouped(options?: {
+  startDate?: string;
+  endDate?: string;
+}): Promise<ApiResponse<Record<string, number>>> {
+  const params = new URLSearchParams();
+  if (options?.startDate) params.set('startDate', options.startDate);
+  if (options?.endDate) params.set('endDate', options.endDate);
+  const queryStr = params.toString() ? `?${params.toString()}` : '';
+  return request<Record<string, number>>(`/api/events/grouped${queryStr}`);
+}
+
+async function fetchRelatedEvents(eventId: string, maxDistance?: number): Promise<ApiResponse<RelatedEventsResponse>> {
+  const params = new URLSearchParams();
+  if (maxDistance) params.set('maxDistance', maxDistance.toString());
+  const queryStr = params.toString() ? `?${params.toString()}` : '';
+  return request<RelatedEventsResponse>(`/api/events/${encodeURIComponent(eventId)}/related${queryStr}`);
+}
+
 export {
   getToken,
   setToken,
@@ -405,6 +516,11 @@ export {
   fetchEvolutionPrinciples,
   fetchEvolutionQueue,
   fetchThinkingModels,
+  fetchSystemHealth,
+  fetchPipelineStats,
+  fetchEvents,
+  fetchEventsGrouped,
+  fetchRelatedEvents,
 };
 
 export type {
@@ -426,4 +542,13 @@ export type {
   EvolutionPrinciplesData,
   QueueHealthData,
   ThinkingModelOverview,
+  HealthCheckItem,
+  PipelineTimestamps,
+  SystemHealthStatus,
+  PipelineStage,
+  Bottleneck,
+  PipelineStats,
+  EventLogEntry,
+  EventsResponse,
+  RelatedEventsResponse,
 };

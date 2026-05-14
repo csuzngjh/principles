@@ -2,11 +2,117 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { EventLogEntry, GateBlockEvent } from '../types/index.js';
 
+function extractFileDate(filePath: string): string | null {
+  const match = /events_(\d{4}-\d{2}-\d{2})\.jsonl/.exec(filePath);
+  return match ? match[1] : null;
+}
+
 export class EventLogReadModel {
   private readonly logsDir: string;
 
   constructor(stateDir: string) {
     this.logsDir = path.join(stateDir, 'logs');
+  }
+
+  async getEventsPaginated(options: {
+    types?: string[];
+    startDate?: string;
+    endDate?: string;
+    searchQuery?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<{
+    events: EventLogEntry[];
+    total: number;
+    totalPages: number;
+  }> {
+    const {
+      types,
+      startDate,
+      endDate,
+      searchQuery,
+      page = 1,
+      pageSize = 50,
+    } = options;
+
+    const allFiles = this.getEventFiles().reverse(); // newest first
+    const filteredFiles = allFiles.filter(file => {
+      if (!startDate && !endDate) return true;
+      const fileDate = extractFileDate(file);
+      if (!fileDate) return true;
+      if (startDate && fileDate < startDate) return false;
+      if (endDate && fileDate > endDate) return false;
+      return true;
+    });
+
+    const allMatchingEvents: EventLogEntry[] = [];
+
+    for (const file of filteredFiles) {
+      const entries = await this.readEventsOfFile(file);
+      for (const entry of entries.reverse()) {
+        if (types && types.length > 0 && !types.includes(entry.type)) continue;
+        if (searchQuery) {
+          const entryStr = JSON.stringify(entry).toLowerCase();
+          if (!entryStr.includes(searchQuery.toLowerCase())) continue;
+        }
+        allMatchingEvents.push(entry);
+      }
+    }
+
+    const total = allMatchingEvents.length;
+    const totalPages = Math.ceil(total / pageSize);
+    const startIndex = (page - 1) * pageSize;
+    const events = allMatchingEvents.slice(startIndex, startIndex + pageSize);
+
+    return { events, total, totalPages };
+  }
+
+  async countEventsGroupedByType(dateRange?: {
+    startDate?: string;
+    endDate?: string;
+  }): Promise<Record<string, number>> {
+    const allFiles = this.getEventFiles().reverse();
+    const filteredFiles = allFiles.filter(file => {
+      if (!dateRange?.startDate && !dateRange?.endDate) return true;
+      const fileDate = extractFileDate(file);
+      if (!fileDate) return true;
+      if (dateRange.startDate && fileDate < dateRange.startDate) return false;
+      if (dateRange.endDate && fileDate > dateRange.endDate) return false;
+      return true;
+    });
+
+    const counts: Record<string, number> = {};
+
+    for (const file of filteredFiles) {
+      const entries = await this.readEventsOfFile(file);
+      for (const entry of entries) {
+        counts[entry.type] = (counts[entry.type] || 0) + 1;
+      }
+    }
+
+    return counts;
+  }
+
+  async getRelatedEvents(eventId: string, maxDistance = 10): Promise<EventLogEntry[]> {
+    const allFiles = this.getEventFiles().reverse();
+    const relatedEvents: EventLogEntry[] = [];
+    let foundTarget = false;
+    let distance = 0;
+
+    for (const file of allFiles) {
+      const entries = await this.readEventsOfFile(file);
+      for (const entry of entries) {
+        if (entry.id === eventId) {
+          foundTarget = true;
+          relatedEvents.push(entry);
+        } else if (foundTarget && distance < maxDistance) {
+          relatedEvents.push(entry);
+          distance++;
+        }
+      }
+    }
+
+    return relatedEvents;
   }
 
   async getGateBlocks(limit = 100): Promise<GateBlockEvent[]> {

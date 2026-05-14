@@ -21,6 +21,9 @@ import { handleFeedbackRoute, disposeFeedbackModels } from './routes/feedback.js
 import { handleSamplesRoute, disposeSampleModels } from './routes/samples.js';
 import { handleEvolutionRoute, disposeEvolutionModels } from './routes/evolution.js';
 import { handleThinkingModelsRoute, disposeThinkingModels } from './routes/thinking-models.js';
+import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
+import { handlePipelineRoute, disposePipelineModels } from './routes/pipeline.js';
+import { handleEventsRoute, disposeEventsModels } from './routes/events.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
@@ -205,6 +208,9 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeSampleModels();
   disposeEvolutionModels();
   disposeThinkingModels();
+  disposeHealthModels();
+  disposePipelineModels();
+  disposeEventsModels();
   services.workspaceService.dispose();
 
   try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }
@@ -313,11 +319,20 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
 
       // GET /api/health
       if (urlPath === '/api/health') {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { success: false, error: 'Method not allowed' });
-          return;
-        }
-        sendSuccess(res, { status: 'ok', timestamp: new Date().toISOString() });
+        asyncHandler(() => handleHealthRoute(req, res, services.workspaceDir))(req, res);
+        return;
+      }
+
+      // GET /api/pipeline
+      if (urlPath === '/api/pipeline') {
+        asyncHandler(() => handlePipelineRoute(req, res, services.workspaceDir))(req, res);
+        return;
+      }
+
+      // GET /api/events
+      if (urlPath === '/api/events' || urlPath.startsWith('/api/events/')) {
+        const subPath = urlPath.slice('/api/events'.length);
+        asyncHandler(() => handleEventsRoute({ req, res, workspaceDir: services.workspaceDir, subPath }))(req, res);
         return;
       }
 
