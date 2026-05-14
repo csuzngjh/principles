@@ -36,7 +36,7 @@ export { PersistenceActionSchema, HygieneStatsSchema } from './types/hygiene-typ
 // Runtime summary types schemas
 export { RuntimeTruthSchema, AnalyticsTruthSchema, TrendMetricsSchema } from './types/runtime-summary-types.js';
 // Event types schemas
-export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RuleMatchEventDataSchema, RulePromotionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, PlanApprovalEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, NocturnalDreamerCompletedEventDataSchema, NocturnalArtifactPersistedEventDataSchema, NocturnalCodeCandidateCreatedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, PainStatsSchema, EmpathyEventStatsSchema, GfiStatsSchema, EventEvolutionStatsSchema, EvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
+export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RuleMatchEventDataSchema, RulePromotionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, PlanApprovalEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, NocturnalDreamerCompletedEventDataSchema, NocturnalArtifactPersistedEventDataSchema, NocturnalCodeCandidateCreatedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, PainStatsSchema, EmpathyEventStatsSchema, GfiStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
 // Event payload discriminated union schemas
 export { DiscriminatedEventLogEntrySchema } from './types/event-payload.js';
 
@@ -910,7 +910,7 @@ export type {
   Philosopher6DScores,
   PhilosopherJudgment,
   PhilosopherOutput,
-  TournamentTraceEntry,
+  TrinityTournamentTraceEntry,
   RejectedAnalysis,
   ChosenJustification,
   ContrastiveAnalysis,
@@ -930,7 +930,7 @@ export {
   Philosopher6DScoresSchema,
   PhilosopherJudgmentSchema,
   PhilosopherOutputSchema,
-  TournamentTraceEntrySchema as TrinityTournamentTraceEntrySchema,
+  TrinityTournamentTraceEntrySchema,
   RejectedAnalysisSchema,
   ChosenJustificationSchema,
   ContrastiveAnalysisSchema,
@@ -947,9 +947,7 @@ export type {
   CandidateScores,
   ScoredCandidate,
   CandidateTournamentResult,
-  TournamentResult, // Backward-compatible alias
   CandidateTournamentTraceEntry,
-  TournamentTraceEntry, // Backward-compatible alias
   ScoringWeights,
   DiversityValidationResult,
   RankCandidatesOptions,
@@ -967,9 +965,7 @@ export {
   CandidateScoresSchema,
   ScoredCandidateSchema,
   CandidateTournamentResultSchema,
-  TournamentResultSchema, // Backward-compatible alias
   CandidateTournamentTraceEntrySchema,
-  TournamentTraceEntrySchema, // Backward-compatible alias
   ScoringWeightsSchema,
   DiversityValidationResultSchema,
 } from './nocturnal/index.js';
@@ -1080,7 +1076,6 @@ export type {
   EmpathyEventStats,
   GfiStats,
   EventEvolutionStats,
-  EvolutionStats, // Backward-compatible alias
   HookStats,
   DailyStats,
 } from './types/event-types.js';

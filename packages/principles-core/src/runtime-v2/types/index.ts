@@ -143,7 +143,6 @@ export type {
   EmpathyEventStats,
   GfiStats,
   EventEvolutionStats,
-  EvolutionStats, // Backward-compatible alias
   HookStats,
   DailyStats,
 } from './event-types.js';
@@ -180,7 +179,6 @@ export {
   EmpathyEventStatsSchema,
   GfiStatsSchema,
   EventEvolutionStatsSchema,
-  EvolutionStatsSchema, // Backward-compatible alias
   HookStatsSchema,
   DailyStatsSchema,
   createEmptyDailyStats,
