@@ -9,179 +9,216 @@
  * to keep this module free of plugin I/O imports.
  */
 
+import { Type, type Static } from '@sinclair/typebox';
+
 // ---------------------------------------------------------------------------
 // Artificer Context Types (inlined from nocturnal-artificer.ts)
 // ---------------------------------------------------------------------------
 
-export interface ArtificerTargetRuleScore {
-  ruleId: string;
-  score: number;
-  matchedSignals: string[];
-}
+export const ArtificerTargetRuleScoreSchema = Type.Object({
+  ruleId: Type.String({ minLength: 1 }),
+  score: Type.Number(),
+  matchedSignals: Type.Array(Type.String()),
+});
+export type ArtificerTargetRuleScore = Static<typeof ArtificerTargetRuleScoreSchema>
 
-export type ArtificerTargetRuleResolution =
-  | {
-      status: 'selected';
-      ruleId: string;
-      reason: 'single-rule' | 'evidence-winner';
-      scores: ArtificerTargetRuleScore[];
-    }
-  | {
-      status: 'skip';
-      reason:
-        | 'principle-not-found'
-        | 'no-rules'
-        | 'ambiguous-target-rule'
-        | 'no-deterministic-signal';
-      scores: ArtificerTargetRuleScore[];
-    };
+export const ArtificerTargetRuleResolutionSchema = Type.Union([
+  Type.Object({
+    status: Type.Literal('selected'),
+    ruleId: Type.String({ minLength: 1 }),
+    reason: Type.Union([Type.Literal('single-rule'), Type.Literal('evidence-winner')]),
+    scores: Type.Array(ArtificerTargetRuleScoreSchema),
+  }),
+  Type.Object({
+    status: Type.Literal('skip'),
+    reason: Type.Union([
+      Type.Literal('principle-not-found'),
+      Type.Literal('no-rules'),
+      Type.Literal('ambiguous-target-rule'),
+      Type.Literal('no-deterministic-signal'),
+    ]),
+    scores: Type.Array(ArtificerTargetRuleScoreSchema),
+  }),
+]);
+export type ArtificerTargetRuleResolution = Static<typeof ArtificerTargetRuleResolutionSchema>;
 
-export interface TrinityArtificerContext {
-  principleId: string;
-  resolution: ArtificerTargetRuleResolution;
-  eligible: boolean;
-}
+export const TrinityArtificerContextSchema = Type.Object({
+  principleId: Type.String({ minLength: 1 }),
+  resolution: ArtificerTargetRuleResolutionSchema,
+  eligible: Type.Boolean(),
+});
+export type TrinityArtificerContext = Static<typeof TrinityArtificerContextSchema>
 
 // ---------------------------------------------------------------------------
 // Dreamer Types
 // ---------------------------------------------------------------------------
 
-export interface TrinityDreamerCandidate {
-  candidateIndex: number;
-  badDecision: string;
-  betterDecision: string;
-  rationale: string;
-  confidence: number;
-  riskLevel?: "low" | "medium" | "high";
-  strategicPerspective?: "conservative_fix" | "structural_improvement" | "paradigm_shift";
-}
+export const TrinityDreamerCandidateSchema = Type.Object({
+  candidateIndex: Type.Integer({ minimum: 0 }),
+  badDecision: Type.String({ minLength: 1 }),
+  betterDecision: Type.String({ minLength: 1 }),
+  rationale: Type.String({ minLength: 1 }),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  riskLevel: Type.Optional(Type.Union([
+    Type.Literal('low'),
+    Type.Literal('medium'),
+    Type.Literal('high'),
+  ])),
+  strategicPerspective: Type.Optional(Type.Union([
+    Type.Literal('conservative_fix'),
+    Type.Literal('structural_improvement'),
+    Type.Literal('paradigm_shift'),
+  ])),
+});
+export type TrinityDreamerCandidate = Static<typeof TrinityDreamerCandidateSchema>
 
-export interface TrinityDreamerOutput {
-  valid: boolean;
-  candidates: TrinityDreamerCandidate[];
-  reason?: string;
-  generatedAt: string;
-}
+export const TrinityDreamerOutputSchema = Type.Object({
+  valid: Type.Boolean(),
+  candidates: Type.Array(TrinityDreamerCandidateSchema),
+  reason: Type.Optional(Type.String()),
+  generatedAt: Type.String({ minLength: 1 }),
+});
+export type TrinityDreamerOutput = Static<typeof TrinityDreamerOutputSchema>
 
 // ---------------------------------------------------------------------------
 // Philosopher Types
 // ---------------------------------------------------------------------------
 
-export interface PhilosopherRiskAssessment {
-  falsePositiveEstimate: number;
-  implementationComplexity: 'low' | 'medium' | 'high';
-  breakingChangeRisk: boolean;
-}
+export const PhilosopherRiskAssessmentSchema = Type.Object({
+  falsePositiveEstimate: Type.Number({ minimum: 0, maximum: 1 }),
+  implementationComplexity: Type.Union([
+    Type.Literal('low'),
+    Type.Literal('medium'),
+    Type.Literal('high'),
+  ]),
+  breakingChangeRisk: Type.Boolean(),
+});
+export type PhilosopherRiskAssessment = Static<typeof PhilosopherRiskAssessmentSchema>
 
-export interface Philosopher6DScores {
-  principleAlignment: number;
-  specificity: number;
-  actionability: number;
-  executability: number;
-  safetyImpact: number;
-  uxImpact: number;
-}
+export const Philosopher6DScoresSchema = Type.Object({
+  principleAlignment: Type.Number({ minimum: 0, maximum: 1 }),
+  specificity: Type.Number({ minimum: 0, maximum: 1 }),
+  actionability: Type.Number({ minimum: 0, maximum: 1 }),
+  executability: Type.Number({ minimum: 0, maximum: 1 }),
+  safetyImpact: Type.Number({ minimum: 0, maximum: 1 }),
+  uxImpact: Type.Number({ minimum: 0, maximum: 1 }),
+});
+export type Philosopher6DScores = Static<typeof Philosopher6DScoresSchema>
 
-export interface PhilosopherJudgment {
-  candidateIndex: number;
-  critique: string;
-  principleAligned: boolean;
-  score: number;
-  rank: number;
-  scores?: Philosopher6DScores;
-  risks?: PhilosopherRiskAssessment;
-}
+export const PhilosopherJudgmentSchema = Type.Object({
+  candidateIndex: Type.Integer({ minimum: 0 }),
+  critique: Type.String({ minLength: 1 }),
+  principleAligned: Type.Boolean(),
+  score: Type.Number({ minimum: 0, maximum: 1 }),
+  rank: Type.Integer({ minimum: 1 }),
+  scores: Type.Optional(Philosopher6DScoresSchema),
+  risks: Type.Optional(PhilosopherRiskAssessmentSchema),
+});
+export type PhilosopherJudgment = Static<typeof PhilosopherJudgmentSchema>
 
-export interface PhilosopherOutput {
-  valid: boolean;
-  judgments: PhilosopherJudgment[];
-  overallAssessment: string;
-  reason?: string;
-  generatedAt: string;
-}
+export const PhilosopherOutputSchema = Type.Object({
+  valid: Type.Boolean(),
+  judgments: Type.Array(PhilosopherJudgmentSchema),
+  overallAssessment: Type.String({ minLength: 1 }),
+  reason: Type.Optional(Type.String()),
+  generatedAt: Type.String({ minLength: 1 }),
+});
+export type PhilosopherOutput = Static<typeof PhilosopherOutputSchema>
 
 // ---------------------------------------------------------------------------
 // Trinity Result Types
 // ---------------------------------------------------------------------------
 
-export interface TournamentTraceEntry {
-  candidateIndex: number;
-  reason: string;
-}
+export const TournamentTraceEntrySchema = Type.Object({
+  candidateIndex: Type.Integer({ minimum: 0 }),
+  reason: Type.String({ minLength: 1 }),
+});
+export type TournamentTraceEntry = Static<typeof TournamentTraceEntrySchema>
 
-export interface RejectedAnalysis {
-  whyRejected: string;
-  warningSignals: string[];
-  correctiveThinking: string;
-}
+export const RejectedAnalysisSchema = Type.Object({
+  whyRejected: Type.String({ minLength: 1 }),
+  warningSignals: Type.Array(Type.String()),
+  correctiveThinking: Type.String({ minLength: 1 }),
+});
+export type RejectedAnalysis = Static<typeof RejectedAnalysisSchema>
 
-export interface ChosenJustification {
-  whyChosen: string;
-  keyInsights: string[];
-  limitations: string[];
-}
+export const ChosenJustificationSchema = Type.Object({
+  whyChosen: Type.String({ minLength: 1 }),
+  keyInsights: Type.Array(Type.String()),
+  limitations: Type.Array(Type.String()),
+});
+export type ChosenJustification = Static<typeof ChosenJustificationSchema>
 
-export interface ContrastiveAnalysis {
-  criticalDifference: string;
-  decisionTrigger: string;
-  preventionStrategy: string;
-}
+export const ContrastiveAnalysisSchema = Type.Object({
+  criticalDifference: Type.String({ minLength: 1 }),
+  decisionTrigger: Type.String({ minLength: 1 }),
+  preventionStrategy: Type.String({ minLength: 1 }),
+});
+export type ContrastiveAnalysis = Static<typeof ContrastiveAnalysisSchema>
 
-export interface TrinityTelemetry {
-  chainMode: 'trinity' | 'single-reflector';
-  usedStubs: boolean;
-  dreamerPassed: boolean;
-  philosopherPassed: boolean;
-  scribePassed: boolean;
-  candidateCount: number;
-  selectedCandidateIndex: number;
-  stageFailures: string[];
-  tournamentTrace?: TournamentTraceEntry[];
-  winnerAggregateScore?: number;
-  winnerThresholdPassed?: boolean;
-  eligibleCandidateCount?: number;
-  diversityCheckPassed?: boolean;
-  candidateRiskLevels?: string[];
-  philosopher6D?: {
-    avgScores: {
-      principleAlignment: number;
-      specificity: number;
-      actionability: number;
-      executability: number;
-      safetyImpact: number;
-      uxImpact: number;
-    };
-    highRiskCount: number;
-  };
-}
+export const TrinityTelemetrySchema = Type.Object({
+  chainMode: Type.Union([Type.Literal('trinity'), Type.Literal('single-reflector')]),
+  usedStubs: Type.Boolean(),
+  dreamerPassed: Type.Boolean(),
+  philosopherPassed: Type.Boolean(),
+  scribePassed: Type.Boolean(),
+  candidateCount: Type.Integer({ minimum: 0 }),
+  selectedCandidateIndex: Type.Integer({ minimum: 0 }),
+  stageFailures: Type.Array(Type.String()),
+  tournamentTrace: Type.Optional(Type.Array(TournamentTraceEntrySchema)),
+  winnerAggregateScore: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+  winnerThresholdPassed: Type.Optional(Type.Boolean()),
+  eligibleCandidateCount: Type.Optional(Type.Integer({ minimum: 0 })),
+  diversityCheckPassed: Type.Optional(Type.Boolean()),
+  candidateRiskLevels: Type.Optional(Type.Array(Type.String())),
+  philosopher6D: Type.Optional(Type.Object({
+    avgScores: Type.Object({
+      principleAlignment: Type.Number({ minimum: 0, maximum: 1 }),
+      specificity: Type.Number({ minimum: 0, maximum: 1 }),
+      actionability: Type.Number({ minimum: 0, maximum: 1 }),
+      executability: Type.Number({ minimum: 0, maximum: 1 }),
+      safetyImpact: Type.Number({ minimum: 0, maximum: 1 }),
+      uxImpact: Type.Number({ minimum: 0, maximum: 1 }),
+    }),
+    highRiskCount: Type.Integer({ minimum: 0 }),
+  })),
+});
+export type TrinityTelemetry = Static<typeof TrinityTelemetrySchema>
 
-export interface TrinityStageFailure {
-  stage: 'dreamer' | 'philosopher' | 'scribe';
-  reason: string;
-}
+export const TrinityStageFailureSchema = Type.Object({
+  stage: Type.Union([
+    Type.Literal('dreamer'),
+    Type.Literal('philosopher'),
+    Type.Literal('scribe'),
+  ]),
+  reason: Type.String({ minLength: 1 }),
+});
+export type TrinityStageFailure = Static<typeof TrinityStageFailureSchema>
 
-export interface TrinityResult {
-  success: boolean;
-  artifact?: TrinityDraftArtifact;
-  telemetry: TrinityTelemetry;
-  failures: TrinityStageFailure[];
-  fallbackOccurred: boolean;
-  artificerContext?: TrinityArtificerContext;
-}
+export const TrinityDraftArtifactSchema = Type.Object({
+  selectedCandidateIndex: Type.Integer({ minimum: 0 }),
+  badDecision: Type.String({ minLength: 1 }),
+  betterDecision: Type.String({ minLength: 1 }),
+  rationale: Type.String({ minLength: 1 }),
+  sessionId: Type.String({ minLength: 1 }),
+  principleId: Type.String({ minLength: 1 }),
+  sourceSnapshotRef: Type.String({ minLength: 1 }),
+  telemetry: TrinityTelemetrySchema,
+  thinkingModelDelta: Type.Optional(Type.Number()),
+  planningRatioGain: Type.Optional(Type.Number()),
+  artificerContext: Type.Optional(TrinityArtificerContextSchema),
+  contrastiveAnalysis: Type.Optional(ContrastiveAnalysisSchema),
+  rejectedAnalysis: Type.Optional(RejectedAnalysisSchema),
+  chosenJustification: Type.Optional(ChosenJustificationSchema),
+});
+export type TrinityDraftArtifact = Static<typeof TrinityDraftArtifactSchema>
 
-export interface TrinityDraftArtifact {
-  selectedCandidateIndex: number;
-  badDecision: string;
-  betterDecision: string;
-  rationale: string;
-  sessionId: string;
-  principleId: string;
-  sourceSnapshotRef: string;
-  telemetry: TrinityTelemetry;
-  thinkingModelDelta?: number;
-  planningRatioGain?: number;
-  artificerContext?: TrinityArtificerContext;
-  contrastiveAnalysis?: ContrastiveAnalysis;
-  rejectedAnalysis?: RejectedAnalysis;
-  chosenJustification?: ChosenJustification;
-}
+export const TrinityResultSchema = Type.Object({
+  success: Type.Boolean(),
+  artifact: Type.Optional(TrinityDraftArtifactSchema),
+  telemetry: TrinityTelemetrySchema,
+  failures: Type.Array(TrinityStageFailureSchema),
+  fallbackOccurred: Type.Boolean(),
+  artificerContext: Type.Optional(TrinityArtificerContextSchema),
+});
+export type TrinityResult = Static<typeof TrinityResultSchema>

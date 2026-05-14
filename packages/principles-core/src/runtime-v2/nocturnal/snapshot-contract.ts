@@ -10,6 +10,8 @@
  * (plugin-only I/O module) to keep this module free of I/O imports.
  */
 
+import { Type, type Static } from '@sinclair/typebox';
+
 // ---------------------------------------------------------------------------
 // Inlined Types (from plugin-only modules — pure interfaces only)
 // ---------------------------------------------------------------------------
@@ -18,63 +20,73 @@
  * Minimal sanitized assistant turn for nocturnal snapshot.
  * Contains ONLY sanitizedText — raw_text is never exposed.
  */
-export interface NocturnalAssistantTurn {
-  turnIndex: number;
-  sanitizedText: string;
-  model: string;
-  createdAt: string;
-}
+export const NocturnalAssistantTurnSchema = Type.Object({
+  turnIndex: Type.Integer({ minimum: 0 }),
+  sanitizedText: Type.String({ minLength: 1 }),
+  model: Type.String({ minLength: 1 }),
+  createdAt: Type.String({ minLength: 1 }),
+});
+export type NocturnalAssistantTurn = Static<typeof NocturnalAssistantTurnSchema>
 
 /**
  * Minimal sanitized user turn for nocturnal snapshot.
  * Contains only derived cues — NO raw user text.
  */
-export interface NocturnalUserTurn {
-  turnIndex: number;
-  correctionDetected: boolean;
-  correctionCue: string | null;
-  createdAt: string;
-}
+export const NocturnalUserTurnSchema = Type.Object({
+  turnIndex: Type.Integer({ minimum: 0 }),
+  correctionDetected: Type.Boolean(),
+  correctionCue: Type.Union([Type.String(), Type.Null()]),
+  createdAt: Type.String({ minLength: 1 }),
+});
+export type NocturnalUserTurn = Static<typeof NocturnalUserTurnSchema>
 
 /**
  * Tool call event for nocturnal snapshot.
  */
-export interface NocturnalToolCall {
-  toolName: string;
-  outcome: 'success' | 'failure' | 'blocked';
-  filePath: string | null;
-  durationMs: number | null;
-  exitCode: number | null;
-  errorType: string | null;
-  errorMessage: string | null;
-  createdAt: string;
-}
+export const NocturnalToolCallSchema = Type.Object({
+  toolName: Type.String({ minLength: 1 }),
+  outcome: Type.Union([
+    Type.Literal('success'),
+    Type.Literal('failure'),
+    Type.Literal('blocked'),
+  ]),
+  filePath: Type.Union([Type.String(), Type.Null()]),
+  durationMs: Type.Union([Type.Integer(), Type.Null()]),
+  exitCode: Type.Union([Type.Integer(), Type.Null()]),
+  errorType: Type.Union([Type.String(), Type.Null()]),
+  errorMessage: Type.Union([Type.String(), Type.Null()]),
+  createdAt: Type.String({ minLength: 1 }),
+});
+export type NocturnalToolCall = Static<typeof NocturnalToolCallSchema>
 
 /**
  * Pain signal for nocturnal snapshot.
  */
-export interface NocturnalPainEvent {
-  source: string;
-  score: number;
-  severity: string | null;
-  reason: string | null;
-  createdAt: string;
-}
+export const NocturnalPainEventSchema = Type.Object({
+  source: Type.String({ minLength: 1 }),
+  score: Type.Number(),
+  severity: Type.Union([Type.String(), Type.Null()]),
+  reason: Type.Union([Type.String(), Type.Null()]),
+  createdAt: Type.String({ minLength: 1 }),
+});
+export type NocturnalPainEvent = Static<typeof NocturnalPainEventSchema>
 
 /**
  * Gate block event for nocturnal snapshot.
  */
-export interface NocturnalGateBlock {
-  toolName: string;
-  filePath: string | null;
-  reason: string;
-  planStatus: string | null;
-  createdAt: string;
-}
+export const NocturnalGateBlockSchema = Type.Object({
+  toolName: Type.String({ minLength: 1 }),
+  filePath: Type.Union([Type.String(), Type.Null()]),
+  reason: Type.String({ minLength: 1 }),
+  planStatus: Type.Union([Type.String(), Type.Null()]),
+  createdAt: Type.String({ minLength: 1 }),
+});
+export type NocturnalGateBlock = Static<typeof NocturnalGateBlockSchema>
 
-export interface NocturnalUserCorrection {
-  correctionCue: string | null;
-}
+export const NocturnalUserCorrectionSchema = Type.Object({
+  correctionCue: Type.Union([Type.String(), Type.Null()]),
+});
+export type NocturnalUserCorrection = Static<typeof NocturnalUserCorrectionSchema>
 
 /**
  * A structured nocturnal session snapshot.
@@ -86,35 +98,37 @@ export interface NocturnalUserCorrection {
  * - All text is sanitized or derived-cue only
  * - Self-contained (principle-relevant metadata included)
  */
-export interface NocturnalSessionSnapshot {
-  sessionId: string;
-  startedAt: string;
-  updatedAt: string;
-  assistantTurns: NocturnalAssistantTurn[];
-  userTurns: NocturnalUserTurn[];
-  toolCalls: NocturnalToolCall[];
-  painEvents: NocturnalPainEvent[];
-  gateBlocks: NocturnalGateBlock[];
-  userCorrections: NocturnalUserCorrection[];
-  stats: {
-    totalAssistantTurns: number;
-    totalToolCalls: number;
-    totalPainEvents: number;
-    totalGateBlocks: number;
-    failureCount: number;
-  };
-  _dataSource?: 'pain_context_fallback';
-}
+export const NocturnalSessionSnapshotSchema = Type.Object({
+  sessionId: Type.String({ minLength: 1 }),
+  startedAt: Type.String({ minLength: 1 }),
+  updatedAt: Type.String({ minLength: 1 }),
+  assistantTurns: Type.Array(NocturnalAssistantTurnSchema),
+  userTurns: Type.Array(NocturnalUserTurnSchema),
+  toolCalls: Type.Array(NocturnalToolCallSchema),
+  painEvents: Type.Array(NocturnalPainEventSchema),
+  gateBlocks: Type.Array(NocturnalGateBlockSchema),
+  userCorrections: Type.Array(NocturnalUserCorrectionSchema),
+  stats: Type.Object({
+    totalAssistantTurns: Type.Integer({ minimum: 0 }),
+    totalToolCalls: Type.Integer({ minimum: 0 }),
+    totalPainEvents: Type.Integer({ minimum: 0 }),
+    totalGateBlocks: Type.Integer({ minimum: 0 }),
+    failureCount: Type.Integer({ minimum: 0 }),
+  }),
+  _dataSource: Type.Optional(Type.Literal('pain_context_fallback')),
+});
+export type NocturnalSessionSnapshot = Static<typeof NocturnalSessionSnapshotSchema>
 
 // ---------------------------------------------------------------------------
 // Validation Logic
 // ---------------------------------------------------------------------------
 
-export interface NocturnalSnapshotContractResult {
-  status: 'valid' | 'invalid';
-  reasons: string[];
-  snapshot?: NocturnalSessionSnapshot;
-}
+export const NocturnalSnapshotContractResultSchema = Type.Object({
+  status: Type.Union([Type.Literal('valid'), Type.Literal('invalid')]),
+  reasons: Type.Array(Type.String()),
+  snapshot: Type.Optional(NocturnalSessionSnapshotSchema),
+});
+export type NocturnalSnapshotContractResult = Static<typeof NocturnalSnapshotContractResultSchema>
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);

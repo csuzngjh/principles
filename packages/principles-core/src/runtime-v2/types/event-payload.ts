@@ -3,6 +3,7 @@
  * Each union member is keyed on the `type` field for type narrowing.
  */
 
+import { Type, type Static } from '@sinclair/typebox';
 import type {
   ToolCallEventData,
   PainSignalEventData,
@@ -16,6 +17,7 @@ import type {
   EmpathyRollbackEventData,
   EventCategory,
 } from './event-types.js';
+import { EventCategorySchema } from './event-types.js';
 
 export type EventLogEntry =
   | { ts: string; date: string; type: 'tool_call'; category: EventCategory; sessionId?: string; workspaceDir?: string; data: ToolCallEventData }
@@ -72,3 +74,116 @@ export function isEvolutionTaskEventEntry(entry: EventLogEntry): entry is Extrac
 export function isEmpathyRollbackEventEntry(entry: EventLogEntry): entry is Extract<EventLogEntry, { type: 'empathy_rollback' }> {
   return entry.type === 'empathy_rollback';
 }
+
+// TypeBox schema definitions
+export const DiscriminatedEventLogEntrySchema = Type.Union([
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('tool_call'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('pain_signal'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('rule_match'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('rule_promotion'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('hook_execution'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('gate_block'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('gate_bypass'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('plan_approval'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('evolution_task'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('empathy_rollback'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('error'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+  Type.Object({
+    ts: Type.String(),
+    date: Type.String(),
+    type: Type.Literal('warn'),
+    category: EventCategorySchema,
+    sessionId: Type.Optional(Type.String()),
+    workspaceDir: Type.Optional(Type.String()),
+    data: Type.Record(Type.String(), Type.Any()),
+  }),
+]);
+export type DiscriminatedEventLogEntryStatic = Static<typeof DiscriminatedEventLogEntrySchema>;

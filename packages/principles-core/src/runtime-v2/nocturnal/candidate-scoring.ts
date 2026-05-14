@@ -27,7 +27,9 @@
  * DreamerCandidate renamed to TrinityDreamerCandidate per Core naming convention.
  */
 
+import { Type, type Static } from '@sinclair/typebox';
 import type { TrinityDreamerCandidate, PhilosopherJudgment } from './nocturnal-trinity-types.js';
+import { TrinityDreamerCandidateSchema, PhilosopherJudgmentSchema } from './nocturnal-trinity-types.js';
 
 // ---------------------------------------------------------------------------
 // Inlined Types (from plugin-only modules — pure interfaces only)
@@ -37,93 +39,112 @@ import type { TrinityDreamerCandidate, PhilosopherJudgment } from './nocturnal-t
  * Current threshold values.
  * Inlined from openclaw-plugin/src/core/adaptive-thresholds.ts (I/O module).
  */
-export interface ThresholdValues {
-  schemaCompletenessMin: number;
-  principleAlignmentMin: number;
-  executabilityMin: number;
-  boundednessMin: number;
-  confidenceMin: number;
-  aggregateMin: number;
-}
+export const ThresholdValuesSchema = Type.Object({
+  schemaCompletenessMin: Type.Number({ minimum: 0, maximum: 1 }),
+  principleAlignmentMin: Type.Number({ minimum: 0, maximum: 1 }),
+  executabilityMin: Type.Number({ minimum: 0, maximum: 1 }),
+  boundednessMin: Type.Number({ minimum: 0, maximum: 1 }),
+  confidenceMin: Type.Number({ minimum: 0, maximum: 1 }),
+  aggregateMin: Type.Number({ minimum: 0, maximum: 1 }),
+});
+export type ThresholdValues = Static<typeof ThresholdValuesSchema>
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /**
+ * Single entry in the tournament trace (for candidate scoring).
+ */
+export const CandidateTournamentTraceEntrySchema = Type.Object({
+  /** Description of this step */
+  step: Type.String({ minLength: 1 }),
+  /** Details about the decision */
+  details: Type.String({ minLength: 1 }),
+});
+export type CandidateTournamentTraceEntry = Static<typeof CandidateTournamentTraceEntrySchema>
+
+/**
  * Individual scoring dimensions for a candidate.
  */
-export interface CandidateScores {
+export const CandidateScoresSchema = Type.Object({
   /** Schema completeness (0-1) */
-  schemaCompleteness: number;
+  schemaCompleteness: Type.Number({ minimum: 0, maximum: 1 }),
   /** Principle alignment (0-1) */
-  principleAlignment: number;
+  principleAlignment: Type.Number({ minimum: 0, maximum: 1 }),
   /** Executability (0-1) */
-  executability: number;
+  executability: Type.Number({ minimum: 0, maximum: 1 }),
   /** Boundedness — specificity and constraint (0-1) */
-  boundedness: number;
+  boundedness: Type.Number({ minimum: 0, maximum: 1 }),
   /** Confidence/consistency (0-1) */
-  confidence: number;
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
   /** Aggregate score (weighted average) */
-  aggregate: number;
-}
+  aggregate: Type.Number({ minimum: 0, maximum: 1 }),
+});
+export type CandidateScores = Static<typeof CandidateScoresSchema>
 
 /**
  * Scored candidate with ranking.
  */
-export interface ScoredCandidate {
+export const ScoredCandidateSchema = Type.Object({
   /** Original candidate index from Dreamer */
-  candidateIndex: number;
+  candidateIndex: Type.Integer({ minimum: 0 }),
   /** The Dreamer candidate */
-  candidate: TrinityDreamerCandidate;
+  candidate: TrinityDreamerCandidateSchema,
   /** The Philosopher judgment */
-  judgment: PhilosopherJudgment;
+  judgment: PhilosopherJudgmentSchema,
   /** Individual dimension scores */
-  scores: CandidateScores;
+  scores: CandidateScoresSchema,
   /** Final tournament rank (1 = winner) */
-  rank: number;
+  rank: Type.Integer({ minimum: 1 }),
   /** Whether this candidate passed all thresholds */
-  thresholdPassed: boolean;
+  thresholdPassed: Type.Boolean(),
   /** Which thresholds failed (if any) */
-  failedThresholds: string[];
-}
+  failedThresholds: Type.Array(Type.String()),
+});
+export type ScoredCandidate = Static<typeof ScoredCandidateSchema>
 
 /**
- * Result of a tournament selection.
+ * Result of a tournament selection (for candidate scoring).
  */
-export interface TournamentResult {
+export const CandidateTournamentResultSchema = Type.Object({
   /** Whether tournament produced a winner */
-  success: boolean;
+  success: Type.Boolean(),
   /** The winning candidate (if success === true) */
-  winner: ScoredCandidate | null;
+  winner: Type.Union([ScoredCandidateSchema, Type.Null()]),
   /** All ranked candidates (sorted by rank) */
-  rankedCandidates: ScoredCandidate[];
+  rankedCandidates: Type.Array(ScoredCandidateSchema),
   /** Trace of decisions for debugging/explainability */
-  trace: TournamentTraceEntry[];
+  trace: Type.Array(CandidateTournamentTraceEntrySchema),
   /** Why no winner was selected (if success === false) */
-  failureReason?: string;
-}
+  failureReason: Type.Optional(Type.String()),
+});
+export type CandidateTournamentResult = Static<typeof CandidateTournamentResultSchema>
 
-/**
- * Single entry in the tournament trace.
- */
-export interface TournamentTraceEntry {
-  /** Description of this step */
-  step: string;
-  /** Details about the decision */
-  details: string;
-}
+// Backward compatibility aliases
+/** @deprecated Use CandidateTournamentResult instead. Alias for backward compatibility. */
+export type TournamentResult = CandidateTournamentResult;
+
+/** @deprecated Use CandidateTournamentResultSchema instead. Alias for backward compatibility. */
+export const TournamentResultSchema = CandidateTournamentResultSchema;
+
+/** @deprecated Use CandidateTournamentTraceEntry instead. Alias for backward compatibility. */
+export type TournamentTraceEntry = CandidateTournamentTraceEntry;
+
+/** @deprecated Use CandidateTournamentTraceEntrySchema instead. Alias for backward compatibility. */
+export const TournamentTraceEntrySchema = CandidateTournamentTraceEntrySchema;
 
 /**
  * Scoring weights for aggregate calculation.
  */
-export interface ScoringWeights {
-  schemaCompleteness: number;
-  principleAlignment: number;
-  executability: number;
-  boundedness: number;
-  confidence: number;
-}
+export const ScoringWeightsSchema = Type.Object({
+  schemaCompleteness: Type.Number({ minimum: 0, maximum: 1 }),
+  principleAlignment: Type.Number({ minimum: 0, maximum: 1 }),
+  executability: Type.Number({ minimum: 0, maximum: 1 }),
+  boundedness: Type.Number({ minimum: 0, maximum: 1 }),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+});
+export type ScoringWeights = Static<typeof ScoringWeightsSchema>
 
 /**
  * Default scoring weights (must sum to 1.0).
@@ -140,18 +161,19 @@ export const DEFAULT_SCORING_WEIGHTS: ScoringWeights = {
  * Result of diversity validation on Dreamer candidates.
  * Soft enforcement: result is informational, never gates the pipeline.
  */
-export interface DiversityValidationResult {
+export const DiversityValidationResultSchema = Type.Object({
   /** Whether candidates passed diversity checks */
-  diversityCheckPassed: boolean;
+  diversityCheckPassed: Type.Boolean(),
   /** Whether at least 2 distinct risk levels were present */
-  riskLevelDiversity: boolean;
+  riskLevelDiversity: Type.Boolean(),
   /** Whether no candidate pair exceeded keyword overlap threshold */
-  keywordOverlapPassed: boolean;
+  keywordOverlapPassed: Type.Boolean(),
   /** Highest pairwise keyword overlap score (for telemetry) */
-  maxOverlapScore: number;
+  maxOverlapScore: Type.Number({ minimum: 0, maximum: 1 }),
   /** Human-readable summary of check results */
-  details: string;
-}
+  details: Type.String({ minLength: 1 }),
+});
+export type DiversityValidationResult = Static<typeof DiversityValidationResultSchema>
 
 // ---------------------------------------------------------------------------
 // Helper functions (must be defined before use)
@@ -410,7 +432,7 @@ export function rankCandidates(
   options: RankCandidatesOptions,
 ): ScoredCandidate[] {
   const { candidates, judgments, thresholds, weights = DEFAULT_SCORING_WEIGHTS } = options;
-  const trace: TournamentTraceEntry[] = [];
+  const trace: CandidateTournamentTraceEntry[] = [];
 
   trace.push({
     step: 'Input Validation',
@@ -508,9 +530,9 @@ export function rankCandidates(
  */
 export function runTournament(
   options: RunTournamentOptions,
-): TournamentResult {
+): CandidateTournamentResult {
   const { candidates, judgments, thresholds, weights = DEFAULT_SCORING_WEIGHTS } = options;
-  const trace: TournamentTraceEntry[] = [];
+  const trace: CandidateTournamentTraceEntry[] = [];
 
   if (candidates.length === 0 || judgments.length === 0) {
     return {

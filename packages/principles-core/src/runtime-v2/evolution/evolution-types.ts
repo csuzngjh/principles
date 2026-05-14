@@ -9,6 +9,7 @@
  *
  * Migrated from openclaw-plugin/src/core/evolution-types.ts
  */
+import { Type, type Static } from '@sinclair/typebox';
 
 // ===== 等级定义 =====
 
@@ -366,3 +367,388 @@ export type EvolutionLoopEvent =
   | { ts: string; type: 'principle_rolled_back'; data: PrincipleRolledBackData }
   | { ts: string; type: 'circuit_breaker_opened'; data: CircuitBreakerOpenedData }
   | { ts: string; type: 'legacy_import'; data: LegacyImportData };
+
+// ===== TypeBox Schemas =====
+
+export const EvolutionTierSchema = Type.Union([
+  Type.Literal(EvolutionTier.Seed),
+  Type.Literal(EvolutionTier.Sprout),
+  Type.Literal(EvolutionTier.Sapling),
+  Type.Literal(EvolutionTier.Tree),
+  Type.Literal(EvolutionTier.Forest),
+]);
+export type EvolutionTierTB = Static<typeof EvolutionTierSchema>;
+
+export const TierPermissionsSchema = Type.Object({
+  maxLinesPerWrite: Type.Number(),
+  maxFilesPerTask: Type.Number(),
+  allowRiskPath: Type.Boolean(),
+  allowSubagentSpawn: Type.Boolean(),
+});
+export type TierPermissionsTB = Static<typeof TierPermissionsSchema>;
+
+export const TierDefinitionSchema = Type.Object({
+  tier: EvolutionTierSchema,
+  name: Type.String(),
+  requiredPoints: Type.Number(),
+  permissions: TierPermissionsSchema,
+});
+export type TierDefinitionTB = Static<typeof TierDefinitionSchema>;
+
+export const TaskDifficultySchema = Type.Union([
+  Type.Literal('trivial'),
+  Type.Literal('normal'),
+  Type.Literal('hard'),
+]);
+export type TaskDifficultyTB = Static<typeof TaskDifficultySchema>;
+
+export const TaskDifficultyConfigSchema = Type.Object({
+  basePoints: Type.Number(),
+  description: Type.String(),
+});
+export type TaskDifficultyConfigTB = Static<typeof TaskDifficultyConfigSchema>;
+
+export const EvolutionEventTypeSchema = Type.Union([
+  Type.Literal('success'),
+  Type.Literal('failure'),
+]);
+export type EvolutionEventTypeTB = Static<typeof EvolutionEventTypeSchema>;
+
+export const EvolutionEventSchema = Type.Object({
+  id: Type.String(),
+  timestamp: Type.String(),
+  type: EvolutionEventTypeSchema,
+  taskHash: Type.String(),
+  taskDifficulty: TaskDifficultySchema,
+  toolName: Type.Optional(Type.String()),
+  filePath: Type.Optional(Type.String()),
+  reason: Type.Optional(Type.String()),
+  pointsAwarded: Type.Number(),
+  isDoubleReward: Type.Boolean(),
+  sessionId: Type.Optional(Type.String()),
+});
+export type EvolutionEventTB = Static<typeof EvolutionEventSchema>;
+
+export const EvolutionStatsSchema = Type.Object({
+  totalSuccesses: Type.Number(),
+  totalFailures: Type.Number(),
+  consecutiveSuccesses: Type.Number(),
+  consecutiveFailures: Type.Number(),
+  doubleRewardsEarned: Type.Number(),
+  tierPromotions: Type.Number(),
+  pointsByDifficulty: Type.Object({
+    trivial: Type.Number(),
+    normal: Type.Number(),
+    hard: Type.Number(),
+  }),
+});
+export type EvolutionStatsTB = Static<typeof EvolutionStatsSchema>;
+
+export const EvolutionScorecardSchema = Type.Object({
+  version: Type.Literal('2.0'),
+  agentId: Type.String(),
+  totalPoints: Type.Number(),
+  availablePoints: Type.Number(),
+  currentTier: EvolutionTierSchema,
+  lastDoubleRewardTime: Type.Optional(Type.String()),
+  stats: EvolutionStatsSchema,
+  recentEvents: Type.Array(EvolutionEventSchema),
+  lastUpdated: Type.String(),
+});
+export type EvolutionScorecardTB = Static<typeof EvolutionScorecardSchema>;
+
+export const EvolutionStorageSchema = Type.Object({
+  scorecard: EvolutionScorecardSchema,
+  archivedStats: Type.Object({
+    totalEventsProcessed: Type.Number(),
+    pointsFromTrivial: Type.Number(),
+    pointsFromNormal: Type.Number(),
+    pointsFromHard: Type.Number(),
+  }),
+});
+export type EvolutionStorageTB = Static<typeof EvolutionStorageSchema>;
+
+export const EvolutionConfigSchema = Type.Object({
+  doubleRewardCooldownMs: Type.Number(),
+  maxRecentEvents: Type.Number(),
+  difficultyPenalty: Type.Object({
+    tier4Trivial: Type.Number(),
+    tier4Normal: Type.Number(),
+    tier5Trivial: Type.Number(),
+    tier5Normal: Type.Number(),
+  }),
+});
+export type EvolutionConfigTB = Static<typeof EvolutionConfigSchema>;
+
+export const ArchivedEventStatsSchema = Type.Object({
+  totalEventsProcessed: Type.Number(),
+  pointsFromTrivial: Type.Number(),
+  pointsFromNormal: Type.Number(),
+  pointsFromHard: Type.Number(),
+});
+export type ArchivedEventStatsTB = Static<typeof ArchivedEventStatsSchema>;
+
+export const GateDecisionSchema = Type.Object({
+  allowed: Type.Boolean(),
+  reason: Type.Optional(Type.String()),
+  currentTier: Type.Optional(EvolutionTierSchema),
+  requiredTier: Type.Optional(EvolutionTierSchema),
+});
+export type GateDecisionTB = Static<typeof GateDecisionSchema>;
+
+export const ToolCallContextSchema = Type.Object({
+  toolName: Type.String(),
+  filePath: Type.Optional(Type.String()),
+  content: Type.Optional(Type.String()),
+  lineCount: Type.Optional(Type.Number()),
+  isRiskPath: Type.Optional(Type.Boolean()),
+});
+export type ToolCallContextTB = Static<typeof ToolCallContextSchema>;
+
+export const TierPromotionEventSchema = Type.Object({
+  previousTier: EvolutionTierSchema,
+  newTier: EvolutionTierSchema,
+  totalPoints: Type.Number(),
+  timestamp: Type.String(),
+  newPermissions: TierPermissionsSchema,
+});
+export type TierPromotionEventTB = Static<typeof TierPromotionEventSchema>;
+
+export const EvolutionPrincipleStatusSchema = Type.Union([
+  Type.Literal('candidate'),
+  Type.Literal('probation'),
+  Type.Literal('active'),
+  Type.Literal('deprecated'),
+  Type.Literal('archived'),
+]);
+export type EvolutionPrincipleStatusTB = Static<typeof EvolutionPrincipleStatusSchema>;
+
+export const PrincipleEvaluatorLevelSchema = Type.Union([
+  Type.Literal('deterministic'),
+  Type.Literal('weak_heuristic'),
+  Type.Literal('manual_only'),
+]);
+export type PrincipleEvaluatorLevelTB = Static<typeof PrincipleEvaluatorLevelSchema>;
+
+export const EvaluabilitySchema = PrincipleEvaluatorLevelSchema;
+export type EvaluabilityTB = Static<typeof EvaluabilitySchema>;
+
+export const PrincipleDetectorSpecSchema = Type.Object({
+  applicabilityTags: Type.Array(Type.String()),
+  positiveSignals: Type.Array(Type.String()),
+  negativeSignals: Type.Array(Type.String()),
+  toolSequenceHints: Type.Array(Type.Array(Type.String())),
+  confidence: Type.Union([
+    Type.Literal('high'),
+    Type.Literal('medium'),
+    Type.Literal('low'),
+  ]),
+});
+export type PrincipleDetectorSpecTB = Static<typeof PrincipleDetectorSpecSchema>;
+
+export const EvolutionPrincipleSuggestedRuleSchema = Type.Object({
+  name: Type.String(),
+  type: Type.Union([
+    Type.Literal('hook'),
+    Type.Literal('gate'),
+    Type.Literal('skill'),
+    Type.Literal('test'),
+    Type.Literal('prompt'),
+  ]),
+  triggerCondition: Type.String(),
+  enforcement: Type.Union([
+    Type.Literal('block'),
+    Type.Literal('warn'),
+    Type.Literal('log'),
+  ]),
+  action: Type.String(),
+  implementationHint: Type.Optional(Type.String()),
+});
+export type EvolutionPrincipleSuggestedRuleTB = Static<typeof EvolutionPrincipleSuggestedRuleSchema>;
+
+export const EvolutionPrincipleValueMetricsSnapshotSchema = Type.Object({
+  painPreventedCount: Type.Number(),
+  lastPainPreventedAt: Type.Optional(Type.String()),
+  calculatedAt: Type.String(),
+});
+export type EvolutionPrincipleValueMetricsSnapshotTB = Static<typeof EvolutionPrincipleValueMetricsSnapshotSchema>;
+
+export const EvolutionPrincipleSchema = Type.Object({
+  id: Type.String(),
+  version: Type.Number(),
+  text: Type.String(),
+  source: Type.Object({
+    painId: Type.String(),
+    painType: Type.Union([
+      Type.Literal('tool_failure'),
+      Type.Literal('dispatch_error'),
+      Type.Literal('subagent_error'),
+      Type.Literal('user_frustration'),
+    ]),
+    timestamp: Type.String(),
+  }),
+  trigger: Type.String(),
+  action: Type.String(),
+  guardrails: Type.Optional(Type.Array(Type.String())),
+  contextTags: Type.Array(Type.String()),
+  validation: Type.Object({
+    successCount: Type.Number(),
+    conflictCount: Type.Number(),
+  }),
+  status: EvolutionPrincipleStatusSchema,
+  feedbackScore: Type.Number(),
+  usageCount: Type.Number(),
+  createdAt: Type.String(),
+  activatedAt: Type.Optional(Type.String()),
+  deprecatedAt: Type.Optional(Type.String()),
+  evaluability: PrincipleEvaluatorLevelSchema,
+  detectorMetadata: Type.Optional(PrincipleDetectorSpecSchema),
+  abstractedPrinciple: Type.Optional(Type.String()),
+  coreAxiomId: Type.Optional(Type.String()),
+  priority: Type.Optional(Type.Union([Type.Literal('P0'), Type.Literal('P1'), Type.Literal('P2')])),
+  scope: Type.Optional(Type.Union([Type.Literal('general'), Type.Literal('domain')])),
+  domain: Type.Optional(Type.String()),
+  suggestedRules: Type.Optional(Type.Array(EvolutionPrincipleSuggestedRuleSchema)),
+  valueMetrics: Type.Optional(EvolutionPrincipleValueMetricsSnapshotSchema),
+});
+export type EvolutionPrincipleTB = Static<typeof EvolutionPrincipleSchema>;
+
+export const EvolutionLoopEventTypeSchema = Type.Union([
+  Type.Literal('pain_detected'),
+  Type.Literal('candidate_created'),
+  Type.Literal('principle_promoted'),
+  Type.Literal('principle_deprecated'),
+  Type.Literal('principle_rolled_back'),
+  Type.Literal('circuit_breaker_opened'),
+  Type.Literal('legacy_import'),
+]);
+export type EvolutionLoopEventTypeTB = Static<typeof EvolutionLoopEventTypeSchema>;
+
+export const EvolutionPainDetectedDataSchema = Type.Object({
+  painId: Type.String(),
+  painType: Type.Union([
+    Type.Literal('tool_failure'),
+    Type.Literal('dispatch_error'),
+    Type.Literal('subagent_error'),
+    Type.Literal('user_frustration'),
+  ]),
+  source: Type.String(),
+  reason: Type.String(),
+  score: Type.Optional(Type.Number()),
+  sessionId: Type.Optional(Type.String()),
+  agentId: Type.Optional(Type.String()),
+  taskId: Type.Optional(Type.String()),
+  traceId: Type.Optional(Type.String()),
+});
+export type EvolutionPainDetectedDataTB = Static<typeof EvolutionPainDetectedDataSchema>;
+
+export const CandidateCreatedDataSchema = Type.Object({
+  painId: Type.String(),
+  principleId: Type.String(),
+  trigger: Type.String(),
+  action: Type.String(),
+  status: Type.Literal('candidate'),
+  painType: Type.Optional(Type.Union([
+    Type.Literal('tool_failure'),
+    Type.Literal('dispatch_error'),
+    Type.Literal('subagent_error'),
+    Type.Literal('user_frustration'),
+  ])),
+  evaluability: Type.Optional(PrincipleEvaluatorLevelSchema),
+  detectorMetadata: Type.Optional(PrincipleDetectorSpecSchema),
+  abstractedPrinciple: Type.Optional(Type.String()),
+  coreAxiomId: Type.Optional(Type.String()),
+});
+export type CandidateCreatedDataTB = Static<typeof CandidateCreatedDataSchema>;
+
+export const PrinciplePromotedDataSchema = Type.Object({
+  principleId: Type.String(),
+  from: EvolutionPrincipleStatusSchema,
+  to: EvolutionPrincipleStatusSchema,
+  reason: Type.String(),
+  successCount: Type.Optional(Type.Number()),
+});
+export type PrinciplePromotedDataTB = Static<typeof PrinciplePromotedDataSchema>;
+
+export const PrincipleDeprecatedDataSchema = Type.Object({
+  principleId: Type.String(),
+  reason: Type.String(),
+  triggeredBy: Type.Union([
+    Type.Literal('auto'),
+    Type.Literal('manual'),
+  ]),
+});
+export type PrincipleDeprecatedDataTB = Static<typeof PrincipleDeprecatedDataSchema>;
+
+export const PrincipleRolledBackDataSchema = Type.Object({
+  principleId: Type.String(),
+  reason: Type.String(),
+  triggeredBy: Type.Union([
+    Type.Literal('user_command'),
+    Type.Literal('auto_conflict'),
+  ]),
+  blacklistPattern: Type.Optional(Type.String()),
+  relatedPainId: Type.Optional(Type.String()),
+});
+export type PrincipleRolledBackDataTB = Static<typeof PrincipleRolledBackDataSchema>;
+
+export const CircuitBreakerOpenedDataSchema = Type.Object({
+  taskId: Type.String(),
+  painId: Type.String(),
+  failCount: Type.Number(),
+  reason: Type.String(),
+  requireHuman: Type.Boolean(),
+  nextRetryAt: Type.Optional(Type.String()),
+});
+export type CircuitBreakerOpenedDataTB = Static<typeof CircuitBreakerOpenedDataSchema>;
+
+export const LegacyImportDataSchema = Type.Object({
+  sourceFile: Type.String(),
+  content: Type.String(),
+  contentHash: Type.Optional(Type.String()),
+});
+export type LegacyImportDataTB = Static<typeof LegacyImportDataSchema>;
+
+export const EvolutionLoopEventSchema = Type.Union([
+  Type.Object({
+    ts: Type.String(),
+    type: Type.Literal('pain_detected'),
+    data: EvolutionPainDetectedDataSchema,
+  }),
+  Type.Object({
+    ts: Type.String(),
+    type: Type.Literal('pain_recorded'),
+    data: EvolutionPainDetectedDataSchema,
+  }),
+  Type.Object({
+    ts: Type.String(),
+    type: Type.Literal('candidate_created'),
+    data: CandidateCreatedDataSchema,
+  }),
+  Type.Object({
+    ts: Type.String(),
+    type: Type.Literal('principle_promoted'),
+    data: PrinciplePromotedDataSchema,
+  }),
+  Type.Object({
+    ts: Type.String(),
+    type: Type.Literal('principle_deprecated'),
+    data: PrincipleDeprecatedDataSchema,
+  }),
+  Type.Object({
+    ts: Type.String(),
+    type: Type.Literal('principle_rolled_back'),
+    data: PrincipleRolledBackDataSchema,
+  }),
+  Type.Object({
+    ts: Type.String(),
+    type: Type.Literal('circuit_breaker_opened'),
+    data: CircuitBreakerOpenedDataSchema,
+  }),
+  Type.Object({
+    ts: Type.String(),
+    type: Type.Literal('legacy_import'),
+    data: LegacyImportDataSchema,
+  }),
+]);
+export type EvolutionLoopEventTB = Static<typeof EvolutionLoopEventSchema>;

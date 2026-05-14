@@ -1,6 +1,7 @@
 /**
  * Event types for structured logging and daily statistics.
  */
+import { Type, type Static } from '@sinclair/typebox';
 
 // ============== Event Types ==============
 
@@ -33,6 +34,33 @@ export type EventType =
       | 'rulehost_requireApproval'
       | 'rulehost_auto_correct_proposed';
 
+export const EventTypeSchema = Type.Union([
+  Type.Literal('tool_call'),
+  Type.Literal('pain_signal'),
+  Type.Literal('rule_match'),
+  Type.Literal('rule_promotion'),
+  Type.Literal('hook_execution'),
+  Type.Literal('gate_block'),
+  Type.Literal('gate_bypass'),
+  Type.Literal('plan_approval'),
+  Type.Literal('evolution_task'),
+  Type.Literal('empathy_rollback'),
+  Type.Literal('error'),
+  Type.Literal('warn'),
+  Type.Literal('diagnosis_task'),
+  Type.Literal('heartbeat_diagnosis'),
+  Type.Literal('diagnostician_report'),
+  Type.Literal('principle_candidate'),
+  Type.Literal('rule_enforced'),
+  Type.Literal('nocturnal_dreamer_completed'),
+  Type.Literal('nocturnal_artifact_persisted'),
+  Type.Literal('nocturnal_code_candidate_created'),
+  Type.Literal('rulehost_evaluated'),
+  Type.Literal('rulehost_blocked'),
+  Type.Literal('rulehost_requireApproval'),
+  Type.Literal('rulehost_auto_correct_proposed'),
+]);
+
 export type EventCategory =
   | 'success'
   | 'failure'
@@ -57,6 +85,28 @@ export type EventCategory =
       | 'requireApproval'  // Used by: rulehost_requireApproval
       | 'auto_correct';  // Used by: rulehost_auto_correct_proposed (PRI-114)
 
+export const EventCategorySchema = Type.Union([
+  Type.Literal('success'),
+  Type.Literal('failure'),
+  Type.Literal('detected'),
+  Type.Literal('blocked'),
+  Type.Literal('bypassed'),
+  Type.Literal('approved'),
+  Type.Literal('enqueued'),
+  Type.Literal('completed'),
+  Type.Literal('promoted'),
+  Type.Literal('passed'),
+  Type.Literal('changed'),
+  Type.Literal('rolled_back'),
+  Type.Literal('written'),
+  Type.Literal('injected'),
+  Type.Literal('created'),
+  Type.Literal('matched'),
+  Type.Literal('evaluated'),
+  Type.Literal('requireApproval'),
+  Type.Literal('auto_correct'),
+]);
+
 /**
  * Base event structure for JSONL logging.
  */
@@ -77,6 +127,17 @@ export interface EventLogEntry {
   data: Record<string, unknown>;
 }
 
+export const EventLogEntrySchema = Type.Object({
+  ts: Type.String(),
+  date: Type.String(),
+  type: EventTypeSchema,
+  category: EventCategorySchema,
+  sessionId: Type.Optional(Type.String()),
+  workspaceDir: Type.Optional(Type.String()),
+  data: Type.Record(Type.String(), Type.Any()),
+});
+export type EventLogEntryStatic = Static<typeof EventLogEntrySchema>;
+
 // ============== Specific Event Data ==============
 
 export interface ToolCallEventData {
@@ -94,6 +155,19 @@ export interface ToolCallEventData {
   gfiAfter?: number;
 }
 
+export const ToolCallEventDataSchema = Type.Object({
+  toolName: Type.String(),
+  filePath: Type.Optional(Type.String()),
+  error: Type.Optional(Type.String()),
+  errorType: Type.Optional(Type.String()),
+  gfi: Type.Optional(Type.Number()),
+  consecutiveErrors: Type.Optional(Type.Number()),
+  exitCode: Type.Optional(Type.Number()),
+  gfiBefore: Type.Optional(Type.Number()),
+  gfiAfter: Type.Optional(Type.Number()),
+});
+export type ToolCallEventDataStatic = Static<typeof ToolCallEventDataSchema>;
+
 export interface PainSignalEventData {
   score: number;
   source: string;
@@ -110,12 +184,48 @@ export interface PainSignalEventData {
   calibrated_score?: number;
 }
 
+export const PainSignalEventDataSchema = Type.Object({
+  score: Type.Number(),
+  source: Type.String(),
+  eventId: Type.Optional(Type.String()),
+  reason: Type.Optional(Type.String()),
+  isRisky: Type.Optional(Type.Boolean()),
+  origin: Type.Optional(Type.Union([
+    Type.Literal('assistant_self_report'),
+    Type.Literal('user_manual'),
+    Type.Literal('system_infer'),
+  ])),
+  severity: Type.Optional(Type.Union([
+    Type.Literal('mild'),
+    Type.Literal('moderate'),
+    Type.Literal('severe'),
+  ])),
+  confidence: Type.Optional(Type.Number()),
+  detection_mode: Type.Optional(Type.Union([
+    Type.Literal('structured'),
+    Type.Literal('legacy_tag'),
+  ])),
+  deduped: Type.Optional(Type.Boolean()),
+  trigger_text_excerpt: Type.Optional(Type.String()),
+  raw_score: Type.Optional(Type.Number()),
+  calibrated_score: Type.Optional(Type.Number()),
+});
+export type PainSignalEventDataStatic = Static<typeof PainSignalEventDataSchema>;
+
 export interface RuleMatchEventData {
   ruleId: string;
   layer: 'L1' | 'L2' | 'L3';
   severity: number;
   textPreview: string;
 }
+
+export const RuleMatchEventDataSchema = Type.Object({
+  ruleId: Type.String(),
+  layer: Type.Union([Type.Literal('L1'), Type.Literal('L2'), Type.Literal('L3')]),
+  severity: Type.Number(),
+  textPreview: Type.String(),
+});
+export type RuleMatchEventDataStatic = Static<typeof RuleMatchEventDataSchema>;
 
 export interface RulePromotionEventData {
   fingerprint: string;
@@ -125,12 +235,29 @@ export interface RulePromotionEventData {
   avgSimilarity: number;
 }
 
+export const RulePromotionEventDataSchema = Type.Object({
+  fingerprint: Type.String(),
+  ruleId: Type.String(),
+  phrase: Type.String(),
+  sampleCount: Type.Number(),
+  avgSimilarity: Type.Number(),
+});
+export type RulePromotionEventDataStatic = Static<typeof RulePromotionEventDataSchema>;
+
 export interface HookExecutionEventData {
   hook: string;
   sessionId?: string;
   durationMs?: number;
   error?: string;
 }
+
+export const HookExecutionEventDataSchema = Type.Object({
+  hook: Type.String(),
+  sessionId: Type.Optional(Type.String()),
+  durationMs: Type.Optional(Type.Number()),
+  error: Type.Optional(Type.String()),
+});
+export type HookExecutionEventDataStatic = Static<typeof HookExecutionEventDataSchema>;
 
 export interface GateBlockEventData {
   toolName: string;
@@ -141,11 +268,27 @@ export interface GateBlockEventData {
   blockSource?: string;
 }
 
+export const GateBlockEventDataSchema = Type.Object({
+  toolName: Type.String(),
+  filePath: Type.String(),
+  reason: Type.String(),
+  planStatus: Type.Optional(Type.String()),
+  blockSource: Type.Optional(Type.String()),
+});
+export type GateBlockEventDataStatic = Static<typeof GateBlockEventDataSchema>;
+
 export interface GateBypassEventData {
   toolName: string;
   filePath: string;
   bypassType: 'stage4_architect' | 'whitelisted';
 }
+
+export const GateBypassEventDataSchema = Type.Object({
+  toolName: Type.String(),
+  filePath: Type.String(),
+  bypassType: Type.Union([Type.Literal('stage4_architect'), Type.Literal('whitelisted')]),
+});
+export type GateBypassEventDataStatic = Static<typeof GateBypassEventDataSchema>;
 
 export interface PlanApprovalEventData {
   toolName: string;
@@ -154,11 +297,26 @@ export interface PlanApprovalEventData {
   planStatus: string;
 }
 
+export const PlanApprovalEventDataSchema = Type.Object({
+  toolName: Type.String(),
+  filePath: Type.String(),
+  pattern: Type.String(),
+  planStatus: Type.String(),
+});
+export type PlanApprovalEventDataStatic = Static<typeof PlanApprovalEventDataSchema>;
+
 export interface EvolutionTaskEventData {
   taskId: string;
   taskType: string;
   reason: string;
 }
+
+export const EvolutionTaskEventDataSchema = Type.Object({
+  taskId: Type.String(),
+  taskType: Type.String(),
+  reason: Type.String(),
+});
+export type EvolutionTaskEventDataStatic = Static<typeof EvolutionTaskEventDataSchema>;
 
 export interface EmpathyRollbackEventData {
   /** Event ID being rolled back */
@@ -173,6 +331,19 @@ export interface EmpathyRollbackEventData {
   triggeredBy: 'user_command' | 'natural_language' | 'system';
 }
 
+export const EmpathyRollbackEventDataSchema = Type.Object({
+  eventId: Type.String(),
+  originalScore: Type.Number(),
+  originalSessionId: Type.Optional(Type.String()),
+  reason: Type.String(),
+  triggeredBy: Type.Union([
+    Type.Literal('user_command'),
+    Type.Literal('natural_language'),
+    Type.Literal('system'),
+  ]),
+});
+export type EmpathyRollbackEventDataStatic = Static<typeof EmpathyRollbackEventDataSchema>;
+
 /**
  * C: New event data types for diagnostician heartbeat chain observability.
  * Maps heartbeat_injected -> when prompt.ts injects diagnostician tasks into heartbeat
@@ -183,6 +354,13 @@ export interface HeartbeatDiagnosisEventData {
   trigger: 'heartbeat' | 'immediate';
 }
 
+export const HeartbeatDiagnosisEventDataSchema = Type.Object({
+  taskCount: Type.Number(),
+  taskIds: Type.Array(Type.String()),
+  trigger: Type.Union([Type.Literal('heartbeat'), Type.Literal('immediate')]),
+});
+export type HeartbeatDiagnosisEventDataStatic = Static<typeof HeartbeatDiagnosisEventDataSchema>;
+
 /**
  * Maps diagnosis_task_written -> when evolution-worker writes to diagnostician_tasks.json
  */
@@ -191,6 +369,13 @@ export interface DiagnosisTaskEventData {
   painEventId?: string;
   sessionId?: string;
 }
+
+export const DiagnosisTaskEventDataSchema = Type.Object({
+  taskId: Type.String(),
+  painEventId: Type.Optional(Type.String()),
+  sessionId: Type.Optional(Type.String()),
+});
+export type DiagnosisTaskEventDataStatic = Static<typeof DiagnosisTaskEventDataSchema>;
 
 /**
  * Maps diagnostician_report_written -> when diagnostician completes and writes report
@@ -206,6 +391,17 @@ export interface DiagnosticianReportEventData {
   category: 'success' | 'missing_json' | 'incomplete_fields';
 }
 
+export const DiagnosticianReportEventDataSchema = Type.Object({
+  taskId: Type.String(),
+  reportPath: Type.String(),
+  category: Type.Union([
+    Type.Literal('success'),
+    Type.Literal('missing_json'),
+    Type.Literal('incomplete_fields'),
+  ]),
+});
+export type DiagnosticianReportEventDataStatic = Static<typeof DiagnosticianReportEventDataSchema>;
+
 /**
  * Maps principle_candidate_created -> when evolution-worker extracts principle from report
  */
@@ -214,6 +410,17 @@ export interface PrincipleCandidateEventData {
   taskId: string;
   source: 'diagnostician' | 'nocturnal' | 'manual';
 }
+
+export const PrincipleCandidateEventDataSchema = Type.Object({
+  principleId: Type.String(),
+  taskId: Type.String(),
+  source: Type.Union([
+    Type.Literal('diagnostician'),
+    Type.Literal('nocturnal'),
+    Type.Literal('manual'),
+  ]),
+});
+export type PrincipleCandidateEventDataStatic = Static<typeof PrincipleCandidateEventDataSchema>;
 
 /**
  * Maps rule_enforced -> when RuleHost evaluate() returns matched during tool call
@@ -225,6 +432,19 @@ export interface RuleEnforcedEventData {
   toolName: string;
   filePath: string;
 }
+
+export const RuleEnforcedEventDataSchema = Type.Object({
+  ruleId: Type.String(),
+  principleId: Type.String(),
+  enforcement: Type.Union([
+    Type.Literal('warn'),
+    Type.Literal('block'),
+    Type.Literal('requireApproval'),
+  ]),
+  toolName: Type.String(),
+  filePath: Type.String(),
+});
+export type RuleEnforcedEventDataStatic = Static<typeof RuleEnforcedEventDataSchema>;
 
 // ============== Nocturnal Funnel Events (PD-FUNNEL-2.3) ==============
 
@@ -240,6 +460,15 @@ export interface NocturnalDreamerCompletedEventData {
   chainMode: 'trinity' | 'single-reflector';
 }
 
+export const NocturnalDreamerCompletedEventDataSchema = Type.Object({
+  workflowId: Type.String(),
+  principleId: Type.String(),
+  sessionId: Type.String(),
+  candidateCount: Type.Number(),
+  chainMode: Type.Union([Type.Literal('trinity'), Type.Literal('single-reflector')]),
+});
+export type NocturnalDreamerCompletedEventDataStatic = Static<typeof NocturnalDreamerCompletedEventDataSchema>;
+
 /**
  * nocturnal_artifact_persisted — Artifact saved to .state/nocturnal/samples/.
  * Emitted from nocturnal-service.ts persistArtifact() after atomicWriteFileSync.
@@ -249,6 +478,13 @@ export interface NocturnalArtifactPersistedEventData {
   principleId: string;
   persistedPath: string;
 }
+
+export const NocturnalArtifactPersistedEventDataSchema = Type.Object({
+  artifactId: Type.String(),
+  principleId: Type.String(),
+  persistedPath: Type.String(),
+});
+export type NocturnalArtifactPersistedEventDataStatic = Static<typeof NocturnalArtifactPersistedEventDataSchema>;
 
 /**
  * nocturnal_code_candidate_created — Rule implementation candidate persisted.
@@ -260,6 +496,14 @@ export interface NocturnalCodeCandidateCreatedEventData {
   ruleId: string;
   persistedPath: string;
 }
+
+export const NocturnalCodeCandidateCreatedEventDataSchema = Type.Object({
+  implementationId: Type.String(),
+  artifactId: Type.String(),
+  ruleId: Type.String(),
+  persistedPath: Type.String(),
+});
+export type NocturnalCodeCandidateCreatedEventDataStatic = Static<typeof NocturnalCodeCandidateCreatedEventDataSchema>;
 
 // ============== RuleHost Funnel Events (PD-FUNNEL-2.4) ==============
 
@@ -275,6 +519,20 @@ export interface RuleHostEvaluatedEventData {
   ruleId?: string;
 }
 
+export const RuleHostEvaluatedEventDataSchema = Type.Object({
+  toolName: Type.String(),
+  filePath: Type.String(),
+  matched: Type.Boolean(),
+  decision: Type.Union([
+    Type.Literal('allow'),
+    Type.Literal('block'),
+    Type.Literal('requireApproval'),
+    Type.Literal('auto_correct'),
+  ]),
+  ruleId: Type.Optional(Type.String()),
+});
+export type RuleHostEvaluatedEventDataStatic = Static<typeof RuleHostEvaluatedEventDataSchema>;
+
 /**
  * rulehost_blocked — Tool call was blocked by RuleHost.
  * Emitted from gate.ts when hostResult.decision === 'block'.
@@ -286,6 +544,14 @@ export interface RuleHostBlockedEventData {
   ruleId?: string;
 }
 
+export const RuleHostBlockedEventDataSchema = Type.Object({
+  toolName: Type.String(),
+  filePath: Type.String(),
+  reason: Type.String(),
+  ruleId: Type.Optional(Type.String()),
+});
+export type RuleHostBlockedEventDataStatic = Static<typeof RuleHostBlockedEventDataSchema>;
+
 /**
  * rulehost_requireApproval — Tool call requires approval by RuleHost.
  * Emitted from gate.ts when hostResult.decision === 'requireApproval'.
@@ -296,6 +562,14 @@ export interface RuleHostRequireApprovalEventData {
   reason: string;
   ruleId?: string;
 }
+
+export const RuleHostRequireApprovalEventDataSchema = Type.Object({
+  toolName: Type.String(),
+  filePath: Type.String(),
+  reason: Type.String(),
+  ruleId: Type.Optional(Type.String()),
+});
+export type RuleHostRequireApprovalEventDataStatic = Static<typeof RuleHostRequireApprovalEventDataSchema>;
 
 /**
  * rulehost_auto_correct_proposed — RuleHost proposed an auto-correction (PRI-114).
@@ -314,6 +588,19 @@ export interface RuleHostAutoCorrectProposedEventData {
   validationValid: boolean;
 }
 
+export const RuleHostAutoCorrectProposedEventDataSchema = Type.Object({
+  toolName: Type.String(),
+  filePath: Type.String(),
+  ruleId: Type.String(),
+  principleId: Type.Optional(Type.String()),
+  confidence: Type.Number(),
+  reason: Type.String(),
+  applicationMode: Type.Union([Type.Literal('shadow'), Type.Literal('live')]),
+  correctedFields: Type.Array(Type.String()),
+  validationValid: Type.Boolean(),
+});
+export type RuleHostAutoCorrectProposedEventDataStatic = Static<typeof RuleHostAutoCorrectProposedEventDataSchema>;
+
 // ============== Daily Statistics ==============
 
 export interface ToolCallStats {
@@ -323,11 +610,29 @@ export interface ToolCallStats {
   byTool: Record<string, { success: number; failure: number }>;
 }
 
+export const ToolCallStatsSchema = Type.Object({
+  total: Type.Number(),
+  success: Type.Number(),
+  failure: Type.Number(),
+  byTool: Type.Record(Type.String(), Type.Object({
+    success: Type.Number(),
+    failure: Type.Number(),
+  })),
+});
+export type ToolCallStatsStatic = Static<typeof ToolCallStatsSchema>;
+
 export interface ErrorStats {
   total: number;
   byType: Record<string, number>;
   byTool: Record<string, number>;
 }
+
+export const ErrorStatsSchema = Type.Object({
+  total: Type.Number(),
+  byType: Type.Record(Type.String(), Type.Number()),
+  byTool: Type.Record(Type.String(), Type.Number()),
+});
+export type ErrorStatsStatic = Static<typeof ErrorStatsSchema>;
 
 export interface PainStats {
   signalsDetected: number;
@@ -337,6 +642,16 @@ export interface PainStats {
   avgScore: number;
   maxScore: number;
 }
+
+export const PainStatsSchema = Type.Object({
+  signalsDetected: Type.Number(),
+  signalsBySource: Type.Record(Type.String(), Type.Number()),
+  rulesMatched: Type.Record(Type.String(), Type.Number()),
+  candidatesPromoted: Type.Number(),
+  avgScore: Type.Number(),
+  maxScore: Type.Number(),
+});
+export type PainStatsStatic = Static<typeof PainStatsSchema>;
 
 /**
  * Empathy Engine event statistics for tracking emotional signals.
@@ -392,21 +707,66 @@ export interface EmpathyEventStats {
   }[];
 }
 
+export const EmpathyEventStatsSchema = Type.Object({
+  totalEvents: Type.Number(),
+  dedupedCount: Type.Number(),
+  dedupeHitRate: Type.Number(),
+  totalPenaltyScore: Type.Number(),
+  rolledBackScore: Type.Number(),
+  rollbackCount: Type.Number(),
+  bySeverity: Type.Object({
+    mild: Type.Number(),
+    moderate: Type.Number(),
+    severe: Type.Number(),
+  }),
+  scoreBySeverity: Type.Object({
+    mild: Type.Number(),
+    moderate: Type.Number(),
+    severe: Type.Number(),
+  }),
+  byDetectionMode: Type.Object({
+    structured: Type.Number(),
+    legacy_tag: Type.Number(),
+  }),
+  byOrigin: Type.Object({
+    assistant_self_report: Type.Number(),
+    user_manual: Type.Number(),
+    system_infer: Type.Number(),
+  }),
+  confidenceDistribution: Type.Object({
+    high: Type.Number(),
+    medium: Type.Number(),
+    low: Type.Number(),
+  }),
+  dailyTrend: Type.Array(Type.Object({
+    date: Type.String(),
+    count: Type.Number(),
+    score: Type.Number(),
+  })),
+});
+export type EmpathyEventStatsStatic = Static<typeof EmpathyEventStatsSchema>;
+
 export interface GfiStats {
   peak: number;
   samples: number;
   total: number;
-  // TODO: resetCount — requires GFI reset event from session-tracker (not yet wired to event-log)
   resetCount: number;
-  // TODO: hourlyDistribution — requires timestamp bucketing in updateStats (not yet implemented)
-  hourlyDistribution: number[];  // 24 hourly samples
+  hourlyDistribution: number[];
 }
 
-export interface EvolutionStats {
+export const GfiStatsSchema = Type.Object({
+  peak: Type.Number(),
+  samples: Type.Number(),
+  total: Type.Number(),
+  resetCount: Type.Number(),
+  hourlyDistribution: Type.Array(Type.Number()),
+});
+export type GfiStatsStatic = Static<typeof GfiStatsSchema>;
+
+export interface EventEvolutionStats {
   tasksEnqueued: number;
   tasksCompleted: number;
   rulesPromoted: number;
-  // C: Diagnostician heartbeat chain counters
   diagnosisTasksWritten: number;
   heartbeatsInjected: number;
   diagnosticianReportsWritten: number;
@@ -414,17 +774,45 @@ export interface EvolutionStats {
   reportsIncompleteFields: number;
   principleCandidatesCreated: number;
   rulesEnforced: number;
-  // C: Nocturnal funnel counters (PD-FUNNEL-2.3)
   nocturnalDreamerCompleted: number;
   nocturnalTrinityCompleted: number;
   nocturnalArtifactPersisted: number;
   nocturnalCodeCandidateCreated: number;
-  // C: RuleHost funnel counters (PD-FUNNEL-2.4)
   rulehostEvaluated: number;
   rulehostBlocked: number;
   rulehostRequireApproval: number;
   rulehostAutoCorrectProposed: number;
 }
+
+// Backward compatibility alias
+/** @deprecated Use EventEvolutionStats instead. Alias for backward compatibility. */
+export type EvolutionStats = EventEvolutionStats;
+
+export const EventEvolutionStatsSchema = Type.Object({
+  tasksEnqueued: Type.Number(),
+  tasksCompleted: Type.Number(),
+  rulesPromoted: Type.Number(),
+  diagnosisTasksWritten: Type.Number(),
+  heartbeatsInjected: Type.Number(),
+  diagnosticianReportsWritten: Type.Number(),
+  reportsMissingJson: Type.Number(),
+  reportsIncompleteFields: Type.Number(),
+  principleCandidatesCreated: Type.Number(),
+  rulesEnforced: Type.Number(),
+  nocturnalDreamerCompleted: Type.Number(),
+  nocturnalTrinityCompleted: Type.Number(),
+  nocturnalArtifactPersisted: Type.Number(),
+  nocturnalCodeCandidateCreated: Type.Number(),
+  rulehostEvaluated: Type.Number(),
+  rulehostBlocked: Type.Number(),
+  rulehostRequireApproval: Type.Number(),
+  rulehostAutoCorrectProposed: Type.Number(),
+});
+export type EventEvolutionStatsStatic = Static<typeof EventEvolutionStatsSchema>;
+
+// Backward compatibility alias for schema
+/** @deprecated Use EventEvolutionStatsSchema instead. Alias for backward compatibility. */
+export const EvolutionStatsSchema = EventEvolutionStatsSchema;
 
 export interface HookStats {
   total: number;
@@ -434,6 +822,20 @@ export interface HookStats {
   errors: number;
   totalDurationMs: number;
 }
+
+export const HookStatsSchema = Type.Object({
+  total: Type.Number(),
+  success: Type.Number(),
+  failure: Type.Number(),
+  byType: Type.Record(Type.String(), Type.Object({
+    total: Type.Number(),
+    success: Type.Number(),
+    failure: Type.Number(),
+  })),
+  errors: Type.Number(),
+  totalDurationMs: Type.Number(),
+});
+export type HookStatsStatic = Static<typeof HookStatsSchema>;
 
 /**
  * Daily aggregated statistics.
@@ -466,6 +868,25 @@ export interface DailyStats {
   /** Hook execution statistics */
   hooks: HookStats;
 }
+
+export const DailyStatsSchema = Type.Object({
+  date: Type.String(),
+  createdAt: Type.String(),
+  updatedAt: Type.String(),
+  tools: Type.Object({
+    total: Type.Number(),
+    success: Type.Number(),
+    failure: Type.Number(),
+  }),
+  toolCalls: ToolCallStatsSchema,
+  errors: ErrorStatsSchema,
+  pain: PainStatsSchema,
+  empathy: EmpathyEventStatsSchema,
+  gfi: GfiStatsSchema,
+  evolution: EventEvolutionStatsSchema,
+  hooks: HookStatsSchema,
+});
+export type DailyStatsStatic = Static<typeof DailyStatsSchema>;
 
 /**
  * Creates an empty daily stats object.
@@ -544,7 +965,6 @@ export function createEmptyDailyStats(date: string): DailyStats {
       tasksEnqueued: 0,
       tasksCompleted: 0,
       rulesPromoted: 0,
-      // C: Diagnostician heartbeat chain counters
       diagnosisTasksWritten: 0,
       heartbeatsInjected: 0,
       diagnosticianReportsWritten: 0,
@@ -552,12 +972,10 @@ export function createEmptyDailyStats(date: string): DailyStats {
       reportsIncompleteFields: 0,
       principleCandidatesCreated: 0,
       rulesEnforced: 0,
-      // C: Nocturnal funnel counters (PD-FUNNEL-2.3)
       nocturnalDreamerCompleted: 0,
       nocturnalTrinityCompleted: 0,
       nocturnalArtifactPersisted: 0,
       nocturnalCodeCandidateCreated: 0,
-      // C: RuleHost funnel counters (PD-FUNNEL-2.4)
       rulehostEvaluated: 0,
       rulehostBlocked: 0,
       rulehostRequireApproval: 0,

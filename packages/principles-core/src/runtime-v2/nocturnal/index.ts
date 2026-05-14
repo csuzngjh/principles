@@ -1,3 +1,4 @@
+// nocturnal-trinity-types
 export type {
   ArtificerTargetRuleScore,
   ArtificerTargetRuleResolution,
@@ -18,13 +19,35 @@ export type {
   TrinityDraftArtifact,
 } from './nocturnal-trinity-types.js';
 
+export {
+  ArtificerTargetRuleScoreSchema,
+  ArtificerTargetRuleResolutionSchema,
+  TrinityArtificerContextSchema,
+  TrinityDreamerCandidateSchema,
+  TrinityDreamerOutputSchema,
+  PhilosopherRiskAssessmentSchema,
+  Philosopher6DScoresSchema,
+  PhilosopherJudgmentSchema,
+  PhilosopherOutputSchema,
+  TournamentTraceEntrySchema as TrinityTournamentTraceEntrySchema,
+  RejectedAnalysisSchema,
+  ChosenJustificationSchema,
+  ContrastiveAnalysisSchema,
+  TrinityTelemetrySchema,
+  TrinityStageFailureSchema,
+  TrinityResultSchema,
+  TrinityDraftArtifactSchema,
+} from './nocturnal-trinity-types.js';
+
 // Candidate scoring (migrated from openclaw-plugin)
 export type {
   ThresholdValues,
   CandidateScores,
   ScoredCandidate,
-  TournamentResult,
-  TournamentTraceEntry as CandidateTournamentTraceEntry,
+  CandidateTournamentResult,
+  TournamentResult, // backward compatibility alias
+  CandidateTournamentTraceEntry,
+  TournamentTraceEntry, // backward compatibility alias
   ScoringWeights,
   DiversityValidationResult,
   RankCandidatesOptions,
@@ -38,6 +61,15 @@ export {
   validateCandidateDiversity,
   rankCandidates,
   runTournament,
+  ThresholdValuesSchema,
+  CandidateScoresSchema,
+  ScoredCandidateSchema,
+  CandidateTournamentResultSchema,
+  TournamentResultSchema, // backward compatibility alias
+  CandidateTournamentTraceEntrySchema,
+  TournamentTraceEntrySchema, // backward compatibility alias
+  ScoringWeightsSchema,
+  DiversityValidationResultSchema,
 } from './candidate-scoring.js';
 
 // Snapshot contract (migrated from openclaw-plugin)
@@ -54,4 +86,12 @@ export type {
 
 export {
   validateNocturnalSnapshotIngress,
+  NocturnalAssistantTurnSchema,
+  NocturnalUserTurnSchema,
+  NocturnalToolCallSchema,
+  NocturnalPainEventSchema,
+  NocturnalGateBlockSchema,
+  NocturnalUserCorrectionSchema,
+  NocturnalSessionSnapshotSchema,
+  NocturnalSnapshotContractResultSchema,
 } from './snapshot-contract.js';

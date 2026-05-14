@@ -5,6 +5,7 @@
  * Replaces the previous hardcoded cue list in detectCorrectionCue()
  * with a persistent, learnable keyword store.
  */
+import { Type, type Static } from '@sinclair/typebox';
 
 // =========================================================================
 // Keyword Store
@@ -86,3 +87,36 @@ export const CORRECTION_SEED_KEYWORDS: CorrectionKeyword[] = [
   { term: 'please redo', weight: 0.6, source: 'seed', addedAt: '' },
   { term: 'please try again', weight: 0.5, source: 'seed', addedAt: '' },
 ];
+
+// ===== TypeBox Schemas =====
+
+export const CorrectionKeywordSchema = Type.Object({
+  term: Type.String(),
+  weight: Type.Number(),
+  source: Type.Union([
+    Type.Literal('seed'),
+    Type.Literal('llm'),
+    Type.Literal('user'),
+  ]),
+  addedAt: Type.String(),
+  hitCount: Type.Optional(Type.Number()),
+  truePositiveCount: Type.Optional(Type.Number()),
+  falsePositiveCount: Type.Optional(Type.Number()),
+  lastHitAt: Type.Optional(Type.String()),
+});
+export type CorrectionKeywordTB = Static<typeof CorrectionKeywordSchema>;
+
+export const CorrectionKeywordStoreSchema = Type.Object({
+  keywords: Type.Array(CorrectionKeywordSchema),
+  version: Type.Number(),
+  lastOptimizedAt: Type.String(),
+});
+export type CorrectionKeywordStoreTB = Static<typeof CorrectionKeywordStoreSchema>;
+
+export const CorrectionMatchResultSchema = Type.Object({
+  matched: Type.Boolean(),
+  matchedTerms: Type.Array(Type.String()),
+  score: Type.Number(),
+  confidence: Type.Number(),
+});
+export type CorrectionMatchResultTB = Static<typeof CorrectionMatchResultSchema>;
