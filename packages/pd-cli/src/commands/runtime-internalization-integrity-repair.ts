@@ -54,7 +54,7 @@ export async function handleRuntimeInternalizationIntegrityRepair(opts: Internal
   const isDryRun = !opts.confirm;
 
   const remediation = new InternalizationIntegrityRemediation({ workspaceDir });
-  const result = remediation.repair({ dryRun: isDryRun }) as unknown as RemediationResult;
+  const result = remediation.repair({ dryRun: isDryRun });
 
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));

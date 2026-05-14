@@ -127,7 +127,7 @@ export class SchemaConformanceReadModel {
 
     let db: Database.Database | null = null;
     try {
-      db = new Database(this.dbPath, { readonly: true } as Database.Options);
+      db = new Database(this.dbPath, { readonly: true });
 
       for (const [tableName, expected] of Object.entries(EXPECTED_SCHEMA)) {
         const tableInfo = db.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];

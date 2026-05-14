@@ -137,7 +137,7 @@ function pd(args: string[], workspace: string, timeoutMs = 300_000): string {
       throw new Error(`pd CLI not found at ${cliPath} — run: npm run build --workspace=@principles/pd-cli`, { cause: err });
     }
     if (err && typeof err === 'object' && 'stdout' in err) {
-      return String((err as { stdout: unknown }).stdout);
+      return String((err).stdout);
     }
     throw err;
   }

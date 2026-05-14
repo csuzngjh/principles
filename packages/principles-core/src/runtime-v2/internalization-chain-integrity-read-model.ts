@@ -76,7 +76,7 @@ export class InternalizationChainIntegrityReadModel {
 
     let db: Database.Database | null = null;
     try {
-      db = new Database(this.dbPath, { readonly: true } as Database.Options);
+      db = new Database(this.dbPath, { readonly: true });
 
       const consumedCandidates = db.prepare(
         "SELECT candidate_id, task_id, source_run_id FROM principle_candidates WHERE status = 'consumed'"

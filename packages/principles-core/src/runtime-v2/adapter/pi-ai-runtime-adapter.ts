@@ -190,14 +190,14 @@ interface RunState {
 }
 
 const OUTPUT_SCHEMA_REGISTRY = new Map<string, TSchema>([
-  ['diagnostician-output-v1', DiagnosticianOutputV1Schema as TSchema],
-  ['dreamer-output-v1', DreamerOutputV1Schema as TSchema],
-  ['philosopher-output-v1', PhilosopherOutputV1Schema as TSchema],
-  ['scribe-output-v1', ScribeOutputV1Schema as TSchema],
-  ['artificer-output-v1', ArtificerOutputV1Schema as TSchema],
-  ['evaluator-output-v1', EvaluatorOutputV1Schema as TSchema],
-  ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema as TSchema],
-  ['trainer-output-v1', TrainerOutputV1Schema as TSchema],
+  ['diagnostician-output-v1', DiagnosticianOutputV1Schema],
+  ['dreamer-output-v1', DreamerOutputV1Schema],
+  ['philosopher-output-v1', PhilosopherOutputV1Schema],
+  ['scribe-output-v1', ScribeOutputV1Schema],
+  ['artificer-output-v1', ArtificerOutputV1Schema],
+  ['evaluator-output-v1', EvaluatorOutputV1Schema],
+  ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema],
+  ['trainer-output-v1', TrainerOutputV1Schema],
 ]);
 
 export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
