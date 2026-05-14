@@ -6,62 +6,68 @@
  * cron/jobs.json using safe file operations (lock + atomic write).
  */
 
+import { Type, type Static } from '@sinclair/typebox';
+
 // =========================================================================
 // PDTaskSpec — Declaration Schema
 // =========================================================================
 
 /** Cron schedule for PD tasks (only "every" kind supported for now) */
-export interface PDTaskSchedule {
-  kind: 'every';
-  everyMs: number;
-}
+export const PDTaskScheduleSchema = Type.Object({
+  kind: Type.Literal('every'),
+  everyMs: Type.Number({ minimum: 1000 }),
+});
+export interface PDTaskSchedule extends Static<typeof PDTaskScheduleSchema> {}
 
 /** Execution configuration for a PD task */
-export interface PDTaskExecution {
+export const PDTaskExecutionSchema = Type.Object({
   /** Which prompt builder to use */
-  promptTemplate: string;
+  promptTemplate: Type.String({ minLength: 1 }),
   /** Execution timeout in seconds (default: 120) */
-  timeoutSeconds?: number;
+  timeoutSeconds: Type.Optional(Type.Number({ minimum: 1 })),
   /** Use lightweight context to save tokens */
-  lightContext?: boolean;
+  lightContext: Type.Optional(Type.Boolean()),
   /** Restrict available tools */
-  toolsAllow?: string[];
-}
+  toolsAllow: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+});
+export interface PDTaskExecution extends Static<typeof PDTaskExecutionSchema> {}
 
 /** Delivery configuration for task results */
-export interface PDTaskDelivery {
-  mode: 'none' | 'announce';
-  channel?: string;
-  to?: string;
-}
+export const PDTaskDeliverySchema = Type.Object({
+  mode: Type.Union([Type.Literal('none'), Type.Literal('announce')]),
+  channel: Type.Optional(Type.String({ minLength: 1 })),
+  to: Type.Optional(Type.String({ minLength: 1 })),
+});
+export interface PDTaskDelivery extends Static<typeof PDTaskDeliverySchema> {}
 
 /** Metadata — not synced to cron, used for health tracking */
-export interface PDTaskMeta {
+export const PDTaskMetaSchema = Type.Object({
   /** When this task was first declared */
-  createdAtMs?: number;
+  createdAtMs: Type.Optional(Type.Number({ minimum: 0 })),
   /** Last successful reconcile timestamp */
-  lastSyncedAtMs?: number;
+  lastSyncedAtMs: Type.Optional(Type.Number({ minimum: 0 })),
   /** The cron job ID from last sync */
-  lastSyncedJobId?: string;
+  lastSyncedJobId: Type.Optional(Type.String({ minLength: 1 })),
   /** Last sync status */
-  lastSyncStatus?: 'ok' | 'error';
+  lastSyncStatus: Type.Optional(Type.Union([Type.Literal('ok'), Type.Literal('error')])),
   /** Last sync error message */
-  lastSyncError?: string;
+  lastSyncError: Type.Optional(Type.String({ minLength: 1 })),
   /** Consecutive failure count (from CronJobState.consecutiveErrors) */
-  consecutiveFailCount?: number;
+  consecutiveFailCount: Type.Optional(Type.Number({ minimum: 0 })),
   /** Timestamp of last failure */
-  lastFailedAtMs?: number;
+  lastFailedAtMs: Type.Optional(Type.Number({ minimum: 0 })),
   /** Whether this task was auto-disabled due to health issues */
-  autoDisabled?: boolean;
+  autoDisabled: Type.Optional(Type.Boolean()),
   /** When the task was auto-disabled */
-  autoDisabledAt?: number;
+  autoDisabledAt: Type.Optional(Type.Number({ minimum: 0 })),
   /** Reason for auto-disable */
-  autoDisabledReason?: string;
+  autoDisabledReason: Type.Optional(Type.String({ minLength: 1 })),
   /** Last manual trigger timestamp */
-  lastTriggeredAtMs?: number;
+  lastTriggeredAtMs: Type.Optional(Type.Number({ minimum: 0 })),
   /** Last manual trigger status */
-  lastTriggerStatus?: 'succeeded' | 'failed' | 'pending';
-}
+  lastTriggerStatus: Type.Optional(Type.Union([Type.Literal('succeeded'), Type.Literal('failed'), Type.Literal('pending')])),
+});
+export interface PDTaskMeta extends Static<typeof PDTaskMetaSchema> {}
 
 /**
  * PDTaskSpec — A declarative specification for a PD background task.
@@ -69,28 +75,29 @@ export interface PDTaskMeta {
  * This is the source of truth. The reconciler translates these into
  * CronJob entries in OpenClaw's cron/jobs.json.
  */
-export interface PDTaskSpec {
+export const PDTaskSpecSchema = Type.Object({
   /** Stable unique ID — never changes across versions */
-  id: string;
+  id: Type.String({ minLength: 1 }),
   /** Human-readable name — becomes the CronJob name (must start with "PD ") */
-  name: string;
+  name: Type.String({ minLength: 1 }),
   /** Description shown to users */
-  description: string;
+  description: Type.String({ minLength: 1 }),
   /** Whether this task should be active */
-  enabled: boolean;
+  enabled: Type.Boolean(),
   /** Schema version — bumped when prompt/config changes require re-sync */
-  version: string;
+  version: Type.String({ minLength: 1 }),
   /** Cron schedule (only "every" kind supported for now) */
-  schedule: PDTaskSchedule;
+  schedule: PDTaskScheduleSchema,
   /** OpenClaw agent ID to run under (default: "main") */
-  agentId?: string;
+  agentId: Type.Optional(Type.String({ minLength: 1 })),
   /** Execution configuration */
-  execution: PDTaskExecution;
+  execution: PDTaskExecutionSchema,
   /** Delivery configuration */
-  delivery: PDTaskDelivery;
+  delivery: PDTaskDeliverySchema,
   /** Metadata — not synced to cron */
-  meta?: PDTaskMeta;
-}
+  meta: Type.Optional(PDTaskMetaSchema),
+});
+export interface PDTaskSpec extends Static<typeof PDTaskSpecSchema> {}
 
 // =========================================================================
 // Builtin PD Tasks

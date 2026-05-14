@@ -191,13 +191,22 @@ flowchart TD
 | PrincipleTreeLedger | plugin | `@principles/core` | ✅ Done |
 | TemplateGenerator | plugin | `@principles/core` | ✅ Done |
 
-### 5.2 进行中迁移（ADR-0002）
+### 5.2 已完成迁移（Phase 1-3）
 
 | 组件 | 原位置 | 目标位置 | 状态 |
 |------|--------|---------|------|
 | RuleHost contracts | plugin | `@principles/core` | ✅ Done (PRI-42) |
 | RoutingPolicy | plugin | `@principles/core` | ✅ Done (PRI-43) |
 | LifecycleMetrics | plugin | `@principles/core` | ✅ Done (PRI-42) |
+| Principle Schema / Rule / Implementation | plugin | `@principles/core/runtime-v2/types` | ✅ Done |
+| Evolution Types | plugin | `@principles/core/runtime-v2/evolution` | ✅ Done |
+| Correction Types | plugin | `@principles/core/runtime-v2/correction` | ✅ Done |
+| Nocturnal Trinity Types | plugin | `@principles/core/runtime-v2/nocturnal` | ✅ Done |
+| Nocturnal Candidate Scoring | plugin | `@principles/core/runtime-v2/nocturnal` | ✅ Done |
+| Nocturnal Snapshot Contract | plugin | `@principles/core/runtime-v2/nocturnal` | ✅ Done |
+| Event Types | plugin | `@principles/core/runtime-v2/types` | ✅ Done |
+| Principle Tree Data Structures (PrincipleDependency, PrincipleValueMetrics, etc.) | plugin | `@principles/core/runtime-v2/types` | ✅ Done |
+| Queue Types / Hygiene Types / Runtime Summary Types | plugin | `@principles/core/runtime-v2/types` | ✅ Done |
 
 ### 5.3 待迁移
 
@@ -205,6 +214,7 @@ flowchart TD
 |------|--------|---------|------|
 | Store modularization | `@principles/core` | `@principles/core/store/` | PRI-47 |
 | Artifact store cleanup | plugin | `@principles/core` | Post M6 |
+| RuleHost core logic | plugin | `@principles/core` | ADR-0002 |
 
 ---
 
