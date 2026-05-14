@@ -1,22 +1,20 @@
+import { useTranslation } from "react-i18next";
 import { useAutoRefresh } from "../hooks/useAutoRefresh.js";
 import { fetchGateStats, fetchGateBlocks } from "../api.js";
 import type { GateStats, GateBlockItem } from "../api.js";
-import { COLORS, REFRESH_BAR, SHADOW_CARD } from "../styles/constants.js";
+import { PageHeader } from "../components/page-header.js";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.js";
+import { Badge } from "../components/ui/badge.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 
-const STATUS_COLORS: Record<string, string> = {
-  healthy: COLORS.success,
-  warning: COLORS.warning,
-  critical: COLORS.danger,
-};
-
-const STAGE_COLORS: Record<string, string> = {
-  stable: COLORS.success,
-  elevated: COLORS.warning,
-  critical: COLORS.danger,
-  saturated: "#722ed1",
+const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
+  healthy: "default",
+  warning: "secondary",
+  critical: "destructive",
 };
 
 export function GatesPage() {
+  const { t } = useTranslation();
   const stats = useAutoRefresh<GateStats>(fetchGateStats, 30000);
   const blocks = useAutoRefresh<GateBlockItem[]>(() => fetchGateBlocks(50), 30000);
 
@@ -26,100 +24,151 @@ export function GatesPage() {
   };
 
   if (stats.error && !stats.data) {
-    return <div style={{ padding: "24px", color: COLORS.danger }}>Error: {stats.error}</div>;
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <p className="text-destructive">{stats.error}</p>
+        </CardContent>
+      </Card>
+    );
   }
 
   if (!stats.data) {
-    return <div style={{ padding: "40px", textAlign: "center", color: COLORS.textMuted }}>Loading...</div>;
+    return (
+      <div>
+        <Skeleton className="h-8 w-48 mb-6" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="p-6">
+                <Skeleton className="h-4 w-24 mb-3" />
+                <Skeleton className="h-8 w-20 mb-2" />
+                <Skeleton className="h-3 w-32" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   const statsData = stats.data;
 
   return (
     <div>
-      <div style={REFRESH_BAR}>
-        <h1 style={{ margin: 0 }}>Gate Monitor</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          {stats.lastUpdated && (
-            <span style={{ fontSize: "12px", color: COLORS.textMuted }}>
-              Updated: {new Date(stats.lastUpdated).toLocaleTimeString()}
-            </span>
-          )}
-          <button
-            onClick={refreshAll}
-            style={{
-              border: "1px solid #d9d9d9",
-              borderRadius: "6px",
-              padding: "6px 12px",
-              fontSize: "13px",
-              cursor: "pointer",
-              backgroundColor: "#fff",
-            }}
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title={t("pages:gates.title")}
+        description={t("pages:gates.description")}
+        onRefresh={refreshAll}
+        lastUpdated={stats.lastUpdated ? new Date(stats.lastUpdated) : undefined}
+      />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "16px", marginBottom: "24px" }}>
-        <div style={{ ...SHADOW_CARD, borderLeft: `4px solid ${STATUS_COLORS[statsData.trust.status]}` }}>
-          <div style={{ fontSize: "14px", color: COLORS.textMuted, marginBottom: "8px" }}>Trust Status</div>
-          <div style={{ fontSize: "24px", fontWeight: "bold", color: STATUS_COLORS[statsData.trust.status], textTransform: "capitalize" }}>
-            {statsData.trust.status}
-          </div>
-          <div style={{ fontSize: "13px", color: COLORS.textSecondary, marginTop: "4px" }}>Stage: {statsData.trust.stage} | Score: {statsData.trust.score}</div>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <Card className="border-l-4 border-l-primary">
+          <CardContent className="p-6">
+            <p className="text-sm text-muted-foreground mb-2">
+              {t("pages:gates.trustStatus")}
+            </p>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-bold capitalize">
+                {statsData.trust.status}
+              </span>
+              <Badge variant={STATUS_VARIANT[statsData.trust.status] ?? "secondary"}>
+                {statsData.trust.stage}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              Score: {statsData.trust.score}
+            </p>
+          </CardContent>
+        </Card>
 
-        <div style={{ ...SHADOW_CARD, borderLeft: `4px solid ${STAGE_COLORS[statsData.gfi.stage] ?? '#999'}` }}>
-          <div style={{ fontSize: "14px", color: COLORS.textMuted, marginBottom: "8px" }}>GFI</div>
-          <div style={{ fontSize: "24px", fontWeight: "bold" }}>{statsData.gfi.current}</div>
-          <div style={{ fontSize: "13px", color: STAGE_COLORS[statsData.gfi.stage] ?? '#999', marginTop: "4px", textTransform: "capitalize" }}>
-            {statsData.gfi.stage}
-          </div>
-          <div style={{ fontSize: "12px", color: COLORS.textMuted, marginTop: "4px" }}>Peak: {statsData.gfi.peakToday} | Threshold: {statsData.gfi.threshold}</div>
-        </div>
+        <Card className="border-l-4 border-l-amber-500">
+          <CardContent className="p-6">
+            <p className="text-sm text-muted-foreground mb-2">GFI</p>
+            <div className="text-2xl font-bold">{statsData.gfi.current}</div>
+            <Badge variant="secondary" className="mt-1 capitalize">
+              {statsData.gfi.stage}
+            </Badge>
+            <p className="text-xs text-muted-foreground mt-2">
+              Peak: {statsData.gfi.peakToday} | Threshold: {statsData.gfi.threshold}
+            </p>
+          </CardContent>
+        </Card>
 
-        <div style={SHADOW_CARD}>
-          <div style={{ fontSize: "14px", color: COLORS.textMuted, marginBottom: "8px" }}>Today</div>
-          <div style={{ fontSize: "13px" }}>GFI Blocks: <strong>{statsData.today.gfiBlocks}</strong></div>
-          <div style={{ fontSize: "13px" }}>Stage Blocks: <strong>{statsData.today.stageBlocks}</strong></div>
-          <div style={{ fontSize: "13px" }}>Bypass Attempts: <strong>{statsData.today.bypassAttempts}</strong></div>
-        </div>
+        <Card>
+          <CardContent className="p-6">
+            <p className="text-sm text-muted-foreground mb-2">{t("pages:gates.todayBlocks")}</p>
+            <div className="space-y-1 text-sm">
+              <div>
+                GFI Blocks: <strong>{statsData.today.gfiBlocks}</strong>
+              </div>
+              <div>
+                Stage Blocks: <strong>{statsData.today.stageBlocks}</strong>
+              </div>
+              <div>
+                Bypass Attempts: <strong>{statsData.today.bypassAttempts}</strong>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {Object.keys(statsData.gfi.sources).length > 0 && (
-        <>
-          <h2 style={{ marginBottom: "16px" }}>GFI Sources</h2>
-          <div style={SHADOW_CARD}>
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>{t("pages:gates.sourceBreakdown")}</CardTitle>
+          </CardHeader>
+          <CardContent>
             {Object.entries(statsData.gfi.sources).map(([source, value]) => (
-              <div key={source} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid #f0f0f0" }}>
-                <span style={{ fontSize: "14px" }}>{source}</span>
-                <span style={{ fontSize: "14px", fontWeight: "bold" }}>{value}</span>
+              <div
+                key={source}
+                className="flex justify-between py-2 border-b border-border last:border-0"
+              >
+                <span className="text-sm">{source}</span>
+                <span className="text-sm font-bold">{value}</span>
               </div>
             ))}
-          </div>
-        </>
+          </CardContent>
+        </Card>
       )}
 
-      <h2 style={{ marginTop: "24px", marginBottom: "16px" }}>Gate Blocks</h2>
-      {blocks.error && <div style={{ color: COLORS.danger, marginBottom: "12px" }}>Error: {blocks.error}</div>}
-      {!blocks.data || blocks.data.length === 0 ? (
-        <div style={{ color: COLORS.textMuted, padding: "16px" }}>No gate blocks recorded</div>
-      ) : (
-        blocks.data.map((block, i) => (
-          <div key={i} style={{ ...SHADOW_CARD, borderLeft: "4px solid #ff4d4f" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontWeight: "bold" }}>{block.toolName}</span>
-              <span style={{ fontSize: "12px", color: COLORS.textMuted }}>{new Date(block.timestamp).toLocaleString()}</span>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("pages:gates.blockHistory")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {blocks.error && (
+            <p className="text-destructive mb-3">{blocks.error}</p>
+          )}
+          {!blocks.data || blocks.data.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              {t("components:zoneSection.empty")}
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {blocks.data.map((block, i) => (
+                <Card key={i} className="border-l-4 border-l-destructive">
+                  <CardContent className="p-4">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-sm">{block.toolName}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(block.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm">{block.reason}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Type: {block.gateType} | GFI: {block.gfi} | Trust Stage:{" "}
+                      {block.trustStage}
+                      {block.filePath && <span> | File: {block.filePath}</span>}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
-            <div style={{ marginTop: "8px", fontSize: "14px" }}>{block.reason}</div>
-            <div style={{ marginTop: "4px", fontSize: "12px", color: COLORS.textMuted }}>
-              Type: {block.gateType} | GFI: {block.gfi} | Trust Stage: {block.trustStage}
-              {block.filePath && <span> | File: {block.filePath}</span>}
-            </div>
-          </div>
-        ))
-      )}
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

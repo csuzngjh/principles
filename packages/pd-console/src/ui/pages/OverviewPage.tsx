@@ -1,112 +1,180 @@
+import { useTranslation } from "react-i18next";
 import { useAutoRefresh } from "../hooks/useAutoRefresh.js";
 import { fetchOverview } from "../api.js";
 import type { OverviewData } from "../api.js";
-import { COLORS, REFRESH_BAR, SHADOW_CARD } from "../styles/constants.js";
+import { PageHeader } from "../components/page-header.js";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.js";
+import { Badge } from "../components/ui/badge.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 
-const GRID_STYLE: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-  gap: "16px",
-  marginBottom: "24px",
+const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive"> = {
+  healthy: "default",
+  degraded: "secondary",
+  error: "destructive",
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  healthy: COLORS.success,
-  degraded: COLORS.warning,
-  error: COLORS.danger,
+const STATUS_LABELS: Record<string, string> = {
+  healthy: "健康",
+  degraded: "降级",
+  error: "错误",
 };
 
 function HealthCard({ health }: { health: OverviewData["health"] }) {
+  const { t } = useTranslation();
+  const statusColor = STATUS_COLORS[health.status] || "secondary";
+
   return (
-    <div style={{ ...SHADOW_CARD, borderLeft: `4px solid ${STATUS_COLORS[health.status] ?? '#999'}` }}>
-      <div style={{ fontSize: "14px", color: COLORS.textMuted, marginBottom: "8px" }}>Health Status</div>
-      <div style={{ fontSize: "24px", fontWeight: "bold", color: STATUS_COLORS[health.status] ?? '#999', textTransform: "capitalize" }}>
-        {health.status}
-      </div>
-      <div style={{ marginTop: "8px", fontSize: "13px", color: COLORS.textSecondary }}>
-        GFI: {health.gfi.current} ({health.gfi.stage})
-      </div>
-    </div>
+    <Card className="border-l-4 border-primary mb-6">
+      <CardContent className="p-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground mb-2">
+              {t("pages:overview.health")}
+            </p>
+            <div className="flex items-center gap-3">
+              <span className="text-2xl font-bold capitalize">
+                {STATUS_LABELS[health.status] || health.status}
+              </span>
+              <Badge variant={statusColor}>{health.status.toUpperCase()}</Badge>
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              GFI: {health.gfi.current} ({health.gfi.stage})
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
 function StatCard({ label, value }: { label: string; value: number | string }) {
   return (
-    <div style={SHADOW_CARD}>
-      <div style={{ fontSize: "14px", color: COLORS.textMuted, marginBottom: "4px" }}>{label}</div>
-      <div style={{ fontSize: "28px", fontWeight: "bold" }}>{value}</div>
+    <Card className="transition-all duration-200 hover:shadow-md">
+      <CardContent className="p-6">
+        <p className="text-sm text-muted-foreground mb-2">{label}</p>
+        <p className="text-3xl font-bold">{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function LoadingSkeleton() {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <Skeleton className="h-8 w-32" />
+        <div className="flex items-center gap-4">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-8 w-20" />
+        </div>
+      </div>
+      <Card className="border-l-4 border-primary mb-6">
+        <CardContent className="p-6">
+          <Skeleton className="h-4 w-24 mb-4" />
+          <Skeleton className="h-8 w-32 mb-2" />
+          <Skeleton className="h-4 w-48" />
+        </CardContent>
+      </Card>
+      <Skeleton className="h-6 w-40 mb-4" />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Card key={i}>
+            <CardContent className="p-6">
+              <Skeleton className="h-4 w-24 mb-2" />
+              <Skeleton className="h-8 w-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
 
 export function OverviewPage() {
-  const { data, error, loading, refresh, lastUpdated } = useAutoRefresh<OverviewData>(fetchOverview, 30000);
+  const { t } = useTranslation();
+  const { data, error, loading, refresh, lastUpdated } = useAutoRefresh<OverviewData>(
+    fetchOverview,
+    30000
+  );
 
   if (loading && !data) {
-    return <div style={{ padding: "40px", textAlign: "center", color: COLORS.textMuted }}>Loading...</div>;
+    return <LoadingSkeleton />;
   }
 
   if (error && !data) {
-    return <div style={{ padding: "24px", color: COLORS.danger }}>Error: {error}</div>;
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <p className="text-destructive">{t("components:errorBoundary.title")}</p>
+          <p className="text-muted-foreground mt-2">{error}</p>
+        </CardContent>
+      </Card>
+    );
   }
 
   if (!data) {
-    return <div style={{ padding: "24px", color: COLORS.textMuted }}>No data available</div>;
+    return (
+      <Card>
+        <CardContent className="p-6 text-center">
+          <p className="text-muted-foreground">{t("common:loading")}</p>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
     <div>
-      <div style={REFRESH_BAR}>
-        <h1 style={{ margin: 0 }}>Overview</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          {lastUpdated && (
-            <span style={{ fontSize: "12px", color: COLORS.textMuted }}>
-              Updated: {new Date(lastUpdated).toLocaleTimeString()}
-            </span>
-          )}
-          <button
-            onClick={refresh}
-            disabled={loading}
-            style={{
-              border: "1px solid #d9d9d9",
-              borderRadius: "6px",
-              padding: "6px 12px",
-              fontSize: "13px",
-              cursor: loading ? "not-allowed" : "pointer",
-              backgroundColor: "#fff",
-            }}
-          >
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title={t("pages:overview.title")}
+        description={t("pages:overview.description")}
+        onRefresh={refresh}
+        lastUpdated={lastUpdated ? new Date(lastUpdated) : undefined}
+      />
 
       <HealthCard health={data.health} />
 
-      <h2 style={{ marginTop: "24px", marginBottom: "16px" }}>Summary</h2>
-      <div style={GRID_STYLE}>
-        <StatCard label="Principles" value={data.summary.principleEventCount} />
-        <StatCard label="Pain Events" value={data.summary.painEvents} />
-        <StatCard label="Pending Samples" value={data.summary.pendingSamples} />
-        <StatCard label="Approved Samples" value={data.summary.approvedSamples} />
-        <StatCard label="Task Outcomes" value={data.summary.taskOutcomes} />
-        <StatCard label="Gate Blocks" value={data.summary.gateBlocks} />
-      </div>
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>{t("pages:overview.stats")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <StatCard label={t("pages:overview.principles")} value={data.summary.principleEventCount} />
+            <StatCard label="Pain Events" value={data.summary.painEvents} />
+            <StatCard label="Pending Samples" value={data.summary.pendingSamples} />
+            <StatCard label="Approved Samples" value={data.summary.approvedSamples} />
+            <StatCard label="Task Outcomes" value={data.summary.taskOutcomes} />
+            <StatCard label="Gate Blocks" value={data.summary.gateBlocks} />
+          </div>
+        </CardContent>
+      </Card>
 
-      <h2 style={{ marginTop: "24px", marginBottom: "16px" }}>Principles Breakdown</h2>
-      <div style={GRID_STYLE}>
-        <StatCard label="Active" value={data.health.principles.active} />
-        <StatCard label="Candidate" value={data.health.principles.candidate} />
-        <StatCard label="Probation" value={data.health.principles.probation} />
-        <StatCard label="Deprecated" value={data.health.principles.deprecated} />
-      </div>
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>{t("pages:overview.principles")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard label="Active" value={data.health.principles.active} />
+            <StatCard label="Candidate" value={data.health.principles.candidate} />
+            <StatCard label="Probation" value={data.health.principles.probation} />
+            <StatCard label="Deprecated" value={data.health.principles.deprecated} />
+          </div>
+        </CardContent>
+      </Card>
 
-      <h2 style={{ marginTop: "24px", marginBottom: "16px" }}>Queue</h2>
-      <div style={GRID_STYLE}>
-        <StatCard label="Pending" value={data.health.queue.pending} />
-        <StatCard label="In Progress" value={data.health.queue.inProgress} />
-        <StatCard label="Completed" value={data.health.queue.completed} />
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("pages:overview.queue")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-3 gap-4">
+            <StatCard label={t("common:pending")} value={data.health.queue.pending} />
+            <StatCard label="In Progress" value={data.health.queue.inProgress} />
+            <StatCard label={t("common:completed")} value={data.health.queue.completed} />
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
