@@ -1,84 +1,60 @@
+import * as path from 'path';
 import {
   OperatorHealthReadModel,
   PainChainReadModel,
   PruningReadModel,
   RuntimeStateManager,
 } from '@principles/core/runtime-v2';
-import type { SamplePreview } from '../types/index.js';
-
-export interface OverviewHealthOutput {
-  status: 'healthy' | 'degraded' | 'error';
-  gfi: {
-    current: number;
-    stage: string;
-    peakToday: number;
-    threshold: number;
-  };
-  trust: {
-    stage: number;
-    score: number;
-  };
-  principles: {
-    candidate: number;
-    probation: number;
-    active: number;
-    deprecated: number;
-  };
-  queue: {
-    pending: number;
-    inProgress: number;
-    completed: number;
-  };
-}
-
-export interface OverviewOutput {
-  workspaceDir: string;
-  generatedAt: string;
-  dataFreshness: 'fresh' | 'stale' | 'error';
-
-  summary: {
-    repeatErrorRate: number;
-    userCorrectionRate: number;
-    pendingSamples: number;
-    approvedSamples: number;
-    painEvents: number;
-    principleEventCount: number;
-    gateBlocks: number;
-    taskOutcomes: number;
-  };
-
-  health: OverviewHealthOutput;
-
-  dailyTrend: {
-    day: string;
-    toolCalls: number;
-    failures: number;
-    userCorrections: number;
-    painEvents: number;
-  }[];
-
-  topRegressions: {
-    toolName: string;
-    errorType: string;
-    occurrences: number;
-  }[];
-
-  sampleQueue: {
-    counters: Record<string, number>;
-    preview: SamplePreview[];
-  };
-}
+import { EventLogReadModel } from './EventLogReadModel.js';
+import type { OverviewOutput, OverviewHealthOutput } from '../types/index.js';
 
 export class OverviewConsoleModel {
   private readonly workspaceDir: string;
+  private readonly stateDir: string;
   private healthReadModel: OperatorHealthReadModel | null = null;
   private painChainReadModel: PainChainReadModel | null = null;
   private pruningReadModel: PruningReadModel | null = null;
   private stateManager: RuntimeStateManager | null = null;
+  private eventLogReadModel: EventLogReadModel | null = null;
   private ownsHealthReadModel = false;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
+    this.stateDir = path.join(workspaceDir, '.state');
+  }
+
+  async getHealth(): Promise<OverviewHealthOutput> {
+    const snapshot = await this.getHealthReadModel().getSnapshot();
+    const pruningSummary = this.getPruningReadModel().getHealthSummary();
+    const { byStatus } = pruningSummary;
+
+    const gfiSnapshot = snapshot.gfi;
+    const activeGfi = gfiSnapshot.active;
+
+    return {
+      status: snapshot.overallStatus,
+      gfi: {
+        current: activeGfi?.currentGfi ?? 0,
+        stage: activeGfi?.stage ?? 'stable',
+        peakToday: activeGfi?.dailyGfiPeak ?? 0,
+        threshold: activeGfi?.policy?.criticalThreshold ?? 0,
+      },
+      trust: {
+        stage: 0,
+        score: 0,
+      },
+      principles: {
+        candidate: byStatus.candidate ?? 0,
+        probation: byStatus.probation ?? 0,
+        active: byStatus.active ?? 0,
+        deprecated: byStatus.deprecated ?? 0,
+      },
+      queue: {
+        pending: snapshot.candidateLedger.orphanCandidateCount,
+        inProgress: await this.getInProgressCount(),
+        completed: snapshot.totalTaskCount,
+      },
+    };
   }
 
   async getOverview(_days?: number): Promise<OverviewOutput> {
@@ -91,6 +67,12 @@ export class OverviewConsoleModel {
 
     const gfiSnapshot = snapshot.gfi;
     const activeGfi = gfiSnapshot.active;
+
+    const eventLog = this.getEventLogReadModel();
+    const [gateBlocksToday, painEventsToday] = await Promise.all([
+      eventLog.countEventsByTypeToday('gate_block'),
+      eventLog.countEventsByTypeToday('pain_signal'),
+    ]);
 
     const health: OverviewHealthOutput = {
       status: snapshot.overallStatus,
@@ -112,7 +94,7 @@ export class OverviewConsoleModel {
       },
       queue: {
         pending: snapshot.candidateLedger.orphanCandidateCount,
-        inProgress: 0,
+        inProgress: await this.getInProgressCount(),
         completed: snapshot.totalTaskCount,
       },
     };
@@ -126,13 +108,13 @@ export class OverviewConsoleModel {
         userCorrectionRate: 0,
         pendingSamples: byStatus.candidate ?? 0,
         approvedSamples: byStatus.active ?? 0,
-        painEvents: snapshot.painChain.failureCategory ? 1 : 0,
+        painEvents: painEventsToday,
         principleEventCount: principleActive + principlePending,
-        gateBlocks: 0,
+        gateBlocks: gateBlocksToday,
         taskOutcomes: snapshot.totalTaskCount,
       },
       health,
-      dailyTrend: [],
+      dailyTrend: await this.getDailyTrend(),
       topRegressions: [],
       sampleQueue: {
         counters: byStatus,
@@ -141,9 +123,41 @@ export class OverviewConsoleModel {
     };
   }
 
-  async getHealth(): Promise<OverviewHealthOutput> {
-    const overview = await this.getOverview();
-    return overview.health;
+  private async getInProgressCount(): Promise<number> {
+    try {
+      const mgr = this.getStateManager();
+      const tasks = await mgr.listTasks({ status: 'leased' });
+      return tasks.length;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async getDailyTrend(): Promise<OverviewOutput['dailyTrend']> {
+    const eventLog = this.getEventLogReadModel();
+    const trend: OverviewOutput['dailyTrend'] = [];
+
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const [day] = date.toISOString().split('T');
+
+      const [toolCalls, failures, painEvents] = await Promise.all([
+        eventLog.countEventsByTypeAndDate('tool_call', day),
+        eventLog.countEventsByCategoryAndDate('failure', day),
+        eventLog.countEventsByTypeAndDate('pain_signal', day),
+      ]);
+
+      trend.push({
+        day,
+        toolCalls,
+        failures,
+        userCorrections: 0,
+        painEvents,
+      });
+    }
+
+    return trend;
   }
 
   dispose(): void {
@@ -161,6 +175,9 @@ export class OverviewConsoleModel {
       this.stateManager.close().catch((err) => {
         console.error('[OverviewConsoleModel] Failed to close state manager:', err);
       });
+    }
+    if (this.eventLogReadModel) {
+      this.eventLogReadModel.dispose();
     }
   }
 
@@ -202,5 +219,12 @@ export class OverviewConsoleModel {
       this.stateManager = new RuntimeStateManager({ workspaceDir: this.workspaceDir });
     }
     return this.stateManager;
+  }
+
+  private getEventLogReadModel(): EventLogReadModel {
+    if (!this.eventLogReadModel) {
+      this.eventLogReadModel = new EventLogReadModel(this.stateDir);
+    }
+    return this.eventLogReadModel;
   }
 }
