@@ -32,6 +32,7 @@ graphify-out/cache/
 packages/*/node_modules/
 packages/*/dist/
 packages/*/coverage/
+packages/*/screenshots/
 packages/*/*.tgz
 node_modules/
 dist/

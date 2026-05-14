@@ -28,7 +28,10 @@ import type { SystemStatus, TaskItem, EvidenceItem, TaskEvidence, ActivityEvent 
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const WEB_ROOT = path.resolve(__dirname, '..', 'dist', 'web');
+const PKG_ROOT = __dirname.includes(path.join('src', 'server'))
+  ? path.resolve(__dirname, '..', '..')
+  : path.resolve(__dirname, '..');
+const WEB_ROOT = path.resolve(PKG_ROOT, 'dist', 'web');
 
 // ── CLI arg parsing ──────────────────────────────────────────────────────────────────────
 
