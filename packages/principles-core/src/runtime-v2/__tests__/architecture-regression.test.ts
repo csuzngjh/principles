@@ -1892,3 +1892,145 @@ describe('PRI-114: correction-proposal boundary', () => {
   });
 });
 
+
+
+// ── PRI-117: Nocturnal god-class freeze — no Runtime V2 → Nocturnal reverse imports ─
+
+describe('PRI-117 Nocturnal god-class freeze', () => {
+  const NOCTURNAL_GOD_CLASSES = [
+    'nocturnal-trinity',
+    'nocturnal-service',
+    '../core/nocturnal-trinity.js',
+    '../service/nocturnal-service.js',
+    '../../core/nocturnal-trinity.js',
+    '../../service/nocturnal-service.js',
+  ];
+
+  it('RUNTIME_V2_NO_NOCTURNAL_TRINITY_IMPORT: runtime-v2 must not import nocturnal-trinity', async () => {
+    const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+    const { resolve, join } = await import('node:path');
+    const runtimeDir = resolve(__dirname, '..');
+    const allFiles = [];
+
+    function collectTsFiles(dir) {
+      if (dir.includes('node_modules')) return;
+      try {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            collectTsFiles(fullPath);
+          } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+            allFiles.push(fullPath);
+          }
+        }
+      } catch {
+        // Skip inaccessible directories
+      }
+    }
+
+    collectTsFiles(runtimeDir);
+
+    for (const file of allFiles) {
+      const src = readFileSync(file, 'utf-8');
+      for (const badImport of NOCTURNAL_GOD_CLASSES) {
+        expect(src).not.toContain(badImport);
+      }
+    }
+  });
+
+  it('OPENCLAW_TRINITY_RUNTIME_ADAPTER_IS_LEGACY: OpenClawTrinityRuntimeAdapter must not be referenced in runtime-v2', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { resolve, join } = await import('node:path');
+    const runtimeDir = resolve(__dirname, '..');
+    const allFiles = [];
+
+    function collectTsFiles(dir) {
+      if (dir.includes('node_modules')) return;
+      try {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            collectTsFiles(fullPath);
+          } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+            allFiles.push(fullPath);
+          }
+        }
+      } catch {
+        // Skip inaccessible directories
+      }
+    }
+
+    collectTsFiles(runtimeDir);
+
+    for (const file of allFiles) {
+      const src = readFileSync(file, 'utf-8');
+      expect(src).not.toContain('OpenClawTrinityRuntimeAdapter');
+      expect(src).not.toContain('TrinityRuntimeAdapter');
+      expect(src).not.toContain('runTrinity');
+      expect(src).not.toContain('runTrinityAsync');
+    }
+  });
+
+  it('NOCTURNAL_TRINITY_STUBS_ARE_TEST_ONLY: invokeStub* functions must not appear in non-test runtime-v2 files', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { resolve, join } = await import('node:path');
+    const runtimeDir = resolve(__dirname, '..');
+    const allFiles = [];
+
+    function collectTsFiles(dir) {
+      if (dir.includes('node_modules')) return;
+      try {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            collectTsFiles(fullPath);
+          } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+            allFiles.push(fullPath);
+          }
+        }
+      } catch {
+        // Skip inaccessible directories
+      }
+    }
+
+    collectTsFiles(runtimeDir);
+
+    for (const file of allFiles) {
+      const src = readFileSync(file, 'utf-8');
+      expect(src).not.toContain('invokeStubDreamer');
+      expect(src).not.toContain('invokeStubPhilosopher');
+      expect(src).not.toContain('invokeStubScribe');
+    }
+  });
+
+  it('RUNTIME_V2_USES_PEER_RUNNERS: DreamerRunner/PhilosopherRunner/ScribeRunner are the canonical entry points', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('DreamerRunner');
+    expect(src).toContain('PhilosopherRunner');
+    expect(src).toContain('ScribeRunner');
+    expect(src).toContain('ArtificerRunner');
+  });
+
+  it('PLUGIN_NOCTURNAL_SERVICE_ACTOR: nocturnal-service.ts must not import from runtime-v2 peer runners', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const nocturnalServicePath = resolve(
+      __dirname,
+      '../../../../openclaw-plugin/src/service/nocturnal-service.ts',
+    );
+    if (existsSync(nocturnalServicePath)) {
+      const src = readFileSync(nocturnalServicePath, 'utf-8');
+      expect(src).not.toContain('DreamerRunner');
+      expect(src).not.toContain('PhilosopherRunner');
+      expect(src).not.toContain('ScribeRunner');
+      expect(src).not.toContain("from '../runtime-v2'");
+      expect(src).not.toContain('from "@principles/core/runtime-v2"');
+    }
+  });
+});
+
