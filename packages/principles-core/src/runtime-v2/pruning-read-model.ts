@@ -226,7 +226,7 @@ export class PruningReadModel {
           matchedCandidateCount,
           recentCandCount: recentCandidateCount,
           orphanCandCount: orphanCandidateCount,
-          status: p.status as PrincipleStatus,
+          status: p.status,
           watchThresholdDays: this.watchThresholdDays,
           reviewThresholdDays: this.reviewThresholdDays,
         },
@@ -234,7 +234,7 @@ export class PruningReadModel {
 
       return {
         principleId: p.id,
-        status: p.status as PrincipleStatus,
+        status: p.status,
         createdAt: p.createdAt,
         updatedAt: p.updatedAt ?? p.createdAt,
         derivedCandidateIds: [...(p.derivedFromPainIds ?? [])],
@@ -324,7 +324,7 @@ export class PruningReadModel {
               ? 'candidate not found in state.db'
               : 'candidate not verifiable: state.db unreadable',
             sourceRef: 'derivedFromPainIds',
-            status: p.status as string | undefined,
+            status: p.status,
           });
         }
       }

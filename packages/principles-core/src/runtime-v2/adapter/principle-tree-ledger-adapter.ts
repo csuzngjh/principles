@@ -18,7 +18,7 @@ function extractCandidateIdStatic(sourceRef: string): string {
 }
 
 function expandToLedgerPrincipleStatic(entry: LedgerPrincipleEntry, candidateId: string) {
-  if (!VALID_EVALUABILITIES.includes(entry.evaluability as (typeof VALID_EVALUABILITIES)[number])) {
+  if (!VALID_EVALUABILITIES.includes(entry.evaluability)) {
     throw new Error(
       `Invalid evaluability value: ${entry.evaluability}. Must be one of: ${VALID_EVALUABILITIES.join(', ')}`,
     );
@@ -92,6 +92,6 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
       action: found.action,
       evaluability: 'weak_heuristic' as const,
       createdAt: found.createdAt,
-    } as LedgerPrincipleEntry;
+    };
   }
 }

@@ -232,7 +232,7 @@ function parseImplementations(raw: unknown): Record<string, Implementation> {
   const implementations: Record<string, Implementation> = {};
   for (const [id, value] of Object.entries(raw)) {
     if (!isRecord(value) || typeof value.ruleId !== 'string') continue;
-    implementations[id] = { ...value, id, ruleId: value.ruleId } as Implementation;
+    implementations[id] = { ...value, id, ruleId: value.ruleId };
   }
   return implementations;
 }
@@ -242,7 +242,7 @@ function parseMetrics(raw: unknown): Record<string, PrincipleValueMetrics> {
   const metrics: Record<string, PrincipleValueMetrics> = {};
   for (const [id, value] of Object.entries(raw)) {
     if (!isRecord(value)) continue;
-    metrics[id] = { ...value, principleId: typeof value.principleId === 'string' ? value.principleId : id } as PrincipleValueMetrics;
+    metrics[id] = { ...value, principleId: typeof value.principleId === 'string' ? value.principleId : id };
   }
   return metrics;
 }

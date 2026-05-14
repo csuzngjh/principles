@@ -16,6 +16,8 @@ import { EvolutionPage } from "./pages/EvolutionPage.js";
 import { ThinkingModelsPage } from "./pages/ThinkingModelsPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { CentralPage } from "./pages/CentralPage.js";
+import { DataFlowPage } from "./pages/DataFlowPage.js";
+import { EventLogPage } from "./pages/EventLogPage.js";
 import { LoginPage } from "./pages/LoginPage.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
 import { getToken, clearToken, checkAuth } from "./api.js";
@@ -105,6 +107,8 @@ export function App() {
                     <Route path="/gates" element={<GatesPage />} />
                     <Route path="/samples" element={<SamplesPage />} />
                     <Route path="/evolution" element={<EvolutionPage />} />
+                    <Route path="/data-flow" element={<DataFlowPage />} />
+                    <Route path="/event-log" element={<EventLogPage />} />
                     <Route path="/thinking-models" element={<ThinkingModelsPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                   </Routes>

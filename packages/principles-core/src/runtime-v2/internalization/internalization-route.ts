@@ -80,7 +80,7 @@ export function decideInternalizationRoute(
   if (recommendation.kind === 'principle') {
     const missingFields: RouteMissingField[] = [];
     if (!recommendation.abstractedPrinciple?.trim()) {
-      missingFields.push('abstractedPrinciple' as RouteMissingField);
+      missingFields.push('abstractedPrinciple');
     }
     return {
       ready: missingFields.length === 0,
@@ -99,10 +99,10 @@ export function decideInternalizationRoute(
   if (recommendation.kind === 'rule') {
     const missingFields: RouteMissingField[] = [];
     if (!recommendation.triggerPattern?.trim()) {
-      missingFields.push('triggerPattern' as RouteMissingField);
+      missingFields.push('triggerPattern');
     }
     if (!recommendation.action?.trim()) {
-      missingFields.push('action' as RouteMissingField);
+      missingFields.push('action');
     }
     return {
       ready: missingFields.length === 0,

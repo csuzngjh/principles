@@ -91,9 +91,11 @@ export function ThinkingModelsPage() {
       <div className="flex flex-col gap-3">
         {data.models.map((model) => (
           <Card key={model.id} className="overflow-hidden">
-            <div
+            <button
+              type="button"
+              aria-expanded={expandedId === model.id}
               onClick={() => setExpandedId(expandedId === model.id ? null : model.id)}
-              className={`p-4 cursor-pointer flex justify-between items-center transition-colors duration-150 ${
+              className={`w-full text-left p-4 cursor-pointer flex justify-between items-center transition-colors duration-150 ${
                 expandedId === model.id ? "bg-primary/5" : "hover:bg-accent"
               }`}
             >
@@ -106,7 +108,7 @@ export function ThinkingModelsPage() {
                   expandedId === model.id ? "rotate-90" : ""
                 }`}
               />
-            </div>
+            </button>
 
             <div
               className={`overflow-hidden transition-all duration-300 ${
