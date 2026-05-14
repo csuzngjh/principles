@@ -84,14 +84,14 @@ export function useFocusSearch({ enabled = true }: UseFocusSearchOptions) {
       if (event.key === "/" && !isInputFocused()) {
         event.preventDefault();
         const searchInput = document.querySelector<HTMLInputElement>(
-          'input[placeholder*="Search"], input[placeholder*="搜索"]'
+          '[data-search-input]'
         );
         searchInput?.focus();
       }
 
       if (event.key === "Escape" && isInputFocused()) {
         const searchInput = document.querySelector<HTMLInputElement>(
-          'input[placeholder*="Search"], input[placeholder*="搜索"]'
+          '[data-search-input]'
         );
         searchInput?.blur();
       }

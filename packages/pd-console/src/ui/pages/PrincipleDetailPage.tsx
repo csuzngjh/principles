@@ -232,11 +232,13 @@ export function PrincipleDetailPage() {
       return;
     }
 
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
 
     fetchPrincipleDetail(id)
       .then((result) => {
+        if (controller.signal.aborted) return;
         if (result.success && result.data) {
           setPrinciple(result.data.principle);
         } else {
@@ -244,11 +246,14 @@ export function PrincipleDetailPage() {
         }
       })
       .catch((err) => {
+        if (controller.signal.aborted) return;
         setError(err instanceof Error ? err.message : "Unknown error");
       })
       .finally(() => {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       });
+
+    return () => controller.abort();
   }, [id]);
 
   const handleCopyLink = () => {
@@ -256,6 +261,8 @@ export function PrincipleDetailPage() {
     navigator.clipboard.writeText(url).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      // clipboard API not available (e.g. non-HTTPS)
     });
   };
 
@@ -525,23 +532,6 @@ export function PrincipleDetailPage() {
             <p className="text-sm">
               {new Date(principle.lastPainPreventedAt).toLocaleString()}
             </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {principle.derivedFromPainIds.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{t("pages:principles.derivedFromPain")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {principle.derivedFromPainIds.map((painId) => (
-                <Badge key={painId} variant="secondary" className="text-xs">
-                  {painId}
-                </Badge>
-              ))}
-            </div>
           </CardContent>
         </Card>
       )}
