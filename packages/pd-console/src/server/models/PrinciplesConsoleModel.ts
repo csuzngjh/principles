@@ -1,0 +1,321 @@
+import * as path from 'path';
+import * as fs from 'fs';
+
+export type PrincipleStatus = 'candidate' | 'active' | 'archived' | 'deprecated' | 'probation';
+export type PrinciplePriority = 'P0' | 'P1' | 'P2';
+export type PrincipleScope = 'general' | 'domain';
+export type PrincipleEvaluability = 'manual_only' | 'deterministic' | 'weak_heuristic';
+export type RuleStatus = 'proposed' | 'implemented' | 'enforced' | 'retired';
+export type RuleType = 'hook' | 'gate' | 'skill' | 'lora' | 'test' | 'prompt';
+
+interface LedgerPrinciple {
+  id: string;
+  text?: string;
+  triggerPattern?: string;
+  action?: string;
+  status?: string;
+  priority?: string;
+  scope?: string;
+  domain?: string;
+  evaluability?: string;
+  valueScore?: number;
+  adherenceRate?: number;
+  painPreventedCount?: number;
+  ruleIds?: string[];
+  conflictsWithPrincipleIds?: string[];
+  derivedFromPainIds?: string[];
+  coreAxiomId?: string;
+  lastPainPreventedAt?: string;
+  supersedesPrincipleId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+interface LedgerRule {
+  id: string;
+  name?: string;
+  description?: string;
+  type?: string;
+  triggerCondition?: string;
+  enforcement?: string;
+  action?: string;
+  principleId?: string;
+  status?: string;
+  coverageRate?: number;
+  falsePositiveRate?: number;
+  implementationIds?: string[];
+}
+
+interface LedgerTreeStore {
+  principles: Record<string, LedgerPrinciple>;
+  rules: Record<string, LedgerRule>;
+  implementations: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+  lastUpdated: string;
+}
+
+interface HybridLedgerStore {
+  trainingStore: Record<string, unknown>;
+  tree: LedgerTreeStore;
+}
+
+export interface PrincipleListItem {
+  id: string;
+  text: string;
+  triggerPattern: string;
+  action: string;
+  status: PrincipleStatus;
+  priority: PrinciplePriority;
+  scope: PrincipleScope;
+  domain: string | null;
+  evaluability: PrincipleEvaluability;
+  valueScore: number;
+  adherenceRate: number;
+  painPreventedCount: number;
+  ruleCount: number;
+  conflictsWithCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RuleItem {
+  id: string;
+  name: string;
+  description: string;
+  type: RuleType;
+  triggerCondition: string;
+  enforcement: 'block' | 'warn' | 'log';
+  action: string;
+  status: RuleStatus;
+  coverageRate: number;
+  falsePositiveRate: number;
+}
+
+export interface PrincipleDetail extends PrincipleListItem {
+  coreAxiomId: string | null;
+  lastPainPreventedAt: string | null;
+  derivedFromPainIds: string[];
+  ruleIds: string[];
+  conflictsWithPrincipleIds: string[];
+  supersedesPrincipleId: string | null;
+  rules: RuleItem[];
+}
+
+export interface PrinciplesListOutput {
+  principles: PrincipleListItem[];
+  summary: {
+    candidate: number;
+    probation: number;
+    active: number;
+    deprecated: number;
+    archived: number;
+    total: number;
+  };
+}
+
+export interface PrincipleDetailOutput {
+  principle: PrincipleDetail;
+}
+
+const VALID_STATUSES: PrincipleStatus[] = ['candidate', 'active', 'archived', 'deprecated', 'probation'];
+const VALID_PRIORITIES: PrinciplePriority[] = ['P0', 'P1', 'P2'];
+const VALID_SCOPES: PrincipleScope[] = ['general', 'domain'];
+const VALID_EVALUABILITIES: PrincipleEvaluability[] = ['manual_only', 'deterministic', 'weak_heuristic'];
+const VALID_RULE_TYPES: RuleType[] = ['hook', 'gate', 'skill', 'lora', 'test', 'prompt'];
+const VALID_RULE_STATUSES: RuleStatus[] = ['proposed', 'implemented', 'enforced', 'retired'];
+const VALID_ENFORCEMENTS: ('block' | 'warn' | 'log')[] = ['block', 'warn', 'log'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function createEmptyTree(): LedgerTreeStore {
+  return {
+    principles: {},
+    rules: {},
+    implementations: {},
+    metrics: {},
+    lastUpdated: new Date(0).toISOString(),
+  };
+}
+
+function parseTree(raw: unknown): LedgerTreeStore {
+  if (!isRecord(raw)) {
+    return createEmptyTree();
+  }
+
+  const principles: Record<string, LedgerPrinciple> = {};
+  if (isRecord(raw.principles)) {
+    for (const [id, value] of Object.entries(raw.principles)) {
+      if (isRecord(value)) {
+        principles[id] = { ...value, id } as LedgerPrinciple;
+      }
+    }
+  }
+
+  const rules: Record<string, LedgerRule> = {};
+  if (isRecord(raw.rules)) {
+    for (const [id, value] of Object.entries(raw.rules)) {
+      if (isRecord(value)) {
+        rules[id] = { ...value, id } as LedgerRule;
+      }
+    }
+  }
+
+  return {
+    principles,
+    rules,
+    implementations: isRecord(raw.implementations) ? raw.implementations : {},
+    metrics: isRecord(raw.metrics) ? raw.metrics : {},
+    lastUpdated: typeof raw.lastUpdated === 'string' ? raw.lastUpdated : new Date(0).toISOString(),
+  };
+}
+
+function readLedgerFromFile(filePath: string): HybridLedgerStore {
+  if (!fs.existsSync(filePath)) {
+    return { trainingStore: {}, tree: createEmptyTree() };
+  }
+
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    if (!content || content.trim() === '') {
+      return { trainingStore: {}, tree: createEmptyTree() };
+    }
+    const parsed = JSON.parse(content) as unknown;
+    const raw = isRecord(parsed) ? parsed : {};
+    const treeRaw = raw._tree ?? raw.tree;
+    return {
+      trainingStore: {},
+      tree: parseTree(treeRaw),
+    };
+  } catch {
+    return { trainingStore: {}, tree: createEmptyTree() };
+  }
+}
+
+function clampStatus<T extends string>(value: string | undefined, valid: T[], fallback: T): T {
+  if (value && (valid as string[]).includes(value)) {
+    return value as T;
+  }
+  return fallback;
+}
+
+export class PrinciplesConsoleModel {
+  private readonly workspaceDir: string;
+
+  constructor(workspaceDir: string) {
+    this.workspaceDir = workspaceDir;
+  }
+
+  private getLedgerPath(): string {
+    return path.join(this.workspaceDir, '.state', 'principle_training_state.json');
+  }
+
+  private loadLedger(): HybridLedgerStore {
+    return readLedgerFromFile(this.getLedgerPath());
+  }
+
+  async listPrinciples(): Promise<PrinciplesListOutput> {
+    const ledger = this.loadLedger();
+    const principles = Object.values(ledger.tree.principles);
+
+    const summary = {
+      candidate: 0,
+      probation: 0,
+      active: 0,
+      deprecated: 0,
+      archived: 0,
+      total: principles.length,
+    };
+
+    const items: PrincipleListItem[] = [];
+
+    for (const p of principles) {
+      const status = clampStatus(p.status, VALID_STATUSES, 'candidate');
+      switch (status) {
+        case 'candidate': summary.candidate++; break;
+        case 'probation': summary.probation++; break;
+        case 'active': summary.active++; break;
+        case 'deprecated': summary.deprecated++; break;
+        case 'archived': summary.archived++; break;
+      }
+
+      items.push({
+        id: p.id,
+        text: p.text ?? '',
+        triggerPattern: p.triggerPattern ?? '',
+        action: p.action ?? '',
+        status,
+        priority: clampStatus(p.priority, VALID_PRIORITIES, 'P2'),
+        scope: clampStatus(p.scope, VALID_SCOPES, 'general'),
+        domain: p.domain ?? null,
+        evaluability: clampStatus(p.evaluability, VALID_EVALUABILITIES, 'manual_only'),
+        valueScore: p.valueScore ?? 0,
+        adherenceRate: p.adherenceRate ?? 0,
+        painPreventedCount: p.painPreventedCount ?? 0,
+        ruleCount: (p.ruleIds ?? []).length,
+        conflictsWithCount: (p.conflictsWithPrincipleIds ?? []).length,
+        createdAt: p.createdAt ?? '',
+        updatedAt: p.updatedAt ?? '',
+      });
+    }
+
+    items.sort((a, b) => b.valueScore - a.valueScore);
+
+    return { principles: items, summary };
+  }
+
+  async getPrincipleDetail(principleId: string): Promise<PrincipleDetailOutput | null> {
+    const ledger = this.loadLedger();
+    const p = ledger.tree.principles[principleId];
+    if (!p) {
+      return null;
+    }
+
+    const rules: RuleItem[] = (p.ruleIds ?? [])
+      .map((ruleId: string) => ledger.tree.rules[ruleId])
+      .filter((r: LedgerRule | undefined): r is LedgerRule => r !== undefined)
+      .map((r: LedgerRule) => ({
+        id: r.id,
+        name: r.name ?? '',
+        description: r.description ?? '',
+        type: clampStatus(r.type, VALID_RULE_TYPES, 'hook'),
+        triggerCondition: r.triggerCondition ?? '',
+        enforcement: clampStatus(r.enforcement, VALID_ENFORCEMENTS, 'log'),
+        action: r.action ?? '',
+        status: clampStatus(r.status, VALID_RULE_STATUSES, 'proposed'),
+        coverageRate: r.coverageRate ?? 0,
+        falsePositiveRate: r.falsePositiveRate ?? 0,
+      }));
+
+    const status = clampStatus(p.status, VALID_STATUSES, 'candidate');
+
+    const principle: PrincipleDetail = {
+      id: p.id,
+      text: p.text ?? '',
+      triggerPattern: p.triggerPattern ?? '',
+      action: p.action ?? '',
+      status,
+      priority: clampStatus(p.priority, VALID_PRIORITIES, 'P2'),
+      scope: clampStatus(p.scope, VALID_SCOPES, 'general'),
+      domain: p.domain ?? null,
+      evaluability: clampStatus(p.evaluability, VALID_EVALUABILITIES, 'manual_only'),
+      valueScore: p.valueScore ?? 0,
+      adherenceRate: p.adherenceRate ?? 0,
+      painPreventedCount: p.painPreventedCount ?? 0,
+      ruleCount: (p.ruleIds ?? []).length,
+      conflictsWithCount: (p.conflictsWithPrincipleIds ?? []).length,
+      coreAxiomId: p.coreAxiomId ?? null,
+      lastPainPreventedAt: p.lastPainPreventedAt ?? null,
+      derivedFromPainIds: p.derivedFromPainIds ?? [],
+      ruleIds: p.ruleIds ?? [],
+      conflictsWithPrincipleIds: p.conflictsWithPrincipleIds ?? [],
+      supersedesPrincipleId: p.supersedesPrincipleId ?? null,
+      createdAt: p.createdAt ?? '',
+      updatedAt: p.updatedAt ?? '',
+      rules,
+    };
+
+    return { principle };
+  }
+}
