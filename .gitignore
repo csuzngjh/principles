@@ -110,3 +110,6 @@ pnpm-workspace.yaml
 docs/superpowers/plans/2026-05-14*
 .full-review/
 .pnpm-store/
+
+graphify-out/
+ops/
