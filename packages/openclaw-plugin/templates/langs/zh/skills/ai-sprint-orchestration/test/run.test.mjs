@@ -1417,3 +1417,19 @@ test('cleanupAcpxOrphans does not fallback to spec directory', () => {
   assert.ok(content.includes('spec.workspace') || content.includes('spec?.workspace'),
     'cleanupAcpxOrphans should reference spec.workspace');
 });
+
+test('Windows cmd.exe invocations use /s /c with quoted env vars for space-safe paths', () => {
+  const runPath = path.resolve(__dirname, '..', 'scripts', 'run.mjs');
+  const content = fs.readFileSync(runPath, 'utf8');
+  const winCmdPatterns = content.match(/\/d',\s*'\/[^']*',\s*'[^']*%AI_SPRINT/g) || [];
+  for (const pat of winCmdPatterns) {
+    assert.ok(pat.includes('/s'), `Windows cmd.exe pattern must include /s flag: ${pat}`);
+  }
+  assert.ok(!content.includes("'/d', '/c',"), 'must not use /d /c without /s flag');
+  const envVarRefs = content.match(/%AI_SPRINT_\w+%/g) || [];
+  for (const ref of envVarRefs) {
+    const idx = content.indexOf(ref);
+    const before = content.slice(Math.max(0, idx - 2), idx);
+    assert.ok(before.endsWith('"'), `env var ${ref} must be preceded by a double-quote for space-safe expansion`);
+  }
+});
