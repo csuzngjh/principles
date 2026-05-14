@@ -117,13 +117,13 @@ export interface PrincipleDetailOutput {
   principle: PrincipleDetail;
 }
 
-const VALID_STATUSES: PrincipleStatus[] = ['candidate', 'active', 'archived', 'deprecated', 'probation'];
-const VALID_PRIORITIES: PrinciplePriority[] = ['P0', 'P1', 'P2'];
-const VALID_SCOPES: PrincipleScope[] = ['general', 'domain'];
-const VALID_EVALUABILITIES: PrincipleEvaluability[] = ['manual_only', 'deterministic', 'weak_heuristic'];
-const VALID_RULE_TYPES: RuleType[] = ['hook', 'gate', 'skill', 'lora', 'test', 'prompt'];
-const VALID_RULE_STATUSES: RuleStatus[] = ['proposed', 'implemented', 'enforced', 'retired'];
-const VALID_ENFORCEMENTS: ('block' | 'warn' | 'log')[] = ['block', 'warn', 'log'];
+const VALID_STATUSES: readonly PrincipleStatus[] = ['candidate', 'active', 'archived', 'deprecated', 'probation'];
+const VALID_PRIORITIES: readonly PrinciplePriority[] = ['P0', 'P1', 'P2'];
+const VALID_SCOPES: readonly PrincipleScope[] = ['general', 'domain'];
+const VALID_EVALUABILITIES: readonly PrincipleEvaluability[] = ['manual_only', 'deterministic', 'weak_heuristic'];
+const VALID_RULE_TYPES: readonly RuleType[] = ['hook', 'gate', 'skill', 'lora', 'test', 'prompt'];
+const VALID_RULE_STATUSES: readonly RuleStatus[] = ['proposed', 'implemented', 'enforced', 'retired'];
+const VALID_ENFORCEMENTS: readonly ('block' | 'warn' | 'log')[] = ['block', 'warn', 'log'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -193,15 +193,19 @@ function readLedgerFromFile(filePath: string): HybridLedgerStore {
   }
 }
 
-function clampStatus<T extends string>(value: string | undefined, valid: T[], fallback: T): T {
-  if (value && (valid as string[]).includes(value)) {
+function safeCastEnum<T extends string>(value: string | undefined, valid: readonly T[], fallback: T): T {
+  if (value && (valid as readonly string[]).includes(value)) {
     return value as T;
   }
   return fallback;
 }
 
+const CACHE_TTL_MS = 5_000;
+
 export class PrinciplesConsoleModel {
   private readonly workspaceDir: string;
+  private cachedLedger: HybridLedgerStore | null = null;
+  private cacheTimestamp = 0;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
@@ -212,7 +216,14 @@ export class PrinciplesConsoleModel {
   }
 
   private loadLedger(): HybridLedgerStore {
-    return readLedgerFromFile(this.getLedgerPath());
+    const now = Date.now();
+    if (this.cachedLedger && now - this.cacheTimestamp < CACHE_TTL_MS) {
+      return this.cachedLedger;
+    }
+    const ledger = readLedgerFromFile(this.getLedgerPath());
+    this.cachedLedger = ledger;
+    this.cacheTimestamp = now;
+    return ledger;
   }
 
   async listPrinciples(): Promise<PrinciplesListOutput> {
@@ -231,7 +242,7 @@ export class PrinciplesConsoleModel {
     const items: PrincipleListItem[] = [];
 
     for (const p of principles) {
-      const status = clampStatus(p.status, VALID_STATUSES, 'candidate');
+      const status = safeCastEnum(p.status, VALID_STATUSES, 'candidate');
       switch (status) {
         case 'candidate': summary.candidate++; break;
         case 'probation': summary.probation++; break;
@@ -246,10 +257,10 @@ export class PrinciplesConsoleModel {
         triggerPattern: p.triggerPattern ?? '',
         action: p.action ?? '',
         status,
-        priority: clampStatus(p.priority, VALID_PRIORITIES, 'P2'),
-        scope: clampStatus(p.scope, VALID_SCOPES, 'general'),
+        priority: safeCastEnum(p.priority, VALID_PRIORITIES, 'P2'),
+        scope: safeCastEnum(p.scope, VALID_SCOPES, 'general'),
         domain: p.domain ?? null,
-        evaluability: clampStatus(p.evaluability, VALID_EVALUABILITIES, 'manual_only'),
+        evaluability: safeCastEnum(p.evaluability, VALID_EVALUABILITIES, 'manual_only'),
         valueScore: p.valueScore ?? 0,
         adherenceRate: p.adherenceRate ?? 0,
         painPreventedCount: p.painPreventedCount ?? 0,
@@ -279,16 +290,16 @@ export class PrinciplesConsoleModel {
         id: r.id,
         name: r.name ?? '',
         description: r.description ?? '',
-        type: clampStatus(r.type, VALID_RULE_TYPES, 'hook'),
+        type: safeCastEnum(r.type, VALID_RULE_TYPES, 'hook'),
         triggerCondition: r.triggerCondition ?? '',
-        enforcement: clampStatus(r.enforcement, VALID_ENFORCEMENTS, 'log'),
+        enforcement: safeCastEnum(r.enforcement, VALID_ENFORCEMENTS, 'log'),
         action: r.action ?? '',
-        status: clampStatus(r.status, VALID_RULE_STATUSES, 'proposed'),
+        status: safeCastEnum(r.status, VALID_RULE_STATUSES, 'proposed'),
         coverageRate: r.coverageRate ?? 0,
         falsePositiveRate: r.falsePositiveRate ?? 0,
       }));
 
-    const status = clampStatus(p.status, VALID_STATUSES, 'candidate');
+    const status = safeCastEnum(p.status, VALID_STATUSES, 'candidate');
 
     const principle: PrincipleDetail = {
       id: p.id,
@@ -296,10 +307,10 @@ export class PrinciplesConsoleModel {
       triggerPattern: p.triggerPattern ?? '',
       action: p.action ?? '',
       status,
-      priority: clampStatus(p.priority, VALID_PRIORITIES, 'P2'),
-      scope: clampStatus(p.scope, VALID_SCOPES, 'general'),
+      priority: safeCastEnum(p.priority, VALID_PRIORITIES, 'P2'),
+      scope: safeCastEnum(p.scope, VALID_SCOPES, 'general'),
       domain: p.domain ?? null,
-      evaluability: clampStatus(p.evaluability, VALID_EVALUABILITIES, 'manual_only'),
+      evaluability: safeCastEnum(p.evaluability, VALID_EVALUABILITIES, 'manual_only'),
       valueScore: p.valueScore ?? 0,
       adherenceRate: p.adherenceRate ?? 0,
       painPreventedCount: p.painPreventedCount ?? 0,

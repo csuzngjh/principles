@@ -253,22 +253,34 @@ export function PrinciplesPage() {
   const [loadingDetails, setLoadingDetails] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    loadData();
+    const controller = new AbortController();
+    loadData(controller.signal);
+    return () => controller.abort();
   }, []);
 
-  function loadData() {
+  function loadData(signal?: AbortSignal) {
     setLoading(true);
     setError("");
     fetchPrinciples()
       .then((result) => {
+        if (signal?.aborted) return;
         if (result.success && result.data) {
           setData(result.data);
         } else if (!result.success) {
           setError(result.error);
         }
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (signal?.aborted) return;
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!signal?.aborted) setLoading(false);
+      });
+  }
+
+  function refreshData() {
+    loadData();
   }
 
   const filteredPrinciples = useMemo(() => {
@@ -388,7 +400,7 @@ export function PrinciplesPage() {
       <Card>
         <CardContent className="p-6">
           <p className="text-destructive">{error}</p>
-          <Button variant="outline" className="mt-4" onClick={loadData}>
+          <Button variant="outline" className="mt-4" onClick={refreshData}>
             {t("components:errorBoundary.retry")}
           </Button>
         </CardContent>
@@ -403,7 +415,7 @@ export function PrinciplesPage() {
       <PageHeader
         title={t("pages:principles.title")}
         description={t("pages:principles.description")}
-        onRefresh={loadData}
+        onRefresh={refreshData}
       />
 
       {summary && (
