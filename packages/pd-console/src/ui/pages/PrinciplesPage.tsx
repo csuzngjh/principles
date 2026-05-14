@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { fetchPrinciples, fetchPrincipleDetail } from "../api.js";
 import type { PrincipleListItem, PrincipleDetail, RuleItem } from "../api.js";
@@ -7,15 +8,31 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.
 import { Badge } from "../components/ui/badge.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Button } from "../components/ui/button.js";
+import { ValueScoreBar, AdherenceBar } from "../components/ui/progress-bar.js";
+import { DonutChartWithLegend, HorizontalBarChart, CoverageIndicator, Histogram, computeValueBuckets } from "../components/ui/charts.js";
+import { CompareView } from "../components/compare-view.js";
+import { TruncatedText } from "../components/ui/markdown.js";
+import { useDebounce } from "../hooks/useDebounce.js";
+import { useKeyboardNavigation, useFocusSearch } from "../hooks/useKeyboardNavigation.js";
+import { useBookmarks } from "../hooks/useBookmarks.js";
 import {
   ChevronDown,
   ChevronRight,
   Search,
   Shield,
-  Zap,
-  Eye,
+  FileSearch,
+  Inbox,
   X,
+  ExternalLink,
+  BarChart3,
+  Bookmark,
+  BookmarkCheck,
+  CheckSquare,
+  Square,
+  Download,
+  GitCompare,
 } from "lucide-react";
+import { cn } from "../../../lib/utils.js";
 
 type PrincipleStatus = PrincipleListItem["status"];
 type PrinciplePriority = PrincipleListItem["priority"];
@@ -78,7 +95,7 @@ function RuleCard({ rule }: { rule: RuleItem }) {
         <Badge variant="outline" className="text-xs">
           {RULE_TYPE_LABELS[rule.type] ?? rule.type}
         </Badge>
-        <Badge variant="outline" className={`text-xs ${ENFORCEMENT_COLORS[rule.enforcement] ?? ""}`}>
+        <Badge variant="outline" className={cn("text-xs", ENFORCEMENT_COLORS[rule.enforcement] ?? "")}>
           {rule.enforcement.toUpperCase()}
         </Badge>
         <Badge variant="secondary" className="text-xs">
@@ -100,27 +117,45 @@ function RuleCard({ rule }: { rule: RuleItem }) {
   );
 }
 
-function PrincipleRow({
-  principle,
-  expanded,
-  onToggle,
-  detail,
-  detailLoading,
-}: {
+interface PrincipleRowProps {
   principle: PrincipleListItem;
   expanded: boolean;
   onToggle: () => void;
   detail: PrincipleDetail | null;
   detailLoading: boolean;
-}) {
+  isSelected: boolean;
+  isBookmarked: boolean;
+  onToggleBookmark: () => void;
+  selectionMode: boolean;
+  isChecked: boolean;
+  onToggleCheck: () => void;
+}
+
+function PrincipleRow({ principle, expanded, onToggle, detail, detailLoading, isSelected, isBookmarked, onToggleBookmark, selectionMode, isChecked, onToggleCheck }: PrincipleRowProps) {
   const { t } = useTranslation();
 
   return (
-    <div className="border-b border-border last:border-0">
+    <div
+      className={cn(
+        "border-b border-border last:border-0 transition-colors",
+        isSelected && "bg-accent/70"
+      )}
+    >
       <div
         className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors"
-        onClick={onToggle}
+        onClick={selectionMode ? onToggleCheck : onToggle}
       >
+        {selectionMode && (
+          <div className="mt-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+            <button onClick={onToggleCheck} className="text-muted-foreground hover:text-foreground">
+              {isChecked ? (
+                <CheckSquare className="h-4 w-4 text-primary" />
+              ) : (
+                <Square className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+        )}
         <div className="mt-0.5 flex-shrink-0">
           {expanded ? (
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -131,10 +166,18 @@ function PrincipleRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="font-medium text-sm">{principle.id}</span>
-            <Badge variant="outline" className={`text-xs ${STATUS_COLORS[principle.status]}`}>
+            <Link
+              to={`/principles/${principle.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              title={t("pages:principles.viewDetail")}
+            >
+              <ExternalLink className="h-3 w-3" />
+            </Link>
+            <Badge variant="outline" className={cn("text-xs", STATUS_COLORS[principle.status])}>
               {principle.status}
             </Badge>
-            <Badge variant="outline" className={`text-xs ${PRIORITY_COLORS[principle.priority]}`}>
+            <Badge variant="outline" className={cn("text-xs", PRIORITY_COLORS[principle.priority])}>
               {principle.priority}
             </Badge>
             {principle.scope === "domain" && principle.domain && (
@@ -149,25 +192,35 @@ function PrincipleRow({
               </Badge>
             )}
           </div>
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            {principle.text}
-          </p>
-          <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Zap className="h-3 w-3" />
-              {t("pages:principles.valueScore")}: {principle.valueScore.toFixed(1)}
-            </span>
-            <span className="flex items-center gap-1">
-              <Eye className="h-3 w-3" />
-              {t("pages:principles.adherence")}: {(principle.adherenceRate * 100).toFixed(0)}%
-            </span>
-            <span>
+          <TruncatedText text={principle.text} maxLines={2} className="text-xs text-muted-foreground" />
+          <div className="flex items-center gap-4 mt-2">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">{t("pages:principles.valueScore")}:</span>
+              <ValueScoreBar valueScore={principle.valueScore} className="flex-1" />
+            </div>
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">{t("pages:principles.adherence")}:</span>
+              <AdherenceBar adherenceRate={principle.adherenceRate} className="flex-1" />
+            </div>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
               {t("pages:principles.painPrevented")}: {principle.painPreventedCount}
             </span>
           </div>
         </div>
-        <div className="text-xs text-muted-foreground flex-shrink-0">
-          {principle.updatedAt ? new Date(principle.updatedAt).toLocaleDateString() : ""}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleBookmark(); }}
+            className={cn(
+              "p-1 rounded transition-colors",
+              isBookmarked ? "text-primary" : "text-muted-foreground hover:text-foreground"
+            )}
+            title={isBookmarked ? t("pages:principles.removeBookmark") : t("pages:principles.addBookmark")}
+          >
+            {isBookmarked ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+          </button>
+          <span className="text-xs text-muted-foreground">
+            {principle.updatedAt ? new Date(principle.updatedAt).toLocaleDateString() : ""}
+          </span>
         </div>
       </div>
 
@@ -183,19 +236,19 @@ function PrincipleRow({
           {detail && (
             <div className="space-y-3">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className={`p-2 rounded-md ${STATUS_BG[principle.status]}`}>
+                <div className={cn("p-2 rounded-md", STATUS_BG[principle.status])}>
                   <div className="text-xs text-muted-foreground">{t("pages:principles.triggerPattern")}</div>
                   <div className="text-xs font-medium mt-0.5">{principle.triggerPattern || "—"}</div>
                 </div>
-                <div className={`p-2 rounded-md ${STATUS_BG[principle.status]}`}>
+                <div className={cn("p-2 rounded-md", STATUS_BG[principle.status])}>
                   <div className="text-xs text-muted-foreground">{t("pages:principles.action")}</div>
                   <div className="text-xs font-medium mt-0.5">{principle.action || "—"}</div>
                 </div>
-                <div className={`p-2 rounded-md ${STATUS_BG[principle.status]}`}>
+                <div className={cn("p-2 rounded-md", STATUS_BG[principle.status])}>
                   <div className="text-xs text-muted-foreground">{t("pages:principles.evaluability")}</div>
                   <div className="text-xs font-medium mt-0.5">{principle.evaluability}</div>
                 </div>
-                <div className={`p-2 rounded-md ${STATUS_BG[principle.status]}`}>
+                <div className={cn("p-2 rounded-md", STATUS_BG[principle.status])}>
                   <div className="text-xs text-muted-foreground">{t("pages:principles.scope")}</div>
                   <div className="text-xs font-medium mt-0.5">
                     {principle.scope}{principle.domain ? ` / ${principle.domain}` : ""}
@@ -235,6 +288,35 @@ function PrincipleRow({
   );
 }
 
+function EmptyState({ hasFilters, onClear }: { hasFilters: boolean; onClear: () => void }) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex flex-col items-center justify-center py-16 px-4">
+      <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
+        {hasFilters ? (
+          <FileSearch className="h-8 w-8 text-muted-foreground" />
+        ) : (
+          <Inbox className="h-8 w-8 text-muted-foreground" />
+        )}
+      </div>
+      <h3 className="text-lg font-medium mb-2">
+        {hasFilters ? t("pages:principles.noResults") : t("pages:principles.noPrinciples")}
+      </h3>
+      <p className="text-sm text-muted-foreground text-center mb-4 max-w-md">
+        {hasFilters
+          ? t("pages:principles.noResultsDescription")
+          : t("pages:principles.noPrinciplesDescription")}
+      </p>
+      {hasFilters && (
+        <Button variant="outline" onClick={onClear}>
+          {t("common:clear")}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function PrinciplesPage() {
   const { t } = useTranslation();
   const [data, setData] = useState<{ principles: PrincipleListItem[]; summary: Record<string, number> } | null>(null);
@@ -247,10 +329,88 @@ export function PrinciplesPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [evaluabilityFilter, setEvaluabilityFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("valueScore");
+  const [showBookmarkedOnly, setShowBookmarkedOnly] = useState(false);
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [principleDetails, setPrincipleDetails] = useState<Record<string, PrincipleDetail>>({});
   const [loadingDetails, setLoadingDetails] = useState<Set<string>>(new Set());
+  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
+
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [compareIds, setCompareIds] = useState<[string, string] | null>(null);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
+
+  const { bookmarks, toggleBookmark, isBookmarked, clearBookmarks } = useBookmarks();
+
+  useFocusSearch({ enabled: true });
+
+  const { resetSelection } = useKeyboardNavigation({
+    itemCount: filteredPrinciples.length,
+    onSelect: setSelectedIndex,
+    enabled: true,
+  });
+
+  const filteredPrinciples = useMemo(() => {
+    if (!data) return [];
+    let items = data.principles;
+
+    if (statusFilter !== "all") {
+      items = items.filter((p) => p.status === statusFilter);
+    }
+    if (scopeFilter !== "all") {
+      items = items.filter((p) => p.scope === scopeFilter);
+    }
+    if (priorityFilter !== "all") {
+      items = items.filter((p) => p.priority === priorityFilter);
+    }
+    if (evaluabilityFilter !== "all") {
+      items = items.filter((p) => p.evaluability === evaluabilityFilter);
+    }
+    if (showBookmarkedOnly) {
+      items = items.filter((p) => isBookmarked(p.id));
+    }
+    if (debouncedSearchQuery.trim()) {
+      const q = debouncedSearchQuery.toLowerCase();
+      items = items.filter(
+        (p) =>
+          p.id.toLowerCase().includes(q) ||
+          p.text.toLowerCase().includes(q) ||
+          p.triggerPattern.toLowerCase().includes(q) ||
+          p.action.toLowerCase().includes(q) ||
+          (p.domain ?? "").toLowerCase().includes(q),
+      );
+    }
+
+    items = [...items].sort((a, b) => {
+      switch (sortBy) {
+        case "valueScore":
+          return b.valueScore - a.valueScore;
+        case "adherenceRate":
+          return b.adherenceRate - a.adherenceRate;
+        case "painPreventedCount":
+          return b.painPreventedCount - a.painPreventedCount;
+        case "updatedAt":
+          return b.updatedAt.localeCompare(a.updatedAt);
+        case "createdAt":
+          return b.createdAt.localeCompare(a.createdAt);
+        default:
+          return 0;
+      }
+    });
+
+    return items;
+  }, [data, statusFilter, scopeFilter, priorityFilter, evaluabilityFilter, debouncedSearchQuery, sortBy, showBookmarkedOnly, isBookmarked]);
+
+  useEffect(() => {
+    if (selectedIndex >= filteredPrinciples.length) {
+      setSelectedIndex(filteredPrinciples.length - 1);
+    } else if (selectedIndex < 0 && filteredPrinciples.length > 0) {
+      setSelectedIndex(-1);
+    }
+  }, [filteredPrinciples.length]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -283,82 +443,45 @@ export function PrinciplesPage() {
     loadData();
   }
 
-  const filteredPrinciples = useMemo(() => {
-    if (!data) return [];
-    let items = data.principles;
-
-    if (statusFilter !== "all") {
-      items = items.filter((p) => p.status === statusFilter);
-    }
-    if (scopeFilter !== "all") {
-      items = items.filter((p) => p.scope === scopeFilter);
-    }
-    if (priorityFilter !== "all") {
-      items = items.filter((p) => p.priority === priorityFilter);
-    }
-    if (evaluabilityFilter !== "all") {
-      items = items.filter((p) => p.evaluability === evaluabilityFilter);
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      items = items.filter(
-        (p) =>
-          p.id.toLowerCase().includes(q) ||
-          p.text.toLowerCase().includes(q) ||
-          p.triggerPattern.toLowerCase().includes(q) ||
-          p.action.toLowerCase().includes(q) ||
-          (p.domain ?? "").toLowerCase().includes(q),
-      );
-    }
-
-    items = [...items].sort((a, b) => {
-      switch (sortBy) {
-        case "valueScore":
-          return b.valueScore - a.valueScore;
-        case "adherenceRate":
-          return b.adherenceRate - a.adherenceRate;
-        case "painPreventedCount":
-          return b.painPreventedCount - a.painPreventedCount;
-        case "updatedAt":
-          return b.updatedAt.localeCompare(a.updatedAt);
-        case "createdAt":
-          return b.createdAt.localeCompare(a.createdAt);
-        default:
-          return 0;
-      }
-    });
-
-    return items;
-  }, [data, statusFilter, scopeFilter, priorityFilter, evaluabilityFilter, searchQuery, sortBy]);
-
-  async function toggleExpand(principleId: string) {
-    const next = new Set(expandedIds);
-    if (next.has(principleId)) {
-      next.delete(principleId);
-    } else {
-      next.add(principleId);
-      if (!principleDetails[principleId]) {
-        setLoadingDetails((prev) => new Set(prev).add(principleId));
-        try {
-          const result = await fetchPrincipleDetail(principleId);
-          if (result.success && result.data) {
-            setPrincipleDetails((prev) => ({
-              ...prev,
-              [principleId]: result.data.principle,
-            }));
+  const toggleExpand = useCallback(
+    async (principleId: string) => {
+      const next = new Set(expandedIds);
+      if (next.has(principleId)) {
+        next.delete(principleId);
+      } else {
+        next.add(principleId);
+        if (!principleDetails[principleId]) {
+          setLoadingDetails((prev) => new Set(prev).add(principleId));
+          try {
+            const result = await fetchPrincipleDetail(principleId);
+            if (result.success && result.data) {
+              setPrincipleDetails((prev) => ({
+                ...prev,
+                [principleId]: result.data.principle,
+              }));
+            }
+          } catch {
+            // ignore detail load errors
+          } finally {
+            setLoadingDetails((prev) => {
+              const next = new Set(prev);
+              next.delete(principleId);
+              return next;
+            });
           }
-        } catch {
-          // ignore detail load errors
-        } finally {
-          setLoadingDetails((prev) => {
-            const next = new Set(prev);
-            next.delete(principleId);
-            return next;
-          });
         }
       }
+      setExpandedIds(next);
+    },
+    [expandedIds, principleDetails]
+  );
+
+  function handleRowClick(principleId: string) {
+    const index = filteredPrinciples.findIndex((p) => p.id === principleId);
+    if (index !== -1) {
+      setSelectedIndex(index);
     }
-    setExpandedIds(next);
+    toggleExpand(principleId);
   }
 
   function clearFilters() {
@@ -367,6 +490,41 @@ export function PrinciplesPage() {
     setScopeFilter("all");
     setPriorityFilter("all");
     setEvaluabilityFilter("all");
+    setShowBookmarkedOnly(false);
+    resetSelection();
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function handleExport() {
+    const exportData = selectionMode && selectedIds.size > 0
+      ? filteredPrinciples.filter((p) => selectedIds.has(p.id))
+      : filteredPrinciples;
+    const json = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `principles-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleCompare() {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 2) {
+      setCompareIds([ids[0], ids[1]]);
+    }
   }
 
   const hasActiveFilters =
@@ -374,7 +532,8 @@ export function PrinciplesPage() {
     scopeFilter !== "all" ||
     priorityFilter !== "all" ||
     evaluabilityFilter !== "all" ||
-    searchQuery.trim() !== "";
+    searchQuery.trim() !== "" ||
+    showBookmarkedOnly;
 
   if (loading && !data) {
     return (
@@ -428,18 +587,109 @@ export function PrinciplesPage() {
         </div>
       )}
 
+      {data && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+                <BarChart3 className="h-3.5 w-3.5" />
+                {t("pages:principles.statusDistribution")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DonutChartWithLegend
+                items={[
+                  { label: t("pages:principles.active"), value: data.summary.active, color: "hsl(147, 50%, 38%)" },
+                  { label: t("pages:principles.candidate"), value: data.summary.candidate, color: "hsl(45, 93%, 47%)" },
+                  { label: t("pages:principles.probation"), value: data.summary.probation, color: "hsl(217, 91%, 60%)" },
+                  { label: t("pages:principles.deprecated"), value: data.summary.deprecated, color: "hsl(0, 84%, 60%)" },
+                  { label: t("pages:principles.archived"), value: data.summary.archived, color: "hsl(0, 0%, 60%)" },
+                ].filter((item) => item.value > 0)}
+                size={100}
+                strokeWidth={16}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+                <BarChart3 className="h-3.5 w-3.5" />
+                {t("pages:principles.priorityBreakdown")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <HorizontalBarChart
+                items={[
+                  { label: "P0", value: data.principles.filter((p) => p.priority === "P0").length, color: "hsl(0, 84%, 60%)" },
+                  { label: "P1", value: data.principles.filter((p) => p.priority === "P1").length, color: "hsl(45, 93%, 47%)" },
+                  { label: "P2", value: data.principles.filter((p) => p.priority === "P2").length, color: "hsl(0, 0%, 60%)" },
+                ]}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+                <Shield className="h-3.5 w-3.5" />
+                {t("pages:principles.ruleCoverage")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">{t("pages:principles.withRules")}</div>
+                <CoverageIndicator
+                  covered={data.principles.filter((p) => p.ruleCount > 0).length}
+                  total={data.principles.length}
+                />
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">{t("pages:principles.avgRulesPerPrinciple")}</div>
+                <div className="text-2xl font-bold">
+                  {data.principles.length > 0
+                    ? (data.principles.reduce((sum, p) => sum + p.ruleCount, 0) / data.principles.length).toFixed(1)
+                    : "0"}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+                <BarChart3 className="h-3.5 w-3.5" />
+                {t("pages:principles.valueDistribution")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Histogram buckets={computeValueBuckets(data.principles)} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <input
+                ref={searchInputRef}
                 type="text"
                 placeholder={t("pages:principles.searchPlaceholder")}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 rounded-md border border-input bg-background text-sm"
+                className="w-full pl-8 pr-10 py-2 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
 
             <select
@@ -506,8 +756,74 @@ export function PrinciplesPage() {
               </Button>
             )}
           </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              variant={showBookmarkedOnly ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowBookmarkedOnly(!showBookmarkedOnly)}
+            >
+              <Bookmark className="h-3.5 w-3.5 mr-1" />
+              {t("pages:principles.bookmarked")} ({bookmarks.length})
+            </Button>
+            <Button
+              variant={selectionMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setSelectionMode(!selectionMode);
+                if (selectionMode) {
+                  setSelectedIds(new Set());
+                }
+              }}
+            >
+              <CheckSquare className="h-3.5 w-3.5 mr-1" />
+              {t("pages:principles.select")}
+            </Button>
+            {selectionMode && selectedIds.size > 0 && (
+              <>
+                <span className="text-xs text-muted-foreground">
+                  {selectedIds.size} {t("pages:principles.selected")}
+                </span>
+                <Button variant="outline" size="sm" onClick={handleExport}>
+                  <Download className="h-3.5 w-3.5 mr-1" />
+                  {t("pages:principles.export")}
+                </Button>
+                {selectedIds.size === 2 && (
+                  <Button variant="outline" size="sm" onClick={handleCompare}>
+                    <GitCompare className="h-3.5 w-3.5 mr-1" />
+                    {t("pages:principles.compare")}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  {t("pages:principles.deselectAll")}
+                </Button>
+              </>
+            )}
+            {!selectionMode && (
+              <Button variant="outline" size="sm" onClick={handleExport}>
+                <Download className="h-3.5 w-3.5 mr-1" />
+                {t("pages:principles.exportAll")}
+              </Button>
+            )}
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            {t("pages:principles.keyboardHint")}
+          </div>
         </CardContent>
       </Card>
+
+      {compareIds && data && (
+        <CompareView
+          principles={filteredPrinciples.filter((p) => compareIds.includes(p.id))}
+          onClose={() => {
+            setCompareIds(null);
+            setSelectedIds(new Set());
+          }}
+        />
+      )}
 
       <Card>
         <CardHeader className="pb-2">
@@ -517,22 +833,27 @@ export function PrinciplesPage() {
             </CardTitle>
           </div>
         </CardHeader>
-        <CardContent className="p-0 max-h-[calc(100vh-380px)] overflow-y-auto">
-          {filteredPrinciples.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-8">
-              {t("components:zoneSection.empty")}
-            </p>
+        <CardContent className="p-0 max-h-[calc(100vh-420px)] overflow-y-auto">
+          {filteredPrinciples.length === 0 ? (
+            <EmptyState hasFilters={hasActiveFilters} onClear={clearFilters} />
+          ) : (
+            filteredPrinciples.map((p, index) => (
+              <PrincipleRow
+                key={p.id}
+                principle={p}
+                expanded={expandedIds.has(p.id)}
+                onToggle={() => handleRowClick(p.id)}
+                detail={principleDetails[p.id] ?? null}
+                detailLoading={loadingDetails.has(p.id)}
+                isSelected={index === selectedIndex}
+                isBookmarked={isBookmarked(p.id)}
+                onToggleBookmark={() => toggleBookmark(p.id)}
+                selectionMode={selectionMode}
+                isChecked={selectedIds.has(p.id)}
+                onToggleCheck={() => toggleSelect(p.id)}
+              />
+            ))
           )}
-          {filteredPrinciples.map((p) => (
-            <PrincipleRow
-              key={p.id}
-              principle={p}
-              expanded={expandedIds.has(p.id)}
-              onToggle={() => toggleExpand(p.id)}
-              detail={principleDetails[p.id] ?? null}
-              detailLoading={loadingDetails.has(p.id)}
-            />
-          ))}
         </CardContent>
       </Card>
     </div>

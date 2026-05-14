@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef } from "react";
 
 function isInputFocused(): boolean {
-  const activeElement = globalThis.document?.activeElement;
+  const { activeElement } = document;
   return (
     activeElement instanceof HTMLInputElement ||
     activeElement instanceof HTMLTextAreaElement ||
@@ -59,9 +59,9 @@ export function useKeyboardNavigation({
   useEffect(() => {
     if (!enabled) return;
 
-    globalThis.document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      globalThis.document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [enabled, handleKeyDown]);
 
@@ -83,14 +83,14 @@ export function useFocusSearch({ enabled = true }: UseFocusSearchOptions) {
 
       if (event.key === "/" && !isInputFocused()) {
         event.preventDefault();
-        const searchInput = globalThis.document.querySelector<HTMLInputElement>(
+        const searchInput = document.querySelector<HTMLInputElement>(
           'input[placeholder*="Search"], input[placeholder*="搜索"]'
         );
         searchInput?.focus();
       }
 
       if (event.key === "Escape" && isInputFocused()) {
-        const searchInput = globalThis.document.querySelector<HTMLInputElement>(
+        const searchInput = document.querySelector<HTMLInputElement>(
           'input[placeholder*="Search"], input[placeholder*="搜索"]'
         );
         searchInput?.blur();
@@ -102,9 +102,9 @@ export function useFocusSearch({ enabled = true }: UseFocusSearchOptions) {
   useEffect(() => {
     if (!enabled) return;
 
-    globalThis.document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      globalThis.document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [enabled, handleKeyDown]);
 }
