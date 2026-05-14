@@ -1,57 +1,15 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { getToken, setToken, fetchWorkspaces, addWorkspace, removeWorkspace, syncWorkspace } from "../api.js";
 import type { WorkspaceEntry } from "../api.js";
-
-const CARD_STYLE: React.CSSProperties = {
-  border: "1px solid #e0e0e0",
-  borderRadius: "8px",
-  padding: "16px",
-  backgroundColor: "#fff",
-  marginBottom: "16px",
-};
-
-const INPUT_STYLE: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 12px",
-  border: "1px solid #d9d9d9",
-  borderRadius: "6px",
-  fontSize: "14px",
-  marginTop: "4px",
-  boxSizing: "border-box",
-};
-
-const BUTTON_STYLE: React.CSSProperties = {
-  border: "none",
-  borderRadius: "6px",
-  padding: "8px 16px",
-  fontSize: "13px",
-  cursor: "pointer",
-  fontWeight: 500,
-};
-
-const PRIMARY_BUTTON: React.CSSProperties = {
-  ...BUTTON_STYLE,
-  backgroundColor: "#1677ff",
-  color: "#fff",
-};
-
-const DANGER_BUTTON: React.CSSProperties = {
-  ...BUTTON_STYLE,
-  backgroundColor: "#ff4d4f",
-  color: "#fff",
-};
-
-const SUCCESS_MSG_STYLE: React.CSSProperties = {
-  marginTop: "12px",
-  padding: "8px 12px",
-  backgroundColor: "#f6ffed",
-  border: "1px solid #b7eb8f",
-  borderRadius: "4px",
-  color: "#52c41a",
-  fontSize: "13px",
-};
+import { PageHeader } from "../components/page-header.js";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card.js";
+import { Button } from "../components/ui/button.js";
+import { Separator } from "../components/ui/separator.js";
+import { Key, Plus, RefreshCw, Trash2, CheckCircle, XCircle } from "lucide-react";
 
 function AuthSettings() {
+  const { t } = useTranslation();
   const [tokenValue, setTokenValue] = useState(() => getToken() ?? "");
   const [saved, setSaved] = useState(false);
 
@@ -64,28 +22,43 @@ function AuthSettings() {
   }
 
   return (
-    <div style={CARD_STYLE}>
-      <h3 style={{ marginTop: 0 }}>Authentication</h3>
-      <label style={{ display: "block", marginBottom: "8px", fontSize: "14px", fontWeight: 500, color: "#333" }}>
-        Bearer Token
-        <input
-          type="password"
-          value={tokenValue}
-          onChange={(e) => { setTokenValue(e.target.value); setSaved(false); }}
-          placeholder="Enter access token"
-          style={INPUT_STYLE}
-        />
-      </label>
-      <button onClick={handleSave} style={PRIMARY_BUTTON}>Save</button>
-      {saved && <div style={SUCCESS_MSG_STYLE}>Token saved</div>}
-      <p style={{ marginTop: "12px", color: "#999", fontSize: "13px" }}>
-        Token is stored in the browser session and will be cleared when the tab is closed.
-      </p>
-    </div>
+    <Card className="mb-6">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Key className="h-4 w-4" />
+          {t("pages:settings.auth")}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <label className="block mb-2 text-sm font-medium">
+          Bearer Token
+          <input
+            type="password"
+            value={tokenValue}
+            onChange={(e) => { setTokenValue(e.target.value); setSaved(false); }}
+            placeholder="Enter access token"
+            className="mt-1 w-full px-3 py-2 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </label>
+        <Button onClick={handleSave} disabled={!tokenValue.trim()}>
+          {t("common:save")}
+        </Button>
+        {saved && (
+          <div className="mt-3 flex items-center gap-2 text-sm text-primary">
+            <CheckCircle className="h-4 w-4" />
+            {t("pages:settings.tokenSaved")}
+          </div>
+        )}
+        <p className="mt-3 text-xs text-muted-foreground">
+          Token is stored in the browser session and will be cleared when the tab is closed.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
 function WorkspaceManager() {
+  const { t } = useTranslation();
   const [workspaces, setWorkspaces] = useState<WorkspaceEntry[]>([]);
   const [newName, setNewName] = useState("");
   const [newPath, setNewPath] = useState("");
@@ -109,7 +82,7 @@ function WorkspaceManager() {
       setWorkspaces((prev) => [...prev, result.data]);
       setNewName("");
       setNewPath("");
-      showMessage("success", `Workspace "${newName}" added`);
+      showMessage("success", t("pages:settings.workspaceAdded"));
     } else {
       showMessage("error", result.error);
     }
@@ -119,7 +92,7 @@ function WorkspaceManager() {
     const result = await removeWorkspace(name);
     if (result.success) {
       setWorkspaces((prev) => prev.filter(w => w.name !== name));
-      showMessage("success", `Workspace "${name}" removed`);
+      showMessage("success", t("pages:settings.workspaceRemoved"));
     } else {
       showMessage("error", result.error);
     }
@@ -137,57 +110,110 @@ function WorkspaceManager() {
   }
 
   return (
-    <div style={CARD_STYLE}>
-      <h3 style={{ marginTop: 0 }}>Workspaces</h3>
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("pages:settings.workspace")}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {workspaces.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6">
+            No workspaces configured
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {workspaces.map((ws) => (
+              <div
+                key={ws.name}
+                className="flex justify-between items-center py-3 border-b border-border last:border-0"
+              >
+                <div>
+                  <p className="font-medium text-sm">
+                    {ws.config?.displayName ?? ws.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{ws.path}</p>
+                  {ws.lastSync && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Last sync: {new Date(ws.lastSync).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => handleSync(ws.name)}>
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    {t("pages:settings.syncWorkspace")}
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => handleRemove(ws.name)}>
+                    <Trash2 className="h-3 w-3 mr-1" />
+                    {t("pages:settings.removeWorkspace")}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
-      {workspaces.length === 0 ? (
-        <div style={{ padding: "12px", color: "#888", fontSize: "14px" }}>No workspaces configured</div>
-      ) : (
-        workspaces.map((ws) => (
-          <div key={ws.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #f0f0f0" }}>
-            <div>
-              <div style={{ fontWeight: "bold", fontSize: "14px" }}>{ws.config?.displayName ?? ws.name}</div>
-              <div style={{ fontSize: "12px", color: "#888" }}>{ws.path}</div>
-              {ws.lastSync && <div style={{ fontSize: "11px", color: "#999" }}>Last sync: {new Date(ws.lastSync).toLocaleString()}</div>}
-            </div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => handleSync(ws.name)} style={PRIMARY_BUTTON}>Sync</button>
-              <button onClick={() => handleRemove(ws.name)} style={DANGER_BUTTON}>Remove</button>
-            </div>
-          </div>
-        ))
-      )}
+        <Separator className="my-4" />
 
-      <div style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid #e0e0e0" }}>
-        <h4 style={{ margin: "0 0 12px" }}>Add Workspace</h4>
-        <div style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: "13px", color: "#666" }}>Name</label>
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="my-workspace" style={INPUT_STYLE} />
+        <h4 className="text-sm font-medium mb-3">{t("pages:settings.addWorkspace")}</h4>
+        <div className="flex gap-2 items-end">
+          <div className="flex-1">
+            <label className="text-xs text-muted-foreground">{t("common:name")}</label>
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="my-workspace"
+              className="mt-1 w-full px-3 py-1.5 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
           </div>
-          <div style={{ flex: 2 }}>
-            <label style={{ fontSize: "13px", color: "#666" }}>Path</label>
-            <input value={newPath} onChange={(e) => setNewPath(e.target.value)} placeholder="/path/to/workspace" style={INPUT_STYLE} />
+          <div className="flex-[2]">
+            <label className="text-xs text-muted-foreground">Path</label>
+            <input
+              value={newPath}
+              onChange={(e) => setNewPath(e.target.value)}
+              placeholder="/path/to/workspace"
+              className="mt-1 w-full px-3 py-1.5 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
           </div>
-          <button onClick={handleAdd} style={PRIMARY_BUTTON} disabled={!newName.trim() || !newPath.trim()}>Add</button>
+          <Button
+            onClick={handleAdd}
+            disabled={!newName.trim() || !newPath.trim()}
+            size="sm"
+          >
+            <Plus className="h-3 w-3 mr-1" />
+            {t("common:add")}
+          </Button>
         </div>
-      </div>
 
-      {message && (
-        <div style={{ marginTop: "12px", padding: "8px 12px", borderRadius: "4px", fontSize: "13px",
-          ...(message.type === "success" ? { backgroundColor: "#f6ffed", border: "1px solid #b7eb8f", color: "#52c41a" } : { backgroundColor: "#fff2f0", border: "1px solid #ffccc7", color: "#ff4d4f" })
-        }}>
-          {message.text}
-        </div>
-      )}
-    </div>
+        {message && (
+          <div
+            className={`mt-3 flex items-center gap-2 text-sm p-2 rounded-md ${
+              message.type === "success"
+                ? "bg-primary/10 text-primary"
+                : "bg-destructive/10 text-destructive"
+            }`}
+          >
+            {message.type === "success" ? (
+              <CheckCircle className="h-4 w-4" />
+            ) : (
+              <XCircle className="h-4 w-4" />
+            )}
+            {message.text}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
 export function SettingsPage() {
+  const { t } = useTranslation();
+
   return (
-    <div style={{ maxWidth: "640px" }}>
-      <h1 style={{ marginBottom: "24px" }}>Settings</h1>
+    <div className="max-w-2xl">
+      <PageHeader
+        title={t("pages:settings.title")}
+        description={t("pages:settings.description")}
+      />
       <AuthSettings />
       <WorkspaceManager />
     </div>

@@ -98,7 +98,8 @@ export class GateConsoleModel {
   }
 
   async getGateBlocks(_limit?: number): Promise<GateBlockItem[]> {
-    return this.getGateModel().getGateBlocks(_limit);
+    void this.workspaceDir;
+    return [];
   }
 
   dispose(): void {
