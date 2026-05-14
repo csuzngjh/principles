@@ -307,6 +307,11 @@ export type {
   ReplayResult,
   ClassificationSummary,
   ReplayReport,
+  PrincipleDependency,
+  PrincipleValueMetrics,
+  PrincipleEventType,
+  PrincipleLifecycleEvent,
+  PrincipleTreeStore,
 } from './types/index.js';
 
 // Lifecycle read model types (PRI-51)
@@ -802,8 +807,218 @@ export {
   replayValidateCode,
 } from './golden-trace-replay-adapter.js';
 
+// ── Evolution Types (migrated from openclaw-plugin) ────────────────────────
+
+export {
+  EvolutionTier,
+  TIER_DEFINITIONS,
+  getTierDefinition,
+  getTierByPoints,
+  TASK_DIFFICULTY_CONFIG,
+  DEFAULT_EVOLUTION_CONFIG,
+  isCompleteDetectorMetadata,
+} from './evolution/evolution-types.js';
+
+export type {
+  TierPermissions,
+  TierDefinition,
+  TaskDifficulty,
+  TaskDifficultyConfig,
+  EvolutionEventType,
+  EvolutionEvent,
+  EvolutionScorecard,
+  EvolutionStats,
+  EvolutionStorage,
+  EvolutionConfig,
+  ArchivedEventStats,
+  GateDecision,
+  ToolCallContext,
+  TierPromotionEvent,
+  EvolutionPrincipleStatus,
+  PrincipleEvaluatorLevel,
+  Evaluability,
+  PrincipleDetectorSpec,
+  EvolutionPrinciple,
+  EvolutionPrincipleSuggestedRule,
+  EvolutionPrincipleValueMetricsSnapshot,
+  EvolutionLoopEventType,
+  EvolutionPainDetectedData,
+  CandidateCreatedData,
+  PrinciplePromotedData,
+  PrincipleDeprecatedData,
+  PrincipleRolledBackData,
+  CircuitBreakerOpenedData,
+  LegacyImportData,
+  EvolutionLoopEvent,
+} from './evolution/evolution-types.js';
+
 export type {
   ReplayCodeInput,
   SandboxEvaluateLoader,
 } from './golden-trace-replay-adapter.js';
+
+// ── Nocturnal Trinity Types (migrated from openclaw-plugin) ────────────────
+
+export type {
+  ArtificerTargetRuleScore,
+  ArtificerTargetRuleResolution,
+  TrinityArtificerContext,
+  TrinityDreamerCandidate,
+  TrinityDreamerOutput,
+  PhilosopherRiskAssessment,
+  Philosopher6DScores,
+  PhilosopherJudgment,
+  PhilosopherOutput,
+  TournamentTraceEntry,
+  RejectedAnalysis,
+  ChosenJustification,
+  ContrastiveAnalysis,
+  TrinityTelemetry,
+  TrinityStageFailure,
+  TrinityResult,
+  TrinityDraftArtifact,
+} from './nocturnal/index.js';
+
+// ── Nocturnal Candidate Scoring (migrated from openclaw-plugin) ────────────
+
+export type {
+  ThresholdValues,
+  CandidateScores,
+  ScoredCandidate,
+  TournamentResult as CandidateTournamentResult,
+  CandidateTournamentTraceEntry,
+  ScoringWeights,
+  DiversityValidationResult,
+  RankCandidatesOptions,
+  RunTournamentOptions,
+} from './nocturnal/index.js';
+
+export {
+  DEFAULT_SCORING_WEIGHTS,
+  scoreCandidate,
+  checkThresholds,
+  validateCandidateDiversity,
+  rankCandidates,
+  runTournament,
+} from './nocturnal/index.js';
+
+// ── Nocturnal Snapshot Contract (migrated from openclaw-plugin) ────────────
+
+export type {
+  NocturnalAssistantTurn,
+  NocturnalUserTurn,
+  NocturnalToolCall,
+  NocturnalPainEvent,
+  NocturnalGateBlock,
+  NocturnalUserCorrection,
+  NocturnalSessionSnapshot,
+  NocturnalSnapshotContractResult,
+} from './nocturnal/index.js';
+
+export {
+  validateNocturnalSnapshotIngress,
+} from './nocturnal/index.js';
+
+// ── Correction Cue Keyword Types (migrated from openclaw-plugin) ──────────
+
+export {
+  MAX_CORRECTION_KEYWORDS,
+  CORRECTION_SEED_KEYWORDS,
+} from './correction/correction-types.js';
+
+export type {
+  CorrectionKeyword,
+  CorrectionKeywordStore,
+  CorrectionMatchResult,
+} from './correction/correction-types.js';
+
+// ── Queue, Hygiene, Runtime Summary, Event Types (migrated from openclaw-plugin) ──
+
+export type {
+  Brand,
+  QueueItemId,
+  WorkflowId,
+  SessionKey,
+} from './types/queue-types.js';
+
+export {
+  toQueueItemId,
+  toWorkflowId,
+  toSessionKey,
+  isQueueItemId,
+  isWorkflowId,
+  isSessionKey,
+} from './types/queue-types.js';
+
+export type {
+  PersistenceAction,
+  HygieneStats,
+} from './types/hygiene-types.js';
+
+export {
+  createEmptyHygieneStats,
+} from './types/hygiene-types.js';
+
+export type {
+  RuntimeTruth,
+  AnalyticsTruth,
+  TrendMetrics,
+} from './types/runtime-summary-types.js';
+
+export type {
+  EventType,
+  EventCategory,
+  EventLogEntry,
+  ToolCallEventData,
+  PainSignalEventData,
+  RuleMatchEventData,
+  RulePromotionEventData,
+  HookExecutionEventData,
+  GateBlockEventData,
+  GateBypassEventData,
+  PlanApprovalEventData,
+  EvolutionTaskEventData,
+  EmpathyRollbackEventData,
+  HeartbeatDiagnosisEventData,
+  DiagnosisTaskEventData,
+  DiagnosticianReportEventData,
+  PrincipleCandidateEventData,
+  RuleEnforcedEventData,
+  NocturnalDreamerCompletedEventData,
+  NocturnalArtifactPersistedEventData,
+  NocturnalCodeCandidateCreatedEventData,
+  RuleHostEvaluatedEventData,
+  RuleHostBlockedEventData,
+  RuleHostRequireApprovalEventData,
+  RuleHostAutoCorrectProposedEventData,
+  ToolCallStats,
+  ErrorStats,
+  PainStats,
+  EmpathyEventStats,
+  GfiStats,
+  EvolutionStats as EventEvolutionStats,
+  HookStats,
+  DailyStats,
+} from './types/event-types.js';
+
+export {
+  createEmptyDailyStats,
+} from './types/event-types.js';
+
+export type {
+  EventLogEntry as DiscriminatedEventLogEntry,
+} from './types/event-payload.js';
+
+export {
+  isToolCallEventEntry,
+  isPainSignalEventEntry,
+  isRuleMatchEventEntry,
+  isRulePromotionEventEntry,
+  isHookExecutionEventEntry,
+  isGateBlockEventEntry,
+  isGateBypassEventEntry,
+  isPlanApprovalEventEntry,
+  isEvolutionTaskEventEntry,
+  isEmpathyRollbackEventEntry,
+} from './types/event-payload.js';
 
