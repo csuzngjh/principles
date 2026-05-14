@@ -18,8 +18,13 @@ export type {
   TrinityDraftArtifact,
 } from '@principles/core/runtime-v2';
 
+import type {
+  TrinityDreamerCandidate as TrinityDreamerCandidateType,
+  TrinityDreamerOutput as TrinityDreamerOutputType,
+} from '@principles/core/runtime-v2';
+
 /** @deprecated Use TrinityDreamerCandidate instead. Alias for backward compatibility. */
-export type DreamerCandidate = TrinityDreamerCandidate;
+export type DreamerCandidate = TrinityDreamerCandidateType;
 
 /** @deprecated Use TrinityDreamerOutput instead. Alias for backward compatibility. */
-export type DreamerOutput = TrinityDreamerOutput;
+export type DreamerOutput = TrinityDreamerOutputType;
