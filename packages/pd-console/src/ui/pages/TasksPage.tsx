@@ -63,7 +63,12 @@ function TaskCard({
   return (
     <Card className="mb-3 transition-all duration-200 hover:shadow-sm">
       <CardContent className="p-4">
-        <div className="flex items-start justify-between cursor-pointer" onClick={onToggleExpand}>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          className="flex items-start justify-between cursor-pointer w-full text-left"
+          onClick={onToggleExpand}
+        >
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <Badge variant="outline" className="text-xs">
@@ -79,7 +84,7 @@ function TaskCard({
           <ChevronRight
             className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
           />
-        </div>
+        </button>
 
         <div
           className={`overflow-hidden transition-all duration-300 ${expanded ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"}`}

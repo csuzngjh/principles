@@ -130,16 +130,29 @@ export function EvolutionPage() {
   }, [statusFilter, page]);
 
   const refreshAll = async () => {
-    const [statsRes, principlesRes, queueRes] = await Promise.all([
-      fetchEvolutionStats(),
-      fetchEvolutionPrinciples(),
-      fetchEvolutionQueue(),
-    ]);
-    if (statsRes.success) setStats(statsRes.data);
-    if (principlesRes.success) setPrinciples(principlesRes.data);
-    if (queueRes.success) setQueue(queueRes.data);
-    const tasksRes = await fetchEvolutionTasks(statusFilter, page);
-    if (tasksRes.success) setTasks(tasksRes.data);
+    try {
+      const [statsRes, principlesRes, queueRes] = await Promise.all([
+        fetchEvolutionStats(),
+        fetchEvolutionPrinciples(),
+        fetchEvolutionQueue(),
+      ]);
+      if (statsRes.success) setStats(statsRes.data);
+      if (principlesRes.success) setPrinciples(principlesRes.data);
+      if (queueRes.success) setQueue(queueRes.data);
+      const tasksRes = await fetchEvolutionTasks(statusFilter, page);
+      if (tasksRes.success) setTasks(tasksRes.data);
+      const errors = [statsRes, principlesRes, queueRes, tasksRes]
+        .filter((r) => !r.success)
+        .map((r) => r.error)
+        .filter(Boolean);
+      if (errors.length > 0) {
+        setError(errors.join("; "));
+      } else {
+        setError("");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   if (error && !stats) {

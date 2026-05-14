@@ -14,6 +14,23 @@ export class EventLogReadModel {
     this.logsDir = path.join(stateDir, 'logs');
   }
 
+  private async readFilesWithConcurrency<T>(
+    files: string[],
+    processor: (file: string) => Promise<T[]>,
+    concurrency = 5,
+  ): Promise<T[]> {
+    void this;
+    const results: T[] = [];
+    for (let i = 0; i < files.length; i += concurrency) {
+      const batch = files.slice(i, i + concurrency);
+      const batchResults = await Promise.all(batch.map(processor));
+      for (const batchResult of batchResults) {
+        results.push(...batchResult);
+      }
+    }
+    return results;
+  }
+
   async getEventsPaginated(options: {
     types?: string[];
     startDate?: string;
@@ -45,18 +62,18 @@ export class EventLogReadModel {
       return true;
     });
 
-    const allMatchingEvents: EventLogEntry[] = [];
+    const allEntries = await this.readFilesWithConcurrency(filteredFiles, (file) =>
+      this.readEventsOfFile(file),
+    );
 
-    for (const file of filteredFiles) {
-      const entries = await this.readEventsOfFile(file);
-      for (const entry of entries.reverse()) {
-        if (types && types.length > 0 && !types.includes(entry.type)) continue;
-        if (searchQuery) {
-          const entryStr = JSON.stringify(entry).toLowerCase();
-          if (!entryStr.includes(searchQuery.toLowerCase())) continue;
-        }
-        allMatchingEvents.push(entry);
+    const allMatchingEvents: EventLogEntry[] = [];
+    for (const entry of allEntries.reverse()) {
+      if (types && types.length > 0 && !types.includes(entry.type)) continue;
+      if (searchQuery) {
+        const entryStr = JSON.stringify(entry).toLowerCase();
+        if (!entryStr.includes(searchQuery.toLowerCase())) continue;
       }
+      allMatchingEvents.push(entry);
     }
 
     const total = allMatchingEvents.length;
@@ -81,13 +98,13 @@ export class EventLogReadModel {
       return true;
     });
 
-    const counts: Record<string, number> = {};
+    const allEntries = await this.readFilesWithConcurrency(filteredFiles, (file) =>
+      this.readEventsOfFile(file),
+    );
 
-    for (const file of filteredFiles) {
-      const entries = await this.readEventsOfFile(file);
-      for (const entry of entries) {
-        counts[entry.type] = (counts[entry.type] || 0) + 1;
-      }
+    const counts: Record<string, number> = {};
+    for (const entry of allEntries) {
+      counts[entry.type] = (counts[entry.type] || 0) + 1;
     }
 
     return counts;
@@ -95,20 +112,21 @@ export class EventLogReadModel {
 
   async getRelatedEvents(eventId: string, maxDistance = 10): Promise<EventLogEntry[]> {
     const allFiles = this.getEventFiles().reverse();
+    const allEntries = await this.readFilesWithConcurrency(allFiles, (file) =>
+      this.readEventsOfFile(file),
+    );
+
     const relatedEvents: EventLogEntry[] = [];
     let foundTarget = false;
     let distance = 0;
 
-    for (const file of allFiles) {
-      const entries = await this.readEventsOfFile(file);
-      for (const entry of entries) {
-        if (entry.id === eventId) {
-          foundTarget = true;
-          relatedEvents.push(entry);
-        } else if (foundTarget && distance < maxDistance) {
-          relatedEvents.push(entry);
-          distance++;
-        }
+    for (const entry of allEntries) {
+      if (entry.id === eventId) {
+        foundTarget = true;
+        relatedEvents.push(entry);
+      } else if (foundTarget && distance < maxDistance) {
+        relatedEvents.push(entry);
+        distance++;
       }
     }
 
@@ -116,18 +134,17 @@ export class EventLogReadModel {
   }
 
   async getGateBlocks(limit = 100): Promise<GateBlockEvent[]> {
-    const blocks: GateBlockEvent[] = [];
     const files = this.getEventFiles();
+    const allEntries = await this.readFilesWithConcurrency(files, (file) =>
+      this.readEventsOfFile(file),
+    );
 
-    for (const file of files.reverse()) {
-      if (blocks.length >= limit) break;
-      
-      const entries = await this.readEventsOfFile(file);
-      for (const entry of entries.reverse()) {
-        if (entry.type === 'gate_block' && blocks.length < limit) {
-          blocks.push(entry as GateBlockEvent);
-        }
+    const blocks: GateBlockEvent[] = [];
+    for (const entry of allEntries.reverse()) {
+      if (entry.type === 'gate_block' && blocks.length < limit) {
+        blocks.push(entry as GateBlockEvent);
       }
+      if (blocks.length >= limit) break;
     }
 
     return blocks;
@@ -166,18 +183,17 @@ export class EventLogReadModel {
   }
 
   async getEventsByTypes(types: string[], limit = 50): Promise<EventLogEntry[]> {
-    const results: EventLogEntry[] = [];
     const files = this.getEventFiles();
+    const allEntries = await this.readFilesWithConcurrency(files, (file) =>
+      this.readEventsOfFile(file),
+    );
 
-    for (const file of files.reverse()) {
-      if (results.length >= limit) break;
-
-      const entries = await this.readEventsOfFile(file);
-      for (const entry of entries.reverse()) {
-        if (types.includes(entry.type) && results.length < limit) {
-          results.push(entry);
-        }
+    const results: EventLogEntry[] = [];
+    for (const entry of allEntries.reverse()) {
+      if (types.includes(entry.type) && results.length < limit) {
+        results.push(entry);
       }
+      if (results.length >= limit) break;
     }
 
     return results;

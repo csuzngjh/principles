@@ -385,7 +385,7 @@ class EventLogReadModel {
 
 **查询参数**:
 
-```
+```http
 GET /api/events?types=pain_signal,gate_block&startDate=2026-05-01&endDate=2026-05-14&search=git&page=1&pageSize=50
 ```
 
