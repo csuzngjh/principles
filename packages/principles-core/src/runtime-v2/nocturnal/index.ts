@@ -9,7 +9,7 @@ export type {
   Philosopher6DScores,
   PhilosopherJudgment,
   PhilosopherOutput,
-  TournamentTraceEntry,
+  TournamentTraceEntry as TrinityTournamentTraceEntry,
   RejectedAnalysis,
   ChosenJustification,
   ContrastiveAnalysis,
@@ -45,9 +45,7 @@ export type {
   CandidateScores,
   ScoredCandidate,
   CandidateTournamentResult,
-  TournamentResult, // backward compatibility alias
   CandidateTournamentTraceEntry,
-  TournamentTraceEntry, // backward compatibility alias
   ScoringWeights,
   DiversityValidationResult,
   RankCandidatesOptions,
@@ -65,9 +63,7 @@ export {
   CandidateScoresSchema,
   ScoredCandidateSchema,
   CandidateTournamentResultSchema,
-  TournamentResultSchema, // backward compatibility alias
   CandidateTournamentTraceEntrySchema,
-  TournamentTraceEntrySchema, // backward compatibility alias
   ScoringWeightsSchema,
   DiversityValidationResultSchema,
 } from './candidate-scoring.js';
