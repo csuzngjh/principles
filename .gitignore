@@ -113,3 +113,11 @@ docs/superpowers/plans/2026-05-14*
 
 graphify-out/
 ops/
+
+# Learnings (runtime generated)
+.learnings/
+
+# Docs plans (temporary)
+docs/superpowers/plans/2026-0[123]*
+docs/superpowers/plans/2026-04*
+docs/superpowers/plans/2026-05-1[2-9]*
