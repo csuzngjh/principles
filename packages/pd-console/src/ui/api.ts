@@ -329,6 +329,57 @@ interface EvolutionPrinciplesData {
   recent: { principleId: string; status: string; text: string; triggerPattern: string; action: string; evaluability: string; createdAt: string; updatedAt: string }[];
 }
 
+interface PrincipleListItem {
+  id: string;
+  text: string;
+  triggerPattern: string;
+  action: string;
+  status: 'candidate' | 'active' | 'archived' | 'deprecated' | 'probation';
+  priority: 'P0' | 'P1' | 'P2';
+  scope: 'general' | 'domain';
+  domain: string | null;
+  evaluability: 'manual_only' | 'deterministic' | 'weak_heuristic';
+  valueScore: number;
+  adherenceRate: number;
+  painPreventedCount: number;
+  ruleCount: number;
+  conflictsWithCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface RuleItem {
+  id: string;
+  name: string;
+  description: string;
+  type: 'hook' | 'gate' | 'skill' | 'lora' | 'test' | 'prompt';
+  triggerCondition: string;
+  enforcement: 'block' | 'warn' | 'log';
+  action: string;
+  status: 'proposed' | 'implemented' | 'enforced' | 'retired';
+  coverageRate: number;
+  falsePositiveRate: number;
+}
+
+interface PrincipleDetail extends PrincipleListItem {
+  coreAxiomId: string | null;
+  lastPainPreventedAt: string | null;
+  derivedFromPainIds: string[];
+  ruleIds: string[];
+  conflictsWithPrincipleIds: string[];
+  supersedesPrincipleId: string | null;
+  rules: RuleItem[];
+}
+
+interface PrinciplesListData {
+  principles: PrincipleListItem[];
+  summary: { candidate: number; probation: number; active: number; deprecated: number; archived: number; total: number };
+}
+
+interface PrincipleDetailData {
+  principle: PrincipleDetail;
+}
+
 interface QueueHealthData {
   pendingCount: number;
   retryWaitCount: number;
@@ -355,6 +406,14 @@ async function fetchEvolutionTasks(status?: string, page?: number): Promise<ApiR
 
 async function fetchEvolutionPrinciples(): Promise<ApiResponse<EvolutionPrinciplesData>> {
   return request<EvolutionPrinciplesData>("/api/evolution/principles");
+}
+
+async function fetchPrinciples(): Promise<ApiResponse<PrinciplesListData>> {
+  return request<PrinciplesListData>("/api/principles");
+}
+
+async function fetchPrincipleDetail(principleId: string): Promise<ApiResponse<PrincipleDetailData>> {
+  return request<PrincipleDetailData>(`/api/principles/${encodeURIComponent(principleId)}`);
 }
 
 async function fetchEvolutionQueue(): Promise<ApiResponse<QueueHealthData>> {
@@ -514,6 +573,8 @@ export {
   fetchEvolutionStats,
   fetchEvolutionTasks,
   fetchEvolutionPrinciples,
+  fetchPrinciples,
+  fetchPrincipleDetail,
   fetchEvolutionQueue,
   fetchThinkingModels,
   fetchSystemHealth,
@@ -540,6 +601,11 @@ export type {
   EvolutionTaskItem,
   EvolutionTasksData,
   EvolutionPrinciplesData,
+  PrincipleListItem,
+  RuleItem,
+  PrincipleDetail,
+  PrinciplesListData,
+  PrincipleDetailData,
   QueueHealthData,
   ThinkingModelOverview,
   HealthCheckItem,

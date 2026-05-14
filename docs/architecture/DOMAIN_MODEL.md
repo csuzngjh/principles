@@ -270,10 +270,14 @@ Pruning Review 是 append-only audit log，不改变实体生命周期。当前�
 | --- | --- | --- | --- | --- |
 | Pain Signal | `packages/principles-core/src/runtime-v2/pain-to-principle-service.ts` | - | ✅ Done (ADR-0001) | Runtime V2 写侧统一入口 |
 | Pain Chain Read Model | `packages/principles-core/src/runtime-v2/pain-chain-read-model.ts` | - | ✅ Done (ADR-0001) | pain -> task -> run -> candidate -> ledger 读侧 |
-| Principle Schema | `packages/openclaw-plugin/src/types/principle-tree-schema.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | 类型定义迁移中 |
+| Principle Schema | `packages/principles-core/src/runtime-v2/types/principle-schema.ts` | `@principles/core` | ✅ Done | 已迁移至 `@principles/core/runtime-v2` |
 | LedgerPrinciple | `packages/openclaw-plugin/src/core/principle-tree-ledger.ts` | `@principles/core` | ✅ Done | 已迁移至 `packages/principles-core/src/principle-tree-ledger.ts` |
-| Rule / LedgerRule | `packages/openclaw-plugin/src/types/principle-tree-schema.ts`, `principle-tree-ledger.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | 类型迁移中 |
-| Implementation Schema | `packages/openclaw-plugin/src/types/principle-tree-schema.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | 类型定义迁移中 |
+| Rule / LedgerRule | `packages/principles-core/src/runtime-v2/types/principle-schema.ts` | `@principles/core` | ✅ Done | 已迁移至 `@principles/core/runtime-v2` |
+| Implementation Schema | `packages/principles-core/src/runtime-v2/types/principle-schema.ts` | `@principles/core` | ✅ Done | 已迁移至 `@principles/core/runtime-v2` |
+| Evolution Types | `packages/principles-core/src/runtime-v2/evolution/evolution-types.ts` | `@principles/core` | ✅ Done | 已迁移至 `@principles/core/runtime-v2/evolution` |
+| Nocturnal Trinity Types | `packages/principles-core/src/runtime-v2/nocturnal/nocturnal-trinity-types.ts` | `@principles/core` | ✅ Done | 已迁移至 `@principles/core/runtime-v2/nocturnal` |
+| Event Types | `packages/principles-core/src/runtime-v2/types/event-types.ts` | `@principles/core` | ✅ Done | 已迁移至 `@principles/core/runtime-v2/types` |
+| Principle Tree Data Structures | `packages/principles-core/src/runtime-v2/types/` | `@principles/core` | ✅ Done | 已迁移（PrincipleDependency、PrincipleValueMetrics、PrincipleLifecycleEvent、PrincipleTreeStore） |
 | Code Implementation Asset | `packages/openclaw-plugin/src/core/code-implementation-storage.ts` | - | 🔒 Keep in plugin | 文件系统操作保留在 plugin |
 | RuleHost | `packages/openclaw-plugin/src/core/rule-host.ts` | `@principles/core` | ⏳ Pending (ADR-0002) | PRI-45 拆分中 |
 | RuleHostInput/Result | `packages/openclaw-plugin/src/core/rule-host-types.ts` | `@principles/core` | ✅ Done (PRI-42) | 已迁移至 `internalization/rule-host-contracts.ts` |
