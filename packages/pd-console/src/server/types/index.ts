@@ -142,3 +142,95 @@ export interface SampleReviewInput {
   decision: 'approved' | 'rejected';
   note?: string;
 }
+
+export interface EventLogEntry {
+  id?: string;
+  ts: string;
+  date: string;
+  type: string;
+  category: string;
+  sessionId?: string;
+  data: Record<string, unknown>;
+}
+
+export interface GateBlockEvent extends EventLogEntry {
+  type: 'gate_block';
+  data: {
+    toolName: string;
+    filePath: string;
+    reason: string;
+    blockSource?: string;
+  };
+}
+
+export interface EmpathyEventLogEntry extends EventLogEntry {
+  type: 'empathy_rollback' | 'user_empathy';
+  data: {
+    score?: number;
+    reason?: string;
+    origin?: string;
+  };
+}
+
+export interface OverviewHealthOutput {
+  status: 'healthy' | 'degraded' | 'error';
+  gfi: {
+    current: number;
+    stage: string;
+    peakToday: number;
+    threshold: number;
+  };
+  trust: {
+    stage: number;
+    score: number;
+  };
+  principles: {
+    candidate: number;
+    probation: number;
+    active: number;
+    deprecated: number;
+  };
+  queue: {
+    pending: number;
+    inProgress: number;
+    completed: number;
+  };
+}
+
+export interface OverviewOutput {
+  workspaceDir: string;
+  generatedAt: string;
+  dataFreshness: 'fresh' | 'stale' | 'error';
+
+  summary: {
+    repeatErrorRate: number;
+    userCorrectionRate: number;
+    pendingSamples: number;
+    approvedSamples: number;
+    painEvents: number;
+    principleEventCount: number;
+    gateBlocks: number;
+    taskOutcomes: number;
+  };
+
+  health: OverviewHealthOutput;
+
+  dailyTrend: {
+    day: string;
+    toolCalls: number;
+    failures: number;
+    userCorrections: number;
+    painEvents: number;
+  }[];
+
+  topRegressions: {
+    toolName: string;
+    errorType: string;
+    occurrences: number;
+  }[];
+
+  sampleQueue: {
+    counters: Record<string, number>;
+    preview: SamplePreview[];
+  };
+}

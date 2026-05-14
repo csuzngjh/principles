@@ -1,11 +1,13 @@
 import { useTranslation } from "react-i18next";
 import { useAutoRefresh } from "../hooks/useAutoRefresh.js";
-import { fetchOverview } from "../api.js";
-import type { OverviewData } from "../api.js";
+import { fetchOverview, fetchSystemHealth } from "../api.js";
+import type { OverviewData, SystemHealthStatus } from "../api.js";
 import { PageHeader } from "../components/page-header.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.js";
 import { Badge } from "../components/ui/badge.js";
 import { Skeleton } from "../components/ui/skeleton.js";
+import { HealthDiagnosticCard } from "../components/health-diagnostic-card.js";
+import { DataFreshnessIndicator } from "../components/data-freshness-indicator.js";
 
 const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive"> = {
   healthy: "default",
@@ -96,6 +98,16 @@ export function OverviewPage() {
     fetchOverview,
     30000
   );
+  const { 
+    data: healthData, 
+    error: healthError, 
+    loading: healthLoading, 
+    refresh: refreshHealth, 
+    lastUpdated: healthLastUpdated 
+  } = useAutoRefresh<SystemHealthStatus>(
+    fetchSystemHealth,
+    30000
+  );
 
   if (loading && !data) {
     return <LoadingSkeleton />;
@@ -122,14 +134,49 @@ export function OverviewPage() {
     );
   }
 
+  const handleRefreshAll = () => {
+    refresh();
+    refreshHealth();
+  };
+
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
         title={t("pages:overview.title")}
         description={t("pages:overview.description")}
-        onRefresh={refresh}
+        onRefresh={handleRefreshAll}
         lastUpdated={lastUpdated ? new Date(lastUpdated) : undefined}
       />
+
+      {healthData && (
+        <HealthDiagnosticCard
+          overall={healthData.overall}
+          checks={healthData.checks}
+          onRefresh={refreshHealth}
+          loading={healthLoading}
+        />
+      )}
+
+      <div className="flex items-center gap-2 flex-wrap">
+        {healthData?.pipeline.lastPainSignal && (
+          <DataFreshnessIndicator 
+            label="Pain Signals" 
+            lastUpdateTime={healthData.pipeline.lastPainSignal} 
+          />
+        )}
+        {healthData?.pipeline.lastTaskCreated && (
+          <DataFreshnessIndicator 
+            label="Tasks" 
+            lastUpdateTime={healthData.pipeline.lastTaskCreated} 
+          />
+        )}
+        {healthData?.pipeline.lastCandidateGenerated && (
+          <DataFreshnessIndicator 
+            label="Candidates" 
+            lastUpdateTime={healthData.pipeline.lastCandidateGenerated} 
+          />
+        )}
+      </div>
 
       <HealthCard health={data.health} />
 

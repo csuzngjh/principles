@@ -1,5 +1,0 @@
-*
-!.gitignore
-!specs/
-!specs/*.json
-!agent-registry.json

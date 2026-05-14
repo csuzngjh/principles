@@ -13,7 +13,7 @@ export class MemoryTaskStore implements TaskStore {
       ...record,
       createdAt: now,
       updatedAt: now,
-    } as TaskRecord;
+    };
     this.tasks.set(record.taskId, full);
     return full;
   }

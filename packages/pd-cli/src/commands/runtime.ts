@@ -103,7 +103,7 @@ async function handleOpenClawProbe(opts: RuntimeProbeOptions): Promise<void> {
     console.log(`  lastCheckedAt: ${result.health.lastCheckedAt}`);
     console.log('');
     console.log('Capabilities:');
-    console.log(formatCapabilitiesTable(result.capabilities as Record<string, unknown>));
+    console.log(formatCapabilitiesTable(result.capabilities));
     console.log('');
 
     if (exitCode !== 0) {
@@ -234,7 +234,7 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
     console.log(`  lastCheckedAt: ${result.health.lastCheckedAt}`);
     console.log('');
     console.log('Capabilities:');
-    console.log(formatCapabilitiesTable(result.capabilities as Record<string, unknown>));
+    console.log(formatCapabilitiesTable(result.capabilities));
     console.log('');
 
     if (exitCode !== 0) process.exit(exitCode);
