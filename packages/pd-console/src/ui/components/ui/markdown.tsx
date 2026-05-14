@@ -15,6 +15,8 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
     navigator.clipboard.writeText(code).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      // clipboard API not available (e.g. non-HTTPS)
     });
   }, [code]);
 
@@ -232,7 +234,7 @@ export function TruncatedText({
   return (
     <div className={className}>
       <div
-        className={cn("transition-all duration-200", !expanded && `line-clamp-${maxLines}`)}
+        className={cn("transition-all duration-200", !expanded && "overflow-hidden")}
         style={!expanded ? { display: "-webkit-box", WebkitLineClamp: maxLines, WebkitBoxOrient: "vertical", overflow: "hidden" } : undefined}
       >
         {text}
