@@ -80,7 +80,7 @@ function StatCard({ label, value, color }: { label: string; value: number; color
   return (
     <Card className="transition-all duration-200 hover:shadow-md">
       <CardContent className="p-4 text-center">
-        <div className={`text-2xl font-bold ${color}`}>{value}</div>
+        <div className={cn("text-2xl font-bold", color)}>{value}</div>
         <div className="text-xs text-muted-foreground mt-1">{label}</div>
       </CardContent>
     </Card>
@@ -343,15 +343,9 @@ export function PrinciplesPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
-  const { bookmarks, toggleBookmark, isBookmarked, clearBookmarks } = useBookmarks();
+  const { bookmarks, toggleBookmark, isBookmarked } = useBookmarks();
 
   useFocusSearch({ enabled: true });
-
-  const { resetSelection } = useKeyboardNavigation({
-    itemCount: filteredPrinciples.length,
-    onSelect: setSelectedIndex,
-    enabled: true,
-  });
 
   const filteredPrinciples = useMemo(() => {
     if (!data) return [];
@@ -403,6 +397,12 @@ export function PrinciplesPage() {
 
     return items;
   }, [data, statusFilter, scopeFilter, priorityFilter, evaluabilityFilter, debouncedSearchQuery, sortBy, showBookmarkedOnly, isBookmarked]);
+
+  const { resetSelection } = useKeyboardNavigation({
+    itemCount: filteredPrinciples.length,
+    onSelect: setSelectedIndex,
+    enabled: true,
+  });
 
   useEffect(() => {
     if (selectedIndex >= filteredPrinciples.length) {
@@ -676,6 +676,7 @@ export function PrinciplesPage() {
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <input
                 ref={searchInputRef}
+                data-search-input
                 type="text"
                 placeholder={t("pages:principles.searchPlaceholder")}
                 value={searchQuery}
