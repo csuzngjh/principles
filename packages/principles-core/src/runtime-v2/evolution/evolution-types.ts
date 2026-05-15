@@ -116,10 +116,8 @@ export interface EvolutionScorecard {
   lastUpdated: string;
 }
 
-export interface RecentFailureHashEntry {
-  key: string;
-  value: string;
-}
+// Serialized form is [string, string] tuple (for JSON compatibility)
+export type RecentFailureHashEntry = [string, string];
 
 export interface EvolutionStats {
   totalSuccesses: number;
@@ -453,10 +451,10 @@ export const EvolutionStatsSchema = Type.Object({
 });
 export type EvolutionStatsTB = Static<typeof EvolutionStatsSchema>;
 
-export const RecentFailureHashEntrySchema = Type.Object({
-  key: Type.String(),
-  value: Type.String(),
-});
+export const RecentFailureHashEntrySchema = Type.Tuple([
+  Type.String(),
+  Type.String(),
+]);
 export type RecentFailureHashEntryTB = Static<typeof RecentFailureHashEntrySchema>;
 
 export const EvolutionScorecardSchema = Type.Object({
