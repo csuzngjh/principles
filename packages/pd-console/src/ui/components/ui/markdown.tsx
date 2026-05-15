@@ -167,7 +167,7 @@ function renderTextBlock(text: string): React.ReactNode[] {
 
     if (headingMatch) {
       const level = headingMatch[1].length;
-      const Tag = `h${level}` as keyof JSX.IntrinsicElements;
+      const Tag = `h${level}` as keyof React.JSX.IntrinsicElements;
       const sizeClass = level === 1 ? "text-lg" : level === 2 ? "text-base" : "text-sm";
       nodes.push(
         <Tag key={key++} className={cn("font-semibold mt-3 mb-1", sizeClass)}>

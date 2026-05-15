@@ -5,7 +5,7 @@ import { Badge } from "./ui/badge.js";
 import { Button } from "./ui/button.js";
 import { ValueScoreBar, AdherenceBar } from "./ui/progress-bar.js";
 import { X } from "lucide-react";
-import { cn } from "../../../lib/utils.js";
+import { cn } from "../../lib/utils.js";
 
 const STATUS_COLORS: Record<string, string> = {
   candidate: "text-amber-500",

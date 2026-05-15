@@ -22,7 +22,7 @@ import {
   Target,
   FileText,
 } from "lucide-react";
-import { cn } from "../../../lib/utils.js";
+import { cn } from "../../lib/utils.js";
 
 type PrincipleStatus = PrincipleDetail["status"];
 type PrinciplePriority = PrincipleDetail["priority"];
@@ -241,8 +241,10 @@ export function PrincipleDetailPage() {
         if (controller.signal.aborted) return;
         if (result.success && result.data) {
           setPrinciple(result.data.principle);
-        } else {
+        } else if (!result.success) {
           setError(result.error || "Failed to load principle");
+        } else {
+          setError("Failed to load principle");
         }
       })
       .catch((err) => {
