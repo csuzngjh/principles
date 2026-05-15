@@ -541,6 +541,45 @@ async function fetchRelatedEvents(eventId: string, maxDistance?: number): Promis
   return request<RelatedEventsResponse>(`/api/events/${encodeURIComponent(eventId)}/related${queryStr}`);
 }
 
+interface AgentInfo {
+  id: string;
+  name: string;
+  nameZh: string;
+  description: string;
+  descriptionZh: string;
+  icon: string;
+  category: string;
+  status: 'running' | 'idle' | 'cooldown' | 'failed' | 'unknown';
+  lastRunAt: string | null;
+  lastStatus: 'succeeded' | 'failed' | 'pending' | 'leased' | null;
+  recentTaskCount: number;
+  failedTaskCount: number;
+  subAgents: string[];
+  prompt: string;
+  tools: string[];
+  taskKind: string | null;
+  cooldownRemaining: string | null;
+}
+
+interface AgentDetail extends AgentInfo {
+  recentTasks: {
+    taskId: string;
+    status: string;
+    createdAt: string;
+    updatedAt: string;
+    lastError: string | null;
+    attemptCount: number;
+  }[];
+}
+
+async function fetchAgents(): Promise<ApiResponse<AgentInfo[]>> {
+  return request<AgentInfo[]>("/api/agents");
+}
+
+async function fetchAgentDetail(id: string): Promise<ApiResponse<AgentDetail>> {
+  return request<AgentDetail>(`/api/agents/${encodeURIComponent(id)}`);
+}
+
 export {
   getToken,
   setToken,
@@ -582,6 +621,8 @@ export {
   fetchEvents,
   fetchEventsGrouped,
   fetchRelatedEvents,
+  fetchAgents,
+  fetchAgentDetail,
 };
 
 export type {
@@ -617,4 +658,6 @@ export type {
   EventLogEntry,
   EventsResponse,
   RelatedEventsResponse,
+  AgentInfo,
+  AgentDetail,
 };

@@ -24,6 +24,13 @@ const ZONE_CONFIG = [
   { key: "recentActivity" as const, label: "recentActivity", color: "bg-blue-50 border-blue-200", headerColor: "bg-blue-100", badgeColor: "bg-blue-500" },
 ];
 
+const taskKindToAgent: Record<string, { id: string; label: string }> = {
+  diagnostician: { id: 'diagnostician', label: '诊断者' },
+  sleep_reflection: { id: 'nocturnal-reflection', label: '夜间反思' },
+  keyword_optimization: { id: 'correction-observer', label: '纠正观察者' },
+  principle_candidate_intake: { id: 'diagnostician', label: '诊断者' },
+};
+
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
   if (seconds < 60) return `${seconds}秒前`;
@@ -74,6 +81,15 @@ function TaskCard({
               <Badge variant="outline" className="text-xs">
                 {task.kind}
               </Badge>
+              {taskKindToAgent[task.title] && (
+                <a
+                  href={`#/agents/${taskKindToAgent[task.title].id}`}
+                  className="text-xs text-primary hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {taskKindToAgent[task.title].label}
+                </a>
+              )}
               <span className="text-xs text-muted-foreground">
                 {timeAgo(new Date(task.createdAt))}
               </span>

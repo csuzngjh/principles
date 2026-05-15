@@ -16,6 +16,7 @@ import {
   Activity,
   FileText,
   ScrollText,
+  Bot,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
 import { Button } from "./ui/button.js";
@@ -27,6 +28,7 @@ const navItems = [
   { id: "overview", label: "概览", icon: LayoutDashboard, href: "/" },
   { id: "central", label: "中央", icon: Building2, href: "/central" },
   { id: "tasks", label: "任务", icon: ListTodo, href: "/tasks" },
+  { id: "agents", label: "代理", icon: Bot, href: "/agents" },
   { id: "data-flow", label: "数据流", icon: Activity, href: "/data-flow" },
   { id: "event-log", label: "事件日志", icon: FileText, href: "/event-log" },
   { id: "feedback", label: "反馈", icon: MessageSquare, href: "/feedback" },
@@ -112,20 +114,23 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
             )}
           </div>
           {!collapsed && (
-            <div className="flex items-center gap-2">
-              <span>PD Console</span>
-              {alertCount > 0 && (
-                <div className="flex items-center gap-1 text-xs text-destructive">
-                  <AlertTriangle className="h-3 w-3" />
-                  <span>{alertCount}</span>
-                </div>
-              )}
-              {healthError && (
-                <div className="flex items-center gap-1 text-xs text-destructive" title={healthError}>
-                  <AlertTriangle className="h-3 w-3" />
-                  <span>!</span>
-                </div>
-              )}
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span>PD Console</span>
+                {alertCount > 0 && (
+                  <div className="flex items-center gap-1 text-xs text-destructive">
+                    <AlertTriangle className="h-3 w-3" />
+                    <span>{alertCount}</span>
+                  </div>
+                )}
+                {healthError && (
+                  <div className="flex items-center gap-1 text-xs text-destructive" title={healthError}>
+                    <AlertTriangle className="h-3 w-3" />
+                    <span>!</span>
+                  </div>
+                )}
+              </div>
+              <span className="text-[10px] text-muted-foreground mt-0.5 tracking-wider">燃烧痛苦，驱动进化</span>
             </div>
           )}
         </div>
