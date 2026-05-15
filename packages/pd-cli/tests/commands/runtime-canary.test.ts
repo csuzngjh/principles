@@ -197,4 +197,60 @@ describe('runCanaryChecks', () => {
       expect((queueCall[0] as Record<string, unknown>).readonly).toBe(true);
     }
   });
+
+  it('includes nextReadyTaskKind and nextReadyTaskId in top-level internalizationQueueSummary when queue has ready tasks', async () => {
+    mockQueueSnapshot.mockResolvedValue({
+      pendingCount: 2,
+      retryWaitCount: 1,
+      countsByTaskKind: { dreamer: 3 },
+      countsByChannel: {},
+      invalidMetadataCount: 0,
+      sampleInvalidTaskIds: [],
+      blockedSummary: { count: 0, samples: [] },
+      dependencyFailedSummary: { count: 0, samples: [] },
+      leaseConflictSummary: { count: 0, samples: [], sampleTaskIds: [] },
+      retryWaitPendingSummary: { count: 0, samples: [] },
+      readyTasks: [
+        { taskId: 'task-abc-123', taskKind: 'dreamer', channel: 'pi' },
+        { taskId: 'task-def-456', taskKind: 'philosopher', channel: 'pi' },
+      ],
+      noReadyTasks: null,
+    });
+
+    const result = await runCanaryChecks(WS);
+
+    expect(result.internalizationQueueSummary).toBeDefined();
+    expect(result.internalizationQueueSummary?.readyCount).toBe(2);
+    expect(result.internalizationQueueSummary?.retryWaitCount).toBe(1);
+    expect(result.internalizationQueueSummary?.pendingCount).toBe(2);
+    expect(result.internalizationQueueSummary?.nextReadyTaskKind).toBe('dreamer');
+    expect(result.internalizationQueueSummary?.nextReadyTaskId).toBe('task-abc-123');
+  });
+
+  it('includes noReadyReason in internalizationQueueSummary when no ready tasks exist', async () => {
+    mockQueueSnapshot.mockResolvedValue({
+      pendingCount: 0,
+      retryWaitCount: 0,
+      countsByTaskKind: {},
+      countsByChannel: {},
+      invalidMetadataCount: 5,
+      sampleInvalidTaskIds: ['bad-1', 'bad-2'],
+      blockedSummary: { count: 0, samples: [] },
+      dependencyFailedSummary: { count: 0, samples: [] },
+      leaseConflictSummary: { count: 0, samples: [], sampleTaskIds: [] },
+      retryWaitPendingSummary: { count: 0, samples: [] },
+      readyTasks: [],
+      noReadyTasks: { reason: 'all_hydration_failed', inspectedCount: 5 },
+    });
+
+    const result = await runCanaryChecks(WS);
+
+    expect(result.internalizationQueueSummary).toBeDefined();
+    expect(result.internalizationQueueSummary?.readyCount).toBe(0);
+    expect(result.internalizationQueueSummary?.retryWaitCount).toBe(0);
+    expect(result.internalizationQueueSummary?.pendingCount).toBe(0);
+    expect(result.internalizationQueueSummary?.nextReadyTaskKind).toBeNull();
+    expect(result.internalizationQueueSummary?.nextReadyTaskId).toBeNull();
+    expect(result.internalizationQueueSummary?.noReadyReason).toBe('all_hydration_failed');
+  });
 });
