@@ -1119,8 +1119,25 @@ function restartGatewayLinux() {
 
         console.log(`   Starting new gateway (logs: ${logPath})...`);
         execSync(`nohup openclaw gateway --force > ${logPath} 2>&1 &`, { stdio: 'ignore' });
-        console.log('✅ Gateway restart triggered.');
-        return true; // async setTimeout verification is just logging
+
+        // Wait for process to actually start (up to 15s)
+        const deadline = Date.now() + 15000;
+        while (Date.now() < deadline) {
+            try {
+                const running = execSync(
+                    'pgrep -f "openclaw-gateway|openclaw gateway"',
+                    { encoding: 'utf-8', stdio: 'pipe' }
+                ).trim();
+                if (running) {
+                    console.log('✅ Gateway restart triggered.');
+                    return true;
+                }
+            } catch { /* not ready yet */ }
+            execSync('sleep 1');
+        }
+
+        console.error(`❌ Gateway did not come back up. Check ${logPath}`);
+        return false;
 
     } catch (error) {
         console.error(`\n❌ Failed to restart gateway: ${error.message}`);
