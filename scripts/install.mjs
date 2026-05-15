@@ -222,7 +222,7 @@ function buildCoreAndCli() {
     console.log('✅ @principles/core and @principles/pd-cli built');
   } catch (error) {
     console.error('\n❌ Core/CLI build failed');
-    console.exit(1);
+    process.exit(1);
   }
 }
 
@@ -237,7 +237,7 @@ function buildPdConsole() {
       console.log('✅ pd-console built');
     } catch (error) {
       console.error('\n❌ pd-console build failed');
-      console.exit(1);
+      process.exit(1);
     }
   } else {
     console.log('⏭️  pd-console dist already exists (skip build)');
@@ -273,7 +273,7 @@ function installPlugin(args) {
     console.log('✅ Plugin installed');
   } catch (error) {
     console.error('\n❌ Plugin installation failed');
-    console.exit(1);
+    process.exit(1);
   }
 }
 
