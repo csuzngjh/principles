@@ -26,6 +26,7 @@ vi.mock('@mariozechner/pi-ai', () => ({
   getModel: vi.fn(),
   getProviders: vi.fn(() => ['openrouter', 'anthropic', 'openai', 'google']),
   complete: vi.fn(),
+  completeSimple: vi.fn(),
 }));
 
 // Mock store/event-emitter
@@ -33,12 +34,13 @@ vi.mock('../../store/event-emitter.js', () => ({
   storeEmitter: { emitTelemetry: vi.fn() },
 }));
 
-import { complete } from '@mariozechner/pi-ai';
+import { complete, completeSimple } from '@mariozechner/pi-ai';
 import { storeEmitter } from '../../store/event-emitter.js';
 import { PiAiRuntimeAdapter } from '../pi-ai-runtime-adapter.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
 
 const mockComplete = complete as ReturnType<typeof vi.fn>;
+const mockCompleteSimple = completeSimple as ReturnType<typeof vi.fn>;
 const mockEmitTelemetry = storeEmitter.emitTelemetry as ReturnType<typeof vi.fn>;
 
 const VALID_DIAGNOSIS = {
@@ -121,6 +123,7 @@ describe('Runtime Config Contract (PRI-103)', () => {
     vi.clearAllMocks();
     process.env.TEST_API_KEY = 'test-key-123';
     mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+    mockCompleteSimple.mockResolvedValue(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
   });
 
   afterEach(() => {
@@ -179,7 +182,7 @@ describe('Runtime Config Contract (PRI-103)', () => {
 
   describe('telemetry: runtime_invocation_started field contract', () => {
     it('includes all required fields: runId, runtimeKind, runnerKind, provider, model, timeoutMs, timeoutSource, outputSchemaRef', async () => {
-      mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify(VALID_DREAMER_OUTPUT)));
+      mockCompleteSimple.mockResolvedValue(makeAssistantMessage(JSON.stringify(VALID_DREAMER_OUTPUT)));
       const adapter = makeAdapter({ provider: 'anthropic', model: 'claude-sonnet-4' });
       await adapter.startRun(makeStartRunInput({
         timeoutMs: 90_000,
@@ -218,15 +221,15 @@ describe('Runtime Config Contract (PRI-103)', () => {
   // ── Architecture Guard ──────────────────────────────────────────────────
 
   describe('architecture guard: adapter cannot ignore runner timeout', () => {
-    it('PiAiRuntimeAdapter.startRun() propagates input.timeoutMs to pi-ai complete() call', async () => {
+    it('PiAiRuntimeAdapter.startRun() propagates input.timeoutMs to pi-ai completeSimple() call', async () => {
       const adapter = makeAdapter({ timeoutMs: 500_000 });
       const inputTimeout = 42_000;
       await adapter.startRun(makeStartRunInput({ timeoutMs: inputTimeout, outputSchemaRef: undefined }));
 
-      // Verify the complete() call received the runner's timeout, not config's
-      expect(mockComplete).toHaveBeenCalledTimes(1);
-      const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
-      // The effectiveTimeoutMs passed through completeWithRetry → complete
+      // Verify the completeSimple() call received the runner's timeout, not config's
+      expect(mockCompleteSimple).toHaveBeenCalledTimes(1);
+      const [, , options] = mockCompleteSimple.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
+      // The effectiveTimeoutMs passed through completeWithRetry → completeSimple
       // must equal the runner input, not the adapter config
       expect(options.timeoutMs).toBe(inputTimeout);
     });
