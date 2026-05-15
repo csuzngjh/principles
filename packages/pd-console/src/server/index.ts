@@ -27,6 +27,7 @@ import { handleEventsRoute, disposeEventsModels } from './routes/events.js';
 import { handlePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
+import { handleAgentsRoute, disposeAgentModels } from './routes/agents.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
 import type { SystemStatus, TaskItem, EvidenceItem, TaskEvidence, ActivityEvent } from './types/index.js';
 
@@ -239,6 +240,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposePipelineModels();
   disposeEventsModels();
   disposePrinciplesModels();
+  disposeAgentModels();
   services.workspaceService.dispose();
 
   try { await services.healthReadModel.close(); } catch (err) { console.error('[pd-console] Failed to close health read model', err); }
@@ -347,6 +349,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/central' || urlPath.startsWith('/api/central/')) {
         const subPath = urlPath.slice('/api/central'.length);
         asyncHandler(() => handleCentralRoute(req, res, subPath))(req, res);
+        return;
+      }
+
+      // Agent status routes
+      if (urlPath === '/api/agents' || urlPath.startsWith('/api/agents/')) {
+        const subPath = urlPath.slice('/api/agents'.length);
+        asyncHandler(() => handleAgentsRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 
