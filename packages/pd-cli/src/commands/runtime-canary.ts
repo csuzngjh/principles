@@ -17,6 +17,16 @@ export interface CanaryOutput {
   checks: CanaryCheck[];
   recommendedNextActions: string[];
   generatedAt: string;
+  internalizationQueueSummary?: InternalizationQueueSummary;
+}
+
+export interface InternalizationQueueSummary {
+  readyCount: number;
+  retryWaitCount: number;
+  pendingCount: number;
+  nextReadyTaskKind: string | null;
+  nextReadyTaskId: string | null;
+  noReadyReason: string | null;
 }
 
 interface CanaryOptions {
@@ -241,11 +251,29 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
   const overallStatus = computeOverallStatus(checks);
   const recommendedNextActions = buildRecommendedActions(checks);
 
+  const internalizationQueueCheck = checks.find(c => c.name === 'internalization_queue');
+  const internalizationQueueSummary: InternalizationQueueSummary | undefined =
+    internalizationQueueCheck && internalizationQueueCheck.details
+      ? (() => {
+          const snapshot = internalizationQueueCheck.details as InternalizationQueueSnapshot;
+          const firstReady = snapshot.readyTasks[0] ?? null;
+          return {
+            readyCount: snapshot.readyTasks.length,
+            retryWaitCount: snapshot.retryWaitCount,
+            pendingCount: snapshot.pendingCount,
+            nextReadyTaskKind: firstReady ? firstReady.taskKind : null,
+            nextReadyTaskId: firstReady ? firstReady.taskId : null,
+            noReadyReason: snapshot.noReadyTasks?.reason ?? null,
+          };
+        })()
+      : undefined;
+
   return {
     overallStatus,
     checks,
     recommendedNextActions,
     generatedAt,
+    ...(internalizationQueueSummary ? { internalizationQueueSummary } : {}),
   };
 }
 
