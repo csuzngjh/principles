@@ -1943,9 +1943,9 @@ describe('PRI-117 Nocturnal god-class freeze', () => {
     const { existsSync, readdirSync, readFileSync } = await import('node:fs');
     const { resolve, join } = await import('node:path');
     const runtimeDir = resolve(__dirname, '..');
-    const allFiles = [];
+    const allFiles: string[] = [];
 
-    function collectTsFiles(dir) {
+    function collectTsFiles(dir: string) {
       if (dir.includes('node_modules')) return;
       try {
         const entries = readdirSync(dir, { withFileTypes: true });
@@ -1976,9 +1976,9 @@ describe('PRI-117 Nocturnal god-class freeze', () => {
     const { readdirSync, readFileSync } = await import('node:fs');
     const { resolve, join } = await import('node:path');
     const runtimeDir = resolve(__dirname, '..');
-    const allFiles = [];
+    const allFiles: string[] = [];
 
-    function collectTsFiles(dir) {
+    function collectTsFiles(dir: string) {
       if (dir.includes('node_modules')) return;
       try {
         const entries = readdirSync(dir, { withFileTypes: true });
@@ -2010,9 +2010,9 @@ describe('PRI-117 Nocturnal god-class freeze', () => {
     const { readdirSync, readFileSync } = await import('node:fs');
     const { resolve, join } = await import('node:path');
     const runtimeDir = resolve(__dirname, '..');
-    const allFiles = [];
+    const allFiles: string[] = [];
 
-    function collectTsFiles(dir) {
+    function collectTsFiles(dir: string) {
       if (dir.includes('node_modules')) return;
       try {
         const entries = readdirSync(dir, { withFileTypes: true });
