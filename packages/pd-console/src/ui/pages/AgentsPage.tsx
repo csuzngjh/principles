@@ -44,13 +44,13 @@ const STATUS_COLORS: Record<string, string> = {
   unknown: "#d1d5db",
 };
 
-const STATUS_BADGE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+const STATUS_BADGE_VARIANT = {
   running: "default",
   idle: "secondary",
   cooldown: "outline",
   failed: "destructive",
   unknown: "secondary",
-};
+} as const satisfies Record<string, string>;
 
 interface FlowNode {
   id: string;
@@ -133,7 +133,7 @@ function AgentNode({
         height={node.h}
         rx={node.small ? 6 : 10}
         fill="var(--color-card, hsl(0 0% 100%))"
-        stroke={selected ? "var(--color-primary, hsl(220 90% 56%))" : "hsl(220 14% 78%)"}
+        stroke={selected ? "var(--color-primary, hsl(220 90% 56%))" : "var(--color-border, hsl(220 14% 78%))"}
         strokeWidth={selected ? 2.5 : 1.5}
         className="transition-all duration-200"
       />
@@ -191,7 +191,7 @@ function TrinityGroup() {
       height={scribe.y + scribe.h - dreamer.y + pad * 2}
       rx={8}
       fill="none"
-      stroke="hsl(220 14% 78%)"
+      stroke="var(--color-border, hsl(220 14% 78%))"
       strokeWidth={1}
       strokeDasharray="6 3"
     />
@@ -229,7 +229,7 @@ function FlowEdgeLine({ from, to }: { from: FlowNode; to: FlowNode }) {
 
 function RowLabel({ x, y, text }: { x: number; y: number; text: string }) {
   return (
-    <text x={x} y={y} fontSize={10} fill="hsl(220 10% 46%)" fontStyle="italic">
+    <text x={x} y={y} fontSize={10} fill="var(--color-muted-foreground, hsl(220 10% 46%))" fontStyle="italic">
       {text}
     </text>
   );
@@ -463,7 +463,7 @@ function AgentDrawer({
             <Separator />
 
             <Button variant="outline" size="sm" className="w-full" asChild>
-              <a href={`#/tasks?agent=${agent.id}`}>
+              <a href="#/tasks">
                 <ExternalLink className="h-3 w-3 mr-2" />
                 {t("pages:agents.viewTasks")}
               </a>

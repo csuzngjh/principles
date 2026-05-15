@@ -238,12 +238,26 @@ class AgentConsoleModel {
   }
 
   private async ensureInitialized(): Promise<RuntimeStateManager> {
-    if (!this.stateManager) {
-      this.stateManager = new RuntimeStateManager({ workspaceDir: this.workspaceDir });
-      this.initPromise = this.stateManager.initialize();
+    if (this.stateManager) return this.stateManager;
+    if (this.initPromise) {
+      try {
+        await this.initPromise;
+        if (this.stateManager) return this.stateManager;
+        throw new Error('initPromise resolved but stateManager is null');
+      } catch {
+        this.initPromise = null;
+      }
     }
-    await this.initPromise;
-    return this.stateManager;
+    this.stateManager = new RuntimeStateManager({ workspaceDir: this.workspaceDir });
+    this.initPromise = this.stateManager.initialize();
+    try {
+      await this.initPromise;
+      return this.stateManager;
+    } catch {
+      this.stateManager = null;
+      this.initPromise = null;
+      throw new Error('Failed to initialize RuntimeStateManager');
+    }
   }
 
   private readWorkerStatus(): WorkerStatusReport | null {
@@ -288,6 +302,45 @@ class AgentConsoleModel {
     };
   }
 
+  private static stageEventsCache = new Map<string, Record<string, string>>();
+
+  private static getStageEvents(workflowId: string): Record<string, string> {
+    const cached = AgentConsoleModel.stageEventsCache.get(workflowId);
+    if (cached) return cached;
+    return {};
+  }
+
+  static refreshStageEvents(workspaceDir: string): void {
+    const dbPath = path.join(workspaceDir, '.state', 'subagent_workflows.db');
+    if (!fs.existsSync(dbPath)) return;
+    let db: Database.Database | null = null;
+    try {
+      db = new Database(dbPath, { readonly: true });
+      const events = db.prepare(`
+        SELECT workflow_id, event_type, event_data
+        FROM subagent_workflow_events
+        WHERE event_type LIKE 'trinity_%'
+        ORDER BY created_at DESC
+      `).all() as { workflow_id: string; event_type: string; event_data: string }[];
+      const grouped = new Map<string, Record<string, string>>();
+      for (const ev of events) {
+        const states = grouped.get(ev.workflow_id) || {};
+        const stage = ev.event_type.replace('trinity_', '').replace('_start', '').replace('_complete', '').replace('_failed', '');
+        if (!states[stage]) {
+          if (ev.event_type.endsWith('_failed')) states[stage] = 'failed';
+          else if (ev.event_type.endsWith('_complete')) states[stage] = 'completed';
+          else if (ev.event_type.endsWith('_start')) states[stage] = 'started';
+        }
+        grouped.set(ev.workflow_id, states);
+      }
+      AgentConsoleModel.stageEventsCache = grouped;
+    } catch {
+      AgentConsoleModel.stageEventsCache.clear();
+    } finally {
+      db?.close();
+    }
+  }
+
   private static getTrinitySubAgentStatus(agentId: string, workflows: WorkflowRow[]): { status: AgentStatus; lastRunAt: string | null } {
     const stageMap: Record<string, string> = {
       'trinity-dreamer': 'dreamer',
@@ -297,15 +350,50 @@ class AgentConsoleModel {
     const stage = stageMap[agentId];
     if (!stage) return { status: 'unknown', lastRunAt: null };
 
+    const stageOrder = ['dreamer', 'philosopher', 'scribe'];
+    const stageIndex = stageOrder.indexOf(stage);
+
     for (const wf of workflows) {
       if (wf.workflow_type !== 'nocturnal_reflection') continue;
+
+      const eventStates = AgentConsoleModel.getStageEvents(wf.workflow_id);
+      const stageEvent = eventStates[stage];
+
+      if (stageEvent === 'failed') {
+        return { status: 'failed', lastRunAt: new Date(wf.updated_at).toISOString() };
+      }
+      if (stageEvent === 'completed') {
+        return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
+      }
+
+      for (let i = stageOrder.length - 1; i >= 0; i--) {
+        const s = stageOrder[i];
+        if (eventStates[s] === 'completed') {
+          if (i === stageIndex) return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
+          if (i > stageIndex) return { status: 'running', lastRunAt: new Date(wf.updated_at).toISOString() };
+          return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
+        }
+        if (eventStates[s] === 'running' || eventStates[s] === 'started') {
+          if (i === stageIndex) return { status: 'running', lastRunAt: new Date(wf.updated_at).toISOString() };
+          if (i < stageIndex) return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
+          return { status: 'running', lastRunAt: new Date(wf.updated_at).toISOString() };
+        }
+      }
+
       if (wf.state === 'running' || wf.state === 'pending') {
-        return { status: 'running', lastRunAt: new Date(wf.updated_at).toISOString() };
+        if (stageIndex === 0) return { status: 'running', lastRunAt: new Date(wf.updated_at).toISOString() };
+        return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
       }
       if (wf.state === 'completed') {
         return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
       }
       if (wf.state === 'failed') {
+        if (eventStates.dreamer === 'failed') {
+          return { status: stageIndex === 0 ? 'failed' : 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
+        }
+        if (eventStates.philosopher === 'failed') {
+          return { status: stageIndex <= 1 ? (stageIndex === 1 ? 'failed' : 'idle') : 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
+        }
         return { status: 'failed', lastRunAt: new Date(wf.updated_at).toISOString() };
       }
     }
@@ -386,6 +474,7 @@ class AgentConsoleModel {
     const mgr = await this.ensureInitialized();
     const allTasks = await mgr.listTasks();
     const workflows = this.readWorkflowData();
+    AgentConsoleModel.refreshStageEvents(this.workspaceDir);
     const results: AgentInfo[] = [];
     for (const agent of AGENT_REGISTRY) {
       results.push(await this.buildAgentInfo(agent, allTasks, workflows));
@@ -400,6 +489,7 @@ class AgentConsoleModel {
     const mgr = await this.ensureInitialized();
     const allTasks = await mgr.listTasks();
     const workflows = this.readWorkflowData();
+    AgentConsoleModel.refreshStageEvents(this.workspaceDir);
     const info = await this.buildAgentInfo(agent, allTasks, workflows);
 
     let agentTasks = agent.taskKind
@@ -487,7 +577,17 @@ export async function handleAgentsRoute(
 
   const tasksMatch = /^\/([^/]+)\/tasks\/?$/.exec(subPath);
   if (tasksMatch) {
-    const agentId = decodeURIComponent(tasksMatch[1]);
+    const agentId = (() => {
+      try {
+        return decodeURIComponent(tasksMatch[1]);
+      } catch {
+        return null;
+      }
+    })();
+    if (!agentId) {
+      sendNotFound(res, 'Invalid agent ID encoding');
+      return;
+    }
     try {
       const result = await model.getAgentTasks(agentId);
       if (!result) {
@@ -503,7 +603,17 @@ export async function handleAgentsRoute(
 
   const detailMatch = /^\/([^/]+)\/?$/.exec(subPath);
   if (detailMatch) {
-    const agentId = decodeURIComponent(detailMatch[1]);
+    const agentId = (() => {
+      try {
+        return decodeURIComponent(detailMatch[1]);
+      } catch {
+        return null;
+      }
+    })();
+    if (!agentId) {
+      sendNotFound(res, 'Invalid agent ID encoding');
+      return;
+    }
     try {
       const result = await model.getAgentDetail(agentId);
       if (!result) {

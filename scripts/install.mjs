@@ -237,7 +237,7 @@ function buildPdConsole() {
       console.log('✅ pd-console built');
     } catch (error) {
       console.error('\n❌ pd-console build failed');
-      console.exit(1);
+      process.exit(1);
     }
   } else {
     console.log('⏭️  pd-console dist already exists (skip build)');

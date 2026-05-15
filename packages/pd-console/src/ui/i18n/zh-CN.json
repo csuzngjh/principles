@@ -243,6 +243,7 @@
     "login": {
       "title": "登录",
       "description": "登录 PD Console",
+      "slogan": "燃烧痛苦，驱动进化",
       "password": "密码",
       "showPassword": "显示密码",
       "hidePassword": "隐藏密码",
