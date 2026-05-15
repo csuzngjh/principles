@@ -28,6 +28,7 @@ import { handlePrinciplesRoute, disposePrinciplesModels } from './routes/princip
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
 import { handleAgentsRoute, disposeAgentModels } from './routes/agents.js';
+import { handleStateRoute } from './routes/state.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
 import type { SystemStatus, TaskItem, EvidenceItem, TaskEvidence, ActivityEvent } from './types/index.js';
 
@@ -352,10 +353,19 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // Agent status routes
+// Agent status routes
       if (urlPath === '/api/agents' || urlPath.startsWith('/api/agents/')) {
         const subPath = urlPath.slice('/api/agents'.length);
         asyncHandler(() => handleAgentsRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // GET /api/v1/state, /api/v1/state/:taskId
+      if (urlPath === '/api/v1/state' || urlPath.startsWith('/api/v1/state/')) {
+        const subPath = urlPath.slice('/api/v1/state'.length);
+        asyncHandler(() => handleStateRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
         return;
       }
 

@@ -223,4 +223,108 @@ describe('DefaultRecoverySweep', () => {
       expect(second.recovered).toBe(0);
     });
   });
+
+  describe('dirty workspace handling', () => {
+    it('stalled attempt leaves dirty workspace -> no automatic retry is scheduled', async () => {
+      // Simulate a task that stalled with dirty workspace (lastError = workspace_dirty)
+      await taskStore.createTask(makeTaskInput('dirty-stalled-task', {
+        attemptCount: 1,
+        maxAttempts: 3,
+        lastError: 'workspace_dirty',
+      }));
+      await taskStore.updateTask('dirty-stalled-task', {
+        status: 'leased',
+        leaseOwner: 'agent-1',
+        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
+        diagnosticJson: JSON.stringify({
+          workspaceDir: 'D:/code/test-workspace',
+          dirtyFiles: [
+            'packages/pd-cli/src/commands/runtime-canary.ts',
+            'packages/pd-cli/tests/commands/runtime-canary.test.ts',
+          ],
+        }),
+      });
+
+      // Recovery should NOT schedule a retry — task should go to needs_human_review
+      const result = await recoverySweep.recoverTask('dirty-stalled-task');
+
+      expect(result).not.toBeNull();
+      expect(result!.newStatus).toBe('needs_human_review');
+      expect(result!.wasLeaseExpired).toBe(true);
+
+      // Verify task was updated to needs_human_review
+      const updated = await taskStore.getTask('dirty-stalled-task');
+      expect(updated!.status).toBe('needs_human_review');
+      expect(updated!.leaseOwner).toBeUndefined();
+      expect(updated!.leaseExpiresAt).toBeUndefined();
+    });
+
+    it('clean stalled attempt (no workspace_dirty) -> follows existing retry behavior', async () => {
+      // A task that stalled without a dirty workspace should still go to retry_wait
+      await taskStore.createTask(makeTaskInput('clean-stalled-task', {
+        attemptCount: 1,
+        maxAttempts: 3,
+        lastError: 'timeout',
+      }));
+      await taskStore.updateTask('clean-stalled-task', {
+        status: 'leased',
+        leaseOwner: 'agent-1',
+        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
+        diagnosticJson: JSON.stringify({ workspaceDir: 'D:/code/test-workspace' }),
+      });
+
+      const result = await recoverySweep.recoverTask('clean-stalled-task');
+
+      expect(result).not.toBeNull();
+      expect(result!.newStatus).toBe('retry_wait');
+      const updated = await taskStore.getTask('clean-stalled-task');
+      expect(updated!.status).toBe('retry_wait');
+    });
+
+    it('dirty workspace with maxAttempts exceeded -> goes to failed not retry_wait', async () => {
+      await taskStore.createTask(makeTaskInput('dirty-max-task', {
+        attemptCount: 3,
+        maxAttempts: 3,
+        lastError: 'workspace_dirty',
+      }));
+      await taskStore.updateTask('dirty-max-task', {
+        status: 'leased',
+        leaseOwner: 'agent-1',
+        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
+        diagnosticJson: JSON.stringify({
+          workspaceDir: 'D:/code/test-workspace',
+          dirtyFiles: ['some/file.ts'],
+        }),
+      });
+
+      const result = await recoverySweep.recoverTask('dirty-max-task');
+
+      // Even with workspace_dirty, if max attempts exceeded -> failed
+      expect(result).not.toBeNull();
+      expect(result!.newStatus).toBe('failed');
+    });
+
+    it('needs_human_review task is not recovered by recoverAll (idempotent)', async () => {
+      // A task already in needs_human_review should not be touched
+      await taskStore.createTask(makeTaskInput('already-review-task', {
+        attemptCount: 2,
+        maxAttempts: 3,
+        status: 'needs_human_review',
+        lastError: 'workspace_dirty',
+      }));
+      await taskStore.updateTask('already-review-task', {
+        leaseOwner: 'agent-1',
+        leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
+      });
+
+      const result = await recoverySweep.recoverTask('already-review-task');
+
+      // Non-leased or non-expired tasks return null
+      expect(result).toBeNull();
+
+      // Task should remain in needs_human_review
+      const updated = await taskStore.getTask('already-review-task');
+      expect(updated!.status).toBe('needs_human_review');
+    });
+  });
 });

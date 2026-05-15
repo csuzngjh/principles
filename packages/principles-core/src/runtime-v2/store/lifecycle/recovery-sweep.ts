@@ -76,7 +76,7 @@ export class DefaultRecoverySweep implements RecoverySweep {
     now: string,
   ): (RecoveryResult & { attemptCount: number; backoffMs?: number }) | null {
     const row = db.prepare(
-      'SELECT task_id, status, attempt_count, max_attempts, lease_expires_at FROM tasks WHERE task_id = ?',
+      'SELECT task_id, status, attempt_count, max_attempts, lease_expires_at, last_error FROM tasks WHERE task_id = ?',
     ).get(taskId) as Record<string, unknown> | undefined;
 
     if (!row) return null;
@@ -91,6 +91,22 @@ export class DefaultRecoverySweep implements RecoverySweep {
     if (new Date(leaseExpiresAt) >= new Date()) return null;
 
     const previousStatus = status;
+
+    // Check if this was a dirty workspace stall — if so, do NOT schedule retry, go to needs_human_review
+    // Fetch last_error from the row (not yet read in current query)
+    const lastError = row.last_error ? String(row.last_error) : null;
+    const isDirtyStall = lastError === 'workspace_dirty';
+
+    // If dirty workspace stall and attempts remain → needs_human_review (terminal, no auto-retry)
+    if (isDirtyStall && attemptCount < maxAttempts) {
+      db.prepare(`
+        UPDATE tasks
+        SET status = 'needs_human_review', lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+        WHERE task_id = ?
+      `).run(now, taskId);
+
+      return { taskId, recoveredAt: now, previousStatus, newStatus: 'needs_human_review' as PDTaskStatus, wasLeaseExpired: true, attemptCount };
+    }
 
     if (this.retryPolicy.shouldRetry({ taskId, status, attemptCount, maxAttempts } as TaskRecord)) {
       const backoffMs = this.retryPolicy.calculateBackoff(attemptCount + 1);
