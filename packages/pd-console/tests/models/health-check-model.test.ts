@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { HealthCheckModel } from '../../src/server/models/HealthCheckModel.js';
 import {
   createTestWorkspace,
@@ -96,18 +96,23 @@ describe('HealthCheckModel', () => {
     }
   });
 
-  it('overall is degraded when there are warnings but no errors', async () => {
+  it('overall health reflects the worst status among checks', async () => {
     ws = await createTestWorkspace();
     const model = new HealthCheckModel(ws.workspaceDir);
 
     try {
       const health = await model.checkSystemHealth();
 
-      const hasWarning = health.checks.some(c => c.status === 'warning');
-      const hasError = health.checks.some(c => c.status === 'error');
+      const statuses = health.checks.map(c => c.status);
+      const hasError = statuses.includes('error');
+      const hasWarning = statuses.includes('warning');
 
-      if (hasWarning && !hasError) {
+      if (hasError) {
+        expect(health.overall).toBe('error');
+      } else if (hasWarning) {
         expect(health.overall).toBe('degraded');
+      } else {
+        expect(health.overall).toBe('healthy');
       }
     } finally {
       model.dispose();

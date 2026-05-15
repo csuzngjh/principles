@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { PipelineStatsModel } from '../../src/server/models/PipelineStatsModel.js';
 import type { EventLogEntry } from '../../src/server/types/index.js';
 import {
@@ -71,7 +71,7 @@ describe('PipelineStatsModel', () => {
     }
   });
 
-  it('stage status reflects recency of events', async () => {
+  it('stage status is normal for recent events', async () => {
     ws = await createTestWorkspace();
     const now = new Date();
     const today = now.toISOString().split('T')[0];
@@ -99,13 +99,13 @@ describe('PipelineStatsModel', () => {
     }
   });
 
-  it('stuck status is assigned when events are old', async () => {
+  it('stage status is stuck for events older than 12 hours', async () => {
     ws = await createTestWorkspace();
-    const oldDate = new Date(Date.now() - 60 * 60 * 1000);
-    const oldDay = oldDate.toISOString().split('T')[0];
+    const veryOldDate = new Date(Date.now() - 13 * 60 * 60 * 1000);
+    const oldDay = veryOldDate.toISOString().split('T')[0];
 
     const events: EventLogEntry[] = [
-      makeEvent({ id: 'e-old', type: 'pain_signal', ts: oldDate.toISOString() }),
+      makeEvent({ id: 'e-old', type: 'pain_signal', ts: veryOldDate.toISOString() }),
     ];
 
     const logsDir = path.join(ws.workspaceDir, '.state', 'logs');
@@ -117,11 +117,8 @@ describe('PipelineStatsModel', () => {
     try {
       const stats = await model.getPipelineStats();
 
-      const todayStr = new Date().toISOString().split('T')[0];
-      if (oldDay === todayStr) {
-        const painStage = stats.stages.find(s => s.id === 'pain_signal');
-        expect(painStage?.status).toMatch(/^(slow|stuck|normal)$/);
-      }
+      const painStage = stats.stages.find(s => s.id === 'pain_signal');
+      expect(painStage?.status).toBe('stuck');
     } finally {
       model.dispose();
     }
@@ -154,7 +151,7 @@ describe('PipelineStatsModel', () => {
     }
   });
 
-  it('throughput is calculated correctly', async () => {
+  it('throughput is calculated correctly for empty workspace', async () => {
     ws = await createTestWorkspace();
     const model = new PipelineStatsModel(ws.workspaceDir);
 
@@ -173,11 +170,10 @@ describe('PipelineStatsModel', () => {
     const today = now.toISOString().split('T')[0];
 
     const oldTime = new Date(now.getTime() - 20 * 60 * 1000);
-    const newTime = now;
 
     const events: EventLogEntry[] = [
       makeEvent({ id: 'b1', type: 'pain_signal', ts: oldTime.toISOString() }),
-      makeEvent({ id: 'b2', type: 'task_created', ts: newTime.toISOString() }),
+      makeEvent({ id: 'b2', type: 'task_created', ts: now.toISOString() }),
     ];
 
     const logsDir = path.join(ws.workspaceDir, '.state', 'logs');
@@ -189,13 +185,12 @@ describe('PipelineStatsModel', () => {
     try {
       const stats = await model.getPipelineStats();
 
-      if (stats.bottlenecks.length > 0) {
-        const bottleneck = stats.bottlenecks[0];
-        expect(bottleneck.fromStage).toBeDefined();
-        expect(bottleneck.toStage).toBeDefined();
-        expect(bottleneck.gapMinutes).toBeGreaterThan(5);
-        expect(['warning', 'critical']).toContain(bottleneck.severity);
-      }
+      const bottleneck = stats.bottlenecks.find(
+        b => b.fromStage === 'Pain Signal' && b.toStage === 'Task Created',
+      );
+      expect(bottleneck).toBeDefined();
+      expect(bottleneck!.gapMinutes).toBeGreaterThanOrEqual(20);
+      expect(['warning', 'critical']).toContain(bottleneck!.severity);
     } finally {
       model.dispose();
     }

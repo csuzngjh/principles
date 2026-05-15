@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { PrinciplesConsoleModel } from '../../src/server/models/PrinciplesConsoleModel.js';
 import {
   createTestWorkspace,
