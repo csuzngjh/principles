@@ -1,6 +1,6 @@
 # ADR-0007: pd-cli 与 pd-console 受众分离
 
-> **状态**: Proposed
+> **状态**: Accepted
 > **日期**: 2026-05-15
 > **关联 ADR**: ADR-0001（服务边界）, ADR-0006（混合激活）
 > **关联文档**: `PD_ARCHITECTURE_OVERVIEW.md` §2.2, `COMPONENTS.md` §5

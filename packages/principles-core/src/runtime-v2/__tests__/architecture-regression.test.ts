@@ -91,6 +91,28 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-115
   'golden-trace-replay-validator.ts',
   'golden-trace-replay-adapter.ts',
+  // Phase 2 migration: evolution types
+  'evolution/evolution-types.ts',
+  'evolution/index.ts',
+  // Phase 2 migration: correction types
+  'correction/correction-types.ts',
+  'correction/index.ts',
+  // Phase 2 migration: nocturnal trinity types + pure computation
+  'nocturnal/nocturnal-trinity-types.ts',
+  'nocturnal/candidate-scoring.ts',
+  'nocturnal/snapshot-contract.ts',
+  'nocturnal/index.ts',
+  // Phase 2 migration: types directory
+  'types/queue-types.ts',
+  'types/hygiene-types.ts',
+  'types/runtime-summary-types.ts',
+  'types/event-types.ts',
+  'types/event-payload.ts',
+  // Phase 2 migration: principle-tree data structures
+  'types/principle-dependency.ts',
+  'types/principle-value-metrics.ts',
+  'types/principle-lifecycle-event.ts',
+  'types/principle-tree-store.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -786,6 +808,18 @@ describe('PRI-51 lifecycle type extraction', () => {
     // Should no longer define these locally
     expect(src).not.toMatch(/^export type PrinciplePriority = /m);
     expect(src).not.toMatch(/^export type RuleType = /m);
+  });
+
+  it('plugin principle-tree-schema.ts re-exports Rule and Implementation from core (no local re-definition)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/types/principle-tree-schema.ts'
+    ), 'utf-8');
+    expect(src).toContain("Rule");
+    expect(src).toContain("Implementation");
+    expect(src).not.toMatch(/^export interface Rule \{/m);
+    expect(src).not.toMatch(/^export interface Implementation \{/m);
   });
 });
 
@@ -1889,6 +1923,361 @@ describe('PRI-114: correction-proposal boundary', () => {
     expect(src).toContain('validateProposedParams');
     expect(src).toContain('validateCorrectionProposal');
     expect(src).toContain("from './internalization/correction-proposal.js'");
+  });
+});
+
+// ── Phase 2 Migration: Evolution Types ────────────────────────────────────────
+
+describe('Phase 2.1 evolution types migration', () => {
+  const CORE_FILES = [
+    'evolution/evolution-types.ts',
+    'evolution/index.ts',
+  ];
+
+  for (const file of CORE_FILES) {
+    it(`core ${file} has zero infrastructure imports`, async () => {
+      const { readFileSync } = await import('node:fs');
+      const { resolve } = await import('node:path');
+      const src = readFileSync(resolve(__dirname, '..', file), 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('openclaw-plugin');
+    });
+  }
+
+  it('core barrel exports EvolutionTier, TIER_DEFINITIONS, getTierDefinition, getTierByPoints', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('EvolutionTier');
+    expect(src).toContain('TIER_DEFINITIONS');
+    expect(src).toContain('getTierDefinition');
+    expect(src).toContain('getTierByPoints');
+    expect(src).toContain("from './evolution/evolution-types.js'");
+  });
+
+  it('core barrel exports EvolutionPrinciple, EvolutionPrincipleStatus, EvolutionPainDetectedData', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('EvolutionPrinciple');
+    expect(src).toContain('EvolutionPrincipleStatus');
+    expect(src).toContain('EvolutionPainDetectedData');
+  });
+
+  it('plugin evolution-types.ts re-exports from core with backward-compatible aliases', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/evolution-types.ts'
+    ), 'utf-8');
+    expect(src).toContain("from '@principles/core/runtime-v2'");
+    expect(src).toContain('EvolutionTier');
+    expect(src).toContain('EvolutionPrinciple');
+    expect(src).toContain('type Principle = EvolutionPrinciple');
+    expect(src).toContain('type PrincipleStatus = EvolutionPrincipleStatus');
+    expect(src).toContain('type PainDetectedData = EvolutionPainDetectedData');
+  });
+
+  it('plugin evolution-types.ts does NOT define EvolutionTier or TIER_DEFINITIONS locally', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/evolution-types.ts'
+    ), 'utf-8');
+    expect(src).not.toMatch(/^export enum EvolutionTier/m);
+    expect(src).not.toMatch(/^export const TIER_DEFINITIONS/m);
+  });
+});
+
+// ── Phase 2 Migration: Correction Types ───────────────────────────────────────
+
+describe('Phase 2.2 correction types migration', () => {
+  const CORE_FILES = [
+    'correction/correction-types.ts',
+    'correction/index.ts',
+  ];
+
+  for (const file of CORE_FILES) {
+    it(`core ${file} has zero infrastructure imports`, async () => {
+      const { readFileSync } = await import('node:fs');
+      const { resolve } = await import('node:path');
+      const src = readFileSync(resolve(__dirname, '..', file), 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('openclaw-plugin');
+    });
+  }
+
+  it('core barrel exports CorrectionKeyword, CorrectionKeywordStore, MAX_CORRECTION_KEYWORDS', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('CorrectionKeyword');
+    expect(src).toContain('CorrectionKeywordStore');
+    expect(src).toContain('MAX_CORRECTION_KEYWORDS');
+    expect(src).toContain("from './correction/correction-types.js'");
+  });
+
+  it('plugin correction-types.ts re-exports from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/correction-types.ts'
+    ), 'utf-8');
+    expect(src).toContain("from '@principles/core/runtime-v2'");
+    expect(src).toContain('CorrectionKeyword');
+    expect(src).toContain('MAX_CORRECTION_KEYWORDS');
+  });
+
+  it('plugin correction-types.ts does NOT define CorrectionKeyword interface locally', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/correction-types.ts'
+    ), 'utf-8');
+    expect(src).not.toMatch(/^export interface CorrectionKeyword/m);
+  });
+});
+
+// ── Phase 2 Migration: Nocturnal Trinity Types ────────────────────────────────
+
+describe('Phase 2.3 nocturnal trinity types migration', () => {
+  const CORE_FILES = [
+    'nocturnal/nocturnal-trinity-types.ts',
+    'nocturnal/candidate-scoring.ts',
+    'nocturnal/snapshot-contract.ts',
+    'nocturnal/index.ts',
+  ];
+
+  for (const file of CORE_FILES) {
+    it(`core ${file} has zero infrastructure imports`, async () => {
+      const { readFileSync } = await import('node:fs');
+      const { resolve } = await import('node:path');
+      const src = readFileSync(resolve(__dirname, '..', file), 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('openclaw-plugin');
+    });
+  }
+
+  it('core barrel exports TrinityDreamerCandidate, TrinityDreamerOutput, TrinityResult', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('TrinityDreamerCandidate');
+    expect(src).toContain('TrinityDreamerOutput');
+    expect(src).toContain('TrinityResult');
+    expect(src).toContain("from './nocturnal/index.js'");
+  });
+
+  it('core barrel exports rankCandidates, runTournament, scoreCandidate', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('rankCandidates');
+    expect(src).toContain('runTournament');
+    expect(src).toContain('scoreCandidate');
+  });
+
+  it('core barrel exports validateNocturnalSnapshotIngress, NocturnalSessionSnapshot', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('validateNocturnalSnapshotIngress');
+    expect(src).toContain('NocturnalSessionSnapshot');
+  });
+
+  it('plugin nocturnal-trinity-types.ts re-exports from core with backward-compatible aliases', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/nocturnal-trinity-types.ts'
+    ), 'utf-8');
+    expect(src).toContain("from '@principles/core/runtime-v2'");
+    expect(src).toContain('TrinityDreamerCandidate');
+    expect(src).toContain('type DreamerCandidate = TrinityDreamerCandidate');
+    expect(src).toContain('type DreamerOutput = TrinityDreamerOutput');
+  });
+
+  it('plugin nocturnal-trinity-types.ts does NOT define TrinityResult or DreamerCandidate locally', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/core/nocturnal-trinity-types.ts'
+    ), 'utf-8');
+    expect(src).not.toMatch(/^export interface TrinityResult/m);
+    expect(src).not.toMatch(/^export interface DreamerCandidate/m);
+  });
+});
+
+// ── Phase 2 Migration: Types Directory (queue, hygiene, runtime-summary, events) ──
+
+describe('Phase 2.4 types directory migration', () => {
+  const CORE_TYPE_FILES = [
+    'types/queue-types.ts',
+    'types/hygiene-types.ts',
+    'types/runtime-summary-types.ts',
+    'types/event-types.ts',
+    'types/event-payload.ts',
+  ];
+
+  for (const file of CORE_TYPE_FILES) {
+    it(`core ${file} has zero infrastructure imports`, async () => {
+      const { readFileSync } = await import('node:fs');
+      const { resolve } = await import('node:path');
+      const src = readFileSync(resolve(__dirname, '..', file), 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('openclaw-plugin');
+    });
+  }
+
+  it('core barrel exports QueueItemId, WorkflowId, SessionKey brand types', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('QueueItemId');
+    expect(src).toContain('WorkflowId');
+    expect(src).toContain('SessionKey');
+    expect(src).toContain("from './types/queue-types.js'");
+  });
+
+  it('core barrel exports HygieneStats, createEmptyHygieneStats', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('HygieneStats');
+    expect(src).toContain('createEmptyHygieneStats');
+    expect(src).toContain("from './types/hygiene-types.js'");
+  });
+
+  it('core barrel exports RuntimeTruth, TrendMetrics', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('RuntimeTruth');
+    expect(src).toContain('TrendMetrics');
+    expect(src).toContain("from './types/runtime-summary-types.js'");
+  });
+
+  it('core barrel exports EventType, EventLogEntry, EventEvolutionStats', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('EventType');
+    expect(src).toContain('EventLogEntry');
+    expect(src).toContain('EventEvolutionStats');
+    expect(src).toContain("from './types/event-types.js'");
+  });
+
+  it('core barrel exports DiscriminatedEventLogEntry, isToolCallEventEntry', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('DiscriminatedEventLogEntry');
+    expect(src).toContain('isToolCallEventEntry');
+    expect(src).toContain("from './types/event-payload.js'");
+  });
+
+  it('plugin types/queue.ts re-exports from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/types/queue.ts'
+    ), 'utf-8');
+    expect(src).toContain("@principles/core/runtime-v2");
+  });
+
+  it('plugin types/hygiene-types.ts re-exports from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/types/hygiene-types.ts'
+    ), 'utf-8');
+    expect(src).toContain("@principles/core/runtime-v2");
+  });
+
+  it('plugin types/runtime-summary.ts re-exports from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/types/runtime-summary.ts'
+    ), 'utf-8');
+    expect(src).toContain("@principles/core/runtime-v2");
+  });
+
+  it('plugin types/event-types.ts re-exports from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/types/event-types.ts'
+    ), 'utf-8');
+    expect(src).toContain("@principles/core/runtime-v2");
+  });
+
+  it('plugin types/event-payload.ts re-exports from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/types/event-payload.ts'
+    ), 'utf-8');
+    expect(src).toContain("@principles/core/runtime-v2");
+  });
+});
+
+// ── Phase 2 Migration: Principle-Tree Data Structures ─────────────────────────
+
+describe('Phase 2.6 principle-tree data structures migration', () => {
+  const CORE_TYPE_FILES = [
+    'types/principle-dependency.ts',
+    'types/principle-value-metrics.ts',
+    'types/principle-lifecycle-event.ts',
+    'types/principle-tree-store.ts',
+  ];
+
+  for (const file of CORE_TYPE_FILES) {
+    it(`core ${file} has zero infrastructure imports`, async () => {
+      const { readFileSync } = await import('node:fs');
+      const { resolve } = await import('node:path');
+      const src = readFileSync(resolve(__dirname, '..', file), 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('openclaw-plugin');
+    });
+  }
+
+  it('core barrel exports PrincipleDependency, PrincipleValueMetrics, PrincipleLifecycleEvent, PrincipleTreeStore', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('PrincipleDependency');
+    expect(src).toContain('PrincipleValueMetrics');
+    expect(src).toContain('PrincipleLifecycleEvent');
+    expect(src).toContain('PrincipleTreeStore');
+  });
+
+  it('plugin principle-tree-schema.ts re-exports PrincipleDependency, PrincipleValueMetrics, PrincipleLifecycleEvent, PrincipleTreeStore from core', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/types/principle-tree-schema.ts'
+    ), 'utf-8');
+    expect(src).toContain("from '@principles/core/runtime-v2'");
+    expect(src).toContain('PrincipleDependency');
+    expect(src).toContain('PrincipleValueMetrics');
+    expect(src).toContain('PrincipleLifecycleEvent');
+    expect(src).toContain('PrincipleTreeStore');
+  });
+
+  it('plugin principle-tree-schema.ts does NOT define PrincipleDependency or PrincipleTreeStore locally', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '../../../../openclaw-plugin/src/types/principle-tree-schema.ts'
+    ), 'utf-8');
+    expect(src).not.toMatch(/^export interface PrincipleDependency/m);
+    expect(src).not.toMatch(/^export interface PrincipleTreeStore/m);
   });
 });
 

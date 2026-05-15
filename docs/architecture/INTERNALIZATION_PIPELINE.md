@@ -641,6 +641,38 @@ RejectionFeedback 写入
 Dreamer 在新一轮中知道"上次为何被拒"
 ```
 
+### 7.4 三振出局（Three Strikes Out）— 防止无底洞重试
+
+**问题**：大模型在被拒绝后极易陷入"死脑筋"——生成逻辑相同但变量名不同的代码，导致无限重试消耗 Token 并撑爆任务队列。
+
+**机制**：在 `TaskStore` 的 task 记录中增加 `rejection_count` 字段。
+
+```typescript
+interface TaskRecord {
+  // ... 现有字段 ...
+  rejection_count: number;          // 被人工拒绝的次数（默认 0）
+  unresolvable_at?: string;         // 打上 UNRESOLVABLE 标签的时间
+  unresolvable_reason?: string;     // 原因（rejection_limit_exceeded / ...）
+}
+```
+
+**规则**：
+
+| 条件 | 行为 |
+|------|-----|
+| `rejection_count < 3` | 正常创建新 Dreamer task，注入 correctionHints |
+| `rejection_count >= 3` | 打上 `UNRESOLVABLE` 标签，**不再创建新 AI 任务** |
+| UNRESOLVABLE 后 | 在 pd-console 显示为"需要人工开发者介入"，作为传统 Issue 处理 |
+
+**不变量**：
+- `rejection_count` 只增不减（append-only 语义）
+- UNRESOLVABLE 状态不可由 AI 自动解除，只能由人工 `pd task reopen <taskId>` 重置
+- 每次 reject 必须写入 `RejectionFeedback`，`rejection_count` 在 reject 时原子递增
+
+**可观测性**：
+- `pd health` 输出 `unresolvable_task_count`
+- pd-console 在 Tasks 页面单独展示 UNRESOLVABLE 任务列表
+
 ---
 
 ## 8. 与 Activation Pipeline 的衔接（断点 ② 解决方案）
@@ -784,12 +816,15 @@ routing_policy:
 - [ ] `IntakeToInternalizationBridge` 实现 → 解决断点 ①
 - [ ] `IdleTrigger` 实现 → 替代 nocturnal-service 触发部分
 - [ ] `ActivationDispatcher` 框架 + prompt/archive 两个 ChannelWriter → 解决断点 ②（最低风险通道）
+- [ ] **L1 容量硬上限（Hard Cap）** → 防止 System Prompt 膨胀导致 LLM 失效（见 §9.1）
+- [ ] **三振出局机制** → `rejection_count` 字段 + UNRESOLVABLE 状态（见 §7.4）
 
 ### 优先级 P1（高风险通道）
 - [ ] `SkillFileWriter`
-- [ ] `RuleHostWriter` + shadow mode
+- [ ] `RuleHostWriter` + shadow mode（Offline Replay 模式，见 §9.2）
 - [ ] `ApprovalQueue`
 - [ ] pd-console 审批 UI
+- [ ] **基于置信度的自动晋升**（Auto-Promotion by Confidence，见 §9.3）
 
 ### 优先级 P2（清理与合并）
 - [ ] 删除 `nocturnal-service.ts`、`nocturnal-trinity.ts` 等冗余代码
@@ -799,6 +834,147 @@ routing_policy:
 ### 优先级 P3（最高风险通道）
 - [ ] `TrainingExporter` + 二次确认
 - [ ] 与外部模型训练系统集成
+
+---
+
+## 9. 运行时防御机制（Runtime Safeguards）
+
+> 本节补充评审 3 识别的 5 个致命缺陷对应的设计约束。这些机制是 P0/P1 实施的**强制要求**，不是可选优化。
+
+### 9.1 L1 容量硬上限（防止 System Prompt 膨胀）
+
+**问题根源**：根据 `PD_System_Dynamics_Model.md`，L1（软内化）膨胀是导致 LLM 变笨的主要原因。如果 Pruning Action 排到 P3（6+ 个月），系统全力运转后 System Prompt 会在数周内超过 LLM 有效注意力窗口。
+
+**强制约束**：
+
+```yaml
+# {workspace}/.pd/config/internalization.yaml
+internalization:
+  l1_capacity:
+    soft_limit: 8          # 超过时 pd health 报 warning
+    hard_limit: 12         # 超过时强制 LRU 淘汰
+    lru_eviction: true     # 硬上限触发时自动淘汰最久未触发的 principle
+    eviction_audit: true   # 每次淘汰写入 audit log
+```
+
+**LRU 淘汰规则**：
+- 当 `active principles count > hard_limit` 时，淘汰 `last_triggered_at` 最早的 principle
+- 淘汰 = 将 `Ledger.principles[id].status` 从 `active` 改为 `archived`，原因 `lru_eviction`
+- 淘汰操作写入 `correction_audit_events` 表，可通过 `pd audit list --type lru_eviction` 查询
+- 淘汰不等于删除：principle 数据保留，可通过 `pd principle restore <id>` 重新激活
+
+**不变量**：
+- `active principles count` 在任何时刻不得超过 `hard_limit`（代码强制，不依赖 config）
+- 代码默认 `hard_limit = 12`，config 只能调低不能调高（防止误配置）
+
+> **注意**：这是"低端但保底"的修剪机制，不替代完整的 Pruning Action（P3）。完整 Pruning Action 需要人工审批和回滚机制，但 LRU 硬上限是系统存活的最低保障。
+
+### 9.2 Shadow Mode 重新定义（Offline Replay，非旁路运行）
+
+**问题根源**：对于 `code_tool_hook` 通道的拦截器（RuleHost Gate），传统"影子模式"（只记录不拦截）存在逻辑悖论——如果不拦截，危险操作会真实发生；如果拦截，就不是影子模式。
+
+**正确定义**：Shadow Mode = **Offline Replay 测试**，不是旁路运行。
+
+```
+新生成的 RuleHost 代码
+        │
+        │ 不上线，不拦截任何真实调用
+        ▼
+每日夜间 Offline Replay
+        │
+        │ 把过去 N 天的全量 Trajectory 日志过一遍新规则
+        ▼
+评估结果
+  ├── 误杀率 > 阈值（误杀了历史正常操作）→ 打回，不激活
+  ├── 命中率 < 阈值（没有命中历史 Pain 记录）→ 打回，不激活
+  └── 连续 30 天通过 → 进入人工审批队列
+```
+
+**实现要求**：
+- `GoldenTrace` 已实现（PR #568），作为 Replay 的数据源
+- 新增 `ShadowModeEvaluator` 组件，每日调度一次 Replay
+- Replay 结果写入 `pi_artifacts` 的 `shadow_eval_results` 字段
+- 30 天通过后自动触发 `ApprovalQueue.enqueue()`
+
+**配置**：
+```yaml
+code_tool_hook:
+  shadow_mode_cycles: 30        # 连续通过天数（默认 30）
+  false_positive_threshold: 0.05  # 误杀率上限（5%）
+  hit_rate_threshold: 0.8       # 命中率下限（80%）
+```
+
+### 9.3 基于置信度的自动晋升（Auto-Promotion by Confidence）
+
+**问题根源**：如果所有 L2 变更都需要人工审批，操作员会产生"报警疲劳"，要么闭眼 Approve（护栏失效），要么让队列堆满（系统便秘）。
+
+**机制**：在 `ActivationDispatcher` 中增加置信度评估，满足以下**全部条件**时允许跳过人工审批：
+
+| 条件 | 说明 |
+|------|-----|
+| `rollout_confidence >= 0.95` | RolloutReviewer 给出 95% 以上置信度 |
+| `shadow_eval_false_positive_rate < 0.01` | Offline Replay 误杀率 < 1% |
+| `scope = non_destructive_only` | 规则作用域仅限非破坏性工具（如 `git status`、`read_file`）|
+| `rejection_count = 0` | 此 artifact 从未被拒绝过 |
+
+**不允许自动晋升的情况**（无论置信度多高）：
+- 涉及 `write_file`、`exec`、`delete` 等破坏性工具的拦截规则
+- `model_training` 通道（永远需要双人审批）
+- `rejection_count > 0` 的 artifact
+
+**配置**：
+```yaml
+code_tool_hook:
+  auto_promotion:
+    enabled: true                    # 默认开启
+    confidence_threshold: 0.95
+    max_false_positive_rate: 0.01
+    allowed_scopes:                  # 白名单：只有这些工具可以自动晋升
+      - read_file
+      - git_status
+      - list_directory
+```
+
+### 9.4 SQLite 并发安全（WAL + Jitter）
+
+**问题根源**：多个 workspace 或多个 Agent 同时进入 Idle 状态时，会同时争抢 SQLite 的 `pending` 任务锁，导致 `Database is locked` 错误。
+
+**强制要求**：
+
+**1. WAL 模式（必须）**：
+
+```typescript
+// packages/principles-core/src/runtime-v2/sqlite-connection.ts
+// 每个连接建立时必须执行：
+db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');   // 等待 5s 而非立即失败
+db.pragma('synchronous = NORMAL');  // WAL 模式下 NORMAL 足够安全
+```
+
+**2. IdleTrigger Jitter（必须）**：
+
+```typescript
+// packages/openclaw-plugin/src/service/idle-trigger.ts
+// 空闲检测到后，不立即唤起，而是随机等待
+const jitterMs = Math.random() * (maxJitterMs - minJitterMs) + minJitterMs;
+await sleep(jitterMs);
+await orchestrator.wakeOnce();
+```
+
+配置：
+```yaml
+idle_trigger:
+  jitter_min_ms: 5000    # 最少等待 5 秒
+  jitter_max_ms: 30000   # 最多等待 30 秒
+```
+
+**3. LeaseManager 超时（已有，确认配置）**：
+- Lease 超时默认 5 分钟，防止死锁
+- `RecoverySweep` 每次启动时清理过期 lease
+
+**不变量**：
+- 任何 SQLite 连接建立时必须设置 `journal_mode = WAL`（架构守护测试覆盖）
+- `IdleTrigger` 必须有 jitter，不允许固定间隔触发（架构守护测试覆盖）
 
 ---
 

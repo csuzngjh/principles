@@ -334,33 +334,37 @@ disabled（自动 deactivate）
 
 | 领域概念 | 当前位置 | 目标位置 | 状态 |
 |---------|--------|---------|------|
-| Pain Signal | `@principles/core/pain-signal.ts` | - | ✅ Done |
-| Pain Chain Read Model | `@principles/core/runtime-v2/pain-chain-read-model.ts` | - | ✅ Done |
-| Principle Schema | `openclaw-plugin/src/types/principle-tree-schema.ts` | `@principles/core` | ⏳ Pending（ADR-0002）|
-| LedgerPrinciple | `@principles/core/principle-tree-ledger.ts` | - | ✅ Done |
-| Rule / LedgerRule | plugin types + `@principles/core` | `@principles/core` | ⏳ Pending（ADR-0002）|
-| Implementation Schema | plugin types | `@principles/core` | ⏳ Pending |
-| Code Implementation 文件 | `openclaw-plugin/core/code-implementation-storage.ts` | - | 🔒 Keep in plugin（文件 IO）|
-| RuleHost | `openclaw-plugin/core/rule-host.ts` | `@principles/core` | ⏳ Pending（ADR-0002 PRI-45）|
-| RuleHostInput / Result | `@principles/core/runtime-v2/internalization/rule-host-contracts.ts` | - | ✅ Done（PRI-42）|
-| RuleHost Helpers | `@principles/core/runtime-v2/internalization/rule-host-helpers.ts` | - | ✅ Done |
-| Lifecycle Metrics | `@principles/core/runtime-v2/internalization/lifecycle-metrics.ts` | - | ✅ Done |
-| Routing Policy | `@principles/core/runtime-v2/internalization/routing-policy.ts` | - | ✅ Done |
-| Template Generator | `@principles/core/runtime-v2/internalization/template-generator.ts` | - | ✅ Done |
-| Pruning Signal | `@principles/core/runtime-v2/pruning-read-model.ts` | - | ✅ Done |
-| Pruning Review | `@principles/core/runtime-v2/pruning-review-log.ts` | - | ✅ Done |
-| Diagnostician Recommendation | `@principles/core/runtime-v2/diagnostician-output.ts` | - | ✅ Done |
-| **PIArtifact** | `@principles/core/runtime-v2/internalization/pi-artifact.ts` | - | ✅ Done（ADR-0003）|
-| **7 Peer Runners** | `@principles/core/runtime-v2/internalization/*-runner.ts` | - | ✅ Done |
-| **InternalizationOrchestrator** | `@principles/core/runtime-v2/internalization/internalization-orchestrator.ts` | - | ✅ Done |
-| **IntakeToInternalizationBridge** | TBD | `@principles/core` | ❌ 待建（ADR-0005 衔接）|
-| **IdleTrigger** | TBD | `openclaw-plugin/service/` | ❌ 待建（取代 nocturnal-service）|
-| **ActivationDispatcher** | TBD | `@principles/core/runtime-v2/activation/` | ❌ 待建（ADR-0006）|
-| **ApprovalQueue** | TBD | `@principles/core/runtime-v2/activation/` | ❌ 待建（ADR-0006）|
-| **ChannelWriter（5 个）** | TBD | `@principles/core/runtime-v2/activation/writers/` | ❌ 待建 |
-| **CorrectionProposal** | `@principles/core/runtime-v2/internalization/correction-proposal.ts` | - | ✅ Done（ADR-0004）|
-| **GoldenTrace** | `@principles/core/runtime-v2/golden-trace.ts` | - | ✅ Done |
-| **Nocturnal-Trinity** | `openclaw-plugin/core/nocturnal-trinity.ts` | 删除 | ⏳ 删除中（ADR-0005）|
+| Pain Signal | `packages/principles-core/src/runtime-v2/pain-to-principle-service.ts` | - | ✅ Done（ADR-0001）|
+| Pain Chain Read Model | `packages/principles-core/src/runtime-v2/pain-chain-read-model.ts` | - | ✅ Done（ADR-0001）|
+| Principle Schema | `packages/principles-core/src/runtime-v2/types/principle-schema.ts` | - | ✅ Done |
+| LedgerPrinciple | `packages/principles-core/src/principle-tree-ledger.ts` | - | ✅ Done |
+| Rule / LedgerRule | `packages/principles-core/src/runtime-v2/types/principle-schema.ts` | - | ✅ Done |
+| Implementation Schema | `packages/principles-core/src/runtime-v2/types/principle-schema.ts` | - | ✅ Done |
+| Evolution Types | `packages/principles-core/src/runtime-v2/evolution/evolution-types.ts` | - | ✅ Done |
+| Nocturnal Trinity Types | `packages/principles-core/src/runtime-v2/nocturnal/nocturnal-trinity-types.ts` | 删除（ADR-0005）| ⏳ 迁移中 |
+| Event Types | `packages/principles-core/src/runtime-v2/types/event-types.ts` | - | ✅ Done |
+| Principle Tree Data Structures | `packages/principles-core/src/runtime-v2/types/` | - | ✅ Done |
+| Code Implementation 文件 | `packages/openclaw-plugin/src/core/code-implementation-storage.ts` | - | 🔒 Keep in plugin（文件 IO）|
+| RuleHost | `packages/openclaw-plugin/src/core/rule-host.ts` | `@principles/core` | ⏳ Pending（ADR-0002 PRI-45）|
+| RuleHostInput / Result | `packages/principles-core/src/runtime-v2/internalization/rule-host-contracts.ts` | - | ✅ Done（PRI-42）|
+| RuleHost Helpers | `packages/principles-core/src/runtime-v2/internalization/rule-host-helpers.ts` | - | ✅ Done |
+| Lifecycle Metrics | `packages/principles-core/src/runtime-v2/internalization/lifecycle-metrics.ts` | - | ✅ Done |
+| Routing Policy | `packages/principles-core/src/runtime-v2/internalization/routing-policy.ts` | - | ✅ Done（PRI-43）|
+| Template Generator | `packages/principles-core/src/runtime-v2/internalization/template-generator.ts` | - | ✅ Done |
+| Pruning Signal | `packages/principles-core/src/runtime-v2/pruning-read-model.ts` | - | ✅ Done |
+| Pruning Review | `packages/principles-core/src/runtime-v2/pruning-review-log.ts` | - | ✅ Done |
+| Diagnostician Recommendation | `packages/principles-core/src/runtime-v2/diagnostician-output.ts` | - | ✅ Done |
+| **PIArtifact** | `packages/principles-core/src/runtime-v2/internalization/pi-artifact.ts` | - | ✅ Done（ADR-0003）|
+| **7 Peer Runners** | `packages/principles-core/src/runtime-v2/internalization/*-runner.ts` | - | ✅ Done |
+| **InternalizationOrchestrator** | `packages/principles-core/src/runtime-v2/internalization/internalization-orchestrator.ts` | - | ✅ Done |
+| **CorrectionProposal** | `packages/principles-core/src/runtime-v2/internalization/correction-proposal.ts` | - | ✅ Done（ADR-0004）|
+| **GoldenTrace** | `packages/principles-core/src/runtime-v2/golden-trace.ts` | - | ✅ Done |
+| **IntakeToInternalizationBridge** | TBD | `packages/principles-core/src/runtime-v2/internalization/intake-to-internalization-bridge.ts` | ❌ 待建（断点①）|
+| **IdleTrigger** | TBD | `packages/openclaw-plugin/src/service/idle-trigger.ts` | ❌ 待建（取代 nocturnal-service）|
+| **ActivationDispatcher** | TBD | `packages/principles-core/src/runtime-v2/activation/activation-dispatcher.ts` | ❌ 待建（ADR-0006）|
+| **ApprovalQueue** | TBD | `packages/principles-core/src/runtime-v2/activation/approval-queue.ts` | ❌ 待建（ADR-0006）|
+| **ChannelWriter（5 个）** | TBD | `packages/principles-core/src/runtime-v2/activation/writers/` | ❌ 待建 |
+| **Nocturnal-Trinity** | `packages/openclaw-plugin/src/core/nocturnal-trinity.ts` | 删除 | ⏳ 删除中（ADR-0005）|
 | **NocturnalArtifact** | plugin | 替换为 PIArtifact | ⏳ 迁移中（ADR-0005）|
 
 **迁移状态图例**：

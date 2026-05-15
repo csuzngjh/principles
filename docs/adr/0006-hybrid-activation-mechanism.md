@@ -1,6 +1,6 @@
 # ADR-0006: 5 通道混合激活机制
 
-> **状态**: Proposed
+> **状态**: Accepted
 > **日期**: 2026-05-15
 > **关联 ADR**: ADR-0003（Peer Agent 状态机）, ADR-0004（L2 自动校正与回放）
 > **关联文档**: `ACTIVATION_CHANNELS.md`（详细通道设计）
@@ -193,7 +193,16 @@ interface ApprovalRecord {
   artifactId: string;
   channel: InternalizationChannel;
   riskLevel: 'medium' | 'high' | 'critical';
-  status: 'pending' | 'approved' | 'rejected' | 'expired';
+  /**
+   * 审批状态（6 种，与 ACTIVATION_CHANNELS.md §2.3 和 DOMAIN_MODEL.md §5.4 保持一致）：
+   * - pending: 等待审批
+   * - approved: 已通过（第一次）
+   * - awaiting_second_confirmation: 等待二次确认（仅 critical 风险）
+   * - rejected: 已拒绝
+   * - expired: 超时未处理（默认 72h）
+   * - cancelled: 主动取消（由 pd-cli 或系统触发）
+   */
+  status: 'pending' | 'approved' | 'awaiting_second_confirmation' | 'rejected' | 'expired' | 'cancelled';
   requestedAt: string;
   decidedAt?: string;
   decidedBy?: string;
@@ -377,11 +386,16 @@ activation:
 
 ### 4.2 默认安全策略
 
-如果 `activation.yaml` 不存在或解析失败，使用安全默认值：
+如果 `activation.yaml` 不存在或解析失败，使用代码内硬编码的安全默认值（**不依赖 config 文件**）：
 
-- 所有通道：`require_approval`
-- 所有 channel writer：`activated_count = 0`
-- 启动时记录警告："activation config missing, defaulting to require_approval for all channels"
+- `prompt` / `defer_archive`：`auto`（低风险，代码默认值）
+- `skill`：`auto`（中风险，代码默认值，可通过 config 覆盖为 `require_approval`）
+- `code_tool_hook`：`require_approval`（高风险，代码硬编码，**不可通过 config 覆盖**）
+- `model_training`：`require_approval + second_confirmation`（极高风险，代码硬编码，**不可通过 config 覆盖**）
+
+> **原则**：代码内硬编码的默认值是安全基线。config 文件只能在允许的范围内收紧策略（如把 skill 改为 require_approval），不能放宽高风险通道的策略。config 缺失时系统仍可安全运行。
+
+启动时如果 config 文件缺失，记录警告：`"activation config not found at {path}, using code defaults"`。
 
 ---
 

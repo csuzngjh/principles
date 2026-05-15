@@ -126,9 +126,9 @@
 | [ADR-0002](../adr/0002-hard-internalization-core-boundary.md) | Accepted | 硬内化核心边界 |
 | [ADR-0003](../adr/0003-peer-agent-state-machine-orchestration.md) | Accepted | Peer Agent 状态机编排 |
 | [ADR-0004](../adr/0004-l2-auto-correction-and-replay.md) | Accepted | L2 自动校正与回放 |
-| [ADR-0005](../adr/0005-nocturnal-internalization-merger.md) | Proposed | Nocturnal 与 Internalization 合并 |
-| [ADR-0006](../adr/0006-hybrid-activation-mechanism.md) | Proposed | 5 通道混合激活机制 |
-| [ADR-0007](../adr/0007-cli-vs-console-audience-separation.md) | Proposed | pd-cli 与 pd-console 受众分离 |
+| [ADR-0005](../adr/0005-nocturnal-internalization-merger.md) | Accepted | Nocturnal 与 Internalization 合并 |
+| [ADR-0006](../adr/0006-hybrid-activation-mechanism.md) | Accepted | 5 通道混合激活机制 |
+| [ADR-0007](../adr/0007-cli-vs-console-audience-separation.md) | Accepted | pd-cli 与 pd-console 受众分离 |
 
 ### 架构治理（Governance）
 

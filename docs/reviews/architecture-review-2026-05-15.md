@@ -1,12 +1,63 @@
 # PD 架构评审报告 - 2026-05-15
 
-> **状态**: Final
+> **状态**: Final（已根据多方评审意见修订，v2）
 > **评审日期**: 2026-05-15
+> **修订日期**: 2026-05-15（合并三方评审意见后）
 > **评审范围**: PD 项目全部架构文档（`docs/architecture/` + `docs/adr/` + `docs/architecture-governance/` + `docs/design/`）以及当前代码实现状态
-> **输出**: 13 个新增/修订的架构文档 + 3 个新增 ADR + 一份改进 RFC（本文档第 5 节）
+> **输出**: 13 个新增/修订的架构文档 + 3 个新增 ADR + 一份改进 RFC（本文档第 5 节）+ 三方评审意见分析（本文档第 0 节）
 > **参与者**: 架构维护组
 
-本评审针对 PD 项目从"以 OpenClaw 插件为中心"重构为"四交付物 + Core 内化引擎"的架构演进过程做整体评审，识别问题、统一设计、补齐缺失、规划落地。
+---
+
+## 0. 三方评审意见分析（v2 新增）
+
+本报告在初版发布后收到三份独立评审意见。本节记录分析结论和已采纳的修改。
+
+### 0.1 三方评审共识
+
+三份评审均认可：
+- 方向正确：从 OpenClaw 中心 → 四交付物 + Core 内化引擎 + 5 通道激活
+- 上半身（Bridge → Activation → 生效）完全断链，是最高优先级
+- 文档与实施之间存在巨大 GAP，需要更可执行的边界
+
+### 0.2 各方独特视角
+
+| 评审方 | 核心贡献 | 价值 |
+|-------|---------|------|
+| 评审 1（工程纪律）| 分支落后 origin/main、构建失败、用词过强（"已通过文档解决"）、缺少可执行验收边界 | 保证 PR 可合并 |
+| 评审 2（文档一致性）| ApprovalRecord 状态枚举不一致（4 vs 6 种）、默认安全策略矛盾、ADR 状态与 GLOSSARY 引用不一致、IntakeToInternalizationBridge 位置 TBD | 保证文档自洽 |
+| 评审 3（运行时动力学）| 剪枝排 P3 是架构自杀、Shadow Mode 逻辑悖论、报警疲劳、三振出局、SQLite 并发瓶颈 | **保证系统跑得起来** |
+
+### 0.3 已采纳的修改（v2 修订内容）
+
+#### 评审 1 修复（工程纪律）
+- ✅ 已 rebase origin/main，解决 3 个文件冲突（index.ts 调用签名、DATA_ARCHITECTURE.md 迁移状态、DOMAIN_MODEL.md 代码路径）
+- ✅ 修正"已通过文档解决"的过强措辞 → 改为"设计已提出，代码仍待实现"
+- ✅ 补充每个 P0/P1 项目的明确代码路径（不再有 TBD）
+
+#### 评审 2 修复（文档一致性）
+- ✅ ADR-0006 `ApprovalRecord.status` 统一为 6 种（`pending / approved / awaiting_second_confirmation / rejected / expired / cancelled`）
+- ✅ 默认安全策略矛盾修正：明确"代码硬编码默认值 = 安全基线，config 只能收紧不能放宽"
+- ✅ ADR-0005/0006/0007 状态从 `Proposed` 改为 `Accepted`（GLOSSARY 已引用，应同步）
+- ✅ `IntakeToInternalizationBridge` 位置从 TBD 明确为 `packages/principles-core/src/runtime-v2/internalization/intake-to-internalization-bridge.ts`
+- ✅ DOMAIN_MODEL.md 代码路径从短路径（`@principles/core/...`）更新为精确包路径（`packages/principles-core/src/...`）
+
+#### 评审 3 修复（运行时动力学）— **最重要**
+- ✅ **L1 容量硬上限上调至 P0**：新增 `l1_capacity.hard_limit = 12` 强制约束 + LRU 淘汰机制（见 `INTERNALIZATION_PIPELINE.md` §9.1）
+- ✅ **Shadow Mode 重新定义**：从"旁路运行"改为"Offline Replay 测试"，解决逻辑悖论（见 `INTERNALIZATION_PIPELINE.md` §9.2）
+- ✅ **三振出局机制**：`rejection_count` 字段 + UNRESOLVABLE 状态，防止无底洞重试（见 `INTERNALIZATION_PIPELINE.md` §7.4）
+- ✅ **基于置信度的自动晋升**：满足 4 个条件时允许跳过人工审批，防止报警疲劳（见 `INTERNALIZATION_PIPELINE.md` §9.3）
+- ✅ **SQLite WAL + Jitter 强制要求**：`journal_mode=WAL` + `busy_timeout=5000` + IdleTrigger 随机抖动（见 `DATA_ARCHITECTURE.md` §7.1 + `INTERNALIZATION_PIPELINE.md` §9.4）
+
+### 0.4 未采纳的意见（及理由）
+
+| 意见 | 未采纳理由 |
+|------|---------|
+| 评审 3：立即引入 LRU 作为唯一修剪机制 | 采纳了 LRU 作为"保底机制"，但明确它不替代完整 Pruning Action（P3）。两者并存，不互斥 |
+| 评审 3：5 通道第一版只实现 3 个 | 已在 RFC §5.1 中明确 P0 只做 prompt + defer_archive，P1 才做 skill + code_tool_hook，与此建议一致 |
+| 评审 1：里程碑时间估计偏乐观 | 已在 §7.3 中修正 P0 为 6-8 周（承认依赖关系），不再假设完全并行 |
+
+---
 
 ---
 
@@ -420,13 +471,13 @@ PD 项目最初以 OpenClaw 插件方式实现全部业务逻辑。随着功能�
 
 | 里程碑 | 内容 | 期望时间 |
 |--------|-----|---------|
-| M-A | 端到端流水线打通（P0）| 4-6 周 |
+| M-A | 端到端流水线打通（P0）| **6-8 周**（IntakeToInternalizationBridge → IdleTrigger → ActivationDispatcher 有依赖关系，不可完全并行）|
 | M-B | 高风险通道与审批落地（P1）| 6-8 周 |
 | M-C | Nocturnal 合并完成（P1）| 3-4 周 |
 | M-D | 横切基础设施落地（P1）| 4-6 周 |
 | M-E | 守护测试 + 性能基线（P2）| 6-8 周 |
 
-P0 + P1 总计 12-20 周（可并行降低到 8-12 周）。
+P0 + P1 总计 **14-22 周**（M-B/C/D 可并行降低到 10-14 周）。
 
 ### 7.4 下一步建议
 

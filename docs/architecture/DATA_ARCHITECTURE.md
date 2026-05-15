@@ -503,6 +503,17 @@ PD 默认启用 SQLite WAL（Write-Ahead Logging）模式：
 - 写不阻塞读
 - 单写者（同一时刻只有一个 write transaction）
 
+**强制要求**（架构守护测试覆盖）：
+
+```typescript
+// 每个 SQLite 连接建立时必须执行以下 PRAGMA
+db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');   // 等待 5s 而非立即失败（防止多 workspace 并发锁竞争）
+db.pragma('synchronous = NORMAL'); // WAL 模式下 NORMAL 足够安全且性能更好
+```
+
+> **背景**：多个 workspace 或多个 Agent 同时进入 Idle 状态时，会同时争抢 SQLite 的 `pending` 任务锁。没有 WAL + busy_timeout，会出现 `Database is locked` 错误导致任务丢失。
+
 ### 7.2 跨进程协调
 
 ```
@@ -695,6 +706,14 @@ flowchart TD
 | RuleHost contracts | plugin | `@principles/core` | ✅（PRI-42）|
 | RoutingPolicy | plugin | `@principles/core` | ✅（PRI-43）|
 | LifecycleMetrics | plugin | `@principles/core` | ✅（PRI-42）|
+| Principle Schema / Rule / Implementation | plugin | `@principles/core/runtime-v2/types` | ✅ |
+| Evolution Types | plugin | `@principles/core/runtime-v2/evolution` | ✅ |
+| Correction Types | plugin | `@principles/core/runtime-v2/correction` | ✅ |
+| Nocturnal Trinity Types | plugin | `@principles/core/runtime-v2/nocturnal` | ✅ |
+| Nocturnal Candidate Scoring | plugin | `@principles/core/runtime-v2/nocturnal` | ✅ |
+| Event Types | plugin | `@principles/core/runtime-v2/types` | ✅ |
+| Principle Tree Data Structures | plugin | `@principles/core/runtime-v2/types` | ✅ |
+| Queue / Hygiene / Runtime Summary Types | plugin | `@principles/core/runtime-v2/types` | ✅ |
 
 ### 11.2 进行中（ADR-0005 / ADR-0006）
 
@@ -727,6 +746,8 @@ flowchart TD
 | DAT-6 | 工作区路径不允许逃逸 | validateWorkspacePath |
 | DAT-7 | Schema migration 不允许修改已发布版本 | hash 校验 |
 | DAT-8 | 只读 ReadModel 不允许触发写 | architecture-regression test |
+| **DAT-9** | **每个 SQLite 连接必须设置 `journal_mode=WAL` + `busy_timeout=5000`** | **架构守护测试** |
+| **DAT-10** | **active principles count 不得超过 `l1_capacity.hard_limit`（默认 12）** | **LedgerPromptWriter 强制检查** |
 
 ---
 

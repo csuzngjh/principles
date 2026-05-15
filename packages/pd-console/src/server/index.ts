@@ -325,7 +325,7 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // GET /api/principles, /api/principles/:id
       if (urlPath === '/api/principles' || urlPath.startsWith('/api/principles/')) {
         const subPath = urlPath.slice('/api/principles'.length);
-        asyncHandler(() => handlePrinciplesRoute(req, res, services.workspaceDir, subPath))(req, res);
+        asyncHandler(() => handlePrinciplesRoute({ req, res, workspaceDir: services.workspaceDir, subPath }))(req, res);
         return;
       }
 

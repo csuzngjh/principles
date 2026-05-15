@@ -1,6 +1,6 @@
 # ADR-0005: Nocturnal 与 Internalization Engine 合并
 
-> **状态**: Proposed
+> **状态**: Accepted
 > **日期**: 2026-05-15
 > **关联 ADR**: ADR-0003（Peer Agent 状态机编排）, ADR-0001（Runtime V2 服务边界）
 > **取代**: 部分取代 `docs/design/2026-04-07-principle-internalization-system.md` 中关于"nocturnal 复用"的设计
