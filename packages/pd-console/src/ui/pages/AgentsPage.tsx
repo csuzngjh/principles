@@ -212,13 +212,13 @@ function FlowEdgeLine({ from, to }: { from: FlowNode; to: FlowNode }) {
           markerHeight="6"
           orient="auto-start-reverse"
         >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="hsl(180, 70%, 50%)" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-accent, hsl(180 70% 50%))" />
         </marker>
       </defs>
       <path
         d={d}
         fill="none"
-        stroke="hsl(180, 70%, 50%)"
+        stroke="var(--color-accent, hsl(180 70% 50%))"
         strokeWidth={1.8}
         markerEnd={`url(#arrow-${from.id}-${to.id})`}
         className="opacity-70"

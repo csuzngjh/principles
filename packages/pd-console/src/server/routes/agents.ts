@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 import { RuntimeStateManager } from '@principles/core/runtime-v2';
-import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
 
 const AGENT_REGISTRY = [
   {
@@ -232,6 +232,7 @@ class AgentConsoleModel {
   private readonly workspaceDir: string;
   private stateManager: RuntimeStateManager | null = null;
   private initPromise: Promise<void> | null = null;
+  private stageEventsCache = new Map<string, Record<string, string>>();
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
@@ -248,11 +249,12 @@ class AgentConsoleModel {
         this.initPromise = null;
       }
     }
-    this.stateManager = new RuntimeStateManager({ workspaceDir: this.workspaceDir });
-    this.initPromise = this.stateManager.initialize();
+    const manager = new RuntimeStateManager({ workspaceDir: this.workspaceDir });
+    this.initPromise = manager.initialize();
     try {
       await this.initPromise;
-      return this.stateManager;
+      this.stateManager = manager;
+      return manager;
     } catch {
       this.stateManager = null;
       this.initPromise = null;
@@ -302,26 +304,24 @@ class AgentConsoleModel {
     };
   }
 
-  private static stageEventsCache = new Map<string, Record<string, string>>();
-
-  private static getStageEvents(workflowId: string): Record<string, string> {
-    const cached = AgentConsoleModel.stageEventsCache.get(workflowId);
+  private getStageEvents(workflowId: string): Record<string, string> {
+    const cached = this.stageEventsCache.get(workflowId);
     if (cached) return cached;
     return {};
   }
 
-  static refreshStageEvents(workspaceDir: string): void {
-    const dbPath = path.join(workspaceDir, '.state', 'subagent_workflows.db');
+  private refreshStageEvents(): void {
+    const dbPath = path.join(this.workspaceDir, '.state', 'subagent_workflows.db');
     if (!fs.existsSync(dbPath)) return;
     let db: Database.Database | null = null;
     try {
       db = new Database(dbPath, { readonly: true });
       const events = db.prepare(`
-        SELECT workflow_id, event_type, event_data
+        SELECT workflow_id, event_type, payload_json
         FROM subagent_workflow_events
         WHERE event_type LIKE 'trinity_%'
         ORDER BY created_at DESC
-      `).all() as { workflow_id: string; event_type: string; event_data: string }[];
+      `).all() as { workflow_id: string; event_type: string; payload_json: string }[];
       const grouped = new Map<string, Record<string, string>>();
       for (const ev of events) {
         const states = grouped.get(ev.workflow_id) || {};
@@ -333,15 +333,15 @@ class AgentConsoleModel {
         }
         grouped.set(ev.workflow_id, states);
       }
-      AgentConsoleModel.stageEventsCache = grouped;
+      this.stageEventsCache = grouped;
     } catch {
-      AgentConsoleModel.stageEventsCache.clear();
+      this.stageEventsCache.clear();
     } finally {
       db?.close();
     }
   }
 
-  private static getTrinitySubAgentStatus(agentId: string, workflows: WorkflowRow[]): { status: AgentStatus; lastRunAt: string | null } {
+  private getTrinitySubAgentStatus(agentId: string, workflows: WorkflowRow[]): { status: AgentStatus; lastRunAt: string | null } {
     const stageMap: Record<string, string> = {
       'trinity-dreamer': 'dreamer',
       'trinity-philosopher': 'philosopher',
@@ -354,9 +354,9 @@ class AgentConsoleModel {
     const stageIndex = stageOrder.indexOf(stage);
 
     for (const wf of workflows) {
-      if (wf.workflow_type !== 'nocturnal_reflection') continue;
+      if (wf.workflow_type !== 'nocturnal') continue;
 
-      const eventStates = AgentConsoleModel.getStageEvents(wf.workflow_id);
+      const eventStates = this.getStageEvents(wf.workflow_id);
       const stageEvent = eventStates[stage];
 
       if (stageEvent === 'failed') {
@@ -380,14 +380,14 @@ class AgentConsoleModel {
         }
       }
 
-      if (wf.state === 'running' || wf.state === 'pending') {
+      if (wf.state === 'active' || wf.state === 'pending') {
         if (stageIndex === 0) return { status: 'running', lastRunAt: new Date(wf.updated_at).toISOString() };
         return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
       }
       if (wf.state === 'completed') {
         return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
       }
-      if (wf.state === 'failed') {
+      if (wf.state === 'terminal_error') {
         if (eventStates.dreamer === 'failed') {
           return { status: stageIndex === 0 ? 'failed' : 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
         }
@@ -443,7 +443,7 @@ class AgentConsoleModel {
         status = 'idle';
       }
     } else if (agent.id === 'trinity-dreamer' || agent.id === 'trinity-philosopher' || agent.id === 'trinity-scribe') {
-      const subStatus = AgentConsoleModel.getTrinitySubAgentStatus(agent.id, workflows);
+      const subStatus = this.getTrinitySubAgentStatus(agent.id, workflows);
       ({ status, lastRunAt } = subStatus);
     } else if (agent.id === 'pain-diagnostic-gate') {
       status = 'idle';
@@ -474,7 +474,7 @@ class AgentConsoleModel {
     const mgr = await this.ensureInitialized();
     const allTasks = await mgr.listTasks();
     const workflows = this.readWorkflowData();
-    AgentConsoleModel.refreshStageEvents(this.workspaceDir);
+    this.refreshStageEvents();
     const results: AgentInfo[] = [];
     for (const agent of AGENT_REGISTRY) {
       results.push(await this.buildAgentInfo(agent, allTasks, workflows));
@@ -489,7 +489,7 @@ class AgentConsoleModel {
     const mgr = await this.ensureInitialized();
     const allTasks = await mgr.listTasks();
     const workflows = this.readWorkflowData();
-    AgentConsoleModel.refreshStageEvents(this.workspaceDir);
+    this.refreshStageEvents();
     const info = await this.buildAgentInfo(agent, allTasks, workflows);
 
     let agentTasks = agent.taskKind
@@ -585,7 +585,7 @@ export async function handleAgentsRoute(
       }
     })();
     if (!agentId) {
-      sendNotFound(res, 'Invalid agent ID encoding');
+      sendBadRequest(res, 'Invalid agent ID encoding');
       return;
     }
     try {
@@ -611,7 +611,7 @@ export async function handleAgentsRoute(
       }
     })();
     if (!agentId) {
-      sendNotFound(res, 'Invalid agent ID encoding');
+      sendBadRequest(res, 'Invalid agent ID encoding');
       return;
     }
     try {
