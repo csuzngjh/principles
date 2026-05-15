@@ -69,6 +69,7 @@ _scratchpad/
 # Private AI agent files (DO NOT COMMIT)
 GEMINI.md
 CLAUDE.md
+AGENT.md
 code-concise/
 .trae
 
