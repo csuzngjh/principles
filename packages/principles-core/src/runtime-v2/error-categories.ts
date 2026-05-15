@@ -36,6 +36,7 @@ export const PDErrorCategorySchema = Type.Union([
   Type.Literal('trajectory_ambiguous'),
   Type.Literal('storage_unavailable'),
   Type.Literal('workspace_invalid'),
+  Type.Literal('workspace_dirty'),
   Type.Literal('query_invalid'),
 ]);
 export type PDErrorCategory = Static<typeof PDErrorCategorySchema>;
@@ -58,6 +59,7 @@ export const PD_ERROR_CATEGORIES: readonly PDErrorCategory[] = [
   'trajectory_ambiguous',
   'storage_unavailable',
   'workspace_invalid',
+  'workspace_dirty',
   'query_invalid',
 ] as const;
 
@@ -88,6 +90,7 @@ export const FAILURE_CATEGORY_MAP: Record<PDErrorCategory, string> = {
   trajectory_ambiguous: 'runtime_unavailable',
   storage_unavailable: 'ledger_write_failed',
   workspace_invalid: 'config_missing',
+  workspace_dirty: 'artifact_missing',
   query_invalid: 'runtime_unavailable',
 };
 

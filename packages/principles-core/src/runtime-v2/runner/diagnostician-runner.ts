@@ -509,7 +509,7 @@ export class DiagnosticianRunner {
   // -- Error classification --
 
   private readonly PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set(
-    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing'] as const),
+    Object.freeze(['storage_unavailable', 'workspace_invalid', 'workspace_dirty', 'capability_missing'] as const),
   );
 
   private isPermanentError(category: PDErrorCategory): boolean {
