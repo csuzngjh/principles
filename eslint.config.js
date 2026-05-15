@@ -116,4 +116,14 @@ export default defineConfig(
       complexity: 'off',
     },
   },
+
+  // UI hook files need browser globals
+  {
+    files: ['packages/pd-console/src/ui/hooks/**/*.ts'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+      },
+    },
+  },
 );

@@ -241,7 +241,7 @@ describe('rankCandidates', () => {
       makeJudgment(1, { score: 0.9, rank: 1, principleAligned: true }),
     ];
 
-    const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
+    const ranked = rankCandidates({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
 
     // Candidate 1 has higher score and should be ranked first
     expect(ranked[0].candidateIndex).toBe(1);
@@ -261,7 +261,7 @@ describe('rankCandidates', () => {
       makeJudgment(1, { score: 0.9, principleAligned: true }),
     ];
 
-    const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
+    const ranked = rankCandidates({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
 
     // Candidate 1 passes thresholds (high confidence, principle aligned, has file path)
     expect(ranked[0].thresholdPassed).toBe(true);
@@ -281,14 +281,14 @@ describe('rankCandidates', () => {
       makeJudgment(5, { score: 0.8, principleAligned: true }),
     ];
 
-    const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
+    const ranked = rankCandidates({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
 
     // Lower candidateIndex wins tie
     expect(ranked[0].candidateIndex).toBe(1);
   });
 
   it('handles empty input gracefully', () => {
-    const ranked = rankCandidates([], [], DEFAULT_THRESHOLDS);
+    const ranked = rankCandidates({ candidates: [], judgments: [], thresholds: DEFAULT_THRESHOLDS });
     expect(ranked).toHaveLength(0);
   });
 
@@ -296,7 +296,7 @@ describe('rankCandidates', () => {
     const candidates = [makeCandidate({ candidateIndex: 0 })];
     const judgments = [makeJudgment(99)]; // No matching judgment
 
-    const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
+    const ranked = rankCandidates({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
     expect(ranked).toHaveLength(0);
   });
 
@@ -309,7 +309,7 @@ describe('rankCandidates', () => {
       makeJudgment(1, { score: 0.9, principleAligned: true }),
       makeJudgment(0, { score: 0.5, principleAligned: true }),
     ];
-    const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
+    const ranked = rankCandidates({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
     expect(ranked[0].candidateIndex).toBe(1);
     expect(ranked[1].candidateIndex).toBe(0);
   });
@@ -325,7 +325,7 @@ describe('rankCandidates', () => {
       makeJudgment(0, { score: 0.8, principleAligned: true }),
       makeJudgment(10, { score: 0.9, principleAligned: true }),
     ];
-    const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
+    const ranked = rankCandidates({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
     expect(ranked).toHaveLength(3);
     expect(ranked[0].candidateIndex).toBe(10);
     expect(ranked[1].candidateIndex).toBe(0);
@@ -338,7 +338,7 @@ describe('rankCandidates', () => {
       makeJudgment(0, { score: 0.1, principleAligned: false }),
       makeJudgment(0, { score: 0.9, principleAligned: true }),
     ];
-    const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
+    const ranked = rankCandidates({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
     expect(ranked).toHaveLength(1);
     expect(ranked[0].scores.principleAlignment).toBe(1.0);
   });
@@ -353,7 +353,7 @@ describe('rankCandidates', () => {
       makeJudgment(1, { score: 0.9, principleAligned: true }),
     ];
 
-    const ranked = rankCandidates(candidates, judgments, DEFAULT_THRESHOLDS);
+    const ranked = rankCandidates({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
 
     expect(ranked[0].thresholdPassed).toBe(true);
     expect(ranked[1].thresholdPassed).toBe(false);
@@ -381,7 +381,7 @@ describe('runTournament', () => {
       makeJudgment(2, { score: 0.5, principleAligned: true }),
     ];
 
-    const result = runTournament(candidates, judgments, DEFAULT_THRESHOLDS);
+    const result = runTournament({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
 
     expect(result.success).toBe(true);
     expect(result.winner).not.toBeNull();
@@ -400,7 +400,7 @@ describe('runTournament', () => {
       makeJudgment(1, { score: 0.2, principleAligned: false }),
     ];
 
-    const result = runTournament(candidates, judgments, DEFAULT_THRESHOLDS);
+    const result = runTournament({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
 
     expect(result.success).toBe(false);
     expect(result.winner).toBeNull();
@@ -411,7 +411,7 @@ describe('runTournament', () => {
     const candidates = [makeCandidate({ candidateIndex: 0, betterDecision: 'Read error.json to check logs' })];
     const judgments = [makeJudgment(0, { score: 0.9, principleAligned: true })];
 
-    const result = runTournament(candidates, judgments, DEFAULT_THRESHOLDS);
+    const result = runTournament({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
 
     expect(result.trace).toBeDefined();
     expect(result.trace.length).toBeGreaterThan(0);
@@ -429,8 +429,8 @@ describe('runTournament', () => {
       makeJudgment(1, { score: 0.9, principleAligned: true }),
     ];
 
-    const result1 = runTournament(candidates, judgments, DEFAULT_THRESHOLDS);
-    const result2 = runTournament(candidates, judgments, DEFAULT_THRESHOLDS);
+    const result1 = runTournament({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
+    const result2 = runTournament({ candidates, judgments, thresholds: DEFAULT_THRESHOLDS });
 
     expect(result1.winner!.candidateIndex).toBe(result2.winner!.candidateIndex);
   });

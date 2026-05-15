@@ -2179,12 +2179,12 @@ export function invokeStubScribe(
   const weights = config.scoringWeights ?? DEFAULT_SCORING_WEIGHTS;
 
   // Run tournament selection
-  const tournamentResult = runTournament(
-    dreamerOutput.candidates,
-    philosopherOutput.judgments,
+  const tournamentResult = runTournament({
+    candidates: dreamerOutput.candidates,
+    judgments: philosopherOutput.judgments,
     thresholds,
-    weights
-  );
+    weights,
+  });
 
   if (!tournamentResult.success || !tournamentResult.winner) {
     // Tournament failed — no eligible candidate
