@@ -32,7 +32,7 @@ import {
   Download,
   GitCompare,
 } from "lucide-react";
-import { cn } from "../../../lib/utils.js";
+import { cn } from "../../lib/utils.js";
 
 type PrincipleStatus = PrincipleListItem["status"];
 type PrinciplePriority = PrincipleListItem["priority"];
