@@ -32,6 +32,7 @@ export const PDTaskStatusSchema = Type.Union([
   Type.Literal('succeeded'),
   Type.Literal('retry_wait'),
   Type.Literal('failed'),
+  Type.Literal('needs_human_review'),
 ]);
 export type PDTaskStatus = Static<typeof PDTaskStatusSchema>;
 
