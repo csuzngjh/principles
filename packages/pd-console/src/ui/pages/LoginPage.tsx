@@ -49,6 +49,7 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
             </div>
           </div>
           <CardTitle className="text-2xl">PD Console</CardTitle>
+          <p className="text-sm text-primary font-medium tracking-wider mt-1">{t("pages:login.slogan")}</p>
           <CardDescription className="mt-2">
             {t("pages:login.description")}
           </CardDescription>

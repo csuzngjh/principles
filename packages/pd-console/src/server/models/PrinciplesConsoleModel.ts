@@ -148,7 +148,7 @@ function parseTree(raw: unknown): LedgerTreeStore {
   if (isRecord(raw.principles)) {
     for (const [id, value] of Object.entries(raw.principles)) {
       if (isRecord(value)) {
-        principles[id] = { ...value, id } as LedgerPrinciple;
+        principles[id] = { ...value, id };
       }
     }
   }
@@ -157,7 +157,7 @@ function parseTree(raw: unknown): LedgerTreeStore {
   if (isRecord(raw.rules)) {
     for (const [id, value] of Object.entries(raw.rules)) {
       if (isRecord(value)) {
-        rules[id] = { ...value, id } as LedgerRule;
+        rules[id] = { ...value, id };
       }
     }
   }
