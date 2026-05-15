@@ -249,6 +249,35 @@
       "signIn": "Sign In",
       "errorInvalid": "Invalid password",
       "errorEmpty": "Please enter password"
+    },
+    "agents": {
+      "title": "Agents",
+      "description": "View agent collaboration topology and runtime status",
+      "status": "Status",
+      "lastRun": "Last Run",
+      "prompt": "Driving Prompt",
+      "tools": "Tools Used",
+      "recentRuns": "Recent Runs",
+      "errorLog": "Error Log",
+      "cooldown": "Cooling Down",
+      "cooldownRemaining": "Cooldown Remaining",
+      "viewTasks": "View Related Tasks",
+      "input": "Input",
+      "output": "Output",
+      "noRecentRuns": "No recent runs",
+      "noErrors": "No errors",
+      "running": "Running",
+      "idle": "Idle",
+      "failed": "Failed",
+      "unknown": "Unknown",
+      "category": {
+        "scheduler": "Scheduler",
+        "analyzer": "Analyzer",
+        "reflector": "Reflector",
+        "sub-process": "Sub-process",
+        "optimizer": "Optimizer",
+        "gate": "Gate"
+      }
     }
   },
   "components": {

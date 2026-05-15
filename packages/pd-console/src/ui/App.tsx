@@ -20,6 +20,7 @@ import { DataFlowPage } from "./pages/DataFlowPage.js";
 import { EventLogPage } from "./pages/EventLogPage.js";
 import { PrinciplesPage } from "./pages/PrinciplesPage.js";
 import { PrincipleDetailPage } from "./pages/PrincipleDetailPage.js";
+import { AgentsPage } from "./pages/AgentsPage.js";
 import { LoginPage } from "./pages/LoginPage.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
 import { getToken, clearToken, checkAuth } from "./api.js";
@@ -111,6 +112,7 @@ export function App() {
                     <Route path="/evolution" element={<EvolutionPage />} />
                     <Route path="/principles" element={<PrinciplesPage />} />
                     <Route path="/principles/:id" element={<PrincipleDetailPage />} />
+                    <Route path="/agents" element={<AgentsPage />} />
                     <Route path="/data-flow" element={<DataFlowPage />} />
                     <Route path="/event-log" element={<EventLogPage />} />
                     <Route path="/thinking-models" element={<ThinkingModelsPage />} />

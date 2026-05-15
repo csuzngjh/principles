@@ -249,6 +249,35 @@
       "signIn": "登录",
       "errorInvalid": "密码错误",
       "errorEmpty": "请输入密码"
+    },
+    "agents": {
+      "title": "代理",
+      "description": "查看代理协作拓扑与运行状态",
+      "status": "状态",
+      "lastRun": "最近运行",
+      "prompt": "驱动提示词",
+      "tools": "使用工具",
+      "recentRuns": "最近运行",
+      "errorLog": "错误日志",
+      "cooldown": "冷却中",
+      "cooldownRemaining": "剩余冷却时间",
+      "viewTasks": "查看关联任务",
+      "input": "输入",
+      "output": "输出",
+      "noRecentRuns": "暂无运行记录",
+      "noErrors": "暂无错误",
+      "running": "运行中",
+      "idle": "空闲",
+      "failed": "失败",
+      "unknown": "未知",
+      "category": {
+        "scheduler": "调度器",
+        "analyzer": "分析器",
+        "reflector": "反思器",
+        "sub-process": "子流程",
+        "optimizer": "优化器",
+        "gate": "门控"
+      }
     }
   },
   "components": {
