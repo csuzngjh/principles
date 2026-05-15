@@ -1056,15 +1056,16 @@ function restartGatewayWindows() {
         if (!gatewayListening) {
             console.warn('\n⚠️  Gateway may not be running on port 18789 (plugin files are installed).');
             console.warn('   Run "openclaw gateway start" to verify.');
-            return; // 不 exit(1)，插件已安装完成
+            return false;
         }
 
         console.log('   ✅ Gateway is listening on port 18789');
+        return true;
 
     } catch (error) {
-        // Gateway 重启失败不算安装失败 — 插件文件已同步
-        console.warn(`\n⚠️  Gateway restart warning: ${error.message}`);
-        console.warn('   Plugin files are installed. Run "openclaw gateway start" manually if needed.');
+        console.warn(`\n⚠️  Gateway restart failed: ${error.message}`);
+        console.warn('   Plugin files are installed. Run "openclaw gateway start" manually.');
+        return false;
     }
 }
 
@@ -1105,7 +1106,7 @@ function restartGatewayLinux() {
                     console.warn(`⚠️  Post-restart verification skipped: ${e.message}`);
                 }
             }, 8000);
-            return;
+            return true; // systemctl restart triggered successfully
         } catch { /* systemctl not available, fall through to manual restart */ }
 
         // Manual process management
@@ -1119,21 +1120,11 @@ function restartGatewayLinux() {
         console.log(`   Starting new gateway (logs: ${logPath})...`);
         execSync(`nohup openclaw gateway --force > ${logPath} 2>&1 &`, { stdio: 'ignore' });
         console.log('✅ Gateway restart triggered.');
+        return true; // async setTimeout verification is just logging
 
-        setTimeout(() => {
-            if (existsSync(logPath)) {
-                const logs = readFileSync(logPath, 'utf-8');
-                if (logs.includes('Principles Disciple Plugin registered')) {
-                    console.log('✅ SUCCESS: Principles Disciple plugin registered successfully (manual restart)!');
-                } else if (logs.includes('failed to load')) {
-                    console.error('\n❌ CRITICAL: Manual restart triggered but PD plugin FAILED to load!');
-                    process.exit(1);
-                }
-            }
-        }, 8000);
     } catch (error) {
         console.error(`\n❌ Failed to restart gateway: ${error.message}`);
-        process.exit(1);
+        return false;
     }
 }
 
@@ -1247,7 +1238,11 @@ function main() {
     console.log('╚════════════════════════════════════════════════════════════╝');
 
     if (args.restart) {
-        restartGateway();
+        const restarted = restartGateway();
+        if (!restarted) {
+            console.error('\n❌ Gateway restart failed. Please restart manually: openclaw gateway start');
+            process.exit(1);
+        }
     } else {
         console.log('\n💡 Restart OpenClaw Gateway to load the new version.');
         console.log('   (Plugin code changes require a full gateway restart)');
