@@ -25,7 +25,7 @@ Principles Disciple 是一个 OpenClaw 插件，用来帮助编程智能体保�
 智能体是日常用户。
 人类是安装者、监督者和风险承担者。
 
-[![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/nicepkg/openclaw)
+[![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/openclaw/openclaw)
 
 [English](README.md) | [中文](README_ZH.md)
 
@@ -176,6 +176,27 @@ http://localhost:18789/plugins/principles/
 - 原则与规则实现状态。
 
 状态数据保存在本地。
+
+## 示例：治理外部自动化工作流
+
+外部插件可能让智能体的行为影响工作区之外。例如，[TweetClaw](https://github.com/Xquik-dev/tweetclaw) 是一个 OpenClaw 插件，可用于 scrape tweets、search tweets、search tweet replies、follower export、user lookup、media workflows、monitor tweets、webhooks、giveaway draws，以及通过 Xquik post tweets 或 tweet replies。
+
+可以在 [ClawHub](https://clawhub.ai/plugins/%40xquik/tweetclaw) 浏览，也可以安装当前 [npm](https://www.npmjs.com/package/@xquik/tweetclaw) 包：
+
+```bash
+openclaw plugins install @xquik/tweetclaw
+```
+
+将 Principles Disciple 与这类插件配合使用，可以捕获操作者纠正并沉淀为明确原则，例如：
+
+```text
+- 发布或回复前确认目标账号和 tweet ID。
+- 起草公开文案前先总结来源 tweets。
+- 不要把凭据、私信和个人数据写入计划或记忆。
+- 将搜索失败、回复错误和 giveaway draw 纠正记录为痛觉信号。
+```
+
+目标不是替代人工审查，而是让反复出现的外部自动化错误变得可见、可审查，并更容易预防。
 
 ## 它不是什么
 

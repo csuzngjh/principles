@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/nicepkg/openclaw">
+  <a href="https://github.com/openclaw/openclaw">
     <img src="https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35" alt="OpenClaw Plugin">
   </a>
   <img src="https://img.shields.io/github/v/release/csuzngjh/principles?style=flat-square&color=5865F2" alt="Release">
@@ -155,6 +155,27 @@ The console can show:
 - principle and implementation status.
 
 State is stored locally.
+
+## Example: governed external automation
+
+External plugins can make agent work visible outside the workspace. For example, [TweetClaw](https://github.com/Xquik-dev/tweetclaw) is an OpenClaw plugin for scrape tweets, search tweets, search tweet replies, follower export, user lookup, media workflows, monitor tweets, webhooks, giveaway draws, and post tweets or tweet replies through Xquik.
+
+Browse it on [ClawHub](https://clawhub.ai/plugins/%40xquik/tweetclaw), or install the current [npm](https://www.npmjs.com/package/@xquik/tweetclaw) package:
+
+```bash
+openclaw plugins install @xquik/tweetclaw
+```
+
+Use Principles Disciple beside plugins like this to capture operator corrections and promote explicit principles, for example:
+
+```text
+- Confirm the target account and tweet ID before posting or replying.
+- Summarize source tweets before drafting public copy.
+- Keep credentials, private messages, and personal data out of plans and memories.
+- Record failed searches, reply mistakes, and giveaway draw corrections as pain signals.
+```
+
+The goal is not to replace human review. It is to make repeated external-automation mistakes visible, reviewable, and easier to prevent.
 
 ## What this is not
 
