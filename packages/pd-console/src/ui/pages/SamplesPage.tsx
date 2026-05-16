@@ -1,13 +1,17 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { fetchSamples, fetchSampleDetail, reviewSample } from "../api.js";
 import { PageHeader } from "../components/page-header.js";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card.js";
 import { Button } from "../components/ui/button.js";
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "../components/ui/select.js";
 import { Badge } from "../components/ui/badge.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Separator } from "../components/ui/separator.js";
 import { Check, X, ChevronLeft, ChevronRight, ClipboardList } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../components/ui/alert-dialog.js";
+import { formatDate } from "../utils/format.js";
 
 interface SampleListItem {
   sampleId: string;
@@ -51,13 +55,25 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
 
 export function SamplesPage() {
   const { t } = useTranslation();
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [page, setPage] = useState(1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") ?? "all");
+  const [page, setPage] = useState(() => {
+    const p = searchParams.get("page");
+    return p ? Math.max(1, parseInt(p, 10) || 1) : 1;
+  });
   const [data, setData] = useState<SamplesData | null>(null);
   const [selected, setSelected] = useState<SampleDetail | null>(null);
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(() => searchParams.get("id") ?? "");
   const [error, setError] = useState("");
   const [reviewLoading, setReviewLoading] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (page > 1) params.set("page", String(page));
+    if (selectedId) params.set("id", selectedId);
+    setSearchParams(params, { replace: true });
+  }, [statusFilter, page, selectedId, setSearchParams]);
 
   useEffect(() => {
     fetchSamples(statusFilter, page).then((result) => {
@@ -138,16 +154,17 @@ export function SamplesPage() {
         actions={
           <div className="flex items-center gap-2">
             <label className="text-sm text-muted-foreground">{t("pages:samples.filterByStatus")}:</label>
-            <select
-              value={statusFilter}
-              onChange={(e) => { setStatusFilter(e.target.value); setPage(1); setSelectedId(""); }}
-              className="px-3 py-1.5 rounded-md border border-input bg-background text-sm"
-            >
-              <option value="all">{t("common:all")}</option>
-              <option value="pending">{t("common:pending")}</option>
-              <option value="approved">{t("common:completed")}</option>
-              <option value="rejected">{t("common:failed")}</option>
-            </select>
+            <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); setSelectedId(""); }}>
+              <SelectTrigger className="h-9 text-sm w-[130px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("common:all")}</SelectItem>
+                <SelectItem value="pending">{t("common:pending")}</SelectItem>
+                <SelectItem value="approved">{t("common:completed")}</SelectItem>
+                <SelectItem value="rejected">{t("common:failed")}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         }
       />
@@ -179,6 +196,9 @@ export function SamplesPage() {
               <div
                 key={item.sampleId}
                 onClick={() => setSelectedId(item.sampleId)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedId(item.sampleId); } }}
                 className={`p-3 border-b border-border cursor-pointer transition-colors duration-150 ${
                   selectedId === item.sampleId
                     ? "bg-primary/5 border-l-2 border-l-primary"
@@ -200,13 +220,13 @@ export function SamplesPage() {
                     </Badge>
                     {item.confidence !== null && (
                       <span className="text-xs text-muted-foreground">
-                        Score: {item.confidence}
+                        {t("pages:samples.score")} {item.confidence}
                       </span>
                     )}
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {new Date(item.createdAt).toLocaleString()}
+                  {formatDate(item.createdAt)}
                 </p>
               </div>
             ))}
@@ -240,7 +260,7 @@ export function SamplesPage() {
           {!selected && (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
               <ClipboardList className="h-12 w-12 mb-3 opacity-50" />
-              <p className="text-sm">Select a sample to view details</p>
+              <p className="text-sm">{t("pages:samples.selectSample")}</p>
             </div>
           )}
           {selected && (
@@ -252,12 +272,12 @@ export function SamplesPage() {
                       {selected.title || selected.sampleId}
                     </p>
                     <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                      <span>{selected.sampleId.slice(0, 12)}...</span>
+                      <span>{selected.sampleId.slice(0, 12)}…</span>
                       <Badge variant={STATUS_VARIANT[selected.reviewStatus] ?? "outline"}>
                         {selected.reviewStatus}
                       </Badge>
                       {selected.confidence !== null && (
-                        <span>Score: {selected.confidence}</span>
+                        <span>{t("pages:samples.score")} {selected.confidence}</span>
                       )}
                     </div>
                   </div>
@@ -269,17 +289,30 @@ export function SamplesPage() {
                         disabled={reviewLoading}
                       >
                         <Check className="h-3 w-3 mr-1" />
-                        {reviewLoading ? "..." : t("components:taskCard.approve")}
+                        {reviewLoading ? "…" : t("components:taskCard.approve")}
                       </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => handleReview("rejected")}
-                        disabled={reviewLoading}
-                      >
-                        <X className="h-3 w-3 mr-1" />
-                        {reviewLoading ? "..." : t("components:taskCard.reject")}
-                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={reviewLoading}
+                          >
+                            <X className="h-3 w-3 mr-1" />
+                            {reviewLoading ? "…" : t("components:taskCard.reject")}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>{t("pages:samples.confirmRejectTitle")}</AlertDialogTitle>
+                            <AlertDialogDescription>{t("pages:samples.confirmRejectDescription")}</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleReview("rejected")}>{t("common:confirm")}</AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     </div>
                   )}
                 </div>
@@ -300,26 +333,26 @@ export function SamplesPage() {
                     <h4 className="text-xs font-medium text-muted-foreground mb-1">
                       {t("pages:samples.recommendation")}
                     </h4>
-                    <div className="bg-muted/50 p-3 rounded-md text-sm space-y-2">
+                    <div className="bg-muted/50 p-3 rounded-md text-sm flex flex-col gap-2">
                       {selected.recommendation.title && (
-                        <div><strong>Title:</strong> {selected.recommendation.title}</div>
+                        <div><strong>{t("pages:samples.titleLabel")}</strong> {selected.recommendation.title}</div>
                       )}
                       {selected.recommendation.text && (
-                        <div><strong>Text:</strong> {selected.recommendation.text}</div>
+                        <div><strong>{t("pages:samples.textLabel")}</strong> {selected.recommendation.text}</div>
                       )}
                       {selected.recommendation.triggerPattern && (
                         <div>
-                          <strong>Trigger Pattern:</strong>{" "}
+                          <strong>{t("pages:samples.triggerPatternLabel")}</strong>{" "}
                           <code className="bg-muted px-1.5 py-0.5 rounded text-xs">
                             {selected.recommendation.triggerPattern}
                           </code>
                         </div>
                       )}
                       {selected.recommendation.action && (
-                        <div><strong>Action:</strong> {selected.recommendation.action}</div>
+                        <div><strong>{t("pages:samples.actionLabel")}</strong> {selected.recommendation.action}</div>
                       )}
                       {selected.recommendation.abstractedPrinciple && (
-                        <div><strong>Abstracted Principle:</strong> {selected.recommendation.abstractedPrinciple}</div>
+                        <div><strong>{t("pages:samples.abstractedPrinciple")}</strong> {selected.recommendation.abstractedPrinciple}</div>
                       )}
                     </div>
                   </div>
@@ -328,7 +361,7 @@ export function SamplesPage() {
                 {selected.artifactContent && (
                   <div className="mb-4">
                     <h4 className="text-xs font-medium text-muted-foreground mb-1">
-                      Artifact Content
+                      {t("pages:samples.artifactContent")}
                     </h4>
                     <pre className="bg-muted/50 p-3 rounded-md text-xs overflow-x-auto max-h-[200px]">
                       {JSON.stringify(selected.artifactContent, null, 2)}
@@ -337,7 +370,7 @@ export function SamplesPage() {
                 )}
 
                 <p className="text-xs text-muted-foreground mt-4">
-                  Created: {new Date(selected.createdAt).toLocaleString()} | Task: {selected.taskId.slice(0, 12)}...
+                  {t("pages:samples.createdLabel")} {formatDate(selected.createdAt)} | {t("pages:samples.taskLabel")} {selected.taskId.slice(0, 12)}…
                 </p>
               </div>
             </div>

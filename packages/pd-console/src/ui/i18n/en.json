@@ -66,7 +66,22 @@
       "gfi": "GFI",
       "pendingTasks": "Pending Tasks",
       "totalWorkspaces": "Total Workspaces",
-      "activeWorkspaces": "Active Workspaces"
+      "activeWorkspaces": "Active Workspaces",
+      "painSignals": "Pain Signals",
+      "candidates": "Candidates",
+      "painEvents": "Pain Events",
+      "pendingSamples": "Pending Samples",
+      "approvedSamples": "Approved Samples",
+      "taskOutcomes": "Task Outcomes",
+      "gateBlocks": "Gate Blocks",
+      "activePrinciples": "Active",
+      "candidatePrinciples": "Candidate",
+      "probationPrinciples": "Probation",
+      "deprecatedPrinciples": "Deprecated",
+      "inProgress": "In Progress",
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "error": "Error"
     },
     "tasks": {
       "title": "Tasks",
@@ -92,7 +107,11 @@
       "source": "Source",
       "timestamp": "Timestamp",
       "count": "Count",
-      "totalGFI": "Total GFI"
+      "totalGFI": "Total GFI",
+      "gfiFull": "GFI (General Friction Index)",
+      "peakToday": "Peak today:",
+      "origin": "Origin:",
+      "gfiAfter": "GFI after:"
     },
     "gates": {
       "title": "Gates",
@@ -103,7 +122,14 @@
       "totalBlocks": "Total Blocks",
       "todayBlocks": "Today Blocks",
       "blockRate": "Block Rate",
-      "sourceBreakdown": "Source Breakdown"
+      "sourceBreakdown": "Source Breakdown",
+      "gfiLabel": "GFI",
+      "gfiBlocks": "GFI Blocks",
+      "stageBlocks": "Stage Blocks",
+      "bypassAttempts": "Bypass Attempts",
+      "score": "Score:",
+      "peak": "Peak:",
+      "threshold": "Threshold:"
     },
     "samples": {
       "title": "Samples",
@@ -114,7 +140,19 @@
       "recommendation": "Recommendation",
       "rejectReason": "Reject Reason",
       "sampleCount": "Sample Count",
-      "status": "Status"
+      "status": "Status",
+      "selectSample": "Select a sample to view details",
+      "score": "Score:",
+      "artifactContent": "Artifact Content",
+      "titleLabel": "Title:",
+      "textLabel": "Text:",
+      "triggerPatternLabel": "Trigger Pattern:",
+      "actionLabel": "Action:",
+      "abstractedPrinciple": "Abstracted Principle:",
+      "createdLabel": "Created:",
+      "taskLabel": "Task:",
+      "confirmRejectTitle": "Reject Sample",
+      "confirmRejectDescription": "Are you sure you want to reject this sample? This action cannot be undone."
     },
     "evolution": {
       "title": "Evolution",
@@ -127,7 +165,15 @@
       "progress": "Progress",
       "completedTasks": "Completed Tasks",
       "failedTasks": "Failed Tasks",
-      "pendingTasks": "Pending Tasks"
+      "pendingTasks": "Pending Tasks",
+      "inProgress": "In Progress",
+      "stageDistribution": "Stage Distribution",
+      "recentTransitions": "Recent Transitions",
+      "ready": "Ready",
+      "retryWait": "Retry Wait",
+      "blocked": "Blocked",
+      "byTaskKind": "By Task Kind",
+      "leased": "Leased"
     },
     "principles": {
       "title": "Principles",
@@ -211,7 +257,10 @@
       "trigger": "Trigger",
       "must": "Must",
       "forbidden": "Forbidden",
-      "noModels": "No thinking models"
+      "noModels": "No thinking models",
+      "modelsLabel": "models",
+      "sourceLabel": "Source:",
+      "placeThinkingOs": "Place a THINKING_OS.md file in the workspace root or .state directory"
     },
     "settings": {
       "title": "Settings",
@@ -227,7 +276,9 @@
       "removeWorkspace": "Remove Workspace",
       "tokenSaved": "Token saved",
       "workspaceAdded": "Workspace added",
-      "workspaceRemoved": "Workspace removed"
+      "workspaceRemoved": "Workspace removed",
+      "confirmDeleteTitle": "Delete Workspace",
+      "confirmDeleteDescription": "Are you sure you want to delete workspace \"{{name}}\"? This action cannot be undone."
     },
     "central": {
       "title": "Central",
@@ -238,7 +289,17 @@
       "workspaceName": "Workspace Name",
       "workspaceStatus": "Workspace Status",
       "workspaceGFI": "Workspace GFI",
-      "workspacePrinciples": "Workspace Principles"
+      "workspacePrinciples": "Workspace Principles",
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "error": "Error",
+      "total": "Total",
+      "gfiLabel": "GFI",
+      "principlesLabel": "Principles",
+      "activeLabel": "Active",
+      "pendingLabel": "Pending",
+      "noWorkspaces": "No workspaces configured. Go to Settings to add workspaces.",
+      "noWorkspaceData": "No workspace data available"
     },
     "login": {
       "title": "Login",
@@ -249,7 +310,12 @@
       "hidePassword": "Hide password",
       "signIn": "Sign In",
       "errorInvalid": "Invalid password",
-      "errorEmpty": "Please enter password"
+      "errorEmpty": "Please enter password",
+      "enterAccessToken": "Enter access token",
+      "verifying": "Verifying…",
+      "bearerToken": "Bearer Token",
+      "tokenSessionOnly": "Token is stored in browser session only.",
+      "noAuthFlag": "Use --no-auth flag to disable authentication."
     },
     "agents": {
       "title": "Agents",
@@ -271,6 +337,9 @@
       "idle": "Idle",
       "failed": "Failed",
       "unknown": "Unknown",
+      "realtimeTriggerPath": "Real-time Trigger Path",
+      "backgroundHeartbeatPath": "Background Heartbeat Path (Evolution Worker Driven)",
+      "loadFailed": "Load failed",
       "category": {
         "scheduler": "Scheduler",
         "analyzer": "Analyzer",
@@ -279,6 +348,26 @@
         "optimizer": "Optimizer",
         "gate": "Gate"
       }
+    },
+    "eventLog": {
+      "title": "Event Log",
+      "description": "View and analyze system event records",
+      "filter": "Filter",
+      "collapse": "Collapse",
+      "expand": "Expand",
+      "eventType": "Event Type",
+      "startDate": "Start Date",
+      "endDate": "End Date",
+      "searchPlaceholder": "Search event content…",
+      "clear": "Clear",
+      "reset": "Reset",
+      "apply": "Apply",
+      "loading": "Loading…",
+      "noMatchingEvents": "No matching events",
+      "relatedEvents": "Related Events",
+      "noRelatedEvents": "No related events",
+      "current": "Current",
+      "eventStats": "Event Statistics"
     }
   },
   "components": {
@@ -327,6 +416,19 @@
     "sidebar": {
       "collapse": "Collapse Sidebar",
       "expand": "Expand Sidebar"
+    },
+    "healthDiagnostic": {
+      "title": "System Health",
+      "allNormal": "All systems normal",
+      "needsAttention": "Some systems need attention",
+      "criticalIssues": "Critical issues detected"
+    },
+    "dataFreshness": {
+      "justNow": "just now",
+      "upToDate": "up to date",
+      "slightlyDelayed": "slightly delayed",
+      "stale": "stale",
+      "never": "never"
     }
   }
 }

@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.
 import { Badge } from "../components/ui/badge.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Separator } from "../components/ui/separator.js";
+import { formatDate } from "../utils/format.js";
 
 const SEVERITY_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
   low: "default",
@@ -42,7 +43,7 @@ function GfiGauge({ gfi }: { gfi: FeedbackGfi | null }) {
     <Card className="mb-6">
       <CardContent className="p-6">
         <p className="text-sm text-muted-foreground mb-3">
-          GFI (General Friction Index)
+          {t("pages:feedback.gfiFull")}
         </p>
         <div className="flex items-center gap-4">
           <div className="text-4xl font-bold text-primary">{gfi.current}</div>
@@ -60,7 +61,7 @@ function GfiGauge({ gfi }: { gfi: FeedbackGfi | null }) {
           </div>
         </div>
         <p className="text-xs text-muted-foreground mt-2">
-          Peak today: {gfi.peakToday}
+          {t("pages:feedback.peakToday")} {gfi.peakToday}
         </p>
         {Object.keys(gfi.sources).length > 0 && (
           <div className="mt-4">
@@ -120,7 +121,7 @@ export function FeedbackPage() {
               {t("components:zoneSection.empty")}
             </p>
           ) : (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               {empathy.data.map((event, i) => (
                 <Card
                   key={i}
@@ -138,12 +139,12 @@ export function FeedbackPage() {
                         {event.severity}
                       </Badge>
                       <span className="text-xs text-muted-foreground">
-                        {new Date(event.timestamp).toLocaleString()}
+                        {formatDate(event.timestamp)}
                       </span>
                     </div>
                     <p className="mt-2 text-sm">{event.reason}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Origin: {event.origin} | GFI after: {event.gfiAfter}
+                      {t("pages:feedback.origin")} {event.origin} | {t("pages:feedback.gfiAfter")} {event.gfiAfter}
                     </p>
                   </CardContent>
                 </Card>
@@ -166,14 +167,14 @@ export function FeedbackPage() {
               {t("components:zoneSection.empty")}
             </p>
           ) : (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               {blocks.data.map((block, i) => (
                 <Card key={i} className="border-l-4 border-l-destructive">
                   <CardContent className="p-4">
                     <div className="flex justify-between items-center">
                       <span className="font-bold text-sm">{block.toolName}</span>
                       <span className="text-xs text-muted-foreground">
-                        {new Date(block.timestamp).toLocaleString()}
+                        {formatDate(block.timestamp)}
                       </span>
                     </div>
                     <p className="mt-2 text-sm">{block.reason}</p>

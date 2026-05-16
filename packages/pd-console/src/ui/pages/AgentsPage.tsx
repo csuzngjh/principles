@@ -15,15 +15,16 @@ import {
   PenTool,
   SearchCheck,
   ShieldCheck,
-  X,
   ChevronDown,
   ChevronRight,
   ExternalLink,
   AlertCircle,
   Clock,
 } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../components/ui/sheet.js";
 import { fetchAgents, fetchAgentDetail } from "../api.js";
 import type { AgentInfo, AgentDetail } from "../api.js";
+import { formatDate } from "../utils/format.js";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Cpu,
@@ -244,6 +245,7 @@ function AgentFlowMap({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const agentMap = new Map(agents.map((a) => [a.id, a]));
 
   return (
@@ -254,8 +256,8 @@ function AgentFlowMap({
           className="w-full h-auto"
           style={{ maxHeight: 500 }}
         >
-          <RowLabel x={60} y={24} text="实时触发路径" />
-          <RowLabel x={60} y={168} text="后台心跳路径 (Evolution Worker 驱动)" />
+          <RowLabel x={60} y={24} text={t("pages:agents.realtimeTriggerPath")} />
+          <RowLabel x={60} y={168} text={t("pages:agents.backgroundHeartbeatPath")} />
 
           {FLOW_EDGES.map((edge) => {
             const fromNode = FLOW_NODES.find((n) => n.id === edge.from)!;
@@ -309,169 +311,172 @@ function AgentDrawer({
   agent,
   loading,
   onClose,
+  open,
 }: {
   agent: AgentDetail | null;
   loading: boolean;
   onClose: () => void;
+  open: boolean;
 }) {
   const { t } = useTranslation();
-
-  if (!agent && !loading) return null;
-
   const Icon = ICON_MAP[agent?.icon ?? ""] ?? Cpu;
 
   return (
-    <div className="fixed right-0 top-0 h-screen w-[400px] bg-background border-l border-border shadow-xl z-50 flex flex-col transition-transform duration-300">
-      <div className="flex items-center justify-between p-4 border-b border-border">
-        <div className="flex items-center gap-2">
-          <Icon className="h-5 w-5 text-primary" />
-          <span className="font-semibold text-lg">{agent?.nameZh ?? agent?.name ?? ""}</span>
-        </div>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {loading ? (
-          <div className="space-y-4">
-            <Skeleton className="h-6 w-24" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-32 w-full" />
-          </div>
-        ) : agent ? (
-          <>
-            <div className="flex items-center gap-2">
-              <Badge variant={STATUS_BADGE_VARIANT[agent.status] ?? "secondary"}>
-                {t(`pages:agents.${agent.status}`)}
-              </Badge>
-              {agent.lastRunAt && (
-                <span className="text-xs text-muted-foreground">
-                  <Clock className="h-3 w-3 inline mr-1" />
-                  {new Date(agent.lastRunAt).toLocaleString()}
-                </span>
-              )}
-            </div>
-
-            <p className="text-sm text-muted-foreground">
+    <Sheet open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
+      <SheetContent className="w-[400px] sm:max-w-[400px] overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2">
+            <Icon className="h-5 w-5 text-primary" />
+            {agent?.nameZh ?? agent?.name ?? ""}
+          </SheetTitle>
+          {agent && (
+            <SheetDescription className="sr-only">
               {agent.descriptionZh || agent.description}
-            </p>
+            </SheetDescription>
+          )}
+        </SheetHeader>
 
-            {agent.cooldownRemaining && (
-              <div className="flex items-center gap-2 p-2 rounded-md bg-yellow-50 border border-yellow-200">
-                <Clock className="h-4 w-4 text-yellow-600" />
-                <span className="text-sm text-yellow-700">
-                  {t("pages:agents.cooldown")}: {agent.cooldownRemaining}
-                </span>
-              </div>
-            )}
-
-            <Separator />
-
-            <CollapsibleSection title={t("pages:agents.prompt")} defaultOpen={false}>
-              <pre className="text-xs bg-muted p-3 rounded-md overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto">
-                {agent.prompt || "—"}
-              </pre>
-            </CollapsibleSection>
-
-            <CollapsibleSection title={t("pages:agents.tools")} defaultOpen={true}>
-              <div className="flex flex-wrap gap-1.5">
-                {agent.tools.length > 0 ? (
-                  agent.tools.map((tool) => (
-                    <Badge key={tool} variant="outline" className="text-xs">
-                      {tool}
-                    </Badge>
-                  ))
-                ) : (
-                  <span className="text-xs text-muted-foreground">—</span>
+        <div className="mt-4 flex flex-col gap-4">
+          {loading ? (
+            <div className="flex flex-col gap-4">
+              <Skeleton className="h-6 w-24" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-32 w-full" />
+            </div>
+          ) : agent ? (
+            <>
+              <div className="flex items-center gap-2">
+                <Badge variant={STATUS_BADGE_VARIANT[agent.status] ?? "secondary"}>
+                  {t(`pages:agents.${agent.status}`)}
+                </Badge>
+                {agent.lastRunAt && (
+                  <span className="text-xs text-muted-foreground">
+                    <Clock className="h-3 w-3 inline mr-1" />
+                    {formatDate(agent.lastRunAt)}
+                  </span>
                 )}
               </div>
-            </CollapsibleSection>
 
-            <Separator />
+              <p className="text-sm text-muted-foreground">
+                {agent.descriptionZh || agent.description}
+              </p>
 
-            <div>
-              <h4 className="text-sm font-medium mb-2">{t("pages:agents.recentRuns")}</h4>
-              {agent.recentTasks.length > 0 ? (
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-muted-foreground border-b">
-                      <th className="text-left py-1 font-medium">Time</th>
-                      <th className="text-left py-1 font-medium">Status</th>
-                      <th className="text-left py-1 font-medium">Attempts</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {agent.recentTasks.slice(0, 5).map((task) => (
-                      <tr key={task.taskId} className="border-b border-border/50">
-                        <td className="py-1.5">
-                          {new Date(task.createdAt).toLocaleTimeString()}
-                        </td>
-                        <td className="py-1.5">
-                          <Badge
-                            variant={
-                              task.status === "succeeded"
-                                ? "default"
-                                : task.status === "failed"
-                                  ? "destructive"
-                                  : "secondary"
-                            }
-                            className="text-[10px]"
-                          >
-                            {task.status}
-                          </Badge>
-                        </td>
-                        <td className="py-1.5">{task.attemptCount}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {t("pages:agents.noRecentRuns")}
-                </p>
-              )}
-            </div>
-
-            {agent.recentTasks.some((t) => t.lastError) && (
-              <>
-                <Separator />
-                <div>
-                  <h4 className="text-sm font-medium mb-2 text-destructive">
-                    {t("pages:agents.errorLog")}
-                  </h4>
-                  <div className="space-y-2">
-                    {agent.recentTasks
-                      .filter((t) => t.lastError)
-                      .map((task) => (
-                        <div
-                          key={task.taskId}
-                          className="p-2 rounded-md bg-red-50 border border-red-200 text-xs"
-                        >
-                          <p className="font-medium text-red-700">{task.lastError}</p>
-                          <p className="text-red-500 mt-1">
-                            {new Date(task.updatedAt).toLocaleString()}
-                          </p>
-                        </div>
-                      ))}
-                  </div>
+              {agent.cooldownRemaining && (
+                <div className="flex items-center gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
+                <Clock className="h-4 w-4 text-amber-500" />
+                <span className="text-sm text-amber-600">
+                    {t("pages:agents.cooldown")}: {agent.cooldownRemaining}
+                  </span>
                 </div>
-              </>
-            )}
+              )}
 
-            <Separator />
+              <Separator />
 
-            <Button variant="outline" size="sm" className="w-full" asChild>
-              <a href="#/tasks">
-                <ExternalLink className="h-3 w-3 mr-2" />
-                {t("pages:agents.viewTasks")}
-              </a>
-            </Button>
-          </>
-        ) : null}
-      </div>
-    </div>
+              <CollapsibleSection title={t("pages:agents.prompt")} defaultOpen={false}>
+                <pre className="text-xs bg-muted p-3 rounded-md overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto">
+                  {agent.prompt || "—"}
+                </pre>
+              </CollapsibleSection>
+
+              <CollapsibleSection title={t("pages:agents.tools")} defaultOpen={true}>
+                <div className="flex flex-wrap gap-1.5">
+                  {agent.tools.length > 0 ? (
+                    agent.tools.map((tool) => (
+                      <Badge key={tool} variant="outline" className="text-xs">
+                        {tool}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
+                </div>
+              </CollapsibleSection>
+
+              <Separator />
+
+              <div>
+                <h4 className="text-sm font-medium mb-2">{t("pages:agents.recentRuns")}</h4>
+                {agent.recentTasks.length > 0 ? (
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-muted-foreground border-b">
+                        <th className="text-left py-1 font-medium">Time</th>
+                        <th className="text-left py-1 font-medium">Status</th>
+                        <th className="text-left py-1 font-medium">Attempts</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {agent.recentTasks.slice(0, 5).map((task) => (
+                        <tr key={task.taskId} className="border-b border-border/50">
+                          <td className="py-1.5">
+                            {formatDate(task.createdAt)}
+                          </td>
+                          <td className="py-1.5">
+                            <Badge
+                              variant={
+                                task.status === "succeeded"
+                                  ? "default"
+                                  : task.status === "failed"
+                                    ? "destructive"
+                                    : "secondary"
+                              }
+                              className="text-[10px]"
+                            >
+                              {task.status}
+                            </Badge>
+                          </td>
+                          <td className="py-1.5">{task.attemptCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {t("pages:agents.noRecentRuns")}
+                  </p>
+                )}
+              </div>
+
+              {agent.recentTasks.some((t) => t.lastError) && (
+                <>
+                  <Separator />
+                  <div>
+                    <h4 className="text-sm font-medium mb-2 text-destructive">
+                      {t("pages:agents.errorLog")}
+                    </h4>
+                    <div className="flex flex-col gap-2">
+                      {agent.recentTasks
+                        .filter((t) => t.lastError)
+                        .map((task) => (
+                          <div
+                            key={task.taskId}
+                            className="p-2 rounded-md bg-destructive/10 border border-destructive/20 text-xs"
+                        >
+                          <p className="font-medium text-destructive">{task.lastError}</p>
+                          <p className="text-destructive mt-1">
+                              {formatDate(task.updatedAt)}
+                            </p>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <Separator />
+
+              <Button variant="outline" size="sm" className="w-full" asChild>
+                <a href="#/tasks">
+                  <ExternalLink className="h-3 w-3 mr-2" />
+                  {t("pages:agents.viewTasks")}
+                </a>
+              </Button>
+            </>
+          ) : null}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -504,7 +509,7 @@ function AgentsPageInner() {
   const loadData = useCallback(async () => {
     const result = await fetchAgents();
     if (!result.success) {
-      setError(result.error ?? "加载失败");
+      setError(result.error ?? t("pages:agents.loadFailed"));
     } else {
       setAgents(result.data);
       setLastUpdated(new Date());
@@ -573,13 +578,12 @@ function AgentsPageInner() {
 
       <AgentFlowMap agents={agents} selectedId={selectedId} onSelect={handleSelect} />
 
-      {(selectedId || detailLoading) && (
-        <AgentDrawer
-          agent={detail}
-          loading={detailLoading}
-          onClose={() => setSelectedId(null)}
-        />
-      )}
+      <AgentDrawer
+        agent={detail}
+        loading={detailLoading}
+        onClose={() => setSelectedId(null)}
+        open={selectedId !== null}
+      />
     </div>
   );
 }

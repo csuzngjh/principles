@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { setToken, clearToken, checkAuth } from "../api.js";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card.js";
 import { Button } from "../components/ui/button.js";
+import { Input } from "../components/ui/input.js";
 import { Dna, Eye, EyeOff } from "lucide-react";
 
 interface LoginPageProps {
@@ -57,21 +58,19 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
         <CardContent>
           <form onSubmit={handleSubmit}>
             <label className="block text-sm font-medium mb-1.5">
-              Bearer Token
+              {t("pages:login.bearerToken")}
             </label>
             <div className="relative">
-              <input
+              <Input
                 type={showToken ? "text" : "password"}
                 value={token}
                 onChange={(e) => {
                   setTokenValue(e.target.value);
                   setError(null);
                 }}
-                placeholder="Enter access token"
+                placeholder={t("pages:login.enterAccessToken")}
                 autoFocus
-                className={`w-full px-3 py-2.5 rounded-md border text-sm focus:outline-none focus:ring-2 focus:ring-ring pr-10 ${
-                  error ? "border-destructive" : "border-input"
-                }`}
+                className={error ? "border-destructive pr-10" : "pr-10"}
               />
               <button
                 type="button"
@@ -91,14 +90,14 @@ export function LoginPage({ onAuthSuccess }: LoginPageProps) {
               disabled={checking || !token.trim()}
               className="w-full mt-5"
             >
-              {checking ? "Verifying..." : t("pages:login.signIn")}
+              {checking ? t("pages:login.verifying") : t("pages:login.signIn")}
             </Button>
           </form>
 
           <div className="mt-6 pt-4 border-t border-border text-xs text-muted-foreground text-center">
-            Token is stored in browser session only.
+            {t("pages:login.tokenSessionOnly")}
             <br />
-            Use <code className="bg-muted px-1 py-0.5 rounded text-xs">--no-auth</code> flag to disable authentication.
+            {t("pages:login.noAuthFlag")}
           </div>
         </CardContent>
       </Card>

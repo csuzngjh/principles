@@ -32,7 +32,7 @@ function OverallStatusBadge({ status }: { status: string }) {
   );
 }
 
-function WorkspaceCard({ ws }: { ws: CentralOverview["workspaces"][number] }) {
+function WorkspaceCard({ ws, t }: { ws: CentralOverview["workspaces"][number]; t: (key: string) => string }) {
   return (
     <Card
       className={`border-l-4 ${
@@ -54,11 +54,11 @@ function WorkspaceCard({ ws }: { ws: CentralOverview["workspaces"][number] }) {
               <div className="text-xl font-bold">
                 {ws.gfi >= 0 ? ws.gfi : "N/A"}
               </div>
-              <div className="text-xs text-muted-foreground">GFI</div>
+              <div className="text-xs text-muted-foreground">{t("pages:central.gfiLabel")}</div>
             </div>
             <div className="text-center">
               <div className="text-xl font-bold">{ws.principleCount}</div>
-              <div className="text-xs text-muted-foreground">Principles</div>
+              <div className="text-xs text-muted-foreground">{t("pages:central.principlesLabel")}</div>
             </div>
             <OverallStatusBadge status={ws.status} />
           </div>
@@ -68,7 +68,7 @@ function WorkspaceCard({ ws }: { ws: CentralOverview["workspaces"][number] }) {
   );
 }
 
-function HealthDetailCard({ ws }: { ws: CentralHealth["workspaces"][number] }) {
+function HealthDetailCard({ ws, t }: { ws: CentralHealth["workspaces"][number]; t: (key: string) => string }) {
   return (
     <Card
       className={`border-l-4 ${
@@ -87,15 +87,15 @@ function HealthDetailCard({ ws }: { ws: CentralHealth["workspaces"][number] }) {
         <div className="grid grid-cols-3 gap-3">
           <div className="text-center p-2 rounded-md bg-muted/50">
             <div className="text-lg font-bold">{ws.gfi >= 0 ? ws.gfi : "N/A"}</div>
-            <div className="text-xs text-muted-foreground">GFI</div>
+            <div className="text-xs text-muted-foreground">{t("pages:central.gfiLabel")}</div>
           </div>
           <div className="text-center p-2 rounded-md bg-muted/50">
             <div className="text-lg font-bold">{ws.activePrinciples}</div>
-            <div className="text-xs text-muted-foreground">Active</div>
+            <div className="text-xs text-muted-foreground">{t("pages:central.activeLabel")}</div>
           </div>
           <div className="text-center p-2 rounded-md bg-muted/50">
             <div className="text-lg font-bold">{ws.pendingTasks}</div>
-            <div className="text-xs text-muted-foreground">Pending</div>
+            <div className="text-xs text-muted-foreground">{t("pages:central.pendingLabel")}</div>
           </div>
         </div>
       </CardContent>
@@ -147,7 +147,7 @@ export function CentralPage() {
     return (
       <Card>
         <CardContent className="p-6 text-center text-muted-foreground">
-          No workspace data available
+          {t("pages:central.noWorkspaceData")}
         </CardContent>
       </Card>
     );
@@ -179,19 +179,19 @@ export function CentralPage() {
             <div className="flex gap-6">
               <div className="text-center">
                 <div className="text-3xl font-bold text-primary">{healthyCount}</div>
-                <div className="text-xs text-muted-foreground">Healthy</div>
+                <div className="text-xs text-muted-foreground">{t("pages:central.healthy")}</div>
               </div>
               <div className="text-center">
                 <div className="text-3xl font-bold text-amber-500">{degradedCount}</div>
-                <div className="text-xs text-muted-foreground">Degraded</div>
+                <div className="text-xs text-muted-foreground">{t("pages:central.degraded")}</div>
               </div>
               <div className="text-center">
                 <div className="text-3xl font-bold text-destructive">{errorCount}</div>
-                <div className="text-xs text-muted-foreground">Error</div>
+                <div className="text-xs text-muted-foreground">{t("pages:central.error")}</div>
               </div>
               <div className="text-center">
                 <div className="text-3xl font-bold">{overviewData.workspaceCount}</div>
-                <div className="text-xs text-muted-foreground">Total</div>
+                <div className="text-xs text-muted-foreground">{t("pages:central.total")}</div>
               </div>
             </div>
           </div>
@@ -205,12 +205,12 @@ export function CentralPage() {
         <CardContent>
           {overviewData.workspaces.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
-              No workspaces configured. Go to Settings to add workspaces.
+              {t("pages:central.noWorkspaces")}
             </p>
           ) : (
             <div className="space-y-3">
               {overviewData.workspaces.map((ws) => (
-                <WorkspaceCard key={ws.name} ws={ws} />
+                <WorkspaceCard key={ws.name} ws={ws} t={t} />
               ))}
             </div>
           )}
@@ -225,7 +225,7 @@ export function CentralPage() {
           <CardContent>
             <div className="space-y-3">
               {healthData.workspaces.map((ws) => (
-                <HealthDetailCard key={ws.name} ws={ws} />
+                <HealthDetailCard key={ws.name} ws={ws} t={t} />
               ))}
             </div>
           </CardContent>

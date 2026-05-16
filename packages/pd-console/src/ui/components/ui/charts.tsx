@@ -62,7 +62,7 @@ export function DonutChart({ items, size = 120, strokeWidth = 20, className }: D
             strokeDashoffset={segment.offset}
             strokeLinecap="butt"
             transform={`rotate(-90 ${center} ${center})`}
-            className="transition-all duration-500"
+            className="transition-[stroke-dashoffset,stroke-dasharray] duration-500 motion-reduce:transition-none"
           />
         ))}
       </svg>
@@ -133,7 +133,7 @@ export function HorizontalBarChart({ items, maxValue, className }: BarChartProps
           </div>
           <div className="h-2 bg-muted rounded-full overflow-hidden">
             <div
-              className="h-full rounded-full transition-all duration-500"
+              className="h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none"
               style={{
                 width: `${Math.min((item.value / max) * 100, 100)}%`,
                 backgroundColor: item.color,
@@ -155,7 +155,7 @@ interface CoverageIndicatorProps {
 export function CoverageIndicator({ covered, total, className }: CoverageIndicatorProps) {
   const percentage = total > 0 ? (covered / total) * 100 : 0;
   const color =
-    percentage >= 80 ? "bg-green-500" : percentage >= 50 ? "bg-amber-500" : "bg-red-500";
+    percentage >= 80 ? "bg-primary" : percentage >= 50 ? "bg-amber-500" : "bg-destructive";
 
   return (
     <div className={cn("space-y-1", className)}>
@@ -167,7 +167,7 @@ export function CoverageIndicator({ covered, total, className }: CoverageIndicat
       </div>
       <div className="h-2 bg-muted rounded-full overflow-hidden">
         <div
-          className={cn("h-full rounded-full transition-all duration-500", color)}
+          className={cn("h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none", color)}
           style={{ width: `${percentage}%` }}
         />
       </div>
@@ -190,7 +190,7 @@ export function Histogram({ buckets, className }: HistogramProps) {
         return (
           <div key={bucket.label} className="flex-1 flex flex-col items-center gap-1">
             <div
-              className="w-full bg-primary/70 rounded-t transition-all duration-500 hover:bg-primary"
+              className="w-full bg-primary/70 rounded-t transition-[height] duration-500 hover:bg-primary motion-reduce:transition-none"
               style={{ height: `${Math.max(height, 2)}%` }}
               title={`${bucket.label}: ${bucket.count}`}
             />

@@ -526,7 +526,7 @@ export function TasksPage() {
     return (
       <Card className="max-w-md mx-auto mt-12">
         <CardContent className="p-8 text-center">
-          <div className="animate-pulse">Checking authentication...</div>
+          <div className="animate-pulse">Checking authentication…</div>
         </CardContent>
       </Card>
     );
