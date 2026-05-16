@@ -109,6 +109,7 @@ export class SqliteConnection {
 
       if (journalMode !== 'wal') issues.push(`journal_mode is ${journalMode}, expected wal`);
       if (busyTimeout < 5000) issues.push(`busy_timeout is ${busyTimeout}, expected >= 5000`);
+      if (!foreignKeys) issues.push('foreign_keys is OFF, expected ON');
       if (synchronous !== '1') issues.push(`synchronous is ${synchronous}, expected NORMAL`);
 
       return { journalMode, busyTimeout, synchronous, foreignKeys, healthy: issues.length === 0, issues };
