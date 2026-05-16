@@ -247,7 +247,7 @@ export class EvolutionConsoleModel {
         });
       }
     } catch {
-      // ledger file may be corrupted or empty
+      // Silently skip invalid entries
     }
 
     return { summary, recent };
