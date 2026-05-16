@@ -21,7 +21,7 @@ describe('EvolutionConsoleModel with real runtime-v2 data', () => {
         { id: 'p-probation', status: 'probation', text: 'Probation', triggerPattern: 't2', action: 'a2' },
       ],
       trainingState: {
-        tree: {
+        _tree: {
           principles: {
             'p-active': {
               id: 'p-active',
@@ -29,7 +29,7 @@ describe('EvolutionConsoleModel with real runtime-v2 data', () => {
               text: 'Active principle text',
               triggerPattern: 'on-error',
               action: 'analyze and fix',
-              evaluability: 'high',
+              evaluability: 'deterministic',
               createdAt: '2026-01-01T00:00:00Z',
               updatedAt: '2026-05-01T00:00:00Z',
             },
@@ -39,7 +39,7 @@ describe('EvolutionConsoleModel with real runtime-v2 data', () => {
               text: 'Probation principle text',
               triggerPattern: 'on-ambiguity',
               action: 'ask user',
-              evaluability: 'medium',
+              evaluability: 'weak_heuristic',
               createdAt: '2026-04-01T00:00:00Z',
               updatedAt: '2026-05-10T00:00:00Z',
             },
