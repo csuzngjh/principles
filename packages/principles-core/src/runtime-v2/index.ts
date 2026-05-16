@@ -132,6 +132,7 @@ export { MemoryCommitStore } from './store/commit/memory-commit-store.js';
 export { MemoryCandidateStore } from './store/candidate/memory-candidate-store.js';
 export { MemoryArtifactStore } from './store/artifact/memory-artifact-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
+export type { SqlitePragmaReport } from './store/sqlite-connection.js';
 export { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-locator.js';
 export { SqliteHistoryQuery } from './store/history/sqlite-history-query.js';
 export { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
