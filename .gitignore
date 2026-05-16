@@ -73,9 +73,8 @@ AGENT.md
 code-concise/
 .trae
 
-# Docs (Project documentation should be tracked)
-# The docs/ directory itself is NOT ignored, but old state files within it were moved out.
-# We now track actual project documents in docs/
+# Docs (removed from git tracking - kept locally only)
+docs/
 
 # Interactive Conversation Test Output
 packages/openclaw-plugin/tests/interactive-conversation/output/
@@ -85,7 +84,6 @@ tests/archive/reports-2026-03-11/
 # Local agent scratch and review memory
 .learnings/
 myagents/
-docs/design/gfi-trust-capability-simplification-2026-03-20.md
 .kiro
 # AI tool state and temp files
 .tmp-trainer/
@@ -108,20 +106,11 @@ patches/
 feedback-light.png
 overview-light.png
 pnpm-workspace.yaml
-docs/superpowers/plans/2026-05-14*
 .full-review/
 .pnpm-store/
 
 graphify-out/
 ops/
-
-# Learnings (runtime generated)
-.learnings/
-
-# Docs plans (temporary)
-docs/superpowers/plans/2026-0[123]*
-docs/superpowers/plans/2026-04*
-docs/superpowers/plans/2026-05-1[2-9]*
 
 # Agent/Codegen tool outputs
 .codex/
