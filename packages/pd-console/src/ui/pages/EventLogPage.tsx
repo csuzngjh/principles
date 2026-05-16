@@ -26,10 +26,10 @@ const COMMON_EVENT_TYPES = [
   'all',
   'pain_signal',
   'gate_block',
-  'task_created',
-  'diagnostician_run',
-  'candidate_generated',
-  'principle_added',
+  'diagnosis_task',
+  'evolution_task',
+  'principle_candidate',
+  'rule_promotion',
   'empathy_rollback',
 ];
 
