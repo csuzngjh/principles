@@ -46,6 +46,21 @@ PD 的内化流水线是一条**单向**、**事件驱动**、**状态可追溯*
 
 把代理的**结构化失败事件**（PainSignal）转化为**可摄入的原则候选**（LedgerPrincipleEntry, status=probation）。
 
+### 2.1.1 信号源三层架构（GAP — Goal-Aligned Pain）
+
+PD 的痛苦信号按重要性分为三层。**只有 Layer 1 和 Layer 2 独立触发 Diagnostician**；Layer 3 仅作为证据补充，不再独立触发（详见 ADR-0010）。
+
+| 层 | 信号类型 | 触发 Diagnostician | 来源 |
+|----|---------|------------------|------|
+| **Layer 1（主信号）** | `mission_failed` / `mission_stalled` / `okr_drift` / `decision_skipped` / `rework_loop` | ✅ 独立触发 | `GAPSignalGenerator` 每日扫描 |
+| **Layer 2（强信号）** | `explicit_user_complaint` / `user_correction` | ✅ 独立触发 | 用户显式反馈 / 共情系统 |
+| **Layer 3（辅助）** | `tool_failure` / `empathy_inferred` | ❌ 仅作为证据 | Plugin Hook（after_tool_call / llm_output）|
+
+**关键变化**：
+- Layer 3 不再独立触发 Diagnostician，只作为"证据"附加到 Layer 1/2 的 painId 中
+- GFI Kernel 简化：不再做多源加权聚合，只做"上层信号 + 下层证据"的组装
+- 这解决了"工具失败太琐碎"的问题：一次 `git push` 失败不触发反思，**连续 3 天目标推进为 0** 才触发
+
 ### 2.2 数据流
 
 ```
@@ -818,6 +833,9 @@ routing_policy:
 - [ ] `ActivationDispatcher` 框架 + prompt/archive 两个 ChannelWriter → 解决断点 ②（最低风险通道）
 - [ ] **L1 容量硬上限（Hard Cap）** → 防止 System Prompt 膨胀导致 LLM 失效（见 §9.1）
 - [ ] **三振出局机制** → `rejection_count` 字段 + UNRESOLVABLE 状态（见 §7.4）
+- [ ] **BALM 骨架** → AgentRegistry + AgentManifest schema + 改 Diagnostician 用 BALM（ADR-0008）
+- [ ] **LRAS 基础** → Session checkpoint + self-validation tools + log backflow（ADR-0009）
+- [ ] **GAP 信号源** → Mission/Objective 数据模型 + GAPSignalGenerator + GFI 简化（ADR-0010）
 
 ### 优先级 P1（高风险通道）
 - [ ] `SkillFileWriter`
@@ -825,6 +843,9 @@ routing_policy:
 - [ ] `ApprovalQueue`
 - [ ] pd-console 审批 UI
 - [ ] **基于置信度的自动晋升**（Auto-Promotion by Confidence，见 §9.3）
+- [ ] **新 RuntimeAdapter**（Claude Code / Codex CLI 至少各 1 个，ADR-0008）
+- [ ] **DecisionHygieneGate**（high/critical 影响强制触发，ADR-0010）
+- [ ] **MissionScheduler**（三层任务调度，替代 polling，ADR-0011）
 
 ### 优先级 P2（清理与合并）
 - [ ] 删除 `nocturnal-service.ts`、`nocturnal-trinity.ts` 等冗余代码

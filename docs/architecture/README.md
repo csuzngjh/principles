@@ -23,6 +23,10 @@
 | 配置 / 环境变量 | [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) |
 | Schema 演化 / API 兼容 | [`VERSIONING_AND_COMPATIBILITY.md`](./VERSIONING_AND_COMPATIBILITY.md) |
 | 性能 / SLA | [`PERFORMANCE_BUDGETS.md`](./PERFORMANCE_BUDGETS.md) |
+| **新建内置代理 / 切换 CLI 后端** | [`COMPONENTS.md`](./COMPONENTS.md) §3.8（BALM）+ ADR-0008 |
+| **代理长程任务 / 自校验工具** | [`COMPONENTS.md`](./COMPONENTS.md) §3.9（LRAS）+ ADR-0009 |
+| **痛苦信号来源 / 目标对齐** | [`INTERNALIZATION_PIPELINE.md`](./INTERNALIZATION_PIPELINE.md) §2.1.1 + ADR-0010 |
+| **OKR / Mission / 任务调度** | [`COMPONENTS.md`](./COMPONENTS.md) §3.10-3.11 + ADR-0010/0011 |
 
 ---
 
@@ -129,6 +133,10 @@
 | [ADR-0005](../adr/0005-nocturnal-internalization-merger.md) | Accepted | Nocturnal 与 Internalization 合并 |
 | [ADR-0006](../adr/0006-hybrid-activation-mechanism.md) | Accepted | 5 通道混合激活机制 |
 | [ADR-0007](../adr/0007-cli-vs-console-audience-separation.md) | Accepted | pd-cli 与 pd-console 受众分离 |
+| ADR-0008 | Proposed | Built-in Agent Lifecycle Manager（BALM）|
+| ADR-0009 | Proposed | Long-Running Agent Session（LRAS）|
+| ADR-0010 | Proposed | Goal-Aligned Pain Signal（GAP）|
+| ADR-0011 | Proposed | Three-Tier Task Model and MissionScheduler |
 
 ### 架构治理（Governance）
 

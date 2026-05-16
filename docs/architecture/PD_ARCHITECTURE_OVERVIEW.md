@@ -31,6 +31,8 @@ PD 的设计哲学：
 - **最便宜的内化方式优先** —— `prompt < code < model_training < fine-tune`
 - **代理是日常用户，人是审核员和风险责任人** —— 全自动是目标，人工保留在高风险路径
 - **人在回路最低化但不可缺位** —— L2/L3 高风险通道必须有人工审核
+- **目标对齐优先于局部优化** —— 代理的每个行动应能追溯到 Objective，偏离目标才是真正的痛苦
+- **长程自主优先于短任务轮询** —— 内置代理应持续工作直到完成，而非被超时切碎
 
 ---
 
@@ -64,10 +66,10 @@ PD 是一个 monorepo，由四个独立可交付的包构成。每个包有清�
 
 | 包 | 角色 | 主要受众 | 进程模型 | 拥有 | 不拥有 |
 |----|------|---------|---------|------|--------|
-| `@principles/core` | Domain & Runtime SDK | 其他包 | Library | 业务领域、状态机、Runner、Store、Read Model、Schema | 任何宿主 API、UI、CLI |
-| `openclaw-plugin` | Host Adapter | OpenClaw Gateway | Plugin in-proc | Hook 桥接、PainSignal 捕获、Runtime Adapter 注册、IdleTrigger | 业务规则、原则生命周期、Runner 实现 |
-| `@principles/pd-cli` | Agent Operator | AI 代理 (OpenClaw / Codex / Gemini) | Stdout-driven CLI | 结构化 JSON 接口、读侧查询、低风险写操作 | 高风险审批、长连接 UI |
-| `@principles/pd-console` | Human Operator | 开发者 / 运维 / 研究员 | Local Web Server | 可视化 UI、人工审批工作流、长任务流式输出 | 业务规则 |
+| `@principles/core` | Domain & Runtime SDK | 其他包 | Library | 业务领域、状态机、Runner、Store、Read Model、Schema、**BALM（代理生命周期管理）**、**LRAS（长程会话）**、**GAP（目标驱动信号）**、**MissionScheduler** | 任何宿主 API、UI、CLI |
+| `openclaw-plugin` | Host Adapter | OpenClaw Gateway | Plugin in-proc | Hook 桥接、PainSignal 捕获、Runtime Adapter 注册、IdleTrigger、**新 CLI Adapter（Claude Code/Codex/Gemini 等）** | 业务规则、原则生命周期、Runner 实现 |
+| `@principles/pd-cli` | Agent Operator | AI 代理 (OpenClaw / Codex / Gemini) | Stdout-driven CLI | 结构化 JSON 接口、读侧查询、低风险写操作、**PD 元工具（pd_validate_output / pd_fetch_recent_logs 等）** | 高风险审批、长连接 UI |
+| `@principles/pd-console` | Human Operator | 开发者 / 运维 / 研究员 | Local Web Server | 可视化 UI、人工审批工作流、长任务流式输出、**Mission/Objective 视图**、**Agent 健康面板** | 业务规则 |
 
 ### 2.3 三个独立 deliverable 共用同一个 core
 
@@ -113,7 +115,8 @@ PD 采用**四层架构**。从上到下：
 │  │ openclaw-plugin                                 │                │
 │  │  - Hooks (pain/gate/prompt/llm/lifecycle)      │ ← 平台桥接     │
 │  │  - IdleTrigger                                  │                │
-│  │  - RuntimeAdapter (OpenClaw)                    │                │
+│  │  - RuntimeAdapter (OpenClaw / Claude Code /    │                │
+│  │    Codex / Gemini / opencode / Hermes 等)      │                │
 │  └────────────────────────────────────────────────┘                │
 └────────────────────────────────────────────────────────────────────┘
                               ▲
@@ -124,6 +127,9 @@ PD 采用**四层架构**。从上到下：
 │  │ (PainBridge,     │ Pipeline         │ Pipeline          │       │
 │  │  Diagnostician,  │ (Dreamer→Trainer │ (5 Channel        │       │
 │  │  Intake)         │  + Orchestrator) │  Dispatcher)      │       │
+│  ├──────────────────┼──────────────────┼───────────────────┤       │
+│  │ BALM             │ LRAS             │ GAP + Goals       │       │
+│  │ (代理生命周期)    │ (长程会话)        │ (目标驱动信号)     │       │
 │  └──────────────────┴──────────────────┴───────────────────┘       │
 └────────────────────────────────────────────────────────────────────┘
                               ▲
@@ -152,9 +158,25 @@ PD 的所有运行时行为可以归为五条数据流。每条流有：明确�
 
 **目的**：把代理的失败转化为结构化原则候选。
 
+**信号源三层架构（GAP — Goal-Aligned Pain）**：
+
 ```
-[Tool Failure / User Frustration]
-      │ Plugin Hook (after_tool_call / llm_output)
+Layer 1: GAP 主信号（目标驱动）          ← 独立触发 Diagnostician
+  mission_failed / mission_stalled
+  okr_drift / decision_skipped / rework_loop
+
+Layer 2: 用户反馈信号（强信号）           ← 独立触发 Diagnostician
+  explicit_user_complaint / user_correction
+
+Layer 3: 工具/系统失败（辅助信号）        ← 仅作为 Layer 1/2 的证据补充
+  tool_failure / empathy_inferred          不独立触发 Diagnostician
+```
+
+**数据流**：
+
+```
+[GAP Signal / User Feedback / Tool Failure]
+      │ Plugin Hook / GAP Generator / 用户显式反馈
       ▼
 [PainSignal] ─────► PainSignalAdapter ─────► state.db: pain_signals
       │
@@ -162,7 +184,7 @@ PD 的所有运行时行为可以归为五条数据流。每条流有：明确�
 PainBridge.onPainDetected()
       │
       ▼
-DiagnosticianRunner.run()  ◄──── PDRuntimeAdapter（LLM 调用）
+DiagnosticianRunner.run()  ◄──── PDRuntimeAdapter（LLM 调用，LRAS 长程会话）
       │
       ▼
 DiagnosticianOutputV1
@@ -495,6 +517,10 @@ PD 在做架构决策时，按以下优先级判断：
 | Pruning Pipeline | ⚠️ 50% | PruningAction 未实现 |
 | 横切约束 | ⚠️ 50% | 5 个横切文档待建 |
 | 守护测试 | ❌ 20% | architecture-regression.test 仅占位 |
+| **BALM（代理生命周期）** | ❌ 0% | 全部待建（ADR-0008）|
+| **LRAS（长程代理会话）** | ❌ 0% | 全部待建（ADR-0009）|
+| **GAP（目标驱动信号）** | ❌ 0% | Mission/Objective/GAP Generator 全部待建（ADR-0010）|
+| **MissionScheduler（三层任务）** | ❌ 0% | 全部待建（ADR-0011）|
 
 ---
 
@@ -506,6 +532,10 @@ PD 在做架构决策时，按以下优先级判断：
 | [ADR-0002](../adr/0002-hard-internalization-core-boundary.md) | 硬内化核心边界 | Accepted |
 | [ADR-0003](../adr/0003-peer-agent-state-machine-orchestration.md) | Peer Agent 状态机编排 | Accepted |
 | [ADR-0004](../adr/0004-l2-auto-correction-and-replay.md) | L2 自动校正与回放 | Accepted |
-| ADR-0005 | Nocturnal 与 Internalization Engine 合并 | Proposed |
-| ADR-0006 | 5 通道混合激活机制 | Proposed |
-| ADR-0007 | pd-cli 与 pd-console 受众分离 | Proposed |
+| [ADR-0005](../adr/0005-nocturnal-internalization-merger.md) | Nocturnal 与 Internalization Engine 合并 | Accepted |
+| [ADR-0006](../adr/0006-hybrid-activation-mechanism.md) | 5 通道混合激活机制 | Accepted |
+| [ADR-0007](../adr/0007-cli-vs-console-audience-separation.md) | pd-cli 与 pd-console 受众分离 | Accepted |
+| ADR-0008 | Built-in Agent Lifecycle Manager（BALM）| Proposed |
+| ADR-0009 | Long-Running Agent Session（LRAS）| Proposed |
+| ADR-0010 | Goal-Aligned Pain Signal（GAP）| Proposed |
+| ADR-0011 | Three-Tier Task Model and MissionScheduler | Proposed |

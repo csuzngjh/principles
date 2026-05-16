@@ -78,8 +78,8 @@ describe('PipelineStatsModel', () => {
 
     const events: EventLogEntry[] = [
       makeEvent({ id: 'e1', type: 'pain_signal', ts: now.toISOString() }),
-      makeEvent({ id: 'e2', type: 'task_created', ts: new Date(now.getTime() - 60000).toISOString() }),
-      makeEvent({ id: 'e3', type: 'candidate_generated', ts: new Date(now.getTime() - 120000).toISOString() }),
+      makeEvent({ id: 'e2', type: 'diagnosis_task', ts: new Date(now.getTime() - 60000).toISOString() }),
+      makeEvent({ id: 'e3', type: 'principle_candidate', ts: new Date(now.getTime() - 120000).toISOString() }),
     ];
 
     const logsDir = path.join(ws.workspaceDir, '.state', 'logs');
@@ -132,7 +132,7 @@ describe('PipelineStatsModel', () => {
     const events: EventLogEntry[] = [
       makeEvent({ id: 'a1', type: 'pain_signal', ts: now.toISOString() }),
       makeEvent({ id: 'a2', type: 'pain_signal', ts: now.toISOString() }),
-      makeEvent({ id: 'a3', type: 'task_created', ts: now.toISOString() }),
+      makeEvent({ id: 'a3', type: 'diagnosis_task', ts: now.toISOString() }),
     ];
 
     const logsDir = path.join(ws.workspaceDir, '.state', 'logs');
@@ -173,7 +173,7 @@ describe('PipelineStatsModel', () => {
 
     const events: EventLogEntry[] = [
       makeEvent({ id: 'b1', type: 'pain_signal', ts: oldTime.toISOString() }),
-      makeEvent({ id: 'b2', type: 'task_created', ts: now.toISOString() }),
+      makeEvent({ id: 'b2', type: 'diagnosis_task', ts: now.toISOString() }),
     ];
 
     const logsDir = path.join(ws.workspaceDir, '.state', 'logs');

@@ -325,17 +325,18 @@ export class HealthCheckModel {
   private async getPipelineTimestamps(): Promise<PipelineTimestamps> {
     const eventLog = this.getEventLogReadModel();
 
-    const [painSignals, tasks, candidates] = await Promise.all([
+    const [painSignals, tasks, candidates, promotions] = await Promise.all([
       eventLog.getEventsByTypes(['pain_signal'], 1),
-      eventLog.getEventsByTypes(['task_created', 'diagnostician_run'], 1),
-      eventLog.getEventsByTypes(['candidate_generated'], 1),
+      eventLog.getEventsByTypes(['diagnosis_task', 'heartbeat_diagnosis', 'evolution_task'], 1),
+      eventLog.getEventsByTypes(['principle_candidate'], 1),
+      eventLog.getEventsByTypes(['rule_promotion'], 1),
     ]);
 
     return {
       lastPainSignal: painSignals[0]?.ts ?? null,
       lastTaskCreated: tasks[0]?.ts ?? null,
       lastCandidateGenerated: candidates[0]?.ts ?? null,
-      lastPrincipleAdded: null,
+      lastPrincipleAdded: promotions[0]?.ts ?? null,
     };
   }
 
