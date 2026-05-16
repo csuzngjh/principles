@@ -1,4 +1,5 @@
 import { useState, useEffect, type ChangeEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/page-header.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card.js';
 import { Button } from '../components/ui/button.js';
@@ -34,6 +35,7 @@ const COMMON_EVENT_TYPES = [
 ];
 
 export function EventLogPage() {
+  const [searchParams] = useSearchParams();
   const [events, setEvents] = useState<EventLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +43,10 @@ export function EventLogPage() {
   const [totalPages, setTotalPages] = useState(0);
   const [total, setTotal] = useState(0);
   const [pageSize] = useState(50);
-  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(() => {
+    const typeParam = searchParams.get('type');
+    return typeParam && COMMON_EVENT_TYPES.includes(typeParam) ? [typeParam] : [];
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
