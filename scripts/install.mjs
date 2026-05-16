@@ -228,8 +228,6 @@ function buildCoreAndCli() {
 
 function buildPdConsole() {
   console.log('\n🔨 Building pd-console...');
-  const distDir = join(PD_CONSOLE_SOURCE_DIR, 'dist');
-  const webDist = join(distDir, 'web');
 
   try {
     execSync('npm run build:ui', { cwd: PD_CONSOLE_SOURCE_DIR, stdio: 'inherit' });
