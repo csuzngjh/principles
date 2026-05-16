@@ -2,8 +2,8 @@
  * SQLite connection factory for PD Runtime v2 state store.
  *
  * Opens (or creates) the workspace-level DB at `<workspaceDir>/.pd/state.db`
- * with WAL journal mode and a 5-second busy timeout. Initializes the
- * tasks and runs tables on first open.
+ * with WAL journal mode, 5-second busy timeout, and synchronous NORMAL.
+ * Initializes the tasks and runs tables on first open.
  *
  * @example
  * const conn = new SqliteConnection('/path/to/workspace');
@@ -14,10 +14,20 @@
 import Database from 'better-sqlite3';
 import { join } from 'path';
 import * as fs from 'fs';
+import { PDRuntimeError } from '../error-categories.js';
 
 export interface SqliteConnectionOptions {
   workspaceDir: string;
   readonly?: boolean;
+}
+
+export interface SqlitePragmaReport {
+  journalMode: string;
+  busyTimeout: number;
+  synchronous: string;
+  foreignKeys: boolean;
+  healthy: boolean;
+  issues: string[];
 }
 
 export class SqliteConnection {
@@ -46,35 +56,58 @@ export class SqliteConnection {
 
     if (!this.readonlyMode) {
       try {
-        this.db.pragma('journal_mode = WAL');
-      } catch {
-        try {
-          this.db.pragma('journal_mode = MEMORY');
-        } catch {
-          try {
-            this.db.pragma('journal_mode = OFF');
-          } catch {
-            // Sandbox may block all journal modes — continue without journal
-          }
+        const walResult = this.db.pragma('journal_mode = WAL', { simple: true });
+        if (walResult !== 'wal') {
+          throw new PDRuntimeError(
+            'storage_unavailable',
+            `Failed to set WAL journal mode (got: ${walResult})`,
+          );
         }
-      }
-      try {
         this.db.pragma('busy_timeout = 5000');
-      } catch { /* non-critical */ }
-      try {
+        this.db.pragma('synchronous = NORMAL');
         this.db.pragma('foreign_keys = ON');
-      } catch { /* non-critical */ }
+      } catch (err) {
+        if (err instanceof PDRuntimeError) throw err;
+        throw new PDRuntimeError(
+          'storage_unavailable',
+          `Required SQLite pragma failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       try {
         this.initSchema();
       } catch { /* schema init may fail in restricted environments */ }
       try {
         this.migrateSchema();
-      } catch {
-        // schema migration is non-fatal — run with degraded indexes
-      }
+      } catch { /* schema migration is non-fatal */ }
     }
 
     return this.db;
+  }
+
+  getPragmaReport(): SqlitePragmaReport {
+    if (!this.db) {
+      return {
+        journalMode: 'none',
+        busyTimeout: 0,
+        synchronous: 'unknown',
+        foreignKeys: false,
+        healthy: false,
+        issues: ['database not opened'],
+      };
+    }
+    const issues: string[] = [];
+    const journalMode = String(this.db.pragma('journal_mode', { simple: true }));
+    const busyTimeout = Number(this.db.pragma('busy_timeout', { simple: true }));
+    const synchronous = String(this.db.pragma('synchronous', { simple: true }));
+    const foreignKeys = Boolean(this.db.pragma('foreign_keys', { simple: true }));
+
+    if (journalMode !== 'wal') issues.push(`journal_mode is ${journalMode}, expected wal`);
+    if (busyTimeout < 5000) issues.push(`busy_timeout is ${busyTimeout}, expected >= 5000`);
+    if (synchronous !== '1' && synchronous !== 'normal') {
+      issues.push(`synchronous is ${synchronous}, expected NORMAL`);
+    }
+
+    return { journalMode, busyTimeout, synchronous, foreignKeys, healthy: issues.length === 0, issues };
   }
 
   private initSchema(): void {
@@ -103,18 +136,16 @@ export class SqliteConnection {
     `);
 
     // Migration: add diagnostic_json column to existing tasks table
-    // (CREATE TABLE IF NOT EXISTS only affects new DBs)
     const taskColumns = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
     if (!taskColumns.some((c) => c.name === 'diagnostic_json')) {
       db.exec('ALTER TABLE tasks ADD COLUMN diagnostic_json TEXT');
     }
 
-    // Migration: add sessionIdHint expression index (idempotent)
-    // Runs after diagnostic_json column migration to avoid "no such column" error on existing DBs
+    // Migration: add sessionIdHint expression index
     try {
       db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_session_id_hint ON tasks(json_extract(diagnostic_json, '$.sessionIdHint'))");
     } catch {
-      // Index may already exist — ignore
+      // Index may already exist
     }
 
     db.exec(`
@@ -140,10 +171,7 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);
     `);
 
-    // Migration: rewrite runs FK with ON DELETE CASCADE (SQLite doesn't support ALTER FK)
-    // Only needed for pre-existing runs tables that lack CASCADE.
-    // Check runs_backup (old table) to determine if migration is needed.
-    // fkInfo.length === 0 means no backup table exists yet (fresh DB).
+    // Migration: rewrite runs FK with ON DELETE CASCADE
     const fkInfo = db.prepare('PRAGMA foreign_key_list(runs_backup)').all() as { id: number; seq: number; from: string; to: string; on_delete: string }[];
     if (fkInfo.length > 0 && !fkInfo.some((fk) => fk.on_delete === 'CASCADE')) {
       db.exec(`
@@ -170,7 +198,7 @@ export class SqliteConnection {
       `);
     }
 
-    // M5: artifacts table — committed diagnostician output
+    // M5: artifacts table
     db.exec(`
       CREATE TABLE IF NOT EXISTS artifacts (
         artifact_id TEXT PRIMARY KEY,
@@ -186,7 +214,7 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_artifacts_artifact_kind ON artifacts(artifact_kind);
     `);
 
-    // M5: commits table — atomic commit records linking run to artifact
+    // M5: commits table
     db.exec(`
       CREATE TABLE IF NOT EXISTS commits (
         commit_id TEXT PRIMARY KEY,
@@ -204,7 +232,7 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_commits_artifact_id ON commits(artifact_id);
     `);
 
-    // M5: principle_candidates table — extracted principle recommendations
+    // M5: principle_candidates table
     db.exec(`
       CREATE TABLE IF NOT EXISTS principle_candidates (
         candidate_id TEXT PRIMARY KEY,
