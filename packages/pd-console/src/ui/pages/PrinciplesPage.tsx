@@ -1,13 +1,16 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { fetchPrinciples, fetchPrincipleDetail } from "../api.js";
 import type { PrincipleListItem, PrincipleDetail, RuleItem } from "../api.js";
+import { formatDateShort } from "../utils/format.js";
 import { PageHeader } from "../components/page-header.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.js";
 import { Badge } from "../components/ui/badge.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Button } from "../components/ui/button.js";
+import { Input } from "../components/ui/input.js";
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "../components/ui/select.js";
 import { ValueScoreBar, AdherenceBar } from "../components/ui/progress-bar.js";
 import { DonutChartWithLegend, HorizontalBarChart, CoverageIndicator, Histogram, computeValueBuckets } from "../components/ui/charts.js";
 import { CompareView } from "../components/compare-view.js";
@@ -48,8 +51,8 @@ const STATUS_COLORS: Record<PrincipleStatus, string> = {
 };
 
 const STATUS_BG: Record<PrincipleStatus, string> = {
-  candidate: "bg-amber-50 dark:bg-amber-950/20",
-  probation: "bg-blue-50 dark:bg-blue-950/20",
+  candidate: "bg-amber-500/10",
+  probation: "bg-blue-500/10",
   active: "bg-primary/10",
   deprecated: "bg-destructive/10",
   archived: "bg-muted",
@@ -143,11 +146,14 @@ function PrincipleRow({ principle, expanded, onToggle, detail, detailLoading, is
     >
       <div
         className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors"
+        role="button"
+        tabIndex={0}
         onClick={selectionMode ? onToggleCheck : onToggle}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectionMode ? onToggleCheck() : onToggle(); } }}
       >
         {selectionMode && (
           <div className="mt-0.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-            <button onClick={onToggleCheck} className="text-muted-foreground hover:text-foreground">
+            <button onClick={onToggleCheck} className="text-muted-foreground hover:text-foreground" aria-label={isChecked ? "Deselect principle" : "Select principle"}>
               {isChecked ? (
                 <CheckSquare className="h-4 w-4 text-primary" />
               ) : (
@@ -215,11 +221,12 @@ function PrincipleRow({ principle, expanded, onToggle, detail, detailLoading, is
               isBookmarked ? "text-primary" : "text-muted-foreground hover:text-foreground"
             )}
             title={isBookmarked ? t("pages:principles.removeBookmark") : t("pages:principles.addBookmark")}
+            aria-label={isBookmarked ? "Remove bookmark" : "Add bookmark"}
           >
             {isBookmarked ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
           </button>
           <span className="text-xs text-muted-foreground">
-            {principle.updatedAt ? new Date(principle.updatedAt).toLocaleDateString() : ""}
+            {principle.updatedAt ? formatDateShort(principle.updatedAt) : ""}
           </span>
         </div>
       </div>
@@ -227,14 +234,14 @@ function PrincipleRow({ principle, expanded, onToggle, detail, detailLoading, is
       {expanded && (
         <div className="px-4 pb-4 pl-11">
           {detailLoading && (
-            <div className="space-y-2">
+            <div className="flex flex-col gap-2">
               <Skeleton className="h-4 w-48" />
               <Skeleton className="h-4 w-64" />
               <Skeleton className="h-20 w-full" />
             </div>
           )}
           {detail && (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className={cn("p-2 rounded-md", STATUS_BG[principle.status])}>
                   <div className="text-xs text-muted-foreground">{t("pages:principles.triggerPattern")}</div>
@@ -267,7 +274,7 @@ function PrincipleRow({ principle, expanded, onToggle, detail, detailLoading, is
                   <h4 className="text-xs font-medium text-muted-foreground mb-2">
                     {t("pages:principles.associatedRules")} ({detail.rules.length})
                   </h4>
-                  <div className="space-y-2">
+                  <div className="flex flex-col gap-2">
                     {detail.rules.map((rule) => (
                       <RuleCard key={rule.id} rule={rule} />
                     ))}
@@ -319,17 +326,18 @@ function EmptyState({ hasFilters, onClear }: { hasFilters: boolean; onClear: () 
 
 export function PrinciplesPage() {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState<{ principles: PrincipleListItem[]; summary: Record<string, number> } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [scopeFilter, setScopeFilter] = useState<string>("all");
-  const [priorityFilter, setPriorityFilter] = useState<string>("all");
-  const [evaluabilityFilter, setEvaluabilityFilter] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<string>("valueScore");
-  const [showBookmarkedOnly, setShowBookmarkedOnly] = useState(false);
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("search") ?? "");
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") ?? "all");
+  const [scopeFilter, setScopeFilter] = useState(() => searchParams.get("scope") ?? "all");
+  const [priorityFilter, setPriorityFilter] = useState(() => searchParams.get("priority") ?? "all");
+  const [evaluabilityFilter, setEvaluabilityFilter] = useState(() => searchParams.get("evaluability") ?? "all");
+  const [sortBy, setSortBy] = useState(() => searchParams.get("sort") ?? "valueScore");
+  const [showBookmarkedOnly, setShowBookmarkedOnly] = useState(() => searchParams.get("bookmarked") === "true");
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [principleDetails, setPrincipleDetails] = useState<Record<string, PrincipleDetail>>({});
@@ -342,6 +350,18 @@ export function PrinciplesPage() {
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set("search", searchQuery);
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (scopeFilter !== "all") params.set("scope", scopeFilter);
+    if (priorityFilter !== "all") params.set("priority", priorityFilter);
+    if (evaluabilityFilter !== "all") params.set("evaluability", evaluabilityFilter);
+    if (sortBy !== "valueScore") params.set("sort", sortBy);
+    if (showBookmarkedOnly) params.set("bookmarked", "true");
+    setSearchParams(params, { replace: true });
+  }, [searchQuery, statusFilter, scopeFilter, priorityFilter, evaluabilityFilter, sortBy, showBookmarkedOnly, setSearchParams]);
 
   const { bookmarks, toggleBookmark, isBookmarked } = useBookmarks();
 
@@ -490,8 +510,10 @@ export function PrinciplesPage() {
     setScopeFilter("all");
     setPriorityFilter("all");
     setEvaluabilityFilter("all");
+    setSortBy("valueScore");
     setShowBookmarkedOnly(false);
     resetSelection();
+    setSearchParams({}, { replace: true });
   }
 
   function toggleSelect(id: string) {
@@ -570,7 +592,7 @@ export function PrinciplesPage() {
   const summary = data?.summary;
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title={t("pages:principles.title")}
         description={t("pages:principles.description")}
@@ -674,14 +696,14 @@ export function PrinciplesPage() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <input
+              <Input
                 ref={searchInputRef}
                 data-search-input
                 type="text"
                 placeholder={t("pages:principles.searchPlaceholder")}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-10 py-2 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="pl-8 pr-10"
               />
               {searchQuery && (
                 <button
@@ -693,62 +715,82 @@ export function PrinciplesPage() {
               )}
             </div>
 
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-2 py-2 rounded-md border border-input bg-background text-xs"
-            >
-              <option value="all">{t("pages:principles.allStatuses")}</option>
-              <option value="active">Active</option>
-              <option value="candidate">Candidate</option>
-              <option value="probation">Probation</option>
-              <option value="deprecated">Deprecated</option>
-              <option value="archived">Archived</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">{t("pages:principles.status")}:</label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="h-8 text-xs w-[130px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("pages:principles.allStatuses")}</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="candidate">Candidate</SelectItem>
+                  <SelectItem value="probation">Probation</SelectItem>
+                  <SelectItem value="deprecated">Deprecated</SelectItem>
+                  <SelectItem value="archived">Archived</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-            <select
-              value={scopeFilter}
-              onChange={(e) => setScopeFilter(e.target.value)}
-              className="px-2 py-2 rounded-md border border-input bg-background text-xs"
-            >
-              <option value="all">{t("pages:principles.allScopes")}</option>
-              <option value="general">General</option>
-              <option value="domain">Domain</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">{t("pages:principles.scope")}:</label>
+              <Select value={scopeFilter} onValueChange={setScopeFilter}>
+                <SelectTrigger className="h-8 text-xs w-[110px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("pages:principles.allScopes")}</SelectItem>
+                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="domain">Domain</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-            <select
-              value={priorityFilter}
-              onChange={(e) => setPriorityFilter(e.target.value)}
-              className="px-2 py-2 rounded-md border border-input bg-background text-xs"
-            >
-              <option value="all">{t("pages:principles.allPriorities")}</option>
-              <option value="P0">P0</option>
-              <option value="P1">P1</option>
-              <option value="P2">P2</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">{t("pages:principles.priorityBreakdown")}:</label>
+              <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                <SelectTrigger className="h-8 text-xs w-[100px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("pages:principles.allPriorities")}</SelectItem>
+                  <SelectItem value="P0">P0</SelectItem>
+                  <SelectItem value="P1">P1</SelectItem>
+                  <SelectItem value="P2">P2</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-            <select
-              value={evaluabilityFilter}
-              onChange={(e) => setEvaluabilityFilter(e.target.value)}
-              className="px-2 py-2 rounded-md border border-input bg-background text-xs"
-            >
-              <option value="all">{t("pages:principles.allEvaluabilities")}</option>
-              <option value="deterministic">Deterministic</option>
-              <option value="weak_heuristic">Weak Heuristic</option>
-              <option value="manual_only">Manual Only</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">{t("pages:principles.evaluability")}:</label>
+              <Select value={evaluabilityFilter} onValueChange={setEvaluabilityFilter}>
+                <SelectTrigger className="h-8 text-xs w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("pages:principles.allEvaluabilities")}</SelectItem>
+                  <SelectItem value="deterministic">Deterministic</SelectItem>
+                  <SelectItem value="weak_heuristic">Weak Heuristic</SelectItem>
+                  <SelectItem value="manual_only">Manual Only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="px-2 py-2 rounded-md border border-input bg-background text-xs"
-            >
-              <option value="valueScore">{t("pages:principles.sortByValue")}</option>
-              <option value="adherenceRate">{t("pages:principles.sortByAdherence")}</option>
-              <option value="painPreventedCount">{t("pages:principles.sortByPainPrevented")}</option>
-              <option value="updatedAt">{t("pages:principles.sortByUpdated")}</option>
-              <option value="createdAt">{t("pages:principles.sortByCreated")}</option>
-            </select>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">{t("common:sort")}:</label>
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger className="h-8 text-xs w-[160px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="valueScore">{t("pages:principles.sortByValue")}</SelectItem>
+                  <SelectItem value="adherenceRate">{t("pages:principles.sortByAdherence")}</SelectItem>
+                  <SelectItem value="painPreventedCount">{t("pages:principles.sortByPainPrevented")}</SelectItem>
+                  <SelectItem value="updatedAt">{t("pages:principles.sortByUpdated")}</SelectItem>
+                  <SelectItem value="createdAt">{t("pages:principles.sortByCreated")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
             {hasActiveFilters && (
               <Button variant="ghost" size="sm" onClick={clearFilters}>

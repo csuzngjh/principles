@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Badge } from './ui/badge.js';
 
 type FreshnessLevel = 'fresh' | 'stale' | 'critical';
@@ -9,7 +10,7 @@ interface DataFreshnessIndicatorProps {
   thresholdMinutes?: { stale: number; critical: number };
 }
 
-function formatTimeAgo(timestamp: string): string {
+function formatTimeAgo(timestamp: string, t: (key: string, options?: Record<string, unknown>) => string): string {
   const now = new Date();
   const time = new Date(timestamp);
   const diffMs = now.getTime() - time.getTime();
@@ -18,10 +19,10 @@ function formatTimeAgo(timestamp: string): string {
   const diffHour = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHour / 24);
 
-  if (diffMin < 1) return 'just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHour < 24) return `${diffHour}h ago`;
-  return `${diffDay}d ago`;
+  if (diffMin < 1) return t('components:dataFreshness.justNow');
+  if (diffMin < 60) return t('components:pageHeader.minutesAgo', { count: diffMin });
+  if (diffHour < 24) return t('components:pageHeader.hoursAgo', { count: diffHour });
+  return t('components:pageHeader.daysAgo', { count: diffDay });
 }
 
 export function DataFreshnessIndicator({
@@ -29,13 +30,14 @@ export function DataFreshnessIndicator({
   label,
   thresholdMinutes = { stale: 5, critical: 15 },
 }: DataFreshnessIndicatorProps) {
+  const { t } = useTranslation();
   const [freshness, setFreshness] = useState<FreshnessLevel>('fresh');
   const [timeAgo, setTimeAgo] = useState('');
 
   useEffect(() => {
     if (!lastUpdateTime) {
       setFreshness('critical');
-      setTimeAgo('never');
+      setTimeAgo(t('components:dataFreshness.never'));
       return;
     }
 
@@ -50,13 +52,13 @@ export function DataFreshnessIndicator({
       else if (diffMin > thresholdMinutes.stale) level = 'stale';
 
       setFreshness(level);
-      setTimeAgo(formatTimeAgo(lastUpdateTime));
+      setTimeAgo(formatTimeAgo(lastUpdateTime, t));
     };
 
     update();
     const interval = setInterval(update, 10000);
     return () => clearInterval(interval);
-  }, [lastUpdateTime, thresholdMinutes]);
+  }, [lastUpdateTime, thresholdMinutes, t]);
 
   const getBadgeVariant = (): 'default' | 'secondary' | 'destructive' => {
     switch (freshness) {
@@ -68,9 +70,9 @@ export function DataFreshnessIndicator({
 
   const getStatusText = () => {
     switch (freshness) {
-      case 'fresh': return 'up to date';
-      case 'stale': return 'slightly delayed';
-      case 'critical': return 'stale';
+      case 'fresh': return t('components:dataFreshness.upToDate');
+      case 'stale': return t('components:dataFreshness.slightlyDelayed');
+      case 'critical': return t('components:dataFreshness.stale');
     }
   };
 

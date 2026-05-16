@@ -1,9 +1,11 @@
 import { useState, useEffect, type ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { PageHeader } from '../components/page-header.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card.js';
 import { Button } from '../components/ui/button.js';
 import { Badge } from '../components/ui/badge.js';
+import { Input } from '../components/ui/input.js';
 import {
   ChevronLeft,
   ChevronRight,
@@ -16,6 +18,7 @@ import {
 } from 'lucide-react';
 import { fetchEvents, fetchEventsGrouped, fetchRelatedEvents } from '../api.js';
 import type { EventLogEntry } from '../api.js';
+import { formatDate } from '../utils/format.js';
 
 const EVENT_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   pain_signal: 'destructive',
@@ -35,21 +38,29 @@ const COMMON_EVENT_TYPES = [
 ];
 
 export function EventLogPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { t } = useTranslation();
   const [events, setEvents] = useState<EventLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() => {
+    const p = searchParams.get("page");
+    return p ? Math.max(1, parseInt(p, 10) || 1) : 1;
+  });
   const [totalPages, setTotalPages] = useState(0);
   const [total, setTotal] = useState(0);
   const [pageSize] = useState(50);
   const [selectedTypes, setSelectedTypes] = useState<string[]>(() => {
-    const typeParam = searchParams.get('type');
+    const typesParam = searchParams.get("types");
+    if (typesParam) {
+      return typesParam.split(",").filter((t) => COMMON_EVENT_TYPES.includes(t));
+    }
+    const typeParam = searchParams.get("type");
     return typeParam && COMMON_EVENT_TYPES.includes(typeParam) ? [typeParam] : [];
   });
-  const [searchQuery, setSearchQuery] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("search") ?? "");
+  const [startDate, setStartDate] = useState(() => searchParams.get("start") ?? "");
+  const [endDate, setEndDate] = useState(() => searchParams.get("end") ?? "");
   const [typeCounts, setTypeCounts] = useState<Record<string, number> | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [relatedEvents, setRelatedEvents] = useState<EventLogEntry[] | null>(null);
@@ -118,6 +129,16 @@ export function EventLogPage() {
     loadEvents(1);
   }, [selectedTypes, searchQuery, startDate, endDate]);
 
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (selectedTypes.length > 0) params.set("types", selectedTypes.join(","));
+    if (searchQuery) params.set("search", searchQuery);
+    if (startDate) params.set("start", startDate);
+    if (endDate) params.set("end", endDate);
+    if (page > 1) params.set("page", String(page));
+    setSearchParams(params, { replace: true });
+  }, [selectedTypes, searchQuery, startDate, endDate, page, setSearchParams]);
+
   const handleTypeToggle = (type: string) => {
     if (type === 'all') {
       setSelectedTypes([]);
@@ -140,37 +161,32 @@ export function EventLogPage() {
     }
   };
 
-  const formatDate = (ts: string) => {
-    const date = new Date(ts);
-    return date.toLocaleString();
-  };
-
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
-        title="事件日志"
-        description="查看和分析系统事件记录"
+        title={t("pages:eventLog.title")}
+        description={t("pages:eventLog.description")}
         onRefresh={() => loadEvents(page)}
       />
 
       <Card>
         <CardHeader className="pb-3">
           <div className="flex justify-between items-center">
-            <CardTitle className="text-base">过滤器</CardTitle>
+            <CardTitle className="text-base">{t("pages:eventLog.filter")}</CardTitle>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setShowFilters(!showFilters)}
             >
               <Filter className="w-4 h-4 mr-2" />
-              {showFilters ? '收起' : '展开'}
+              {showFilters ? t("pages:eventLog.collapse") : t("pages:eventLog.expand")}
             </Button>
           </div>
         </CardHeader>
         {showFilters && (
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <p className="text-sm text-muted-foreground">事件类型</p>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <p className="text-sm text-muted-foreground">{t("pages:eventLog.eventType")}</p>
               <div className="flex flex-wrap gap-2">
                 {COMMON_EVENT_TYPES.map(type => (
                   <Badge
@@ -185,7 +201,10 @@ export function EventLogPage() {
                         : 'outline'
                     }
                     className="cursor-pointer"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleTypeToggle(type)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleTypeToggle(type); } }}
                   >
                     {type}
                     {typeCounts && typeCounts[type] !== undefined && (
@@ -198,38 +217,41 @@ export function EventLogPage() {
 
             <div className="flex gap-4 flex-wrap">
               <div className="flex-1 min-w-[200px]">
-                <p className="text-sm text-muted-foreground mb-1">开始日期</p>
-                <input
+                <label htmlFor="start-date" className="text-sm text-muted-foreground mb-1 block">{t("pages:eventLog.startDate")}</label>
+                <Input
+                  id="start-date"
                   type="date"
                   value={startDate}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => setStartDate(e.target.value)}
-                  className="w-full h-9 px-3 py-1 text-sm border border-input bg-background rounded-md"
+                  className="h-9"
                 />
               </div>
               <div className="flex-1 min-w-[200px]">
-                <p className="text-sm text-muted-foreground mb-1">结束日期</p>
-                <input
+                <label htmlFor="end-date" className="text-sm text-muted-foreground mb-1 block">{t("pages:eventLog.endDate")}</label>
+                <Input
+                  id="end-date"
                   type="date"
                   value={endDate}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
-                  className="w-full h-9 px-3 py-1 text-sm border border-input bg-background rounded-md"
+                  className="h-9"
                 />
               </div>
               <div className="flex-1 min-w-[200px]">
-                <p className="text-sm text-muted-foreground mb-1">搜索</p>
+                <label htmlFor="event-search" className="text-sm text-muted-foreground mb-1 block">{t("common:search")}</label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <input
+                    <Input
+                      id="event-search"
                       type="text"
-                      placeholder="搜索事件内容..."
+                      placeholder={t("pages:eventLog.searchPlaceholder")}
                       value={searchQuery}
                       onChange={(e: ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-                      className="w-full h-9 pl-8 pr-3 py-1 text-sm border border-input bg-background rounded-md"
+                      className="h-9 pl-8"
                     />
                   </div>
                   <Button onClick={() => setSearchQuery('')} variant="ghost">
-                    清除
+                    {t("pages:eventLog.clear")}
                   </Button>
                 </div>
               </div>
@@ -242,17 +264,18 @@ export function EventLogPage() {
                   setSearchQuery('');
                   setStartDate('');
                   setEndDate('');
+                  setSearchParams({}, { replace: true });
                 }}
                 variant="ghost"
               >
-                重置
+                {t("pages:eventLog.reset")}
               </Button>
               <Button
                 onClick={() => loadEvents(page)}
                 className="ml-2"
               >
                 <RefreshCw className="w-4 h-4 mr-2" />
-                应用
+                {t("pages:eventLog.apply")}
               </Button>
             </div>
           </CardContent>
@@ -260,9 +283,9 @@ export function EventLogPage() {
       </Card>
 
       {error && (
-        <Card className="border-red-200 bg-red-50 dark:bg-red-950">
+        <Card className="border-destructive/20 bg-destructive/10">
           <CardContent className="p-4">
-            <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+            <div className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="w-4 h-4" />
               <p>{error}</p>
             </div>
@@ -302,11 +325,11 @@ export function EventLogPage() {
               <div className="h-[600px] overflow-y-auto">
                 {loading && !events.length ? (
                   <div className="p-8 text-center">
-                    <div className="animate-pulse text-muted-foreground">加载中...</div>
+                    <div className="animate-pulse text-muted-foreground">{t("pages:eventLog.loading")}</div>
                   </div>
                 ) : events.length === 0 ? (
                   <div className="p-8 text-center text-muted-foreground">
-                    没有匹配的事件
+                    {t("pages:eventLog.noMatchingEvents")}
                   </div>
                 ) : (
                   <div className="divide-y">
@@ -316,7 +339,10 @@ export function EventLogPage() {
                         className={`p-4 hover:bg-muted/50 cursor-pointer transition-colors ${
                           selectedEventId === event.id ? 'bg-muted' : ''
                         }`}
+                        role="button"
+                        tabIndex={0}
                         onClick={() => handleEventClick(event)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleEventClick(event); } }}
                       >
                         <div className="flex items-start justify-between mb-2">
                           <div className="flex items-center gap-2">
@@ -352,17 +378,17 @@ export function EventLogPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Link className="w-4 h-4" />
-                  相关事件
+                  {t("pages:eventLog.relatedEvents")}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {loadingRelated ? (
                   <div className="text-sm text-muted-foreground animate-pulse">
-                    加载中...
+                    {t("pages:eventLog.loading")}
                   </div>
                 ) : relatedEvents.length === 0 ? (
                   <div className="text-sm text-muted-foreground">
-                    没有相关事件
+                    {t("pages:eventLog.noRelatedEvents")}
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -378,7 +404,7 @@ export function EventLogPage() {
                             {event.type}
                           </Badge>
                           {event.id === selectedEventId && (
-                            <Badge variant="default" className="text-xs">当前</Badge>
+                            <Badge variant="default" className="text-xs">{t("pages:eventLog.current")}</Badge>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">
@@ -395,7 +421,7 @@ export function EventLogPage() {
           {typeCounts && (
             <Card className="mt-4">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">事件统计</CardTitle>
+                <CardTitle className="text-base">{t("pages:eventLog.eventStats")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).map(([type, count]) => (
