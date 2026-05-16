@@ -353,7 +353,7 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-// Agent status routes
+      // Agent status routes
       if (urlPath === '/api/agents' || urlPath.startsWith('/api/agents/')) {
         const subPath = urlPath.slice('/api/agents'.length);
         asyncHandler(() => handleAgentsRoute(req, res, services.workspaceDir, subPath))(req, res);
@@ -364,8 +364,6 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/v1/state' || urlPath.startsWith('/api/v1/state/')) {
         const subPath = urlPath.slice('/api/v1/state'.length);
         asyncHandler(() => handleStateRoute(req, res, services.workspaceDir, subPath))(req, res);
-        return;
-      }
         return;
       }
 

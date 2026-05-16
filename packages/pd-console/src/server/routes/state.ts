@@ -104,7 +104,7 @@ export async function handleStateRoute(
     // GET /api/v1/state/:taskId
     const parts = subPath.split('/').filter(Boolean);
     if (parts.length === 1 && parts[0]) {
-      const taskId = parts[0];
+      const [taskId] = parts;
       const taskState = await getTaskState(stateManager, taskId);
       if (!taskState) {
         sendNotFound(res, `Task ${taskId} not found`);

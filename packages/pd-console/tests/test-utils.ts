@@ -179,13 +179,34 @@ function writePrincipleLedger(stateDir: string, principles: PrincipleSeed[]): vo
     text: p.text,
     triggerPattern: p.triggerPattern,
     action: p.action,
-    evaluability: 'high',
+    evaluability: 'deterministic',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }));
 
-  const ledgerPath = path.join(stateDir, 'principle-tree-ledger.json');
-  fs.writeFileSync(ledgerPath, JSON.stringify(entries, null, 2), 'utf8');
+  const tree = {
+    principles: Object.fromEntries(entries.map(e => [e.id, e])),
+  };
+
+  const ledgerPath = path.join(stateDir, 'principle_training_state.json');
+  const content: Record<string, unknown> = {};
+  for (const e of entries) {
+    content[e.id] = {
+      principleId: e.id,
+      evaluability: e.evaluability,
+      applicableOpportunityCount: 0,
+      observedViolationCount: 0,
+      complianceRate: 0,
+      violationTrend: 0,
+      generatedSampleCount: 0,
+      approvedSampleCount: 0,
+      includedTrainRunIds: [],
+      deployedCheckpointIds: [],
+      internalizationStatus: 'needs_training',
+    };
+  }
+  content._tree = tree;
+  fs.writeFileSync(ledgerPath, JSON.stringify(content, null, 2), 'utf8');
 }
 
 export function sampleThinkingOsMd(): string {
@@ -207,7 +228,7 @@ export function sampleThinkingOsMd(): string {
 
 export function sampleTrainingState() {
   return {
-    tree: {
+    _tree: {
       principles: {
         'p-001': {
           id: 'p-001',
@@ -215,7 +236,7 @@ export function sampleTrainingState() {
           text: 'Active principle',
           triggerPattern: 'on-error',
           action: 'fix it',
-          evaluability: 'high',
+          evaluability: 'deterministic',
           createdAt: '2026-01-01T00:00:00Z',
           updatedAt: '2026-05-01T00:00:00Z',
         },
