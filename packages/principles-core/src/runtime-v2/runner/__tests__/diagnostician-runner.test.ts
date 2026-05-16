@@ -762,4 +762,96 @@ describe('DiagnosticianRunner', () => {
       expect(allEventTypes).toContain('principle_candidate_registered');
     });
   });
+
+  // ── PRI-137: workspace_dirty as permanent error ──────────────────────────────────
+
+  describe('PRI-137: workspace_dirty permanent error handling', () => {
+    it('fails permanently on workspace_dirty error (never retries)', async () => {
+      const mocks = createMocks();
+      mocks._contextAssembler.assemble.mockRejectedValue(
+        new PDRuntimeError('workspace_dirty', 'Workspace contains uncommitted changes', {
+          dirtyFiles: ['file1.ts', 'file2.ts'],
+        }),
+      );
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('failed');
+      expect(result.errorCategory).toBe('workspace_dirty');
+      expect(result.failureReason).toContain('workspace_dirty');
+      expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(TASK_ID, 'workspace_dirty');
+      expect(mocks._stateManager.markTaskRetryWait).not.toHaveBeenCalled();
+    });
+
+    it('workspace_dirty fails immediately even when shouldRetry returns true', async () => {
+      const mocks = createMocks();
+      mocks._contextAssembler.assemble.mockRejectedValue(
+        new PDRuntimeError('workspace_dirty', 'Dirty workspace detected'),
+      );
+      mocks._stateManager.getRetryPolicy.mockReturnValue({
+        calculateBackoff: vi.fn().mockReturnValue(30_000),
+        shouldRetry: vi.fn().mockReturnValue(true),
+      });
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('failed');
+      expect(result.errorCategory).toBe('workspace_dirty');
+      expect(mocks._stateManager.markTaskRetryWait).not.toHaveBeenCalled();
+      expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(TASK_ID, 'workspace_dirty');
+    });
+
+    it('workspace_dirty is in PERMANENT_ERROR_CATEGORIES set', async () => {
+      const mocks = createMocks();
+      mocks._contextAssembler.assemble.mockRejectedValue(
+        new PDRuntimeError('workspace_dirty', 'Workspace dirty'),
+      );
+      mocks._stateManager.getRetryPolicy.mockReturnValue({
+        calculateBackoff: vi.fn().mockReturnValue(30_000),
+        shouldRetry: vi.fn().mockReturnValue(false),
+      });
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('failed');
+      expect(result.errorCategory).toBe('workspace_dirty');
+    });
+
+    it('emits task_failed telemetry with workspace_dirty category', async () => {
+      const mocks = createMocks();
+      mocks._contextAssembler.assemble.mockRejectedValue(
+        new PDRuntimeError('workspace_dirty', 'Uncommitted changes found'),
+      );
+
+      const runner = createRunner(mocks);
+      await runner.run(TASK_ID);
+
+      const allEventTypes = (mocks._eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.map(
+        (call) => call[0]?.eventType,
+      );
+      expect(allEventTypes).toContain('diagnostician_task_failed');
+
+      const taskFailedEvents = (mocks._eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls
+        .filter((call) => call[0]?.eventType === 'diagnostician_task_failed');
+      expect(taskFailedEvents[0]?.[0]?.payload?.errorCategory).toBe('workspace_dirty');
+    });
+
+    it('capability_missing also fails permanently (part of permanent error set)', async () => {
+      const mocks = createMocks();
+      mocks._contextAssembler.assemble.mockRejectedValue(
+        new PDRuntimeError('capability_missing', 'Required capability not available'),
+      );
+
+      const runner = createRunner(mocks);
+      const result = await runner.run(TASK_ID);
+
+      expect(result.status).toBe('failed');
+      expect(result.errorCategory).toBe('capability_missing');
+      expect(mocks._stateManager.markTaskFailed).toHaveBeenCalledWith(TASK_ID, 'capability_missing');
+      expect(mocks._stateManager.markTaskRetryWait).not.toHaveBeenCalled();
+    });
+  });
 });
