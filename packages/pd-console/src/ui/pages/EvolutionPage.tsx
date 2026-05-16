@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { fetchEvolutionStats, fetchEvolutionTasks, fetchEvolutionPrinciples, fetchEvolutionQueue } from "../api.js";
 import { PageHeader } from "../components/page-header.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.js";
 import { Button } from "../components/ui/button.js";
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "../components/ui/select.js";
 import { Badge } from "../components/ui/badge.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { formatDate } from "../utils/format.js";
 
 interface EvolutionStats {
   total: number;
@@ -97,13 +100,24 @@ function StatCard({ label, value, color }: { label: string; value: number; color
 
 export function EvolutionPage() {
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [stats, setStats] = useState<EvolutionStats | null>(null);
   const [tasks, setTasks] = useState<EvolutionTasksData | null>(null);
   const [principles, setPrinciples] = useState<EvolutionPrinciplesData | null>(null);
   const [queue, setQueue] = useState<QueueHealthData | null>(null);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") ?? "all");
+  const [page, setPage] = useState(() => {
+    const p = searchParams.get("page");
+    return p ? Math.max(1, parseInt(p, 10) || 1) : 1;
+  });
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (page > 1) params.set("page", String(page));
+    setSearchParams(params, { replace: true });
+  }, [statusFilter, page, setSearchParams]);
 
   useEffect(() => {
     Promise.all([
@@ -191,7 +205,7 @@ export function EvolutionPage() {
 
       <div className="flex gap-3 mb-6 flex-wrap">
         <StatCard label={t("common:pending")} value={stats.pending} color={STATUS_COLORS.pending} />
-        <StatCard label="In Progress" value={stats.inProgress} color={STATUS_COLORS.leased} />
+        <StatCard label={t("pages:evolution.inProgress")} value={stats.inProgress} color={STATUS_COLORS.leased} />
         <StatCard label={t("common:completed")} value={stats.completed} color={STATUS_COLORS.succeeded} />
         <StatCard label={t("common:failed")} value={stats.failed} color={STATUS_COLORS.failed} />
       </div>
@@ -218,7 +232,7 @@ export function EvolutionPage() {
               {principles.recent.length > 0 && (
                 <div>
                   <h4 className="text-xs font-medium text-muted-foreground mb-2">
-                    Recent Transitions
+                    {t("pages:evolution.recentTransitions")}
                   </h4>
                   {principles.recent.slice(0, 5).map((p, i) => (
                     <div
@@ -233,7 +247,7 @@ export function EvolutionPage() {
                           </Badge>
                         </div>
                         <span className="text-xs text-muted-foreground">
-                          {new Date(p.updatedAt).toLocaleString()}
+                          {formatDate(p.updatedAt)}
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
@@ -253,25 +267,25 @@ export function EvolutionPage() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="p-3 rounded-md bg-amber-50 dark:bg-amber-950/20">
-                    <div className="text-xl font-bold text-amber-600 dark:text-amber-400">
+                  <div className="p-3 rounded-md bg-amber-500/10">
+                    <div className="text-xl font-bold text-amber-500">
                       {queue.pendingCount}
                     </div>
                     <div className="text-xs text-muted-foreground">{t("common:pending")}</div>
                   </div>
                   <div className="p-3 rounded-md bg-primary/10">
                     <div className="text-xl font-bold text-primary">{queue.readyTaskCount}</div>
-                    <div className="text-xs text-muted-foreground">Ready</div>
+                    <div className="text-xs text-muted-foreground">{t("pages:evolution.ready")}</div>
                   </div>
-                  <div className="p-3 rounded-md bg-purple-50 dark:bg-purple-950/20">
-                    <div className="text-xl font-bold text-purple-600 dark:text-purple-400">
+                  <div className="p-3 rounded-md bg-purple-500/10">
+                    <div className="text-xl font-bold text-purple-500">
                       {queue.retryWaitCount}
                     </div>
-                    <div className="text-xs text-muted-foreground">Retry Wait</div>
+                    <div className="text-xs text-muted-foreground">{t("pages:evolution.retryWait")}</div>
                   </div>
                   <div className="p-3 rounded-md bg-destructive/10">
                     <div className="text-xl font-bold text-destructive">{queue.blockedCount}</div>
-                    <div className="text-xs text-muted-foreground">Blocked</div>
+                    <div className="text-xs text-muted-foreground">{t("pages:evolution.blocked")}</div>
                   </div>
                 </div>
 
@@ -283,7 +297,7 @@ export function EvolutionPage() {
 
                 {Object.keys(queue.countsByTaskKind).length > 0 && (
                   <div className="mt-3">
-                    <h4 className="text-xs font-medium text-muted-foreground mb-2">By Task Kind</h4>
+                    <h4 className="text-xs font-medium text-muted-foreground mb-2">{t("pages:evolution.byTaskKind")}</h4>
                     {Object.entries(queue.countsByTaskKind).map(([kind, count]) => (
                       <div key={kind} className="flex justify-between text-xs py-1">
                         <span className="text-muted-foreground">{kind}</span>
@@ -301,7 +315,7 @@ export function EvolutionPage() {
       {stats.stageDistribution.length > 0 && (
         <Card className="mb-6">
           <CardContent className="p-4">
-            <h3 className="text-sm font-medium mb-3">Stage Distribution</h3>
+            <h3 className="text-sm font-medium mb-3">{t("pages:evolution.stageDistribution")}</h3>
             <div className="flex gap-2 flex-wrap">
               {stats.stageDistribution.map((stage) => (
                 <Badge key={stage.stage} variant="outline">
@@ -319,18 +333,19 @@ export function EvolutionPage() {
             <CardTitle className="text-sm">{t("pages:evolution.taskList")}</CardTitle>
             <div className="flex items-center gap-2">
               <label className="text-xs text-muted-foreground">{t("common:status")}:</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-                className="px-2 py-1 rounded-md border border-input bg-background text-xs"
-              >
-                <option value="all">{t("common:all")}</option>
-                <option value="pending">{t("common:pending")}</option>
-                <option value="leased">Leased</option>
-                <option value="succeeded">{t("common:completed")}</option>
-                <option value="retry_wait">Retry Wait</option>
-                <option value="failed">{t("common:failed")}</option>
-              </select>
+              <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+                <SelectTrigger className="h-8 text-xs w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("common:all")}</SelectItem>
+                  <SelectItem value="pending">{t("common:pending")}</SelectItem>
+                  <SelectItem value="leased">{t("pages:evolution.leased")}</SelectItem>
+                  <SelectItem value="succeeded">{t("common:completed")}</SelectItem>
+                  <SelectItem value="retry_wait">{t("pages:evolution.retryWait")}</SelectItem>
+                  <SelectItem value="failed">{t("common:failed")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardHeader>
@@ -345,7 +360,7 @@ export function EvolutionPage() {
               <div className="flex justify-between items-center">
                 <div>
                   <span className={`font-medium text-xs ${STATUS_COLORS[task.status] ?? ""}`}>
-                    {task.taskId.slice(0, 16)}...
+                    {task.taskId.slice(0, 16)}…
                   </span>
                   <span className="ml-2 text-xs text-muted-foreground">{task.taskKind}</span>
                 </div>
@@ -361,7 +376,7 @@ export function EvolutionPage() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {new Date(task.createdAt).toLocaleString()}
+                {formatDate(task.createdAt)}
               </p>
             </div>
           ))}

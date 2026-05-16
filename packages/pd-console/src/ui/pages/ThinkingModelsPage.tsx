@@ -71,7 +71,7 @@ export function ThinkingModelsPage() {
         description={t("pages:thinking-models.description")}
         actions={
           <span className="text-sm text-muted-foreground">
-            {data.totalModels} models | Source: {data.source}
+            {data.totalModels} {t("pages:thinking-models.modelsLabel")} | {t("pages:thinking-models.sourceLabel")} {data.source}
           </span>
         }
       />
@@ -82,7 +82,7 @@ export function ThinkingModelsPage() {
             <Brain className="h-12 w-12 mb-3 opacity-50" />
             <p className="text-sm mb-1">{t("pages:thinking-models.noModels")}</p>
             <p className="text-xs">
-              Place a THINKING_OS.md file in the workspace root or .state directory
+              {t("pages:thinking-models.placeThinkingOs")}
             </p>
           </CardContent>
         </Card>
@@ -104,7 +104,7 @@ export function ThinkingModelsPage() {
                 <span className="text-sm">{model.name}</span>
               </div>
               <ChevronRight
-                className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${
+                className={`h-4 w-4 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none ${
                   expandedId === model.id ? "rotate-90" : ""
                 }`}
               />
@@ -115,7 +115,7 @@ export function ThinkingModelsPage() {
                 expandedId === model.id ? "max-h-[600px] opacity-100" : "max-h-0 opacity-0"
               }`}
             >
-              <div className="p-4 border-t border-border space-y-4">
+              <div className="p-4 border-t border-border flex flex-col gap-4">
                 {model.trigger && (
                   <div>
                     <h4 className="text-xs font-medium text-muted-foreground mb-1">

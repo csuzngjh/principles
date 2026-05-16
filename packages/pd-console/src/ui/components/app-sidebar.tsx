@@ -103,7 +103,7 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
           )}
         >
           <div className="relative">
-            <Dna className="h-6 w-6" />
+            <Dna className="h-6 w-6" aria-hidden="true" />
             {alertCount > 0 && (
               <Badge
                 variant={getAlertBadgeVariant()}
@@ -152,7 +152,7 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
                 collapsed && "justify-center"
               )}
             >
-              <Icon className={cn("h-5 w-5 flex-shrink-0", collapsed && "h-5 w-5")} />
+              <Icon className={cn("h-5 w-5 flex-shrink-0", collapsed && "h-5 w-5")} aria-hidden="true" />
               {!collapsed && <span>{item.label}</span>}
             </Link>
           );

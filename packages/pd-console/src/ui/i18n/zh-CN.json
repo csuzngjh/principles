@@ -66,7 +66,23 @@
       "gfi": "GFI",
       "pendingTasks": "待处理任务",
       "totalWorkspaces": "工作空间总数",
-      "activeWorkspaces": "活跃工作空间"
+      "activeWorkspaces": "活跃工作空间",
+      "painSignals": "痛苦信号",
+      "candidates": "候选",
+      "tasks": "任务",
+      "painEvents": "痛苦事件",
+      "pendingSamples": "待处理样本",
+      "approvedSamples": "已批准样本",
+      "taskOutcomes": "任务结果",
+      "gateBlocks": "门控阻断",
+      "activePrinciples": "活跃",
+      "candidatePrinciples": "候选",
+      "probationPrinciples": "试用",
+      "deprecatedPrinciples": "已弃用",
+      "inProgress": "进行中",
+      "healthy": "健康",
+      "degraded": "降级",
+      "error": "错误"
     },
     "tasks": {
       "title": "任务",
@@ -80,7 +96,18 @@
       "undo": "撤销",
       "confirmAction": "确认操作",
       "batchCleanup": "批量清理",
-      "noToken": "未配置认证令牌"
+      "noToken": "未配置认证令牌",
+      "checkingAuth": "验证认证中…",
+      "agentDiagnostician": "诊断者",
+      "agentNocturnalReflection": "夜间反思",
+      "agentCorrectionObserver": "纠正观察者",
+      "secondsAgo": "{{count}}秒前",
+      "minutesAgo": "{{count}}分钟前",
+      "hoursAgo": "{{count}}小时前",
+      "loadFailed": "加载失败",
+      "operationFailed": "操作失败: {{error}}",
+      "unknownError": "未知错误",
+      "batchCleanupResult": "批量清理完成，{{failed}}/{{total}} 项失败"
     },
     "feedback": {
       "title": "反馈",
@@ -92,7 +119,11 @@
       "source": "来源",
       "timestamp": "时间戳",
       "count": "计数",
-      "totalGFI": "总 GFI"
+      "totalGFI": "总 GFI",
+      "gfiFull": "GFI（通用摩擦指数）",
+      "peakToday": "今日峰值：",
+      "origin": "来源：",
+      "gfiAfter": "GFI 之后："
     },
     "gates": {
       "title": "门控",
@@ -103,7 +134,14 @@
       "totalBlocks": "总阻断数",
       "todayBlocks": "今日阻断",
       "blockRate": "阻断率",
-      "sourceBreakdown": "来源分布"
+      "sourceBreakdown": "来源分布",
+      "gfiLabel": "GFI",
+      "gfiBlocks": "GFI 阻断",
+      "stageBlocks": "阶段阻断",
+      "bypassAttempts": "绕过尝试",
+      "score": "分数：",
+      "peak": "峰值：",
+      "threshold": "阈值："
     },
     "samples": {
       "title": "样本",
@@ -114,7 +152,19 @@
       "recommendation": "建议",
       "rejectReason": "拒绝原因",
       "sampleCount": "样本数量",
-      "status": "状态"
+      "status": "状态",
+      "confirmRejectTitle": "拒绝样本",
+      "confirmRejectDescription": "确定要拒绝此样本吗？此操作无法撤销。",
+      "selectSample": "选择样本查看详情",
+      "score": "分数：",
+      "artifactContent": "产物内容",
+      "titleLabel": "标题：",
+      "textLabel": "文本：",
+      "triggerPatternLabel": "触发模式：",
+      "actionLabel": "动作：",
+      "abstractedPrinciple": "抽象原则：",
+      "createdLabel": "创建时间：",
+      "taskLabel": "任务："
     },
     "evolution": {
       "title": "进化",
@@ -127,7 +177,15 @@
       "progress": "进度",
       "completedTasks": "已完成任务",
       "failedTasks": "失败任务",
-      "pendingTasks": "待处理任务"
+      "pendingTasks": "待处理任务",
+      "inProgress": "进行中",
+      "stageDistribution": "阶段分布",
+      "recentTransitions": "最近转换",
+      "ready": "就绪",
+      "retryWait": "重试等待",
+      "blocked": "已阻塞",
+      "byTaskKind": "按任务类型",
+      "leased": "已租用"
     },
     "principles": {
       "title": "原则",
@@ -211,7 +269,10 @@
       "trigger": "触发条件",
       "must": "必须",
       "forbidden": "禁止",
-      "noModels": "暂无思维模型"
+      "noModels": "暂无思维模型",
+      "modelsLabel": "个模型",
+      "sourceLabel": "来源：",
+      "placeThinkingOs": "在工作空间根目录或 .state 目录中放置 THINKING_OS.md 文件"
     },
     "settings": {
       "title": "设置",
@@ -222,12 +283,21 @@
       "language": "语言",
       "theme": "主题",
       "apiToken": "API 令牌",
+      "bearerToken": "Bearer 令牌",
+      "enterAccessToken": "输入访问令牌",
+      "lastSync": "上次同步",
+      "path": "路径",
+      "name": "名称",
       "addWorkspace": "添加工作空间",
       "syncWorkspace": "同步工作空间",
       "removeWorkspace": "移除工作空间",
       "tokenSaved": "令牌已保存",
+      "tokenSessionOnly": "令牌仅存储在浏览器会话中。",
+      "noAuthFlag": "使用 --no-auth 标志禁用身份验证。",
       "workspaceAdded": "工作空间已添加",
-      "workspaceRemoved": "工作空间已移除"
+      "workspaceRemoved": "工作空间已移除",
+      "confirmDeleteTitle": "删除工作区",
+      "confirmDeleteDescription": "确定要删除工作区 \"{{name}}\" 吗？此操作无法撤销。"
     },
     "central": {
       "title": "中央",
@@ -238,7 +308,17 @@
       "workspaceName": "工作空间名称",
       "workspaceStatus": "工作空间状态",
       "workspaceGFI": "工作空间 GFI",
-      "workspacePrinciples": "工作空间原则数"
+      "workspacePrinciples": "工作空间原则数",
+      "healthy": "健康",
+      "degraded": "降级",
+      "error": "错误",
+      "total": "总计",
+      "gfiLabel": "GFI",
+      "principlesLabel": "原则",
+      "activeLabel": "活跃",
+      "pendingLabel": "待处理",
+      "noWorkspaces": "未配置工作空间。请前往设置添加工作空间。",
+      "noWorkspaceData": "暂无工作空间数据"
     },
     "login": {
       "title": "登录",
@@ -249,7 +329,12 @@
       "hidePassword": "隐藏密码",
       "signIn": "登录",
       "errorInvalid": "密码错误",
-      "errorEmpty": "请输入密码"
+      "errorEmpty": "请输入密码",
+      "enterAccessToken": "输入访问令牌",
+      "verifying": "验证中…",
+      "bearerToken": "Bearer 令牌",
+      "tokenSessionOnly": "令牌仅存储在浏览器会话中。",
+      "noAuthFlag": "使用 --no-auth 标志禁用身份验证。"
     },
     "agents": {
       "title": "代理",
@@ -271,6 +356,9 @@
       "idle": "空闲",
       "failed": "失败",
       "unknown": "未知",
+      "realtimeTriggerPath": "实时触发路径",
+      "backgroundHeartbeatPath": "后台心跳路径（Evolution Worker 驱动）",
+      "loadFailed": "加载失败",
       "category": {
         "scheduler": "调度器",
         "analyzer": "分析器",
@@ -279,6 +367,26 @@
         "optimizer": "优化器",
         "gate": "门控"
       }
+    },
+    "eventLog": {
+      "title": "事件日志",
+      "description": "查看和分析系统事件记录",
+      "filter": "过滤器",
+      "collapse": "收起",
+      "expand": "展开",
+      "eventType": "事件类型",
+      "startDate": "开始日期",
+      "endDate": "结束日期",
+      "searchPlaceholder": "搜索事件内容…",
+      "clear": "清除",
+      "reset": "重置",
+      "apply": "应用",
+      "loading": "加载中…",
+      "noMatchingEvents": "没有匹配的事件",
+      "relatedEvents": "相关事件",
+      "noRelatedEvents": "没有相关事件",
+      "current": "当前",
+      "eventStats": "事件统计"
     }
   },
   "components": {
@@ -327,6 +435,19 @@
     "sidebar": {
       "collapse": "折叠侧边栏",
       "expand": "展开侧边栏"
+    },
+    "healthDiagnostic": {
+      "title": "系统健康",
+      "allNormal": "所有系统正常",
+      "needsAttention": "部分系统需要关注",
+      "criticalIssues": "检测到严重问题"
+    },
+    "dataFreshness": {
+      "justNow": "刚刚",
+      "upToDate": "最新",
+      "slightlyDelayed": "轻微延迟",
+      "stale": "过期",
+      "never": "从未"
     }
   }
 }

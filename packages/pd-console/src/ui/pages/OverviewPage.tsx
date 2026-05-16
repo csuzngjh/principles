@@ -16,9 +16,9 @@ const STATUS_COLORS: Record<string, "default" | "secondary" | "destructive"> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  healthy: "健康",
-  degraded: "降级",
-  error: "错误",
+  healthy: "pages:overview.healthy",
+  degraded: "pages:overview.degraded",
+  error: "pages:overview.error",
 };
 
 function HealthCard({ health }: { health: OverviewData["health"] }) {
@@ -35,7 +35,7 @@ function HealthCard({ health }: { health: OverviewData["health"] }) {
             </p>
             <div className="flex items-center gap-3">
               <span className="text-2xl font-bold capitalize">
-                {STATUS_LABELS[health.status] || health.status}
+                {t(STATUS_LABELS[health.status] || health.status)}
               </span>
               <Badge variant={statusColor}>{health.status.toUpperCase()}</Badge>
             </div>
@@ -140,7 +140,7 @@ export function OverviewPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title={t("pages:overview.title")}
         description={t("pages:overview.description")}
@@ -160,19 +160,19 @@ export function OverviewPage() {
       <div className="flex items-center gap-2 flex-wrap">
         {healthData?.pipeline.lastPainSignal && (
           <DataFreshnessIndicator 
-            label="Pain Signals" 
+            label={t("pages:overview.painSignals")} 
             lastUpdateTime={healthData.pipeline.lastPainSignal} 
           />
         )}
         {healthData?.pipeline.lastTaskCreated && (
           <DataFreshnessIndicator 
-            label="Tasks" 
+            label={t("pages:overview.tasks")} 
             lastUpdateTime={healthData.pipeline.lastTaskCreated} 
           />
         )}
         {healthData?.pipeline.lastCandidateGenerated && (
           <DataFreshnessIndicator 
-            label="Candidates" 
+            label={t("pages:overview.candidates")} 
             lastUpdateTime={healthData.pipeline.lastCandidateGenerated} 
           />
         )}
@@ -187,11 +187,11 @@ export function OverviewPage() {
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <StatCard label={t("pages:overview.principles")} value={data.summary.principleEventCount} />
-            <StatCard label="Pain Events" value={data.summary.painEvents} />
-            <StatCard label="Pending Samples" value={data.summary.pendingSamples} />
-            <StatCard label="Approved Samples" value={data.summary.approvedSamples} />
-            <StatCard label="Task Outcomes" value={data.summary.taskOutcomes} />
-            <StatCard label="Gate Blocks" value={data.summary.gateBlocks} />
+            <StatCard label={t("pages:overview.painEvents")} value={data.summary.painEvents} />
+            <StatCard label={t("pages:overview.pendingSamples")} value={data.summary.pendingSamples} />
+            <StatCard label={t("pages:overview.approvedSamples")} value={data.summary.approvedSamples} />
+            <StatCard label={t("pages:overview.taskOutcomes")} value={data.summary.taskOutcomes} />
+            <StatCard label={t("pages:overview.gateBlocks")} value={data.summary.gateBlocks} />
           </div>
         </CardContent>
       </Card>
@@ -202,10 +202,10 @@ export function OverviewPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard label="Active" value={data.health.principles.active} />
-            <StatCard label="Candidate" value={data.health.principles.candidate} />
-            <StatCard label="Probation" value={data.health.principles.probation} />
-            <StatCard label="Deprecated" value={data.health.principles.deprecated} />
+            <StatCard label={t("pages:overview.activePrinciples")} value={data.health.principles.active} />
+            <StatCard label={t("pages:overview.candidatePrinciples")} value={data.health.principles.candidate} />
+            <StatCard label={t("pages:overview.probationPrinciples")} value={data.health.principles.probation} />
+            <StatCard label={t("pages:overview.deprecatedPrinciples")} value={data.health.principles.deprecated} />
           </div>
         </CardContent>
       </Card>
@@ -217,7 +217,7 @@ export function OverviewPage() {
         <CardContent>
           <div className="grid grid-cols-3 gap-4">
             <StatCard label={t("common:pending")} value={data.health.queue.pending} />
-            <StatCard label="In Progress" value={data.health.queue.inProgress} />
+            <StatCard label={t("pages:overview.inProgress")} value={data.health.queue.inProgress} />
             <StatCard label={t("common:completed")} value={data.health.queue.completed} />
           </div>
         </CardContent>

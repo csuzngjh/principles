@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card.js';
 import { Badge } from './ui/badge.js';
 import { Button } from './ui/button.js';
 import { RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface HealthCheckItem {
   id: string;
@@ -24,14 +25,15 @@ export function HealthDiagnosticCard({
   onRefresh,
   loading,
 }: HealthDiagnosticCardProps) {
+  const { t } = useTranslation();
   const healthyCount = checks.filter(c => c.status === 'healthy').length;
   const totalCount = checks.length;
 
   const getOverallStatusText = () => {
     switch (overall) {
-      case 'healthy': return 'All systems normal';
-      case 'degraded': return 'Some systems need attention';
-      case 'error': return 'Critical issues detected';
+      case 'healthy': return t('components:healthDiagnostic.allNormal');
+      case 'degraded': return t('components:healthDiagnostic.needsAttention');
+      case 'error': return t('components:healthDiagnostic.criticalIssues');
     }
   };
 
@@ -65,20 +67,20 @@ export function HealthDiagnosticCard({
     <Card>
       <CardHeader className="pb-2">
         <div className="flex justify-between items-center">
-          <CardTitle className="text-sm">System Health</CardTitle>
+          <CardTitle className="text-sm">{t('components:healthDiagnostic.title')}</CardTitle>
           <div className="flex items-center gap-2">
             <Badge variant={getOverallBadgeVariant()}>
               {healthyCount}/{totalCount} healthy &middot; {getOverallStatusText()}
             </Badge>
             {onRefresh && (
               <Button variant="ghost" size="sm" onClick={onRefresh} disabled={loading}>
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
               </Button>
             )}
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="flex flex-col gap-2">
         {checks.map((check) => (
           <div key={check.id} className="flex items-center justify-between py-1 border-b last:border-0">
             <div className="flex items-center gap-2">
