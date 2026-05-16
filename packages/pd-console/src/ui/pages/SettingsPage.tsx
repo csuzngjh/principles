@@ -34,13 +34,13 @@ function AuthSettings() {
       </CardHeader>
       <CardContent>
         <label className="block mb-2 text-sm font-medium" htmlFor="bearer-token">
-          Bearer Token
+          {t("pages:settings.bearerToken")}
           <Input
             id="bearer-token"
             type="password"
             value={tokenValue}
             onChange={(e) => { setTokenValue(e.target.value); setSaved(false); }}
-            placeholder="Enter access token"
+            placeholder={t("pages:settings.enterAccessToken")}
             className="mt-1"
           />
         </label>
@@ -54,7 +54,7 @@ function AuthSettings() {
           </div>
         )}
         <p className="mt-3 text-xs text-muted-foreground">
-          Token is stored in the browser session and will be cleared when the tab is closed.
+          {t("pages:settings.tokenSessionOnly")}
         </p>
       </CardContent>
     </Card>
@@ -137,7 +137,7 @@ function WorkspaceManager() {
                   <p className="text-xs text-muted-foreground">{ws.path}</p>
                   {ws.lastSync && (
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Last sync: {formatDate(ws.lastSync)}
+                      {t("pages:settings.lastSync")} {formatDate(ws.lastSync)}
                     </p>
                   )}
                 </div>
@@ -175,7 +175,7 @@ function WorkspaceManager() {
         <h4 className="text-sm font-medium mb-3">{t("pages:settings.addWorkspace")}</h4>
         <div className="flex gap-2 items-end">
           <div className="flex-1">
-            <label className="text-xs text-muted-foreground" htmlFor="ws-name">{t("common:name")}</label>
+            <label className="text-xs text-muted-foreground" htmlFor="ws-name">{t("pages:settings.name")}</label>
             <Input
               id="ws-name"
               value={newName}
@@ -185,7 +185,7 @@ function WorkspaceManager() {
             />
           </div>
           <div className="flex-[2]">
-            <label className="text-xs text-muted-foreground" htmlFor="ws-path">Path</label>
+            <label className="text-xs text-muted-foreground" htmlFor="ws-path">{t("pages:settings.path")}</label>
             <Input
               id="ws-path"
               value={newPath}

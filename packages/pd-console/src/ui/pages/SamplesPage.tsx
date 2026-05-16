@@ -153,9 +153,9 @@ export function SamplesPage() {
         description={t("pages:samples.description")}
         actions={
           <div className="flex items-center gap-2">
-            <label className="text-sm text-muted-foreground">{t("pages:samples.filterByStatus")}:</label>
+            <span id="samples-status-filter-label" className="text-sm text-muted-foreground">{t("pages:samples.filterByStatus")}:</span>
             <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); setSelectedId(""); }}>
-              <SelectTrigger className="h-9 text-sm w-[130px]">
+              <SelectTrigger className="h-9 text-sm w-[130px]" aria-labelledby="samples-status-filter-label">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
