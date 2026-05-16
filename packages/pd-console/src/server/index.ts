@@ -366,8 +366,6 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         asyncHandler(() => handleStateRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
-        return;
-      }
 
       // ── Legacy API routes (preserved for backward compatibility) ──────
 
