@@ -67,11 +67,16 @@ export class SqliteConnection {
         this.db.pragma('synchronous = NORMAL');
         this.db.pragma('foreign_keys = ON');
       } catch (err) {
-        if (err instanceof PDRuntimeError) throw err;
-        throw new PDRuntimeError(
-          'storage_unavailable',
-          `Required SQLite pragma failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        const pdErr = err instanceof PDRuntimeError
+          ? err
+          : new PDRuntimeError(
+              'storage_unavailable',
+              `Required SQLite pragma failed: ${err instanceof Error ? err.message : String(err)}`,
+              { originalError: err instanceof Error ? err.message : String(err) },
+            );
+        try { this.db?.close(); } catch { /* best-effort cleanup */ }
+        this.db = null;
+        throw pdErr;
       }
       try {
         this.initSchema();
@@ -95,24 +100,24 @@ export class SqliteConnection {
         issues: ['database not opened'],
       };
     }
-    const issues: string[] = [];
-    const journalMode = String(this.db.pragma('journal_mode', { simple: true }));
-    const busyTimeout = Number(this.db.pragma('busy_timeout', { simple: true }));
-    const synchronous = String(this.db.pragma('synchronous', { simple: true }));
-    const foreignKeys = Boolean(this.db.pragma('foreign_keys', { simple: true }));
+    try {
+      const issues: string[] = [];
+      const journalMode = String(this.db.pragma('journal_mode', { simple: true }));
+      const busyTimeout = Number(this.db.pragma('busy_timeout', { simple: true }));
+      const synchronous = String(this.db.pragma('synchronous', { simple: true }));
+      const foreignKeys = Boolean(this.db.pragma('foreign_keys', { simple: true }));
 
-    if (journalMode !== 'wal') issues.push(`journal_mode is ${journalMode}, expected wal`);
-    if (busyTimeout < 5000) issues.push(`busy_timeout is ${busyTimeout}, expected >= 5000`);
-    if (synchronous !== '1' && synchronous !== 'normal') {
-      issues.push(`synchronous is ${synchronous}, expected NORMAL`);
+      if (journalMode !== 'wal') issues.push(`journal_mode is ${journalMode}, expected wal`);
+      if (busyTimeout < 5000) issues.push(`busy_timeout is ${busyTimeout}, expected >= 5000`);
+      if (synchronous !== '1') issues.push(`synchronous is ${synchronous}, expected NORMAL`);
+
+      return { journalMode, busyTimeout, synchronous, foreignKeys, healthy: issues.length === 0, issues };
+    } catch {
+      return { journalMode: 'error', busyTimeout: 0, synchronous: 'error', foreignKeys: false, healthy: false, issues: ['pragma read failed - database may be corrupted'] };
     }
-
-    return { journalMode, busyTimeout, synchronous, foreignKeys, healthy: issues.length === 0, issues };
   }
-
   private initSchema(): void {
     const db = this.db as Database.Database;
-
     db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
         task_id TEXT PRIMARY KEY,

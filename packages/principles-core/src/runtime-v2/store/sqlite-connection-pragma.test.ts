@@ -209,3 +209,28 @@ describe('PRI-140: getPragmaReport()', () => {
     }
   });
 });
+// -- 6. getDb() does not cache broken connection after pragma failure --
+
+describe('PRI-140: getDb() leak protection', () => {
+  it('second getDb() after pragma failure also throws (no cached broken db)', () => {
+    const dir = freshDir('leak-protection');
+
+    const origPragma = Database.prototype.pragma;
+    Database.prototype.pragma = function (this: Database.Database, ...args: Parameters<Database.Database['pragma']>) {
+      if (typeof args[0] === 'string' && args[0].includes('journal_mode')) {
+        throw new Error('simulated pragma failure');
+      }
+      return origPragma.apply(this, args);
+    };
+
+    try {
+      const conn = new SqliteConnection(dir);
+      expect(() => conn.getDb()).toThrow(PDRuntimeError);
+      // Second call should also throw, not return cached broken connection
+      expect(() => conn.getDb()).toThrow(PDRuntimeError);
+      conn.close();
+    } finally {
+      Database.prototype.pragma = origPragma;
+    }
+  });
+});
