@@ -113,6 +113,8 @@ const REQUIRED_SOURCE_FILES = [
   'types/principle-value-metrics.ts',
   'types/principle-lifecycle-event.ts',
   'types/principle-tree-store.ts',
+  // PRI-140
+  'store/sqlite-connection.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -149,6 +151,8 @@ const REQUIRED_TEST_FILES = [
   '../gfi/__tests__/gfi-kernel.test.ts',
   // PRI-115
   'golden-trace-replay-validator.test.ts',
+  // PRI-140
+  '../store/sqlite-connection-pragma.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -1940,7 +1944,7 @@ describe('PRI-117 Nocturnal god-class freeze', () => {
   ];
 
   it('RUNTIME_V2_NO_NOCTURNAL_TRINITY_IMPORT: runtime-v2 must not import nocturnal-trinity', async () => {
-    const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+    const { readdirSync, readFileSync } = await import('node:fs');
     const { resolve, join } = await import('node:path');
     const runtimeDir = resolve(__dirname, '..');
     const allFiles: string[] = [];
