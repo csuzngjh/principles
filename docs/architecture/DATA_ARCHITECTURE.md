@@ -101,7 +101,7 @@ PD Runtime V2 的权威数据存储分为**两个物理事实源**：
 ```
 state.db
 ├── 任务调度
-│   ├── tasks                          PITaskRecord 主表
+│   ├── tasks                          PITaskRecord 主表（含 mission_id / priority / depends_on）
 │   ├── runs                           RunRecord 主表
 │   └── leases (隐式：在 tasks 中通过 leaseOwner / leaseExpiresAt 字段)
 ├── Diagnostician 子系统
@@ -109,10 +109,15 @@ state.db
 │   ├── artifacts                      Diagnostician artifact
 │   └── commits                        DiagnosticianCommit
 ├── Internalization 子系统
-│   └── pi_artifacts                   PIArtifact
+│   └── pi_artifacts                   PIArtifact（含 shadow_eval_results）
 ├── Activation 子系统（新增 — ADR-0006）
 │   ├── approvals                      ApprovalRecord
 │   └── rejection_feedbacks            RejectionFeedback
+├── Goals 子系统（新增 — ADR-0010）
+│   ├── objectives                     Objective（OKR 季度目标）
+│   ├── key_results                    KeyResult（可量化关键结果）
+│   ├── missions                       Mission（长程任务）
+│   └── agent_session_checkpoints      LRAS 检查点（ADR-0009）
 ├── 历史与查询
 │   ├── history (各子表)
 │   └── trajectory (各子表)
@@ -210,6 +215,82 @@ CREATE INDEX idx_correction_audit_timestamp ON correction_audit_events(timestamp
 - 用于支撑 shadow mode 报告
 - 用于排查误杀
 - 永久保留（合规需要）
+
+#### 3.2.4 Goals 子系统表（ADR-0010）
+
+```sql
+-- Objective（OKR 季度目标）
+CREATE TABLE objectives (
+  objective_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  status TEXT NOT NULL,                       -- active / achieved / abandoned
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- KeyResult（可量化关键结果）
+CREATE TABLE key_results (
+  kr_id TEXT PRIMARY KEY,
+  objective_id TEXT NOT NULL REFERENCES objectives(objective_id),
+  metric TEXT NOT NULL,                       -- "完成 5 个 PR"、"通过 80% 测试"
+  target REAL NOT NULL,
+  current REAL NOT NULL DEFAULT 0,
+  unit TEXT NOT NULL,                         -- "PRs", "%", "lines"
+  measurement_source TEXT NOT NULL,           -- manual / auto_query
+  query TEXT,                                 -- auto_query 时的查询表达式
+  updated_at TEXT NOT NULL
+);
+
+-- Mission（长程任务）
+CREATE TABLE missions (
+  mission_id TEXT PRIMARY KEY,
+  objective_id TEXT REFERENCES objectives(objective_id),  -- 可选关联
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL,                       -- planning / executing / review / succeeded / failed / stalled
+  expected_duration_days INTEGER,
+  started_at TEXT,
+  completed_at TEXT,
+  alignment_json TEXT NOT NULL,               -- { objectiveContribution, riskLevel, requiresDecisionHygiene }
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_missions_status ON missions(status);
+CREATE INDEX idx_missions_objective ON missions(objective_id);
+
+-- tasks 表扩展（ADR-0011）
+-- ALTER TABLE tasks ADD COLUMN mission_id TEXT REFERENCES missions(mission_id);
+-- ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 50;
+-- ALTER TABLE tasks ADD COLUMN depends_on TEXT;  -- JSON array of taskId
+```
+
+#### 3.2.5 agent_session_checkpoints（ADR-0009）
+
+```sql
+CREATE TABLE agent_session_checkpoints (
+  checkpoint_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  state TEXT NOT NULL,                        -- LRAS 状态机状态
+  step_number INTEGER NOT NULL,
+  scratchpad TEXT NOT NULL,                   -- 代理工作记忆（JSON）
+  partial_output TEXT,                        -- 部分输出
+  tool_call_history TEXT NOT NULL,            -- 累计工具调用记录（JSON）
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_checkpoints_session ON agent_session_checkpoints(session_id, step_number);
+CREATE INDEX idx_checkpoints_task ON agent_session_checkpoints(task_id);
+```
+
+**特性**：
+- 崩溃恢复：`RecoverySweep` 启动时扫描未完成 session，读取最近 checkpoint 续跑
+- 每 2 分钟（可配）自动保存
 
 ### 3.3 已有表（无变更）
 

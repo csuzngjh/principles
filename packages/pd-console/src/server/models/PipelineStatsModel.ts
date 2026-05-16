@@ -32,9 +32,9 @@ export interface PipelineStats {
 
 const STAGE_CONFIG = [
   { id: 'pain_signal', name: 'Pain Signal', eventTypes: ['pain_signal'] },
-  { id: 'task_created', name: 'Task Created', eventTypes: ['task_created', 'diagnostician_run'] },
-  { id: 'candidate_generated', name: 'Candidate Generated', eventTypes: ['candidate_generated'] },
-  { id: 'principle_added', name: 'Principle Added', eventTypes: ['principle_added'] },
+  { id: 'task_created', name: 'Task Created', eventTypes: ['diagnosis_task', 'heartbeat_diagnosis', 'evolution_task'] },
+  { id: 'candidate_generated', name: 'Candidate Generated', eventTypes: ['principle_candidate'] },
+  { id: 'principle_added', name: 'Principle Added', eventTypes: ['rule_promotion'] },
 ];
 
 const THRESHOLD_MINUTES = {

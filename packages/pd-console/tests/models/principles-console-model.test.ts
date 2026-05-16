@@ -460,7 +460,7 @@ function writeLedger(workspaceDir: string, tree: Record<string, unknown>): void 
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(
     path.join(stateDir, 'principle_training_state.json'),
-    JSON.stringify({ tree }, null, 2),
+    JSON.stringify({ _tree: tree }, null, 2),
     'utf8',
   );
 }

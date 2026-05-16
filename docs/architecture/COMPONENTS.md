@@ -214,6 +214,121 @@ PD 系统有 5 类组件：
 | `TestDoubleRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/test-double-runtime-adapter.ts` | ✅ |
 | `PrincipleTreeLedgerAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/principle-tree-ledger-adapter.ts` | ✅ |
 | `RuntimeSelector` | 🔵 Service | core | `runtime-v2/runtime-selector.ts` | ✅ |
+| `ClaudeCodeRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/claude-code-runtime-adapter.ts` | ❌ 待建（ADR-0008）|
+| `CodexCliRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/codex-cli-runtime-adapter.ts` | ❌ 待建（ADR-0008）|
+| `GeminiCliRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/gemini-cli-runtime-adapter.ts` | ❌ 待建（ADR-0008）|
+| `OpenCodeRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/opencode-runtime-adapter.ts` | ❌ 待建（ADR-0008）|
+| `HermesRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/hermes-runtime-adapter.ts` | ❌ 待建（ADR-0008）|
+
+### 3.8 BALM — Built-in Agent Lifecycle Manager（ADR-0008）
+
+> 统一管理 PD 内置代理的身份、提示词、工具、工作流、后端路由和版本。
+
+| 组件 | 类型 | 包 | 文件 | 输入 | 输出 | 状态 |
+|------|-----|----|----|----|----|------|
+| `BuiltInAgentRegistry` | 🔵 Service | core | `runtime-v2/agents/agent-registry.ts` | agentId | AgentManifest | ❌ 待建 |
+| `AgentManifest` schema | 📋 Schema | core | `runtime-v2/agents/agent-manifest.ts` | n/a | TypeBox schema | ❌ 待建 |
+| `AgentRuntimeResolver` | 🔵 Service | core | `runtime-v2/agents/agent-runtime-resolver.ts` | agentId + caps | PDRuntimeAdapter | ❌ 待建 |
+| `AgentLoader` | 🔵 Service | core | `runtime-v2/agents/agent-loader.ts` | agentId + runtimeKind | AgentBundle | ❌ 待建 |
+| `AgentVersioning` | 🔵 Service | core | `runtime-v2/agents/agent-versioning.ts` | agentId + samples | EvalResult | ❌ 待建 |
+| `diagnostician.agent.yaml` | 📋 Schema | core | `runtime-v2/agents/definitions/diagnostician.agent.yaml` | n/a | AgentManifest | ❌ 待建 |
+| `dreamer.agent.yaml` | 📋 Schema | core | `runtime-v2/agents/definitions/dreamer.agent.yaml` | n/a | AgentManifest | ❌ 待建 |
+| `philosopher.agent.yaml` | 📋 Schema | core | `runtime-v2/agents/definitions/philosopher.agent.yaml` | n/a | AgentManifest | ❌ 待建 |
+| `scribe.agent.yaml` | 📋 Schema | core | `runtime-v2/agents/definitions/scribe.agent.yaml` | n/a | AgentManifest | ❌ 待建 |
+| `artificer.agent.yaml` | 📋 Schema | core | `runtime-v2/agents/definitions/artificer.agent.yaml` | n/a | AgentManifest | ❌ 待建 |
+| `evaluator.agent.yaml` | 📋 Schema | core | `runtime-v2/agents/definitions/evaluator.agent.yaml` | n/a | AgentManifest | ❌ 待建 |
+| `rollout-reviewer.agent.yaml` | 📋 Schema | core | `runtime-v2/agents/definitions/rollout-reviewer.agent.yaml` | n/a | AgentManifest | ❌ 待建 |
+| `trainer.agent.yaml` | 📋 Schema | core | `runtime-v2/agents/definitions/trainer.agent.yaml` | n/a | AgentManifest | ❌ 待建 |
+
+**不变量**：
+- `BALM-1`：所有内置代理必须有 manifest，禁止匿名 Peer Runner
+- `BALM-2`：Peer Runner 不得直接 import Adapter 实现，必须通过 BALM 解析
+- `BALM-3`：Agent prompt 必须从 manifest 加载，不得硬编码
+
+### 3.9 LRAS — Long-Running Agent Session（ADR-0009）
+
+> 代理持续工作直到完成的会话模型。10 分钟起步，有检查点、自校验工具、错误日志回灌。
+
+| 组件 | 类型 | 包 | 文件 | 输入 | 输出 | 状态 |
+|------|-----|----|----|----|----|------|
+| `AgentSession` | 🔵 Service | core | `runtime-v2/session/agent-session.ts` | taskId + agentBundle | SessionResult | ❌ 待建 |
+| `SessionCheckpoint` | 🟡 Store | core | `runtime-v2/session/session-checkpoint.ts` | sessionId + scratchpad | checkpointId | ❌ 待建 |
+| `SessionStateMachine` | 🔧 Util | core | `runtime-v2/session/session-state-machine.ts` | state + event | nextState | ❌ 待建 |
+| `SelfValidationTools` | 🔵 Service | core | `runtime-v2/session/self-validation-tools.ts` | output + schema | ValidationResult | ❌ 待建 |
+| `LogBackflow` | 🔵 Service | core | `runtime-v2/session/log-backflow.ts` | workspaceDir + lookback | logLines[] | ❌ 待建 |
+
+**PD 元工具（pd-cli 暴露给代理）**：
+
+| 工具 | pd-cli 命令 | 作用 | 状态 |
+|-----|-----------|------|------|
+| `pd_validate_output` | `pd validate-output` | 在线校验输出是否符合 schema | ❌ 待建 |
+| `pd_fetch_recent_logs` | `pd logs recent` | 拉取最近 N 条 error/warn 日志 | ❌ 待建 |
+| `pd_fetch_pain_history` | `pd pain history` | 拉取 painId 的历史诊断 | ❌ 待建 |
+| `pd_fetch_principle_ledger` | `pd ledger read` | 只读访问账本 | ❌ 待建 |
+| `pd_check_schema_drift` | `pd schema check` | 验证当前 schema 版本 | ❌ 待建 |
+
+**不变量**：
+- `LRAS-1`：每个 LRAS session 至少有 1 个 checkpoint
+- `LRAS-2`：self-validation tools 不得有副作用（只读）
+- `LRAS-3`：Log backflow 必须脱敏（应用 log-sanitizer）
+
+### 3.10 GAP — Goal-Aligned Pain + Goals（ADR-0010）
+
+> 目标驱动的痛苦信号源。Mission/Objective 数据模型 + GAP 信号生成器 + 决策卫生门控。
+
+| 组件 | 类型 | 包 | 文件 | 输入 | 输出 | 状态 |
+|------|-----|----|----|----|----|------|
+| `ObjectiveStore` | 🟡 Store | core | `runtime-v2/goals/objective-store.ts` | Objective | CRUD | ❌ 待建 |
+| `KeyResultStore` | 🟡 Store | core | `runtime-v2/goals/key-result-store.ts` | KeyResult | CRUD | ❌ 待建 |
+| `MissionStore` | 🟡 Store | core | `runtime-v2/goals/mission-store.ts` | Mission | CRUD | ❌ 待建 |
+| `GAPSignalGenerator` | 🔵 Service | core | `runtime-v2/goals/gap-signal-generator.ts` | workspaceDir | GAPSignal[] | ❌ 待建 |
+| `AlignmentEvaluator` | 🔧 Util | core | `runtime-v2/goals/alignment-evaluator.ts` | mission + objective | alignmentScore | ❌ 待建 |
+| `DecisionHygieneGate` | 🔵 Service | core | `runtime-v2/decision-hygiene/decision-hygiene-gate.ts` | DecisionContext | HygieneRequirement | ❌ 待建 |
+| `ThinkingModels` | 🔧 Util | core | `runtime-v2/decision-hygiene/thinking-models.ts` | n/a | framework list | ❌ 待建 |
+
+**GAP 信号三层架构**：
+
+| 层 | 信号类型 | 触发 Diagnostician | 说明 |
+|----|---------|------------------|------|
+| Layer 1（主信号）| `mission_failed` / `mission_stalled` / `okr_drift` / `decision_skipped` / `rework_loop` | ✅ 独立触发 | 目标层事件 |
+| Layer 2（强信号）| `explicit_user_complaint` / `user_correction` | ✅ 独立触发 | 用户反馈 |
+| Layer 3（辅助）| `tool_failure` / `empathy_inferred` | ❌ 仅作为证据 | 不独立触发 |
+
+**DecisionHygieneGate 触发规则**：
+
+| 条件 | 触发类型 |
+|------|---------|
+| 估计影响 = high / critical | 强制（hard gate）|
+| 涉及不可逆变更（删数据、改 schema、生产部署）| 强制 |
+| 同一 mission 已 rework 过 3 次 | 强制 |
+| 偏离当前 OKR > 20% | 强制 |
+| 其他情况 | 提醒（soft reminder）|
+
+**不变量**：
+- `GAP-1`：Layer 3 信号不得独立触发 Diagnostician（GAP Generator 强制）
+- `HYGIENE-1`：high/critical 影响的决策必须经过 DecisionHygieneGate
+
+### 3.11 MissionScheduler — 三层任务调度（ADR-0011）
+
+> 替代 polling 模型，按 Objective → Mission → Run 三层优先级调度代理工作。
+
+| 组件 | 类型 | 包 | 文件 | 输入 | 输出 | 状态 |
+|------|-----|----|----|----|----|------|
+| `MissionScheduler` | 🔵 Service | core | `runtime-v2/scheduler/mission-scheduler.ts` | n/a | ScheduleDecision[] | ❌ 待建 |
+| `PriorityCalculator` | 🔧 Util | core | `runtime-v2/scheduler/priority-calculator.ts` | mission + objective | priority score | ❌ 待建 |
+| `DependencyResolver` | 🔧 Util | core | `runtime-v2/scheduler/dependency-resolver.ts` | taskId | resolved deps | ❌ 待建 |
+
+**三层任务模型**：
+
+| 层 | 实体 | 生命周期 | 关联 |
+|----|------|---------|------|
+| L1 | `Objective` | 数月（季度目标）| 由人类设置 |
+| L2 | `Mission` | 数小时到数天 | 可选关联 Objective |
+| L3 | `Run`（现有 TaskRecord）| 数分钟到数十分钟 | 关联 Mission |
+
+**不变量**：
+- `SCHED-1`：MissionScheduler 调度决策必须可解释（reason 字段非空）
+- `SCHED-2`：IdleTrigger 唤起后调用 MissionScheduler，不直接调用 Orchestrator
 
 ### 3.6 GFI（Global Friction Index）
 
