@@ -192,6 +192,18 @@ export class EvolutionConsoleModel {
     try {
       const raw = fs.readFileSync(ledgerPath, 'utf8');
       const parsed = JSON.parse(raw) as {
+        _tree?: {
+          principles?: Record<string, {
+            id: string;
+            status: PrincipleStatus;
+            text: string;
+            triggerPattern: string;
+            action: string;
+            evaluability: string;
+            createdAt: string;
+            updatedAt: string;
+          }>;
+        };
         tree?: {
           principles?: Record<string, {
             id: string;
@@ -205,7 +217,7 @@ export class EvolutionConsoleModel {
           }>;
         };
       };
-      const principles = Object.values(parsed.tree?.principles ?? {});
+      const principles = Object.values(parsed._tree?.principles ?? parsed.tree?.principles ?? {});
 
       for (const p of principles) {
         summary.total++;

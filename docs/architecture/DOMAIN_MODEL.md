@@ -212,9 +212,10 @@ PD 鼓励**渐进式内化**：原则先以 prompt 起步，经过验证后逐�
 
 ## 4. 系统动力学与流量词汇
 
-| 概念 | 定义 |
+| **概念** | **定义** |
 |------|-----|
 | **Pain Signal** | 代理执行任务时遇到的具体挫败（错误、超时、用户负面反馈）。是演化的原始输入流量。 |
+| **GAP Signal** | Goal-Aligned Pain Signal。目标驱动的痛苦信号，来自 Mission 失败/停滞、OKR 偏离、决策卫生缺失等**长程目标层**事件。是 Pain Pipeline 的**主信号源**（Layer 1）。 |
 | **Diagnosis** | 寻找 Pain 根因的分析过程，由 `DiagnosticianRunner` 完成。|
 | **Recommendation** | Diagnostician 输出的建议项。合法 `kind`：`principle / rule / implementation / prompt / defer`。|
 | **Taxonomy** | 将 Recommendation 正确分类的动作。分类精度决定软硬转换效率。|
@@ -225,7 +226,13 @@ PD 鼓励**渐进式内化**：原则先以 prompt 起步，经过验证后逐�
 | **Pruning Action** | 真正改变 Principle 生命周期的**写**动作。**当前未实现**，需独立 issue 推进。|
 | **Approval** | 高风险通道激活的人工审批操作（ADR-0006）。|
 | **RejectionFeedback** | 拒绝 Approval 后的结构化反馈，触发 Internalization Pipeline 优化（ADR-0006）。|
-| **Shadow Mode** | code_tool_hook 通道激活后的观察期（ADR-0004 / ADR-0006）。|
+| **Shadow Mode** | code_tool_hook 通道激活后的 Offline Replay 观察期（ADR-0004 / ADR-0006）。|
+| **Objective** | OKR 中的季度目标。Mission 的上层锚点。可选关联（Mission 可以是 standalone）。|
+| **KeyResult** | Objective 的可量化关键结果。有 target / current / measurement_source。|
+| **Mission** | 长程任务（数小时到数天）。包含多个 Run，跟踪 status/progress/blockers，可选关联 Objective。|
+| **DecisionHygieneGate** | 在代理做高影响决策前强制触发的分析流程。high/critical 影响必须经过，其他为提醒。|
+| **AgentManifest** | 内置代理的声明式清单（YAML）。包含 prompt、tools、preferred_runtimes、版本、评估指标。|
+| **AgentSession（LRAS）** | Long-Running Agent Session。代理持续工作直到完成的会话模型，有检查点和自修复能力。|
 
 **严禁混淆**：
 - ❌ `Pruning Review` 当成 `Pruning Action`
@@ -366,6 +373,15 @@ disabled（自动 deactivate）
 | **ChannelWriter（5 个）** | TBD | `packages/principles-core/src/runtime-v2/activation/writers/` | ❌ 待建 |
 | **Nocturnal-Trinity** | `packages/openclaw-plugin/src/core/nocturnal-trinity.ts` | 删除 | ⏳ 删除中（ADR-0005）|
 | **NocturnalArtifact** | plugin | 替换为 PIArtifact | ⏳ 迁移中（ADR-0005）|
+| **BuiltInAgentRegistry（BALM）** | TBD | `packages/principles-core/src/runtime-v2/agents/` | ❌ 待建（ADR-0008）|
+| **AgentManifest** | TBD | `packages/principles-core/src/runtime-v2/agents/agent-manifest.ts` | ❌ 待建（ADR-0008）|
+| **AgentSession / LRAS** | TBD | `packages/principles-core/src/runtime-v2/session/` | ❌ 待建（ADR-0009）|
+| **SessionCheckpoint** | TBD | `packages/principles-core/src/runtime-v2/session/session-checkpoint.ts` | ❌ 待建（ADR-0009）|
+| **GAPSignalGenerator** | TBD | `packages/principles-core/src/runtime-v2/goals/gap-signal-generator.ts` | ❌ 待建（ADR-0010）|
+| **ObjectiveStore** | TBD | `packages/principles-core/src/runtime-v2/goals/objective-store.ts` | ❌ 待建（ADR-0010）|
+| **MissionStore** | TBD | `packages/principles-core/src/runtime-v2/goals/mission-store.ts` | ❌ 待建（ADR-0010）|
+| **DecisionHygieneGate** | TBD | `packages/principles-core/src/runtime-v2/decision-hygiene/` | ❌ 待建（ADR-0010）|
+| **MissionScheduler** | TBD | `packages/principles-core/src/runtime-v2/scheduler/mission-scheduler.ts` | ❌ 待建（ADR-0011）|
 
 **迁移状态图例**：
 - ✅ Done
@@ -407,6 +423,10 @@ UI 文案可使用同义词；**代码、Schema、ADR、issue title 必须使用
 5. ❌ **激活流水线落地**：ActivationDispatcher + 5 ChannelWriter（ADR-0006）
 6. ❌ **审批 UI**：pd-console `/approvals` 路由（ADR-0006 + ADR-0007）
 7. ❌ **Pruning Action**：从 ReadModel 推进到真正的 mutation（独立 issue）
+8. ❌ **BALM**：内置代理生命周期管理，声明式 AgentManifest（ADR-0008）
+9. ❌ **LRAS**：长程代理会话，检查点 + 自校验工具（ADR-0009）
+10. ❌ **GAP + Goals**：Mission/Objective 数据模型 + GAP 信号生成器（ADR-0010）
+11. ❌ **MissionScheduler**：三层任务调度，替代 polling 模型（ADR-0011）
 
 ---
 
