@@ -228,19 +228,13 @@ function buildCoreAndCli() {
 
 function buildPdConsole() {
   console.log('\n🔨 Building pd-console...');
-  const distDir = join(PD_CONSOLE_SOURCE_DIR, 'dist');
-  const serverDist = join(distDir, 'server');
 
-  if (!existsSync(join(serverDist, 'index.js'))) {
-    try {
-      execSync('npm run build', { cwd: PD_CONSOLE_SOURCE_DIR, stdio: 'inherit' });
-      console.log('✅ pd-console built');
-    } catch (error) {
-      console.error('\n❌ pd-console build failed');
-      process.exit(1);
-    }
-  } else {
-    console.log('⏭️  pd-console dist already exists (skip build)');
+  try {
+    execSync('npm run build:ui', { cwd: PD_CONSOLE_SOURCE_DIR, stdio: 'inherit' });
+    console.log('✅ pd-console UI built');
+  } catch (error) {
+    console.error('\n❌ pd-console UI build failed');
+    process.exit(1);
   }
 }
 
