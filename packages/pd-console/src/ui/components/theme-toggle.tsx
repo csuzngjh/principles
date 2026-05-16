@@ -34,8 +34,9 @@ export function ThemeToggle() {
       variant="ghost"
       size="icon"
       onClick={toggleTheme}
-      className="transition-transform duration-300 hover:rotate-180"
+      className="transition-transform duration-300 hover:rotate-180 motion-reduce:transition-none motion-reduce:hover:rotate-0"
       title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
     >
       {isDark ? (
         <Sun className="h-5 w-5" />

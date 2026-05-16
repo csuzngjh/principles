@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { getToken, setToken, fetchWorkspaces, addWorkspace, removeWorkspace, syncWorkspace } from "../api.js";
+import { formatDate } from "../utils/format.js";
 import type { WorkspaceEntry } from "../api.js";
 import { PageHeader } from "../components/page-header.js";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card.js";
 import { Button } from "../components/ui/button.js";
+import { Input } from "../components/ui/input.js";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../components/ui/alert-dialog.js";
 import { Separator } from "../components/ui/separator.js";
 import { Key, Plus, RefreshCw, Trash2, CheckCircle, XCircle } from "lucide-react";
 
@@ -30,14 +33,15 @@ function AuthSettings() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <label className="block mb-2 text-sm font-medium">
-          Bearer Token
-          <input
+        <label className="block mb-2 text-sm font-medium" htmlFor="bearer-token">
+          {t("pages:settings.bearerToken")}
+          <Input
+            id="bearer-token"
             type="password"
             value={tokenValue}
             onChange={(e) => { setTokenValue(e.target.value); setSaved(false); }}
-            placeholder="Enter access token"
-            className="mt-1 w-full px-3 py-2 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            placeholder={t("pages:settings.enterAccessToken")}
+            className="mt-1"
           />
         </label>
         <Button onClick={handleSave} disabled={!tokenValue.trim()}>
@@ -50,7 +54,7 @@ function AuthSettings() {
           </div>
         )}
         <p className="mt-3 text-xs text-muted-foreground">
-          Token is stored in the browser session and will be cleared when the tab is closed.
+          {t("pages:settings.tokenSessionOnly")}
         </p>
       </CardContent>
     </Card>
@@ -120,7 +124,7 @@ function WorkspaceManager() {
             No workspaces configured
           </p>
         ) : (
-          <div className="space-y-3">
+          <div className="flex flex-col gap-3">
             {workspaces.map((ws) => (
               <div
                 key={ws.name}
@@ -133,7 +137,7 @@ function WorkspaceManager() {
                   <p className="text-xs text-muted-foreground">{ws.path}</p>
                   {ws.lastSync && (
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Last sync: {new Date(ws.lastSync).toLocaleString()}
+                      {t("pages:settings.lastSync")} {formatDate(ws.lastSync)}
                     </p>
                   )}
                 </div>
@@ -142,10 +146,24 @@ function WorkspaceManager() {
                     <RefreshCw className="h-3 w-3 mr-1" />
                     {t("pages:settings.syncWorkspace")}
                   </Button>
-                  <Button variant="destructive" size="sm" onClick={() => handleRemove(ws.name)}>
-                    <Trash2 className="h-3 w-3 mr-1" />
-                    {t("pages:settings.removeWorkspace")}
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="destructive" size="sm">
+                        <Trash2 className="h-3 w-3 mr-1" />
+                        {t("pages:settings.removeWorkspace")}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t("pages:settings.confirmDeleteTitle")}</AlertDialogTitle>
+                        <AlertDialogDescription>{t("pages:settings.confirmDeleteDescription", { name: ws.name })}</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
+                        <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => handleRemove(ws.name)}>{t("common:confirm")}</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </div>
             ))}
@@ -157,21 +175,23 @@ function WorkspaceManager() {
         <h4 className="text-sm font-medium mb-3">{t("pages:settings.addWorkspace")}</h4>
         <div className="flex gap-2 items-end">
           <div className="flex-1">
-            <label className="text-xs text-muted-foreground">{t("common:name")}</label>
-            <input
+            <label className="text-xs text-muted-foreground" htmlFor="ws-name">{t("pages:settings.name")}</label>
+            <Input
+              id="ws-name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="my-workspace"
-              className="mt-1 w-full px-3 py-1.5 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="mt-1 h-8 text-sm"
             />
           </div>
           <div className="flex-[2]">
-            <label className="text-xs text-muted-foreground">Path</label>
-            <input
+            <label className="text-xs text-muted-foreground" htmlFor="ws-path">{t("pages:settings.path")}</label>
+            <Input
+              id="ws-path"
               value={newPath}
               onChange={(e) => setNewPath(e.target.value)}
               placeholder="/path/to/workspace"
-              className="mt-1 w-full px-3 py-1.5 rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="mt-1 h-8 text-sm"
             />
           </div>
           <Button

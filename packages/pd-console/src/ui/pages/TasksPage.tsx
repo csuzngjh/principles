@@ -24,20 +24,20 @@ const ZONE_CONFIG = [
   { key: "recentActivity" as const, label: "recentActivity", color: "bg-blue-50 border-blue-200", headerColor: "bg-blue-100", badgeColor: "bg-blue-500" },
 ];
 
-const taskKindToAgent: Record<string, { id: string; label: string }> = {
-  diagnostician: { id: 'diagnostician', label: '诊断者' },
-  sleep_reflection: { id: 'nocturnal-reflection', label: '夜间反思' },
-  keyword_optimization: { id: 'correction-observer', label: '纠正观察者' },
-  principle_candidate_intake: { id: 'diagnostician', label: '诊断者' },
+const TASK_KIND_AGENT: Record<string, { id: string; i18nKey: string }> = {
+  diagnostician: { id: 'diagnostician', i18nKey: 'pages:tasks.agentDiagnostician' },
+  sleep_reflection: { id: 'nocturnal-reflection', i18nKey: 'pages:tasks.agentNocturnalReflection' },
+  keyword_optimization: { id: 'correction-observer', i18nKey: 'pages:tasks.agentCorrectionObserver' },
+  principle_candidate_intake: { id: 'diagnostician', i18nKey: 'pages:tasks.agentDiagnostician' },
 };
 
-function timeAgo(date: Date): string {
+function timeAgo(date: Date, t: (key: string, options?: Record<string, unknown>) => string): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return `${seconds}秒前`;
+  if (seconds < 60) return t("pages:tasks.secondsAgo", { count: seconds });
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}分钟前`;
+  if (minutes < 60) return t("pages:tasks.minutesAgo", { count: minutes });
   const hours = Math.floor(minutes / 60);
-  return `${hours}小时前`;
+  return t("pages:tasks.hoursAgo", { count: hours });
 }
 
 function TaskCard({
@@ -81,17 +81,17 @@ function TaskCard({
               <Badge variant="outline" className="text-xs">
                 {task.kind}
               </Badge>
-              {taskKindToAgent[task.title] && (
+              {TASK_KIND_AGENT[task.title] && (
                 <a
-                  href={`#/agents/${taskKindToAgent[task.title].id}`}
+                  href={`#/agents/${TASK_KIND_AGENT[task.title].id}`}
                   className="text-xs text-primary hover:underline"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {taskKindToAgent[task.title].label}
+                  {t(TASK_KIND_AGENT[task.title].i18nKey)}
                 </a>
               )}
               <span className="text-xs text-muted-foreground">
-                {timeAgo(new Date(task.createdAt))}
+                {timeAgo(new Date(task.createdAt), t)}
               </span>
             </div>
             <p className="font-medium text-sm truncate">{task.title}</p>
@@ -278,7 +278,7 @@ function TasksPageInner() {
   async function loadData() {
     const result = await fetchTasks();
     if (!result.success) {
-      setError(result.error ?? "加载失败");
+      setError(result.error ?? t("pages:tasks.loadFailed"));
     } else {
       setZones(result.data);
       setLastUpdated(new Date());
@@ -344,7 +344,7 @@ function TasksPageInner() {
       const result = await approveTask(taskId);
       if (!result.success) {
         setZones((prev) => ({ ...prev, [zone]: [task, ...prev[zone]] }));
-        setError(`操作失败: ${result.error ?? "未知错误"}`);
+        setError(t("pages:tasks.operationFailed", { error: result.error ?? t("pages:tasks.unknownError") }));
       }
     }, 5000);
     setUndoMap((prev) => {
@@ -367,7 +367,7 @@ function TasksPageInner() {
       const result = await rejectTask(taskId);
       if (!result.success) {
         setZones((prev) => ({ ...prev, [zone]: [task, ...prev[zone]] }));
-        setError(`操作失败: ${result.error ?? "未知错误"}`);
+        setError(t("pages:tasks.operationFailed", { error: result.error ?? t("pages:tasks.unknownError") }));
       }
     }, 5000);
     setUndoMap((prev) => {
@@ -404,7 +404,7 @@ function TasksPageInner() {
       }
     }
     if (failed > 0) {
-      setError(`批量清理完成，${failed}/${cleanupTasks.length} 项失败`);
+      setError(t("pages:tasks.batchCleanupResult", { failed, total: cleanupTasks.length }));
     }
   }
 
@@ -526,7 +526,7 @@ export function TasksPage() {
     return (
       <Card className="max-w-md mx-auto mt-12">
         <CardContent className="p-8 text-center">
-          <div className="animate-pulse">Checking authentication...</div>
+          <div className="animate-pulse">{t("pages:tasks.checkingAuth")}</div>
         </CardContent>
       </Card>
     );

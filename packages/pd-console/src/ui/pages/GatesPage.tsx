@@ -6,6 +6,7 @@ import { PageHeader } from "../components/page-header.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.js";
 import { Badge } from "../components/ui/badge.js";
 import { Skeleton } from "../components/ui/skeleton.js";
+import { formatDate } from "../utils/format.js";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
   healthy: "default",
@@ -77,21 +78,21 @@ export function GatesPage() {
                 {statsData.trust.stage}
               </Badge>
             </div>
-            <p className="text-sm text-muted-foreground mt-2">
-              Score: {statsData.trust.score}
+            <p className="text-sm text-muted-foreground mb-2">
+              {t("pages:gates.score")} {statsData.trust.score}
             </p>
           </CardContent>
         </Card>
 
         <Card className="border-l-4 border-l-amber-500">
           <CardContent className="p-6">
-            <p className="text-sm text-muted-foreground mb-2">GFI</p>
+            <p className="text-sm text-muted-foreground mb-2">{t("pages:gates.gfiLabel")}</p>
             <div className="text-2xl font-bold">{statsData.gfi.current}</div>
             <Badge variant="secondary" className="mt-1 capitalize">
               {statsData.gfi.stage}
             </Badge>
             <p className="text-xs text-muted-foreground mt-2">
-              Peak: {statsData.gfi.peakToday} | Threshold: {statsData.gfi.threshold}
+              {t("pages:gates.peak")} {statsData.gfi.peakToday} | {t("pages:gates.threshold")} {statsData.gfi.threshold}
             </p>
           </CardContent>
         </Card>
@@ -101,13 +102,13 @@ export function GatesPage() {
             <p className="text-sm text-muted-foreground mb-2">{t("pages:gates.todayBlocks")}</p>
             <div className="space-y-1 text-sm">
               <div>
-                GFI Blocks: <strong>{statsData.today.gfiBlocks}</strong>
+                {t("pages:gates.gfiBlocks")}: <strong>{statsData.today.gfiBlocks}</strong>
               </div>
               <div>
-                Stage Blocks: <strong>{statsData.today.stageBlocks}</strong>
+                {t("pages:gates.stageBlocks")}: <strong>{statsData.today.stageBlocks}</strong>
               </div>
               <div>
-                Bypass Attempts: <strong>{statsData.today.bypassAttempts}</strong>
+                {t("pages:gates.bypassAttempts")}: <strong>{statsData.today.bypassAttempts}</strong>
               </div>
             </div>
           </CardContent>
@@ -146,14 +147,14 @@ export function GatesPage() {
               {t("components:zoneSection.empty")}
             </p>
           ) : (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-3">
               {blocks.data.map((block, i) => (
                 <Card key={i} className="border-l-4 border-l-destructive">
                   <CardContent className="p-4">
                     <div className="flex justify-between items-center">
                       <span className="font-bold text-sm">{block.toolName}</span>
                       <span className="text-xs text-muted-foreground">
-                        {new Date(block.timestamp).toLocaleString()}
+                        {formatDate(block.timestamp)}
                       </span>
                     </div>
                     <p className="mt-2 text-sm">{block.reason}</p>

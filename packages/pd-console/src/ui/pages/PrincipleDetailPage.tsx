@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { fetchPrincipleDetail } from "../api.js";
 import type { PrincipleDetail, RuleItem } from "../api.js";
+import { formatDate, formatDateShort } from "../utils/format.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
@@ -375,13 +376,13 @@ export function PrincipleDetailPage() {
                   <Clock className="h-3 w-3" />
                   {t("pages:principles.createdAt")}:{" "}
                   {principle.createdAt
-                    ? new Date(principle.createdAt).toLocaleDateString()
+                    ? formatDateShort(principle.createdAt)
                     : "—"}
                 </span>
                 <span>
                   {t("pages:principles.updatedAt")}:{" "}
                   {principle.updatedAt
-                    ? new Date(principle.updatedAt).toLocaleDateString()
+                    ? formatDateShort(principle.updatedAt)
                     : "—"}
                 </span>
               </div>
@@ -532,7 +533,7 @@ export function PrincipleDetailPage() {
           </CardHeader>
           <CardContent>
             <p className="text-sm">
-              {new Date(principle.lastPainPreventedAt).toLocaleString()}
+              {formatDate(principle.lastPainPreventedAt)}
             </p>
           </CardContent>
         </Card>

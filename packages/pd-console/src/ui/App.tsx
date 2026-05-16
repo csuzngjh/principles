@@ -44,7 +44,7 @@ export function App() {
       <ThemeProvider>
         <div className="min-h-screen flex items-center justify-center">
           <div className="text-muted-foreground animate-pulse">
-            Checking authentication...
+            Checking authentication…
           </div>
         </div>
       </ThemeProvider>
@@ -71,12 +71,15 @@ export function App() {
       <I18nextProvider i18n={i18n}>
         <HashRouter>
           <div className="min-h-screen bg-background text-foreground">
+            <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-4 focus:bg-background focus:text-foreground">
+              Skip to main content
+            </a>
             <AppSidebar
               collapsed={sidebarCollapsed}
               onCollapsedChange={setSidebarCollapsed}
             />
             <div
-              className={`transition-all duration-300 flex flex-col min-h-screen ${sidebarCollapsed ? "ml-16" : "ml-56"}`}
+              className={`transition-[margin] duration-300 motion-reduce:transition-none flex flex-col min-h-screen ${sidebarCollapsed ? "ml-16" : "ml-56"}`}
             >
               <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
                 <div className="flex items-center justify-between px-6 py-3">
@@ -100,7 +103,7 @@ export function App() {
                   </div>
                 </div>
               </header>
-              <main className="flex-1 p-6 overflow-y-auto">
+              <main id="main-content" className="flex-1 p-6 overflow-y-auto">
                 <ErrorBoundary>
                   <Routes>
                     <Route path="/" element={<OverviewPage />} />

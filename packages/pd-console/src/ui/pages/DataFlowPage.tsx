@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/page-header.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card.js';
 import { Badge } from '../components/ui/badge.js';
+import { formatTime } from '../utils/format.js';
 import { Button } from '../components/ui/button.js';
 import { Skeleton } from '../components/ui/skeleton.js';
 import {
@@ -374,7 +375,7 @@ export function DataFlowPage() {
         <CardContent className="p-4">
           <div className="flex items-center justify-between text-sm text-muted-foreground">
             <span>数据刷新间隔: 15 秒</span>
-            <span>最后更新: {new Date(data.generatedAt).toLocaleTimeString()}</span>
+            <span>最后更新: {formatTime(data.generatedAt)}</span>
           </div>
         </CardContent>
       </Card>
