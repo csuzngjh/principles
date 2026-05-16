@@ -69,6 +69,7 @@
       "activeWorkspaces": "活跃工作空间",
       "painSignals": "痛苦信号",
       "candidates": "候选",
+      "tasks": "任务",
       "painEvents": "痛苦事件",
       "pendingSamples": "待处理样本",
       "approvedSamples": "已批准样本",
@@ -165,7 +166,15 @@
       "progress": "进度",
       "completedTasks": "已完成任务",
       "failedTasks": "失败任务",
-      "pendingTasks": "待处理任务"
+      "pendingTasks": "待处理任务",
+      "inProgress": "进行中",
+      "stageDistribution": "阶段分布",
+      "recentTransitions": "最近转换",
+      "ready": "就绪",
+      "retryWait": "重试等待",
+      "blocked": "已阻塞",
+      "byTaskKind": "按任务类型",
+      "leased": "已租用"
     },
     "principles": {
       "title": "原则",

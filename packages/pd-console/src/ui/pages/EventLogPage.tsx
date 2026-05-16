@@ -5,6 +5,7 @@ import { PageHeader } from '../components/page-header.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card.js';
 import { Button } from '../components/ui/button.js';
 import { Badge } from '../components/ui/badge.js';
+import { Input } from '../components/ui/input.js';
 import {
   ChevronLeft,
   ChevronRight,

@@ -10,7 +10,7 @@ interface DataFreshnessIndicatorProps {
   thresholdMinutes?: { stale: number; critical: number };
 }
 
-function formatTimeAgo(timestamp: string, t: (key: string) => string): string {
+function formatTimeAgo(timestamp: string, t: (key: string, options?: Record<string, unknown>) => string): string {
   const now = new Date();
   const time = new Date(timestamp);
   const diffMs = now.getTime() - time.getTime();
@@ -20,9 +20,9 @@ function formatTimeAgo(timestamp: string, t: (key: string) => string): string {
   const diffDay = Math.floor(diffHour / 24);
 
   if (diffMin < 1) return t('components:dataFreshness.justNow');
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHour < 24) return `${diffHour}h ago`;
-  return `${diffDay}d ago`;
+  if (diffMin < 60) return t('components:pageHeader.minutesAgo', { count: diffMin });
+  if (diffHour < 24) return t('components:pageHeader.hoursAgo', { count: diffHour });
+  return t('components:pageHeader.daysAgo', { count: diffDay });
 }
 
 export function DataFreshnessIndicator({

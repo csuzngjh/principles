@@ -160,7 +160,7 @@ function WorkspaceManager() {
                       </AlertDialogHeader>
                       <AlertDialogFooter>
                         <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => handleRemove(ws.name)}>{t("common:confirm")}</AlertDialogAction>
+                        <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => handleRemove(ws.name)}>{t("common:confirm")}</AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
