@@ -17,6 +17,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
 import { loadLedger } from '../principle-tree-ledger.js';
+import { DEFAULT_L1_HARD_CAP, validateL1CapConfig } from './l1-hard-cap.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,8 @@ export interface PruningHealthSummary {
   reviewCount: number;
   orphanDerivedCandidateCount: number;
   averageAgeDays: number;
+  activeL1Count: number;
+  l1Cap: number;
   generatedAt: string;
 }
 
@@ -67,6 +70,8 @@ export interface PruningReadModelOptions {
   watchThresholdDays?: number;
   /** Override days threshold for 'review' risk level (default: 90) */
   reviewThresholdDays?: number;
+  /** Override L1 hard cap for health summary (default: 12) */
+  l1Cap?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -143,11 +148,14 @@ export class PruningReadModel {
   private readonly workspaceDir: string;
   private readonly watchThresholdDays: number;
   private readonly reviewThresholdDays: number;
+  private readonly l1Cap: number;
 
   constructor(opts: PruningReadModelOptions) {
     this.workspaceDir = opts.workspaceDir;
     this.watchThresholdDays = opts.watchThresholdDays ?? 30;
     this.reviewThresholdDays = opts.reviewThresholdDays ?? 90;
+    this.l1Cap = opts.l1Cap ?? DEFAULT_L1_HARD_CAP;
+    validateL1CapConfig({ hardCap: this.l1Cap });
   }
 
   /**
@@ -276,6 +284,8 @@ export class PruningReadModel {
       averageAgeDays: signals.length > 0
         ? Math.round(totalAgeDays / signals.length)
         : 0,
+      activeL1Count: byStatus.active ?? 0,
+      l1Cap: this.l1Cap,
       generatedAt: now.toISOString(),
     };
   }
