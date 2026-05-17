@@ -119,6 +119,11 @@ const REQUIRED_SOURCE_FILES = [
   'l1-hard-cap.ts',
   // PRI-142
   'internalization/intake-to-internalization-bridge.ts',
+  // PRI-143
+  'idle-trigger/idle-trigger-types.ts',
+  'idle-trigger/idle-trigger-policy.ts',
+  'idle-trigger/idle-trigger-decision.ts',
+  'idle-trigger/index.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -163,6 +168,8 @@ const REQUIRED_TEST_FILES = [
   'l1-hard-cap.test.ts',
   // PRI-142
   'intake-to-internalization-bridge.test.ts',
+  // PRI-143
+  '../idle-trigger/__tests__/idle-trigger-decision.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -2578,6 +2585,64 @@ describe('PRI-142 IntakeToInternalizationBridge', () => {
     expect(src).toContain('BridgeDecision');
     expect(src).toContain('BridgeTaskSeed');
     expect(src).toContain('BridgeTaskStore');
+  });
+});
+
+// ── PRI-143: IdleTrigger Decision Model ──────────────────────────────────────
+
+describe('PRI-143 IdleTrigger Decision Model', () => {
+  it('core barrel exports evaluateIdleTriggerDecision, evaluateIdleTrigger, computeJitterMs, DEFAULT_IDLE_TRIGGER_CONFIG, resolveIdleTriggerConfig', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('evaluateIdleTriggerDecision');
+    expect(src).toContain('evaluateIdleTrigger');
+    expect(src).toContain('computeJitterMs');
+    expect(src).toContain('DEFAULT_IDLE_TRIGGER_CONFIG');
+    expect(src).toContain('resolveIdleTriggerConfig');
+  });
+
+  it('core barrel exports IdleTriggerConfig, IdleTriggerQueueSnapshot, IdleTriggerInput, IdleTriggerResult types', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('IdleTriggerConfig');
+    expect(src).toContain('IdleTriggerQueueSnapshot');
+    expect(src).toContain('IdleTriggerInput');
+    expect(src).toContain('IdleTriggerResult');
+  });
+
+  it('idle-trigger core files have zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const files = [
+      resolve(__dirname, '..', 'idle-trigger', 'idle-trigger-types.ts'),
+      resolve(__dirname, '..', 'idle-trigger', 'idle-trigger-policy.ts'),
+      resolve(__dirname, '..', 'idle-trigger', 'idle-trigger-decision.ts'),
+      resolve(__dirname, '..', 'idle-trigger', 'index.ts'),
+    ];
+    for (const file of files) {
+      const src = readFileSync(file, 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('node:process');
+      expect(src).not.toContain('openclaw-plugin');
+    }
+  });
+
+  it('idle-trigger/index.ts exports all public symbols', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'idle-trigger', 'index.ts'), 'utf-8');
+    expect(src).toContain('IdleTriggerConfig');
+    expect(src).toContain('IdleTriggerQueueSnapshot');
+    expect(src).toContain('IdleTriggerInput');
+    expect(src).toContain('IdleTriggerResult');
+    expect(src).toContain('DEFAULT_IDLE_TRIGGER_CONFIG');
+    expect(src).toContain('resolveIdleTriggerConfig');
+    expect(src).toContain('computeJitterMs');
+    expect(src).toContain('evaluateIdleTrigger');
+    expect(src).toContain('evaluateIdleTriggerDecision');
   });
 });
 
