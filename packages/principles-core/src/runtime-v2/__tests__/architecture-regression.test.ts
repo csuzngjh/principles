@@ -153,6 +153,8 @@ const REQUIRED_TEST_FILES = [
   'golden-trace-replay-validator.test.ts',
   // PRI-140
   '../store/sqlite-connection-pragma.test.ts',
+  // PRI-141
+  'task-three-strikes.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -2423,6 +2425,56 @@ describe('Phase 2.6 principle-tree data structures migration', () => {
     ), 'utf-8');
     expect(src).not.toMatch(/^export interface PrincipleDependency/m);
     expect(src).not.toMatch(/^export interface PrincipleTreeStore/m);
+  });
+});
+
+// ── PRI-141: Task Three Strikes Out Mechanism ──────────────────────────────────
+
+describe('PRI-141 Task Three Strikes Out Mechanism', () => {
+  it('core barrel exports isUnresolvable, recordRejection, DEFAULT_UNRESOLVABLE_THRESHOLD', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('isUnresolvable');
+    expect(src).toContain('recordRejection');
+    expect(src).toContain('DEFAULT_UNRESOLVABLE_THRESHOLD');
+  });
+
+  it('core barrel exports UnresolvableSample type', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('UnresolvableSample');
+  });
+
+  it('internalization-task-guards.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '..', 'internalization', 'internalization-task-guards.ts'
+    ), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('node:cron');
+  });
+
+  it('PITaskRecord includes rejectionCount field', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '..', 'internalization', 'peer-runner-contracts.ts'
+    ), 'utf-8');
+    expect(src).toContain('rejectionCount');
+  });
+
+  it('PITaskMetadata includes rejectionCount field', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(
+      __dirname, '..', 'internalization', 'pitask-metadata.ts'
+    ), 'utf-8');
+    expect(src).toContain('rejectionCount');
   });
 });
 

@@ -30,6 +30,7 @@ import {
   canAcquireLease,
   canTransitionTo,
   canRetryNow,
+  isUnresolvable,
 } from './internalization-task-guards.js';
 
 // ── Dependency Gate Types ─────────────────────────────────────────────────────
@@ -263,7 +264,14 @@ export function decideArtifactRejectionFeedback(
     sourceTaskKind: task.taskKind,
   };
 
-  // Scribe rejections → re-run scribe to regenerate
+  if (isUnresolvable(task)) {
+    return {
+      ...base,
+      action: 'escalate',
+      rejectionReason: 'unresolvable_threshold_exceeded',
+    };
+  }
+
   if (task.taskKind === 'scribe') {
     return {
       ...base,
@@ -272,7 +280,6 @@ export function decideArtifactRejectionFeedback(
     };
   }
 
-  // Artificer rejections → re-run artificer to re-validate
   if (task.taskKind === 'artificer') {
     return {
       ...base,
@@ -281,7 +288,6 @@ export function decideArtifactRejectionFeedback(
     };
   }
 
-  // All other runners → escalate for human review
   return {
     ...base,
     action: 'escalate',
@@ -315,6 +321,10 @@ export function createNextTaskProposal(
   channel?: InternalizationChannel,
 ): NextTaskProposal | null {
   if (currentTask.status !== 'succeeded') {
+    return null;
+  }
+
+  if (isUnresolvable(currentTask)) {
     return null;
   }
 
