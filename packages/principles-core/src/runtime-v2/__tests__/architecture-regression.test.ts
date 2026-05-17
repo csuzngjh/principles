@@ -98,7 +98,7 @@ const REQUIRED_SOURCE_FILES = [
   'correction/correction-types.ts',
   'correction/index.ts',
   // Phase 2 migration: nocturnal trinity types + pure computation
-  'nocturnal/nocturnal-trinity-types.ts',
+  'nocturnal/trinity-types.ts',
   'nocturnal/candidate-scoring.ts',
   'nocturnal/snapshot-contract.ts',
   'nocturnal/index.ts',
@@ -2195,7 +2195,7 @@ describe('Phase 2.2 correction types migration', () => {
 
 describe('Phase 2.3 nocturnal trinity types migration', () => {
   const CORE_FILES = [
-    'nocturnal/nocturnal-trinity-types.ts',
+    'nocturnal/trinity-types.ts',
     'nocturnal/candidate-scoring.ts',
     'nocturnal/snapshot-contract.ts',
     'nocturnal/index.ts',

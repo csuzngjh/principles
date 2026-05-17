@@ -12,7 +12,13 @@ vi.mock('fs', () => ({
 vi.mock('better-sqlite3', () => ({
   default: vi.fn(function () {
     return {
-      pragma: vi.fn(),
+      pragma: vi.fn((sql) => {
+        if (sql.includes('journal_mode')) return 'wal';
+        if (sql.includes('foreign_keys')) return 1;
+        if (sql.includes('busy_timeout')) return 5000;
+        if (sql.includes('synchronous')) return 1;
+        return undefined;
+      }),
       exec: vi.fn(),
       prepare: vi.fn(() => ({ all: vi.fn(() => []), get: vi.fn() })),
       close: vi.fn(),
@@ -58,7 +64,13 @@ describe('SqliteConnection readonly mode', () => {
 
   it('skips schema init in readonly mode', () => {
     const mockExec = vi.fn();
-    const mockPragma = vi.fn();
+    const mockPragma = vi.fn((sql) => {
+      if (sql.includes('journal_mode')) return 'wal';
+      if (sql.includes('foreign_keys')) return 1;
+      if (sql.includes('busy_timeout')) return 5000;
+      if (sql.includes('synchronous')) return 1;
+      return undefined;
+    });
     Database.mockImplementation(function () {
       return { exec: mockExec, pragma: mockPragma, prepare: vi.fn(() => ({ all: vi.fn(() => []), get: vi.fn() })), close: vi.fn() };
     });
@@ -72,7 +84,13 @@ describe('SqliteConnection readonly mode', () => {
 
   it('runs schema init in writable mode', () => {
     const mockExec = vi.fn();
-    const mockPragma = vi.fn();
+    const mockPragma = vi.fn((sql) => {
+      if (sql.includes('journal_mode')) return 'wal';
+      if (sql.includes('foreign_keys')) return 1;
+      if (sql.includes('busy_timeout')) return 5000;
+      if (sql.includes('synchronous')) return 1;
+      return undefined;
+    });
     Database.mockImplementation(function () {
       return { exec: mockExec, pragma: mockPragma, prepare: vi.fn(() => ({ all: vi.fn(() => []), get: vi.fn() })), close: vi.fn() };
     });
