@@ -39,6 +39,7 @@ import { handleRuntimeInternalizationIntegrity } from './commands/runtime-intern
 import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-internalization-integrity-repair.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
+import { handleRuntimeIdleTriggerEvaluate } from './commands/runtime-idle-trigger.js';
 
 const program = new Command();
 
@@ -449,6 +450,32 @@ internalizationCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeInternalizationIntegrityRepair({ workspace: opts.workspace, confirm: opts.confirm, dryRun: opts.dryRun, json: opts.json });
+  });
+
+const idleTriggerCmd = runtimeCmd
+  .command('idle-trigger')
+  .description('Idle trigger decision model (read-only)');
+
+idleTriggerCmd
+  .command('evaluate')
+  .description('Evaluate whether idle trigger should fire (read-only, no mutations)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .option('--enabled <boolean>', 'Override config enabled', v => v === 'true')
+  .option('--idle-threshold-ms <number>', 'Override idle threshold in ms', parseInt)
+  .option('--jitter-max-ms <number>', 'Override jitter max in ms', parseInt)
+  .option('--activity-cooldown-ms <number>', 'Override activity cooldown in ms', parseInt)
+  .option('--jitter-seed <string>', 'Jitter seed for deterministic evaluation')
+  .action(async (opts) => {
+    await handleRuntimeIdleTriggerEvaluate({
+      workspace: opts.workspace,
+      json: opts.json,
+      enabled: opts.enabled,
+      idleThresholdMs: opts.idleThresholdMs,
+      jitterMaxMs: opts.jitterMaxMs,
+      activityCooldownMs: opts.activityCooldownMs,
+      jitterSeed: opts.jitterSeed,
+    });
   });
 
 const diagnosticsCmd = runtimeCmd
