@@ -713,6 +713,22 @@ export type {
 export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
 export { MemoryPIArtifactStore } from './internalization/pi-artifact-store.js';
 
+// ── Intake To Internalization Bridge (PRI-142) ────────────────────────────────
+
+export type {
+  IntakeToInternalizationBridgeInput,
+  BridgeDecision,
+  BridgeTaskSeed,
+  BridgeTaskStore,
+} from './internalization/intake-to-internalization-bridge.js';
+
+export {
+  ROUTE_CHANNEL_MAP,
+  computeBridgeDecision,
+  buildDreamerTaskSeed,
+  seedIntakeTask,
+} from './internalization/intake-to-internalization-bridge.js';
+
 // ── Internalization Queue Read Model (PRI-73) ──────────────────────────────
 
 export { InternalizationQueueReadModel } from './internalization-queue-read-model.js';

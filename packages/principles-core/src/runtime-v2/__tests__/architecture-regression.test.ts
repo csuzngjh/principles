@@ -117,6 +117,8 @@ const REQUIRED_SOURCE_FILES = [
   'store/sqlite-connection.ts',
   // PRI-139
   'l1-hard-cap.ts',
+  // PRI-142
+  'internalization/intake-to-internalization-bridge.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -159,6 +161,8 @@ const REQUIRED_TEST_FILES = [
   'task-three-strikes.test.ts',
   // PRI-139
   'l1-hard-cap.test.ts',
+  // PRI-142
+  'intake-to-internalization-bridge.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -2526,6 +2530,54 @@ describe('PRI-139 L1 Hard Cap & LRU Eviction', () => {
     const src = readFileSync(resolve(__dirname, '..', 'pruning-read-model.ts'), 'utf-8');
     expect(src).toContain('activeL1Count');
     expect(src).toContain('l1Cap');
+  });
+});
+
+// ── PRI-142: IntakeToInternalizationBridge ──────────────────────────────────────
+
+describe('PRI-142 IntakeToInternalizationBridge', () => {
+  it('core barrel exports computeBridgeDecision, buildDreamerTaskSeed, seedIntakeTask, ROUTE_CHANNEL_MAP', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('computeBridgeDecision');
+    expect(src).toContain('buildDreamerTaskSeed');
+    expect(src).toContain('seedIntakeTask');
+    expect(src).toContain('ROUTE_CHANNEL_MAP');
+  });
+
+  it('core barrel exports IntakeToInternalizationBridgeInput, BridgeDecision, BridgeTaskSeed, BridgeTaskStore types', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('IntakeToInternalizationBridgeInput');
+    expect(src).toContain('BridgeDecision');
+    expect(src).toContain('BridgeTaskSeed');
+    expect(src).toContain('BridgeTaskStore');
+  });
+
+  it('intake-to-internalization-bridge.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'intake-to-internalization-bridge.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('internalization/index.ts exports bridge symbols', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
+    expect(src).toContain('computeBridgeDecision');
+    expect(src).toContain('buildDreamerTaskSeed');
+    expect(src).toContain('seedIntakeTask');
+    expect(src).toContain('ROUTE_CHANNEL_MAP');
+    expect(src).toContain('IntakeToInternalizationBridgeInput');
+    expect(src).toContain('BridgeDecision');
+    expect(src).toContain('BridgeTaskSeed');
+    expect(src).toContain('BridgeTaskStore');
   });
 });
 

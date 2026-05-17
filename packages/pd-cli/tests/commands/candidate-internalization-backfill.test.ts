@@ -16,50 +16,46 @@ vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({
   PrincipleTreeLedgerAdapter: vi.fn(),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
-  RuntimeStateManager: vi.fn().mockImplementation(function () {
-    return {
-      initialize: mockInitialize,
-      close: mockClose,
-      getCandidate: mockGetCandidate,
-      getTask: mockGetTask,
-      createTask: mockCreateTask,
-      updateTaskDiagnosticJson: mockUpdateTaskDiagnosticJson,
-      connection: {
-        getDb: () => ({
-          prepare: () => ({ all: mockAll, get: vi.fn(), run: vi.fn() }),
-        }),
-      },
-    };
-  }),
-  SqliteConnection: vi.fn(),
-  candidateList: vi.fn(),
-  candidateShow: vi.fn(),
-  CandidateIntakeService: vi.fn(),
-  CandidateIntakeError: class CandidateIntakeError extends Error {},
-  loadLedger: vi.fn(),
-  getLedgerFilePathPublic: vi.fn(),
-  decideInternalizationRoute: vi.fn(() => ({
-    ready: true,
-    route: 'principle-ledger',
-    reason: 'ready',
-    missingFields: [],
-    nextAction: 'internalize',
-  })),
-  createPITaskDiagnosticJson: vi.fn(() => JSON.stringify({ pi_metadata: { channel: 'prompt' } })),
-  createRemediationResult: vi.fn((input) => ({
-    mode: input.mode,
-    status: input.status ?? (input.mode === 'dry_run'
-      ? (input.actions?.length > 0 ? 'would_change' : 'no_op')
-      : (input.repairedCount > 0 ? 'changed' : 'no_op')),
-    safeToConfirm: input.safeToConfirm ?? false,
-    repairedCount: input.repairedCount ?? 0,
-    skippedCount: input.skippedCount ?? 0,
-    actions: input.actions ?? [],
-    warnings: input.warnings ?? [],
-  })),
-  remediationAction: vi.fn((input) => input),
-}));
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+  const original = await importOriginal() as Record<string, unknown>;
+  return {
+    ...original,
+    RuntimeStateManager: vi.fn().mockImplementation(function () {
+      return {
+        initialize: mockInitialize,
+        close: mockClose,
+        getCandidate: mockGetCandidate,
+        getTask: mockGetTask,
+        createTask: mockCreateTask,
+        updateTaskDiagnosticJson: mockUpdateTaskDiagnosticJson,
+        connection: {
+          getDb: () => ({
+            prepare: () => ({ all: mockAll, get: vi.fn(), run: vi.fn() }),
+          }),
+        },
+      };
+    }),
+    decideInternalizationRoute: vi.fn(() => ({
+      ready: true,
+      route: 'principle-ledger',
+      reason: 'ready',
+      missingFields: [],
+      nextAction: 'internalize',
+    })),
+    createRemediationResult: vi.fn((input: { mode: string; status?: string; safeToConfirm?: boolean; repairedCount?: number; skippedCount?: number; actions?: unknown[]; warnings?: unknown[] }) => ({
+      mode: input.mode,
+      status: input.status ?? (input.mode === 'dry_run'
+        ? ((input.actions?.length ?? 0) > 0 ? 'would_change' : 'no_op')
+        : ((input.repairedCount ?? 0) > 0 ? 'changed' : 'no_op')),
+      safeToConfirm: input.safeToConfirm ?? false,
+      repairedCount: input.repairedCount ?? 0,
+      skippedCount: input.skippedCount ?? 0,
+      actions: input.actions ?? [],
+      warnings: input.warnings ?? [],
+    })),
+    remediationAction: vi.fn((input: unknown) => input),
+  };
+});
 
 import { handleCandidateInternalizationBackfill } from '../../src/commands/candidate.js';
 
@@ -121,4 +117,3 @@ describe('pd candidate internalization backfill remediation contract', () => {
     exitSpy.mockRestore();
   });
 });
-
