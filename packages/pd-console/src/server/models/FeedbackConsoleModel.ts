@@ -55,7 +55,7 @@ export class FeedbackConsoleModel {
         severity: FeedbackConsoleModel.convertScoreToSeverity((event.data?.score as number) ?? 50),
         score: (event.data?.score as number) ?? 50,
         reason: (event.data?.reason as string) ?? '',
-        origin: (event.data?.origin as string) ?? (event.data?.source as string) ?? 'unknown',
+        origin: typeof event.data?.origin === 'string' ? event.data.origin : typeof event.data?.source === 'string' ? event.data.source : 'unknown',
         gfiAfter: 0,
       }));
   }
@@ -67,7 +67,7 @@ export class FeedbackConsoleModel {
     bySeverity: Record<string, number>;
     byOrigin: Record<string, number>;
   }> {
-    const dailyStats = this.readDailyStats();
+    const dailyStats = await this.readDailyStats();
     let totalEvents = 0;
     let totalPenaltyScore = 0;
     let rollbackCount = 0;
@@ -77,17 +77,17 @@ export class FeedbackConsoleModel {
     for (const day of Object.values(dailyStats)) {
       const emp = day?.empathy as EmpathyDailyStats | undefined;
       if (!emp) continue;
-      totalEvents += emp.totalEvents ?? 0;
-      totalPenaltyScore += emp.totalPenaltyScore ?? 0;
-      rollbackCount += emp.rollbackCount ?? 0;
+      totalEvents += Number(emp.totalEvents) || 0;
+      totalPenaltyScore += Number(emp.totalPenaltyScore) || 0;
+      rollbackCount += Number(emp.rollbackCount) || 0;
       if (emp.bySeverity) {
         for (const [k, v] of Object.entries(emp.bySeverity)) {
-          bySeverity[k] = (bySeverity[k] ?? 0) + v;
+          bySeverity[k] = (bySeverity[k] ?? 0) + (Number(v) || 0);
         }
       }
       if (emp.byOrigin) {
         for (const [k, v] of Object.entries(emp.byOrigin)) {
-          byOrigin[k] = (byOrigin[k] ?? 0) + v;
+          byOrigin[k] = (byOrigin[k] ?? 0) + (Number(v) || 0);
         }
       }
     }
@@ -105,7 +105,7 @@ export class FeedbackConsoleModel {
     totalRequireApproval: number;
     blockRate: number;
   }> {
-    const dailyStats = this.readDailyStats();
+    const dailyStats = await this.readDailyStats();
     let totalEvaluated = 0;
     let totalBlocked = 0;
     let totalRequireApproval = 0;
@@ -113,9 +113,9 @@ export class FeedbackConsoleModel {
     for (const day of Object.values(dailyStats)) {
       const evo = day?.evolution as RuleHostDailyStats | undefined;
       if (!evo) continue;
-      totalEvaluated += evo.rulehostEvaluated ?? 0;
-      totalBlocked += evo.rulehostBlocked ?? 0;
-      totalRequireApproval += evo.rulehostRequireApproval ?? 0;
+      totalEvaluated += Number(evo.rulehostEvaluated) || 0;
+      totalBlocked += Number(evo.rulehostBlocked) || 0;
+      totalRequireApproval += Number(evo.rulehostRequireApproval) || 0;
     }
 
     return {
@@ -132,11 +132,10 @@ export class FeedbackConsoleModel {
     return 'low';
   }
 
-  private readDailyStats(): Record<string, Record<string, unknown>> {
+  private async readDailyStats(): Promise<Record<string, Record<string, unknown>>> {
     const statsPath = path.join(this.stateDir, 'logs', 'daily-stats.json');
-    if (!fs.existsSync(statsPath)) return {};
     try {
-      const raw = fs.readFileSync(statsPath, 'utf8');
+      const raw = await fs.promises.readFile(statsPath, 'utf8');
       return JSON.parse(raw) as Record<string, Record<string, unknown>>;
     } catch {
       console.warn('[FeedbackConsoleModel] Failed to parse daily-stats.json at ' + statsPath);
