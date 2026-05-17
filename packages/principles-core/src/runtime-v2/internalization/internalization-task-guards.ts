@@ -161,13 +161,15 @@ export function isArtifactRejected(artifact: PIArtifact): boolean {
 export const DEFAULT_UNRESOLVABLE_THRESHOLD = 3;
 
 export function isUnresolvable(task: PITaskRecord, threshold: number = DEFAULT_UNRESOLVABLE_THRESHOLD): boolean {
-  return task.rejectionCount >= threshold;
+  const count = task.rejectionCount ?? 0;
+  return count >= threshold;
 }
 
 export function recordRejection(task: PITaskRecord): PITaskRecord {
+  const currentCount = task.rejectionCount ?? 0;
   return {
     ...task,
-    rejectionCount: task.rejectionCount + 1,
+    rejectionCount: currentCount + 1,
     updatedAt: new Date().toISOString(),
   };
 }

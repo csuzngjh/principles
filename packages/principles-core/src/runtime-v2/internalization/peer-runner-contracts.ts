@@ -202,6 +202,7 @@ export function isTerminalTaskStatus(status: string): boolean {
  *   - timeoutMs as number
  *   - inputArtifactRefs as array
  *   - outputArtifactRefs as array
+ *   - rejectionCount as finite non-negative number (PRI-141)
  */
 export function isValidPITaskRecord(record: TaskRecord): record is PITaskRecord {
   // Must have a valid peer runner kind
@@ -218,7 +219,8 @@ export function isValidPITaskRecord(record: TaskRecord): record is PITaskRecord 
     isInternalizationChannel(pi.channel) &&
     typeof pi.timeoutMs === 'number' &&
     Array.isArray(pi.inputArtifactRefs) &&
-    Array.isArray(pi.outputArtifactRefs)
+    Array.isArray(pi.outputArtifactRefs) &&
+    (typeof pi.rejectionCount === 'number' && Number.isFinite(pi.rejectionCount) && pi.rejectionCount >= 0)
   );
 }
 

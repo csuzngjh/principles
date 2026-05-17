@@ -255,4 +255,45 @@ describe('PRI-141: Task Three Strikes Out Mechanism', () => {
       expect(src).not.toContain('openclaw-plugin');
     });
   });
+
+  describe('isValidPITaskRecord validates rejectionCount', () => {
+    it('record with valid rejectionCount passes validation', async () => {
+      const { isValidPITaskRecord } = await import('../internalization/peer-runner-contracts.js');
+      const task = makePITask({ rejectionCount: 0 });
+      expect(isValidPITaskRecord(task)).toBe(true);
+    });
+
+    it('record with undefined rejectionCount fails validation', async () => {
+      const { isValidPITaskRecord } = await import('../internalization/peer-runner-contracts.js');
+      const { rejectionCount: _rc, ...taskWithoutRejectionCount } = makePITask({ rejectionCount: 0 });
+      expect(isValidPITaskRecord(taskWithoutRejectionCount as unknown as PITaskRecord)).toBe(false);
+    });
+
+    it('record with negative rejectionCount fails validation', async () => {
+      const { isValidPITaskRecord } = await import('../internalization/peer-runner-contracts.js');
+      const task = { ...makePITask({ rejectionCount: 0 }), rejectionCount: -1 } as unknown as PITaskRecord;
+      expect(isValidPITaskRecord(task)).toBe(false);
+    });
+
+    it('record with NaN rejectionCount fails validation', async () => {
+      const { isValidPITaskRecord } = await import('../internalization/peer-runner-contracts.js');
+      const task = { ...makePITask({ rejectionCount: 0 }), rejectionCount: NaN } as unknown as PITaskRecord;
+      expect(isValidPITaskRecord(task)).toBe(false);
+    });
+  });
+
+  describe('defensive: isUnresolvable and recordRejection handle undefined rejectionCount', () => {
+    it('isUnresolvable treats undefined rejectionCount as 0 (not unresolvable)', async () => {
+      const { isUnresolvable } = await import('../internalization/internalization-task-guards.js');
+      const task = { ...makePITask(), rejectionCount: undefined } as unknown as PITaskRecord;
+      expect(isUnresolvable(task)).toBe(false);
+    });
+
+    it('recordRejection treats undefined rejectionCount as 0 and increments to 1', async () => {
+      const { recordRejection } = await import('../internalization/internalization-task-guards.js');
+      const task = { ...makePITask(), rejectionCount: undefined } as unknown as PITaskRecord;
+      const result = recordRejection(task);
+      expect(result.rejectionCount).toBe(1);
+    });
+  });
 });
