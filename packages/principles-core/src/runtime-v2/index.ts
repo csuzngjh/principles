@@ -294,6 +294,10 @@ export type { CompileResult } from './internalization/compile-result.js';
 // Pruning mask — builds masked principle set from review log (PRI-48)
 export { buildMaskedPrincipleSet, getCachedMaskedPrincipleSet, clearPruningMaskCache } from './pruning-mask.js';
 
+// L1 Hard Cap & LRU Eviction (PRI-139)
+export { enforceL1HardCap, validateL1CapConfig, DEFAULT_L1_HARD_CAP, MAX_L1_HARD_CAP } from './l1-hard-cap.js';
+export type { L1CapConfig, L1EvictionCandidate, L1EvictionResult } from './l1-hard-cap.js';
+
 // Decision merge and adapter interface (PRI-45)
 export type { DecisionMergeLogger, RuleHostLogger } from './internalization/rule-host-evaluator.js';
 export { mergeDecisions } from './internalization/rule-host-evaluator.js';

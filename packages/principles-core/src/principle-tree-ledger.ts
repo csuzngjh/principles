@@ -81,6 +81,7 @@ export interface PrincipleValueMetrics {
 
 export interface LedgerPrinciple extends Principle {
   suggestedRules?: string[];
+  lastTriggeredAt?: string;
 }
 
 export interface LedgerRule extends Rule {
