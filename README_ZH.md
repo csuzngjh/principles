@@ -25,7 +25,7 @@ Principles Disciple 是一个 OpenClaw 插件，用来帮助编程智能体保�
 智能体是日常用户。
 人类是安装者、监督者和风险承担者。
 
-[![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/nicepkg/openclaw)
+[![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/openclaw/openclaw)
 
 [English](README.md) | [中文](README_ZH.md)
 
