@@ -113,22 +113,15 @@ export interface PIArtifact {
  * @see ADR-0003 Section 3.4
  */
 export interface PITaskRecord extends TaskRecord {
-  /** One of the 7 peer runner kinds */
   taskKind: PeerRunnerKind;
-  /** Optional parent task (for chained execution) */
   parentTaskId?: string;
-  /** Tasks that must complete before this task can be leased */
   dependencyTaskIds: string[];
-  /** The internalization channel this task uses */
   channel: InternalizationChannel;
-  /** Optional correlation ID for tracing across related tasks */
   correlationId?: string;
-  /** Timeout in milliseconds for this task's execution */
   timeoutMs: number;
-  /** Input artifacts for this task */
   inputArtifactRefs: ArtifactRef[];
-  /** Output artifacts produced by this task (set on succeeded) */
   outputArtifactRefs: ArtifactRef[];
+  rejectionCount: number;
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────
@@ -251,5 +244,6 @@ export function createMinimalPITaskRecord(
     timeoutMs: 60000,
     inputArtifactRefs: [],
     outputArtifactRefs: [],
+    rejectionCount: 0,
   };
 }

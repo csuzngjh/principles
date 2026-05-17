@@ -34,6 +34,7 @@ type MakeTaskOptions = {
   outputArtifactRefs?: { artifactType: string; ref: string }[];
   attemptCount?: number;
   maxAttempts?: number;
+  rejectionCount?: number;
 };
 
 function makeTask(overrides: MakeTaskOptions & { taskId: string; taskKind: string; status: 'pending' | 'retry_wait' | 'failed' }): TaskRecord {
@@ -47,6 +48,7 @@ function makeTask(overrides: MakeTaskOptions & { taskId: string; taskKind: strin
   const outputArtifactRefs = overrides.outputArtifactRefs ?? [];
   const attemptCount = overrides.attemptCount ?? 0;
   const maxAttempts = overrides.maxAttempts ?? 3;
+  const rejectionCount = overrides.rejectionCount ?? 0;
 
   let {diagnosticJson} = overrides;
   if (diagnosticJson === undefined) {
@@ -57,6 +59,7 @@ function makeTask(overrides: MakeTaskOptions & { taskId: string; taskKind: strin
         timeoutMs,
         inputArtifactRefs,
         outputArtifactRefs,
+        rejectionCount,
       },
     });
   }
@@ -365,6 +368,74 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
     expect(snap.dependencyFailedSummary.count).toBe(1);
     expect(snap.blockedSummary.count).toBe(1);
     expect(snap.noReadyTasks?.reason).toBe('all_dependency_failed');
+  });
+
+  // ── P8: Unresolvable tasks (PRI-141) ────────────────────────────────────
+
+  it('unresolvable task (rejectionCount >= 3) excluded from readyTasks', async () => {
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'unresolvable_1', taskKind: 'scribe', status: 'pending', rejectionCount: 3 }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    const snap = await model.getSnapshot();
+
+    expect(snap.readyTasks).toEqual([]);
+    expect(snap.unresolvableSummary.count).toBe(1);
+    expect(snap.unresolvableSummary.samples[0]?.taskId).toBe('unresolvable_1');
+    expect(snap.unresolvableSummary.samples[0]?.rejectionCount).toBe(3);
+  });
+
+  it('all unresolvable tasks → all_unresolvable reason', async () => {
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'u1', taskKind: 'scribe', status: 'pending', rejectionCount: 3 }),
+        makeTask({ taskId: 'u2', taskKind: 'artificer', status: 'pending', rejectionCount: 5 }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    const snap = await model.getSnapshot();
+
+    expect(snap.readyTasks).toEqual([]);
+    expect(snap.unresolvableSummary.count).toBe(2);
+    expect(snap.noReadyTasks?.reason).toBe('all_unresolvable');
+  });
+
+  it('unresolvable task mixed with ready task: ready task still available', async () => {
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'u1', taskKind: 'scribe', status: 'pending', rejectionCount: 3 }),
+        makeTask({ taskId: 'r1', taskKind: 'dreamer', status: 'pending', rejectionCount: 0 }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    const snap = await model.getSnapshot();
+
+    expect(snap.readyTasks).toContainEqual({ taskId: 'r1', taskKind: 'dreamer', channel: 'prompt' });
+    expect(snap.unresolvableSummary.count).toBe(1);
+    expect(snap.noReadyTasks).toBeNull();
+  });
+
+  it('task with rejectionCount < 3 is NOT unresolvable', async () => {
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'retry_1', taskKind: 'scribe', status: 'pending', rejectionCount: 2 }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    const snap = await model.getSnapshot();
+
+    expect(snap.readyTasks).toContainEqual({ taskId: 'retry_1', taskKind: 'scribe', channel: 'prompt' });
+    expect(snap.unresolvableSummary.count).toBe(0);
   });
 
 });

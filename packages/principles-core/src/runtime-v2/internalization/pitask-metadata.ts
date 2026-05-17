@@ -48,6 +48,7 @@ export interface PITaskMetadata {
   outputArtifactRefs: ArtifactRef[];
   parentTaskId?: string;
   correlationId?: string;
+  rejectionCount?: number;
 }
 
 // ── Serialization ──────────────────────────────────────────────────────────────
@@ -66,6 +67,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       outputArtifactRefs: metadata.outputArtifactRefs,
       parentTaskId: metadata.parentTaskId,
       correlationId: metadata.correlationId,
+      rejectionCount: metadata.rejectionCount,
     },
   });
 }
@@ -147,6 +149,12 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     if (m.correlationId.trim() === '') return null;
   }
 
+  let rejectionCount = 0;
+  if (m.rejectionCount !== undefined) {
+    if (typeof m.rejectionCount !== 'number' || !Number.isFinite(m.rejectionCount) || m.rejectionCount < 0) return null;
+    rejectionCount = Math.floor(m.rejectionCount);
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -155,6 +163,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     outputArtifactRefs: m.outputArtifactRefs as ArtifactRef[],
     parentTaskId: m.parentTaskId,
     correlationId: m.correlationId,
+    rejectionCount,
   };
 }
 
@@ -194,5 +203,6 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     outputArtifactRefs: meta.outputArtifactRefs,
     parentTaskId: meta.parentTaskId,
     correlationId: meta.correlationId,
+    rejectionCount: meta.rejectionCount ?? 0,
   } as unknown as PITaskRecord;
 }
