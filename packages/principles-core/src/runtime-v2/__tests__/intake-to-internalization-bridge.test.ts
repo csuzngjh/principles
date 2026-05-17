@@ -122,14 +122,16 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
   describe('buildDreamerTaskSeed', () => {
     it('returns BridgeTaskSeed for valid input', () => {
       const result = buildDreamerTaskSeed(validInput);
-      if (!('decision' in result)) {
-        expect(result.taskId).toBe('dreamer-cand-001-prompt');
-        expect(result.taskKind).toBe('dreamer');
-        expect(result.channel).toBe('prompt');
-        expect(result.status).toBe('pending');
-        expect(result.attemptCount).toBe(0);
-        expect(result.maxAttempts).toBe(3);
+      expect('decision' in result).toBe(false);
+      if ('decision' in result) {
+        throw new Error(`unexpected decision: ${(result as { decision: string }).decision}`);
       }
+      expect(result.taskId).toBe('dreamer-cand-001-prompt');
+      expect(result.taskKind).toBe('dreamer');
+      expect(result.channel).toBe('prompt');
+      expect(result.status).toBe('pending');
+      expect(result.attemptCount).toBe(0);
+      expect(result.maxAttempts).toBe(3);
     });
 
     it('returns BridgeDecision for invalid input', () => {
@@ -137,9 +139,11 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
         ...validInput,
         candidateId: '',
       });
-      if ('decision' in result) {
-        expect(result.decision).toBe('invalid_candidate');
+      expect('decision' in result).toBe(true);
+      if (!('decision' in result)) {
+        throw new Error('expected decision result');
       }
+      expect(result.decision).toBe('invalid_candidate');
     });
 
     it('returns BridgeDecision for not-ready input', () => {
@@ -147,47 +151,55 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
         ...validInput,
         ready: false,
       });
-      if ('decision' in result) {
-        expect(result.decision).toBe('not_internalizable');
+      expect('decision' in result).toBe(true);
+      if (!('decision' in result)) {
+        throw new Error('expected decision result');
       }
+      expect(result.decision).toBe('not_internalizable');
     });
 
     it('created task metadata can be parsed by parsePITaskMetadata', () => {
       const result = buildDreamerTaskSeed(validInput);
-      if ('diagnosticJson' in result) {
-        const meta = parsePITaskMetadata(result.diagnosticJson);
-        expect(meta).not.toBeNull();
-        if (meta) {
-          expect(meta.dependencyTaskIds).toEqual([]);
-          expect(meta.channel).toBe('prompt');
-          expect(meta.timeoutMs).toBe(300_000);
-          expect(meta.inputArtifactRefs).toEqual([
-            { artifactType: 'candidate', ref: 'candidate://cand-001' },
-          ]);
-          expect(meta.outputArtifactRefs).toEqual([]);
-          expect(meta.correlationId).toBe('cand-001');
-        }
+      expect('decision' in result).toBe(false);
+      if ('decision' in result) {
+        throw new Error(`unexpected decision: ${(result as { decision: string }).decision}`);
+      }
+      const meta = parsePITaskMetadata(result.diagnosticJson);
+      expect(meta).not.toBeNull();
+      if (meta) {
+        expect(meta.dependencyTaskIds).toEqual([]);
+        expect(meta.channel).toBe('prompt');
+        expect(meta.timeoutMs).toBe(300_000);
+        expect(meta.inputArtifactRefs).toEqual([
+          { artifactType: 'candidate', ref: 'candidate://cand-001' },
+        ]);
+        expect(meta.outputArtifactRefs).toEqual([]);
+        expect(meta.correlationId).toBe('cand-001');
       }
     });
 
     it('diagnosticJson contains top-level candidateId for chain integrity', () => {
       const result = buildDreamerTaskSeed(validInput);
-      if ('diagnosticJson' in result) {
-        const diagObj = JSON.parse(result.diagnosticJson);
-        expect(diagObj.candidateId).toBe('cand-001');
+      expect('decision' in result).toBe(false);
+      if ('decision' in result) {
+        throw new Error(`unexpected decision: ${(result as { decision: string }).decision}`);
       }
+      const diagObj = JSON.parse(result.diagnosticJson);
+      expect(diagObj.candidateId).toBe('cand-001');
     });
 
     it('dependencyTaskIds is empty, channel is correct, taskKind is dreamer', () => {
       const result = buildDreamerTaskSeed(validInput);
-      if ('diagnosticJson' in result) {
-        const meta = parsePITaskMetadata(result.diagnosticJson);
-        if (meta) {
-          expect(meta.dependencyTaskIds).toEqual([]);
-          expect(meta.channel).toBe('prompt');
-        }
-        expect(result.taskKind).toBe('dreamer');
+      expect('decision' in result).toBe(false);
+      if ('decision' in result) {
+        throw new Error(`unexpected decision: ${(result as { decision: string }).decision}`);
       }
+      const meta = parsePITaskMetadata(result.diagnosticJson);
+      if (meta) {
+        expect(meta.dependencyTaskIds).toEqual([]);
+        expect(meta.channel).toBe('prompt');
+      }
+      expect(result.taskKind).toBe('dreamer');
     });
   });
 
@@ -274,6 +286,32 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       await expect(
         seedIntakeTask(validInput, mockStore),
       ).rejects.toThrow('DB read failed');
+    });
+
+    it('returns already_exists on concurrent createTask conflict', async () => {
+      vi.clearAllMocks();
+      (mockStore.getTask as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ taskId: 'dreamer-cand-001-prompt' });
+      (mockStore.createTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('UNIQUE constraint failed'));
+
+      const result = await seedIntakeTask(validInput, mockStore);
+      expect(result.decision).toBe('already_exists');
+      if (result.decision === 'already_exists') {
+        expect(result.taskId).toBe('dreamer-cand-001-prompt');
+      }
+    });
+
+    it('re-throws non-concurrent createTask errors', async () => {
+      vi.clearAllMocks();
+      (mockStore.getTask as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      (mockStore.createTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('disk full'));
+
+      await expect(
+        seedIntakeTask(validInput, mockStore),
+      ).rejects.toThrow('disk full');
     });
   });
 

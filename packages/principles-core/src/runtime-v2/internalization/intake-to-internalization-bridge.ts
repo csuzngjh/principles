@@ -123,14 +123,22 @@ export async function seedIntakeTask(
     return seed;
   }
 
-  await store.createTask({
-    taskId: seed.taskId,
-    taskKind: seed.taskKind,
-    status: seed.status,
-    attemptCount: seed.attemptCount,
-    maxAttempts: seed.maxAttempts,
-    diagnosticJson: seed.diagnosticJson,
-  });
+  try {
+    await store.createTask({
+      taskId: seed.taskId,
+      taskKind: seed.taskKind,
+      status: seed.status,
+      attemptCount: seed.attemptCount,
+      maxAttempts: seed.maxAttempts,
+      diagnosticJson: seed.diagnosticJson,
+    });
+  } catch (error) {
+    const concurrent = await store.getTask(seed.taskId);
+    if (concurrent) {
+      return { decision: 'already_exists', taskId: concurrent.taskId };
+    }
+    throw error;
+  }
 
   return decision;
 }
