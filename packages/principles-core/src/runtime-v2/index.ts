@@ -744,6 +744,23 @@ export type {
   UnresolvableSample,
 } from './internalization-queue-read-model.js';
 
+// ── Idle Trigger Decision Model (PRI-143) ──────────────────────────────────
+
+export type {
+  IdleTriggerConfig,
+  IdleTriggerQueueSnapshot,
+  IdleTriggerInput,
+  IdleTriggerResult,
+} from './idle-trigger/index.js';
+
+export {
+  DEFAULT_IDLE_TRIGGER_CONFIG,
+  resolveIdleTriggerConfig,
+  computeJitterMs,
+  evaluateIdleTrigger,
+  evaluateIdleTriggerDecision,
+} from './idle-trigger/index.js';
+
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────
 
 export {
