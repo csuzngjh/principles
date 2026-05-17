@@ -761,6 +761,38 @@ export {
   evaluateIdleTriggerDecision,
 } from './idle-trigger/index.js';
 
+// ── Activation Dispatcher (PRI-144) ──────────────────────────────────────
+
+export type {
+  ActivationRiskLevel,
+  ActivationActor,
+  RolloutActivationDecision,
+  DispatchInput,
+  ActivationDecision,
+  PIArtifactSnapshot,
+  ActivationArtifactReadModel,
+  ActivationStatusRecord,
+  ActivationStateReadModel,
+  WriterInput,
+  WriterResult,
+  CanActivateResult,
+  ChannelWriter,
+} from './activation/index.js';
+
+export {
+  LOW_RISK_CHANNELS,
+  HIGH_RISK_CHANNEL_MAP,
+  makeIdempotencyKey,
+  isLowRiskChannel,
+  getChannelRiskLevel,
+  ActivationDispatcher,
+  PromptWriter,
+  DeferArchiveWriter,
+  extractPrincipleId,
+  MemoryActivationStateStore,
+  MemoryArtifactReadModel,
+} from './activation/index.js';
+
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────
 
 export {
