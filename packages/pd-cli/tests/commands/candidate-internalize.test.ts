@@ -21,11 +21,14 @@ const { mockStateManager, MockRuntimeStateManager } = vi.hoisted(() => {
   return { mockStateManager, MockRuntimeStateManager };
 });
 
-vi.mock('@principles/core/runtime-v2', () => ({
-  RuntimeStateManager: MockRuntimeStateManager,
-  decideInternalizationRoute: vi.fn(),
-  createPITaskDiagnosticJson: vi.fn().mockReturnValue('{"pi_metadata":{}}'),
-}));
+vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
+  const original = await importOriginal() as Record<string, unknown>;
+  return {
+    ...original,
+    RuntimeStateManager: MockRuntimeStateManager,
+    decideInternalizationRoute: vi.fn(),
+  };
+});
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/test-workspace'),
