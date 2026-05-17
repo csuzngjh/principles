@@ -115,6 +115,8 @@ const REQUIRED_SOURCE_FILES = [
   'types/principle-tree-store.ts',
   // PRI-140
   'store/sqlite-connection.ts',
+  // PRI-139
+  'l1-hard-cap.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -155,6 +157,8 @@ const REQUIRED_TEST_FILES = [
   '../store/sqlite-connection-pragma.test.ts',
   // PRI-141
   'task-three-strikes.test.ts',
+  // PRI-139
+  'l1-hard-cap.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -2475,6 +2479,53 @@ describe('PRI-141 Task Three Strikes Out Mechanism', () => {
       __dirname, '..', 'internalization', 'pitask-metadata.ts'
     ), 'utf-8');
     expect(src).toContain('rejectionCount');
+  });
+});
+
+// ── PRI-139: L1 Hard Cap & LRU Eviction ──────────────────────────────────────
+
+describe('PRI-139 L1 Hard Cap & LRU Eviction', () => {
+  it('core barrel exports enforceL1HardCap, validateL1CapConfig, DEFAULT_L1_HARD_CAP, MAX_L1_HARD_CAP', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('enforceL1HardCap');
+    expect(src).toContain('validateL1CapConfig');
+    expect(src).toContain('DEFAULT_L1_HARD_CAP');
+    expect(src).toContain('MAX_L1_HARD_CAP');
+  });
+
+  it('core barrel exports L1CapConfig, L1EvictionCandidate, L1EvictionResult types', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('L1CapConfig');
+    expect(src).toContain('L1EvictionCandidate');
+    expect(src).toContain('L1EvictionResult');
+  });
+
+  it('l1-hard-cap.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'l1-hard-cap.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('LedgerPrinciple includes lastTriggeredAt field', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', '..', 'principle-tree-ledger.ts'), 'utf-8');
+    expect(src).toContain('lastTriggeredAt');
+  });
+
+  it('PruningHealthSummary includes activeL1Count and l1Cap fields', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'pruning-read-model.ts'), 'utf-8');
+    expect(src).toContain('activeL1Count');
+    expect(src).toContain('l1Cap');
   });
 });
 
