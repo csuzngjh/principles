@@ -56,16 +56,28 @@ export class SqliteConnection {
 
     if (!this.readonlyMode) {
       try {
-        const walResult = this.db.pragma('journal_mode = WAL', { simple: true });
-        if (walResult !== 'wal') {
-          throw new PDRuntimeError(
-            'storage_unavailable',
-            `Failed to set WAL journal mode (got: ${walResult})`,
-          );
-        }
+        // Set the pragmas
+        this.db.pragma('journal_mode = WAL');
         this.db.pragma('busy_timeout = 5000');
         this.db.pragma('synchronous = NORMAL');
         this.db.pragma('foreign_keys = ON');
+
+        // Verify they were applied correctly
+        const journalMode = this.db.pragma('journal_mode', { simple: true });
+        if (String(journalMode).toLowerCase() !== 'wal') {
+          throw new PDRuntimeError(
+            'storage_unavailable',
+            `Failed to set WAL journal mode (got: ${journalMode})`,
+          );
+        }
+
+        const foreignKeys = this.db.pragma('foreign_keys', { simple: true });
+        if (!foreignKeys) {
+          throw new PDRuntimeError(
+            'storage_unavailable',
+            `Failed to enable foreign keys (got: ${foreignKeys})`,
+          );
+        }
       } catch (err) {
         const pdErr = err instanceof PDRuntimeError
           ? err

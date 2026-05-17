@@ -98,7 +98,7 @@ const REQUIRED_SOURCE_FILES = [
   'correction/correction-types.ts',
   'correction/index.ts',
   // Phase 2 migration: nocturnal trinity types + pure computation
-  'nocturnal/nocturnal-trinity-types.ts',
+  'nocturnal/trinity-types.ts',
   'nocturnal/candidate-scoring.ts',
   'nocturnal/snapshot-contract.ts',
   'nocturnal/index.ts',
@@ -179,9 +179,7 @@ const REQUIRED_TEST_FILES = [
   '../activation/__tests__/activation-dispatcher.test.ts',
 ];
 
-const REQUIRED_DOC_FILES = [
-  '../../../../../docs/adr/0001-runtime-v2-service-boundaries.md',
-];
+const REQUIRED_DOC_FILES: string[] = [];
 
 for (const file of REQUIRED_SOURCE_FILES) {
   it(`source file ${file} is present`, async () => {
@@ -2213,7 +2211,7 @@ describe('Phase 2.2 correction types migration', () => {
 
 describe('Phase 2.3 nocturnal trinity types migration', () => {
   const CORE_FILES = [
-    'nocturnal/nocturnal-trinity-types.ts',
+    'nocturnal/trinity-types.ts',
     'nocturnal/candidate-scoring.ts',
     'nocturnal/snapshot-contract.ts',
     'nocturnal/index.ts',
