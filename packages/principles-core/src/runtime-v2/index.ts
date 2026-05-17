@@ -713,6 +713,22 @@ export type {
 export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
 export { MemoryPIArtifactStore } from './internalization/pi-artifact-store.js';
 
+// ── Intake To Internalization Bridge (PRI-142) ────────────────────────────────
+
+export type {
+  IntakeToInternalizationBridgeInput,
+  BridgeDecision,
+  BridgeTaskSeed,
+  BridgeTaskStore,
+} from './internalization/intake-to-internalization-bridge.js';
+
+export {
+  ROUTE_CHANNEL_MAP,
+  computeBridgeDecision,
+  buildDreamerTaskSeed,
+  seedIntakeTask,
+} from './internalization/intake-to-internalization-bridge.js';
+
 // ── Internalization Queue Read Model (PRI-73) ──────────────────────────────
 
 export { InternalizationQueueReadModel } from './internalization-queue-read-model.js';
@@ -727,6 +743,55 @@ export type {
   LeaseConflictSample,
   UnresolvableSample,
 } from './internalization-queue-read-model.js';
+
+// ── Idle Trigger Decision Model (PRI-143) ──────────────────────────────────
+
+export type {
+  IdleTriggerConfig,
+  IdleTriggerQueueSnapshot,
+  IdleTriggerInput,
+  IdleTriggerResult,
+} from './idle-trigger/index.js';
+
+export {
+  DEFAULT_IDLE_TRIGGER_CONFIG,
+  resolveIdleTriggerConfig,
+  computeJitterMs,
+  evaluateIdleTrigger,
+  evaluateIdleTriggerDecision,
+} from './idle-trigger/index.js';
+
+// ── Activation Dispatcher (PRI-144) ──────────────────────────────────────
+
+export type {
+  ActivationRiskLevel,
+  ActivationActor,
+  RolloutActivationDecision,
+  DispatchInput,
+  ActivationDecision,
+  PIArtifactSnapshot,
+  ActivationArtifactReadModel,
+  ActivationStatusRecord,
+  ActivationStateReadModel,
+  WriterInput,
+  WriterResult,
+  CanActivateResult,
+  ChannelWriter,
+} from './activation/index.js';
+
+export {
+  LOW_RISK_CHANNELS,
+  HIGH_RISK_CHANNEL_MAP,
+  makeIdempotencyKey,
+  isLowRiskChannel,
+  getChannelRiskLevel,
+  ActivationDispatcher,
+  PromptWriter,
+  DeferArchiveWriter,
+  extractPrincipleId,
+  MemoryActivationStateStore,
+  MemoryArtifactReadModel,
+} from './activation/index.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────
 

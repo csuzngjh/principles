@@ -117,6 +117,18 @@ const REQUIRED_SOURCE_FILES = [
   'store/sqlite-connection.ts',
   // PRI-139
   'l1-hard-cap.ts',
+  // PRI-142
+  'internalization/intake-to-internalization-bridge.ts',
+  // PRI-143
+  'idle-trigger/idle-trigger-types.ts',
+  'idle-trigger/idle-trigger-policy.ts',
+  'idle-trigger/idle-trigger-decision.ts',
+  'idle-trigger/index.ts',
+  // PRI-144
+  'activation/activation-types.ts',
+  'activation/activation-dispatcher.ts',
+  'activation/low-risk-writers.ts',
+  'activation/index.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -159,6 +171,12 @@ const REQUIRED_TEST_FILES = [
   'task-three-strikes.test.ts',
   // PRI-139
   'l1-hard-cap.test.ts',
+  // PRI-142
+  'intake-to-internalization-bridge.test.ts',
+  // PRI-143
+  '../idle-trigger/__tests__/idle-trigger-decision.test.ts',
+  // PRI-144
+  '../activation/__tests__/activation-dispatcher.test.ts',
 ];
 
 const REQUIRED_DOC_FILES = [
@@ -2526,6 +2544,172 @@ describe('PRI-139 L1 Hard Cap & LRU Eviction', () => {
     const src = readFileSync(resolve(__dirname, '..', 'pruning-read-model.ts'), 'utf-8');
     expect(src).toContain('activeL1Count');
     expect(src).toContain('l1Cap');
+  });
+});
+
+// ── PRI-142: IntakeToInternalizationBridge ──────────────────────────────────────
+
+describe('PRI-142 IntakeToInternalizationBridge', () => {
+  it('core barrel exports computeBridgeDecision, buildDreamerTaskSeed, seedIntakeTask, ROUTE_CHANNEL_MAP', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('computeBridgeDecision');
+    expect(src).toContain('buildDreamerTaskSeed');
+    expect(src).toContain('seedIntakeTask');
+    expect(src).toContain('ROUTE_CHANNEL_MAP');
+  });
+
+  it('core barrel exports IntakeToInternalizationBridgeInput, BridgeDecision, BridgeTaskSeed, BridgeTaskStore types', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('IntakeToInternalizationBridgeInput');
+    expect(src).toContain('BridgeDecision');
+    expect(src).toContain('BridgeTaskSeed');
+    expect(src).toContain('BridgeTaskStore');
+  });
+
+  it('intake-to-internalization-bridge.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'intake-to-internalization-bridge.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('internalization/index.ts exports bridge symbols', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'index.ts'), 'utf-8');
+    expect(src).toContain('computeBridgeDecision');
+    expect(src).toContain('buildDreamerTaskSeed');
+    expect(src).toContain('seedIntakeTask');
+    expect(src).toContain('ROUTE_CHANNEL_MAP');
+    expect(src).toContain('IntakeToInternalizationBridgeInput');
+    expect(src).toContain('BridgeDecision');
+    expect(src).toContain('BridgeTaskSeed');
+    expect(src).toContain('BridgeTaskStore');
+  });
+});
+
+// ── PRI-143: IdleTrigger Decision Model ──────────────────────────────────────
+
+describe('PRI-143 IdleTrigger Decision Model', () => {
+  it('core barrel exports evaluateIdleTriggerDecision, evaluateIdleTrigger, computeJitterMs, DEFAULT_IDLE_TRIGGER_CONFIG, resolveIdleTriggerConfig', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('evaluateIdleTriggerDecision');
+    expect(src).toContain('evaluateIdleTrigger');
+    expect(src).toContain('computeJitterMs');
+    expect(src).toContain('DEFAULT_IDLE_TRIGGER_CONFIG');
+    expect(src).toContain('resolveIdleTriggerConfig');
+  });
+
+  it('core barrel exports IdleTriggerConfig, IdleTriggerQueueSnapshot, IdleTriggerInput, IdleTriggerResult types', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('IdleTriggerConfig');
+    expect(src).toContain('IdleTriggerQueueSnapshot');
+    expect(src).toContain('IdleTriggerInput');
+    expect(src).toContain('IdleTriggerResult');
+  });
+
+  it('idle-trigger core files have zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const files = [
+      resolve(__dirname, '..', 'idle-trigger', 'idle-trigger-types.ts'),
+      resolve(__dirname, '..', 'idle-trigger', 'idle-trigger-policy.ts'),
+      resolve(__dirname, '..', 'idle-trigger', 'idle-trigger-decision.ts'),
+      resolve(__dirname, '..', 'idle-trigger', 'index.ts'),
+    ];
+    for (const file of files) {
+      const src = readFileSync(file, 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('node:process');
+      expect(src).not.toContain('openclaw-plugin');
+    }
+  });
+
+  it('idle-trigger/index.ts exports all public symbols', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'idle-trigger', 'index.ts'), 'utf-8');
+    expect(src).toContain('IdleTriggerConfig');
+    expect(src).toContain('IdleTriggerQueueSnapshot');
+    expect(src).toContain('IdleTriggerInput');
+    expect(src).toContain('IdleTriggerResult');
+    expect(src).toContain('DEFAULT_IDLE_TRIGGER_CONFIG');
+    expect(src).toContain('resolveIdleTriggerConfig');
+    expect(src).toContain('computeJitterMs');
+    expect(src).toContain('evaluateIdleTrigger');
+    expect(src).toContain('evaluateIdleTriggerDecision');
+  });
+});
+
+// ── PRI-144: ActivationDispatcher & Low-risk Writers ──────────────────────────
+
+describe('PRI-144 ActivationDispatcher & Low-risk Writers', () => {
+  it('core barrel exports ActivationDispatcher, PromptWriter, DeferArchiveWriter, LOW_RISK_CHANNELS, makeIdempotencyKey, isLowRiskChannel, getChannelRiskLevel', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('ActivationDispatcher');
+    expect(src).toContain('PromptWriter');
+    expect(src).toContain('DeferArchiveWriter');
+    expect(src).toContain('LOW_RISK_CHANNELS');
+    expect(src).toContain('makeIdempotencyKey');
+    expect(src).toContain('isLowRiskChannel');
+    expect(src).toContain('getChannelRiskLevel');
+  });
+
+  it('core barrel exports ActivationDecision, DispatchInput, PIArtifactSnapshot, ChannelWriter types', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('ActivationDecision');
+    expect(src).toContain('DispatchInput');
+    expect(src).toContain('PIArtifactSnapshot');
+    expect(src).toContain('ChannelWriter');
+  });
+
+  it('activation core files have zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const files = [
+      resolve(__dirname, '..', 'activation', 'activation-types.ts'),
+      resolve(__dirname, '..', 'activation', 'activation-dispatcher.ts'),
+      resolve(__dirname, '..', 'activation', 'low-risk-writers.ts'),
+      resolve(__dirname, '..', 'activation', 'index.ts'),
+    ];
+    for (const file of files) {
+      const src = readFileSync(file, 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('node:process');
+      expect(src).not.toContain('openclaw-plugin');
+    }
+  });
+
+  it('activation/index.ts exports all public symbols', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'activation', 'index.ts'), 'utf-8');
+    expect(src).toContain('ActivationDispatcher');
+    expect(src).toContain('PromptWriter');
+    expect(src).toContain('DeferArchiveWriter');
+    expect(src).toContain('LOW_RISK_CHANNELS');
+    expect(src).toContain('makeIdempotencyKey');
+    expect(src).toContain('isLowRiskChannel');
+    expect(src).toContain('getChannelRiskLevel');
+    expect(src).toContain('MemoryActivationStateStore');
+    expect(src).toContain('MemoryArtifactReadModel');
   });
 });
 

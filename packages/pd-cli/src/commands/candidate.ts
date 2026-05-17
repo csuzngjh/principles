@@ -21,7 +21,8 @@ import {
   loadLedger,
   getLedgerFilePathPublic,
   decideInternalizationRoute,
-  createPITaskDiagnosticJson,
+  computeBridgeDecision,
+  buildDreamerTaskSeed,
   type LedgerPrincipleEntry,
 } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
@@ -213,13 +214,6 @@ interface CandidateInternalizeResult {
   reason?: string;
 }
 
-const ROUTE_CHANNEL_MAP: Record<string, string> = {
-  'principle-ledger': 'prompt',
-  'rule-candidate': 'code_tool_hook',
-  'implementation-candidate': 'skill',
-  'prompt-injection-candidate': 'prompt',
-};
-
 export async function handleCandidateInternalize(opts: CandidateInternalizeOptions): Promise<void> {
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
   const stateManager = new RuntimeStateManager({ workspaceDir });
@@ -248,12 +242,24 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
 
     const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
 
-    if (!decision.ready || decision.route === 'deferred') {
+    const bridgeInput = {
+      candidateId: opts.candidateId,
+      recommendationKind: recommendation.kind,
+      route: decision.route,
+      ready: decision.ready,
+    };
+
+    const bridgeDecision = computeBridgeDecision(bridgeInput);
+
+    if (bridgeDecision.decision !== 'seeded') {
+      const reason = bridgeDecision.decision === 'already_exists'
+        ? `Task ${bridgeDecision.taskId} already exists`
+        : bridgeDecision.reason;
       const result: CandidateInternalizeResult = {
         candidateId: opts.candidateId,
         route: decision.route,
         status: 'no_task_created',
-        reason: decision.reason,
+        reason,
       };
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -267,7 +273,8 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
       return;
     }
 
-    const channel = ROUTE_CHANNEL_MAP[decision.route] ?? 'prompt';
+    const {channel} = bridgeDecision;
+    const {taskId} = bridgeDecision;
 
     if (opts.dryRun) {
       const result: CandidateInternalizeResult = {
@@ -288,8 +295,6 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
       }
       return;
     }
-
-    const taskId = `dreamer-${opts.candidateId}-${channel}`;
 
     const existingTask = await stateManager.getTask(taskId);
     if (existingTask) {
@@ -313,32 +318,29 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
       return;
     }
 
-    const diagnosticJson = createPITaskDiagnosticJson({
-      dependencyTaskIds: [],
-      channel: channel as 'prompt' | 'skill' | 'code_tool_hook' | 'model_training',
-      timeoutMs: 300_000,
-      inputArtifactRefs: [{ artifactType: 'candidate', ref: `candidate://${opts.candidateId}` }],
-      outputArtifactRefs: [],
-      parentTaskId: undefined,
-      correlationId: opts.candidateId,
-    });
-
-    let finalDiagnosticJson = diagnosticJson;
-    try {
-      const diagObj = JSON.parse(diagnosticJson);
-      diagObj.candidateId = opts.candidateId;
-      finalDiagnosticJson = JSON.stringify(diagObj);
-    } catch {
-      finalDiagnosticJson = diagnosticJson;
+    const seed = buildDreamerTaskSeed(bridgeInput);
+    if ('decision' in seed) {
+      const result: CandidateInternalizeResult = {
+        candidateId: opts.candidateId,
+        route: decision.route,
+        status: 'no_task_created',
+        reason: (seed as { reason: string }).reason,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Bridge seed failed: ${(seed as { reason: string }).reason}`);
+      }
+      return;
     }
 
     const task = await stateManager.createTask({
-      taskId,
-      taskKind: 'dreamer',
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: 3,
-      diagnosticJson: finalDiagnosticJson,
+      taskId: seed.taskId,
+      taskKind: seed.taskKind,
+      status: seed.status,
+      attemptCount: seed.attemptCount,
+      maxAttempts: seed.maxAttempts,
+      diagnosticJson: seed.diagnosticJson,
     });
 
     const result: CandidateInternalizeResult = {
@@ -780,14 +782,26 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       const recommendation = resolveCandidateRecommendation(candidate, stateManager, candidateId);
       const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
 
-      if (!decision.ready || decision.route === 'deferred') {
+      const bridgeInput = {
+        candidateId,
+        recommendationKind: recommendation.kind,
+        route: decision.route,
+        ready: decision.ready,
+      };
+
+      const bridgeDecision = computeBridgeDecision(bridgeInput);
+
+      if (bridgeDecision.decision !== 'seeded') {
         output.deferred++;
-        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason: decision.reason });
+        const reason = bridgeDecision.decision === 'already_exists'
+          ? `Task ${bridgeDecision.taskId} already exists`
+          : bridgeDecision.reason;
+        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason });
         continue;
       }
 
-      const channel = ROUTE_CHANNEL_MAP[decision.route] ?? 'prompt';
-      const taskId = `dreamer-${candidateId}-${channel}`;
+      const {channel} = bridgeDecision;
+      const {taskId} = bridgeDecision;
 
       const existingTask = await stateManager.getTask(taskId);
       if (existingTask) {
@@ -813,27 +827,20 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       }
 
       try {
-        const diagnosticJson = createPITaskDiagnosticJson({
-          dependencyTaskIds: [],
-          channel: channel as 'prompt' | 'skill' | 'code_tool_hook' | 'model_training',
-          timeoutMs: 300_000,
-          inputArtifactRefs: [{ artifactType: 'candidate', ref: `candidate://${candidateId}` }],
-          outputArtifactRefs: [],
-          parentTaskId: undefined,
-          correlationId: candidateId,
-        });
-
-        const diagObj = JSON.parse(diagnosticJson);
-        diagObj.candidateId = candidateId;
-        const finalDiagnosticJson = JSON.stringify(diagObj);
+        const seed = buildDreamerTaskSeed(bridgeInput);
+        if ('decision' in seed) {
+          output.errors++;
+          output.results.push({ candidateId, route: decision.route, status: 'error', reason: (seed as { reason: string }).reason });
+          continue;
+        }
 
         const task = await stateManager.createTask({
-          taskId,
-          taskKind: 'dreamer',
-          status: 'pending',
-          attemptCount: 0,
-          maxAttempts: 3,
-          diagnosticJson: finalDiagnosticJson,
+          taskId: seed.taskId,
+          taskKind: seed.taskKind,
+          status: seed.status,
+          attemptCount: seed.attemptCount,
+          maxAttempts: seed.maxAttempts,
+          diagnosticJson: seed.diagnosticJson,
         });
 
         output.created++;
