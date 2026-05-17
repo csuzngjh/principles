@@ -422,3 +422,19 @@ export { InternalizationOrchestrator, WAKE_ONCE_DECISIONS } from './internalizat
 export type { PIArtifactRecord, PIArtifactStore } from './pi-artifact.js';
 export { MemoryPIArtifactStore } from './pi-artifact-store.js';
 export { SqlitePIArtifactStore } from '../store/artifact/sqlite-pi-artifact-store.js';
+
+// ── Intake To Internalization Bridge (PRI-142) ────────────────────────────────
+
+export type {
+  IntakeToInternalizationBridgeInput,
+  BridgeDecision,
+  BridgeTaskSeed,
+  BridgeTaskStore,
+} from './intake-to-internalization-bridge.js';
+
+export {
+  ROUTE_CHANNEL_MAP,
+  computeBridgeDecision,
+  buildDreamerTaskSeed,
+  seedIntakeTask,
+} from './intake-to-internalization-bridge.js';
