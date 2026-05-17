@@ -125,4 +125,18 @@ describe('handleRuntimeIdleTriggerEvaluate', () => {
 
     expect(mockClose).toHaveBeenCalled();
   });
+
+  it('rejects NaN numeric overrides and falls back to defaults', async () => {
+    await handleRuntimeIdleTriggerEvaluate({
+      workspace: WS,
+      json: true,
+      idleThresholdMs: NaN,
+      jitterMaxMs: NaN,
+      activityCooldownMs: NaN,
+    });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.jitterMs).toBeGreaterThanOrEqual(0);
+    expect(output.jitterMs).toBeLessThanOrEqual(30_000);
+  });
 });
