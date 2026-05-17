@@ -1,3 +1,4 @@
+
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -30,6 +31,13 @@ import { createCentralRoutes } from './routes/central.js';
 import { handleAgentsRoute, disposeAgentModels } from './routes/agents.js';
 import { handleStateRoute } from './routes/state.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
+import { 
+  parseDiagnosticianOutput, 
+  parseDiagnosticInput, 
+  parseSeverityFromDiagnostic,
+  parseReasonSummaryFromDiagnostic,
+  parseRecommendationKind 
+} from './utils/diagnostic-parser.js';
 import type { SystemStatus, TaskItem, EvidenceItem, TaskEvidence, ActivityEvent } from './types/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -62,18 +70,49 @@ interface ServerOptions {
   token?: string;
 }
 
+function resolveWorkspaceDir(argv: string[]): string {
+  const args = argv.slice(2);
+  let explicitWorkspace: string | undefined = undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--workspace' && i + 1 < args.length) {
+      explicitWorkspace = path.resolve(args[i + 1]);
+      i++;
+    }
+  }
+
+  if (explicitWorkspace) {
+    if (!fs.existsSync(explicitWorkspace)) {
+      console.error('Workspace directory does not exist: ' + explicitWorkspace);
+      process.exit(1);
+    }
+    return explicitWorkspace;
+  }
+
+  const configStore = new WorkspaceConfigStore();
+  const workspaces = configStore.getWorkspaces();
+  const enabled = workspaces.filter(e => e.config?.enabled !== false);
+  if (enabled.length > 0) {
+    const resolved = path.resolve(enabled[0].path);
+    if (fs.existsSync(resolved)) {
+      console.log('[pd-console] No --workspace flag; using registered workspace: ' + resolved);
+      return resolved;
+    }
+    console.warn('[pd-console] Registered workspace path does not exist: ' + resolved + ', falling back to cwd');
+  }
+
+  return process.cwd();
+}
+
 function parseArgs(argv: string[]): ServerOptions {
   const args = argv.slice(2);
-  let workspace = process.cwd();
+  let workspace = resolveWorkspaceDir(argv);
   let port = 3100;
   let noAuth = false;
   let token: string | undefined = undefined;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--workspace' && i + 1 < args.length) {
-      workspace = path.resolve(args[i + 1]);
-      i++;
-    } else if (args[i] === '--port' && i + 1 < args.length) {
+    if (args[i] === '--port' && i + 1 < args.length) {
       const parsed = parseInt(args[i + 1], 10);
       if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
         console.error('Invalid port: ' + args[i + 1] + '. Must be 1-65535.');
@@ -424,14 +463,18 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         }
         asyncHandler(async (_req, response) => {
           const pruningSignals = services.pruningReadModel.getPrincipleSignals();
-          const pendingTasks = await services.stateManager.listTasks({ status: 'pending' });
+          const diagnosticianTasks = await services.stateManager.listTasks({ taskKind: 'diagnostician', limit: 50 });
           const needsConfirmation: TaskItem[] = [];
           const candidateBatches = await Promise.all(
-            pendingTasks.map((t) => services.stateManager.getCandidatesByTaskId(t.taskId)),
+            diagnosticianTasks.map((t) => services.stateManager.getCandidatesByTaskId(t.taskId)),
           );
-          for (const candidates of candidateBatches) {
+          for (let ci = 0; ci < candidateBatches.length; ci++) {
+            const candidates = candidateBatches[ci];
+            const parentTask = diagnosticianTasks[ci];
             for (const c of candidates) {
               if (c.status !== 'pending') continue;
+              const severity = parseSeverityFromDiagnostic(parentTask.diagnosticJson);
+              const recommendationKind = parseRecommendationKind(c.sourceRecommendationJson);
               needsConfirmation.push({
                 id: c.candidateId,
                 title: c.title,
@@ -439,6 +482,9 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
                 priority: 'needs_confirmation',
                 kind: 'approval',
                 createdAt: c.createdAt,
+                confidence: c.confidence,
+                severity,
+                recommendationKind,
               });
             }
           }
@@ -455,14 +501,31 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
               triggerCount: s.derivedPainCount,
             }));
           const recentTasks = await services.stateManager.listTasks({ status: 'succeeded', limit: 5 });
-          const recentActivity: TaskItem[] = recentTasks.map((t) => ({
-            id: t.taskId,
-            title: t.taskKind,
-            sourceSummary: t.resultRef ?? '',
-            priority: 'recent_activity' as const,
-            kind: 'approval' as const,
-            createdAt: t.createdAt,
-          }));
+          const recentActivity: TaskItem[] = recentTasks.map((t) => {
+            const reasonSummary = parseReasonSummaryFromDiagnostic(t.diagnosticJson);
+            const severity = parseSeverityFromDiagnostic(t.diagnosticJson);
+            const {attemptCount} = t;
+            const {maxAttempts} = t;
+            const kindLabels: Record<string, string> = {
+              diagnostician: '诊断分析',
+              principle_candidate_intake: '原则候选录入',
+              dreamer: '深度反思',
+              keyword_optimization: '关键词优化',
+              sleep_reflection: '夜间反思',
+            };
+            return {
+              id: t.taskId,
+              title: reasonSummary || kindLabels[t.taskKind] || t.taskKind,
+              sourceSummary: reasonSummary ? `来源: ${t.taskKind}` : '',
+              priority: 'recent_activity' as const,
+              kind: 'completed' as const,
+              createdAt: t.createdAt,
+              status: t.status,
+              severity,
+              attemptCount,
+              maxAttempts,
+            };
+          });
           sendSuccess(response, { needsConfirmation, suggestedAttention, recentActivity });
         })(req, res);
         return;
@@ -494,12 +557,28 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
             for (const lid of trace.ledgerEntryIds) {
               evidence.push({ timestamp: trace.checkedAt, operation: 'ledger_written', problem: `principle: ${lid}` });
             }
+
+            let diagnosis: TaskEvidence['diagnosis'] | undefined = undefined;
+            let inputInfo: TaskEvidence['input'] | undefined = undefined;
+
+            const artifact = await services.stateManager.getArtifact(candidate.artifactId);
+            if (artifact && artifact.artifactKind === 'diagnostician_output') {
+              diagnosis = parseDiagnosticianOutput(artifact.contentJson);
+            }
+
+            const parentTask = await services.stateManager.getTask(candidate.taskId);
+            if (parentTask?.diagnosticJson) {
+              inputInfo = parseDiagnosticInput(parentTask.diagnosticJson);
+            }
+
             const result: TaskEvidence = {
               taskId: id,
               summary: candidate.title,
               why: candidate.description,
               whatHappensIf: `If declined, this candidate will expire. Status: ${candidate.status}.`,
               evidence,
+              diagnosis,
+              input: inputInfo,
             };
             sendSuccess(response, result);
             return;
@@ -517,6 +596,38 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
             sendSuccess(response, result);
             return;
           }
+
+          const task = await services.stateManager.getTask(id);
+          if (task) {
+            let diagnosis: TaskEvidence['diagnosis'] | undefined = undefined;
+            let inputInfo: TaskEvidence['input'] | undefined = undefined;
+
+            if (task.diagnosticJson) {
+              inputInfo = parseDiagnosticInput(task.diagnosticJson);
+            }
+
+            const taskCandidates = await services.stateManager.getCandidatesByTaskId(id);
+            if (taskCandidates.length > 0) {
+              const [firstCandidate] = taskCandidates;
+              const artifact = await services.stateManager.getArtifact(firstCandidate.artifactId);
+              if (artifact && artifact.artifactKind === 'diagnostician_output') {
+                diagnosis = parseDiagnosticianOutput(artifact.contentJson);
+              }
+            }
+
+            const result: TaskEvidence = {
+              taskId: id,
+              summary: inputInfo?.reasonSummary ?? `${task.taskKind} (${task.status})`,
+              why: diagnosis?.rootCause ?? '',
+              whatHappensIf: `Status: ${task.status}. Attempt: ${task.attemptCount}/${task.maxAttempts}.`,
+              evidence: [],
+              diagnosis,
+              input: inputInfo,
+            };
+            sendSuccess(response, result);
+            return;
+          }
+
           sendNotFound(response, 'Task or principle not found');
         })(req, res);
         return;
@@ -699,3 +810,4 @@ main().catch((err: unknown) => {
   console.error('[pd-console] Fatal startup error:', err);
   process.exit(1);
 });
+
