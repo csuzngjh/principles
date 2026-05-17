@@ -22,12 +22,23 @@ export interface L1EvictionResult {
 }
 
 export function validateL1CapConfig(config: L1CapConfig): void {
+  if (!Number.isFinite(config.hardCap) || !Number.isInteger(config.hardCap)) {
+    throw new Error(`L1 hard cap must be a finite integer, got ${config.hardCap}.`);
+  }
   if (config.hardCap > MAX_L1_HARD_CAP) {
     throw new Error(`L1 hard cap ${config.hardCap} exceeds maximum allowed cap of ${MAX_L1_HARD_CAP}. Config may lower but not raise the cap above ${MAX_L1_HARD_CAP}.`);
   }
   if (config.hardCap <= 0) {
     throw new Error(`L1 hard cap must be a positive integer, got ${config.hardCap}.`);
   }
+}
+
+function parseTriggeredAtOrThrow(id: string, value: string): number {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Invalid lastTriggeredAt for principle "${id}": ${value}`);
+  }
+  return parsed;
 }
 
 export function enforceL1HardCap(
@@ -50,8 +61,8 @@ export function enforceL1HardCap(
   }
 
   const sorted = [...active].sort((a, b) => {
-    const timeA = Date.parse(a.lastTriggeredAt);
-    const timeB = Date.parse(b.lastTriggeredAt);
+    const timeA = parseTriggeredAtOrThrow(a.id, a.lastTriggeredAt);
+    const timeB = parseTriggeredAtOrThrow(b.id, b.lastTriggeredAt);
     if (timeA !== timeB) return timeA - timeB;
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });

@@ -17,7 +17,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
 import { loadLedger } from '../principle-tree-ledger.js';
-import { DEFAULT_L1_HARD_CAP } from './l1-hard-cap.js';
+import { DEFAULT_L1_HARD_CAP, validateL1CapConfig } from './l1-hard-cap.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 
@@ -155,6 +155,7 @@ export class PruningReadModel {
     this.watchThresholdDays = opts.watchThresholdDays ?? 30;
     this.reviewThresholdDays = opts.reviewThresholdDays ?? 90;
     this.l1Cap = opts.l1Cap ?? DEFAULT_L1_HARD_CAP;
+    validateL1CapConfig({ hardCap: this.l1Cap });
   }
 
   /**

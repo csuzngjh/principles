@@ -605,6 +605,12 @@ describe('PruningReadModel', () => {
     expect(summary.activeL1Count).toBe(3);
   });
 
+  it('constructor rejects invalid l1Cap via validateL1CapConfig', () => {
+    expect(() => new PruningReadModel({ workspaceDir: WORKSPACE, l1Cap: 0 })).toThrow();
+    expect(() => new PruningReadModel({ workspaceDir: WORKSPACE, l1Cap: 13 })).toThrow();
+    expect(() => new PruningReadModel({ workspaceDir: WORKSPACE, l1Cap: 1.5 })).toThrow();
+  });
+
   it('orphan count matches getOrphanDerivedCandidates for same data', () => {
     mockLedgerData = {
       tree: {

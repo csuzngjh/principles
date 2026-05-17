@@ -37,6 +37,18 @@ describe('validateL1CapConfig', () => {
     expect(() => validateL1CapConfig({ hardCap: 0 })).toThrow(/cap/i);
     expect(() => validateL1CapConfig({ hardCap: -1 })).toThrow(/cap/i);
   });
+
+  it('rejects config with NaN', () => {
+    expect(() => validateL1CapConfig({ hardCap: NaN })).toThrow(/finite integer/i);
+  });
+
+  it('rejects config with non-integer', () => {
+    expect(() => validateL1CapConfig({ hardCap: 1.5 })).toThrow(/finite integer/i);
+  });
+
+  it('rejects config with Infinity', () => {
+    expect(() => validateL1CapConfig({ hardCap: Infinity })).toThrow(/finite integer/i);
+  });
 });
 
 describe('enforceL1HardCap', () => {
@@ -68,7 +80,7 @@ describe('enforceL1HardCap', () => {
   it('evicts multiple when active count far exceeds cap', () => {
     const candidates = Array.from({ length: 15 }, (_, i) =>
       makeCandidate(`p_${String(i).padStart(2, '0')}`, {
-        lastTriggeredAt: `2026-${String(i + 1).padStart(2, '0')}-01T00:00:00.000Z`,
+        lastTriggeredAt: `2026-01-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
       }),
     );
     const result = enforceL1HardCap(candidates, { hardCap: 12 });
@@ -122,7 +134,7 @@ describe('enforceL1HardCap', () => {
   it('idempotent: calling twice with same input produces same result', () => {
     const candidates = Array.from({ length: 15 }, (_, i) =>
       makeCandidate(`p_${i}`, {
-        lastTriggeredAt: `2026-${String(i + 1).padStart(2, '0')}-01T00:00:00.000Z`,
+        lastTriggeredAt: `2026-01-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
       }),
     );
     const result1 = enforceL1HardCap(candidates, { hardCap: 12 });
@@ -150,6 +162,22 @@ describe('enforceL1HardCap', () => {
     expect(result.beforeCount).toBe(0);
     expect(result.afterCount).toBe(0);
     expect(result.evictedIds).toEqual([]);
+  });
+
+  it('throws on invalid lastTriggeredAt timestamp', () => {
+    const candidates = [
+      makeCandidate('p1', { lastTriggeredAt: 'not-a-date' }),
+      makeCandidate('p2', { lastTriggeredAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    expect(() => enforceL1HardCap(candidates, { hardCap: 1 })).toThrow(/Invalid lastTriggeredAt/);
+  });
+
+  it('throws on empty string lastTriggeredAt', () => {
+    const candidates = [
+      makeCandidate('p1', { lastTriggeredAt: '' }),
+      makeCandidate('p2', { lastTriggeredAt: '2026-01-01T00:00:00.000Z' }),
+    ];
+    expect(() => enforceL1HardCap(candidates, { hardCap: 1 })).toThrow(/Invalid lastTriggeredAt/);
   });
 });
 
