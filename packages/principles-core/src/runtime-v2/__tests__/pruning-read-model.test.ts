@@ -437,6 +437,8 @@ describe('PruningReadModel', () => {
     expect(summary.watchCount).toBe(0);
     expect(summary.reviewCount).toBe(0);
     expect(summary.averageAgeDays).toBe(0);
+    expect(summary.activeL1Count).toBe(0);
+    expect(summary.l1Cap).toBe(12);
     expect(summary.generatedAt).toBeTruthy();
   });
 
@@ -589,6 +591,18 @@ describe('PruningReadModel', () => {
 
     expect(summary.totalPrinciples).toBe(4);
     expect(summary.orphanDerivedCandidateCount).toBe(1);
+    expect(summary.activeL1Count).toBe(3);
+  });
+
+  it('health summary uses custom l1Cap when provided', () => {
+    mockLedgerData = LEDGER_MIXED;
+    mockDbExists = false;
+
+    const model = new PruningReadModel({ workspaceDir: WORKSPACE, l1Cap: 8 });
+    const summary = model.getHealthSummary();
+
+    expect(summary.l1Cap).toBe(8);
+    expect(summary.activeL1Count).toBe(3);
   });
 
   it('orphan count matches getOrphanDerivedCandidates for same data', () => {
