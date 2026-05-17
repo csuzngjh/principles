@@ -72,7 +72,7 @@ export class SqliteConnection {
         }
 
         const foreignKeys = this.db.pragma('foreign_keys', { simple: true });
-        if (!Boolean(foreignKeys)) {
+        if (!foreignKeys) {
           throw new PDRuntimeError(
             'storage_unavailable',
             `Failed to enable foreign keys (got: ${foreignKeys})`,
