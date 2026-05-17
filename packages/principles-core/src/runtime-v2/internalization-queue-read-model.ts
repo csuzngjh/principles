@@ -21,6 +21,7 @@ import type { PeerRunnerKind, InternalizationChannel } from './internalization/p
 import { isPeerRunnerKind } from './internalization/peer-runner-contracts.js';
 import { hydratePITaskRecord } from './internalization/pitask-metadata.js';
 import { validateInternalizationTaskReady } from './internalization/internalization-state-machine.js';
+import { isUnresolvable } from './internalization/internalization-task-guards.js';
 
 // ── Output types ────────────────────────────────────────────────────────────
 
@@ -48,7 +49,8 @@ export type QueueNoReadyTasksReason =
   | 'all_blocked'
   | 'all_dependency_failed'
   | 'all_retry_wait_pending'
-  | 'all_lease_conflict';
+  | 'all_lease_conflict'
+  | 'all_unresolvable';
 
 export interface NoReadyTasksDiagnosis {
   reason: QueueNoReadyTasksReason;
@@ -68,6 +70,12 @@ export interface LeaseConflictSample {
   leaseExpiresAt: string;
 }
 
+export interface UnresolvableSample {
+  taskId: string;
+  taskKind: PeerRunnerKind;
+  rejectionCount: number;
+}
+
 export interface InternalizationQueueSnapshot {
   pendingCount: number;
   retryWaitCount: number;
@@ -79,6 +87,7 @@ export interface InternalizationQueueSnapshot {
   dependencyFailedSummary: { count: number; samples: DependencyFailedSample[] };
   leaseConflictSummary: { count: number; samples: LeaseConflictSample[]; sampleTaskIds: string[] };
   retryWaitPendingSummary: { count: number; samples: RetryWaitPendingSample[] };
+  unresolvableSummary: { count: number; samples: UnresolvableSample[] };
   readyTasks: ReadyTask[];
   noReadyTasks: NoReadyTasksDiagnosis | null;
 }
@@ -124,6 +133,7 @@ export class InternalizationQueueReadModel {
     const dependencyFailedSamples: DependencyFailedSample[] = [];
     const leaseConflictSamples: LeaseConflictSample[] = [];
     const retryWaitPendingSamples: RetryWaitPendingSample[] = [];
+    const unresolvableSamples: UnresolvableSample[] = [];
     const readyTasks: ReadyTask[] = [];
 
     let hydrationFailures = 0;
@@ -131,6 +141,7 @@ export class InternalizationQueueReadModel {
     let dependencyFailures = 0;
     let leaseConflicts = 0;
     let retryWaitPendingCount = 0;
+    let unresolvableCount = 0;
 
     const nowMs = Date.now();
 
@@ -158,6 +169,18 @@ export class InternalizationQueueReadModel {
             taskKind: piTask.taskKind,
             leaseOwner: piTask.leaseOwner ?? '',
             leaseExpiresAt: piTask.leaseExpiresAt ?? '',
+          });
+        }
+        continue;
+      }
+
+      if (isUnresolvable(piTask)) {
+        unresolvableCount++;
+        if (unresolvableSamples.length < MAX_SAMPLES) {
+          unresolvableSamples.push({
+            taskId: piTask.taskId,
+            taskKind: piTask.taskKind,
+            rejectionCount: piTask.rejectionCount,
           });
         }
         continue;
@@ -213,15 +236,17 @@ export class InternalizationQueueReadModel {
         noReadyTasks = { reason: 'no_candidates', inspectedCount };
       } else {
         const reason: QueueNoReadyTasksReason =
-          retryWaitPendingCount > 0 && retryWaitPendingCount >= hydrationFailures && retryWaitPendingCount >= dependencyFailures && retryWaitPendingCount >= blockedCount
-            ? 'all_retry_wait_pending'
-            : leaseConflicts > 0 && leaseConflicts >= hydrationFailures && leaseConflicts >= dependencyFailures && leaseConflicts >= blockedCount
-              ? 'all_lease_conflict'
-            : hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount
-              ? 'all_hydration_failed'
-              : dependencyFailures >= blockedCount
-                ? 'all_dependency_failed'
-                : 'all_blocked';
+          unresolvableCount > 0 && unresolvableCount >= hydrationFailures && unresolvableCount >= dependencyFailures && unresolvableCount >= blockedCount && unresolvableCount >= retryWaitPendingCount && unresolvableCount >= leaseConflicts
+            ? 'all_unresolvable'
+            : retryWaitPendingCount > 0 && retryWaitPendingCount >= hydrationFailures && retryWaitPendingCount >= dependencyFailures && retryWaitPendingCount >= blockedCount
+              ? 'all_retry_wait_pending'
+              : leaseConflicts > 0 && leaseConflicts >= hydrationFailures && leaseConflicts >= dependencyFailures && leaseConflicts >= blockedCount
+                ? 'all_lease_conflict'
+                : hydrationFailures > 0 && hydrationFailures >= dependencyFailures && hydrationFailures >= blockedCount
+                  ? 'all_hydration_failed'
+                  : dependencyFailures >= blockedCount
+                    ? 'all_dependency_failed'
+                    : 'all_blocked';
         noReadyTasks = { reason, inspectedCount };
       }
     }
@@ -241,6 +266,7 @@ export class InternalizationQueueReadModel {
         sampleTaskIds: leaseConflictSamples.map((sample) => sample.taskId),
       },
       retryWaitPendingSummary: { count: retryWaitPendingCount, samples: retryWaitPendingSamples },
+      unresolvableSummary: { count: unresolvableCount, samples: unresolvableSamples },
       readyTasks,
       noReadyTasks,
     };
