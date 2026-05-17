@@ -26,6 +26,7 @@ function makePITask(overrides: Partial<PITaskRecord> = {}): PITaskRecord {
     timeoutMs = 60000,
     inputArtifactRefs = [],
     outputArtifactRefs = [],
+    rejectionCount = 0,
   } = overrides;
   return {
     taskId,
@@ -40,6 +41,7 @@ function makePITask(overrides: Partial<PITaskRecord> = {}): PITaskRecord {
     timeoutMs,
     inputArtifactRefs,
     outputArtifactRefs,
+    rejectionCount,
   } as PITaskRecord;
 }
 

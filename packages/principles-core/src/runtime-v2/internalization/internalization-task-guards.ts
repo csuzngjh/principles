@@ -155,3 +155,21 @@ export function canUpdateLastError(task: PITaskRecord): boolean {
 export function isArtifactRejected(artifact: PIArtifact): boolean {
   return artifact.validationStatus === 'rejected';
 }
+
+// ── Three Strikes Out Guards (PRI-141) ──────────────────────────────────────
+
+export const DEFAULT_UNRESOLVABLE_THRESHOLD = 3;
+
+export function isUnresolvable(task: PITaskRecord, threshold: number = DEFAULT_UNRESOLVABLE_THRESHOLD): boolean {
+  const count = task.rejectionCount ?? 0;
+  return count >= threshold;
+}
+
+export function recordRejection(task: PITaskRecord): PITaskRecord {
+  const currentCount = task.rejectionCount ?? 0;
+  return {
+    ...task,
+    rejectionCount: currentCount + 1,
+    updatedAt: new Date().toISOString(),
+  };
+}

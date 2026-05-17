@@ -403,6 +403,9 @@ export {
   isResultRefImmutable,
   canUpdateLastError,
   isArtifactRejected,
+  isUnresolvable,
+  recordRejection,
+  DEFAULT_UNRESOLVABLE_THRESHOLD,
 } from './internalization/internalization-task-guards.js';
 
 export type {
@@ -718,6 +721,7 @@ export type {
   DependencyFailedSample,
   RetryWaitPendingSample,
   LeaseConflictSample,
+  UnresolvableSample,
 } from './internalization-queue-read-model.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────

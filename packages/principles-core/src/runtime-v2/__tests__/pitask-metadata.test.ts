@@ -63,6 +63,7 @@ function makeMetadata(overrides?: Partial<PITaskMetadata>) {
     outputArtifactRefs: overrides?.outputArtifactRefs ?? ([] as ArtifactRef[]),
     parentTaskId: overrides?.parentTaskId,
     correlationId: overrides?.correlationId,
+    rejectionCount: overrides?.rejectionCount,
   };
 }
 
