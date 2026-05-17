@@ -40,6 +40,7 @@ import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeIdleTriggerEvaluate } from './commands/runtime-idle-trigger.js';
+import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
 
 const program = new Command();
 
@@ -475,6 +476,30 @@ idleTriggerCmd
       jitterMaxMs: opts.jitterMaxMs,
       activityCooldownMs: opts.activityCooldownMs,
       jitterSeed: opts.jitterSeed,
+    });
+  });
+
+const activationCmd = runtimeCmd
+  .command('activation')
+  .description('Activation dispatch operations');
+
+activationCmd
+  .command('dispatch')
+  .description('Dispatch an activation for a rollout-reviewed artifact')
+  .requiredOption('-a, --artifact-id <id>', 'PIArtifact ID to activate')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-c, --channel <channel>', 'Activation channel (prompt|defer_archive)', 'prompt')
+  .option('--dry-run', 'Dry-run mode (default, no writes)')
+  .option('--confirm', 'Confirm and write activation record')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeActivationDispatch({
+      workspace: opts.workspace,
+      artifactId: opts.artifactId,
+      channel: opts.channel,
+      dryRun: opts.dryRun,
+      confirm: opts.confirm,
+      json: opts.json,
     });
   });
 
