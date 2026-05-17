@@ -246,6 +246,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
       candidateId: opts.candidateId,
       recommendationKind: recommendation.kind,
       route: decision.route,
+      ready: decision.ready,
     };
 
     const bridgeDecision = computeBridgeDecision(bridgeInput);
@@ -785,6 +786,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
         candidateId,
         recommendationKind: recommendation.kind,
         route: decision.route,
+        ready: decision.ready,
       };
 
       const bridgeDecision = computeBridgeDecision(bridgeInput);

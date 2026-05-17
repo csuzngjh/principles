@@ -6,6 +6,7 @@ export interface IntakeToInternalizationBridgeInput {
   candidateId: string;
   recommendationKind: string;
   route: InternalizationRouteKind;
+  ready: boolean;
   sourcePainId?: string;
   workspaceDir?: string;
   now?: string;
@@ -29,6 +30,10 @@ export function computeBridgeDecision(
 ): BridgeDecision {
   if (!input.candidateId || input.candidateId.trim() === '') {
     return { decision: 'invalid_candidate', reason: 'candidateId must be a non-empty string' };
+  }
+
+  if (!input.ready) {
+    return { decision: 'not_internalizable', reason: `Route "${input.route}" is not ready — missing required fields` };
   }
 
   if (input.route === 'deferred') {
@@ -72,11 +77,15 @@ export function buildDreamerTaskSeed(
     correlationId: input.candidateId,
   });
 
+  const diagObj = JSON.parse(diagnosticJson);
+  diagObj.candidateId = input.candidateId;
+  const finalDiagnosticJson = JSON.stringify(diagObj);
+
   return {
     taskId: decision.taskId,
     taskKind: 'dreamer',
     channel: decision.channel,
-    diagnosticJson,
+    diagnosticJson: finalDiagnosticJson,
     status: 'pending',
     attemptCount: 0,
     maxAttempts: 3,

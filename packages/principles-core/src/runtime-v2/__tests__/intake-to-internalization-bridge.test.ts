@@ -16,6 +16,7 @@ const validInput: IntakeToInternalizationBridgeInput = {
   candidateId: 'cand-001',
   recommendationKind: 'principle',
   route: 'principle-ledger',
+  ready: true,
 };
 
 describe('IntakeToInternalizationBridge (PRI-142)', () => {
@@ -27,6 +28,17 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
         expect(result.taskId).toBe('dreamer-cand-001-prompt');
         expect(result.taskKind).toBe('dreamer');
         expect(result.channel).toBe('prompt');
+      }
+    });
+
+    it('ready=false returns not_internalizable even with mapped route', () => {
+      const result = computeBridgeDecision({
+        ...validInput,
+        ready: false,
+      });
+      expect(result.decision).toBe('not_internalizable');
+      if (result.decision === 'not_internalizable') {
+        expect(result.reason).toContain('not ready');
       }
     });
 
@@ -71,6 +83,7 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
         candidateId: 'cand-rule',
         recommendationKind: 'rule',
         route: 'rule-candidate',
+        ready: true,
       });
       expect(result.decision).toBe('seeded');
       if (result.decision === 'seeded') {
@@ -84,6 +97,7 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
         candidateId: 'cand-impl',
         recommendationKind: 'implementation',
         route: 'implementation-candidate',
+        ready: true,
       });
       expect(result.decision).toBe('seeded');
       if (result.decision === 'seeded') {
@@ -96,6 +110,7 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
         candidateId: 'cand-prompt',
         recommendationKind: 'prompt',
         route: 'prompt-injection-candidate',
+        ready: true,
       });
       expect(result.decision).toBe('seeded');
       if (result.decision === 'seeded') {
@@ -127,6 +142,16 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       }
     });
 
+    it('returns BridgeDecision for not-ready input', () => {
+      const result = buildDreamerTaskSeed({
+        ...validInput,
+        ready: false,
+      });
+      if ('decision' in result) {
+        expect(result.decision).toBe('not_internalizable');
+      }
+    });
+
     it('created task metadata can be parsed by parsePITaskMetadata', () => {
       const result = buildDreamerTaskSeed(validInput);
       if ('diagnosticJson' in result) {
@@ -142,6 +167,14 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
           expect(meta.outputArtifactRefs).toEqual([]);
           expect(meta.correlationId).toBe('cand-001');
         }
+      }
+    });
+
+    it('diagnosticJson contains top-level candidateId for chain integrity', () => {
+      const result = buildDreamerTaskSeed(validInput);
+      if ('diagnosticJson' in result) {
+        const diagObj = JSON.parse(result.diagnosticJson);
+        expect(diagObj.candidateId).toBe('cand-001');
       }
     });
 
@@ -195,6 +228,17 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       vi.clearAllMocks();
       const result = await seedIntakeTask(
         { ...validInput, route: 'deferred', recommendationKind: 'defer' },
+        mockStore,
+      );
+      expect(result.decision).toBe('not_internalizable');
+      expect(mockStore.getTask).not.toHaveBeenCalled();
+      expect(mockStore.createTask).not.toHaveBeenCalled();
+    });
+
+    it('returns not_internalizable for ready=false', async () => {
+      vi.clearAllMocks();
+      const result = await seedIntakeTask(
+        { ...validInput, ready: false },
         mockStore,
       );
       expect(result.decision).toBe('not_internalizable');
