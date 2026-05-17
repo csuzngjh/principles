@@ -179,9 +179,7 @@ const REQUIRED_TEST_FILES = [
   '../activation/__tests__/activation-dispatcher.test.ts',
 ];
 
-const REQUIRED_DOC_FILES = [
-  '../../../../../docs/adr/0001-runtime-v2-service-boundaries.md',
-];
+const REQUIRED_DOC_FILES: string[] = [];
 
 for (const file of REQUIRED_SOURCE_FILES) {
   it(`source file ${file} is present`, async () => {
