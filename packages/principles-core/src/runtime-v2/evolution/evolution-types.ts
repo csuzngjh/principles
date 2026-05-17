@@ -6,8 +6,6 @@
  * - 失败记录教训，不扣分
  * - 同类任务失败后首次成功 = 双倍奖励（1小时冷却）
  * - 5级成长路径：Seed → Forest
- *
- * Migrated from openclaw-plugin/src/core/evolution-types.ts
  */
 import { Type, type Static } from '@sinclair/typebox';
 

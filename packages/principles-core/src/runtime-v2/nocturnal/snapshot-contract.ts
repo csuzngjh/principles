@@ -4,10 +4,6 @@
  *
  * PURPOSE: Validate incoming NocturnalSessionSnapshot data at the boundary
  * before it enters the nocturnal pipeline. Pure validation logic with zero I/O.
- *
- * Migrated from openclaw-plugin/src/core/nocturnal-snapshot-contract.ts.
- * NocturnalSessionSnapshot interface inlined from nocturnal-trajectory-extractor.ts
- * (plugin-only I/O module) to keep this module free of I/O imports.
  */
 
 import { Type, type Static } from '@sinclair/typebox';

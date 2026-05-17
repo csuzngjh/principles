@@ -209,7 +209,67 @@ describe('PRI-140: getPragmaReport()', () => {
     }
   });
 });
-// -- 6. getDb() does not cache broken connection after pragma failure --
+
+function tryGetPragmaError(conn: SqliteConnection): PDRuntimeError | undefined {
+  try {
+    conn.getDb();
+  } catch (err) {
+    if (err instanceof PDRuntimeError) {
+      return err;
+    }
+    return undefined;
+  }
+}
+
+// -- 6. Verification readback failure (pragma SET succeeds but readback returns unexpected value) --
+
+describe('PRI-140: verification readback failure', () => {
+  it('throws PDRuntimeError when foreign_keys readback returns false after SET succeeded', () => {
+    const dir = freshDir('fk-readback-fail');
+    const origPragma = Database.prototype.pragma;
+
+    Database.prototype.pragma = function (this: Database.Database, ...args: Parameters<Database.Database['pragma']>) {
+      // Only intercept foreign_keys readback; let all other calls (including SET) pass through
+      if (typeof args[0] === 'string' && args[0] === 'foreign_keys' && typeof args[1] === 'object' && args[1] !== null && (args[1] as { simple?: boolean }).simple === true) {
+        return 0;
+      }
+      return origPragma.apply(this, args);
+    };
+
+    try {
+      const conn = new SqliteConnection(dir);
+      expect(() => conn.getDb()).toThrow(PDRuntimeError);
+      const err = tryGetPragmaError(conn);
+      expect(err?.message).toContain('Failed to enable foreign keys');
+    } finally {
+      Database.prototype.pragma = origPragma;
+    }
+  });
+
+  it('throws PDRuntimeError when journal_mode readback returns non-WAL value after SET succeeded', () => {
+    const dir = freshDir('wal-readback-fail');
+    const origPragma = Database.prototype.pragma;
+
+    Database.prototype.pragma = function (this: Database.Database, ...args: Parameters<Database.Database['pragma']>) {
+      // Only intercept journal_mode readback; let all other calls pass through
+      if (typeof args[0] === 'string' && args[0] === 'journal_mode' && typeof args[1] === 'object' && args[1] !== null && (args[1] as { simple?: boolean }).simple === true) {
+        return 'memory';
+      }
+      return origPragma.apply(this, args);
+    };
+
+    try {
+      const conn = new SqliteConnection(dir);
+      expect(() => conn.getDb()).toThrow(PDRuntimeError);
+      const err = tryGetPragmaError(conn);
+      expect(err?.message).toContain('got: memory');
+    } finally {
+      Database.prototype.pragma = origPragma;
+    }
+  });
+});
+
+// -- 7. getDb() does not cache broken connection after pragma failure --
 
 describe('PRI-140: getDb() leak protection', () => {
   it('second getDb() after pragma failure also throws (no cached broken db)', () => {
