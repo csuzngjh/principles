@@ -1,7 +1,11 @@
 import type { TaskEvidence } from '../types/index.js';
-/**
- * Parses diagnostician output JSON from artifact content
- */
+
+const VALID_RECOMMENDATION_KINDS = new Set(['principle', 'rule', 'implementation', 'prompt', 'defer']);
+
+function logParseError(context: string, raw: string): void {
+  console.debug('[diagnostic-parser] Failed to parse ' + context + ': ' + raw.slice(0, 200));
+}
+
 export function parseDiagnosticianOutput(contentJson: string): TaskEvidence['diagnosis'] | undefined {
   try {
     const output = JSON.parse(contentJson) as {
@@ -12,32 +16,27 @@ export function parseDiagnosticianOutput(contentJson: string): TaskEvidence['dia
       recommendations?: { kind: string; description: string; triggerPattern?: string; action?: string; abstractedPrinciple?: string }[];
       ambiguityNotes?: string[];
     };
-    
-    if (output.rootCause || output.recommendations?.length) {
-      return {
-        rootCause: output.rootCause ?? '',
-        confidence: output.confidence ?? 0,
-        violatedPrinciples: output.violatedPrinciples ?? [],
-        evidenceChain: output.evidence ?? [],
-        recommendations: (output.recommendations ?? []).map(r => ({
-          kind: r.kind as 'principle' | 'rule' | 'implementation' | 'prompt' | 'defer',
-          description: r.description,
-          triggerPattern: r.triggerPattern,
-          action: r.action,
-          abstractedPrinciple: r.abstractedPrinciple,
-        })),
-        ambiguityNotes: output.ambiguityNotes ?? [],
-      };
-    }
+
+    return {
+      rootCause: output.rootCause ?? '',
+      confidence: output.confidence ?? 0,
+      violatedPrinciples: output.violatedPrinciples ?? [],
+      evidenceChain: output.evidence ?? [],
+      recommendations: (output.recommendations ?? []).map(r => ({
+        kind: VALID_RECOMMENDATION_KINDS.has(r.kind) ? (r.kind as 'principle' | 'rule' | 'implementation' | 'prompt' | 'defer') : 'principle',
+        description: r.description,
+        triggerPattern: r.triggerPattern,
+        action: r.action,
+        abstractedPrinciple: r.abstractedPrinciple,
+      })),
+      ambiguityNotes: output.ambiguityNotes ?? [],
+    };
   } catch {
-    // Ignore parse errors
+    logParseError('diagnostician output', contentJson);
   }
   return undefined;
 }
 
-/**
- * Parses diagnostic input JSON from task
- */
 export function parseDiagnosticInput(diagnosticJson: string): TaskEvidence['input'] | undefined {
   try {
     const diag = JSON.parse(diagnosticJson) as {
@@ -47,57 +46,50 @@ export function parseDiagnosticInput(diagnosticJson: string): TaskEvidence['inpu
       painId?: string;
       sessionIdHint?: string;
     };
-    
-    if (diag.reasonSummary || diag.source) {
-      return {
-        reasonSummary: diag.reasonSummary ?? '',
-        source: diag.source ?? '',
-        severity: diag.severity ?? 'unknown',
-        painId: diag.painId,
-        sessionId: diag.sessionIdHint,
-      };
-    }
+
+    return {
+      reasonSummary: diag.reasonSummary ?? '',
+      source: diag.source ?? '',
+      severity: diag.severity ?? 'unknown',
+      painId: diag.painId,
+      sessionId: diag.sessionIdHint,
+    };
   } catch {
-    // Ignore parse errors
+    logParseError('diagnostic input', diagnosticJson);
   }
   return undefined;
 }
 
-/**
- * Parses severity from diagnostic JSON
- */
 export function parseSeverityFromDiagnostic(diagnosticJson: string | null | undefined): string | undefined {
   if (!diagnosticJson) return undefined;
   try {
     const diag = JSON.parse(diagnosticJson);
     return diag.severity ?? undefined;
   } catch {
+    logParseError('severity', diagnosticJson);
     return undefined;
   }
 }
 
-/**
- * Parses reason summary from diagnostic JSON
- */
 export function parseReasonSummaryFromDiagnostic(diagnosticJson: string | null | undefined): string {
   if (!diagnosticJson) return '';
   try {
     const diag = JSON.parse(diagnosticJson);
     return diag.reasonSummary ?? '';
   } catch {
+    logParseError('reason summary', diagnosticJson);
     return '';
   }
 }
 
-/**
- * Parses recommendation kind from source recommendation JSON
- */
 export function parseRecommendationKind(sourceRecommendationJson: string | null | undefined): string | undefined {
   if (!sourceRecommendationJson) return undefined;
   try {
-    const rec = JSON.parse(sourceRecommendationJson) as { kind?: string };
+    const rec = JSON.parse(sourceRecommendationJson);
+    if (typeof rec !== 'object' || rec === null || Array.isArray(rec)) return undefined;
     return rec.kind ?? undefined;
   } catch {
+    logParseError('recommendation kind', sourceRecommendationJson);
     return undefined;
   }
 }

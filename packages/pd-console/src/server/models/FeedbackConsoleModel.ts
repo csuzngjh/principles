@@ -139,6 +139,7 @@ export class FeedbackConsoleModel {
       const raw = fs.readFileSync(statsPath, 'utf8');
       return JSON.parse(raw) as Record<string, Record<string, unknown>>;
     } catch {
+      console.warn('[FeedbackConsoleModel] Failed to parse daily-stats.json at ' + statsPath);
       return {};
     }
   }

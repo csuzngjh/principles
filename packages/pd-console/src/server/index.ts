@@ -77,7 +77,7 @@ function resolveWorkspaceDir(argv: string[]): string {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--workspace' && i + 1 < args.length) {
       explicitWorkspace = path.resolve(args[i + 1]);
-      i++;
+      break;
     }
   }
 
@@ -126,11 +126,6 @@ function parseArgs(argv: string[]): ServerOptions {
       token = args[i + 1];
       i++;
     }
-  }
-
-  if (!fs.existsSync(workspace)) {
-    console.error('Workspace directory does not exist: ' + workspace);
-    process.exit(1);
   }
 
   return { workspace, port, noAuth, token };
