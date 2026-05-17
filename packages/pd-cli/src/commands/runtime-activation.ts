@@ -20,11 +20,11 @@ interface ActivationDispatchOptions {
 }
 
 function mapRolloutDecision(reviewDecision: string | undefined): RolloutActivationDecision {
-  if (!reviewDecision) return 'auto_activate';
+  if (!reviewDecision) return 'require_approval';
   if (reviewDecision === 'approve_rollout') return 'auto_activate';
   if (reviewDecision === 'needs_revision') return 'require_approval';
   if (reviewDecision === 'reject') return 'reject';
-  return 'auto_activate';
+  return 'require_approval';
 }
 
 function extractRolloutDecisionFromArtifact(artifact: PIArtifactRecord): RolloutActivationDecision {
@@ -40,9 +40,9 @@ function extractRolloutDecisionFromArtifact(artifact: PIArtifactRecord): Rollout
       }
     }
   } catch {
-    return 'auto_activate';
+    return 'require_approval';
   }
-  return 'auto_activate';
+  return 'require_approval';
 }
 
 function toSnapshot(record: PIArtifactRecord): PIArtifactSnapshot {
@@ -117,9 +117,9 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
 
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
   const stateManager = new RuntimeStateManager({ workspaceDir });
-  await stateManager.initialize();
 
   try {
+    await stateManager.initialize();
     const artifactRecord = await stateManager.piArtifactStore.getArtifactById(opts.artifactId);
     if (!artifactRecord) {
       const result: ActivationDecision = { decision: 'invalid_artifact', reason: 'artifact_not_found' };

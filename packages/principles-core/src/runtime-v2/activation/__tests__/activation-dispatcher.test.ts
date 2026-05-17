@@ -11,7 +11,7 @@ import {
   LOW_RISK_CHANNELS,
   HIGH_RISK_CHANNEL_MAP,
 } from '../index.js';
-import type { PIArtifactSnapshot, DispatchInput, ActivationArtifactReadModel } from '../index.js';
+import type { PIArtifactSnapshot, DispatchInput, ActivationArtifactReadModel, ChannelWriter } from '../index.js';
 
 function makePrincipleArtifact(overrides: Partial<PIArtifactSnapshot> = {}): PIArtifactSnapshot {
   return {
@@ -240,6 +240,50 @@ describe('ActivationDispatcher', () => {
       expect(result.reason).toBe('no_principle_id');
     }
   });
+
+  it('pending validation artifact → refused by writer', async () => {
+    const { artifactStore, dispatcher } = makeDispatcher();
+    artifactStore.addArtifact(makePrincipleArtifact({ validationStatus: 'pending' }));
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toContain('artifact_validation_status_pending');
+    }
+  });
+
+  it('whitespace-only sourcePrincipleId → invalid_artifact', async () => {
+    const { artifactStore, dispatcher } = makeDispatcher();
+    artifactStore.addArtifact(makePrincipleArtifact({
+      sourcePrincipleId: '   ',
+      contentJson: JSON.stringify({ text: 'No principle ID here' }),
+    }));
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
+    expect(result.decision).toBe('invalid_artifact');
+    if (result.decision === 'invalid_artifact') {
+      expect(result.reason).toBe('no_principle_id');
+    }
+  });
+
+  it('writer.activate throws → refused', async () => {
+    const { artifactStore } = makeDispatcher();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const throwingWriter: ChannelWriter = {
+      channel: 'prompt',
+      canActivate: async () => ({ ok: true, riskLevel: 'low' as const }),
+      activate: async () => { throw new Error('Writer crashed'); },
+    };
+    const stateStore = new MemoryActivationStateStore();
+    const throwDispatcher = new ActivationDispatcher(
+      { getArtifactById: async (id: string) => id === 'art-001' ? makePrincipleArtifact() : null },
+      stateStore,
+      [throwingWriter],
+    );
+    const result = await throwDispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toBe('activation_write_failed');
+    }
+  });
 });
 
 describe('PromptWriter', () => {
@@ -254,6 +298,13 @@ describe('PromptWriter', () => {
     const writer = new PromptWriter();
     const result = await writer.canActivate(makePrincipleArtifact({ artifactKind: 'rule' }));
     expect(result.ok).toBe(false);
+  });
+
+  it('canActivate returns ok=false for pending validation artifact', async () => {
+    const writer = new PromptWriter();
+    const result = await writer.canActivate(makePrincipleArtifact({ validationStatus: 'pending' }));
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('artifact_validation_status_pending');
   });
 
   it('activate returns correct activationId and targetRef', async () => {
@@ -290,6 +341,36 @@ describe('DeferArchiveWriter', () => {
     expect(result.activationId).toBe('act_archive_P_001');
     expect(result.action).toBe('defer_archive');
     expect(result.targetRef).toBe('ledger://P_001#archived');
+  });
+});
+
+describe('extractPrincipleId', () => {
+  it('trims whitespace from sourcePrincipleId', async () => {
+    const writer = new PromptWriter();
+    const artifact = makePrincipleArtifact({ sourcePrincipleId: '  P_001  ' });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects whitespace-only sourcePrincipleId', async () => {
+    const writer = new PromptWriter();
+    const artifact = makePrincipleArtifact({
+      sourcePrincipleId: '   ',
+      contentJson: JSON.stringify({ text: 'No ID' }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('no_principle_id_in_artifact');
+  });
+
+  it('trims whitespace from contentJson principleId', async () => {
+    const writer = new PromptWriter();
+    const artifact = makePrincipleArtifact({
+      sourcePrincipleId: undefined,
+      contentJson: JSON.stringify({ principleId: '  P_002  ' }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(true);
   });
 });
 

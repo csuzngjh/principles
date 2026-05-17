@@ -1,14 +1,17 @@
 import type { PIArtifactSnapshot, CanActivateResult, ChannelWriter, WriterInput, WriterResult } from './activation-types.js';
 
 function extractPrincipleId(artifact: PIArtifactSnapshot): string | null {
-  if (artifact.sourcePrincipleId) return artifact.sourcePrincipleId;
+  if (typeof artifact.sourcePrincipleId === 'string') {
+    const sourceId = artifact.sourcePrincipleId.trim();
+    if (sourceId !== '') return sourceId;
+  }
   try {
     const parsed = JSON.parse(artifact.contentJson) as Record<string, unknown>;
     if (typeof parsed.principleId === 'string' && parsed.principleId.trim() !== '') {
-      return parsed.principleId;
+      return parsed.principleId.trim();
     }
     if (typeof parsed.sourcePrincipleId === 'string' && parsed.sourcePrincipleId.trim() !== '') {
-      return parsed.sourcePrincipleId;
+      return parsed.sourcePrincipleId.trim();
     }
   } catch {
     return null;
@@ -24,7 +27,7 @@ export class PromptWriter implements ChannelWriter {
     if (artifact.artifactKind !== 'principle') {
       return { ok: false, reason: 'artifact_kind_not_principle', riskLevel: 'low' };
     }
-    if (artifact.validationStatus !== 'validated' && artifact.validationStatus !== 'pending') {
+    if (artifact.validationStatus !== 'validated') {
       return { ok: false, reason: `artifact_validation_status_${artifact.validationStatus}`, riskLevel: 'low' };
     }
     const principleId = extractPrincipleId(artifact);
@@ -52,7 +55,7 @@ export class DeferArchiveWriter implements ChannelWriter {
     if (artifact.artifactKind !== 'principle') {
       return { ok: false, reason: 'artifact_kind_not_principle', riskLevel: 'low' };
     }
-    if (artifact.validationStatus !== 'validated' && artifact.validationStatus !== 'pending') {
+    if (artifact.validationStatus !== 'validated') {
       return { ok: false, reason: `artifact_validation_status_${artifact.validationStatus}`, riskLevel: 'low' };
     }
     const principleId = extractPrincipleId(artifact);

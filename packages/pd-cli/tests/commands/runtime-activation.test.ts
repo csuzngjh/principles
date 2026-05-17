@@ -35,7 +35,7 @@ function makeArtifact(overrides: Record<string, unknown> = {}) {
     sourcePrincipleId: 'P_001',
     lineageArtifactIds: [],
     validationStatus: 'validated',
-    contentJson: JSON.stringify({ principleId: 'P_001', text: 'Test' }),
+    contentJson: JSON.stringify({ principleId: 'P_001', text: 'Test', review: { decision: 'approve_rollout' } }),
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,

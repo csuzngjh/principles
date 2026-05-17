@@ -8,6 +8,7 @@ import type {
   DispatchInput,
   PIArtifactSnapshot,
   WriterInput,
+  WriterResult,
 } from './activation-types.js';
 import {
   isLowRiskChannel,
@@ -101,8 +102,15 @@ export class ActivationDispatcher {
       now: input.now,
     };
 
+    // eslint-disable-next-line @typescript-eslint/init-declarations
+    let writerResult: WriterResult;
+    try {
+      writerResult = await writer.activate(writerInput, artifact);
+    } catch {
+      return { decision: 'refused', reason: 'activation_write_failed', channel: input.channel };
+    }
+
     if (!input.confirm) {
-      const writerResult = await writer.activate(writerInput, artifact);
       return {
         decision: 'would_activate',
         activationId: writerResult.activationId,
@@ -110,8 +118,6 @@ export class ActivationDispatcher {
         targetRef: writerResult.targetRef,
       };
     }
-
-    const writerResult = await writer.activate(writerInput, artifact);
 
     try {
       await this.stateReadModel.recordActivation({
