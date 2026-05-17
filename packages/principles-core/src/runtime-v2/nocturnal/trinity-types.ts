@@ -1,12 +1,8 @@
 /**
  * Nocturnal Trinity Shared Types
  *
- * Types shared between nocturnal-trinity.ts and nocturnal-candidate-scoring.ts.
+ * Types shared between trinity components and candidate scoring.
  * Extracted to break circular dependency.
- *
- * Migrated from openclaw-plugin/src/core/nocturnal-trinity-types.ts.
- * TrinityArtificerContext and its dependencies inlined from nocturnal-artificer.ts
- * to keep this module free of plugin I/O imports.
  */
 
 import { Type, type Static } from '@sinclair/typebox';

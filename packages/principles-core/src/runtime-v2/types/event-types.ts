@@ -471,7 +471,7 @@ export type NocturnalDreamerCompletedEventDataStatic = Static<typeof NocturnalDr
 
 /**
  * nocturnal_artifact_persisted — Artifact saved to .state/nocturnal/samples/.
- * Emitted from nocturnal-service.ts persistArtifact() after atomicWriteFileSync.
+ * Emitted from persistArtifact() after atomicWriteFileSync.
  */
 export interface NocturnalArtifactPersistedEventData {
   artifactId: string;
@@ -488,7 +488,7 @@ export type NocturnalArtifactPersistedEventDataStatic = Static<typeof NocturnalA
 
 /**
  * nocturnal_code_candidate_created — Rule implementation candidate persisted.
- * Emitted from nocturnal-service.ts persistCodeCandidate() after successful creation.
+ * Emitted from persistCodeCandidate() after successful creation.
  */
 export interface NocturnalCodeCandidateCreatedEventData {
   implementationId: string;

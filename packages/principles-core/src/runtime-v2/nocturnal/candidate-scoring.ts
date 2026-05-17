@@ -21,23 +21,18 @@
  * - confidence/consistency: candidate's internal consistency
  *
  * PHASE 6 ONLY — No real training, no automatic deployment
- *
- * Migrated from openclaw-plugin/src/core/nocturnal-candidate-scoring.ts.
- * ThresholdValues interface inlined from adaptive-thresholds.ts (plugin-only I/O module).
- * DreamerCandidate renamed to TrinityDreamerCandidate per Core naming convention.
  */
 
 import { Type, type Static } from '@sinclair/typebox';
-import type { TrinityDreamerCandidate, PhilosopherJudgment } from './nocturnal-trinity-types.js';
-import { TrinityDreamerCandidateSchema, PhilosopherJudgmentSchema } from './nocturnal-trinity-types.js';
+import type { TrinityDreamerCandidate, PhilosopherJudgment } from './trinity-types.js';
+import { TrinityDreamerCandidateSchema, PhilosopherJudgmentSchema } from './trinity-types.js';
 
 // ---------------------------------------------------------------------------
-// Inlined Types (from plugin-only modules — pure interfaces only)
+// Inlined Types
 // ---------------------------------------------------------------------------
 
 /**
  * Current threshold values.
- * Inlined from openclaw-plugin/src/core/adaptive-thresholds.ts (I/O module).
  */
 export const ThresholdValuesSchema = Type.Object({
   schemaCompletenessMin: Type.Number({ minimum: 0, maximum: 1 }),

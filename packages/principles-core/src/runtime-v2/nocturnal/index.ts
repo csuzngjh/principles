@@ -1,4 +1,4 @@
-// nocturnal-trinity-types
+// trinity-types
 export type {
   ArtificerTargetRuleScore,
   ArtificerTargetRuleResolution,
@@ -17,7 +17,7 @@ export type {
   TrinityStageFailure,
   TrinityResult,
   TrinityDraftArtifact,
-} from './nocturnal-trinity-types.js';
+} from './trinity-types.js';
 
 export {
   ArtificerTargetRuleScoreSchema,
@@ -37,9 +37,9 @@ export {
   TrinityStageFailureSchema,
   TrinityResultSchema,
   TrinityDraftArtifactSchema,
-} from './nocturnal-trinity-types.js';
+} from './trinity-types.js';
 
-// Candidate scoring (migrated from openclaw-plugin)
+// Candidate scoring
 export type {
   ThresholdValues,
   CandidateScores,
@@ -68,7 +68,7 @@ export {
   DiversityValidationResultSchema,
 } from './candidate-scoring.js';
 
-// Snapshot contract (migrated from openclaw-plugin)
+// Snapshot contract
 export type {
   NocturnalAssistantTurn,
   NocturnalUserTurn,
