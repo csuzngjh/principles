@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqliteApprovalQueueStore } from '../sqlite-approval-store.js';
 import { SqliteConnection } from '../../store/sqlite-connection.js';
 import path from 'path';
@@ -17,6 +17,10 @@ describe('SqliteApprovalQueueStore', () => {
   beforeEach(() => {
     connection = createTestConnection();
     store = new SqliteApprovalQueueStore(connection);
+  });
+
+  afterEach(() => {
+    connection?.close();
   });
 
   it('enqueue creates a pending record', async () => {

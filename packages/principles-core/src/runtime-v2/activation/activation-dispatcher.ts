@@ -91,16 +91,28 @@ export class ActivationDispatcher {
   }
 
   private async enqueueForApproval(input: DispatchInput, _idempotencyKey: string): Promise<ActivationDecision> {
+    const riskLevel = getChannelRiskLevel(input.channel);
+
     if (!this.approvalQueueStore) {
       return {
         decision: 'refused',
         reason: 'requires_approval',
         channel: input.channel,
-        riskLevel: getChannelRiskLevel(input.channel),
+        riskLevel,
       };
     }
 
-    const riskLevel = getChannelRiskLevel(input.channel);
+    // Dry-run: preview what would be queued without persisting
+    if (!input.confirm) {
+      return {
+        decision: 'queued_for_approval',
+        approvalId: 'apr_' + input.channel + '_' + input.artifactId,
+        queuedAt: input.now,
+        channel: input.channel,
+        riskLevel,
+      };
+    }
+
     try {
       const record = await this.approvalQueueStore.enqueue(
         { artifactId: input.artifactId, channel: input.channel, riskLevel, confidence: input.confidence },

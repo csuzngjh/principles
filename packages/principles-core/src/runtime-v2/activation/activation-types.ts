@@ -132,7 +132,8 @@ export interface ApprovalFilter {
 
 export type ApprovalDecisionResult =
   | { ok: true; record: ApprovalRecord }
-  | { ok: false; error: 'already_decided' | 'not_found'; status?: ApprovalStatus };
+  | { ok: false; error: 'already_decided'; status: ApprovalStatus }
+  | { ok: false; error: 'not_found' };
 
 export interface ApprovalQueueStore {
   enqueue(input: ApprovalEnqueueInput, now: string): Promise<ApprovalRecord>;

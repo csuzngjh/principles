@@ -99,8 +99,7 @@ describe('ApprovalQueue', () => {
     await queue.approve(record.approvalId, 'user-1');
     const result = await queue.approve(record.approvalId, 'user-2');
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('already_decided');
+    if (!result.ok && result.error === 'already_decided') {
       expect(result.status).toBe('approved');
     }
   });

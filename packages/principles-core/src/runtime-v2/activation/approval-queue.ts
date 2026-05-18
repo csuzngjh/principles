@@ -13,6 +13,7 @@ import {
 
 export function decideAutoPromotion(channel: InternalizationChannel, confidence: number | undefined): boolean {
   if (confidence === undefined || confidence === null) return false;
+  if (confidence < 0 || confidence > 1) return false;
   if (!AUTO_PROMOTABLE_CHANNELS.includes(channel)) return false;
   return confidence >= AUTO_PROMOTION_CONFIDENCE_THRESHOLD;
 }

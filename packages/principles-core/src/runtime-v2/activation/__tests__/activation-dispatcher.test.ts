@@ -426,7 +426,7 @@ describe('ActivationDispatcher', () => {
       stateStore,
       { writers: [new PromptWriter(), new DeferArchiveWriter()], approvalQueueStore: failingStore },
     );
-    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.90 }));
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.90, confirm: true }));
     expect(result.decision).toBe('refused');
     if (result.decision === 'refused') {
       expect(result.reason).toBe('approval_enqueue_failed');
