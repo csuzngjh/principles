@@ -104,4 +104,32 @@ describe('SqliteApprovalQueueStore', () => {
       expect(result.error).toBe('not_found');
     }
   });
+
+  it('enqueue is idempotent for same artifact+channel', async () => {
+    const r1 = await store.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
+    const r2 = await store.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-19T00:00:00Z');
+    expect(r1.approvalId).toBe(r2.approvalId);
+    expect(r1.requestedAt).toBe(r2.requestedAt);
+    expect(r1.requestedAt).toBe('2026-05-18T00:00:00Z');
+    const pending = await store.listPending();
+    expect(pending).toHaveLength(1);
+  });
+
+  it('listPending filters by riskLevel', async () => {
+    await store.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
+    await store.enqueue({ artifactId: 'art-2', channel: 'model_training', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
+    const pending = await store.listPending({ riskLevel: 'critical' });
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.channel).toBe('model_training');
+  });
+
+  it('reject returns error for already-rejected record', async () => {
+    const created = await store.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
+    await store.reject(created.approvalId, 'user-1', 'dangerous');
+    const result = await store.reject(created.approvalId, 'user-2', 'also bad');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe('already_decided');
+    }
+  });
 });

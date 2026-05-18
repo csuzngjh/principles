@@ -77,6 +77,8 @@ export class ActivationDispatcher {
       return { decision: 'refused', reason: 'rollout_rejected', channel: input.channel };
     }
 
+    // Auto-promotion bypasses both channel-risk gating AND explicit require_approval from the rollout gate.
+    // This is intentional: high-confidence skill artifacts are safe enough to activate without human review.
     const needsApproval = input.rolloutDecision === 'require_approval' || !isLowRiskChannel(input.channel);
     if (needsApproval) {
       if (decideAutoPromotion(input.channel, input.confidence)) {
@@ -99,17 +101,21 @@ export class ActivationDispatcher {
     }
 
     const riskLevel = getChannelRiskLevel(input.channel);
-    const record = await this.approvalQueueStore.enqueue(
-      { artifactId: input.artifactId, channel: input.channel, riskLevel, confidence: input.confidence },
-      input.now,
-    );
-    return {
-      decision: 'queued_for_approval',
-      approvalId: record.approvalId,
-      queuedAt: record.requestedAt,
-      channel: input.channel,
-      riskLevel,
-    };
+    try {
+      const record = await this.approvalQueueStore.enqueue(
+        { artifactId: input.artifactId, channel: input.channel, riskLevel, confidence: input.confidence },
+        input.now,
+      );
+      return {
+        decision: 'queued_for_approval',
+        approvalId: record.approvalId,
+        queuedAt: record.requestedAt,
+        channel: input.channel,
+        riskLevel,
+      };
+    } catch {
+      return { decision: 'refused', reason: 'approval_enqueue_failed', channel: input.channel, riskLevel };
+    }
   }
 
   private async activateArtifact(input: DispatchInput, artifact: PIArtifactSnapshot, idempotencyKey: string): Promise<ActivationDecision> {

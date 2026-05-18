@@ -17,6 +17,8 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
 
   async enqueue(input: ApprovalEnqueueInput, now: string): Promise<ApprovalRecord> {
     const approvalId = makeApprovalId(input.artifactId, input.channel);
+    const existing = this.records.get(approvalId);
+    if (existing) return existing;
     const record: ApprovalRecord = {
       approvalId,
       artifactId: input.artifactId,

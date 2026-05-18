@@ -59,7 +59,8 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
       input.confidence ?? null,
       now,
     );
-    const row = db.prepare(`SELECT * FROM approvals WHERE approval_id = ?`).get(approvalId) as ApprovalRow;
+    const row = db.prepare(`SELECT * FROM approvals WHERE approval_id = ?`).get(approvalId) as ApprovalRow | undefined;
+    if (!row) throw new Error(`ApprovalQueue enqueue failed: no row found for ${approvalId}`);
     return rowToRecord(row);
   }
 
@@ -93,7 +94,10 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
       return { ok: false, error: 'already_decided', status: existing.status as ApprovalStatus };
     }
     const now = new Date().toISOString();
-    db.prepare(`UPDATE approvals SET status = 'approved', decided_at = ?, decided_by = ?, decision_note = ? WHERE approval_id = ? AND status = 'pending'`).run(now, decidedBy, note ?? null, approvalId);
+    const updateResult = db.prepare(`UPDATE approvals SET status = 'approved', decided_at = ?, decided_by = ?, decision_note = ? WHERE approval_id = ? AND status = 'pending'`).run(now, decidedBy, note ?? null, approvalId);
+    if (updateResult.changes === 0) {
+      return { ok: false, error: 'already_decided', status: existing.status as ApprovalStatus };
+    }
     const row = db.prepare(`SELECT * FROM approvals WHERE approval_id = ?`).get(approvalId) as ApprovalRow;
     return { ok: true, record: rowToRecord(row) };
   }
@@ -106,7 +110,10 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
       return { ok: false, error: 'already_decided', status: existing.status as ApprovalStatus };
     }
     const now = new Date().toISOString();
-    db.prepare(`UPDATE approvals SET status = 'rejected', decided_at = ?, decided_by = ?, rejection_reason = ? WHERE approval_id = ? AND status = 'pending'`).run(now, decidedBy, reason, approvalId);
+    const updateResult = db.prepare(`UPDATE approvals SET status = 'rejected', decided_at = ?, decided_by = ?, rejection_reason = ? WHERE approval_id = ? AND status = 'pending'`).run(now, decidedBy, reason, approvalId);
+    if (updateResult.changes === 0) {
+      return { ok: false, error: 'already_decided', status: existing.status as ApprovalStatus };
+    }
     const row = db.prepare(`SELECT * FROM approvals WHERE approval_id = ?`).get(approvalId) as ApprovalRow;
     return { ok: true, record: rowToRecord(row) };
   }

@@ -131,7 +131,19 @@ describe('ApprovalQueue', () => {
     }
   });
 
-  it('listPending returns only pending records', async () => {
+  it('enqueue is idempotent for same artifact+channel', async () => {
+    const store = new MemoryApprovalQueueStore();
+    const queue = new ApprovalQueue(store);
+    const r1 = await queue.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
+    const r2 = await queue.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-19T00:00:00Z');
+    expect(r1.approvalId).toBe(r2.approvalId);
+    expect(r1.requestedAt).toBe(r2.requestedAt);
+    expect(r1.requestedAt).toBe('2026-05-18T00:00:00Z');
+    const pending = await queue.listPending();
+    expect(pending).toHaveLength(1);
+  });
+
+    it('listPending returns only pending records', async () => {
     const store = new MemoryApprovalQueueStore();
     const queue = new ApprovalQueue(store);
     await queue.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
@@ -151,5 +163,25 @@ describe('ApprovalQueue', () => {
     const pending = await queue.listPending({ channel: 'code_tool_hook' });
     expect(pending).toHaveLength(1);
     expect(pending[0]?.channel).toBe('code_tool_hook');
+  });
+
+  it('listPending filters by riskLevel', async () => {
+    const store = new MemoryApprovalQueueStore();
+    const queue = new ApprovalQueue(store);
+    await queue.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
+    await queue.enqueue({ artifactId: 'art-2', channel: 'model_training', riskLevel: 'critical' }, '2026-05-18T00:00:00Z');
+    await queue.enqueue({ artifactId: 'art-3', channel: 'skill', riskLevel: 'medium' }, '2026-05-18T00:00:00Z');
+    const pending = await queue.listPending({ riskLevel: 'high' });
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.channel).toBe('code_tool_hook');
+  });
+
+  it('getById returns enqueued record', async () => {
+    const store = new MemoryApprovalQueueStore();
+    const queue = new ApprovalQueue(store);
+    const record = await queue.enqueue({ artifactId: 'art-1', channel: 'skill', riskLevel: 'medium' }, '2026-05-18T00:00:00Z');
+    const found = await queue.getById(record.approvalId);
+    expect(found).not.toBeNull();
+    expect(found?.artifactId).toBe('art-1');
   });
 });

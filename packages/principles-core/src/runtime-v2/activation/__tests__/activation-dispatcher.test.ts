@@ -350,6 +350,88 @@ describe('ActivationDispatcher', () => {
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill' }));
     expect(result.decision).toBe('queued_for_approval');
   });
+
+  it('skill with confidence 0.95 + queue store + writer -> would_activate (auto-promote dry-run)', async () => {
+    const skillWriter: ChannelWriter = {
+      channel: 'skill',
+      canActivate: async () => ({ ok: true, riskLevel: 'medium' }),
+      activate: async (input) => ({
+        activationId: 'act_skill_' + input.principleId,
+        action: 'skill_activate',
+        targetRef: 'skill://' + input.principleId,
+      }),
+    };
+    const stateStore = new MemoryActivationStateStore();
+    const artifactStore = new MemoryArtifactReadModel();
+    const approvalStore = new MemoryApprovalQueueStore();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [skillWriter], approvalQueueStore: approvalStore },
+    );
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.95 }));
+    expect(result.decision).toBe('would_activate');
+    if (result.decision === 'would_activate') {
+      expect(result.activationId).toBe('act_skill_P_001');
+      expect(result.action).toBe('skill_activate');
+    }
+    // Verify nothing was queued
+    const pending = await approvalStore.listPending();
+    expect(pending).toHaveLength(0);
+  });
+
+  it('skill with confidence 0.96 + queue store + writer -> activated (auto-promote confirm)', async () => {
+    const skillWriter: ChannelWriter = {
+      channel: 'skill',
+      canActivate: async () => ({ ok: true, riskLevel: 'medium' }),
+      activate: async (input) => ({
+        activationId: 'act_skill_' + input.principleId,
+        action: 'skill_activate',
+        targetRef: 'skill://' + input.principleId,
+      }),
+    };
+    const stateStore = new MemoryActivationStateStore();
+    const artifactStore = new MemoryArtifactReadModel();
+    const approvalStore = new MemoryApprovalQueueStore();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [skillWriter], approvalQueueStore: approvalStore },
+    );
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.96, confirm: true }));
+    expect(result.decision).toBe('activated');
+    if (result.decision === 'activated') {
+      expect(result.activationId).toBe('act_skill_P_001');
+    }
+    // Verify nothing was queued
+    const pending = await approvalStore.listPending();
+    expect(pending).toHaveLength(0);
+  });
+
+  it('approval store enqueue fails -> refused', async () => {
+    const failingStore = {
+      enqueue: async () => { throw new Error('DB down'); },
+      getById: async () => null,
+      listPending: async () => [],
+      approve: async () => ({ ok: false as const, error: 'not_found' as const }),
+      reject: async () => ({ ok: false as const, error: 'not_found' as const }),
+    };
+    const stateStore = new MemoryActivationStateStore();
+    const artifactStore = new MemoryArtifactReadModel();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [new PromptWriter(), new DeferArchiveWriter()], approvalQueueStore: failingStore },
+    );
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.90 }));
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toBe('approval_enqueue_failed');
+    }
+  });
 });
 
 describe('PromptWriter', () => {
