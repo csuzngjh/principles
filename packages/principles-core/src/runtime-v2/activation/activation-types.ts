@@ -116,6 +116,49 @@ export interface ApprovalRecord {
   decidedBy?: string;
   decisionNote?: string;
   rejectionReason?: string;
+  summary?: string;
+  triggerReason?: string;
+  confidenceExplanation?: string;
+  effectDescription?: string;
+  rejectionEffect?: string;
+}
+
+export type ConfidenceLabel = 'high' | 'medium' | 'low';
+
+export function mapConfidenceToLabel(confidence: number | undefined): ConfidenceLabel {
+  if (confidence === undefined || confidence === null) return 'medium';
+  if (confidence >= 0.8) return 'high';
+  if (confidence >= 0.5) return 'medium';
+  return 'low';
+}
+
+export interface ApprovalWithContext extends ApprovalRecord {
+  summary?: string;
+  triggerReason?: string;
+  confidenceLabel: ConfidenceLabel;
+  confidenceExplanation?: string;
+  effectDescription?: string;
+  rejectionEffect?: string;
+}
+
+export interface ApprovalListFilter {
+  status?: ApprovalStatus;
+  channel?: InternalizationChannel;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ApprovalStats {
+  pending: number;
+  approved: number;
+  rejected: number;
+  cancelled: number;
+}
+
+export interface ApprovalListResult {
+  items: ApprovalWithContext[];
+  total: number;
+  stats: ApprovalStats;
 }
 
 export interface ApprovalEnqueueInput {
@@ -123,6 +166,11 @@ export interface ApprovalEnqueueInput {
   channel: InternalizationChannel;
   riskLevel: ActivationRiskLevel;
   confidence?: number;
+  summary?: string;
+  triggerReason?: string;
+  confidenceExplanation?: string;
+  effectDescription?: string;
+  rejectionEffect?: string;
 }
 
 export interface ApprovalFilter {
@@ -139,6 +187,8 @@ export interface ApprovalQueueStore {
   enqueue(input: ApprovalEnqueueInput, now: string): Promise<ApprovalRecord>;
   getById(approvalId: string): Promise<ApprovalRecord | null>;
   listPending(filter?: ApprovalFilter): Promise<ApprovalRecord[]>;
+  listAll(filter?: ApprovalListFilter): Promise<ApprovalRecord[]>;
+  countByStatus(): Promise<ApprovalStats>;
   approve(approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult>;
   reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult>;
 }

@@ -2,14 +2,16 @@ import type {
   ApprovalDecisionResult,
   ApprovalEnqueueInput,
   ApprovalFilter,
+  ApprovalListFilter,
   ApprovalQueueStore,
   ApprovalRecord,
+  ApprovalStats,
   ApprovalStatus,
   InternalizationChannel,
 } from './activation-types.js';
 
 function makeApprovalId(artifactId: string, channel: InternalizationChannel): string {
-  return `apr_${channel}_${artifactId}`;
+  return 'apr_' + channel + '_' + artifactId;
 }
 
 export class MemoryApprovalQueueStore implements ApprovalQueueStore {
@@ -27,6 +29,11 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
       status: 'pending' as ApprovalStatus,
       confidence: input.confidence,
       requestedAt: now,
+      summary: input.summary,
+      triggerReason: input.triggerReason,
+      confidenceExplanation: input.confidenceExplanation,
+      effectDescription: input.effectDescription,
+      rejectionEffect: input.rejectionEffect,
     };
     this.records.set(approvalId, record);
     return record;
@@ -44,6 +51,31 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
       if (filter.riskLevel && r.riskLevel !== filter.riskLevel) return false;
       return true;
     });
+  }
+
+  async listAll(filter?: ApprovalListFilter): Promise<ApprovalRecord[]> {
+    let items = [...this.records.values()];
+    if (filter?.status) {
+      items = items.filter((r) => r.status === filter.status);
+    }
+    if (filter?.channel) {
+      items = items.filter((r) => r.channel === filter.channel);
+    }
+    const page = Math.max(1, filter?.page ?? 1);
+    const pageSize = filter?.pageSize ?? 0;
+    if (pageSize <= 0) return items;
+    const offset = (page - 1) * pageSize;
+    return items.slice(offset, offset + pageSize);
+  }
+
+  async countByStatus(): Promise<ApprovalStats> {
+    const stats: ApprovalStats = { pending: 0, approved: 0, rejected: 0, cancelled: 0 };
+    for (const r of this.records.values()) {
+      if (r.status in stats) {
+        stats[r.status as keyof ApprovalStats]++;
+      }
+    }
+    return stats;
   }
 
   async approve(approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult> {

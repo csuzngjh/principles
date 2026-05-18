@@ -20,6 +20,7 @@ import { handleOverviewRoute, disposeOverviewModels } from './routes/overview.js
 import { handleGatesRoute, disposeGateModels } from './routes/gates.js';
 import { handleFeedbackRoute, disposeFeedbackModels } from './routes/feedback.js';
 import { handleSamplesRoute, disposeSampleModels } from './routes/samples.js';
+import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
 import { handleEvolutionRoute, disposeEvolutionModels } from './routes/evolution.js';
 import { handleThinkingModelsRoute, disposeThinkingModels } from './routes/thinking-models.js';
 import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
@@ -269,6 +270,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeGateModels();
   disposeFeedbackModels();
   disposeSampleModels();
+  disposeApprovalsModels();
   disposeEvolutionModels();
   disposeThinkingModels();
   disposeHealthModels();
@@ -352,7 +354,14 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
-      // GET /api/evolution/stats, /api/evolution/tasks, /api/evolution/principles, /api/evolution/queue
+      // GET /api/v1/approvals, /api/v1/approvals/:id, POST /api/v1/approvals/:id/approve, /api/v1/approvals/:id/reject
+      if (urlPath.startsWith('/api/v1/approvals')) {
+        const subPath = urlPath.slice('/api/v1/approvals'.length);
+        asyncHandler(() => handleApprovalsRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+            // GET /api/evolution/stats, /api/evolution/tasks, /api/evolution/principles, /api/evolution/queue
       if (urlPath === '/api/evolution' || urlPath.startsWith('/api/evolution/')) {
         const subPath = urlPath.slice('/api/evolution'.length);
         asyncHandler(() => handleEvolutionRoute(req, res, services.workspaceDir, subPath))(req, res);

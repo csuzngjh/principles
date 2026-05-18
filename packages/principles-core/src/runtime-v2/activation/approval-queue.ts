@@ -3,8 +3,10 @@ import type {
   ApprovalDecisionResult,
   ApprovalEnqueueInput,
   ApprovalFilter,
+  ApprovalListFilter,
   ApprovalQueueStore,
   ApprovalRecord,
+  ApprovalStats,
 } from './activation-types.js';
 import {
   AUTO_PROMOTABLE_CHANNELS,
@@ -49,5 +51,13 @@ export class ApprovalQueue {
       return { ok: false, error: 'already_decided', status: existing.status };
     }
     return this.store.reject(approvalId, decidedBy, reason);
+  }
+
+  async listAll(filter?: ApprovalListFilter): Promise<ApprovalRecord[]> {
+    return this.store.listAll(filter);
+  }
+
+  async countByStatus(): Promise<ApprovalStats> {
+    return this.store.countByStatus();
   }
 }
