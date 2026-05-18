@@ -15,6 +15,12 @@ export type {
   InternalizationChannel,
   PIArtifactKind,
   PIArtifactValidationStatus,
+  ApprovalStatus,
+  ApprovalRecord,
+  ApprovalEnqueueInput,
+  ApprovalFilter,
+  ApprovalDecisionResult,
+  ApprovalQueueStore,
 } from './activation-types.js';
 
 export {
@@ -23,9 +29,12 @@ export {
   makeIdempotencyKey,
   isLowRiskChannel,
   getChannelRiskLevel,
+  AUTO_PROMOTION_CONFIDENCE_THRESHOLD,
+  AUTO_PROMOTABLE_CHANNELS,
 } from './activation-types.js';
 
 export { ActivationDispatcher } from './activation-dispatcher.js';
+export type { DispatcherConfig } from './activation-dispatcher.js';
 
 export {
   PromptWriter,
@@ -39,3 +48,9 @@ export {
 } from './memory-activation-state-store.js';
 
 export { SqliteActivationStateStore } from './sqlite-activation-state-store.js';
+
+export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
+
+export { MemoryApprovalQueueStore } from './memory-approval-store.js';
+
+export { SqliteApprovalQueueStore } from './sqlite-approval-store.js';

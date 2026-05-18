@@ -147,7 +147,7 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
     const dispatcher = new ActivationDispatcher(
       artifactReadModel,
       activationStateStore,
-      [new PromptWriter(), new DeferArchiveWriter()],
+      { writers: [new PromptWriter(), new DeferArchiveWriter()] },
     );
 
     const result = await dispatcher.dispatch({
