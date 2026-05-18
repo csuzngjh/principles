@@ -12,6 +12,10 @@ export const HIGH_RISK_CHANNEL_MAP: Readonly<Record<string, ActivationRiskLevel>
   model_training: 'critical',
 } as const;
 
+export const AUTO_PROMOTION_CONFIDENCE_THRESHOLD = 0.95;
+
+export const AUTO_PROMOTABLE_CHANNELS: readonly InternalizationChannel[] = ['skill'] as const;
+
 export type ActivationActor =
   | { kind: 'system'; source: 'rollout_reviewer' | 'recovery_sweep' }
   | { kind: 'agent'; agentId: string }
@@ -27,12 +31,14 @@ export interface DispatchInput {
   idempotencyKey?: string;
   now: string;
   confirm: boolean;
+  confidence?: number;
 }
 
 export type ActivationDecision =
   | { decision: 'would_activate'; activationId: string; action: string; targetRef: string }
   | { decision: 'activated'; activationId: string; action: string; targetRef: string }
   | { decision: 'already_activated'; activationId: string; action: string; targetRef: string }
+  | { decision: 'queued_for_approval'; approvalId: string; queuedAt: string; channel: InternalizationChannel; riskLevel: ActivationRiskLevel }
   | { decision: 'refused'; reason: string; riskLevel?: ActivationRiskLevel; channel?: InternalizationChannel }
   | { decision: 'invalid_artifact'; reason: string };
 
@@ -92,6 +98,49 @@ export interface ChannelWriter {
   readonly channel: InternalizationChannel;
   canActivate(artifact: PIArtifactSnapshot): Promise<CanActivateResult>;
   activate(input: WriterInput, artifact: PIArtifactSnapshot): Promise<WriterResult>;
+}
+
+// ── Approval Queue Types ──────────────────────────────────────────────────
+
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+export interface ApprovalRecord {
+  approvalId: string;
+  artifactId: string;
+  channel: InternalizationChannel;
+  riskLevel: ActivationRiskLevel;
+  status: ApprovalStatus;
+  confidence?: number;
+  requestedAt: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  decisionNote?: string;
+  rejectionReason?: string;
+}
+
+export interface ApprovalEnqueueInput {
+  artifactId: string;
+  channel: InternalizationChannel;
+  riskLevel: ActivationRiskLevel;
+  confidence?: number;
+}
+
+export interface ApprovalFilter {
+  channel?: InternalizationChannel;
+  riskLevel?: ActivationRiskLevel;
+}
+
+export type ApprovalDecisionResult =
+  | { ok: true; record: ApprovalRecord }
+  | { ok: false; error: 'already_decided'; status: ApprovalStatus }
+  | { ok: false; error: 'not_found' };
+
+export interface ApprovalQueueStore {
+  enqueue(input: ApprovalEnqueueInput, now: string): Promise<ApprovalRecord>;
+  getById(approvalId: string): Promise<ApprovalRecord | null>;
+  listPending(filter?: ApprovalFilter): Promise<ApprovalRecord[]>;
+  approve(approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult>;
+  reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult>;
 }
 
 export function makeIdempotencyKey(artifactId: string, channel: InternalizationChannel): string {

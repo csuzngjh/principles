@@ -295,6 +295,22 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_pi_artifacts_source_task_id ON pi_artifacts(source_task_id);
       CREATE INDEX IF NOT EXISTS idx_pi_artifacts_artifact_kind ON pi_artifacts(artifact_kind);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_pi_artifacts_idempotency ON pi_artifacts(source_task_id, artifact_kind);
+
+      CREATE TABLE IF NOT EXISTS approvals (
+        approval_id TEXT PRIMARY KEY,
+        artifact_id TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        risk_level TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        confidence REAL,
+        requested_at TEXT NOT NULL,
+        decided_at TEXT,
+        decided_by TEXT,
+        decision_note TEXT,
+        rejection_reason TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
+      CREATE INDEX IF NOT EXISTS idx_approvals_channel ON approvals(channel);
     `);
 
     db.exec(`

@@ -10,6 +10,9 @@ import {
   getChannelRiskLevel,
   LOW_RISK_CHANNELS,
   HIGH_RISK_CHANNEL_MAP,
+  MemoryApprovalQueueStore,
+  AUTO_PROMOTION_CONFIDENCE_THRESHOLD,
+  AUTO_PROMOTABLE_CHANNELS,
 } from '../index.js';
 import type { PIArtifactSnapshot, DispatchInput, ActivationArtifactReadModel, ChannelWriter } from '../index.js';
 
@@ -49,7 +52,7 @@ describe('ActivationDispatcher', () => {
     const dispatcher = new ActivationDispatcher(
       artifactStore,
       stateStore,
-      [promptWriter, archiveWriter],
+      { writers: [promptWriter, archiveWriter] },
     );
     return { stateStore, artifactStore, dispatcher, promptWriter, archiveWriter };
   }
@@ -95,7 +98,7 @@ describe('ActivationDispatcher', () => {
     const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'code_tool_hook' }));
     expect(result.decision).toBe('refused');
     if (result.decision === 'refused') {
-      expect(result.reason).toContain('high_risk_channel');
+      expect(result.reason).toBe('requires_approval');
       expect(result.riskLevel).toBe('high');
     }
   });
@@ -186,7 +189,7 @@ describe('ActivationDispatcher', () => {
     const dispatcher = new ActivationDispatcher(
       failingArtifactStore as ActivationArtifactReadModel,
       stateStore,
-      [new PromptWriter(), new DeferArchiveWriter()],
+      { writers: [new PromptWriter(), new DeferArchiveWriter()] },
     );
     const result = await dispatcher.dispatch(makeDispatchInput());
     expect(result.decision).toBe('refused');
@@ -276,12 +279,157 @@ describe('ActivationDispatcher', () => {
     const throwDispatcher = new ActivationDispatcher(
       { getArtifactById: async (id: string) => id === 'art-001' ? makePrincipleArtifact() : null },
       stateStore,
-      [throwingWriter],
+      { writers: [throwingWriter] },
     );
     const result = await throwDispatcher.dispatch(makeDispatchInput({ channel: 'prompt' }));
     expect(result.decision).toBe('refused');
     if (result.decision === 'refused') {
       expect(result.reason).toBe('activation_write_failed');
+    }
+  });
+  // PRI-145: ApprovalQueue & Auto-Promotion
+
+  function makeDispatcherWithQueue() {
+    const stateStore = new MemoryActivationStateStore();
+    const artifactStore = new MemoryArtifactReadModel();
+    const approvalStore = new MemoryApprovalQueueStore();
+    const promptWriter = new PromptWriter();
+    const archiveWriter = new DeferArchiveWriter();
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [promptWriter, archiveWriter], approvalQueueStore: approvalStore },
+    );
+    return { stateStore, artifactStore, dispatcher, approvalStore };
+  }
+
+  it('skill with confidence 0.94 + queue store -> queued_for_approval', async () => {
+    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.94 }));
+    expect(result.decision).toBe('queued_for_approval');
+    if (result.decision === 'queued_for_approval') {
+      expect(result.channel).toBe('skill');
+      expect(result.riskLevel).toBe('medium');
+      expect(result.approvalId).toBeTruthy();
+    }
+  });
+
+  it('code_tool_hook with queue store -> queued_for_approval', async () => {
+    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'code_tool_hook', confidence: 0.99 }));
+    expect(result.decision).toBe('queued_for_approval');
+    if (result.decision === 'queued_for_approval') {
+      expect(result.channel).toBe('code_tool_hook');
+      expect(result.riskLevel).toBe('high');
+    }
+  });
+
+  it('model_training with queue store -> queued_for_approval', async () => {
+    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'model_training', confidence: 0.99 }));
+    expect(result.decision).toBe('queued_for_approval');
+    if (result.decision === 'queued_for_approval') {
+      expect(result.channel).toBe('model_training');
+      expect(result.riskLevel).toBe('critical');
+    }
+  });
+
+  it('skill with low confidence -> queued_for_approval', async () => {
+    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.90 }));
+    expect(result.decision).toBe('queued_for_approval');
+  });
+
+  it('skill with no confidence -> queued_for_approval', async () => {
+    const { artifactStore, dispatcher } = makeDispatcherWithQueue();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill' }));
+    expect(result.decision).toBe('queued_for_approval');
+  });
+
+  it('skill with confidence 0.95 + queue store + writer -> would_activate (auto-promote dry-run)', async () => {
+    const skillWriter: ChannelWriter = {
+      channel: 'skill',
+      canActivate: async () => ({ ok: true, riskLevel: 'medium' }),
+      activate: async (input) => ({
+        activationId: 'act_skill_' + input.principleId,
+        action: 'skill_activate',
+        targetRef: 'skill://' + input.principleId,
+      }),
+    };
+    const stateStore = new MemoryActivationStateStore();
+    const artifactStore = new MemoryArtifactReadModel();
+    const approvalStore = new MemoryApprovalQueueStore();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [skillWriter], approvalQueueStore: approvalStore },
+    );
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.95 }));
+    expect(result.decision).toBe('would_activate');
+    if (result.decision === 'would_activate') {
+      expect(result.activationId).toBe('act_skill_P_001');
+      expect(result.action).toBe('skill_activate');
+    }
+    // Verify nothing was queued
+    const pending = await approvalStore.listPending();
+    expect(pending).toHaveLength(0);
+  });
+
+  it('skill with confidence 0.96 + queue store + writer -> activated (auto-promote confirm)', async () => {
+    const skillWriter: ChannelWriter = {
+      channel: 'skill',
+      canActivate: async () => ({ ok: true, riskLevel: 'medium' }),
+      activate: async (input) => ({
+        activationId: 'act_skill_' + input.principleId,
+        action: 'skill_activate',
+        targetRef: 'skill://' + input.principleId,
+      }),
+    };
+    const stateStore = new MemoryActivationStateStore();
+    const artifactStore = new MemoryArtifactReadModel();
+    const approvalStore = new MemoryApprovalQueueStore();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [skillWriter], approvalQueueStore: approvalStore },
+    );
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.96, confirm: true }));
+    expect(result.decision).toBe('activated');
+    if (result.decision === 'activated') {
+      expect(result.activationId).toBe('act_skill_P_001');
+    }
+    // Verify nothing was queued
+    const pending = await approvalStore.listPending();
+    expect(pending).toHaveLength(0);
+  });
+
+  it('approval store enqueue fails -> refused', async () => {
+    const failingStore = {
+      enqueue: async () => { throw new Error('DB down'); },
+      getById: async () => null,
+      listPending: async () => [],
+      approve: async () => ({ ok: false as const, error: 'not_found' as const }),
+      reject: async () => ({ ok: false as const, error: 'not_found' as const }),
+    };
+    const stateStore = new MemoryActivationStateStore();
+    const artifactStore = new MemoryArtifactReadModel();
+    artifactStore.addArtifact(makePrincipleArtifact());
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [new PromptWriter(), new DeferArchiveWriter()], approvalQueueStore: failingStore },
+    );
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.90, confirm: true }));
+    expect(result.decision).toBe('refused');
+    if (result.decision === 'refused') {
+      expect(result.reason).toBe('approval_enqueue_failed');
     }
   });
 });
@@ -401,7 +549,15 @@ describe('activation type helpers', () => {
     expect(makeIdempotencyKey('art-001', 'prompt')).toBe('art-001::prompt');
   });
 
-  it('HIGH_RISK_CHANNEL_MAP has correct entries', () => {
+  it('AUTO_PROMOTION_CONFIDENCE_THRESHOLD is 0.95', () => {
+    expect(AUTO_PROMOTION_CONFIDENCE_THRESHOLD).toBe(0.95);
+  });
+
+  it('AUTO_PROMOTABLE_CHANNELS contains only skill', () => {
+    expect(AUTO_PROMOTABLE_CHANNELS).toEqual(['skill']);
+  });
+
+    it('HIGH_RISK_CHANNEL_MAP has correct entries', () => {
     expect(HIGH_RISK_CHANNEL_MAP.skill).toBe('medium');
     expect(HIGH_RISK_CHANNEL_MAP.code_tool_hook).toBe('high');
     expect(HIGH_RISK_CHANNEL_MAP.model_training).toBe('critical');
