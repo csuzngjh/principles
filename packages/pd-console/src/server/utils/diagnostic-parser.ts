@@ -1,4 +1,4 @@
-import type { TaskEvidence } from '../types/index.js';
+import type { DiagnosisOutput, DiagnosisInput } from '../types/index.js';
 
 const VALID_RECOMMENDATION_KINDS = new Set(['principle', 'rule', 'implementation', 'prompt', 'defer']);
 
@@ -6,7 +6,7 @@ function logParseError(context: string, raw: string): void {
   console.debug('[diagnostic-parser] Failed to parse ' + context + ': ' + raw.slice(0, 200));
 }
 
-export function parseDiagnosticianOutput(contentJson: string): TaskEvidence['diagnosis'] | undefined {
+export function parseDiagnosticianOutput(contentJson: string): DiagnosisOutput | undefined {
   try {
     const output = JSON.parse(contentJson) as {
       rootCause?: string;
@@ -37,7 +37,7 @@ export function parseDiagnosticianOutput(contentJson: string): TaskEvidence['dia
   return undefined;
 }
 
-export function parseDiagnosticInput(diagnosticJson: string): TaskEvidence['input'] | undefined {
+export function parseDiagnosticInput(diagnosticJson: string): DiagnosisInput | undefined {
   try {
     const diag = JSON.parse(diagnosticJson) as {
       reasonSummary?: string;
