@@ -94,8 +94,8 @@ let store!: MemoryApprovalQueueStore;
   });
   describe('getById returns context fields', () => {
     it('returns context fields from stored record', async () => {
-      await store.enqueue(makeEnqueueInput(), '2026-01-01T00:00:00Z');
-      const record = await store.getById('apr_code_tool_hook_art-1');
+      const created = await store.enqueue(makeEnqueueInput(), '2026-01-01T00:00:00Z');
+      const record = await store.getById(created.approvalId);
       expect(record).not.toBeNull();
       expect(record?.summary).toBe('A new skill will be activated');
       expect(record?.triggerReason).toBe('Principle recommends this');
@@ -181,8 +181,8 @@ let store!: SqliteApprovalQueueStore;
   });
   describe('getById returns context fields', () => {
     it('returns context fields from stored record', async () => {
-      await store.enqueue(makeEnqueueInput(), '2026-01-01T00:00:00Z');
-      const record = await store.getById('apr_code_tool_hook_art-1');
+      const created = await store.enqueue(makeEnqueueInput(), '2026-01-01T00:00:00Z');
+      const record = await store.getById(created.approvalId);
       expect(record).not.toBeNull();
       expect(record?.summary).toBe('A new skill will be activated');
       expect(record?.triggerReason).toBe('Principle recommends this');

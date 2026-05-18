@@ -61,8 +61,9 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
     if (filter?.channel) {
       items = items.filter((r) => r.channel === filter.channel);
     }
-    const page = filter?.page ?? 1;
-    const pageSize = filter?.pageSize ?? items.length;
+    const page = Math.max(1, filter?.page ?? 1);
+    const pageSize = filter?.pageSize ?? 0;
+    if (pageSize <= 0) return items;
     const offset = (page - 1) * pageSize;
     return items.slice(offset, offset + pageSize);
   }

@@ -28,13 +28,11 @@ const RISK_COLORS: Record<string, string> = {
   high: "bg-red-50 text-red-700",
 };
 
-const CHANNEL_LABELS: Record<string, string> = {
-  skill: "Skill",
-  prompt: "Prompt",
-  code_tool_hook: "Code Hook",
-  model_training: "Model Training",
-  defer_archive: "Defer Archive",
-};
+function getChannelLabel(channel: string, t: (key: string) => string): string {
+  const key = "components:approvalCard.channel." + channel;
+  const translated = t(key);
+  return translated !== key ? translated : channel;
+}
 
 export function ApprovalCard({
   approval,
@@ -60,14 +58,14 @@ export function ApprovalCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1.5 flex-wrap">
               <Badge variant="outline" className="text-xs">
-                {CHANNEL_LABELS[approval.channel] ?? approval.channel}
+                {getChannelLabel(approval.channel, t)}
               </Badge>
               <Badge className={"text-xs border " + (CONFIDENCE_COLORS[approval.confidenceLabel] ?? CONFIDENCE_COLORS.medium)}>
                 {t("components:approvalCard.confidence." + approval.confidenceLabel)}
               </Badge>
               {approval.riskLevel && (
                 <Badge variant="secondary" className={"text-xs " + (RISK_COLORS[approval.riskLevel] ?? "")}>
-                  {approval.riskLevel}
+                  {t("components:approvalCard.riskLevel." + approval.riskLevel, approval.riskLevel)}
                 </Badge>
               )}
               <span className="text-xs text-muted-foreground">
@@ -127,7 +125,7 @@ export function ApprovalCard({
               </span>
             )}
             <div className="flex-1" />
-            <Button variant="ghost" size="sm" onClick={onViewDetail} disabled={loading}>
+            <Button variant="ghost" size="sm" onClick={onViewDetail} disabled={loading} aria-label={t("components:approvalCard.viewDetail")}>
               <Eye className="h-3 w-3" />
             </Button>
           </div>

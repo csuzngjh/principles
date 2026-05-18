@@ -303,15 +303,20 @@ function TasksPageInner() {
 
   const loadApprovals = useCallback(async () => {
     setApprovalsLoading(true);
-    const result = await fetchApprovals();
-    if (result.success && result.data) {
+    try {
+      const result = await fetchApprovals();
+      if (!result.success) { setError(result.error); return; }
       setApprovals(result.data.items);
       setApprovalStats(result.data.stats);
+    } catch {
+      setError('Failed to load approvals');
+    } finally {
+      setApprovalsLoading(false);
     }
-    setApprovalsLoading(false);
   }, []);
 
   useEffect(() => {
+    if (tab !== 'tasks') return;
     let cancelled = false;
     async function load() {
       if (cancelled) return;
@@ -323,7 +328,7 @@ function TasksPageInner() {
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, []);
+  }, [tab]);
 
   useEffect(() => {
     if (tab !== "approvals") return;
@@ -334,16 +339,28 @@ function TasksPageInner() {
 
   async function handleApprovalDetail(approvalId: string) {
     setActionLoading(approvalId);
-    const result = await fetchApprovalDetail(approvalId);
-    if (result.success && result.data) { setDetailApproval(result.data); setDetailOpen(true); }
-    setActionLoading(null);
+    try {
+      const result = await fetchApprovalDetail(approvalId);
+      if (!result.success) { setError(result.error); return; }
+      setDetailApproval(result.data); setDetailOpen(true);
+    } catch {
+      setError('Failed to load detail');
+    } finally {
+      setActionLoading(null);
+    }
   }
 
   async function handleApprovalApprove(approvalId: string) {
     setActionLoading(approvalId); setDetailOpen(false);
-    const result = await approveApproval(approvalId);
-    if (result.success) await loadApprovals();
-    setActionLoading(null);
+    try {
+      const result = await approveApproval(approvalId);
+      if (!result.success) { setError(result.error); return; }
+      await loadApprovals();
+    } catch {
+      setError('Approve failed');
+    } finally {
+      setActionLoading(null);
+    }
   }
 
   function handleApprovalRejectClick(approval: ApprovalRecord) {
@@ -353,9 +370,15 @@ function TasksPageInner() {
   async function handleApprovalRejectSubmit(reason: string) {
     if (!rejectTarget) return;
     setActionLoading(rejectTarget.approvalId); setRejectOpen(false); setDetailOpen(false);
-    const result = await rejectApproval(rejectTarget.approvalId, reason);
-    if (result.success) await loadApprovals();
-    setRejectTarget(null); setActionLoading(null);
+    try {
+      const result = await rejectApproval(rejectTarget.approvalId, reason);
+      if (!result.success) { setError(result.error); return; }
+      await loadApprovals();
+    } catch {
+      setError('Reject failed');
+    } finally {
+      setRejectTarget(null); setActionLoading(null);
+    }
   }
 
   async function handleToggleExpand(id: string) {

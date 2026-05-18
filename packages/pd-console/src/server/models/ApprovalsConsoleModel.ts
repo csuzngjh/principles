@@ -32,16 +32,20 @@ export class ApprovalsConsoleModel {
   async listApprovals(filter?: ApprovalListFilter): Promise<ApprovalListResult> {
     const queue = this.getQueue();
     const [items, stats] = await Promise.all([
-      queue.listAll(filter),
+      queue.listAll({ status: filter?.status, channel: filter?.channel }),
       queue.countByStatus(),
     ]);
-    const enriched = items.map((record) => ({
+    const total = items.length;
+    const page = filter?.page ?? 1;
+    const pageSize = filter?.pageSize ?? 0;
+    const pageItems = pageSize > 0 ? items.slice((page - 1) * pageSize, page * pageSize) : items;
+    const enriched = pageItems.map((record) => ({
       ...record,
       confidenceLabel: mapConfidenceToLabel(record.confidence),
     }));
     return {
       items: enriched,
-      total: enriched.length,
+      total,
       stats,
     };
   }

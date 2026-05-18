@@ -36,9 +36,21 @@ export async function handleApprovalsRoute(
       const pageSizeRaw = parseInt(query.pageSize ?? '0', 10);
       const page = Number.isNaN(pageRaw) ? 1 : Math.max(1, pageRaw);
       const pageSize = Number.isNaN(pageSizeRaw) ? 0 : Math.min(Math.max(0, pageSizeRaw), 100);
+      const ALLOWED_STATUSES = new Set<string>(['pending', 'approved', 'rejected', 'cancelled']);
+      const ALLOWED_CHANNELS = new Set<string>(['code_tool_hook', 'skill', 'model_training', 'prompt', 'defer_archive']);
+      const {status} = query;
+      if (status !== undefined && !ALLOWED_STATUSES.has(status)) {
+        sendBadRequest(res, 'Invalid status value');
+        return;
+      }
+      const {channel} = query;
+      if (channel !== undefined && !ALLOWED_CHANNELS.has(channel)) {
+        sendBadRequest(res, 'Invalid channel value');
+        return;
+      }
       const result = await model.listApprovals({
-        status: query.status as unknown as ApprovalStatus | undefined,
-        channel: query.channel as unknown as InternalizationChannel | undefined,
+        status: status as ApprovalStatus | undefined,
+        channel: channel as InternalizationChannel | undefined,
         page,
         pageSize: pageSize > 0 ? pageSize : undefined,
       });

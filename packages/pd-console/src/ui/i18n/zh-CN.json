@@ -473,7 +473,7 @@
         "rejected": "已拒绝",
         "cancelled": "已取消"
       },
-      "decidedBy": "决定者",
+      "decidedBy": "决定者：{{by}}",
       "channel": {
         "skill": "技能激活",
         "code_tool_hook": "代码工具钩子",

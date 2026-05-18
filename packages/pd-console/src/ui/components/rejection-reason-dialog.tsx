@@ -40,7 +40,7 @@ export function RejectionReasonDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) setReason(""); onOpenChange(nextOpen); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{t("components:rejectionDialog.title")}</DialogTitle>

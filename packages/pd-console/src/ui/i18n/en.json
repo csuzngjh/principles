@@ -473,7 +473,7 @@
         "rejected": "Rejected",
         "cancelled": "Cancelled"
       },
-      "decidedBy": "Decided by",
+      "decidedBy": "Decided by {{by}}",
       "channel": {
         "skill": "Skill Activation",
         "code_tool_hook": "Code Tool Hook",
