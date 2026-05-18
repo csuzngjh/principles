@@ -8,6 +8,8 @@ import type {
   ChannelWriter,
   DispatchInput,
   PIArtifactSnapshot,
+  ActivationRiskLevel,
+  ApprovalEnqueueInput,
   WriterInput,
   WriterResult,
 } from './activation-types.js';
@@ -36,6 +38,41 @@ async function checkCanActivate(writer: ChannelWriter, artifact: PIArtifactSnaps
   } catch {
     return { decision: { decision: 'refused', reason: 'can_activate_check_failed', channel: writer.channel } };
   }
+}
+
+// eslint-disable-next-line @typescript-eslint/max-params
+function buildApprovalContext(
+  artifact: PIArtifactSnapshot,
+  channel: InternalizationChannel,
+  riskLevel: ActivationRiskLevel,
+  confidence: number | undefined,
+): Pick<ApprovalEnqueueInput, 'summary' | 'triggerReason' | 'confidenceExplanation' | 'effectDescription' | 'rejectionEffect'> {
+  let principleText = '';
+  try {
+    const parsed = JSON.parse(artifact.contentJson) as Record<string, unknown>;
+    principleText = String(parsed.text ?? parsed.description ?? '');
+  } catch { /* best-effort */ }
+
+  const kindLabel = artifact.artifactKind ?? 'artifact';
+  const confidencePct = confidence !== undefined ? Math.round(confidence * 100) + '%' : 'unknown';
+
+  const CHANNEL_EFFECTS: Record<string, string> = {
+    skill: 'This principle will be activated as a skill that monitors and influences agent behavior in real-time.',
+    code_tool_hook: 'This principle will be injected as a code tool hook that intercepts and validates tool calls before execution.',
+    model_training: 'This principle will be used as training data for model fine-tuning, affecting future model responses.',
+  };
+
+  return {
+    summary: principleText
+      ? `Activate ${kindLabel}: "${principleText.slice(0, 200)}"`
+      : `Activate ${kindLabel} artifact ${artifact.artifactId}`,
+    triggerReason: `Rollout reviewer recommended activation via ${channel} channel (risk: ${riskLevel}).`,
+    confidenceExplanation: confidence !== undefined
+      ? `Confidence score: ${confidencePct}. ` + (confidence >= 0.8 ? 'High confidence based on multiple validations.' : confidence >= 0.5 ? 'Moderate confidence, additional review recommended.' : 'Low confidence, manual review strongly recommended.')
+      : 'Confidence score not available.',
+    effectDescription: CHANNEL_EFFECTS[channel] ?? `This artifact will be activated via the ${channel} channel.`,
+    rejectionEffect: `The artifact will remain inactive and will not be deployed to the ${channel} channel. You can request activation again later.`,
+  };
 }
 
 export interface DispatcherConfig {
@@ -84,13 +121,13 @@ export class ActivationDispatcher {
       if (decideAutoPromotion(input.channel, input.confidence)) {
         return this.activateArtifact(input, artifact, idempotencyKey);
       }
-      return this.enqueueForApproval(input, idempotencyKey);
+      return this.enqueueForApproval(input, artifact, idempotencyKey);
     }
 
     return this.activateArtifact(input, artifact, idempotencyKey);
   }
 
-  private async enqueueForApproval(input: DispatchInput, _idempotencyKey: string): Promise<ActivationDecision> {
+  private async enqueueForApproval(input: DispatchInput, artifact: PIArtifactSnapshot, _idempotencyKey: string): Promise<ActivationDecision> {
     const riskLevel = getChannelRiskLevel(input.channel);
 
     if (!this.approvalQueueStore) {
@@ -115,7 +152,13 @@ export class ActivationDispatcher {
 
     try {
       const record = await this.approvalQueueStore.enqueue(
-        { artifactId: input.artifactId, channel: input.channel, riskLevel, confidence: input.confidence },
+        {
+          artifactId: input.artifactId,
+          channel: input.channel,
+          riskLevel,
+          confidence: input.confidence,
+          ...buildApprovalContext(artifact, input.channel, riskLevel, input.confidence),
+        },
         input.now,
       );
       return {
