@@ -68,14 +68,15 @@ spec/
 _scratchpad/
 
 # Private AI agent files (DO NOT COMMIT)
-GEMINI.md
-CLAUDE.md
-AGENT.md
+# NOTE: CLAUDE.md, GEMINI.md, AGENTS.md are project-level AI instructions
+# and MUST be committed so all AI assistants follow the same rules.
 code-concise/
 .trae
 
 # Docs (removed from git tracking - kept locally only)
 docs/
+# Exception: AI assistant handbook must be committed
+!docs/ERROR_EXPERIENCE_HANDBOOK.md
 
 # Interactive Conversation Test Output
 packages/openclaw-plugin/tests/interactive-conversation/output/
