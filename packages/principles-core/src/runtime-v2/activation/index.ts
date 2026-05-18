@@ -37,3 +37,5 @@ export {
   MemoryActivationStateStore,
   MemoryArtifactReadModel,
 } from './memory-activation-state-store.js';
+
+export { SqliteActivationStateStore } from './sqlite-activation-state-store.js';
