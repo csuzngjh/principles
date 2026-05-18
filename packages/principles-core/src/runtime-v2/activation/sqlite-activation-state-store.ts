@@ -1,5 +1,5 @@
 import type { ActivationStateReadModel, ActivationStatusRecord } from './activation-types.js';
-import type { SqliteConnection } from '../../store/sqlite-connection.js';
+import type { SqliteConnection } from '../store/sqlite-connection.js';
 
 export class SqliteActivationStateStore implements ActivationStateReadModel {
   constructor(private readonly connection: SqliteConnection) {}
