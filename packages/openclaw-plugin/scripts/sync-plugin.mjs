@@ -62,13 +62,15 @@ function getConfiguredWorkspaceDir() {
   return join(OPENCLAW_DIR, 'workspace-main');
 }
 
-// Files and directories to sync
+// Files and directories to sync.
+// NOTE: openclaw.plugin.json is NOT included here — it is synced separately
+// via syncFilteredManifest() which filters the skills array by language
+// BEFORE writing to the install target, preventing the en/zh collision.
 const SYNC_ITEMS = [
     'dist',
     'templates',
     'scripts',
     'docs',
-    'openclaw.plugin.json',
     'package.json',
 ];
 
@@ -633,6 +635,60 @@ function ensureInstallDir() {
 }
 
 /**
+ * Sync the openclaw.plugin.json manifest but filter the skills array to only
+ * include paths matching the selected language (zh or en).
+ *
+ * This MUST run BEFORE syncSkillDirs, and it should
+ * never be done via syncItem('openclaw.plugin.json') + subsequent modification
+ * because the post-modification step can fail silently (catch block) leaving
+ * both en/zh skills in the manifest, which triggers OpenClaw's "plugin skill
+ * name collision" warning on startup.
+ */
+function syncFilteredManifest(lang) {
+    const sourcePath = join(SOURCE_DIR, 'openclaw.plugin.json');
+    const targetPath = join(INSTALL_DIR, 'openclaw.plugin.json');
+
+    if (!existsSync(sourcePath)) return;
+
+    console.log(`  📄 openclaw.plugin.json (filtered for lang: ${lang})`);
+
+    let manifest;
+    try {
+        manifest = JSON.parse(readFileSync(sourcePath, 'utf-8'));
+    } catch (err) {
+        console.error(`❌ Failed to read source manifest: ${err.message}`);
+        process.exit(1);
+    }
+
+    if (!manifest.skills || !Array.isArray(manifest.skills)) return;
+
+    const selectedLang = (lang || 'zh').toLowerCase();
+    if (!['zh', 'en'].includes(selectedLang)) {
+        console.error(`❌ Invalid language: ${selectedLang}. Expected zh or en.`);
+        process.exit(1);
+    }
+
+    const filtered = manifest.skills.filter(sp => {
+        if (typeof sp !== 'string') return false;
+        return sp.includes(`/langs/${selectedLang}/`);
+    });
+
+    if (filtered.length === 0) {
+        console.error(`❌ No skills match language "${selectedLang}" in source manifest`);
+        process.exit(1);
+    }
+
+    manifest.skills = filtered;
+
+    // Use syncItem semantics: remove target, then write freshly
+    if (existsSync(targetPath)) {
+        rmSync(targetPath, { force: true });
+    }
+    writeFileSync(targetPath, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+    console.log(`  ✅ skills filtered to lang: ${selectedLang} (${filtered.length} path(s))`);
+}
+
+/**
  * Sync skills directories based on the skills field in openclaw.plugin.json.
  * Reads the manifest to find declared skill paths, resolves them relative to
  * source root, then copies each to the install target.
@@ -679,9 +735,10 @@ function syncSkillDirs(lang) {
 }
 
 /**
- * Update the installed openclaw.plugin.json to only reference skills
- * matching the selected language, preventing OpenClaw from loading
- * both en and zh skill directories simultaneously.
+ * @deprecated Replaced by syncFilteredManifest(). Kept for backwards
+ * compatibility with old installs that may call it externally.
+ * syncFilteredManifest filters the skills array BEFORE writing the manifest
+ * to disk, avoiding the en/zh collision window entirely.
  */
 function filterInstalledManifestSkills(lang) {
     const installedManifestPath = join(INSTALL_DIR, 'openclaw.plugin.json');
@@ -1186,8 +1243,8 @@ function main() {
 
     console.log('\n📦 Syncing files to OpenClaw...');
     for (const item of SYNC_ITEMS) syncItem(item);
+    syncFilteredManifest(args.lang);
     syncSkillDirs(args.lang);
-    filterInstalledManifestSkills(args.lang);
     syncPdCli();
 
     injectLocalWorkspacePackages();

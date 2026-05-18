@@ -37,7 +37,7 @@
         },
         "default": [],
         "description": "自定义高危目录（例如 .git/, prod_db/）。AI 试图修改这些目录前，将被强制拦截并要求出具安全计划。"
-      },
+      }
     }
   },
   "uiHints": {
