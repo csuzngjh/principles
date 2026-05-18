@@ -129,6 +129,10 @@ const REQUIRED_SOURCE_FILES = [
   'activation/activation-dispatcher.ts',
   'activation/low-risk-writers.ts',
   'activation/index.ts',
+  // PRI-145
+  'activation/approval-queue.ts',
+  'activation/memory-approval-store.ts',
+  'activation/sqlite-approval-store.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -177,6 +181,9 @@ const REQUIRED_TEST_FILES = [
   '../idle-trigger/__tests__/idle-trigger-decision.test.ts',
   // PRI-144
   '../activation/__tests__/activation-dispatcher.test.ts',
+  // PRI-145
+  '../activation/__tests__/approval-queue.test.ts',
+  '../activation/__tests__/sqlite-approval-store.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -2685,6 +2692,9 @@ describe('PRI-144 ActivationDispatcher & Low-risk Writers', () => {
       resolve(__dirname, '..', 'activation', 'activation-dispatcher.ts'),
       resolve(__dirname, '..', 'activation', 'low-risk-writers.ts'),
       resolve(__dirname, '..', 'activation', 'index.ts'),
+      resolve(__dirname, '..', 'activation', 'approval-queue.ts'),
+      resolve(__dirname, '..', 'activation', 'memory-approval-store.ts'),
+      resolve(__dirname, '..', 'activation', 'sqlite-approval-store.ts'),
     ];
     for (const file of files) {
       const src = readFileSync(file, 'utf-8');
@@ -2708,6 +2718,13 @@ describe('PRI-144 ActivationDispatcher & Low-risk Writers', () => {
     expect(src).toContain('getChannelRiskLevel');
     expect(src).toContain('MemoryActivationStateStore');
     expect(src).toContain('MemoryArtifactReadModel');
+    expect(src).toContain('ApprovalQueue');
+    expect(src).toContain('decideAutoPromotion');
+    expect(src).toContain('MemoryApprovalQueueStore');
+    expect(src).toContain('SqliteApprovalQueueStore');
+    expect(src).toContain('ApprovalQueueStore');
+    expect(src).toContain('AUTO_PROMOTION_CONFIDENCE_THRESHOLD');
+    expect(src).toContain('AUTO_PROMOTABLE_CHANNELS');
   });
 });
 
