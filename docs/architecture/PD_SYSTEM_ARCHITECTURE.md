@@ -193,7 +193,7 @@ runtime-v2/
 │   ├── internalization-task-guards.ts
 │   ├── internalization-orchestrator.ts
 │   ├── internalization-route.ts
-│   ├── intake-to-internalization-bridge.ts ★ 待建
+│   ├── intake-to-internalization-bridge.ts
 │   ├── routing-policy.ts
 │   ├── deprecated-readiness.ts
 │   ├── lifecycle-datasource.ts
@@ -399,7 +399,7 @@ packages/pd-console/src/
 │   │   ├── EventLogReadModel.ts
 │   │   ├── GateConsoleModel.ts
 │   │   ├── FeedbackConsoleModel.ts
-│   │   └── ApprovalConsoleModel.ts  ★ 待建
+│   │   └── ApprovalConsoleModel.ts  ← 待建（当前审批数据通过 core ApprovalQueue API 直接获取）
 │   ├── routes/                      ← REST API
 │   ├── types/
 │   └── utils/
@@ -417,7 +417,7 @@ packages/pd-console/src/
     │   ├── EventLog.tsx
     │   ├── Principles.tsx
     │   ├── Pruning.tsx
-    │   ├── Approvals.tsx            ★ 待建
+    │   ├── Approvals.tsx（基础版）✅ ← 嵌入 TasksPage.tsx approvals tab
     │   └── ApprovalDetail.tsx       ★ 待建
     └── styles/
 ```
@@ -565,7 +565,7 @@ candidates
 artifacts
 pi_artifacts
 events                            -- TelemetryEvent 流
-approvals                         ★ 待建
+approvals                         ✅ 基础版已落地（pending/approve/reject/cancel/list）
 rejection_feedbacks               ★ 待建
 history (各 history 子表)
 trajectory

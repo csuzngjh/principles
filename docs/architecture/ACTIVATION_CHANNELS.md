@@ -288,12 +288,12 @@ CREATE TABLE rejection_feedbacks (
 
 #### 触发
 - RolloutReviewer 输出 `decision=auto_activate`
-- ActivationDispatcher 直接调用 `LedgerPromptWriter.activate()`
+- ActivationDispatcher 直接调用 `PromptWriter.activate()`（设计稿原名 LedgerPromptWriter）
 
 #### 操作
 
 ```typescript
-class LedgerPromptWriter implements ChannelWriter {
+class PromptWriter implements ChannelWriter {
   channel = 'prompt' as const;
 
   async canActivate(artifact: PIArtifact): Promise<CanActivateResult> {
@@ -355,7 +355,7 @@ class LedgerPromptWriter implements ChannelWriter {
 #### 操作
 
 ```typescript
-class LedgerArchiveWriter implements ChannelWriter {
+class DeferArchiveWriter implements ChannelWriter {
   channel = 'defer_archive' as const;
 
   async activate(artifact, context): Promise<ActivationOutcome> {
@@ -1020,8 +1020,8 @@ activation:
 | 组件 | 状态 |
 |------|------|
 | ActivationDispatcher | ✅ 基础版已落地 |
-| LedgerPromptWriter / PromptWriter | ✅ 基础版已落地 |
-| LedgerArchiveWriter / DeferArchiveWriter | ✅ 基础版已落地 |
+| `PromptWriter`（设计稿名 `LedgerPromptWriter`）| ✅ 基础版已落地 |
+| `DeferArchiveWriter`（设计稿名 `LedgerArchiveWriter`）| ✅ 基础版已落地 |
 | SkillFileWriter | ❌ 待建 |
 | RuleHostWriter | ❌ 待建 |
 | TrainingExporter | ❌ 待建 |

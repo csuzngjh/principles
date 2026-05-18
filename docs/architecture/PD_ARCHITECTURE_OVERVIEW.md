@@ -239,7 +239,7 @@ RolloutDecision: { autoActivate | requireApproval }
 
 | 阶段 | 组件 | 包 | 详见 |
 |------|------|-----|------|
-| 入队 | `IntakeToInternalizationBridge`（待建） | core | `INTERNALIZATION_PIPELINE.md` §3 |
+| 入队 | `IntakeToInternalizationBridge`（已落地） | core | `INTERNALIZATION_PIPELINE.md` §3 |
 | 编排 | `InternalizationOrchestrator` | core | ADR-0003 |
 | Runner 执行 | 7 个 PeerRunner | core | ADR-0003 |
 | 评估 | `Evaluator` + `RolloutReviewer` | core | `INTERNALIZATION_PIPELINE.md` §4 |

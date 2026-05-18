@@ -187,7 +187,7 @@ nocturnal-service.runReflection()    InternalizationOrchestrator.wakeOnce()
 ```
 
 **新链路**：触发与执行分离。
-- **触发**：`openclaw-plugin/service/idle-trigger.ts` 决定何时唤起
+- **触发**：`@principles/core/runtime-v2/idle-trigger/`（核心策略）决定何时唤起；宿主层调用 wakeOnce
 - **执行**：`@principles/core` 的 InternalizationOrchestrator + 7 个 Runner
 
 ### 3.3 流水线启动条件（断点 ① 解决方案）
@@ -222,7 +222,7 @@ nocturnal-service.runReflection()    InternalizationOrchestrator.wakeOnce()
 
 #### 3.3.1 IntakeToInternalizationBridge 契约
 
-位置：`@principles/core/runtime-v2/internalization/intake-to-internalization-bridge.ts`（新建）
+位置：`@principles/core/runtime-v2/internalization/intake-to-internalization-bridge.ts`（已落地）
 
 ```typescript
 interface IntakeToInternalizationBridge {
