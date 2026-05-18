@@ -541,6 +541,33 @@ async function fetchRelatedEvents(eventId: string, maxDistance?: number): Promis
   return request<RelatedEventsResponse>(`/api/events/${encodeURIComponent(eventId)}/related${queryStr}`);
 }
 
+
+interface ApprovalRecord {
+  approvalId: string;
+  artifactId: string;
+  channel: string;
+  riskLevel: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  confidence: number | undefined;
+  requestedAt: string;
+  decidedAt: string | undefined;
+  decidedBy: string | undefined;
+  decisionNote: string | undefined;
+  rejectionReason: string | undefined;
+  summary: string | undefined;
+  triggerReason: string | undefined;
+  confidenceLabel: 'high' | 'medium' | 'low';
+  confidenceExplanation: string | undefined;
+  effectDescription: string | undefined;
+  rejectionEffect: string | undefined;
+}
+
+interface ApprovalListResult {
+  items: ApprovalRecord[];
+  total: number;
+  stats: { pending: number; approved: number; rejected: number; cancelled: number };
+}
+
 interface AgentInfo {
   id: string;
   name: string;
@@ -578,6 +605,40 @@ async function fetchAgents(): Promise<ApiResponse<AgentInfo[]>> {
 
 async function fetchAgentDetail(id: string): Promise<ApiResponse<AgentDetail>> {
   return request<AgentDetail>(`/api/agents/${encodeURIComponent(id)}`);
+}
+
+
+async function fetchApprovals(params?: {
+  status?: string;
+  channel?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<ApiResponse<ApprovalListResult>> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set('status', params.status);
+  if (params?.channel) searchParams.set('channel', params.channel);
+  if (params?.page) searchParams.set('page', String(params.page));
+  if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  const qs = searchParams.toString() ? '?' + searchParams.toString() : '';
+  return request<ApprovalListResult>('/api/v1/approvals' + qs);
+}
+
+async function fetchApprovalDetail(approvalId: string): Promise<ApiResponse<ApprovalRecord>> {
+  return request<ApprovalRecord>('/api/v1/approvals/' + encodeURIComponent(approvalId));
+}
+
+async function approveApproval(approvalId: string, note?: string): Promise<ApiResponse<ApprovalRecord>> {
+  return request<ApprovalRecord>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
+    method: 'POST',
+    body: JSON.stringify({ note }),
+  });
+}
+
+async function rejectApproval(approvalId: string, reason: string): Promise<ApiResponse<ApprovalRecord>> {
+  return request<ApprovalRecord>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/reject', {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export {
@@ -623,6 +684,10 @@ export {
   fetchRelatedEvents,
   fetchAgents,
   fetchAgentDetail,
+  fetchApprovals,
+  fetchApprovalDetail,
+  approveApproval,
+  rejectApproval,
 };
 
 export type {
@@ -660,4 +725,6 @@ export type {
   RelatedEventsResponse,
   AgentInfo,
   AgentDetail,
+  ApprovalRecord,
+  ApprovalListResult,
 };

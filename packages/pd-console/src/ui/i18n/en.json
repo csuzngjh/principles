@@ -107,7 +107,11 @@
       "loadFailed": "Failed to load",
       "operationFailed": "Operation failed: {{error}}",
       "unknownError": "Unknown error",
-      "batchCleanupResult": "Batch cleanup completed, {{failed}}/{{total}} failed"
+      "batchCleanupResult": "Batch cleanup completed, {{failed}}/{{total}} failed",
+      "tabs": {
+        "tasks": "Tasks",
+        "approvals": "Approvals"
+      }
     },
     "feedback": {
       "title": "Feedback",
@@ -448,6 +452,53 @@
       "slightlyDelayed": "slightly delayed",
       "stale": "stale",
       "never": "never"
+    },
+    "approvalCard": {
+      "confidence": {
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low"
+      },
+      "viewDetail": "View Detail",
+      "approve": "Approve",
+      "reject": "Reject",
+      "empty": "No pending approvals",
+      "stats": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected"
+      },
+      "status": {
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "cancelled": "Cancelled"
+      },
+      "decidedBy": "Decided by",
+      "channel": {
+        "skill": "Skill Activation",
+        "code_tool_hook": "Code Tool Hook",
+        "defer_archive": "Defer Archive",
+        "model_training": "Model Training",
+        "prompt": "Prompt Injection"
+      },
+      "riskLevel": "Risk Level"
+    },
+    "approvalDetail": {
+      "title": "Approval Detail",
+      "whyRecommended": "Why Recommended",
+      "confidenceExplanation": "Confidence Explanation",
+      "whatHappens": "What Happens if Approved",
+      "ifReject": "If You Reject",
+      "approve": "Approve",
+      "reject": "Reject"
+    },
+    "rejectionDialog": {
+      "title": "Rejection Reason",
+      "description": "Please explain why you are rejecting this approval. This helps improve future recommendations.",
+      "placeholder": "Enter rejection reason (at least 10 characters)…",
+      "tooShort": "Reason must be at least 10 characters",
+      "cancel": "Cancel",
+      "submit": "Confirm Rejection"
     }
   }
 }

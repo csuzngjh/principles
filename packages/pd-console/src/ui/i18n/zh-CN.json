@@ -107,7 +107,11 @@
       "loadFailed": "加载失败",
       "operationFailed": "操作失败: {{error}}",
       "unknownError": "未知错误",
-      "batchCleanupResult": "批量清理完成，{{failed}}/{{total}} 项失败"
+      "batchCleanupResult": "批量清理完成，{{failed}}/{{total}} 项失败",
+      "tabs": {
+        "tasks": "任务",
+        "approvals": "审批"
+      }
     },
     "feedback": {
       "title": "反馈",
@@ -448,6 +452,53 @@
       "slightlyDelayed": "轻微延迟",
       "stale": "过期",
       "never": "从未"
+    },
+    "approvalCard": {
+      "confidence": {
+        "high": "高置信",
+        "medium": "中置信",
+        "low": "低置信"
+      },
+      "viewDetail": "查看详情",
+      "approve": "批准",
+      "reject": "拒绝",
+      "empty": "暂无待审批项目",
+      "stats": {
+        "pending": "待处理",
+        "approved": "已批准",
+        "rejected": "已拒绝"
+      },
+      "status": {
+        "approved": "已批准",
+        "rejected": "已拒绝",
+        "cancelled": "已取消"
+      },
+      "decidedBy": "决定者",
+      "channel": {
+        "skill": "技能激活",
+        "code_tool_hook": "代码工具钩子",
+        "defer_archive": "延迟归档",
+        "model_training": "模型训练",
+        "prompt": "提示注入"
+      },
+      "riskLevel": "风险级别"
+    },
+    "approvalDetail": {
+      "title": "审批详情",
+      "whyRecommended": "为什么推荐",
+      "confidenceExplanation": "置信度说明",
+      "whatHappens": "批准后会发生什么",
+      "ifReject": "如果拒绝",
+      "approve": "批准",
+      "reject": "拒绝"
+    },
+    "rejectionDialog": {
+      "title": "拒绝原因",
+      "description": "请说明为什么拒绝此审批。这有助于系统改进未来的推荐。",
+      "placeholder": "输入拒绝原因（至少10个字符）…",
+      "tooShort": "拒绝原因至少需要10个字符",
+      "cancel": "取消",
+      "submit": "确认拒绝"
     }
   }
 }

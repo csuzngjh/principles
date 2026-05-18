@@ -783,6 +783,11 @@ export type {
   ApprovalFilter,
   ApprovalDecisionResult,
   ApprovalQueueStore,
+  ApprovalListFilter,
+  ApprovalStats,
+  ApprovalListResult,
+  ApprovalWithContext,
+  ConfidenceLabel,
 } from './activation/index.js';
 
 export {
@@ -804,6 +809,7 @@ export {
   decideAutoPromotion,
   MemoryApprovalQueueStore,
   SqliteApprovalQueueStore,
+  mapConfidenceToLabel,
 } from './activation/index.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────

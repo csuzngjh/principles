@@ -313,6 +313,19 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_approvals_channel ON approvals(channel);
     `);
 
+    // Add context columns for user-facing descriptions (idempotent migration)
+    const approvalCols = db.prepare('PRAGMA table_info(approvals)').all() as { name: string }[];
+    const existingApprovalCols = new Set(approvalCols.map((c: { name: string }) => c.name));
+    const contextColumns = [
+      'summary', 'trigger_reason', 'confidence_label',
+      'confidence_explanation', 'effect_description', 'rejection_effect',
+    ];
+    for (const col of contextColumns) {
+      if (!existingApprovalCols.has(col)) {
+        db.exec('ALTER TABLE approvals ADD COLUMN ' + col + ' TEXT');
+      }
+    }
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS activations (
         activation_id TEXT NOT NULL,

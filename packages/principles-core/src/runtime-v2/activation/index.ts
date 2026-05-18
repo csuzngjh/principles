@@ -21,6 +21,11 @@ export type {
   ApprovalFilter,
   ApprovalDecisionResult,
   ApprovalQueueStore,
+  ConfidenceLabel,
+  ApprovalWithContext,
+  ApprovalListFilter,
+  ApprovalStats,
+  ApprovalListResult,
 } from './activation-types.js';
 
 export {
@@ -31,6 +36,7 @@ export {
   getChannelRiskLevel,
   AUTO_PROMOTION_CONFIDENCE_THRESHOLD,
   AUTO_PROMOTABLE_CHANNELS,
+  mapConfidenceToLabel,
 } from './activation-types.js';
 
 export { ActivationDispatcher } from './activation-dispatcher.js';

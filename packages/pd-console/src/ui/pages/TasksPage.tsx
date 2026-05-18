@@ -1,14 +1,18 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import type { TaskZones, TaskItem, TaskEvidence } from "../../types.js";
-import { fetchTasks, fetchTaskEvidence, approveTask, rejectTask, cleanupTask, checkAuth } from "../api.js";
+import { fetchTasks, fetchTaskEvidence, approveTask, rejectTask, cleanupTask, checkAuth, fetchApprovals, fetchApprovalDetail, approveApproval, rejectApproval } from "../api.js";
+import type { ApprovalRecord } from "../api.js";
 import { PageHeader } from "../components/page-header.js";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card.js";
 import { Button } from "../components/ui/button.js";
 import { Badge } from "../components/ui/badge.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Separator } from "../components/ui/separator.js";
-import { ChevronRight, Trash2, Check, X, Undo2, AlertCircle } from "lucide-react";
+import { ChevronRight, Trash2, Check, X, Undo2, AlertCircle, ListTodo, ShieldCheck } from "lucide-react";
+import { ApprovalCard } from "../components/approval-card.js";
+import { ApprovalDetailDialog } from "../components/approval-detail-dialog.js";
+import { RejectionReasonDialog } from "../components/rejection-reason-dialog.js";
 
 interface UndoEntry {
   task: TaskItem;
@@ -248,6 +252,16 @@ function TasksPageInner() {
   const [undoMap, setUndoMap] = useState<Map<string, UndoEntry>>(new Map());
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
+  const [tab, setTab] = useState<"tasks" | "approvals">("tasks");
+  const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
+  const [approvalStats, setApprovalStats] = useState({ pending: 0, approved: 0, rejected: 0, cancelled: 0 });
+  const [approvalsLoading, setApprovalsLoading] = useState(false);
+  const [detailApproval, setDetailApproval] = useState<ApprovalRecord | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<ApprovalRecord | null>(null);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
   const undoMapRef = useRef(undoMap);
   undoMapRef.current = undoMap;
 
@@ -287,6 +301,16 @@ function TasksPageInner() {
     setLoading(false);
   }
 
+  const loadApprovals = useCallback(async () => {
+    setApprovalsLoading(true);
+    const result = await fetchApprovals();
+    if (result.success && result.data) {
+      setApprovals(result.data.items);
+      setApprovalStats(result.data.stats);
+    }
+    setApprovalsLoading(false);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -300,6 +324,39 @@ function TasksPageInner() {
       clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    if (tab !== "approvals") return;
+    loadApprovals();
+    const id = setInterval(loadApprovals, 15_000);
+    return () => clearInterval(id);
+  }, [tab, loadApprovals]);
+
+  async function handleApprovalDetail(approvalId: string) {
+    setActionLoading(approvalId);
+    const result = await fetchApprovalDetail(approvalId);
+    if (result.success && result.data) { setDetailApproval(result.data); setDetailOpen(true); }
+    setActionLoading(null);
+  }
+
+  async function handleApprovalApprove(approvalId: string) {
+    setActionLoading(approvalId); setDetailOpen(false);
+    const result = await approveApproval(approvalId);
+    if (result.success) await loadApprovals();
+    setActionLoading(null);
+  }
+
+  function handleApprovalRejectClick(approval: ApprovalRecord) {
+    setRejectTarget(approval); setRejectOpen(true);
+  }
+
+  async function handleApprovalRejectSubmit(reason: string) {
+    if (!rejectTarget) return;
+    setActionLoading(rejectTarget.approvalId); setRejectOpen(false); setDetailOpen(false);
+    const result = await rejectApproval(rejectTarget.approvalId, reason);
+    if (result.success) await loadApprovals();
+    setRejectTarget(null); setActionLoading(null);
+  }
 
   async function handleToggleExpand(id: string) {
     const nextExpanded = new Set(expandedIds);
@@ -437,11 +494,21 @@ function TasksPageInner() {
       <PageHeader
         title={t("pages:tasks.title")}
         description={t("pages:tasks.description")}
-        onRefresh={loadData}
+        onRefresh={tab === "tasks" ? loadData : loadApprovals}
         lastUpdated={lastUpdated ?? undefined}
       />
 
-      {ZONE_CONFIG.map((zone) => {
+      <div className="flex items-center gap-1 mb-6 border-b">
+        <button type="button" className={"flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors " + (tab === "tasks" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")} onClick={() => setTab("tasks")}>
+          <ListTodo className="h-4 w-4" />{t("pages:tasks.tabs.tasks")}
+        </button>
+        <button type="button" className={"flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors " + (tab === "approvals" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")} onClick={() => setTab("approvals")}>
+          <ShieldCheck className="h-4 w-4" />{t("pages:tasks.tabs.approvals")}
+          {approvalStats.pending > 0 && (<Badge className="ml-1 bg-red-500 text-white text-xs px-1.5">{approvalStats.pending}</Badge>)}
+        </button>
+      </div>
+
+      {tab === "tasks" && ZONE_CONFIG.map((zone) => {
         const tasks = zones[zone.key];
         const hasCleanupTasks = tasks.some((t) => t.kind === "cleanup");
 
@@ -506,6 +573,26 @@ function TasksPageInner() {
           </Card>
         );
       })}
+
+      {tab === "approvals" && (
+        <div>
+          <div className="flex items-center gap-3 mb-4">
+            <Badge variant="outline">{t("components:approvalCard.stats.pending")}: {approvalStats.pending}</Badge>
+            <Badge variant="outline">{t("components:approvalCard.stats.approved")}: {approvalStats.approved}</Badge>
+            <Badge variant="outline">{t("components:approvalCard.stats.rejected")}: {approvalStats.rejected}</Badge>
+          </div>
+          {approvalsLoading && approvals.length === 0 ? (
+            <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => (<Card key={i}><CardContent className="p-4"><Skeleton className="h-16 w-full" /></CardContent></Card>))}</div>
+          ) : approvals.length === 0 ? (
+            <Card><CardContent className="py-12 text-center"><ShieldCheck className="h-10 w-10 text-muted-foreground mx-auto mb-3" /><p className="text-sm text-muted-foreground">{t("components:approvalCard.empty")}</p></CardContent></Card>
+          ) : (
+            approvals.map((a) => (<ApprovalCard key={a.approvalId} approval={a} loading={actionLoading === a.approvalId} onViewDetail={() => handleApprovalDetail(a.approvalId)} onApprove={() => handleApprovalApprove(a.approvalId)} onReject={() => handleApprovalRejectClick(a)} />))
+          )}
+        </div>
+      )}
+
+      <ApprovalDetailDialog approval={detailApproval} open={detailOpen} onOpenChange={setDetailOpen} onApprove={() => { if (detailApproval) handleApprovalApprove(detailApproval.approvalId); }} onReject={() => { if (detailApproval) { setDetailOpen(false); handleApprovalRejectClick(detailApproval); } }} loading={actionLoading !== null} />
+      <RejectionReasonDialog open={rejectOpen} onOpenChange={setRejectOpen} onSubmit={handleApprovalRejectSubmit} loading={actionLoading !== null} />
     </div>
   );
 }
