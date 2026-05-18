@@ -38,7 +38,7 @@ import {
   parseReasonSummaryFromDiagnostic,
   parseRecommendationKind 
 } from './utils/diagnostic-parser.js';
-import type { SystemStatus, TaskItem, EvidenceItem, TaskEvidence, ActivityEvent } from './types/index.js';
+import type { SystemStatus, TaskItem, EvidenceItem, TaskEvidence, ActivityEvent, DiagnosisOutput, DiagnosisInput } from './types/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -477,7 +477,7 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
                 priority: 'needs_confirmation',
                 kind: 'approval',
                 createdAt: c.createdAt,
-                confidence: c.confidence,
+                confidence: c.confidence ?? undefined,
                 severity,
                 recommendationKind,
               });
@@ -553,8 +553,8 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
               evidence.push({ timestamp: trace.checkedAt, operation: 'ledger_written', problem: `principle: ${lid}` });
             }
 
-            let diagnosis: TaskEvidence['diagnosis'] | undefined = undefined;
-            let inputInfo: TaskEvidence['input'] | undefined = undefined;
+            let diagnosis: DiagnosisOutput | undefined = undefined;
+            let inputInfo: DiagnosisInput | undefined = undefined;
 
             const artifact = await services.stateManager.getArtifact(candidate.artifactId);
             if (artifact && artifact.artifactKind === 'diagnostician_output') {
@@ -594,8 +594,8 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
 
           const task = await services.stateManager.getTask(id);
           if (task) {
-            let diagnosis: TaskEvidence['diagnosis'] | undefined = undefined;
-            let inputInfo: TaskEvidence['input'] | undefined = undefined;
+            let diagnosis: DiagnosisOutput | undefined = undefined;
+            let inputInfo: DiagnosisInput | undefined = undefined;
 
             if (task.diagnosticJson) {
               inputInfo = parseDiagnosticInput(task.diagnosticJson);
