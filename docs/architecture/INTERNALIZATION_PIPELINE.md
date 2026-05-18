@@ -194,9 +194,9 @@ nocturnal-service.runReflection()    InternalizationOrchestrator.wakeOnce()
 
 **问题**：Probation 候选写入 Ledger 后，谁负责把它转换为 `dreamer` 任务入队？
 
-**当前现状**：无自动桥接，需手动 `pd-cli wake-once`。
+**当前现状**：`IntakeToInternalizationBridge` 已在 core 落地，负责 probation/candidate → root dreamer task 自动入队。生产链路持续验证中；host 调度适配仍需后续 issue。
 
-**新设计**：引入 `IntakeToInternalizationBridge`（核心新组件）
+**设计**（已落地）：`IntakeToInternalizationBridge`（core 已落地组件）
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
