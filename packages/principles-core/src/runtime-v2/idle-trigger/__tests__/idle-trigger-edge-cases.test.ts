@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateIdleTrigger } from '../index.js';
-import { DEFAULT_IDLE_TRIGGER_CONFIG } from '../index.js';
+import { evaluateIdleTrigger, DEFAULT_IDLE_TRIGGER_CONFIG } from '../index.js';
 import type { IdleTriggerInput } from '../index.js';
 
 const NOW = '2026-05-17T12:00:00.000Z';
@@ -141,7 +140,7 @@ describe('evaluateIdleTrigger edge cases', () => {
   });
 
   describe('lastActivityAt variations', () => {
-    it('lastActivityAt undefined string returns skip not_idle_enough', () => {
+    it('lastActivityAt undefined with no ready tasks returns skip no_ready_tasks', () => {
       const input = makeInput({
         lastActivityAt: undefined,
         queue: { readyCount: 0, pendingCount: 0, retryWaitCount: 0 },

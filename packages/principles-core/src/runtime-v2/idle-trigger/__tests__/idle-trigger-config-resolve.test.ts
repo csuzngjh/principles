@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveIdleTriggerConfig } from '../index.js';
-import { DEFAULT_IDLE_TRIGGER_CONFIG } from '../index.js';
+import { resolveIdleTriggerConfig, DEFAULT_IDLE_TRIGGER_CONFIG } from '../index.js';
 
 describe('resolveIdleTriggerConfig', () => {
   it('undefined partial returns full default config', () => {
@@ -62,12 +61,12 @@ describe('resolveIdleTriggerConfig', () => {
     expect(result).toEqual(overrides);
   });
 
-  it('single field partial is enough to be valid config', () => {
+  it('single field partial preserves defaults for other fields', () => {
     const result = resolveIdleTriggerConfig({ idleThresholdMs: 120000 });
     expect(result.idleThresholdMs).toBe(120000);
-    expect(result.enabled).toBe(true);
-    expect(result.jitterMaxMs).toBe(30000);
-    expect(result.activityCooldownMs).toBe(60000);
+    expect(result.enabled).toBe(DEFAULT_IDLE_TRIGGER_CONFIG.enabled);
+    expect(result.jitterMaxMs).toBe(DEFAULT_IDLE_TRIGGER_CONFIG.jitterMaxMs);
+    expect(result.activityCooldownMs).toBe(DEFAULT_IDLE_TRIGGER_CONFIG.activityCooldownMs);
   });
 });
 

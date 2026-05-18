@@ -140,7 +140,7 @@ describe('MemoryArtifactReadModel', () => {
   });
 
   describe('addArtifact', () => {
-    it('adds artifact to internal store', () => {
+    it('adds artifact and retrieves it by id', async () => {
       model.addArtifact({
         artifactId: 'art-001',
         artifactKind: 'principle',
@@ -152,10 +152,12 @@ describe('MemoryArtifactReadModel', () => {
         updatedAt: '2026-01-01T00:00:00.000Z',
       });
 
-      expect((model as unknown as { artifacts: Map<string, unknown> }).artifacts.size).toBe(1);
+      const result = await model.getArtifactById('art-001');
+      expect(result).not.toBeNull();
+      expect(result?.artifactId).toBe('art-001');
     });
 
-    it('overwrites existing artifact with same artifactId', () => {
+    it('overwrites existing artifact with same artifactId', async () => {
       model.addArtifact({
         artifactId: 'art-001',
         artifactKind: 'principle',
@@ -178,7 +180,9 @@ describe('MemoryArtifactReadModel', () => {
         updatedAt: '2026-01-02T00:00:00.000Z',
       });
 
-      expect((model as unknown as { artifacts: Map<string, unknown> }).artifacts.size).toBe(1);
+      const result = await model.getArtifactById('art-001');
+      expect(result?.artifactKind).toBe('rule');
+      expect(result?.sourceTaskId).toBe('task-002');
     });
   });
 
@@ -278,7 +282,6 @@ describe('MemoryArtifactReadModel', () => {
 
       expect(result1?.artifactId).toBe('art-001');
       expect(result2?.artifactId).toBe('art-002');
-      expect((model as unknown as { artifacts: Map<string, unknown> }).artifacts.size).toBe(2);
     });
   });
 });
