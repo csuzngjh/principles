@@ -3,6 +3,7 @@ import type {
   ActivationArtifactReadModel,
   ActivationDecision,
   ActivationStateReadModel,
+  ApprovalQueueStore,
   CanActivateResult,
   ChannelWriter,
   DispatchInput,
@@ -15,6 +16,7 @@ import {
   getChannelRiskLevel,
   makeIdempotencyKey,
 } from './activation-types.js';
+import { decideAutoPromotion } from './approval-queue.js';
 import { extractPrincipleId } from './low-risk-writers.js';
 
 async function checkCanActivate(writer: ChannelWriter, artifact: PIArtifactSnapshot): Promise<{ decision: ActivationDecision | null; result?: CanActivateResult }> {
@@ -36,16 +38,23 @@ async function checkCanActivate(writer: ChannelWriter, artifact: PIArtifactSnaps
   }
 }
 
+export interface DispatcherConfig {
+  writers: Iterable<ChannelWriter>;
+  approvalQueueStore?: ApprovalQueueStore;
+}
+
 export class ActivationDispatcher {
   private readonly writers: Map<InternalizationChannel, ChannelWriter>;
+  private readonly approvalQueueStore?: ApprovalQueueStore;
 
   constructor(
     private readonly artifactReadModel: ActivationArtifactReadModel,
     private readonly stateReadModel: ActivationStateReadModel,
-    writers: Iterable<ChannelWriter>,
+    config: DispatcherConfig,
   ) {
+    this.approvalQueueStore = config.approvalQueueStore;
     this.writers = new Map<InternalizationChannel, ChannelWriter>();
-    for (const writer of writers) {
+    for (const writer of config.writers) {
       this.writers.set(writer.channel, writer);
     }
   }
@@ -68,19 +77,42 @@ export class ActivationDispatcher {
       return { decision: 'refused', reason: 'rollout_rejected', channel: input.channel };
     }
 
-    if (input.rolloutDecision === 'require_approval') {
-      return { decision: 'refused', reason: 'requires_approval', channel: input.channel, riskLevel: getChannelRiskLevel(input.channel) };
+    const needsApproval = input.rolloutDecision === 'require_approval' || !isLowRiskChannel(input.channel);
+    if (needsApproval) {
+      if (decideAutoPromotion(input.channel, input.confidence)) {
+        return this.activateArtifact(input, artifact, idempotencyKey);
+      }
+      return this.enqueueForApproval(input, idempotencyKey);
     }
 
-    if (!isLowRiskChannel(input.channel)) {
+    return this.activateArtifact(input, artifact, idempotencyKey);
+  }
+
+  private async enqueueForApproval(input: DispatchInput, _idempotencyKey: string): Promise<ActivationDecision> {
+    if (!this.approvalQueueStore) {
       return {
         decision: 'refused',
-        reason: `high_risk_channel_${input.channel}`,
-        riskLevel: getChannelRiskLevel(input.channel),
+        reason: 'requires_approval',
         channel: input.channel,
+        riskLevel: getChannelRiskLevel(input.channel),
       };
     }
 
+    const riskLevel = getChannelRiskLevel(input.channel);
+    const record = await this.approvalQueueStore.enqueue(
+      { artifactId: input.artifactId, channel: input.channel, riskLevel, confidence: input.confidence },
+      input.now,
+    );
+    return {
+      decision: 'queued_for_approval',
+      approvalId: record.approvalId,
+      queuedAt: record.requestedAt,
+      channel: input.channel,
+      riskLevel,
+    };
+  }
+
+  private async activateArtifact(input: DispatchInput, artifact: PIArtifactSnapshot, idempotencyKey: string): Promise<ActivationDecision> {
     const principleId = extractPrincipleId(artifact);
     if (!principleId) {
       return { decision: 'invalid_artifact', reason: 'no_principle_id' };
@@ -88,7 +120,7 @@ export class ActivationDispatcher {
 
     const writer = this.writers.get(input.channel);
     if (!writer) {
-      return { decision: 'refused', reason: `no_writer_for_channel_${input.channel}`, channel: input.channel };
+      return { decision: 'refused', reason: 'no_writer_for_channel_' + input.channel, channel: input.channel };
     }
 
     const canActivateResult = await checkCanActivate(writer, artifact);

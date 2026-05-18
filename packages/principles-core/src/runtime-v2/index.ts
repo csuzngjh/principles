@@ -777,6 +777,12 @@ export type {
   WriterResult,
   CanActivateResult,
   ChannelWriter,
+  ApprovalStatus,
+  ApprovalRecord,
+  ApprovalEnqueueInput,
+  ApprovalFilter,
+  ApprovalDecisionResult,
+  ApprovalQueueStore,
 } from './activation/index.js';
 
 export {
@@ -792,6 +798,12 @@ export {
   MemoryActivationStateStore,
   MemoryArtifactReadModel,
   SqliteActivationStateStore,
+  AUTO_PROMOTION_CONFIDENCE_THRESHOLD,
+  AUTO_PROMOTABLE_CHANNELS,
+  ApprovalQueue,
+  decideAutoPromotion,
+  MemoryApprovalQueueStore,
+  SqliteApprovalQueueStore,(feat(runtime): add ApprovalQueue & auto-promotion by confidence (PRI-145))
 } from './activation/index.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────
