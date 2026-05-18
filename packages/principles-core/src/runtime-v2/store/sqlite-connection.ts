@@ -317,7 +317,7 @@ export class SqliteConnection {
     const approvalCols = db.prepare('PRAGMA table_info(approvals)').all() as { name: string }[];
     const existingApprovalCols = new Set(approvalCols.map((c: { name: string }) => c.name));
     const contextColumns = [
-      'summary', 'trigger_reason', 'confidence_label',
+      'summary', 'trigger_reason',
       'confidence_explanation', 'effect_description', 'rejection_effect',
     ];
     for (const col of contextColumns) {

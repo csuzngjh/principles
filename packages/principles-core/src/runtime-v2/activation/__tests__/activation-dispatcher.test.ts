@@ -410,6 +410,42 @@ describe('ActivationDispatcher', () => {
     expect(pending).toHaveLength(0);
   });
 
+  // PRI-185: Context fields in queued approval records
+  it('queued approval record contains context fields', async () => {
+    const { artifactStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
+    artifactStore.addArtifact(makePrincipleArtifact({
+      contentJson: JSON.stringify({ principleId: 'P_001', text: 'Always validate user input before processing' }),
+    }));
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'skill', confidence: 0.85, confirm: true }));
+    expect(result.decision).toBe('queued_for_approval');
+    const pending = await approvalStore.listPending();
+    expect(pending).toHaveLength(1);
+    const record = pending[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion
+    expect(record.summary).toContain('Always validate user input before processing');
+    expect(record.triggerReason).toContain('skill');
+    expect(record.triggerReason).toContain('medium');
+    expect(record.confidenceExplanation).toContain('85%');
+    expect(record.effectDescription).toContain('skill');
+    expect(record.rejectionEffect).toContain('skill');
+  });
+
+  it('queued approval record degrades gracefully with unparseable contentJson', async () => {
+    const { artifactStore, dispatcher, approvalStore } = makeDispatcherWithQueue();
+    artifactStore.addArtifact(makePrincipleArtifact({
+      contentJson: '{invalid json content',
+    }));
+    const result = await dispatcher.dispatch(makeDispatchInput({ channel: 'code_tool_hook', confirm: true }));
+    expect(result.decision).toBe('queued_for_approval');
+    const pending = await approvalStore.listPending();
+    expect(pending).toHaveLength(1);
+    const record = pending[0]!; // eslint-disable-line @typescript-eslint/no-non-null-assertion
+    expect(record.summary).toContain('art-001');
+    expect(record.summary).not.toContain('{invalid');
+    expect(record.triggerReason).toContain('code_tool_hook');
+    expect(record.effectDescription).toContain('code tool hook');
+  });
+
+
   it('approval store enqueue fails -> refused', async () => {
     const failingStore = {
       enqueue: async () => { throw new Error('DB down'); },
