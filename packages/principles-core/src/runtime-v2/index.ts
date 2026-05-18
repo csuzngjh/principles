@@ -803,7 +803,7 @@ export {
   ApprovalQueue,
   decideAutoPromotion,
   MemoryApprovalQueueStore,
-  SqliteApprovalQueueStore,(feat(runtime): add ApprovalQueue & auto-promotion by confidence (PRI-145))
+  SqliteApprovalQueueStore,
 } from './activation/index.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────

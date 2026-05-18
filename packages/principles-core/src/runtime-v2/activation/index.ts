@@ -54,4 +54,3 @@ export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
 export { MemoryApprovalQueueStore } from './memory-approval-store.js';
 
 export { SqliteApprovalQueueStore } from './sqlite-approval-store.js';
-> (feat(runtime): add ApprovalQueue & auto-promotion by confidence (PRI-145))
