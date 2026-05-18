@@ -791,6 +791,7 @@ export {
   extractPrincipleId,
   MemoryActivationStateStore,
   MemoryArtifactReadModel,
+  SqliteActivationStateStore,
 } from './activation/index.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────

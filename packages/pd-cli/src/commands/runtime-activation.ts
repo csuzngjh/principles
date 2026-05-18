@@ -4,7 +4,7 @@ import {
   ActivationDispatcher,
   PromptWriter,
   DeferArchiveWriter,
-  MemoryActivationStateStore,
+  SqliteActivationStateStore,
 } from '@principles/core/runtime-v2';
 import type { ActivationDecision, PIArtifactSnapshot, RolloutActivationDecision } from '@principles/core/runtime-v2';
 import type { PIArtifactRecord } from '@principles/core/runtime-v2';
@@ -143,7 +143,7 @@ export async function handleRuntimeActivationDispatch(opts: ActivationDispatchOp
       },
     };
 
-    const activationStateStore = new MemoryActivationStateStore();
+    const activationStateStore = new SqliteActivationStateStore(stateManager.connection);
     const dispatcher = new ActivationDispatcher(
       artifactReadModel,
       activationStateStore,

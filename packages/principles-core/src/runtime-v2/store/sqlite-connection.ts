@@ -296,6 +296,19 @@ export class SqliteConnection {
       CREATE INDEX IF NOT EXISTS idx_pi_artifacts_artifact_kind ON pi_artifacts(artifact_kind);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_pi_artifacts_idempotency ON pi_artifacts(source_task_id, artifact_kind);
     `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS activations (
+        activation_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        artifact_id TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        action TEXT NOT NULL,
+        target_ref TEXT NOT NULL,
+        activated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_activations_idempotency ON activations(idempotency_key);
+    `);
   }
 
   private migrateSchema(): void {
