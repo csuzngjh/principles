@@ -23,15 +23,15 @@ Read the error category table in `references/categories.md` and assign one of:
 
 ### Step 2: Assign Number
 
-Read handbook Statistics section. Next = `ERR-{total+1}` (zero-padded: ERR-001).
+Read handbook Statistics section. Next = `ERR-{total+1}`, zero-padded to at least 3 digits (ERR-001 through ERR-999). If total exceeds 999, extend to 4 digits (ERR-1000).
 
 ### Step 3: Linear Comment
 
-Add comment on the related Linear issue using the entry format in `references/entry-format.md`. Use `mcp_linear_save_comment`.
+Add comment on the related Linear issue using the entry format in `references/entry-format.md`. Use the Linear MCP save_comment tool with the issue ID.
 
 ### Step 4: Tag Issue
 
-Add `lesson-learned` label via `mcp_linear_save_issue` with `labels: ["lesson-learned"]`.
+Add `lesson-learned` label via the Linear MCP save_issue tool with `labels: ["lesson-learned"]`.
 
 ### Step 5: Edit Handbook
 
