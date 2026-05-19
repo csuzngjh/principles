@@ -76,7 +76,7 @@ interface AdherenceBarProps {
 }
 
 export function AdherenceBar({ adherenceRate, className }: AdherenceBarProps) {
-  const percentage = adherenceRate * 100;
+  const percentage = adherenceRate;
   return (
     <div className="flex items-center gap-2">
       <ProgressBar value={percentage} max={100} size="sm" className="flex-1" />
