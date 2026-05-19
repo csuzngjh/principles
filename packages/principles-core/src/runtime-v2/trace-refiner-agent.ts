@@ -224,13 +224,22 @@ export function validateTraceRefinerAgentOutput(
     if (rt.sourcePainId !== det.sourcePainId) {
       errors.push(`refinedTrace.sourcePainId "${rt.sourcePainId}" does not match deterministic "${det.sourcePainId}"`);
     }
-    if (Array.isArray(rt.sourceRunIds) && Array.isArray(det.sourceRunIds)) {
+    if (!Array.isArray(rt.sourceRunIds)) {
+      errors.push('refinedTrace.sourceRunIds must be an array');
+    } else {
+      for (let i = 0; i < rt.sourceRunIds.length; i++) {
+        if (typeof rt.sourceRunIds[i] !== 'string') {
+          errors.push(`refinedTrace.sourceRunIds[${i}] must be a string, found ${typeof rt.sourceRunIds[i]}`);
+        }
+      }
       if (rt.sourceRunIds.length !== det.sourceRunIds.length || !(rt.sourceRunIds as string[]).every((id, idx) => id === det.sourceRunIds[idx])) {
         errors.push('refinedTrace.sourceRunIds does not match deterministic sourceRunIds');
       }
     }
 
-    if (Array.isArray(rt.evidenceRefs)) {
+    if (!Array.isArray(rt.evidenceRefs)) {
+      errors.push('refinedTrace.evidenceRefs must be an array');
+    } else {
       for (const ref of rt.evidenceRefs) {
         if (typeof ref !== 'string') {
           errors.push(`refinedTrace.evidenceRefs must contain only strings, found ${typeof ref}`);
@@ -240,12 +249,19 @@ export function validateTraceRefinerAgentOutput(
       }
     }
 
-    if (Array.isArray(rt.keyEvents)) {
+    if (!Array.isArray(rt.keyEvents)) {
+      errors.push('refinedTrace.keyEvents must be an array');
+    } else {
       for (let i = 0; i < rt.keyEvents.length; i++) {
         const event = rt.keyEvents[i];
-        if (typeof event !== 'object' || event === null) continue;
+        if (typeof event !== 'object' || event === null) {
+          errors.push(`refinedTrace.keyEvents[${i}] must be an object`);
+          continue;
+        }
         const e = event as Record<string, unknown>;
-        if (Array.isArray(e.evidenceRefs)) {
+        if (!Array.isArray(e.evidenceRefs)) {
+          errors.push(`refinedTrace.keyEvents[${i}].evidenceRefs must be an array`);
+        } else {
           for (const ref of e.evidenceRefs) {
             if (typeof ref !== 'string') {
               errors.push(`refinedTrace.keyEvents[${i}].evidenceRefs must contain only strings, found ${typeof ref}`);

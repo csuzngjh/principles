@@ -704,3 +704,190 @@ describe('validateTraceRefinerAgentOutput: refinedTrace lineage validation', () 
     expect(result.ok).toBe(true);
   });
 });
+
+describe('validateTraceRefinerAgentOutput: refinedTrace complete shape validation', () => {
+  it('missing refinedTrace.sourceRunIds fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace = { ...refined, sourceRunIds: undefined } as unknown as RefinedTracePayload;
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('sourceRunIds') && e.includes('array'))).toBe(true);
+    }
+  });
+
+  it('non-array sourceRunIds fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace = { ...refined, sourceRunIds: 'not-array' } as unknown as RefinedTracePayload;
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('sourceRunIds') && e.includes('array'))).toBe(true);
+    }
+  });
+
+  it('sourceRunIds with non-string item fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace = { ...refined, sourceRunIds: [42 as unknown as string] } as unknown as RefinedTracePayload;
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('sourceRunIds') && e.includes('string'))).toBe(true);
+    }
+  });
+
+  it('missing refinedTrace.evidenceRefs fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace = { ...refined, evidenceRefs: undefined } as unknown as RefinedTracePayload;
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('evidenceRefs') && e.includes('array'))).toBe(true);
+    }
+  });
+
+  it('non-array evidenceRefs fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace = { ...refined, evidenceRefs: 'not-array' } as unknown as RefinedTracePayload;
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('evidenceRefs') && e.includes('array'))).toBe(true);
+    }
+  });
+
+  it('missing refinedTrace.keyEvents fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace = { ...refined, keyEvents: undefined } as unknown as RefinedTracePayload;
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('keyEvents') && e.includes('array'))).toBe(true);
+    }
+  });
+
+  it('non-array keyEvents fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace = { ...refined, keyEvents: 'not-array' } as unknown as RefinedTracePayload;
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('keyEvents') && e.includes('array'))).toBe(true);
+    }
+  });
+
+  it('keyEvent non-object fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace: RefinedTracePayload = {
+      ...refined,
+      keyEvents: [
+        'not-an-object' as unknown as typeof refined.keyEvents[0],
+      ],
+    };
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('keyEvents[0]') && e.includes('object'))).toBe(true);
+    }
+  });
+
+  it('keyEvent null fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace: RefinedTracePayload = {
+      ...refined,
+      keyEvents: [
+        null as unknown as typeof refined.keyEvents[0],
+      ],
+    };
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('keyEvents[0]') && e.includes('object'))).toBe(true);
+    }
+  });
+
+  it('keyEvent missing evidenceRefs fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace: RefinedTracePayload = {
+      ...refined,
+      keyEvents: [
+        { kind: 'failure', summary: 'x', evidenceRefs: undefined as unknown as string[], severity: 'high', at: '2026-05-19T00:00:00Z' },
+      ],
+    };
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('keyEvents[0].evidenceRefs') && e.includes('array'))).toBe(true);
+    }
+  });
+
+  it('keyEvent non-array evidenceRefs fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace: RefinedTracePayload = {
+      ...refined,
+      keyEvents: [
+        { kind: 'failure', summary: 'x', evidenceRefs: 'not-array' as unknown as string[], severity: 'high', at: '2026-05-19T00:00:00Z' },
+      ],
+    };
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('keyEvents[0].evidenceRefs') && e.includes('array'))).toBe(true);
+    }
+  });
+});
