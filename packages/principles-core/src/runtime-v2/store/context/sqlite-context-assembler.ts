@@ -28,7 +28,7 @@ import { PDRuntimeError } from '../../error-categories.js';
 
 // ── PII Sanitizer (PRI-171) ──
 
-const SECRET_KEY_NAMES = ['apikey', 'api_key', 'token', 'authorization', 'password', 'secret', 'bearer'];
+const SECRET_KEY_PATTERNS = ['apikey', 'api_key', 'api-key', 'token', 'authorization', 'password', 'secret', 'bearer', 'access_token', 'refresh_token', 'auth_token', 'secret_key'];
 
 function sanitizeString(input: string): string {
   return input
@@ -67,7 +67,7 @@ function sanitizeObject(obj: unknown): unknown {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj)) {
       const keyLower = key.toLowerCase();
-      if (SECRET_KEY_NAMES.some(p => keyLower.includes(p))) {
+      if (SECRET_KEY_PATTERNS.some(p => keyLower === p || keyLower.endsWith('_' + p) || keyLower.startsWith(p + '_') || keyLower.endsWith('-' + p) || keyLower.startsWith(p + '-'))) {
         result[key] = '[REDACTED]';
       } else {
         result[key] = sanitizeObject(value);
@@ -90,7 +90,7 @@ function sanitizeJsonOrString(value: unknown): string {
 function tryParseJson(input: string | undefined): Record<string, unknown> | null {
   if (!input) return null;
   const trimmed = input.trim();
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+  if (!trimmed.startsWith('{')) return null;
   try {
     const parsed = JSON.parse(trimmed);
     return (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) ? parsed as Record<string, unknown> : null;
@@ -151,16 +151,16 @@ export class SqliteContextAssembler implements ContextAssembler {
       sessionIdHint: dt.sessionIdHint || undefined,
     };
 
-    // Build fullTrace when painId (sourcePainId) is available (PRI-171)
-    const fullTrace: FullTracePayload | null = dt.sourcePainId
-      ? SqliteContextAssembler.buildFullTraceSafe(dt, runs)
-      : null;
-
     const ambiguityNotes = SqliteContextAssembler.buildAmbiguityNotes(
       taskId,
       historyResult.entries,
       historyResult.truncated,
     );
+
+    // Build fullTrace when painId (sourcePainId) is available (PRI-171)
+    const fullTrace: FullTracePayload | null = dt.sourcePainId
+      ? SqliteContextAssembler.buildFullTraceSafe(dt, runs, ambiguityNotes)
+      : null;
 
     const payload: DiagnosticianContextPayload = {
       contextId,
@@ -187,10 +187,17 @@ export class SqliteContextAssembler implements ContextAssembler {
   private static buildFullTraceSafe(
     dt: DiagnosticianTaskRecord,
     runs: readonly RunRecord[],
+    ambiguityNotes: string[] | undefined,
   ): FullTracePayload | null {
     try {
       return SqliteContextAssembler.buildFullTrace(dt, runs);
-    } catch {
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (ambiguityNotes) {
+        ambiguityNotes.push(
+          'fullTrace construction failed for painId=' + (dt.sourcePainId ?? 'unknown') + ': ' + reason,
+        );
+      }
       return null;
     }
   }
