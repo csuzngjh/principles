@@ -140,6 +140,8 @@ const REQUIRED_SOURCE_FILES = [
   'full-trace-contract.ts',
   // PRI-191
   'trace-refiner.ts',
+  // PRI-192
+  'trace-refiner-agent.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -195,6 +197,8 @@ const REQUIRED_TEST_FILES = [
   'full-trace-contract.test.ts',
   // PRI-191
   'trace-refiner.test.ts',
+  // PRI-192
+  'trace-refiner-agent.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -2888,6 +2892,59 @@ describe('PRI-191 TraceRefiner read model boundary', () => {
     const importLines = src.split('\n').filter((line) => line.trim().startsWith('import'));
     for (const line of importLines) {
       expect(line).toContain('full-trace-contract');
+    }
+  });
+});
+
+describe('PRI-192 TraceRefinerAgent shadow contract boundary', () => {
+  it('trace-refiner-agent.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner-agent.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('trace-refiner-agent.ts has no LLM or network imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner-agent.ts'), 'utf-8');
+    expect(src).not.toContain('node:http');
+    expect(src).not.toContain('node:https');
+    expect(src).not.toContain('node:net');
+    expect(src).not.toContain('fetch(');
+    expect(src).not.toContain('openai');
+    expect(src).not.toContain('anthropic');
+  });
+
+  it('core barrel exports TraceRefinerAgent types and functions', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('createTraceRefinerAgentInput');
+    expect(src).toContain('validateTraceRefinerAgentOutput');
+    expect(src).toContain('applyTraceRefinerAgentShadowResult');
+    expect(src).toContain('TraceRefinerAgentInput');
+    expect(src).toContain('TraceRefinerAgentOutput');
+    expect(src).toContain('TraceRefinerAgentObjective');
+    expect(src).toContain('TraceRefinerAgentMode');
+    expect(src).toContain('TraceRefinerEvidenceClaim');
+    expect(src).toContain('TraceRefinerRejectedEvidence');
+    expect(src).toContain('TraceRefinerAgentStatus');
+  });
+
+  it('trace-refiner-agent.ts imports only from full-trace-contract and trace-refiner', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner-agent.ts'), 'utf-8');
+    const importLines = src.split('\n').filter((line) => line.trim().startsWith('import'));
+    const allowedModules = ["'./full-trace-contract", "'./trace-refiner"];
+    for (const line of importLines) {
+      expect(
+        allowedModules.some((mod) => line.includes(mod))
+      ).toBe(true);
     }
   });
 });
