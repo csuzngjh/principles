@@ -464,7 +464,7 @@ describe('SqliteContextAssembler', () => {
       if (!ft) return;
       if ('sourcePainId' in ft) {
         expect(ft.sourcePainId).toBe('pain-src-happy');
-        expect(ft.sourceTaskId).toBe(diagTask.taskId);
+        expect(ft.sourceTaskId).toBe(sourceTaskId);
         expect(ft.timeline.length).toBeGreaterThan(0);
         expect(ft.sourceRefs.length).toBeGreaterThan(0);
         expect(ft.ambiguityNotes).toBeDefined();

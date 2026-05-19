@@ -127,15 +127,15 @@ export class SqliteContextAssembler implements ContextAssembler {
     dt: DiagnosticianTaskRecord,
     ambiguityNotes: string[],
   ): Promise<FullTracePayloadV2 | null> {
-    const sourceRuns = await this.locateSourceRuns(dt, ambiguityNotes);
-    if (sourceRuns === null) return null;
-    return SqliteContextAssembler.buildFullTraceV2(dt, sourceRuns, ambiguityNotes);
+    const located = await this.locateSourceRuns(dt, ambiguityNotes);
+    if (located === null) return null;
+    return SqliteContextAssembler.buildFullTraceV2({ dt, sourceTaskId: located.sourceTaskId, runs: located.runs, ambiguityNotes });
   }
 
   private async locateSourceRuns(
     dt: DiagnosticianTaskRecord,
     ambiguityNotes: string[],
-  ): Promise<readonly RunRecord[] | null> {
+  ): Promise<{ sourceTaskId: string; runs: readonly RunRecord[] } | null> {
     if (!this.sourceTraceLocator) {
       ambiguityNotes.push(
         'SourceTraceLocator not available; cannot resolve source trace for sourcePainId=' + (dt.sourcePainId ?? 'unknown'),
@@ -164,17 +164,20 @@ export class SqliteContextAssembler implements ContextAssembler {
       return null;
     }
 
-    return this.runStore.listRunsByTask(result.candidate.taskId);
+    const runs = await this.runStore.listRunsByTask(result.candidate.taskId);
+    return { sourceTaskId: result.candidate.taskId, runs };
   }
 
-  private static buildFullTraceV2(
-    dt: DiagnosticianTaskRecord,
-    runs: readonly RunRecord[],
-    ambiguityNotes: string[],
-  ): FullTracePayloadV2 | null {
+  private static buildFullTraceV2(opts: {
+    dt: DiagnosticianTaskRecord;
+    sourceTaskId: string;
+    runs: readonly RunRecord[];
+    ambiguityNotes: string[];
+  }): FullTracePayloadV2 | null {
+    const { dt, sourceTaskId, runs, ambiguityNotes } = opts;
     if (!dt.sourcePainId || !dt.taskId) return null;
 
-    const { taskId: sourceTaskId, sourcePainId } = dt;
+    const { sourcePainId } = dt;
     const sourceRunIds = runs.map((r) => r.runId);
     const capturedAt = new Date().toISOString();
 
