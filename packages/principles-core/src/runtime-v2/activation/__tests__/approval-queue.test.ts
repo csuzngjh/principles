@@ -36,6 +36,18 @@ describe('decideAutoPromotion', () => {
   it('returns false for null confidence', () => {
     expect(decideAutoPromotion('skill', null as unknown as number)).toBe(false);
   });
+
+  it('returns false for negative confidence (out of range)', () => {
+    expect(decideAutoPromotion('skill', -0.1)).toBe(false);
+    expect(decideAutoPromotion('skill', -1)).toBe(false);
+    expect(decideAutoPromotion('skill', -100)).toBe(false);
+  });
+
+  it('returns false for confidence > 1 (out of range)', () => {
+    expect(decideAutoPromotion('skill', 1.1)).toBe(false);
+    expect(decideAutoPromotion('skill', 2)).toBe(false);
+    expect(decideAutoPromotion('skill', 100)).toBe(false);
+  });
 });
 
 describe('ApprovalQueue', () => {
