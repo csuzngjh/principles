@@ -10,6 +10,8 @@ import {
   SqliteRunStore,
   SqliteHistoryQuery,
   SqliteContextAssembler,
+  SqliteTrajectoryLocator,
+  SqliteSourceTraceLocator,
 } from '@principles/core';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
@@ -26,7 +28,9 @@ export async function handleContextBuild(taskId: string, opts: ContextBuildOptio
     const taskStore = new SqliteTaskStore(connection);
     const runStore = new SqliteRunStore(connection);
     const historyQuery = new SqliteHistoryQuery(connection);
-    const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
+    const trajectoryLocator = new SqliteTrajectoryLocator(connection);
+    const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
+    const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
 
     const payload = await assembler.assemble(taskId);
 
