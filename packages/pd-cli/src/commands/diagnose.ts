@@ -10,6 +10,8 @@ import {
   SqliteHistoryQuery,
   SqliteContextAssembler,
   SqliteDiagnosticianCommitter,
+  SqliteTrajectoryLocator,
+  SqliteSourceTraceLocator,
   StoreEventEmitter,
   storeEmitter,
   DiagnosticianRunner,
@@ -122,7 +124,9 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const {taskStore} = stateManager;
     const {runStore} = stateManager;
     const historyQuery = new SqliteHistoryQuery(sqliteConn);
-    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
+    const trajectoryLocator = new SqliteTrajectoryLocator(sqliteConn);
+    const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
+    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
 
     // Select runtime adapter based on --runtime flag (CLI-02)
     // eslint-disable-next-line @typescript-eslint/init-declarations
