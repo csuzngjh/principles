@@ -675,6 +675,66 @@ describe('buildGoldenTraceCandidate', () => {
     }
   });
 
+  it('candidate_created includes missing_params in builderNotes when some tool calls lack params', () => {
+    const fullTrace = makeFullTrace({
+      timeline: [
+        {
+          at: '2026-05-19T12:00:01.000Z',
+          kind: 'tool_call',
+          summary: 'Bash (failed)',
+          rawPreview: '{"command":"rm -rf /"}',
+          metadata: { toolName: 'Bash', status: 'failed', error: 'dangerous' },
+        },
+        {
+          at: '2026-05-19T12:00:02.000Z',
+          kind: 'tool_result',
+          summary: 'Error from Bash',
+          metadata: { toolName: 'Bash', error: 'dangerous' },
+        },
+        {
+          at: '2026-05-19T12:00:03.000Z',
+          kind: 'tool_call',
+          summary: 'Grep (failed)',
+          metadata: { toolName: 'Grep', status: 'failed', error: 'not found' },
+        },
+        {
+          at: '2026-05-19T12:00:04.000Z',
+          kind: 'tool_call',
+          summary: 'Read (completed)',
+          rawPreview: '{"file_path":"/src/main.ts"}',
+          metadata: { toolName: 'Read', status: 'completed' },
+        },
+      ],
+    });
+    const refinedTrace = makeRefinedTrace({
+      keyEvents: [
+        {
+          kind: 'failure',
+          summary: 'Bash (failed)',
+          evidenceRefs: ['task:task-001'],
+          severity: 'high',
+          at: '2026-05-19T12:00:01.000Z',
+        },
+        {
+          kind: 'tool_use',
+          summary: 'Read (completed)',
+          evidenceRefs: ['task:task-001'],
+          severity: 'low',
+          at: '2026-05-19T12:00:04.000Z',
+        },
+      ],
+      failureSummary: 'Bash: dangerous',
+    });
+
+    const result = buildGoldenTraceCandidate({ fullTrace, refinedTrace });
+
+    expect(result.decision).toBe('candidate_created');
+    if (result.decision === 'candidate_created') {
+      expect(result.builderNotes.some((n) => n.includes('missing_params'))).toBe(true);
+      expect(result.builderNotes.some((n) => n.includes('Grep'))).toBe(true);
+    }
+  });
+
   it('uses provided createdAt when given', () => {
     const fullTrace = makeFullTrace({
       timeline: [

@@ -169,7 +169,9 @@ export function buildGoldenTraceCandidate(
     const toolNames = noParamsEvidence
       .map((e) => extractMetadataString(e, 'toolName'))
       .filter((n): n is string => n !== undefined);
-    reasons.push(`missing_params: tool calls without extractable params: ${toolNames.join(', ')}`);
+    const missingParamsNote = `missing_params: tool calls without extractable params: ${toolNames.join(', ')}`;
+    reasons.push(missingParamsNote);
+    builderNotes.push(missingParamsNote);
   }
 
   if (failureEvidence.length === 0 || positiveEvidence.length === 0) {
