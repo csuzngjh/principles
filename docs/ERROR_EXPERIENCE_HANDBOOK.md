@@ -159,11 +159,23 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-006]** | Missed Codex PR review comments due to API failure + no retry
+
+- **What happened**: When asked to use `pr-review` skill on an existing PR, GitHub API calls timed out and I skipped checking for PR comments completely. Missed critical Codex review feedback on type safety issues that were already identified on the PR.
+- **Why it's wrong**: The PR already had the review information available, but I failed to persistently retrieve it. This caused duplicate work and delayed fixing an issue that was already found.
+- **Correct approach**: When working on an existing PR, **ALWAYS** try multiple ways to get PR comments/reviews (retry API, ask user, check git log). Never skip this critical step.
+- **How to prevent**: Added Rule #8 in AGENTS.md. When asked to review/fix an existing PR, FIRST fetch all comments/reviews before doing any work. Retry API at least twice, or ask user to paste comments.
+- **Source**: PRI-191 / PR #637
+- **Date**: 2026-05-19
+- **Recurrence**: No
+
+---
+
 ## Statistics
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 5 |
+| Total lessons | 6 |
 | Last updated | 2026-05-19 |
 | Top category | Schema & Type |
 | Recurring errors | 1 |
