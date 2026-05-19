@@ -217,9 +217,24 @@ export function validateTraceRefinerAgentOutput(
   if (typeof o.refinedTrace === 'object' && o.refinedTrace !== null) {
     const rt = o.refinedTrace as Record<string, unknown>;
 
+    const det = input.deterministicRefinedTrace;
+    if (rt.sourceTaskId !== det.sourceTaskId) {
+      errors.push(`refinedTrace.sourceTaskId "${rt.sourceTaskId}" does not match deterministic "${det.sourceTaskId}"`);
+    }
+    if (rt.sourcePainId !== det.sourcePainId) {
+      errors.push(`refinedTrace.sourcePainId "${rt.sourcePainId}" does not match deterministic "${det.sourcePainId}"`);
+    }
+    if (Array.isArray(rt.sourceRunIds) && Array.isArray(det.sourceRunIds)) {
+      if (rt.sourceRunIds.length !== det.sourceRunIds.length || !(rt.sourceRunIds as string[]).every((id, idx) => id === det.sourceRunIds[idx])) {
+        errors.push('refinedTrace.sourceRunIds does not match deterministic sourceRunIds');
+      }
+    }
+
     if (Array.isArray(rt.evidenceRefs)) {
       for (const ref of rt.evidenceRefs) {
-        if (typeof ref === 'string' && !allowedSourceRefs.has(ref)) {
+        if (typeof ref !== 'string') {
+          errors.push(`refinedTrace.evidenceRefs must contain only strings, found ${typeof ref}`);
+        } else if (!allowedSourceRefs.has(ref)) {
           errors.push(`refinedTrace.evidenceRefs contains invented ref "${ref}" not present in allowed source refs`);
         }
       }
@@ -232,7 +247,9 @@ export function validateTraceRefinerAgentOutput(
         const e = event as Record<string, unknown>;
         if (Array.isArray(e.evidenceRefs)) {
           for (const ref of e.evidenceRefs) {
-            if (typeof ref === 'string' && !allowedSourceRefs.has(ref)) {
+            if (typeof ref !== 'string') {
+              errors.push(`refinedTrace.keyEvents[${i}].evidenceRefs must contain only strings, found ${typeof ref}`);
+            } else if (!allowedSourceRefs.has(ref)) {
               errors.push(`refinedTrace.keyEvents[${i}].evidenceRefs contains invented ref "${ref}" not present in allowed source refs`);
             }
           }

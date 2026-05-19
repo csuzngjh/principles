@@ -2940,9 +2940,10 @@ describe('PRI-192 TraceRefinerAgent shadow contract boundary', () => {
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'trace-refiner-agent.ts'), 'utf-8');
     const importLines = src.split('\n').filter((line) => line.trim().startsWith('import'));
+    const allowedModules = ["'./full-trace-contract", "'./trace-refiner"];
     for (const line of importLines) {
       expect(
-        line.includes('full-trace-contract') || line.includes('trace-refiner')
+        allowedModules.some((mod) => line.includes(mod))
       ).toBe(true);
     }
   });

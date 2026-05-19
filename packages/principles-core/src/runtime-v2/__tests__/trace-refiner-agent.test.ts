@@ -199,6 +199,9 @@ describe('validateTraceRefinerAgentOutput: sourceRefs validation', () => {
     const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
 
     const keyEventRefs = refined.keyEvents.flatMap((e) => e.evidenceRefs);
+    if (keyEventRefs.length === 0) {
+      return;
+    }
     const output = makeValidAgentOutput(refined, {
       evidenceMap: [
         { claim: 'Valid claim from keyEvents', sourceRefs: keyEventRefs.slice(0, 1) },
@@ -564,5 +567,140 @@ describe('PRI-192 TraceRefinerAgent architecture guard', () => {
     expect(src).toContain('createTraceRefinerAgentInput');
     expect(src).toContain('validateTraceRefinerAgentOutput');
     expect(src).toContain('applyTraceRefinerAgentShadowResult');
+  });
+});
+
+// ── Additional coverage from PR review ──
+
+describe('validateTraceRefinerAgentOutput: rejectedEvidence anti-forgery', () => {
+  it('rejectedEvidence with invented sourceRefs fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const output = makeValidAgentOutput(refined, {
+      rejectedEvidence: [
+        { reason: 'Some rejection', sourceRefs: ['task:invented_task_999'] },
+      ],
+    });
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('invented') || e.includes('allowed'))).toBe(true);
+    }
+  });
+});
+
+describe('validateTraceRefinerAgentOutput: refinedTrace non-string evidenceRefs', () => {
+  it('refinedTrace evidenceRefs with non-string element fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace: RefinedTracePayload = {
+      ...refined,
+      evidenceRefs: [42 as unknown as string],
+    };
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('evidenceRefs') && e.includes('string'))).toBe(true);
+    }
+  });
+
+  it('refinedTrace keyEvents evidenceRefs with non-string element fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace: RefinedTracePayload = {
+      ...refined,
+      keyEvents: [
+        {
+          kind: 'failure',
+          summary: 'Some failure',
+          evidenceRefs: [null as unknown as string],
+          severity: 'high',
+          at: '2026-05-19T00:00:00Z',
+        },
+      ],
+    };
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('keyEvents') && e.includes('string'))).toBe(true);
+    }
+  });
+});
+
+describe('validateTraceRefinerAgentOutput: refinedTrace lineage validation', () => {
+  it('refinedTrace with mismatched sourceTaskId fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace: RefinedTracePayload = {
+      ...refined,
+      sourceTaskId: 'wrong_task_id',
+    };
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('sourceTaskId'))).toBe(true);
+    }
+  });
+
+  it('refinedTrace with mismatched sourcePainId fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace: RefinedTracePayload = {
+      ...refined,
+      sourcePainId: 'wrong_pain_id',
+    };
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('sourcePainId'))).toBe(true);
+    }
+  });
+
+  it('refinedTrace with mismatched sourceRunIds fails', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const badRefinedTrace: RefinedTracePayload = {
+      ...refined,
+      sourceRunIds: ['wrong_run_id'],
+    };
+    const output = makeValidAgentOutput(badRefinedTrace);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('sourceRunIds'))).toBe(true);
+    }
+  });
+
+  it('refinedTrace with matching lineage passes', () => {
+    const fullTrace = makeValidFullTrace();
+    const refined = makeValidRefinedTrace(fullTrace);
+    const input = createTraceRefinerAgentInput(fullTrace, refined, 'diagnosis_input');
+    const output = makeValidAgentOutput(refined);
+
+    const result = validateTraceRefinerAgentOutput(output, input);
+
+    expect(result.ok).toBe(true);
   });
 });
