@@ -451,6 +451,27 @@ describe('refineFullTrace: invalid input handling', () => {
     expect(result.ambiguityNotes).toContain('some ambiguity');
     expect(result.refinementNotes).toContain('invalid_full_trace_input');
   });
+
+  it('partially valid input with non-string array elements filters safely to maintain type contract', () => {
+    const partial = {
+      sourceTaskId: 'task_001',
+      sourcePainId: 'pain-001',
+      sourceRunIds: ['valid-run', 42, 'another-run', true], // mix of valid and invalid types
+      capturedAt: 'not-a-date',
+      sourceRefs: [],
+      timeline: [],
+      ambiguityNotes: ['valid note', null, 123],
+      sanitizationNotes: [{ invalid: 'object' }, 'sanitized'],
+    } as unknown as FullTracePayloadV2;
+
+    const result = refineFullTrace(partial);
+
+    // Only string elements should survive
+    expect(result.sourceRunIds).toEqual(['valid-run', 'another-run']);
+    expect(result.ambiguityNotes).toEqual(['valid note']);
+    expect(result.sanitizationNotes).toEqual(['sanitized']);
+    expect(result.refinementNotes).toContain('invalid_full_trace_input');
+  });
 });
 
 // ── Evidence Refs / Source Lineage ──

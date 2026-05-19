@@ -200,17 +200,29 @@ export function refineFullTrace(
   const validation = validateFullTracePayload(fullTrace);
   if (!validation.valid) {
     const p = fullTrace as Record<string, unknown>;
+    
+    // Validate that salvaged arrays contain only string elements to maintain type contract
+    const safeSourceRunIds = Array.isArray(p.sourceRunIds) 
+      ? p.sourceRunIds.filter((v): v is string => typeof v === 'string') 
+      : [];
+    const safeAmbiguityNotes = Array.isArray(p.ambiguityNotes) 
+      ? p.ambiguityNotes.filter((v): v is string => typeof v === 'string') 
+      : [];
+    const safeSanitizationNotes = Array.isArray(p.sanitizationNotes) 
+      ? p.sanitizationNotes.filter((v): v is string => typeof v === 'string') 
+      : [];
+    
     return {
       sourceTaskId: typeof p.sourceTaskId === 'string' ? p.sourceTaskId : '',
       sourcePainId: typeof p.sourcePainId === 'string' ? p.sourcePainId : '',
-      sourceRunIds: Array.isArray(p.sourceRunIds) ? (p.sourceRunIds as string[]) : [],
+      sourceRunIds: safeSourceRunIds,
       evidenceRefs: [],
       keyEvents: [],
       failureSummary: null,
       toolUseSummary: [],
       userIntentSummary: null,
-      ambiguityNotes: Array.isArray(p.ambiguityNotes) ? (p.ambiguityNotes as string[]) : [],
-      sanitizationNotes: Array.isArray(p.sanitizationNotes) ? (p.sanitizationNotes as string[]) : [],
+      ambiguityNotes: safeAmbiguityNotes,
+      sanitizationNotes: safeSanitizationNotes,
       refinementNotes: [
         'invalid_full_trace_input',
         ...validation.errors.map((e) => `validation_error: ${e}`),

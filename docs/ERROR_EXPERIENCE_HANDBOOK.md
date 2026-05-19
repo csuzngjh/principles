@@ -63,6 +63,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-001 | `as string` cast on untrusted JSON bypasses runtime validation | PRI-189 |
 | ERR-003 | PII sanitizer uses `includes()` substring matching causing false-positive over-sanitization | PRI-171 |
 | ERR-004 | `sourceTaskId` set to diagnostician task ID instead of located source task ID | PRI-190 |
+| ERR-005 | Invalid salvaged arrays bypass type contract in validate failure path | PRI-191 |
 
 ---
 
@@ -146,11 +147,23 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-005]** | Invalid salvaged arrays bypass type contract in validate failure path
+
+- **What happened**: In `refineFullTrace()` validation failure path, `sourceRunIds`, `ambiguityNotes`, `sanitizationNotes` only checked `Array.isArray()` then used `as string[]` cast without validating element types. For invalid FullTrace JSON like `sourceRunIds: [42]`, this returned a `RefinedTracePayload` whose arrays violated the `string[]` contract, reintroducing the same untrusted-JSON problem the FullTrace contract was meant to avoid.
+- **Why it's wrong**: `as string[]` is a compile-time assertion with zero runtime validation. When parsing untrusted JSON, a cast alone doesn't make elements strings. This would have caused downstream consumers expecting `string[]` to fail silently or incorrectly.
+- **Correct approach**: When salvaging arrays from invalid JSON, filter elements with `(v): v is string => typeof v === 'string'` to keep only valid strings, otherwise return empty array.
+- **How to prevent**: Never use `as` array type casts on untrusted JSON arrays without validating element types first. Always apply element-wise type guards when preserving data from invalid payloads.
+- **Source**: PRI-191
+- **Date**: 2026-05-19
+- **Recurrence**: Yes - similar pattern to ERR-001 where `as` bypassed validation
+
+---
+
 ## Statistics
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 4 |
+| Total lessons | 5 |
 | Last updated | 2026-05-19 |
 | Top category | Schema & Type |
-| Recurring errors | 0 |
+| Recurring errors | 1 |
