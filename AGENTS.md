@@ -19,6 +19,7 @@ If a code review catches your error, record it in the handbook and tag the Linea
 5. **No `any`**: Use `unknown` for truly unknown types. Strict TypeScript mode.
 6. **No AI merge**: Never use `gh pr merge` or auto-merge PRs. User must merge manually.
 7. **Conventional commits**: `feat()`, `fix()`, `docs()`, `refactor()`, `test()`, `chore()`.
+8. **MANDATORY: Check PR comments first**: When asked to review/fix an existing PR, **FIRST** fetch and read **all PR comments/reviews** before doing ANY work. Retry at least 2 times if GitHub API fails. If no other way, ask user to copy-paste PR comments.
 
 ## Build & Test
 
