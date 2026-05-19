@@ -76,7 +76,7 @@ docs/                    # Architecture docs, design documents, maps
 
 **Before starting ANY coding task**, you MUST read `docs/ERROR_EXPERIENCE_HANDBOOK.md`. This file records real errors caught in code reviews. Reading it prevents you from repeating mistakes that other AI assistants made on this project.
 
-**After a code review catches your error**: Record it in the handbook following the entry format, and tag the Linear issue with `lesson-learned`.
+**After a code review catches your error**: Use the `record-error` skill to record it. The skill handles the full workflow: Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
 
 ## Critical Boundaries
 

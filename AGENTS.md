@@ -38,10 +38,7 @@ npm run lint
 
 ## Error Recording
 
-When a code review catches your error:
-1. Add entry to `docs/ERROR_EXPERIENCE_HANDBOOK.md` (format: ERR-XXX)
-2. Tag the Linear issue with `lesson-learned`
-3. If same pattern recurred, add Recurrence note to original entry
+When a code review catches your error, use the `record-error` skill to record it. The skill handles: Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
 
 ## Key Files
 

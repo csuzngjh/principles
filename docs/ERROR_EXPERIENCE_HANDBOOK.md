@@ -1,8 +1,20 @@
 # Error Experience Handbook
 
 > **MUST READ before starting any task.** This document records real errors made by AI coding assistants during code reviews. Reading it prevents repeating the same mistakes.
->
-> **When to update**: After every code review that catches an AI assistant error, add a new entry following the format below. Also update the corresponding Linear issue with the `lesson-learned` label.
+
+---
+
+## How to Record an Error
+
+When a code review catches an AI assistant error, use the `record-error` skill. The skill handles the full workflow automatically:
+
+1. **Add a comment** on the Linear Issue using the entry format below
+2. **Tag the issue** with `lesson-learned` label (via Linear MCP tool)
+3. **Edit this file** — add a row to the category table AND add a detailed entry in the "Detailed Entries" section
+4. **Update statistics** at the bottom of this file
+5. **Commit and create a PR** with message `docs: add ERR-XXX to error experience handbook`
+
+The reviewer (human) only needs to point out the error. The AI assistant invokes `record-error` to handle all recording steps.
 
 ---
 

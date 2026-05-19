@@ -55,7 +55,10 @@ packages/openclaw-plugin/skills
 packages/create-principles-disciple/plugin/
 
 # Local environment and state
-.claude/
+# .claude/ is ignored except for skills (shared with team)
+!.claude/
+.claude/*
+!.claude/skills/
 claude/
 .planning/
 plans/
@@ -64,6 +67,9 @@ conductor/
 .state/
 memory/
 .agent/
+# Exception: .agents/skills/ must be committed (Codex/Gemini shared skills)
+!.agents/
+!.agents/skills/
 spec/
 _scratchpad/
 
