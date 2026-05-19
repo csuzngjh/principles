@@ -20,6 +20,7 @@ import {
   type DiagnosisTarget,
   type FullTracePayload,
   type ToolCallEntry,
+  type TrajectoryCandidate,
   type PainContext,
   DiagnosticianContextPayloadSchema,
 } from '../../context-payload.js';
@@ -221,6 +222,13 @@ export class SqliteContextAssembler implements ContextAssembler {
       return null;
     }
 
+    if (!dt.sourcePainId) {
+      ambiguityNotes.push(
+        'No sourcePainId; cannot locate source trace for sessionId=' + dt.sessionIdHint,
+      );
+      return null;
+    }
+
     const result = await this.trajectoryLocator.locate({
       sessionId: dt.sessionIdHint,
       workspace: dt.workspaceDir,
@@ -238,18 +246,53 @@ export class SqliteContextAssembler implements ContextAssembler {
       return null;
     }
 
-    if (candidates.length > 1) {
+    const matched = await this.findPainIdMatchedCandidate(
+      dt.sourcePainId,
+      candidates,
+      ambiguityNotes,
+    );
+
+    if (!matched) return null;
+    return this.runStore.listRunsByTask(matched.trajectoryRef);
+  }
+
+  private async findPainIdMatchedCandidate(
+    sourcePainId: string,
+    candidates: readonly TrajectoryCandidate[],
+    ambiguityNotes: string[],
+  ): Promise<TrajectoryCandidate | null> {
+    const matched: TrajectoryCandidate[] = [];
+
+    for (const candidate of candidates) {
+      const task = await this.taskStore.getTask(candidate.trajectoryRef);
+      if (!task) continue;
+
+      const dj = tryParseJson(task.diagnosticJson);
+      const taskPainId = (dj?.sourcePainId ?? dj?.painId) as string | undefined;
+
+      if (taskPainId === sourcePainId) {
+        matched.push(candidate);
+      }
+    }
+
+    if (matched.length === 0) {
       ambiguityNotes.push(
-        'Ambiguous source trace for sourcePainId=' + (dt.sourcePainId ?? 'unknown') +
-        ': ' + candidates.length + ' candidates. TaskIds: ' +
-        candidates.map((c) => c.trajectoryRef).join(', '),
+        'sourcePainId mismatch: no candidate task has painId=' + sourcePainId +
+        '. Candidates checked: ' + candidates.map((c) => c.trajectoryRef).join(', '),
       );
       return null;
     }
 
-    const sourceRef = candidates[0]?.trajectoryRef;
-    if (!sourceRef) return null;
-    return this.runStore.listRunsByTask(sourceRef);
+    if (matched.length > 1) {
+      ambiguityNotes.push(
+        'Ambiguous source trace for sourcePainId=' + sourcePainId +
+        ': ' + matched.length + ' matched candidates. TaskIds: ' +
+        matched.map((c) => c.trajectoryRef).join(', '),
+      );
+      return null;
+    }
+
+    return matched[0] ?? null;
   }
 
   private static buildFullTraceSafe(

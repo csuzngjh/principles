@@ -68,6 +68,7 @@ interface TestFixture {
   historyQuery: SqliteHistoryQuery;
   trajectoryLocator: SqliteTrajectoryLocator | undefined;
   taskStore: TaskStore;
+  taskMap: Map<string, TaskRecord>;
   assembler: SqliteContextAssembler;
 }
 
@@ -81,7 +82,7 @@ function createFixture(tasks?: Map<string, DiagnosticianTaskRecord>, options?: {
   const taskStore = createMockTaskStore(taskMap);
   const trajectoryLocator = options?.withLocator ? new SqliteTrajectoryLocator(connection) : undefined;
   const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { trajectoryLocator });
-  return { tmpDir, connection, sqliteTaskStore, runStore, historyQuery, trajectoryLocator, taskStore, assembler };
+  return { tmpDir, connection, sqliteTaskStore, runStore, historyQuery, trajectoryLocator, taskStore, taskMap, assembler };
 }
 
 function cleanupFixture(fixture: TestFixture): void {
@@ -131,8 +132,10 @@ async function createRunWithPayloads(
 async function ensureSourceTask(
   fixture: TestFixture,
   sourceTaskId: string,
-  sessionId: string,
+  opts: { sessionId: string; sourcePainId?: string },
 ): Promise<void> {
+  const dj: Record<string, unknown> = { sessionIdHint: opts.sessionId };
+  if (opts.sourcePainId) dj.sourcePainId = opts.sourcePainId;
   const existing = await fixture.sqliteTaskStore.getTask(sourceTaskId);
   if (!existing) {
     await fixture.sqliteTaskStore.createTask({
@@ -141,9 +144,19 @@ async function ensureSourceTask(
       status: 'succeeded',
       attemptCount: 1,
       maxAttempts: 1,
-      diagnosticJson: JSON.stringify({ sessionIdHint: sessionId }),
+      diagnosticJson: JSON.stringify(dj),
     } satisfies Omit<TaskRecord, 'createdAt' | 'updatedAt'>);
   }
+  fixture.taskMap.set(sourceTaskId, {
+    taskId: sourceTaskId,
+    taskKind: 'user_session',
+    status: 'succeeded',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    attemptCount: 1,
+    maxAttempts: 1,
+    diagnosticJson: JSON.stringify(dj),
+  } satisfies TaskRecord);
 }
 
 /** Helper: check that ambiguityNotes includes a substring (safely). */
@@ -426,7 +439,7 @@ describe('SqliteContextAssembler', () => {
     const tasks = new Map([[diagTask.taskId, diagTask]]);
     const f = createFixture(tasks, { withLocator: true });
     try {
-      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await ensureSourceTask(f, sourceTaskId, { sessionId, sourcePainId: 'pain-src-happy' });
       await createRunWithPayloads(f, sourceTaskId, {
         inputPayload: JSON.stringify({
           type: 'session_history',
@@ -526,16 +539,16 @@ describe('SqliteContextAssembler', () => {
     const tasks = new Map([[diagTask.taskId, diagTask]]);
     const f = createFixture(tasks, { withLocator: true });
     try {
-      await ensureSourceTask(f, 'task_src_amb_1', sessionId);
+      await ensureSourceTask(f, 'task_src_amb_1', { sessionId, sourcePainId: 'pain-ambiguous' });
       await createRunWithPayloads(f, 'task_src_amb_1', { inputPayload: '{"toolName":"Tool1"}', outputPayload: '{}' });
-      await ensureSourceTask(f, 'task_src_amb_2', sessionId);
+      await ensureSourceTask(f, 'task_src_amb_2', { sessionId, sourcePainId: 'pain-ambiguous' });
       await createRunWithPayloads(f, 'task_src_amb_2', { inputPayload: '{"toolName":"Tool2"}', outputPayload: '{}' });
 
       const payload = await f.assembler.assemble(diagTask.taskId);
 
       expect(payload.fullTrace).toBeNull();
       expect(notesInclude(payload.ambiguityNotes, 'Ambiguous source trace')).toBe(true);
-      expect(notesInclude(payload.ambiguityNotes, '2 candidates')).toBe(true);
+      expect(notesInclude(payload.ambiguityNotes, '2 matched candidates')).toBe(true);
     } finally { cleanupFixture(f); }
   });
 
@@ -582,7 +595,7 @@ describe('SqliteContextAssembler', () => {
     const tasks = new Map([[task.taskId, task]]);
     const f = createFixture(tasks, { withLocator: true });
     try {
-      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await ensureSourceTask(f, sourceTaskId, { sessionId, sourcePainId: 'pain-no-src-runs' });
 
       const payload = await f.assembler.assemble(task.taskId);
 
@@ -607,7 +620,7 @@ describe('SqliteContextAssembler', () => {
     const tasks = new Map([[task.taskId, task]]);
     const f = createFixture(tasks, { withLocator: true });
     try {
-      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await ensureSourceTask(f, sourceTaskId, { sessionId, sourcePainId: 'pain-pii' });
       await createRunWithPayloads(f, sourceTaskId, {
         inputPayload: JSON.stringify({
           toolCalls: [{
@@ -658,7 +671,7 @@ describe('SqliteContextAssembler', () => {
     const tasks = new Map([[task.taskId, task]]);
     const f = createFixture(tasks, { withLocator: true });
     try {
-      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await ensureSourceTask(f, sourceTaskId, { sessionId, sourcePainId: 'pain-plain' });
       await createRunWithPayloads(f, sourceTaskId, {
         inputPayload: 'This is just plain text, not JSON at all',
         outputPayload: 'Response text with password=supersecret',
@@ -687,7 +700,7 @@ describe('SqliteContextAssembler', () => {
     const tasks = new Map([[task.taskId, task]]);
     const f = createFixture(tasks, { withLocator: true });
     try {
-      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await ensureSourceTask(f, sourceTaskId, { sessionId, sourcePainId: 'pain-oc' });
       await createRunWithPayloads(f, sourceTaskId, {
         runtimeKind: 'openclaw-history',
         inputPayload: JSON.stringify({
@@ -730,7 +743,7 @@ describe('SqliteContextAssembler', () => {
     const tasks = new Map([[task.taskId, task]]);
     const f = createFixture(tasks, { withLocator: true });
     try {
-      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await ensureSourceTask(f, sourceTaskId, { sessionId, sourcePainId: 'pain-nested' });
       await createRunWithPayloads(f, sourceTaskId, {
         inputPayload: JSON.stringify({
           toolCalls: [{
@@ -770,7 +783,7 @@ describe('SqliteContextAssembler', () => {
     const tasks = new Map([[task.taskId, task]]);
     const f = createFixture(tasks, { withLocator: true });
     try {
-      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await ensureSourceTask(f, sourceTaskId, { sessionId, sourcePainId: 'pain-bearer-order' });
       await createRunWithPayloads(f, sourceTaskId, {
         inputPayload: JSON.stringify({
           thinking: 'Set authorization: Bearer sk-live-leaky-token-xyz and then called the API',
@@ -789,6 +802,34 @@ describe('SqliteContextAssembler', () => {
       expect(allText).not.toContain('sk-live-leaky-token-xyz');
       expect(allText).not.toContain('tok-secret-abc123');
       expect(allText).toContain('[REDACTED]');
+    } finally { cleanupFixture(f); }
+  });
+
+
+  it('returns null fullTrace when source task has mismatched sourcePainId', async () => {
+    const sessionId = 'sess-mismatch';
+    const sourceTaskId = 'task_source_mismatch';
+    const diagTask = makeDiagnosticianTask({
+      taskId: 'task_diag_mismatch',
+      sourcePainId: 'pain-A',
+      sessionIdHint: sessionId,
+    });
+    const tasks = new Map([[diagTask.taskId, diagTask]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      // Source task stores painId=pain-B, which does NOT match diagnostician's sourcePainId=pain-A
+      await ensureSourceTask(f, sourceTaskId, { sessionId, sourcePainId: 'pain-B' });
+      await createRunWithPayloads(f, sourceTaskId, {
+        inputPayload: JSON.stringify({ toolCalls: [{ toolName: 'WrongSource', status: 'succeeded' }] }),
+        outputPayload: '{}',
+      });
+
+      const payload = await f.assembler.assemble(diagTask.taskId);
+
+      expect(payload.fullTrace).toBeNull();
+      expect(notesInclude(payload.ambiguityNotes, 'sourcePainId mismatch')).toBe(true);
+      expect(notesInclude(payload.ambiguityNotes, 'pain-A')).toBe(true);
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
     } finally { cleanupFixture(f); }
   });
 
