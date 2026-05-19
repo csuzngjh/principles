@@ -252,8 +252,8 @@ export function refineFullTrace(
 
     const toolName = extractToolName(entry);
     if (toolName) {
-      const runRef = fullTrace.sourceRefs.find((r) => r.kind === 'run');
-      if (runRef) entryEvidenceRefs.push(sourceRefToString(runRef));
+      const runRefs = fullTrace.sourceRefs.filter((r) => r.kind === 'run');
+      for (const ref of runRefs) entryEvidenceRefs.push(sourceRefToString(ref));
     }
     if (entryEvidenceRefs.length === 0 && evidenceRefs.length > 0) {
       entryEvidenceRefs.push(...evidenceRefs);
@@ -278,11 +278,10 @@ export function refineFullTrace(
 
     if (refinedKind === 'tool_use') {
       const status = extractToolStatus(entry);
-      if (toolName) {
-        toolUseSummaries.push(status ? `${toolName} (${status})` : toolName);
-      } else {
-        toolUseSummaries.push(status ? `unknown_tool (${status})` : 'unknown_tool');
-      }
+      const toolSummary = toolName
+        ? (status ? `${toolName} (${status})` : toolName)
+        : (status ? `unknown_tool (${status})` : 'unknown_tool');
+      toolUseSummaries.push(truncateSummary(toolSummary, maxSummaryLength));
     }
 
     if (refinedKind === 'user_intent' && userIntentText === null) {

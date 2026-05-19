@@ -191,6 +191,61 @@ describe('refineFullTrace: tool use extraction', () => {
       expect(toolEvent.evidenceRefs.length).toBeGreaterThan(0);
     }
   });
+
+  it('tool event evidenceRefs include all run refs, not just the first', () => {
+    const payload = makeValidPayload({
+      sourceRefs: [
+        { kind: 'task', id: 'task_src_001' },
+        { kind: 'run', id: 'run_001' },
+        { kind: 'run', id: 'run_002' },
+        { kind: 'run', id: 'run_003' },
+      ],
+      sourceRunIds: ['run_001', 'run_002', 'run_003'],
+      timeline: [
+        { at: '2026-05-19T00:00:00Z', kind: 'tool_call', summary: 'Read', metadata: { toolName: 'Read' } },
+      ],
+    });
+
+    const result = refineFullTrace(payload);
+
+    const toolEvent = result.keyEvents.find((e) => e.kind === 'tool_use');
+    expect(toolEvent).toBeDefined();
+    if (toolEvent) {
+      expect(toolEvent.evidenceRefs).toContain('run:run_001');
+      expect(toolEvent.evidenceRefs).toContain('run:run_002');
+      expect(toolEvent.evidenceRefs).toContain('run:run_003');
+    }
+  });
+
+  it('toolUseSummary is truncated when toolName exceeds maxSummaryLength', () => {
+    const longToolName = 'A'.repeat(500);
+    const payload = makeValidPayload({
+      timeline: [
+        { at: '2026-05-19T00:00:00Z', kind: 'tool_call', summary: 'Call', metadata: { toolName: longToolName, status: 'succeeded' } },
+      ],
+    });
+
+    const result = refineFullTrace(payload, { maxSummaryLength: 300 });
+
+    for (const entry of result.toolUseSummary) {
+      expect(entry.length).toBeLessThanOrEqual(300);
+    }
+  });
+
+  it('toolUseSummary is truncated when status exceeds maxSummaryLength', () => {
+    const longStatus = 'S'.repeat(500);
+    const payload = makeValidPayload({
+      timeline: [
+        { at: '2026-05-19T00:00:00Z', kind: 'tool_call', summary: 'Call', metadata: { toolName: 'Read', status: longStatus } },
+      ],
+    });
+
+    const result = refineFullTrace(payload, { maxSummaryLength: 300 });
+
+    for (const entry of result.toolUseSummary) {
+      expect(entry.length).toBeLessThanOrEqual(300);
+    }
+  });
 });
 
 // ── User Intent Extraction ──
