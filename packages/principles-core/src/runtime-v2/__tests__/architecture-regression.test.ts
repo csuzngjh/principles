@@ -250,6 +250,21 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
       expect(typeof mod[name]).toBe('function');
     }, 15_000);
   }
+
+  // PRI-171: TypeBox schema exports (objects, not functions)
+  const REQUIRED_SCHEMA_EXPORTS = [
+    'FullTracePayloadSchema',
+    'ToolCallEntrySchema',
+    'PainContextSchema',
+  ];
+
+  for (const name of REQUIRED_SCHEMA_EXPORTS) {
+    it(`exports schema ${name}`, async () => {
+      const mod = (await barrel) as Record<string, unknown>;
+      expect(mod).toHaveProperty(name);
+      expect(typeof mod[name]).toBe('object');
+    }, 15_000);
+  }
 });
 
 // ── OpenClawPlugin pain hook integration ───────────────────────────────────
