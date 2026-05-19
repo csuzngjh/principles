@@ -108,3 +108,36 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Last updated | 2026-05-18 |
 | Top category | — |
 | Recurring errors | 0 |
+
+
+---
+
+### [PRI-171] 静默降级必须暴露失败原因 (2026-05-19)
+
+**Context**: `buildFullTraceSafe()` catch 块捕获所有异常后返回 `null`，无任何可观测性。
+
+**Error**: 下游 diagnostician 收到 `fullTrace: null` 无法区分"无 painId"与"trace 构建崩溃"。
+
+**Root Cause**: 降级设计正确但缺少可观测性 — degradation ≠ silence。
+
+**Fix**: catch 块通过 `ambiguityNotes` 传播失败原因。
+
+**Rule**: 任何 catch-and-degrade 模式必须至少通过 ambiguityNotes / telemetry / logging 之一暴露失败原因。
+
+**Tags**: `catch-and-degrade`, `silent-failure`, `PRI-171`
+
+---
+
+### [PRI-171] PII 净化器禁止子串匹配 (2026-05-19)
+
+**Context**: `SECRET_KEY_NAMES.includes()` 做子串匹配导致 `tokenizer`, `tokenCount` 被误脱敏。
+
+**Error**: 诊断上下文数据丢失 — diagnostician 在不完整数据上操作而不知情。
+
+**Root Cause**: `includes('token')` 匹配任何包含 "token" 的字符串。
+
+**Fix**: 改用分段精确匹配 (`keyLower === p || keyLower.endsWith('_' + p)`)。
+
+**Rule**: PII 净化器的 key 匹配必须精确匹配或分段匹配，禁止 `includes()` 子串匹配。每个规则必须有 negative test。
+
+**Tags**: `pii-sanitizer`, `false-positive`, `PRI-171`

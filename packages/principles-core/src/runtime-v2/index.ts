@@ -26,7 +26,7 @@ export { RuntimeKindSchema, RuntimeCapabilitiesSchema, RuntimeHealthSchema, RunH
 export { PDTaskStatusSchema, TaskRecordSchema, DiagnosticianTaskRecordSchema } from './task-status.js';
 export { RuntimeSelectionCriteriaSchema } from './runtime-selector.js';
 // Context payload schemas (Phase 2)
-export { HistoryQueryEntrySchema, TrajectoryLocateQuerySchema, TrajectoryCandidateSchema, TrajectoryLocateResultSchema, HistoryQueryResultSchema, DiagnosisTargetSchema, ContextPayloadSchema, DiagnosticianContextPayloadSchema } from './context-payload.js';
+export { HistoryQueryEntrySchema, TrajectoryLocateQuerySchema, TrajectoryCandidateSchema, TrajectoryLocateResultSchema, HistoryQueryResultSchema, DiagnosisTargetSchema, ContextPayloadSchema, DiagnosticianContextPayloadSchema, ToolCallEntrySchema, PainContextSchema, FullTracePayloadSchema } from './context-payload.js';
 // Diagnostician output schemas (Phase 2)
 export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, RecommendationKindSchema, DiagnosticianRecommendationSchema, DiagnosticianOutputV1Schema, DiagnosticianInvocationInputSchema } from './diagnostician-output.js';
 // Principle tree types schemas
@@ -102,6 +102,9 @@ export type {
   DiagnosisTarget,
   ContextPayload,
   DiagnosticianContextPayload,
+  ToolCallEntry,
+  PainContext,
+  FullTracePayload,
 } from './context-payload.js';
 
 // Diagnostician output
