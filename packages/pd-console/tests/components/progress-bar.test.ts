@@ -25,21 +25,21 @@ describe('ProgressBar Component', () => {
   });
 
   describe('adherence rate display', () => {
-    it('should convert decimal to percentage correctly', () => {
-      const adherenceRate = 0.85;
-      const percentage = adherenceRate * 100;
-      expect(percentage).toBe(85);
+    it('should pass through percentage value directly', () => {
+      const adherenceRate = 26.4;
+      const percentage = adherenceRate;
+      expect(percentage).toBe(26.4);
     });
 
-    it('should handle 100% adherence', () => {
-      const adherenceRate = 1.0;
-      const percentage = adherenceRate * 100;
-      expect(percentage).toBe(100);
+    it('should display percentage as-is when above 100%', () => {
+      const adherenceRate = 120;
+      const percentage = adherenceRate;
+      expect(percentage).toBe(120);
     });
 
     it('should handle 0% adherence', () => {
       const adherenceRate = 0;
-      const percentage = adherenceRate * 100;
+      const percentage = adherenceRate;
       expect(percentage).toBe(0);
     });
   });
