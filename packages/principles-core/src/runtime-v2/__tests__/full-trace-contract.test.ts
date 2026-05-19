@@ -40,6 +40,7 @@ function makeValidPayload(overrides?: Partial<FullTracePayloadV2>): FullTracePay
     sourceRefs: [
       { kind: 'task', id: 'task_src_001' },
       { kind: 'run', id: 'run_001' },
+      { kind: 'run', id: 'run_002' },
     ],
     timeline: [
       { at: '2026-05-19T00:00:00Z', kind: 'user_message', summary: 'User asked to fix bug' },
@@ -509,5 +510,160 @@ describe('backward compatibility', () => {
     for (const field of requiredFields) {
       expect(payload).toHaveProperty(field);
     }
+  });
+});
+
+// ── P2-1: Unrecognized JSON shape preserved in timeline ──
+
+describe('buildFullTraceTimeline: unrecognized JSON shape', () => {
+  it('structured JSON output without text/turns/toolCalls is preserved in timeline', () => {
+    const runs: RunRecordLike[] = [
+      {
+        runId: 'run_001',
+        inputPayload: JSON.stringify({ prompt: 'fix the bug' }),
+        outputPayload: JSON.stringify({ ok: false, error: 'tool failed', result: { details: 'stack trace here' } }),
+        startedAt: '2026-05-19T00:00:00Z',
+        endedAt: '2026-05-19T00:00:05Z',
+        executionStatus: 'failed',
+      },
+    ];
+
+    const timeline = buildFullTraceTimeline(runs);
+
+    expect(timeline.length).toBeGreaterThanOrEqual(2);
+    const inputEntry = timeline.find((e) => e.at === '2026-05-19T00:00:00Z' && e.kind === 'unknown');
+    expect(inputEntry).toBeDefined();
+    expect(inputEntry?.summary).toContain('prompt');
+    expect(inputEntry?.metadata?.parseStatus).toBe('unrecognized_json_shape');
+
+    const outputEntry = timeline.find((e) => e.at === '2026-05-19T00:00:05Z' && e.kind === 'unknown');
+    expect(outputEntry).toBeDefined();
+    expect(outputEntry?.summary).toContain('tool failed');
+    expect(outputEntry?.metadata?.parseStatus).toBe('unrecognized_json_shape');
+  });
+
+  it('JSON with only error field is preserved', () => {
+    const runs: RunRecordLike[] = [
+      {
+        runId: 'run_001',
+        outputPayload: JSON.stringify({ error: 'permission denied', code: 403 }),
+        startedAt: '2026-05-19T00:00:00Z',
+        executionStatus: 'failed',
+      },
+    ];
+
+    const timeline = buildFullTraceTimeline(runs);
+
+    expect(timeline.some((e) => e.kind === 'unknown' && e.summary.includes('permission denied'))).toBe(true);
+  });
+
+  it('mixed: recognized + unrecognized shapes both appear', () => {
+    const runs: RunRecordLike[] = [
+      {
+        runId: 'run_001',
+        inputPayload: JSON.stringify({ text: 'user message here' }),
+        outputPayload: JSON.stringify({ ok: true, metrics: { tokens: 42 } }),
+        startedAt: '2026-05-19T00:00:00Z',
+        executionStatus: 'succeeded',
+      },
+    ];
+
+    const timeline = buildFullTraceTimeline(runs);
+
+    expect(timeline.some((e) => e.kind === 'user_message')).toBe(true);
+    expect(timeline.some((e) => e.kind === 'unknown' && e.summary.includes('metrics'))).toBe(true);
+  });
+
+  it('unrecognized JSON entry is sanitized', () => {
+    const runs: RunRecordLike[] = [
+      {
+        runId: 'run_001',
+        outputPayload: JSON.stringify({ apiKey: 'sk-secret123', data: 'normal' }),
+        startedAt: '2026-05-19T00:00:00Z',
+        executionStatus: 'succeeded',
+      },
+    ];
+
+    const timeline = buildFullTraceTimeline(runs);
+    const { payload: sanitized } = sanitizeFullTracePayload(makeValidPayload({ timeline }));
+
+    const unknownEntry = sanitized.timeline.find((e) => e.kind === 'unknown');
+    expect(unknownEntry).toBeDefined();
+    const entryText = JSON.stringify(unknownEntry);
+    expect(entryText).not.toContain('sk-secret123');
+  });
+});
+
+// ── P2-2: sourceRefs contract enforcement ──
+
+describe('validateFullTracePayload: sourceRefs contract', () => {
+  it('empty sourceRefs fails validation', () => {
+    const payload = makeValidPayload({ sourceRefs: [] });
+    const result = validateFullTracePayload(payload);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('sourceRefs must not be empty'))).toBe(true);
+  });
+
+  it('sourceRefs without task ref fails validation', () => {
+    const payload = makeValidPayload({
+      sourceRefs: [{ kind: 'run', id: 'run_001' }, { kind: 'run', id: 'run_002' }],
+    });
+    const result = validateFullTracePayload(payload);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('kind: "task"'))).toBe(true);
+  });
+
+  it('sourceRefs task ref id mismatch with sourceTaskId fails validation', () => {
+    const payload = makeValidPayload({
+      sourceTaskId: 'task_A',
+      sourceRefs: [
+        { kind: 'task', id: 'task_B' },
+        { kind: 'run', id: 'run_001' },
+      ],
+    });
+    const result = validateFullTracePayload(payload);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('task ref id must match sourceTaskId'))).toBe(true);
+  });
+
+  it('sourceRefs missing run ref for sourceRunIds entry fails validation', () => {
+    const payload = makeValidPayload({
+      sourceRunIds: ['run_001', 'run_002'],
+      sourceRefs: [
+        { kind: 'task', id: 'task_src_001' },
+        { kind: 'run', id: 'run_001' },
+      ],
+    });
+    const result = validateFullTracePayload(payload);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('run_002'))).toBe(true);
+  });
+
+  it('valid sourceRefs with matching task and run refs passes validation', () => {
+    const payload = makeValidPayload({
+      sourceTaskId: 'task_src_001',
+      sourceRunIds: ['run_001', 'run_002'],
+      sourceRefs: [
+        { kind: 'task', id: 'task_src_001' },
+        { kind: 'run', id: 'run_001' },
+        { kind: 'run', id: 'run_002' },
+      ],
+    });
+    const result = validateFullTracePayload(payload);
+    expect(result.valid).toBe(true);
+  });
+
+  it('sourceRefs with artifact/event refs in addition to task/run is valid', () => {
+    const payload = makeValidPayload({
+      sourceRefs: [
+        { kind: 'task', id: 'task_src_001' },
+        { kind: 'run', id: 'run_001' },
+        { kind: 'run', id: 'run_002' },
+        { kind: 'artifact', id: 'artifact_log_001' },
+        { kind: 'event', id: 'event_001' },
+      ],
+    });
+    const result = validateFullTracePayload(payload);
+    expect(result.valid).toBe(true);
   });
 });

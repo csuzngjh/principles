@@ -181,10 +181,38 @@ export function validateFullTracePayload(input: unknown): FullTraceValidationRes
 
   if (!Array.isArray(p.sourceRefs)) {
     errors.push('sourceRefs must be an array');
+  } else if (p.sourceRefs.length === 0) {
+    errors.push('sourceRefs must not be empty — at least one task ref is required');
   } else {
     for (let i = 0; i < p.sourceRefs.length; i++) {
       if (!isValidSourceRef(p.sourceRefs[i])) {
         errors.push(`sourceRefs[${i}] is invalid: must have { kind: SourceRefKind, id: non-empty string }`);
+      }
+    }
+    const hasTaskRef = p.sourceRefs.some(
+      (ref) => typeof ref === 'object' && ref !== null && (ref as Record<string, unknown>).kind === 'task',
+    );
+    if (!hasTaskRef) {
+      errors.push('sourceRefs must contain at least one { kind: "task", id } entry');
+    }
+  }
+
+  if (typeof p.sourceTaskId === 'string' && p.sourceTaskId.length > 0 && Array.isArray(p.sourceRefs)) {
+    const taskRef = p.sourceRefs.find(
+      (ref) => typeof ref === 'object' && ref !== null && (ref as Record<string, unknown>).kind === 'task',
+    );
+    if (taskRef && typeof (taskRef as Record<string, unknown>).id === 'string' && (taskRef as Record<string, unknown>).id !== p.sourceTaskId) {
+      errors.push('sourceRefs task ref id must match sourceTaskId');
+    }
+  }
+
+  if (Array.isArray(p.sourceRunIds) && Array.isArray(p.sourceRefs)) {
+    const runRefIds = p.sourceRefs
+      .filter((ref) => typeof ref === 'object' && ref !== null && (ref as Record<string, unknown>).kind === 'run')
+      .map((ref) => (ref as Record<string, unknown>).id);
+    for (const runId of p.sourceRunIds) {
+      if (!runRefIds.includes(runId)) {
+        errors.push(`sourceRefs is missing { kind: "run", id: "${runId}" } for sourceRunIds entry`);
       }
     }
   }
@@ -384,6 +412,9 @@ export function buildFullTraceTimeline(runs: readonly RunRecordLike[]): TraceTim
     const inputParsed = tryParseJson(run.inputPayload);
     const outputParsed = tryParseJson(run.outputPayload);
 
+    let inputProducedEntry = false;
+    let outputProducedEntry = false;
+
     const userText = inputParsed
       ? extractStringField(inputParsed, 'text') ?? extractUserTurnText(inputParsed)
       : undefined;
@@ -395,6 +426,7 @@ export function buildFullTraceTimeline(runs: readonly RunRecordLike[]): TraceTim
         summary: userText.length > 200 ? userText.slice(0, 200) + '...[truncated]' : userText,
         rawPreview: userText.length > 500 ? userText.slice(0, 500) + '...[truncated]' : undefined,
       });
+      inputProducedEntry = true;
     }
 
     const toolCalls = inputParsed?.toolCalls ?? outputParsed?.toolCalls;
@@ -415,6 +447,7 @@ export function buildFullTraceTimeline(runs: readonly RunRecordLike[]): TraceTim
             ...(tcObj.error ? { error: typeof tcObj.error === 'string' ? tcObj.error : JSON.stringify(tcObj.error) } : {}),
           },
         });
+        inputProducedEntry = true;
 
         if (tcObj.result || tcObj.error) {
           timeline.push({
@@ -430,6 +463,7 @@ export function buildFullTraceTimeline(runs: readonly RunRecordLike[]): TraceTim
               ? { toolName, error: typeof tcObj.error === 'string' ? tcObj.error : JSON.stringify(tcObj.error) }
               : { toolName },
           });
+          outputProducedEntry = true;
         }
       }
     } else if (inputParsed) {
@@ -442,6 +476,7 @@ export function buildFullTraceTimeline(runs: readonly RunRecordLike[]): TraceTim
           rawPreview: inputParsed.params ? JSON.stringify(inputParsed.params).slice(0, 500) : undefined,
           metadata: { toolName, status: run.executionStatus },
         });
+        inputProducedEntry = true;
       }
     }
 
@@ -456,6 +491,7 @@ export function buildFullTraceTimeline(runs: readonly RunRecordLike[]): TraceTim
         summary: assistantText.length > 200 ? assistantText.slice(0, 200) + '...[truncated]' : assistantText,
         rawPreview: assistantText.length > 500 ? assistantText.slice(0, 500) + '...[truncated]' : undefined,
       });
+      outputProducedEntry = true;
     }
 
     if (run.inputPayload && !inputParsed && run.inputPayload.trim().length > 0) {
@@ -466,6 +502,7 @@ export function buildFullTraceTimeline(runs: readonly RunRecordLike[]): TraceTim
         summary: text.length > 200 ? text.slice(0, 200) + '...[truncated]' : text,
         rawPreview: text.length > 500 ? text.slice(0, 500) + '...[truncated]' : undefined,
       });
+      inputProducedEntry = true;
     }
 
     if (run.outputPayload && !outputParsed && run.outputPayload.trim().length > 0) {
@@ -475,6 +512,29 @@ export function buildFullTraceTimeline(runs: readonly RunRecordLike[]): TraceTim
         kind: 'unknown',
         summary: text.length > 200 ? text.slice(0, 200) + '...[truncated]' : text,
         rawPreview: text.length > 500 ? text.slice(0, 500) + '...[truncated]' : undefined,
+      });
+      outputProducedEntry = true;
+    }
+
+    if (inputParsed && !inputProducedEntry) {
+      const preview = JSON.stringify(inputParsed).slice(0, 500);
+      timeline.push({
+        at: run.startedAt ?? null,
+        kind: 'unknown',
+        summary: preview.length > 200 ? preview.slice(0, 200) + '...[truncated]' : preview,
+        rawPreview: preview,
+        metadata: { parseStatus: 'unrecognized_json_shape' },
+      });
+    }
+
+    if (outputParsed && !outputProducedEntry) {
+      const preview = JSON.stringify(outputParsed).slice(0, 500);
+      timeline.push({
+        at: run.endedAt ?? run.startedAt ?? null,
+        kind: 'unknown',
+        summary: preview.length > 200 ? preview.slice(0, 200) + '...[truncated]' : preview,
+        rawPreview: preview,
+        metadata: { parseStatus: 'unrecognized_json_shape' },
       });
     }
   }
