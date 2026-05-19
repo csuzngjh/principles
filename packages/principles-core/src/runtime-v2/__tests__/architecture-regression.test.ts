@@ -136,6 +136,8 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-189
   'store/trajectory/source-trace-locator.ts',
   'store/trajectory/sqlite-source-trace-locator.ts',
+  // PRI-190
+  'full-trace-contract.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -187,6 +189,8 @@ const REQUIRED_TEST_FILES = [
   // PRI-145
   '../activation/__tests__/approval-queue.test.ts',
   '../activation/__tests__/sqlite-approval-store.test.ts',
+  // PRI-190
+  'full-trace-contract.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -259,6 +263,12 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     'FullTracePayloadSchema',
     'ToolCallEntrySchema',
     'PainContextSchema',
+    // PRI-190
+    'FullTracePayloadV2Schema',
+    'TraceSourceRefSchema',
+    'TraceTimelineEntrySchema',
+    'TraceEventKindSchema',
+    'SourceRefKindSchema',
   ];
 
   for (const name of REQUIRED_SCHEMA_EXPORTS) {
@@ -2787,6 +2797,48 @@ describe('PRI-189 SourceTraceLocator contract boundary', () => {
     const src = readFileSync(indexPath, 'utf-8');
     expect(src).toContain('SourceTraceLocator');
     expect(src).toContain('SqliteSourceTraceLocator');
+  });
+});
+
+describe('PRI-190 FullTrace quality contract boundary', () => {
+  it('full-trace-contract.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'full-trace-contract.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('core barrel exports FullTracePayloadV2Schema and contract functions', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('FullTracePayloadV2Schema');
+    expect(src).toContain('TraceSourceRefSchema');
+    expect(src).toContain('TraceTimelineEntrySchema');
+    expect(src).toContain('validateFullTracePayload');
+    expect(src).toContain('sanitizeFullTracePayload');
+    expect(src).toContain('buildFullTraceTimeline');
+    expect(src).toContain('buildSourceRefs');
+  });
+
+  it('context-payload.ts re-exports full-trace-contract types', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'context-payload.ts'), 'utf-8');
+    expect(src).toContain('full-trace-contract');
+    expect(src).toContain('FullTracePayloadV2Schema');
+    expect(src).toContain('validateFullTracePayload');
+    expect(src).toContain('sanitizeFullTracePayload');
+  });
+
+  it('DiagnosticianContextPayloadSchema accepts FullTracePayloadV2', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'context-payload.ts'), 'utf-8');
+    expect(src).toContain('FullTracePayloadV2Schema');
   });
 });
 
