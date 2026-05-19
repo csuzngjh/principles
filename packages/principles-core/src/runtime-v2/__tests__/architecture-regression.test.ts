@@ -138,6 +138,8 @@ const REQUIRED_SOURCE_FILES = [
   'store/trajectory/sqlite-source-trace-locator.ts',
   // PRI-190
   'full-trace-contract.ts',
+  // PRI-191
+  'trace-refiner.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -191,6 +193,8 @@ const REQUIRED_TEST_FILES = [
   '../activation/__tests__/sqlite-approval-store.test.ts',
   // PRI-190
   'full-trace-contract.test.ts',
+  // PRI-191
+  'trace-refiner.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -2839,6 +2843,52 @@ describe('PRI-190 FullTrace quality contract boundary', () => {
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'context-payload.ts'), 'utf-8');
     expect(src).toContain('FullTracePayloadV2Schema');
+  });
+});
+
+describe('PRI-191 TraceRefiner read model boundary', () => {
+  it('trace-refiner.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('trace-refiner.ts has no LLM or network imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner.ts'), 'utf-8');
+    expect(src).not.toContain('node:http');
+    expect(src).not.toContain('node:https');
+    expect(src).not.toContain('node:net');
+    expect(src).not.toContain('fetch(');
+    expect(src).not.toContain('openai');
+    expect(src).not.toContain('anthropic');
+  });
+
+  it('core barrel exports refineFullTrace and RefinedTracePayload', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('refineFullTrace');
+    expect(src).toContain('RefinedTracePayload');
+    expect(src).toContain('RefinedTraceEvent');
+    expect(src).toContain('TraceRefinerOptions');
+    expect(src).toContain('REFINED_EVENT_KINDS');
+    expect(src).toContain('SEVERITY_LEVELS');
+  });
+
+  it('trace-refiner.ts imports only from full-trace-contract', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'trace-refiner.ts'), 'utf-8');
+    const importLines = src.split('\n').filter((line) => line.trim().startsWith('import'));
+    for (const line of importLines) {
+      expect(line).toContain('full-trace-contract');
+    }
   });
 });
 
