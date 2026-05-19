@@ -307,4 +307,30 @@ describe('SqliteSourceTraceLocator', () => {
       }
     } finally { cleanupFixture(f); }
   });
+
+  it('ignores non-string sourcePainId values in diagnosticJson', async () => {
+    const f = createFixture();
+    try {
+      const dj = { sessionIdHint: 'sess-nonstr', sourcePainId: 42 };
+      const existing = await f.taskStore.getTask('task_nonstr_painid');
+      if (!existing) {
+        await f.taskStore.createTask({
+          taskId: 'task_nonstr_painid',
+          taskKind: 'user_session',
+          status: 'succeeded',
+          attemptCount: 1,
+          maxAttempts: 1,
+          diagnosticJson: JSON.stringify(dj),
+        } satisfies Omit<TaskRecord, 'createdAt' | 'updatedAt'>);
+      }
+
+      const result = await f.sourceTraceLocator.locate(q({
+        sourcePainId: '42',
+        sessionIdHint: 'sess-nonstr',
+      }));
+
+      expect(result.decision).not.toBe('found');
+      expect(result.candidate).toBeNull();
+    } finally { cleanupFixture(f); }
+  });
 });

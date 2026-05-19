@@ -106,7 +106,8 @@ export class SqliteSourceTraceLocator implements SourceTraceLocator {
         continue;
       }
 
-      const taskPainId = (dj.sourcePainId ?? dj.painId) as string | undefined;
+      const rawPainId = dj.sourcePainId ?? dj.painId;
+      const taskPainId = typeof rawPainId === 'string' ? rawPainId : undefined;
 
       if (taskPainId === query.sourcePainId) {
         matched.push({
