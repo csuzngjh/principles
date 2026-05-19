@@ -69,6 +69,22 @@ gh pr checks --watch
 
 Wait for CI to pass. If CI fails: read logs, fix, push again.
 
+### Phase 6.5: Record Errors (MANDATORY)
+
+After CI passes and before the final report, you MUST check whether any real issues were found during this review (Phase 2 or Phase 3). If yes, invoke the `record-error` skill for EACH real issue.
+
+**This step is NOT optional.** Even if the fix was already applied, the error must be recorded to prevent recurrence.
+
+Steps:
+1. List all real issues found during Phase 2 (reviewer comments) and Phase 3 (deep diff review)
+2. For each real issue that represents an AI coding error (type safety bug, logic error, architecture violation, etc.):
+   - Invoke `record-error` skill immediately
+   - The skill handles: classify → number → Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR
+3. Do NOT skip this step even if you are tired, rushed, or think the error is "obvious"
+4. If no real issues were found, explicitly state "No real issues found — skipping record-error" in your report
+
+**Why this is mandatory:** Without recording, the same class of error will recur across sessions. The Error Experience Handbook is the project's institutional memory.
+
 ### Phase 7: Report
 
 Summarize:
@@ -83,8 +99,9 @@ Summarize:
 
 When Phase 2 or 3 identifies an AI coding error:
 1. Complete the fix cycle first (Phases 4-6)
-2. Then invoke `record-error` skill to capture the lesson
-3. This prevents the same AI mistake from recurring
+2. Then invoke `record-error` skill for EACH real issue found (Phase 6.5)
+3. This is MANDATORY — do not skip even if the fix was trivial
+4. This prevents the same AI mistake from recurring across sessions
 
 ## Checklist
 
@@ -94,5 +111,5 @@ When Phase 2 or 3 identifies an AI coding error:
 - [ ] Real issues fixed with regression tests
 - [ ] Build + lint + test pass locally
 - [ ] CI gate passes
+- [ ] Real issues recorded via `record-error` (Phase 6.5) — or explicitly noted "no real issues"
 - [ ] Report delivered
-- [ ] If AI error found → `record-error` invoked

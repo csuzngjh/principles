@@ -235,6 +235,7 @@ export {
   SqliteRunStore,
   SqliteConnection,
   SqliteTrajectoryLocator,
+  SqliteSourceTraceLocator,
   SqliteHistoryQuery,
   SqliteContextAssembler,
   ResilientContextAssembler,

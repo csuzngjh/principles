@@ -76,7 +76,9 @@ docs/                    # Architecture docs, design documents, maps
 
 **Before starting ANY coding task**, you MUST read `docs/ERROR_EXPERIENCE_HANDBOOK.md`. This file records real errors caught in code reviews. Reading it prevents you from repeating mistakes that other AI assistants made on this project.
 
-**After a code review catches your error**: Use the `record-error` skill to record it. The skill handles the full workflow: Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
+**After a code review catches your error**: You MUST invoke the `record-error` skill immediately. This is not optional — even if the fix was trivial. The skill handles the full workflow: classify → number → Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
+
+**Mandatory rule**: Any code review (pr-review skill, self-review, or ad-hoc review) that discovers a real issue (bug, type safety violation, architecture violation, logic error) MUST invoke `record-error` before closing. Do NOT skip this step with excuses like "the fix was trivial" or "I'll do it later". Without recording, the same class of error will recur across sessions.
 
 ## Critical Boundaries
 

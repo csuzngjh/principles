@@ -40,7 +40,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 
 | ID | Summary | Source |
 |----|---------|--------|
-| *(No entries yet)* | | |
+| ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
 
 ---
 
@@ -60,7 +60,8 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 
 | ID | Summary | Source |
 |----|---------|--------|
-| *(No entries yet)* | | |
+| ERR-001 | `as string` cast on untrusted JSON bypasses runtime validation | PRI-189 |
+| ERR-003 | PII sanitizer uses `includes()` substring matching causing false-positive over-sanitization | PRI-171 |
 
 ---
 
@@ -96,7 +97,39 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ## Detailed Entries
 
-*(Add detailed entries below this line as they are recorded.)*
+**[ERR-001]** | `as string | undefined` type cast on untrusted JSON bypasses runtime validation
+
+- **What happened**: In `SqliteSourceTraceLocator.locate()`, the code used `(dj.sourcePainId ?? dj.painId) as string | undefined` to extract the pain ID from a parsed JSON object (`Record<string, unknown>`). The `as` cast silently passes non-string values (e.g., `sourcePainId: 42`), causing `taskPainId === query.sourcePainId` to always fail for non-string types because strict equality between a number and a string is always `false`.
+- **Why it's wrong**: `as` is a compile-time assertion with zero runtime validation. When `diagnosticJson` contains `sourcePainId: 42` (a number), the cast silently tells TypeScript it's a string, but the actual runtime value is still `42` (number). The strict equality `42 === "42"` evaluates to `false`, producing a false `not_found` decision instead of a correct match or a type-mismatch diagnostic.
+- **Correct approach**: Use `typeof rawPainId === 'string' ? rawPainId : undefined` to validate the type at runtime before using it in comparisons.
+- **How to prevent**: Never use `as` type assertions on values from untrusted JSON sources (`Record<string, unknown>`). Always validate with `typeof` checks before using the value. When extracting fields from parsed JSON, treat every field as `unknown` and narrow with runtime type guards.
+- **Source**: PRI-189
+- **Date**: 2026-05-19
+- **Recurrence**: None
+
+---
+
+**[ERR-002]** | Catch-and-degrade pattern silently swallows failure reasons
+
+- **What happened**: `buildFullTraceSafe()` catch block caught all exceptions and returned `null` with no observability — no logging, no error propagation, no ambiguity notes.
+- **Why it's wrong**: Downstream diagnostician receives `fullTrace: null` and cannot distinguish between "no painId provided" and "trace construction crashed". Degradation is correct design, but degradation ≠ silence. Silent degradation hides bugs and makes debugging impossible.
+- **Correct approach**: Catch blocks in degrade patterns must propagate the failure reason through at least one channel: `ambiguityNotes`, telemetry, or logging.
+- **How to prevent**: Every catch-and-degrade pattern must expose the failure reason via `ambiguityNotes` / telemetry / logging. Review all catch blocks that return fallback values and verify they communicate why the fallback was triggered.
+- **Source**: PRI-171
+- **Date**: 2026-05-19
+- **Recurrence**: None
+
+---
+
+**[ERR-003]** | PII sanitizer uses `includes()` substring matching causing false-positive over-sanitization
+
+- **What happened**: `SECRET_KEY_NAMES.includes()` performed substring matching, causing keys like `tokenizer` and `tokenCount` to be incorrectly sanitized because they contain the substring `"token"`.
+- **Why it's wrong**: `includes('token')` matches any string containing "token" as a substring, not just the exact key "token". This causes false-positive over-sanitization, stripping diagnostic context data that the diagnostician needs to operate correctly.
+- **Correct approach**: Use segment-exact matching: `keyLower === p || keyLower.endsWith('_' + p)` to match only the full key name or the key as a segment after an underscore.
+- **How to prevent**: PII sanitizer key matching must use exact match or segment-boundary match. Never use `includes()` for key matching. Every sanitization rule must have a negative test case to verify it does not over-sanitize.
+- **Source**: PRI-171
+- **Date**: 2026-05-19
+- **Recurrence**: None
 
 ---
 
@@ -104,40 +137,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 0 |
-| Last updated | 2026-05-18 |
-| Top category | — |
+| Total lessons | 3 |
+| Last updated | 2026-05-19 |
+| Top category | Schema & Type |
 | Recurring errors | 0 |
-
-
----
-
-### [PRI-171] 静默降级必须暴露失败原因 (2026-05-19)
-
-**Context**: `buildFullTraceSafe()` catch 块捕获所有异常后返回 `null`，无任何可观测性。
-
-**Error**: 下游 diagnostician 收到 `fullTrace: null` 无法区分"无 painId"与"trace 构建崩溃"。
-
-**Root Cause**: 降级设计正确但缺少可观测性 — degradation ≠ silence。
-
-**Fix**: catch 块通过 `ambiguityNotes` 传播失败原因。
-
-**Rule**: 任何 catch-and-degrade 模式必须至少通过 ambiguityNotes / telemetry / logging 之一暴露失败原因。
-
-**Tags**: `catch-and-degrade`, `silent-failure`, `PRI-171`
-
----
-
-### [PRI-171] PII 净化器禁止子串匹配 (2026-05-19)
-
-**Context**: `SECRET_KEY_NAMES.includes()` 做子串匹配导致 `tokenizer`, `tokenCount` 被误脱敏。
-
-**Error**: 诊断上下文数据丢失 — diagnostician 在不完整数据上操作而不知情。
-
-**Root Cause**: `includes('token')` 匹配任何包含 "token" 的字符串。
-
-**Fix**: 改用分段精确匹配 (`keyLower === p || keyLower.endsWith('_' + p)`)。
-
-**Rule**: PII 净化器的 key 匹配必须精确匹配或分段匹配，禁止 `includes()` 子串匹配。每个规则必须有 negative test。
-
-**Tags**: `pii-sanitizer`, `false-positive`, `PRI-171`
