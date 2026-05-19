@@ -209,12 +209,8 @@ export function refineFullTrace(
       failureSummary: null,
       toolUseSummary: [],
       userIntentSummary: null,
-      ambiguityNotes: Array.isArray((fullTrace as Record<string, unknown>).ambiguityNotes)
-        ? ((fullTrace as Record<string, unknown>).ambiguityNotes as string[])
-        : [],
-      sanitizationNotes: Array.isArray((fullTrace as Record<string, unknown>).sanitizationNotes)
-        ? ((fullTrace as Record<string, unknown>).sanitizationNotes as string[])
-        : [],
+      ambiguityNotes: Array.isArray(p.ambiguityNotes) ? (p.ambiguityNotes as string[]) : [],
+      sanitizationNotes: Array.isArray(p.sanitizationNotes) ? (p.sanitizationNotes as string[]) : [],
       refinementNotes: [
         'invalid_full_trace_input',
         ...validation.errors.map((e) => `validation_error: ${e}`),
