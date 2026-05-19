@@ -14,20 +14,107 @@ import type { TaskStore } from '../task/task-store.js';
 import type { RunStore } from '../run/run-store.js';
 import type { HistoryQuery } from '../history/history-query.js';
 import type { ContextAssembler } from './context-assembler.js';
+import type { TrajectoryLocator } from '../trajectory/trajectory-locator.js';
 import {
   type DiagnosticianContextPayload,
   type DiagnosisTarget,
+  type FullTracePayload,
+  type ToolCallEntry,
+  type TrajectoryCandidate,
+  type PainContext,
   DiagnosticianContextPayloadSchema,
 } from '../../context-payload.js';
 import type { TaskRecord, DiagnosticianTaskRecord } from '../../task-status.js';
+import type { RunRecord } from '../../runtime-protocol.js';
 import { PDRuntimeError } from '../../error-categories.js';
 
+// ── PII Sanitizer (PRI-171) ──
+
+const SECRET_KEY_PATTERNS = ['apikey', 'api_key', 'api-key', 'token', 'authorization', 'password', 'secret', 'bearer', 'access_token', 'refresh_token', 'auth_token', 'secret_key'];
+
+function sanitizeString(input: string): string {
+  return input
+    .replace(/\bapi[_-]?key\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
+    .replace(/\bapi[_-]?key["']?\s*:\s*["'][^"']*["']/gi, (m) => {
+      const i = m.indexOf(':');
+      return m.slice(0, i + 1) + '"[REDACTED]"';
+    })
+    .replace(/\btoken\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
+    .replace(/\btoken["']?\s*:\s*["'][^"']*["']/gi, (m) => {
+      const i = m.indexOf(':');
+      return m.slice(0, i + 1) + '"[REDACTED]"';
+    })
+    .replace(/\bbearer\s+\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
+    .replace(/\bauthorization\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
+    .replace(/\bauthorization["']?\s*:\s*["'][^"']*["']/gi, (m) => {
+      const i = m.indexOf(':');
+      return m.slice(0, i + 1) + '"[REDACTED]"';
+    })
+    .replace(/\bpassword\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
+    .replace(/\bpassword["']?\s*:\s*["'][^"']*["']/gi, (m) => {
+      const i = m.indexOf(':');
+      return m.slice(0, i + 1) + '"[REDACTED]"';
+    })
+    .replace(/\bsecret\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
+    .replace(/\bsecret["']?\s*:\s*["'][^"']*["']/gi, (m) => {
+      const i = m.indexOf(':');
+      return m.slice(0, i + 1) + '"[REDACTED]"';
+    });
+}
+
+function sanitizeObject(obj: unknown): unknown {
+  if (typeof obj === 'string') return sanitizeString(obj);
+  if (Array.isArray(obj)) return obj.map(sanitizeObject);
+  if (typeof obj === 'object' && obj !== null) {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const keyLower = key.toLowerCase();
+      if (SECRET_KEY_PATTERNS.some(p => keyLower === p || keyLower.endsWith('_' + p) || keyLower.startsWith(p + '_') || keyLower.endsWith('-' + p) || keyLower.startsWith(p + '-'))) {
+        result[key] = '[REDACTED]';
+      } else {
+        result[key] = sanitizeObject(value);
+      }
+    }
+    return result;
+  }
+  return obj;
+}
+
+function sanitizePii(input: string): string {
+  return sanitizeString(input);
+}
+
+function sanitizeJsonOrString(value: unknown): string {
+  if (typeof value === 'string') return sanitizePii(value);
+  return JSON.stringify(sanitizeObject(value));
+}
+
+function tryParseJson(input: string | undefined): Record<string, unknown> | null {
+  if (!input) return null;
+  const trimmed = input.trim();
+  if (!trimmed.startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── SqliteContextAssembler ──
+
 export class SqliteContextAssembler implements ContextAssembler {
+  // eslint-disable-next-line @typescript-eslint/max-params
   constructor(
     private readonly taskStore: TaskStore,
     private readonly historyQuery: HistoryQuery,
     private readonly runStore: RunStore,
-  ) {}
+    options?: { trajectoryLocator?: TrajectoryLocator },
+  ) {
+    this.trajectoryLocator = options?.trajectoryLocator;
+  }
+
+  private readonly trajectoryLocator?: TrajectoryLocator;
 
   async assemble(taskId: string): Promise<DiagnosticianContextPayload> {
     const task = await this.taskStore.getTask(taskId);
@@ -72,11 +159,18 @@ export class SqliteContextAssembler implements ContextAssembler {
       sessionIdHint: dt.sessionIdHint || undefined,
     };
 
-    const ambiguityNotes = SqliteContextAssembler.buildAmbiguityNotes(
+    const ambiguityNotes: string[] = SqliteContextAssembler.buildAmbiguityNotes(
       taskId,
       historyResult.entries,
       historyResult.truncated,
-    );
+    ) ?? [];
+
+    // Build fullTrace from source pain trajectory (PRI-171).
+    // Source trace comes from the original execution that caused the pain signal,
+    // NOT from the diagnostician task's own runs.
+    const fullTrace: FullTracePayload | null = dt.sourcePainId
+      ? await this.buildFullTraceFromSource(dt, ambiguityNotes)
+      : null;
 
     const payload: DiagnosticianContextPayload = {
       contextId,
@@ -86,7 +180,8 @@ export class SqliteContextAssembler implements ContextAssembler {
       sourceRefs: [taskId, ...runIds],
       diagnosisTarget,
       conversationWindow: historyResult.entries,
-      ambiguityNotes,
+      ambiguityNotes: ambiguityNotes.length > 0 ? ambiguityNotes : undefined,
+      fullTrace,
     };
 
     if (!Value.Check(DiagnosticianContextPayloadSchema, payload)) {
@@ -97,6 +192,249 @@ export class SqliteContextAssembler implements ContextAssembler {
     }
 
     return payload;
+  }
+
+
+  private async buildFullTraceFromSource(
+    dt: DiagnosticianTaskRecord,
+    ambiguityNotes: string[],
+  ): Promise<FullTracePayload | null> {
+    const sourceRuns = await this.locateSourceRuns(dt, ambiguityNotes);
+    if (sourceRuns === null) return null;
+    return SqliteContextAssembler.buildFullTraceSafe(dt, sourceRuns, ambiguityNotes);
+  }
+
+  private async locateSourceRuns(
+    dt: DiagnosticianTaskRecord,
+    ambiguityNotes: string[],
+  ): Promise<readonly RunRecord[] | null> {
+    if (!this.trajectoryLocator) {
+      ambiguityNotes.push(
+        'TrajectoryLocator not available; cannot resolve source trace for sourcePainId=' + (dt.sourcePainId ?? 'unknown'),
+      );
+      return null;
+    }
+
+    if (!dt.sessionIdHint) {
+      ambiguityNotes.push(
+        'No sessionIdHint; cannot locate source trace for sourcePainId=' + (dt.sourcePainId ?? 'unknown'),
+      );
+      return null;
+    }
+
+    if (!dt.sourcePainId) {
+      ambiguityNotes.push(
+        'No sourcePainId; cannot locate source trace for sessionId=' + dt.sessionIdHint,
+      );
+      return null;
+    }
+
+    const result = await this.trajectoryLocator.locate({
+      sessionId: dt.sessionIdHint,
+      workspace: dt.workspaceDir,
+    });
+
+    const candidates = result.candidates.filter(
+      (c) => c.trajectoryRef !== dt.taskId,
+    );
+
+    if (candidates.length === 0) {
+      ambiguityNotes.push(
+        'Source trace not found for sourcePainId=' + (dt.sourcePainId ?? 'unknown') +
+        ': no source task located via sessionId=' + dt.sessionIdHint,
+      );
+      return null;
+    }
+
+    const matched = await this.findPainIdMatchedCandidate(
+      dt.sourcePainId,
+      candidates,
+      ambiguityNotes,
+    );
+
+    if (!matched) return null;
+    return this.runStore.listRunsByTask(matched.trajectoryRef);
+  }
+
+  private async findPainIdMatchedCandidate(
+    sourcePainId: string,
+    candidates: readonly TrajectoryCandidate[],
+    ambiguityNotes: string[],
+  ): Promise<TrajectoryCandidate | null> {
+    const matched: TrajectoryCandidate[] = [];
+
+    for (const candidate of candidates) {
+      const task = await this.taskStore.getTask(candidate.trajectoryRef);
+      if (!task) continue;
+
+      const dj = tryParseJson(task.diagnosticJson);
+      const taskPainId = (dj?.sourcePainId ?? dj?.painId) as string | undefined;
+
+      if (taskPainId === sourcePainId) {
+        matched.push(candidate);
+      }
+    }
+
+    if (matched.length === 0) {
+      ambiguityNotes.push(
+        'sourcePainId mismatch: no candidate task has painId=' + sourcePainId +
+        '. Candidates checked: ' + candidates.map((c) => c.trajectoryRef).join(', '),
+      );
+      return null;
+    }
+
+    if (matched.length > 1) {
+      ambiguityNotes.push(
+        'Ambiguous source trace for sourcePainId=' + sourcePainId +
+        ': ' + matched.length + ' matched candidates. TaskIds: ' +
+        matched.map((c) => c.trajectoryRef).join(', '),
+      );
+      return null;
+    }
+
+    return matched[0] ?? null;
+  }
+
+  private static buildFullTraceSafe(
+    dt: DiagnosticianTaskRecord,
+    runs: readonly RunRecord[],
+    ambiguityNotes: string[] | undefined,
+  ): FullTracePayload | null {
+    try {
+      return SqliteContextAssembler.buildFullTrace(dt, runs);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (ambiguityNotes) {
+        ambiguityNotes.push(
+          'fullTrace construction failed for painId=' + (dt.sourcePainId ?? 'unknown') + ': ' + reason,
+        );
+      }
+      return null;
+    }
+  }
+
+  private static buildFullTrace(
+    dt: DiagnosticianTaskRecord,
+    runs: readonly RunRecord[],
+  ): FullTracePayload {
+    const painContext: PainContext = {
+      painId: dt.sourcePainId || undefined,
+      severity: dt.severity || undefined,
+      source: dt.source || undefined,
+      reasonSummary: dt.reasonSummary || undefined,
+      sessionIdHint: dt.sessionIdHint || undefined,
+    };
+
+    const scratchpad: string[] = [];
+    const toolCallHistory: ToolCallEntry[] = [];
+
+    for (const run of runs) {
+      SqliteContextAssembler.extractScratchpadLines(run.inputPayload, scratchpad);
+      SqliteContextAssembler.extractScratchpadLines(run.outputPayload, scratchpad);
+      SqliteContextAssembler.extractToolCalls({
+        inputPayload: run.inputPayload,
+        outputPayload: run.outputPayload,
+        startedAt: run.startedAt,
+        endedAt: run.endedAt,
+        executionStatus: run.executionStatus,
+        accumulator: toolCallHistory,
+      });
+    }
+
+    return {
+      painContext,
+      scratchpad,
+      toolCallHistory,
+    };
+  }
+
+  private static extractScratchpadLines(
+    payload: string | undefined,
+    accumulator: string[],
+  ): void {
+    if (!payload) return;
+
+    const trimmed = payload.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (typeof parsed === 'object' && parsed !== null) {
+          // Extract thinking/scratchpad/reasoning fields
+          const thinking = parsed.thinking ?? parsed.scratchpad ?? parsed.reasoning;
+          if (typeof thinking === 'string' && thinking.length > 0) {
+            accumulator.push(sanitizePii(thinking));
+          } else if (Array.isArray(thinking)) {
+            for (const item of thinking) {
+              if (typeof item === 'string') accumulator.push(sanitizePii(item));
+            }
+          }
+          // Extract user turn text
+          if (Array.isArray(parsed.userTurns)) {
+            for (const turn of parsed.userTurns) {
+              if (turn && typeof turn === 'object' && typeof turn.text === 'string') {
+                accumulator.push(sanitizePii(turn.text));
+              }
+            }
+          }
+          // Extract assistant turn text
+          if (Array.isArray(parsed.turns)) {
+            for (const turn of parsed.turns) {
+              if (turn && typeof turn === 'object' && typeof turn.text === 'string') {
+                accumulator.push(sanitizePii(turn.text));
+              }
+            }
+          }
+        }
+      } catch {
+        // Not valid JSON -- add as plain text
+        if (trimmed.length > 0) accumulator.push(sanitizePii(trimmed));
+      }
+    } else if (trimmed.length > 0) {
+      accumulator.push(sanitizePii(trimmed));
+    }
+  }
+
+  private static extractToolCalls(opts: {
+    inputPayload: string | undefined;
+    outputPayload: string | undefined;
+    startedAt: string;
+    endedAt: string | undefined;
+    executionStatus: string;
+    accumulator: ToolCallEntry[];
+  }): void {
+    const inputParsed = tryParseJson(opts.inputPayload);
+    const outputParsed = tryParseJson(opts.outputPayload);
+
+    // Extract from toolCalls array if present
+    const toolCalls = inputParsed?.toolCalls ?? outputParsed?.toolCalls;
+    if (Array.isArray(toolCalls)) {
+      for (const tc of toolCalls) {
+        if (typeof tc !== 'object' || tc === null) continue;
+        opts.accumulator.push({
+          toolName: typeof tc.toolName === 'string' ? tc.toolName : typeof tc.name === 'string' ? tc.name : undefined,
+          status: typeof tc.status === 'string' ? tc.status : undefined,
+          params: tc.params ? sanitizeJsonOrString(tc.params) : undefined,
+          resultSummary: tc.result ? sanitizeJsonOrString(tc.result) : undefined,
+          errorSummary: tc.error ? sanitizeJsonOrString(tc.error) : undefined,
+          startedAt: opts.startedAt,
+          completedAt: opts.endedAt ?? opts.startedAt,
+        });
+      }
+    } else if (inputParsed) {
+      // No explicit toolCalls array -- synthesize from single toolName if present
+      const toolName = inputParsed.toolName ?? inputParsed.name;
+      if (typeof toolName === 'string') {
+        opts.accumulator.push({
+          toolName,
+          status: opts.executionStatus === 'succeeded' ? 'succeeded' : opts.executionStatus === 'failed' ? 'failed' : undefined,
+          params: inputParsed.params ? sanitizeJsonOrString(inputParsed.params) : undefined,
+          resultSummary: opts.outputPayload ? sanitizePii(opts.outputPayload.length > 500 ? opts.outputPayload.slice(0, 500) + '...[truncated]' : opts.outputPayload) : undefined,
+          errorSummary: opts.executionStatus === 'failed' && outputParsed?.error ? sanitizePii(String(outputParsed.error)) : undefined,
+          startedAt: opts.startedAt,
+          completedAt: opts.endedAt ?? opts.startedAt,
+        });
+      }
+    }
   }
 
   private static buildAmbiguityNotes(
@@ -125,10 +463,6 @@ export class SqliteContextAssembler implements ContextAssembler {
   /**
    * Reconstruct a DiagnosticianTaskRecord from a base TaskRecord by decoding
    * the diagnostic_json column (if present).
-   *
-   * The base TaskRecord from SqliteTaskStore carries diagnostic_json as an
-   * untyped string column. This method decodes it and overlays the fields
-   * onto the base record to produce a full DiagnosticianTaskRecord.
    */
   private static reconstructDiagnosticianRecord(task: TaskRecord): DiagnosticianTaskRecord {
     const base = task as TaskRecord & { workspaceDir?: string };
@@ -145,8 +479,6 @@ export class SqliteContextAssembler implements ContextAssembler {
     return {
       ...base,
       taskKind: 'diagnostician',
-      // Prefer base task's own workspaceDir (e.g. from mock or fully-hydrated record),
-      // then diagnosticJson overlay, then fallback.
       workspaceDir: base.workspaceDir ?? (extra).workspaceDir ?? '<unknown>',
       reasonSummary: extra.reasonSummary ?? (base as DiagnosticianTaskRecord).reasonSummary ?? '',
       source: extra.source ?? (base as DiagnosticianTaskRecord).source,
