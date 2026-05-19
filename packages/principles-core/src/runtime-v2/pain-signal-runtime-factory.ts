@@ -19,6 +19,8 @@ import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-commi
 import { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
 import { SqliteHistoryQuery } from './store/history/sqlite-history-query.js';
 import { SqliteConnection } from './store/sqlite-connection.js';
+import { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-locator.js';
+import { SqliteSourceTraceLocator } from './store/trajectory/sqlite-source-trace-locator.js';
 import { OpenClawCliRuntimeAdapter } from './adapter/openclaw-cli-runtime-adapter.js';
 import { PiAiRuntimeAdapter } from './adapter/pi-ai-runtime-adapter.js';
 import { getProviders } from '@mariozechner/pi-ai';
@@ -159,11 +161,14 @@ export async function createPainSignalBridge(
   const historyQuery = new SqliteHistoryQuery(connection);
   const committer = new SqliteDiagnosticianCommitter(connection);
   const validator = new DefaultDiagnosticianValidator();
+  const trajectoryLocator = new SqliteTrajectoryLocator(connection);
+  const sourceTraceLocator = new SqliteSourceTraceLocator(stateManager.taskStore, trajectoryLocator);
 
   const contextAssembler = new SqliteContextAssembler(
     stateManager.taskStore,
     historyQuery,
     stateManager.runStore,
+    { sourceTraceLocator },
   );
 
   const runtimeAdapter: PDRuntimeAdapter = runtimeConfig.runtimeKind === 'pi-ai'
