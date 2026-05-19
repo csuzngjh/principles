@@ -137,6 +137,8 @@ export { MemoryArtifactStore } from './store/artifact/memory-artifact-store.js';
 export { SqliteConnection } from './store/sqlite-connection.js';
 export type { SqlitePragmaReport } from './store/sqlite-connection.js';
 export { SqliteTrajectoryLocator } from './store/trajectory/sqlite-trajectory-locator.js';
+export { SqliteSourceTraceLocator } from './store/trajectory/sqlite-source-trace-locator.js';
+export type { SourceTraceLocator, SourceTraceLocateDecision, SourceTraceLocateQuery, SourceTraceLocateResult, SourceTraceCandidate } from './store/trajectory/source-trace-locator.js';
 export { SqliteHistoryQuery } from './store/history/sqlite-history-query.js';
 export { SqliteContextAssembler } from './store/context/sqlite-context-assembler.js';
 export { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
