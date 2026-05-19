@@ -62,6 +62,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 |----|---------|--------|
 | ERR-001 | `as string` cast on untrusted JSON bypasses runtime validation | PRI-189 |
 | ERR-003 | PII sanitizer uses `includes()` substring matching causing false-positive over-sanitization | PRI-171 |
+| ERR-004 | `sourceTaskId` set to diagnostician task ID instead of located source task ID | PRI-190 |
 
 ---
 
@@ -133,11 +134,23 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-004]** | `sourceTaskId` set to diagnostician task ID instead of located source task ID
+
+- **What happened**: In `buildFullTraceV2()`, `sourceTaskId` was destructured as `{ taskId: sourceTaskId }` from `dt` (the DiagnosticianTaskRecord), which gives the *diagnostician* task's ID. But `sourceRunIds` and `timeline` come from runs fetched for the *source* candidate task (`result.candidate.taskId`). This mismatch means `sourceRefs[0]` points to the wrong task.
+- **Why it's wrong**: The FullTrace V2 contract requires `sourceTaskId/sourceRunIds/timeline` to be internally consistent — all pointing to the same source execution. Using `dt.taskId` breaks this invariant and would cause downstream TraceRefiner to attach evidence to the diagnostician task instead of the actual source task.
+- **Correct approach**: `locateSourceRuns()` should return `{ sourceTaskId, runs }` preserving the candidate's `taskId`, and `buildFullTraceV2()` should accept that `sourceTaskId` explicitly rather than deriving it from `dt`.
+- **How to prevent**: When building a payload where field X must match data from source Y, always pass both together or derive X from Y — never mix sources. Trace the data lineage: if `sourceRunIds` come from `result.candidate.taskId`, then `sourceTaskId` must also come from `result.candidate.taskId`.
+- **Source**: PRI-190
+- **Date**: 2026-05-19
+- **Recurrence**: None
+
+---
+
 ## Statistics
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 3 |
+| Total lessons | 4 |
 | Last updated | 2026-05-19 |
 | Top category | Schema & Type |
 | Recurring errors | 0 |
