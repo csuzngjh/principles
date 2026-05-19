@@ -64,6 +64,8 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-003 | PII sanitizer uses `includes()` substring matching causing false-positive over-sanitization | PRI-171 |
 | ERR-004 | `sourceTaskId` set to diagnostician task ID instead of located source task ID | PRI-190 |
 | ERR-005 | Invalid salvaged arrays bypass type contract in validate failure path | PRI-191 |
+| ERR-007 | Non-string evidenceRefs silently skipped instead of rejected in validator | PRI-192 |
+| ERR-008 | Missing lineage field validation allows agent to return trace with wrong attribution | PRI-192 |
 
 ---
 
@@ -171,11 +173,31 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-## Statistics
+**[ERR-007]** | Non-string evidenceRefs silently skipped instead of rejected in validator
+
+- **What happened**: In `validateTraceRefinerAgentOutput()`, the `refinedTrace.evidenceRefs` and `refinedTrace.keyEvents[].evidenceRefs` validation used `if (typeof ref === 'string' && !allowedSourceRefs.has(ref))` — when `ref` was not a string, it was silently skipped instead of being rejected as invalid.
+- **Why it's wrong**: This allows structurally invalid output (e.g., `evidenceRefs: [42, null, {}]`) to pass validation and be cast as `RefinedTracePayload` via `as`. This is the same class of error as ERR-001/ERR-005 where `as` casts on untrusted data bypass runtime validation.
+- **Correct approach**: When validating untrusted data, every element must be either validated or rejected. Use `if (typeof ref !== 'string') { error } else if (!allowedSourceRefs.has(ref)) { error }` pattern.
+- **How to prevent**: In any validator that iterates over `unknown[]` arrays, never use `typeof x === 'string' && condition` — this silently skips non-string elements. Always handle the non-string case explicitly as an error.
+- **Source**: PRI-192 / PR #638 (CodeRabbit review)
+- **Date**: 2026-05-19
+- **Recurrence**: Yes - same pattern as ERR-001 and ERR-005
+
+---
+
+**[ERR-008]** | Missing lineage field validation allows agent to return trace with wrong attribution
+
+- **What happened**: `validateTraceRefinerAgentOutput()` validated evidenceRefs and sourceRefs anti-forgery, but did not validate that `refinedTrace.sourceTaskId`, `sourcePainId`, and `sourceRunIds` match the deterministic refined trace. An agent could return a refined trace with completely different lineage fields and the validator would accept it.
+- **Why it's wrong**: The agent contract promises `preserveSourceRefs: true`, but the validator didn't enforce that the refined trace's lineage fields match the deterministic trace. This could lead to attribution errors where a refined trace is associated with the wrong task/pain.
+- **Correct approach**: When validating agent output, always check that identity/lineage fields match the input. The agent can refine the content but must not change the attribution.
+- **How to prevent**: For any agent contract that processes trace data, add explicit lineage field validation: `sourceTaskId`, `sourcePainId`, `sourceRunIds` must match the deterministic trace.
+- **Source**: PRI-192 / PR #638 (Codex review)
+- **Date**: 2026-05-19
+- **Recurrence**: No
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 6 |
+| Total lessons | 8 |
 | Last updated | 2026-05-19 |
 | Top category | Schema & Type |
-| Recurring errors | 1 |
+| Recurring errors | 2 |
