@@ -14,6 +14,7 @@ import type { TaskStore } from '../task/task-store.js';
 import type { RunStore } from '../run/run-store.js';
 import type { HistoryQuery } from '../history/history-query.js';
 import type { ContextAssembler } from './context-assembler.js';
+import type { TrajectoryLocator } from '../trajectory/trajectory-locator.js';
 import {
   type DiagnosticianContextPayload,
   type DiagnosisTarget,
@@ -102,11 +103,17 @@ function tryParseJson(input: string | undefined): Record<string, unknown> | null
 // ── SqliteContextAssembler ──
 
 export class SqliteContextAssembler implements ContextAssembler {
+  // eslint-disable-next-line @typescript-eslint/max-params
   constructor(
     private readonly taskStore: TaskStore,
     private readonly historyQuery: HistoryQuery,
     private readonly runStore: RunStore,
-  ) {}
+    options?: { trajectoryLocator?: TrajectoryLocator },
+  ) {
+    this.trajectoryLocator = options?.trajectoryLocator;
+  }
+
+  private readonly trajectoryLocator?: TrajectoryLocator;
 
   async assemble(taskId: string): Promise<DiagnosticianContextPayload> {
     const task = await this.taskStore.getTask(taskId);
@@ -151,15 +158,17 @@ export class SqliteContextAssembler implements ContextAssembler {
       sessionIdHint: dt.sessionIdHint || undefined,
     };
 
-    const ambiguityNotes = SqliteContextAssembler.buildAmbiguityNotes(
+    const ambiguityNotes: string[] = SqliteContextAssembler.buildAmbiguityNotes(
       taskId,
       historyResult.entries,
       historyResult.truncated,
-    );
+    ) ?? [];
 
-    // Build fullTrace when painId (sourcePainId) is available (PRI-171)
+    // Build fullTrace from source pain trajectory (PRI-171).
+    // Source trace comes from the original execution that caused the pain signal,
+    // NOT from the diagnostician task's own runs.
     const fullTrace: FullTracePayload | null = dt.sourcePainId
-      ? SqliteContextAssembler.buildFullTraceSafe(dt, runs, ambiguityNotes)
+      ? await this.buildFullTraceFromSource(dt, ambiguityNotes)
       : null;
 
     const payload: DiagnosticianContextPayload = {
@@ -170,7 +179,7 @@ export class SqliteContextAssembler implements ContextAssembler {
       sourceRefs: [taskId, ...runIds],
       diagnosisTarget,
       conversationWindow: historyResult.entries,
-      ambiguityNotes,
+      ambiguityNotes: ambiguityNotes.length > 0 ? ambiguityNotes : undefined,
       fullTrace,
     };
 
@@ -182,6 +191,65 @@ export class SqliteContextAssembler implements ContextAssembler {
     }
 
     return payload;
+  }
+
+
+  private async buildFullTraceFromSource(
+    dt: DiagnosticianTaskRecord,
+    ambiguityNotes: string[],
+  ): Promise<FullTracePayload | null> {
+    const sourceRuns = await this.locateSourceRuns(dt, ambiguityNotes);
+    if (sourceRuns === null) return null;
+    return SqliteContextAssembler.buildFullTraceSafe(dt, sourceRuns, ambiguityNotes);
+  }
+
+  private async locateSourceRuns(
+    dt: DiagnosticianTaskRecord,
+    ambiguityNotes: string[],
+  ): Promise<readonly RunRecord[] | null> {
+    if (!this.trajectoryLocator) {
+      ambiguityNotes.push(
+        'TrajectoryLocator not available; cannot resolve source trace for sourcePainId=' + (dt.sourcePainId ?? 'unknown'),
+      );
+      return null;
+    }
+
+    if (!dt.sessionIdHint) {
+      ambiguityNotes.push(
+        'No sessionIdHint; cannot locate source trace for sourcePainId=' + (dt.sourcePainId ?? 'unknown'),
+      );
+      return null;
+    }
+
+    const result = await this.trajectoryLocator.locate({
+      sessionId: dt.sessionIdHint,
+      workspace: dt.workspaceDir,
+    });
+
+    const candidates = result.candidates.filter(
+      (c) => c.trajectoryRef !== dt.taskId,
+    );
+
+    if (candidates.length === 0) {
+      ambiguityNotes.push(
+        'Source trace not found for sourcePainId=' + (dt.sourcePainId ?? 'unknown') +
+        ': no source task located via sessionId=' + dt.sessionIdHint,
+      );
+      return null;
+    }
+
+    if (candidates.length > 1) {
+      ambiguityNotes.push(
+        'Ambiguous source trace for sourcePainId=' + (dt.sourcePainId ?? 'unknown') +
+        ': ' + candidates.length + ' candidates. TaskIds: ' +
+        candidates.map((c) => c.trajectoryRef).join(', '),
+      );
+      return null;
+    }
+
+    const sourceRef = candidates[0]?.trajectoryRef;
+    if (!sourceRef) return null;
+    return this.runStore.listRunsByTask(sourceRef);
   }
 
   private static buildFullTraceSafe(

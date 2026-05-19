@@ -18,6 +18,7 @@ import { SqliteConnection } from '../sqlite-connection.js';
 import { SqliteTaskStore } from '../task/sqlite-task-store.js';
 import { SqliteRunStore } from '../run/sqlite-run-store.js';
 import { SqliteHistoryQuery } from '../history/sqlite-history-query.js';
+import { SqliteTrajectoryLocator } from '../trajectory/sqlite-trajectory-locator.js';
 import { SqliteContextAssembler } from './sqlite-context-assembler.js';
 import { DiagnosticianContextPayloadSchema } from '../../context-payload.js';
 import type { DiagnosticianTaskRecord } from '../../task-status.js';
@@ -65,11 +66,12 @@ interface TestFixture {
   sqliteTaskStore: SqliteTaskStore;
   runStore: SqliteRunStore;
   historyQuery: SqliteHistoryQuery;
+  trajectoryLocator: SqliteTrajectoryLocator | undefined;
   taskStore: TaskStore;
   assembler: SqliteContextAssembler;
 }
 
-function createFixture(tasks?: Map<string, DiagnosticianTaskRecord>): TestFixture {
+function createFixture(tasks?: Map<string, DiagnosticianTaskRecord>, options?: { withLocator?: boolean }): TestFixture {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-context-assembler-test-'));
   const connection = new SqliteConnection(tmpDir);
   const sqliteTaskStore = new SqliteTaskStore(connection);
@@ -77,8 +79,9 @@ function createFixture(tasks?: Map<string, DiagnosticianTaskRecord>): TestFixtur
   const historyQuery = new SqliteHistoryQuery(connection);
   const taskMap = tasks ?? new Map();
   const taskStore = createMockTaskStore(taskMap);
-  const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
-  return { tmpDir, connection, sqliteTaskStore, runStore, historyQuery, taskStore, assembler };
+  const trajectoryLocator = options?.withLocator ? new SqliteTrajectoryLocator(connection) : undefined;
+  const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { trajectoryLocator });
+  return { tmpDir, connection, sqliteTaskStore, runStore, historyQuery, trajectoryLocator, taskStore, assembler };
 }
 
 function cleanupFixture(fixture: TestFixture): void {
@@ -121,6 +124,26 @@ async function createRunWithPayloads(
     inputPayload: options?.inputPayload,
     outputPayload: options?.outputPayload,
   } satisfies Omit<RunRecord, 'createdAt' | 'updatedAt'>);
+}
+
+
+/** Create a source task in SQLite with sessionIdHint in diagnosticJson for TrajectoryLocator. */
+async function ensureSourceTask(
+  fixture: TestFixture,
+  sourceTaskId: string,
+  sessionId: string,
+): Promise<void> {
+  const existing = await fixture.sqliteTaskStore.getTask(sourceTaskId);
+  if (!existing) {
+    await fixture.sqliteTaskStore.createTask({
+      taskId: sourceTaskId,
+      taskKind: 'user_session',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 1,
+      diagnosticJson: JSON.stringify({ sessionIdHint: sessionId }),
+    } satisfies Omit<TaskRecord, 'createdAt' | 'updatedAt'>);
+  }
 }
 
 /** Helper: check that ambiguityNotes includes a substring (safely). */
@@ -386,40 +409,44 @@ describe('SqliteContextAssembler', () => {
   });
 
 
+
   // ── Full Trace Tests (PRI-171) ──
 
-  it('builds fullTrace with scratchpad and toolCallHistory when sourcePainId is provided', async () => {
-    const task = makeDiagnosticianTask({
-      taskId: 'task_fulltrace_1',
-      sourcePainId: 'pain-ft-001',
+  it('builds fullTrace from source pain trajectory, not diagnostician task runs', async () => {
+    const sessionId = 'sess-src-happy';
+    const sourceTaskId = 'task_source_happy';
+    const diagTask = makeDiagnosticianTask({
+      taskId: 'task_diag_happy',
+      sourcePainId: 'pain-src-happy',
+      sessionIdHint: sessionId,
       severity: 'high',
       source: 'test',
-      reasonSummary: 'Full trace test',
-      sessionIdHint: 'sess-ft',
+      reasonSummary: 'Source trace test',
     });
-    const tasks = new Map([[task.taskId, task]]);
-    const f = createFixture(tasks);
+    const tasks = new Map([[diagTask.taskId, diagTask]]);
+    const f = createFixture(tasks, { withLocator: true });
     try {
-      await createRunWithPayloads(f, task.taskId, {
+      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await createRunWithPayloads(f, sourceTaskId, {
         inputPayload: JSON.stringify({
           type: 'session_history',
-          sessionId: 'sess-ft',
+          sessionId,
           userTurns: [{ turnIndex: 1, text: 'user asked something' }],
           toolCalls: [{ toolName: 'Read', status: 'succeeded', params: { file: '/src/main.ts' } }],
         }),
         outputPayload: JSON.stringify({
           type: 'assistant_turns',
-          sessionId: 'sess-ft',
+          sessionId,
           turns: [{ provider: 'openai', model: 'gpt-4', text: 'here is the file content' }],
         }),
       });
 
-      const payload = await f.assembler.assemble(task.taskId);
+      const payload = await f.assembler.assemble(diagTask.taskId);
 
       const ft = payload.fullTrace;
       expect(ft).not.toBeNull();
       if (!ft) return;
-      expect(ft.painContext.painId).toBe('pain-ft-001');
+      expect(ft.painContext.painId).toBe('pain-src-happy');
       expect(ft.painContext.severity).toBe('high');
       expect(ft.scratchpad.length).toBeGreaterThan(0);
       expect(ft.toolCallHistory.length).toBeGreaterThan(0);
@@ -429,7 +456,7 @@ describe('SqliteContextAssembler', () => {
     } finally { cleanupFixture(f); }
   });
 
-  it('sets fullTrace to null when no sourcePainId - keeps fullTrace optional so existing peer runners do not break', async () => {
+  it('sets fullTrace to null when no sourcePainId', async () => {
     const task = makeDiagnosticianTask({
       taskId: 'task_no_painid',
       sourcePainId: undefined,
@@ -446,14 +473,117 @@ describe('SqliteContextAssembler', () => {
     } finally { cleanupFixture(f); }
   });
 
-  it('returns fullTrace with empty arrays when painId present but no runs exist', async () => {
+  it('returns null fullTrace with ambiguityNotes when source trace not found', async () => {
     const task = makeDiagnosticianTask({
-      taskId: 'task_ft_noruns',
-      sourcePainId: 'pain-no-runs',
+      taskId: 'task_src_not_found',
+      sourcePainId: 'pain-not-found',
+      sessionIdHint: 'sess-no-match',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.fullTrace).toBeNull();
+      expect(notesInclude(payload.ambiguityNotes, 'Source trace not found')).toBe(true);
+      expect(notesInclude(payload.ambiguityNotes, 'pain-not-found')).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('does not include diagnostician task runs in fullTrace when source unresolvable', async () => {
+    const diagTask = makeDiagnosticianTask({
+      taskId: 'task_no_fallback',
+      sourcePainId: 'pain-unresolvable',
+      sessionIdHint: 'sess-no-source',
+    });
+    const tasks = new Map([[diagTask.taskId, diagTask]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      await createRunWithPayloads(f, diagTask.taskId, {
+        inputPayload: JSON.stringify({
+          toolCalls: [{ toolName: 'DiagOnlyTool', status: 'succeeded', params: {} }],
+        }),
+        outputPayload: '{}',
+      });
+
+      const payload = await f.assembler.assemble(diagTask.taskId);
+
+      expect(payload.fullTrace).toBeNull();
+      expect(notesInclude(payload.ambiguityNotes, 'Source trace not found')).toBe(true);
+      if (payload.fullTrace) {
+        expect(JSON.stringify(payload.fullTrace)).not.toContain('DiagOnlyTool');
+      }
+    } finally { cleanupFixture(f); }
+  });
+
+  it('returns null fullTrace when multiple source candidates found', async () => {
+    const sessionId = 'sess-ambiguous';
+    const diagTask = makeDiagnosticianTask({
+      taskId: 'task_diag_amb',
+      sourcePainId: 'pain-ambiguous',
+      sessionIdHint: sessionId,
+    });
+    const tasks = new Map([[diagTask.taskId, diagTask]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      await ensureSourceTask(f, 'task_src_amb_1', sessionId);
+      await createRunWithPayloads(f, 'task_src_amb_1', { inputPayload: '{"toolName":"Tool1"}', outputPayload: '{}' });
+      await ensureSourceTask(f, 'task_src_amb_2', sessionId);
+      await createRunWithPayloads(f, 'task_src_amb_2', { inputPayload: '{"toolName":"Tool2"}', outputPayload: '{}' });
+
+      const payload = await f.assembler.assemble(diagTask.taskId);
+
+      expect(payload.fullTrace).toBeNull();
+      expect(notesInclude(payload.ambiguityNotes, 'Ambiguous source trace')).toBe(true);
+      expect(notesInclude(payload.ambiguityNotes, '2 candidates')).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('returns null fullTrace when TrajectoryLocator not provided', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_no_locator',
+      sourcePainId: 'pain-no-locator',
+      sessionIdHint: 'sess-no-loc',
     });
     const tasks = new Map([[task.taskId, task]]);
     const f = createFixture(tasks);
     try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.fullTrace).toBeNull();
+      expect(notesInclude(payload.ambiguityNotes, 'TrajectoryLocator not available')).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('returns null fullTrace when sourcePainId present but no sessionIdHint', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_no_session',
+      sourcePainId: 'pain-no-session',
+      sessionIdHint: undefined,
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.fullTrace).toBeNull();
+      expect(notesInclude(payload.ambiguityNotes, 'No sessionIdHint')).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('returns fullTrace with empty arrays when source task has no runs', async () => {
+    const sessionId = 'sess-src-noruns';
+    const sourceTaskId = 'task_source_noruns';
+    const task = makeDiagnosticianTask({
+      taskId: 'task_diag_noruns',
+      sourcePainId: 'pain-no-src-runs',
+      sessionIdHint: sessionId,
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      await ensureSourceTask(f, sourceTaskId, sessionId);
+
       const payload = await f.assembler.assemble(task.taskId);
 
       const ft = payload.fullTrace;
@@ -461,20 +591,24 @@ describe('SqliteContextAssembler', () => {
       if (!ft) return;
       expect(ft.scratchpad).toEqual([]);
       expect(ft.toolCallHistory).toEqual([]);
-      expect(ft.painContext.painId).toBe('pain-no-runs');
+      expect(ft.painContext.painId).toBe('pain-no-src-runs');
       expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
     } finally { cleanupFixture(f); }
   });
 
-  it('redacts secrets before exposing raw tool params to compiler/refiner prompts', async () => {
+  it('redacts secrets in source trace before exposing to prompts', async () => {
+    const sessionId = 'sess-pii';
+    const sourceTaskId = 'task_source_pii';
     const task = makeDiagnosticianTask({
-      taskId: 'task_pii',
+      taskId: 'task_diag_pii',
       sourcePainId: 'pain-pii',
+      sessionIdHint: sessionId,
     });
     const tasks = new Map([[task.taskId, task]]);
-    const f = createFixture(tasks);
+    const f = createFixture(tasks, { withLocator: true });
     try {
-      await createRunWithPayloads(f, task.taskId, {
+      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await createRunWithPayloads(f, sourceTaskId, {
         inputPayload: JSON.stringify({
           toolCalls: [{
             toolName: 'WriteFile',
@@ -508,21 +642,24 @@ describe('SqliteContextAssembler', () => {
 
       const payload = await f.assembler.assemble(task.taskId);
 
-      // Construct a legacy payload without fullTrace
       const { fullTrace: _, ...legacyPayload } = payload;
       expect(Value.Check(DiagnosticianContextPayloadSchema, legacyPayload)).toBe(true);
     } finally { cleanupFixture(f); }
   });
 
-  it('handles non-JSON inputPayload in fullTrace without throwing', async () => {
+  it('handles non-JSON source run payloads in fullTrace without throwing', async () => {
+    const sessionId = 'sess-plain';
+    const sourceTaskId = 'task_source_plain';
     const task = makeDiagnosticianTask({
-      taskId: 'task_plain_text',
+      taskId: 'task_diag_plain',
       sourcePainId: 'pain-plain',
+      sessionIdHint: sessionId,
     });
     const tasks = new Map([[task.taskId, task]]);
-    const f = createFixture(tasks);
+    const f = createFixture(tasks, { withLocator: true });
     try {
-      await createRunWithPayloads(f, task.taskId, {
+      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await createRunWithPayloads(f, sourceTaskId, {
         inputPayload: 'This is just plain text, not JSON at all',
         outputPayload: 'Response text with password=supersecret',
       });
@@ -533,26 +670,29 @@ describe('SqliteContextAssembler', () => {
       expect(ft).not.toBeNull();
       if (!ft) return;
       expect(ft.scratchpad.length).toBeGreaterThan(0);
-      // Plain text should still be sanitized
       const allText = JSON.stringify(ft);
       expect(allText).not.toContain('supersecret');
       expect(allText).toContain('[REDACTED]');
     } finally { cleanupFixture(f); }
   });
 
-  it('extracts toolCalls array from openclaw-history format into toolCallHistory', async () => {
+  it('extracts toolCalls array from source openclaw-history format', async () => {
+    const sessionId = 'sess-oc';
+    const sourceTaskId = 'task_source_oc';
     const task = makeDiagnosticianTask({
-      taskId: 'task_oc_history',
+      taskId: 'task_diag_oc',
       sourcePainId: 'pain-oc',
+      sessionIdHint: sessionId,
     });
     const tasks = new Map([[task.taskId, task]]);
-    const f = createFixture(tasks);
+    const f = createFixture(tasks, { withLocator: true });
     try {
-      await createRunWithPayloads(f, task.taskId, {
+      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await createRunWithPayloads(f, sourceTaskId, {
         runtimeKind: 'openclaw-history',
         inputPayload: JSON.stringify({
           type: 'session_history',
-          sessionId: 'sess-oc',
+          sessionId,
           userTurns: [{ turnIndex: 1, text: 'fix the bug' }],
           toolCalls: [
             { toolName: 'Read', status: 'succeeded', params: { file: 'src/index.ts' } },
@@ -561,7 +701,7 @@ describe('SqliteContextAssembler', () => {
         }),
         outputPayload: JSON.stringify({
           type: 'assistant_turns',
-          sessionId: 'sess-oc',
+          sessionId,
           turns: [{ text: 'I fixed the bug' }],
         }),
       });
@@ -579,15 +719,19 @@ describe('SqliteContextAssembler', () => {
     } finally { cleanupFixture(f); }
   });
 
-  it('sanitizes nested object params and array values in toolCallHistory', async () => {
+  it('sanitizes nested object params in source trace toolCallHistory', async () => {
+    const sessionId = 'sess-nested';
+    const sourceTaskId = 'task_source_nested';
     const task = makeDiagnosticianTask({
-      taskId: 'task_nested_pii',
+      taskId: 'task_diag_nested',
       sourcePainId: 'pain-nested',
+      sessionIdHint: sessionId,
     });
     const tasks = new Map([[task.taskId, task]]);
-    const f = createFixture(tasks);
+    const f = createFixture(tasks, { withLocator: true });
     try {
-      await createRunWithPayloads(f, task.taskId, {
+      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await createRunWithPayloads(f, sourceTaskId, {
         inputPayload: JSON.stringify({
           toolCalls: [{
             toolName: 'HttpRequest',
@@ -616,7 +760,6 @@ describe('SqliteContextAssembler', () => {
   });
 
   it('throws storage_unavailable for run with unrecognized runtime_kind', async () => {
-    // Regression: ensure only documented runtime kinds are accepted when read back
     const task = makeDiagnosticianTask({ taskId: 'task_bad_runtime' });
     const tasks = new Map([[task.taskId, task]]);
     const f = createFixture(tasks);
@@ -633,14 +776,12 @@ describe('SqliteContextAssembler', () => {
       }
       const db = f.connection.getDb();
       const now = new Date().toISOString();
-      // Insert with invalid runtime_kind directly (bypassing createRun validation at write time)
-      db.prepare(`
-        INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, ended_at,
-          attempt_number, created_at, updated_at, input_payload, output_payload)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run('run_bad_kind', task.taskId, 'invalid-runtime', 'succeeded', now, now,
+      db.prepare(
+        'INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, ended_at, ' +
+        'attempt_number, created_at, updated_at, input_payload, output_payload) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run('run_bad_kind', task.taskId, 'invalid-runtime', 'succeeded', now, now,
         1, now, now, null, null);
-      // Validation happens on read — assemble() calls listRunsByTask which calls rowToRecord
       await expect(f.assembler.assemble(task.taskId)).rejects.toThrow('[storage_unavailable]');
     } finally { cleanupFixture(f); }
   });
