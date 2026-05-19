@@ -43,6 +43,7 @@ function sanitizeString(input: string): string {
       const i = m.indexOf(':');
       return m.slice(0, i + 1) + '"[REDACTED]"';
     })
+    .replace(/\bbearer\s+\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
     .replace(/\bauthorization\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
     .replace(/\bauthorization["']?\s*:\s*["'][^"']*["']/gi, (m) => {
       const i = m.indexOf(':');
@@ -57,8 +58,7 @@ function sanitizeString(input: string): string {
     .replace(/\bsecret["']?\s*:\s*["'][^"']*["']/gi, (m) => {
       const i = m.indexOf(':');
       return m.slice(0, i + 1) + '"[REDACTED]"';
-    })
-    .replace(/\bbearer\s+\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'));
+    });
 }
 
 function sanitizeObject(obj: unknown): unknown {

@@ -759,6 +759,40 @@ describe('SqliteContextAssembler', () => {
     } finally { cleanupFixture(f); }
   });
 
+  it('redacts bearer token value in scratchpad text when preceded by authorization key', async () => {
+    const sessionId = 'sess-bearer-order';
+    const sourceTaskId = 'task_source_bearer_order';
+    const task = makeDiagnosticianTask({
+      taskId: 'task_diag_bearer_order',
+      sourcePainId: 'pain-bearer-order',
+      sessionIdHint: sessionId,
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      await ensureSourceTask(f, sourceTaskId, sessionId);
+      await createRunWithPayloads(f, sourceTaskId, {
+        inputPayload: JSON.stringify({
+          thinking: 'Set authorization: Bearer sk-live-leaky-token-xyz and then called the API',
+        }),
+        outputPayload: JSON.stringify({
+          text: 'Header was Authorization=Bearer tok-secret-abc123, worked fine',
+        }),
+      });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      const ft = payload.fullTrace;
+      expect(ft).not.toBeNull();
+      if (!ft) return;
+      const allText = JSON.stringify(ft);
+      expect(allText).not.toContain('sk-live-leaky-token-xyz');
+      expect(allText).not.toContain('tok-secret-abc123');
+      expect(allText).toContain('[REDACTED]');
+    } finally { cleanupFixture(f); }
+  });
+
+
   it('throws storage_unavailable for run with unrecognized runtime_kind', async () => {
     const task = makeDiagnosticianTask({ taskId: 'task_bad_runtime' });
     const tasks = new Map([[task.taskId, task]]);
