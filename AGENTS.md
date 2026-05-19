@@ -36,9 +36,18 @@ npm run lint
 4. Update status to In Review when done
 5. Leave a summary comment
 
-## Error Recording
+## Error Recording (MANDATORY)
 
-When a code review catches your error, use the `record-error` skill to record it. The skill handles: Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
+**Rule: Any code review that discovers a real issue (bug, type safety violation, architecture violation, logic error) MUST invoke the `record-error` skill before closing the review.**
+
+This applies to:
+- PR reviews (pr-review skill Phase 6.5)
+- Self-review after completing a task
+- Any review where you find an error you (or another AI) made
+
+The `record-error` skill handles: classify → number → Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
+
+**Do NOT skip this step.** Reasons like "the fix was trivial", "I'm tired", or "I'll do it later" are not acceptable. Without recording, the same class of error will recur across sessions. The Error Experience Handbook is the project's institutional memory.
 
 ## Key Files
 

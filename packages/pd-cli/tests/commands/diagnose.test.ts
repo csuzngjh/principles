@@ -33,6 +33,8 @@ vi.mock('@principles/core/runtime-v2', () => {
     SqliteHistoryQuery: vi.fn().mockImplementation(function () { return {}; }),
     SqliteContextAssembler: vi.fn().mockImplementation(function () { return {}; }),
     SqliteDiagnosticianCommitter: vi.fn().mockImplementation(function () { return {}; }),
+    SqliteTrajectoryLocator: vi.fn().mockImplementation(function () { return {}; }),
+    SqliteSourceTraceLocator: vi.fn().mockImplementation(function () { return {}; }),
     StoreEventEmitter: vi.fn().mockImplementation(function () { return {}; }),
     storeEmitter: { emitTelemetry: vi.fn() },
     DiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
