@@ -66,6 +66,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-005 | Invalid salvaged arrays bypass type contract in validate failure path | PRI-191 |
 | ERR-007 | Non-string evidenceRefs silently skipped instead of rejected in validator | PRI-192 |
 | ERR-008 | Missing lineage field validation allows agent to return trace with wrong attribution | PRI-192 |
+| ERR-009 | Validator silently skips missing/malformed required array fields instead of failing loud | PRI-192 |
 
 ---
 
@@ -195,9 +196,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-05-19
 - **Recurrence**: No
 
+---
+
+**[ERR-009]** | Validator silently skips missing/malformed required array fields instead of failing loud
+
+- **What happened**: In `validateTraceRefinerAgentOutput()`, the `refinedTrace` shape validation used `if (Array.isArray(rt.sourceRunIds)) { ... }` pattern — when the field was missing, `undefined`, or non-array, the validator silently skipped it instead of reporting an error. Same for `evidenceRefs` and `keyEvents`. Additionally, `keyEvent` objects that were non-objects were skipped with `continue`, and `keyEvent.evidenceRefs` non-arrays were silently skipped.
+- **Why it's wrong**: This allows structurally invalid `refinedTrace` objects (e.g., `{ sourceRunIds: "not-array", evidenceRefs: undefined, keyEvents: undefined }`) to pass validation and be cast as `RefinedTracePayload`. Even in shadow mode, downstream telemetry or analysis consumers would receive objects that don't conform to the contract. This is the same class as ERR-001/ERR-005/ERR-007 — validators must fail loud, not skip silently.
+- **Correct approach**: For every required field in a validator, check that it exists and has the correct type. If it's missing or wrong type, add an error. Use `if (!Array.isArray(x)) { error } else { validate elements }` instead of `if (Array.isArray(x)) { validate elements }`.
+- **How to prevent**: When writing validators for untrusted data, never use `if (hasCorrectType) { validate }` — always use `if (!hasCorrectType) { error } else { validate }`. The "skip on wrong type" pattern is always wrong for required fields.
+- **Source**: PRI-192 / PR #638 (reviewer feedback)
+- **Date**: 2026-05-19
+- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 8 |
+| Total lessons | 9 |
 | Last updated | 2026-05-19 |
 | Top category | Schema & Type |
-| Recurring errors | 2 |
+| Recurring errors | 3 |
