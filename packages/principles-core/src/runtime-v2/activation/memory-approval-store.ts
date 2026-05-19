@@ -6,7 +6,6 @@ import type {
   ApprovalQueueStore,
   ApprovalRecord,
   ApprovalStats,
-  ApprovalStatus,
   InternalizationChannel,
 } from './activation-types.js';
 
@@ -26,7 +25,7 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
       artifactId: input.artifactId,
       channel: input.channel,
       riskLevel: input.riskLevel,
-      status: 'pending' as ApprovalStatus,
+      status: 'pending',
       confidence: input.confidence,
       requestedAt: now,
       summary: input.summary,
@@ -72,7 +71,7 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
     const stats: ApprovalStats = { pending: 0, approved: 0, rejected: 0, cancelled: 0 };
     for (const r of this.records.values()) {
       if (r.status in stats) {
-        stats[r.status as keyof ApprovalStats]++;
+        stats[r.status]++;
       }
     }
     return stats;
