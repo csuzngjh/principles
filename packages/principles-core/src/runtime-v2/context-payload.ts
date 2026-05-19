@@ -28,7 +28,7 @@ export const HistoryQueryEntrySchema = Type.Object({
   toolResultSummary: Type.Optional(Type.String()),
   eventType: Type.Optional(Type.String()),
 });
- 
+
 export type HistoryQueryEntry = Static<typeof HistoryQueryEntrySchema>;
 
 // ── Trajectory Locate Result ──
@@ -45,7 +45,7 @@ export const TrajectoryLocateQuerySchema = Type.Object({
   workspace: Type.Optional(Type.String({ minLength: 1 })),
   executionStatus: Type.Optional(Type.String({ minLength: 1 })),
 });
- 
+
 export type TrajectoryLocateQuery = Static<typeof TrajectoryLocateQuerySchema>;
 
 export const TrajectoryCandidateSchema = Type.Object({
@@ -54,14 +54,14 @@ export const TrajectoryCandidateSchema = Type.Object({
   reasons: Type.Array(Type.String({ minLength: 1 })),
   sourceTypes: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 });
- 
+
 export type TrajectoryCandidate = Static<typeof TrajectoryCandidateSchema>;
 
 export const TrajectoryLocateResultSchema = Type.Object({
   query: TrajectoryLocateQuerySchema,
   candidates: Type.Array(TrajectoryCandidateSchema),
 });
- 
+
 export type TrajectoryLocateResult = Static<typeof TrajectoryLocateResultSchema>;
 
 // ── History Query Result ──
@@ -72,7 +72,7 @@ export const HistoryQueryResultSchema = Type.Object({
   truncated: Type.Boolean(),
   nextCursor: Type.Optional(Type.String({ minLength: 1 })),
 });
- 
+
 export type HistoryQueryResult = Static<typeof HistoryQueryResultSchema>;
 
 // ── Context Payload (general purpose) ──
@@ -84,8 +84,40 @@ export const DiagnosisTargetSchema = Type.Object({
   painId: Type.Optional(Type.String({ minLength: 1 })),
   sessionIdHint: Type.Optional(Type.String({ minLength: 1 })),
 });
- 
+
 export type DiagnosisTarget = Static<typeof DiagnosisTargetSchema>;
+
+// ── Full Trace Payload (PRI-171) ──
+
+export const ToolCallEntrySchema = Type.Object({
+  toolName: Type.Optional(Type.String()),
+  status: Type.Optional(Type.String()),
+  params: Type.Optional(Type.String()),
+  resultSummary: Type.Optional(Type.String()),
+  errorSummary: Type.Optional(Type.String()),
+  startedAt: Type.Optional(Type.String()),
+  completedAt: Type.Optional(Type.String()),
+});
+
+export type ToolCallEntry = Static<typeof ToolCallEntrySchema>;
+
+export const PainContextSchema = Type.Object({
+  painId: Type.Optional(Type.String({ minLength: 1 })),
+  severity: Type.Optional(Type.String()),
+  source: Type.Optional(Type.String()),
+  reasonSummary: Type.Optional(Type.String()),
+  sessionIdHint: Type.Optional(Type.String()),
+});
+
+export type PainContext = Static<typeof PainContextSchema>;
+
+export const FullTracePayloadSchema = Type.Object({
+  painContext: PainContextSchema,
+  scratchpad: Type.Array(Type.String()),
+  toolCallHistory: Type.Array(ToolCallEntrySchema),
+});
+
+export type FullTracePayload = Static<typeof FullTracePayloadSchema>;
 
 export const ContextPayloadSchema = Type.Object({
   contextId: Type.String({ minLength: 1 }),
@@ -98,7 +130,7 @@ export const ContextPayloadSchema = Type.Object({
   ambiguityNotes: Type.Optional(Type.Array(Type.String())),
   summary: Type.String({ minLength: 1 }),
 });
- 
+
 export type ContextPayload = Static<typeof ContextPayloadSchema>;
 
 // ── Diagnostician-specific Context Payload ──
@@ -113,6 +145,7 @@ export const DiagnosticianContextPayloadSchema = Type.Object({
   conversationWindow: Type.Array(HistoryQueryEntrySchema),
   eventSummaries: Type.Optional(Type.Array(Type.Record(Type.String(), Type.Unknown()))),
   ambiguityNotes: Type.Optional(Type.Array(Type.String())),
+  fullTrace: Type.Optional(Type.Union([FullTracePayloadSchema, Type.Null()])),
 });
- 
+
 export type DiagnosticianContextPayload = Static<typeof DiagnosticianContextPayloadSchema>;

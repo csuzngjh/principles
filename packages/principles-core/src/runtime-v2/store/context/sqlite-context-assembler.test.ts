@@ -385,6 +385,236 @@ describe('SqliteContextAssembler', () => {
     } finally { cleanupFixture(f); }
   });
 
+
+  // ── Full Trace Tests (PRI-171) ──
+
+  it('builds fullTrace with scratchpad and toolCallHistory when sourcePainId is provided', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_fulltrace_1',
+      sourcePainId: 'pain-ft-001',
+      severity: 'high',
+      source: 'test',
+      reasonSummary: 'Full trace test',
+      sessionIdHint: 'sess-ft',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      await createRunWithPayloads(f, task.taskId, {
+        inputPayload: JSON.stringify({
+          type: 'session_history',
+          sessionId: 'sess-ft',
+          userTurns: [{ turnIndex: 1, text: 'user asked something' }],
+          toolCalls: [{ toolName: 'Read', status: 'succeeded', params: { file: '/src/main.ts' } }],
+        }),
+        outputPayload: JSON.stringify({
+          type: 'assistant_turns',
+          sessionId: 'sess-ft',
+          turns: [{ provider: 'openai', model: 'gpt-4', text: 'here is the file content' }],
+        }),
+      });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      const ft = payload.fullTrace;
+      expect(ft).not.toBeNull();
+      if (!ft) return;
+      expect(ft.painContext.painId).toBe('pain-ft-001');
+      expect(ft.painContext.severity).toBe('high');
+      expect(ft.scratchpad.length).toBeGreaterThan(0);
+      expect(ft.toolCallHistory.length).toBeGreaterThan(0);
+      expect(ft.toolCallHistory[0]?.toolName).toBe('Read');
+      expect(ft.toolCallHistory[0]?.status).toBe('succeeded');
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('sets fullTrace to null when no sourcePainId - keeps fullTrace optional so existing peer runners do not break', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_no_painid',
+      sourcePainId: undefined,
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      await createRunWithPayloads(f, task.taskId, { inputPayload: 'input', outputPayload: 'output' });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.fullTrace).toBeNull();
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('returns fullTrace with empty arrays when painId present but no runs exist', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_ft_noruns',
+      sourcePainId: 'pain-no-runs',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      const ft = payload.fullTrace;
+      expect(ft).not.toBeNull();
+      if (!ft) return;
+      expect(ft.scratchpad).toEqual([]);
+      expect(ft.toolCallHistory).toEqual([]);
+      expect(ft.painContext.painId).toBe('pain-no-runs');
+      expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('redacts secrets before exposing raw tool params to compiler/refiner prompts', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_pii',
+      sourcePainId: 'pain-pii',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      await createRunWithPayloads(f, task.taskId, {
+        inputPayload: JSON.stringify({
+          toolCalls: [{
+            toolName: 'WriteFile',
+            params: { apiKey: 'sk-proj-secret123', token: 'tok_abc', password: 'hunter2' },
+          }],
+        }),
+        outputPayload: JSON.stringify({
+          text: 'Used authorization: Bearer secret-token-here and secret=mysecret',
+        }),
+      });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.fullTrace).not.toBeNull();
+      const allText = JSON.stringify(payload.fullTrace);
+      expect(allText).not.toContain('sk-proj-secret123');
+      expect(allText).not.toContain('tok_abc');
+      expect(allText).not.toContain('hunter2');
+      expect(allText).not.toContain('secret-token-here');
+      expect(allText).not.toContain('mysecret');
+      expect(allText).toContain('[REDACTED]');
+    } finally { cleanupFixture(f); }
+  });
+
+  it('payload without fullTrace field still passes schema validation - backward compatible', async () => {
+    const task = makeDiagnosticianTask({ taskId: 'task_compat' });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      await createRunWithPayloads(f, task.taskId, { inputPayload: 'input', outputPayload: 'output' });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      // Construct a legacy payload without fullTrace
+      const { fullTrace: _, ...legacyPayload } = payload;
+      expect(Value.Check(DiagnosticianContextPayloadSchema, legacyPayload)).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('handles non-JSON inputPayload in fullTrace without throwing', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_plain_text',
+      sourcePainId: 'pain-plain',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      await createRunWithPayloads(f, task.taskId, {
+        inputPayload: 'This is just plain text, not JSON at all',
+        outputPayload: 'Response text with password=supersecret',
+      });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      const ft = payload.fullTrace;
+      expect(ft).not.toBeNull();
+      if (!ft) return;
+      expect(ft.scratchpad.length).toBeGreaterThan(0);
+      // Plain text should still be sanitized
+      const allText = JSON.stringify(ft);
+      expect(allText).not.toContain('supersecret');
+      expect(allText).toContain('[REDACTED]');
+    } finally { cleanupFixture(f); }
+  });
+
+  it('extracts toolCalls array from openclaw-history format into toolCallHistory', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_oc_history',
+      sourcePainId: 'pain-oc',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      await createRunWithPayloads(f, task.taskId, {
+        runtimeKind: 'openclaw-history',
+        inputPayload: JSON.stringify({
+          type: 'session_history',
+          sessionId: 'sess-oc',
+          userTurns: [{ turnIndex: 1, text: 'fix the bug' }],
+          toolCalls: [
+            { toolName: 'Read', status: 'succeeded', params: { file: 'src/index.ts' } },
+            { toolName: 'Edit', status: 'succeeded', params: { file: 'src/index.ts', content: 'fixed' } },
+          ],
+        }),
+        outputPayload: JSON.stringify({
+          type: 'assistant_turns',
+          sessionId: 'sess-oc',
+          turns: [{ text: 'I fixed the bug' }],
+        }),
+      });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      const ft = payload.fullTrace;
+      expect(ft).not.toBeNull();
+      if (!ft) return;
+      expect(ft.toolCallHistory.length).toBe(2);
+      expect(ft.toolCallHistory[0]?.toolName).toBe('Read');
+      expect(ft.toolCallHistory[1]?.toolName).toBe('Edit');
+      expect(ft.scratchpad).toContain('fix the bug');
+      expect(ft.scratchpad).toContain('I fixed the bug');
+    } finally { cleanupFixture(f); }
+  });
+
+  it('sanitizes nested object params and array values in toolCallHistory', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_nested_pii',
+      sourcePainId: 'pain-nested',
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      await createRunWithPayloads(f, task.taskId, {
+        inputPayload: JSON.stringify({
+          toolCalls: [{
+            toolName: 'HttpRequest',
+            params: {
+              headers: { Authorization: 'Bearer tok_live_xxx' },
+              body: { api_key: 'pk_live_12345', user_password: 'p@ssw0rd' },
+            },
+          }],
+        }),
+        outputPayload: '{}',
+      });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      const ft = payload.fullTrace;
+      expect(ft).not.toBeNull();
+      if (!ft) return;
+      const params = ft.toolCallHistory[0]?.params;
+      expect(params).toBeDefined();
+      if (!params) return;
+      expect(params).not.toContain('tok_live_xxx');
+      expect(params).not.toContain('pk_live_12345');
+      expect(params).not.toContain('p@ssw0rd');
+      expect(params).toContain('[REDACTED]');
+    } finally { cleanupFixture(f); }
+  });
+
   it('throws storage_unavailable for run with unrecognized runtime_kind', async () => {
     // Regression: ensure only documented runtime kinds are accepted when read back
     const task = makeDiagnosticianTask({ taskId: 'task_bad_runtime' });
