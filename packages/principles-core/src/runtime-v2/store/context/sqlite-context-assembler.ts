@@ -18,87 +18,16 @@ import type { SourceTraceLocator } from '../trajectory/source-trace-locator.js';
 import {
   type DiagnosticianContextPayload,
   type DiagnosisTarget,
-  type FullTracePayload,
-  type ToolCallEntry,
-  type PainContext,
+  type FullTracePayloadV2,
   DiagnosticianContextPayloadSchema,
+  validateFullTracePayload,
+  sanitizeFullTracePayload,
+  buildFullTraceTimeline,
+  buildSourceRefs,
 } from '../../context-payload.js';
 import type { TaskRecord, DiagnosticianTaskRecord } from '../../task-status.js';
 import type { RunRecord } from '../../runtime-protocol.js';
 import { PDRuntimeError } from '../../error-categories.js';
-
-// ── PII Sanitizer (PRI-171) ──
-
-const SECRET_KEY_PATTERNS = ['apikey', 'api_key', 'api-key', 'token', 'authorization', 'password', 'secret', 'bearer', 'access_token', 'refresh_token', 'auth_token', 'secret_key'];
-
-function sanitizeString(input: string): string {
-  return input
-    .replace(/\bapi[_-]?key\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
-    .replace(/\bapi[_-]?key["']?\s*:\s*["'][^"']*["']/gi, (m) => {
-      const i = m.indexOf(':');
-      return m.slice(0, i + 1) + '"[REDACTED]"';
-    })
-    .replace(/\btoken\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
-    .replace(/\btoken["']?\s*:\s*["'][^"']*["']/gi, (m) => {
-      const i = m.indexOf(':');
-      return m.slice(0, i + 1) + '"[REDACTED]"';
-    })
-    .replace(/\bbearer\s+\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
-    .replace(/\bauthorization\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
-    .replace(/\bauthorization["']?\s*:\s*["'][^"']*["']/gi, (m) => {
-      const i = m.indexOf(':');
-      return m.slice(0, i + 1) + '"[REDACTED]"';
-    })
-    .replace(/\bpassword\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
-    .replace(/\bpassword["']?\s*:\s*["'][^"']*["']/gi, (m) => {
-      const i = m.indexOf(':');
-      return m.slice(0, i + 1) + '"[REDACTED]"';
-    })
-    .replace(/\bsecret\s*[:=]\s*\S+/gi, (m) => m.replace(/\S+$/, '[REDACTED]'))
-    .replace(/\bsecret["']?\s*:\s*["'][^"']*["']/gi, (m) => {
-      const i = m.indexOf(':');
-      return m.slice(0, i + 1) + '"[REDACTED]"';
-    });
-}
-
-function sanitizeObject(obj: unknown): unknown {
-  if (typeof obj === 'string') return sanitizeString(obj);
-  if (Array.isArray(obj)) return obj.map(sanitizeObject);
-  if (typeof obj === 'object' && obj !== null) {
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(obj)) {
-      const keyLower = key.toLowerCase();
-      if (SECRET_KEY_PATTERNS.some(p => keyLower === p || keyLower.endsWith('_' + p) || keyLower.startsWith(p + '_') || keyLower.endsWith('-' + p) || keyLower.startsWith(p + '-'))) {
-        result[key] = '[REDACTED]';
-      } else {
-        result[key] = sanitizeObject(value);
-      }
-    }
-    return result;
-  }
-  return obj;
-}
-
-function sanitizePii(input: string): string {
-  return sanitizeString(input);
-}
-
-function sanitizeJsonOrString(value: unknown): string {
-  if (typeof value === 'string') return sanitizePii(value);
-  return JSON.stringify(sanitizeObject(value));
-}
-
-function tryParseJson(input: string | undefined): Record<string, unknown> | null {
-  if (!input) return null;
-  const trimmed = input.trim();
-  if (!trimmed.startsWith('{')) return null;
-  try {
-    const parsed = JSON.parse(trimmed);
-    return (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) ? parsed as Record<string, unknown> : null;
-  } catch {
-    return null;
-  }
-}
 
 // ── SqliteContextAssembler ──
 
@@ -167,7 +96,7 @@ export class SqliteContextAssembler implements ContextAssembler {
     // Build fullTrace from source pain trajectory (PRI-171 / PRI-189).
     // Source trace comes from the original execution that caused the pain signal,
     // NOT from the diagnostician task's own runs.
-    const fullTrace: FullTracePayload | null = dt.sourcePainId
+    const fullTrace: FullTracePayloadV2 | null = dt.sourcePainId
       ? await this.buildFullTraceFromSource(dt, ambiguityNotes)
       : null;
 
@@ -197,10 +126,10 @@ export class SqliteContextAssembler implements ContextAssembler {
   private async buildFullTraceFromSource(
     dt: DiagnosticianTaskRecord,
     ambiguityNotes: string[],
-  ): Promise<FullTracePayload | null> {
+  ): Promise<FullTracePayloadV2 | null> {
     const sourceRuns = await this.locateSourceRuns(dt, ambiguityNotes);
     if (sourceRuns === null) return null;
-    return SqliteContextAssembler.buildFullTraceSafe(dt, sourceRuns, ambiguityNotes);
+    return SqliteContextAssembler.buildFullTraceV2(dt, sourceRuns, ambiguityNotes);
   }
 
   private async locateSourceRuns(
@@ -238,146 +167,50 @@ export class SqliteContextAssembler implements ContextAssembler {
     return this.runStore.listRunsByTask(result.candidate.taskId);
   }
 
-  private static buildFullTraceSafe(
+  private static buildFullTraceV2(
     dt: DiagnosticianTaskRecord,
     runs: readonly RunRecord[],
-    ambiguityNotes: string[] | undefined,
-  ): FullTracePayload | null {
-    try {
-      return SqliteContextAssembler.buildFullTrace(dt, runs);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      if (ambiguityNotes) {
-        ambiguityNotes.push(
-          'fullTrace construction failed for painId=' + (dt.sourcePainId ?? 'unknown') + ': ' + reason,
-        );
-      }
+    ambiguityNotes: string[],
+  ): FullTracePayloadV2 | null {
+    if (!dt.sourcePainId || !dt.taskId) return null;
+
+    const { taskId: sourceTaskId, sourcePainId } = dt;
+    const sourceRunIds = runs.map((r) => r.runId);
+    const capturedAt = new Date().toISOString();
+
+    const sourceRefs = buildSourceRefs(sourceTaskId, sourceRunIds);
+
+    const timeline = buildFullTraceTimeline(runs.map((r) => ({
+      runId: r.runId,
+      inputPayload: r.inputPayload,
+      outputPayload: r.outputPayload,
+      startedAt: r.startedAt,
+      endedAt: r.endedAt,
+      executionStatus: r.executionStatus,
+    })));
+
+    const rawPayload: FullTracePayloadV2 = {
+      sourceTaskId,
+      sourcePainId,
+      sourceRunIds,
+      capturedAt,
+      sourceRefs,
+      timeline,
+      ambiguityNotes: [...ambiguityNotes],
+      sanitizationNotes: [],
+    };
+
+    const validation = validateFullTracePayload(rawPayload);
+    if (!validation.valid) {
+      ambiguityNotes.push(
+        'fullTrace V2 validation failed for painId=' + sourcePainId + ': ' + validation.errors.join('; '),
+      );
       return null;
     }
-  }
 
-  private static buildFullTrace(
-    dt: DiagnosticianTaskRecord,
-    runs: readonly RunRecord[],
-  ): FullTracePayload {
-    const painContext: PainContext = {
-      painId: dt.sourcePainId || undefined,
-      severity: dt.severity || undefined,
-      source: dt.source || undefined,
-      reasonSummary: dt.reasonSummary || undefined,
-      sessionIdHint: dt.sessionIdHint || undefined,
-    };
+    const { payload: sanitized } = sanitizeFullTracePayload(rawPayload);
 
-    const scratchpad: string[] = [];
-    const toolCallHistory: ToolCallEntry[] = [];
-
-    for (const run of runs) {
-      SqliteContextAssembler.extractScratchpadLines(run.inputPayload, scratchpad);
-      SqliteContextAssembler.extractScratchpadLines(run.outputPayload, scratchpad);
-      SqliteContextAssembler.extractToolCalls({
-        inputPayload: run.inputPayload,
-        outputPayload: run.outputPayload,
-        startedAt: run.startedAt,
-        endedAt: run.endedAt,
-        executionStatus: run.executionStatus,
-        accumulator: toolCallHistory,
-      });
-    }
-
-    return {
-      painContext,
-      scratchpad,
-      toolCallHistory,
-    };
-  }
-
-  private static extractScratchpadLines(
-    payload: string | undefined,
-    accumulator: string[],
-  ): void {
-    if (!payload) return;
-
-    const trimmed = payload.trim();
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (typeof parsed === 'object' && parsed !== null) {
-          // Extract thinking/scratchpad/reasoning fields
-          const thinking = parsed.thinking ?? parsed.scratchpad ?? parsed.reasoning;
-          if (typeof thinking === 'string' && thinking.length > 0) {
-            accumulator.push(sanitizePii(thinking));
-          } else if (Array.isArray(thinking)) {
-            for (const item of thinking) {
-              if (typeof item === 'string') accumulator.push(sanitizePii(item));
-            }
-          }
-          // Extract user turn text
-          if (Array.isArray(parsed.userTurns)) {
-            for (const turn of parsed.userTurns) {
-              if (turn && typeof turn === 'object' && typeof turn.text === 'string') {
-                accumulator.push(sanitizePii(turn.text));
-              }
-            }
-          }
-          // Extract assistant turn text
-          if (Array.isArray(parsed.turns)) {
-            for (const turn of parsed.turns) {
-              if (turn && typeof turn === 'object' && typeof turn.text === 'string') {
-                accumulator.push(sanitizePii(turn.text));
-              }
-            }
-          }
-        }
-      } catch {
-        // Not valid JSON -- add as plain text
-        if (trimmed.length > 0) accumulator.push(sanitizePii(trimmed));
-      }
-    } else if (trimmed.length > 0) {
-      accumulator.push(sanitizePii(trimmed));
-    }
-  }
-
-  private static extractToolCalls(opts: {
-    inputPayload: string | undefined;
-    outputPayload: string | undefined;
-    startedAt: string;
-    endedAt: string | undefined;
-    executionStatus: string;
-    accumulator: ToolCallEntry[];
-  }): void {
-    const inputParsed = tryParseJson(opts.inputPayload);
-    const outputParsed = tryParseJson(opts.outputPayload);
-
-    // Extract from toolCalls array if present
-    const toolCalls = inputParsed?.toolCalls ?? outputParsed?.toolCalls;
-    if (Array.isArray(toolCalls)) {
-      for (const tc of toolCalls) {
-        if (typeof tc !== 'object' || tc === null) continue;
-        opts.accumulator.push({
-          toolName: typeof tc.toolName === 'string' ? tc.toolName : typeof tc.name === 'string' ? tc.name : undefined,
-          status: typeof tc.status === 'string' ? tc.status : undefined,
-          params: tc.params ? sanitizeJsonOrString(tc.params) : undefined,
-          resultSummary: tc.result ? sanitizeJsonOrString(tc.result) : undefined,
-          errorSummary: tc.error ? sanitizeJsonOrString(tc.error) : undefined,
-          startedAt: opts.startedAt,
-          completedAt: opts.endedAt ?? opts.startedAt,
-        });
-      }
-    } else if (inputParsed) {
-      // No explicit toolCalls array -- synthesize from single toolName if present
-      const toolName = inputParsed.toolName ?? inputParsed.name;
-      if (typeof toolName === 'string') {
-        opts.accumulator.push({
-          toolName,
-          status: opts.executionStatus === 'succeeded' ? 'succeeded' : opts.executionStatus === 'failed' ? 'failed' : undefined,
-          params: inputParsed.params ? sanitizeJsonOrString(inputParsed.params) : undefined,
-          resultSummary: opts.outputPayload ? sanitizePii(opts.outputPayload.length > 500 ? opts.outputPayload.slice(0, 500) + '...[truncated]' : opts.outputPayload) : undefined,
-          errorSummary: opts.executionStatus === 'failed' && outputParsed?.error ? sanitizePii(String(outputParsed.error)) : undefined,
-          startedAt: opts.startedAt,
-          completedAt: opts.endedAt ?? opts.startedAt,
-        });
-      }
-    }
+    return sanitized;
   }
 
   private static buildAmbiguityNotes(

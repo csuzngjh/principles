@@ -462,12 +462,18 @@ describe('SqliteContextAssembler', () => {
       const ft = payload.fullTrace;
       expect(ft).not.toBeNull();
       if (!ft) return;
-      expect(ft.painContext.painId).toBe('pain-src-happy');
-      expect(ft.painContext.severity).toBe('high');
-      expect(ft.scratchpad.length).toBeGreaterThan(0);
-      expect(ft.toolCallHistory.length).toBeGreaterThan(0);
-      expect(ft.toolCallHistory[0]?.toolName).toBe('Read');
-      expect(ft.toolCallHistory[0]?.status).toBe('succeeded');
+      if ('sourcePainId' in ft) {
+        expect(ft.sourcePainId).toBe('pain-src-happy');
+        expect(ft.sourceTaskId).toBe(diagTask.taskId);
+        expect(ft.timeline.length).toBeGreaterThan(0);
+        expect(ft.sourceRefs.length).toBeGreaterThan(0);
+        expect(ft.ambiguityNotes).toBeDefined();
+        expect(ft.sanitizationNotes).toBeDefined();
+        expect(ft.capturedAt).toBeDefined();
+        const toolCallEntries = ft.timeline.filter((e) => e.kind === 'tool_call');
+        expect(toolCallEntries.length).toBeGreaterThan(0);
+        expect(toolCallEntries.some((e) => e.summary.includes('Read'))).toBe(true);
+      }
       expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
     } finally { cleanupFixture(f); }
   });
@@ -605,9 +611,13 @@ describe('SqliteContextAssembler', () => {
       const ft = payload.fullTrace;
       expect(ft).not.toBeNull();
       if (!ft) return;
-      expect(ft.scratchpad).toEqual([]);
-      expect(ft.toolCallHistory).toEqual([]);
-      expect(ft.painContext.painId).toBe('pain-no-src-runs');
+      if ('sourcePainId' in ft) {
+        expect(ft.timeline).toEqual([]);
+        expect(ft.sourcePainId).toBe('pain-no-src-runs');
+        expect(ft.sourceRunIds).toEqual([]);
+        expect(ft.ambiguityNotes).toBeDefined();
+        expect(ft.sanitizationNotes).toBeDefined();
+      }
       expect(Value.Check(DiagnosticianContextPayloadSchema, payload)).toBe(true);
     } finally { cleanupFixture(f); }
   });
@@ -685,7 +695,9 @@ describe('SqliteContextAssembler', () => {
       const ft = payload.fullTrace;
       expect(ft).not.toBeNull();
       if (!ft) return;
-      expect(ft.scratchpad.length).toBeGreaterThan(0);
+      if ('timeline' in ft) {
+        expect(ft.timeline.length).toBeGreaterThan(0);
+      }
       const allText = JSON.stringify(ft);
       expect(allText).not.toContain('supersecret');
       expect(allText).toContain('[REDACTED]');
@@ -727,11 +739,16 @@ describe('SqliteContextAssembler', () => {
       const ft = payload.fullTrace;
       expect(ft).not.toBeNull();
       if (!ft) return;
-      expect(ft.toolCallHistory.length).toBe(2);
-      expect(ft.toolCallHistory[0]?.toolName).toBe('Read');
-      expect(ft.toolCallHistory[1]?.toolName).toBe('Edit');
-      expect(ft.scratchpad).toContain('fix the bug');
-      expect(ft.scratchpad).toContain('I fixed the bug');
+      if ('timeline' in ft) {
+        const toolCallEntries = ft.timeline.filter((e) => e.kind === 'tool_call');
+        expect(toolCallEntries.length).toBe(2);
+        expect(toolCallEntries[0]?.summary).toContain('Read');
+        expect(toolCallEntries[1]?.summary).toContain('Edit');
+        const userEntries = ft.timeline.filter((e) => e.kind === 'user_message');
+        expect(userEntries.some((e) => e.summary.includes('fix the bug'))).toBe(true);
+        const assistantEntries = ft.timeline.filter((e) => e.kind === 'assistant_message');
+        expect(assistantEntries.some((e) => e.summary.includes('I fixed the bug'))).toBe(true);
+      }
     } finally { cleanupFixture(f); }
   });
 
@@ -765,13 +782,15 @@ describe('SqliteContextAssembler', () => {
       const ft = payload.fullTrace;
       expect(ft).not.toBeNull();
       if (!ft) return;
-      const params = ft.toolCallHistory[0]?.params;
-      expect(params).toBeDefined();
-      if (!params) return;
-      expect(params).not.toContain('tok_live_xxx');
-      expect(params).not.toContain('pk_live_12345');
-      expect(params).not.toContain('p@ssw0rd');
-      expect(params).toContain('[REDACTED]');
+      if ('timeline' in ft) {
+        const [entry] = ft.timeline.filter((e) => e.kind === 'tool_call');
+        expect(entry).toBeDefined();
+        const allTimelineText = JSON.stringify(ft.timeline);
+        expect(allTimelineText).not.toContain('tok_live_xxx');
+        expect(allTimelineText).not.toContain('pk_live_12345');
+        expect(allTimelineText).not.toContain('p@ssw0rd');
+        expect(allTimelineText).toContain('[REDACTED]');
+      }
     } finally { cleanupFixture(f); }
   });
 

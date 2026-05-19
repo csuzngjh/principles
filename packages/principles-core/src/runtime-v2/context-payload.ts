@@ -12,6 +12,30 @@
  *   - diagnostician context assembly → DiagnosticianContextPayload
  */
 import { Type, type Static } from '@sinclair/typebox';
+import {
+  FullTracePayloadV2Schema as FullTracePayloadV2SchemaImport,
+  TraceSourceRefSchema as TraceSourceRefSchemaImport,
+  TraceTimelineEntrySchema as TraceTimelineEntrySchemaImport,
+  TraceEventKindSchema as TraceEventKindSchemaImport,
+  SourceRefKindSchema as SourceRefKindSchemaImport,
+  validateFullTracePayload,
+  sanitizeFullTracePayload,
+  buildFullTraceTimeline,
+  buildSourceRefs,
+  checkFullTracePayloadSchema,
+  TRACE_EVENT_KINDS,
+  SOURCE_REF_KINDS,
+} from './full-trace-contract.js';
+import type {
+  FullTracePayloadV2 as FullTracePayloadV2Type,
+  TraceSourceRef as TraceSourceRefType,
+  TraceTimelineEntry as TraceTimelineEntryType,
+  TraceEventKind as TraceEventKindType,
+  SourceRefKind as SourceRefKindType,
+  FullTraceValidationResult as FullTraceValidationResultType,
+  SanitizeFullTraceResult as SanitizeFullTraceResultType,
+  RunRecordLike as RunRecordLikeType,
+} from './full-trace-contract.js';
 
 // ── History Query Entry (shared building block) ──
 
@@ -119,6 +143,33 @@ export const FullTracePayloadSchema = Type.Object({
 
 export type FullTracePayload = Static<typeof FullTracePayloadSchema>;
 
+// ── FullTrace V2 Payload (PRI-190) ──
+
+export const FullTracePayloadV2Schema = FullTracePayloadV2SchemaImport;
+export const TraceSourceRefSchema = TraceSourceRefSchemaImport;
+export const TraceTimelineEntrySchema = TraceTimelineEntrySchemaImport;
+export const TraceEventKindSchema = TraceEventKindSchemaImport;
+export const SourceRefKindSchema = SourceRefKindSchemaImport;
+
+export type FullTracePayloadV2 = FullTracePayloadV2Type;
+export type TraceSourceRef = TraceSourceRefType;
+export type TraceTimelineEntry = TraceTimelineEntryType;
+export type TraceEventKind = TraceEventKindType;
+export type SourceRefKind = SourceRefKindType;
+export type FullTraceValidationResult = FullTraceValidationResultType;
+export type SanitizeFullTraceResult = SanitizeFullTraceResultType;
+export type RunRecordLike = RunRecordLikeType;
+
+export {
+  validateFullTracePayload,
+  sanitizeFullTracePayload,
+  buildFullTraceTimeline,
+  buildSourceRefs,
+  checkFullTracePayloadSchema,
+  TRACE_EVENT_KINDS,
+  SOURCE_REF_KINDS,
+};
+
 export const ContextPayloadSchema = Type.Object({
   contextId: Type.String({ minLength: 1 }),
   sourceRefs: Type.Array(Type.String({ minLength: 1 })),
@@ -145,7 +196,7 @@ export const DiagnosticianContextPayloadSchema = Type.Object({
   conversationWindow: Type.Array(HistoryQueryEntrySchema),
   eventSummaries: Type.Optional(Type.Array(Type.Record(Type.String(), Type.Unknown()))),
   ambiguityNotes: Type.Optional(Type.Array(Type.String())),
-  fullTrace: Type.Optional(Type.Union([FullTracePayloadSchema, Type.Null()])),
+  fullTrace: Type.Optional(Type.Union([FullTracePayloadSchema, FullTracePayloadV2SchemaImport, Type.Null()])),
 });
 
 export type DiagnosticianContextPayload = Static<typeof DiagnosticianContextPayloadSchema>;
