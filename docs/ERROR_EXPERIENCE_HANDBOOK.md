@@ -60,7 +60,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 
 | ID | Summary | Source |
 |----|---------|--------|
-| *(No entries yet)* | | |
+| ERR-001 | `as string` cast on untrusted JSON bypasses runtime validation | PRI-189 |
 
 ---
 
@@ -98,15 +98,25 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 *(Add detailed entries below this line as they are recorded.)*
 
+**[ERR-001]** | `as string | undefined` type cast on untrusted JSON bypasses runtime validation
+
+- **What happened**: In `SqliteSourceTraceLocator.locate()`, the code used `(dj.sourcePainId ?? dj.painId) as string | undefined` to extract the pain ID from a parsed JSON object (`Record<string, unknown>`). The `as` cast silently passes non-string values (e.g., `sourcePainId: 42`), causing `taskPainId === query.sourcePainId` to always fail for non-string types because strict equality between a number and a string is always `false`.
+- **Why it's wrong**: `as` is a compile-time assertion with zero runtime validation. When `diagnosticJson` contains `sourcePainId: 42` (a number), the cast silently tells TypeScript it's a string, but the actual runtime value is still `42` (number). The strict equality `42 === "42"` evaluates to `false`, producing a false `not_found` decision instead of a correct match or a type-mismatch diagnostic.
+- **Correct approach**: Use `typeof rawPainId === 'string' ? rawPainId : undefined` to validate the type at runtime before using it in comparisons.
+- **How to prevent**: Never use `as` type assertions on values from untrusted JSON sources (`Record<string, unknown>`). Always validate with `typeof` checks before using the value. When extracting fields from parsed JSON, treat every field as `unknown` and narrow with runtime type guards.
+- **Source**: PRI-189
+- **Date**: 2026-05-19
+- **Recurrence**: None
+
 ---
 
 ## Statistics
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 0 |
-| Last updated | 2026-05-18 |
-| Top category | — |
+| Total lessons | 1 |
+| Last updated | 2026-05-19 |
+| Top category | Schema & Type |
 | Recurring errors | 0 |
 
 
