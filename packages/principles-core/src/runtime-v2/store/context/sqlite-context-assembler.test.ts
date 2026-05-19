@@ -19,6 +19,7 @@ import { SqliteTaskStore } from '../task/sqlite-task-store.js';
 import { SqliteRunStore } from '../run/sqlite-run-store.js';
 import { SqliteHistoryQuery } from '../history/sqlite-history-query.js';
 import { SqliteTrajectoryLocator } from '../trajectory/sqlite-trajectory-locator.js';
+import { SqliteSourceTraceLocator } from '../trajectory/sqlite-source-trace-locator.js';
 import { SqliteContextAssembler } from './sqlite-context-assembler.js';
 import { DiagnosticianContextPayloadSchema } from '../../context-payload.js';
 import type { DiagnosticianTaskRecord } from '../../task-status.js';
@@ -66,7 +67,7 @@ interface TestFixture {
   sqliteTaskStore: SqliteTaskStore;
   runStore: SqliteRunStore;
   historyQuery: SqliteHistoryQuery;
-  trajectoryLocator: SqliteTrajectoryLocator | undefined;
+  sourceTraceLocator: SqliteSourceTraceLocator | undefined;
   taskStore: TaskStore;
   taskMap: Map<string, TaskRecord>;
   assembler: SqliteContextAssembler;
@@ -80,9 +81,11 @@ function createFixture(tasks?: Map<string, DiagnosticianTaskRecord>, options?: {
   const historyQuery = new SqliteHistoryQuery(connection);
   const taskMap = tasks ?? new Map();
   const taskStore = createMockTaskStore(taskMap);
-  const trajectoryLocator = options?.withLocator ? new SqliteTrajectoryLocator(connection) : undefined;
-  const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { trajectoryLocator });
-  return { tmpDir, connection, sqliteTaskStore, runStore, historyQuery, trajectoryLocator, taskStore, taskMap, assembler };
+  const sourceTraceLocator = options?.withLocator
+    ? new SqliteSourceTraceLocator(taskStore, new SqliteTrajectoryLocator(connection))
+    : undefined;
+  const assembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
+  return { tmpDir, connection, sqliteTaskStore, runStore, historyQuery, sourceTraceLocator, taskStore, taskMap, assembler };
 }
 
 function cleanupFixture(fixture: TestFixture): void {
@@ -564,7 +567,7 @@ describe('SqliteContextAssembler', () => {
       const payload = await f.assembler.assemble(task.taskId);
 
       expect(payload.fullTrace).toBeNull();
-      expect(notesInclude(payload.ambiguityNotes, 'TrajectoryLocator not available')).toBe(true);
+      expect(notesInclude(payload.ambiguityNotes, 'SourceTraceLocator not available')).toBe(true);
     } finally { cleanupFixture(f); }
   });
 
@@ -580,7 +583,7 @@ describe('SqliteContextAssembler', () => {
       const payload = await f.assembler.assemble(task.taskId);
 
       expect(payload.fullTrace).toBeNull();
-      expect(notesInclude(payload.ambiguityNotes, 'No sessionIdHint')).toBe(true);
+      expect(notesInclude(payload.ambiguityNotes, 'sessionIdHint')).toBe(true);
     } finally { cleanupFixture(f); }
   });
 
