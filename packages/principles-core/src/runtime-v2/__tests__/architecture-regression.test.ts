@@ -133,6 +133,9 @@ const REQUIRED_SOURCE_FILES = [
   'activation/approval-queue.ts',
   'activation/memory-approval-store.ts',
   'activation/sqlite-approval-store.ts',
+  // PRI-189
+  'store/trajectory/source-trace-locator.ts',
+  'store/trajectory/sqlite-source-trace-locator.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -2740,6 +2743,50 @@ describe('PRI-144 ActivationDispatcher & Low-risk Writers', () => {
     expect(src).toContain('ApprovalQueueStore');
     expect(src).toContain('AUTO_PROMOTION_CONFIDENCE_THRESHOLD');
     expect(src).toContain('AUTO_PROMOTABLE_CHANNELS');
+  });
+});
+
+// ── PRI-189: SourceTraceLocator contract boundary ──────────────────────────────
+
+describe('PRI-189 SourceTraceLocator contract boundary', () => {
+  it('source-trace-locator.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'store', 'trajectory', 'source-trace-locator.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('sqlite-source-trace-locator.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'store', 'trajectory', 'sqlite-source-trace-locator.ts'), 'utf-8');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+  });
+
+  it('core barrel exports SourceTraceLocator and SqliteSourceTraceLocator', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('SourceTraceLocator');
+    expect(src).toContain('SqliteSourceTraceLocator');
+    expect(src).toContain('SourceTraceLocateDecision');
+    expect(src).toContain('SourceTraceCandidate');
+  });
+
+  it('store/trajectory/index.ts re-exports SourceTraceLocator + SqliteSourceTraceLocator', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const indexPath = resolve(__dirname, '..', 'store', 'trajectory', 'index.ts');
+    expect(existsSync(indexPath)).toBe(true);
+    const src = readFileSync(indexPath, 'utf-8');
+    expect(src).toContain('SourceTraceLocator');
+    expect(src).toContain('SqliteSourceTraceLocator');
   });
 });
 
