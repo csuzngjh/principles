@@ -98,6 +98,11 @@ export interface ChannelWriter {
   readonly channel: InternalizationChannel;
   canActivate(artifact: PIArtifactSnapshot): Promise<CanActivateResult>;
   activate(input: WriterInput, artifact: PIArtifactSnapshot): Promise<WriterResult>;
+  buildApprovalContext?(
+    input: WriterInput,
+    artifact: PIArtifactSnapshot,
+    confidence?: number,
+  ): Pick<ApprovalEnqueueInput, 'summary' | 'triggerReason' | 'confidenceExplanation' | 'effectDescription' | 'rejectionEffect'>;
 }
 
 // ── Approval Queue Types ──────────────────────────────────────────────────
