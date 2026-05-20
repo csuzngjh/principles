@@ -8,8 +8,7 @@ const mockHealthSnapshot = vi.hoisted(() => vi.fn());
 const mockHealthClose = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockOrphanCandidates = vi.hoisted(() => vi.fn());
 const mockQueueSnapshot = vi.hoisted(() => vi.fn());
-const mockStateManagerInit = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-const mockStateManagerClose = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockQueueClose = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockAuditConsistency = vi.hoisted(() => vi.fn());
 const mockBuildGfiSnapshot = vi.hoisted(() => vi.fn());
 const mockIntegrityCheck = vi.hoisted(() => vi.fn());
@@ -28,14 +27,12 @@ vi.mock('@principles/core/runtime-v2', () => ({
   PruningReadModel: vi.fn().mockImplementation(function () {
     return { getOrphanDerivedCandidates: mockOrphanCandidates };
   }),
-  InternalizationQueueReadModel: vi.fn().mockImplementation(function () {
-    return { getSnapshot: mockQueueSnapshot, close: vi.fn().mockResolvedValue(undefined) };
+  createInternalizationQueueReadModel: vi.fn().mockResolvedValue({
+    readModel: { getSnapshot: mockQueueSnapshot },
+    close: mockQueueClose,
   }),
   InternalizationChainIntegrityReadModel: vi.fn().mockImplementation(function () {
     return { check: mockIntegrityCheck };
-  }),
-  RuntimeStateManager: vi.fn().mockImplementation(function () {
-    return { initialize: mockStateManagerInit, close: mockStateManagerClose };
   }),
   auditCandidateLedgerConsistency: mockAuditConsistency,
   buildGfiWorkspaceSnapshot: mockBuildGfiSnapshot,
@@ -84,8 +81,7 @@ describe('exportDiagnosticsBundle', () => {
     mockHealthClose.mockResolvedValue(undefined);
     mockOrphanCandidates.mockReturnValue({ candidates: [], dbReadable: true });
     mockQueueSnapshot.mockResolvedValue({ pendingCount: 0, readyTasks: [] });
-    mockStateManagerInit.mockResolvedValue(undefined);
-    mockStateManagerClose.mockResolvedValue(undefined);
+    mockQueueClose.mockResolvedValue(undefined);
     mockAuditConsistency.mockResolvedValue({ status: 'ok', consumedCount: 0, orphanCandidateCount: 0, missingLedgerCount: 0 });
     mockBuildGfiSnapshot.mockReturnValue({ active: null, staleSessionCount: 0, totalSessionCount: 0, activeSessionCount: 0, generatedAt: new Date().toISOString() });
     mockIntegrityCheck.mockReturnValue(healthyIntegrityResult());
@@ -156,5 +152,19 @@ describe('exportDiagnosticsBundle', () => {
     expect(parsed.apiKey).toBe('[REDACTED]');
     expect(parsed.config.token).toBe('[REDACTED]');
     expect(parsed.config.safeValue).toBe('hello');
+  });
+
+  it('uses createInternalizationQueueReadModel with readonly: true (no RuntimeStateManager)', async () => {
+    const fs = await import('fs');
+    const src = fs.readFileSync(require.resolve('../../src/commands/runtime-diagnostics-export.ts'), 'utf-8');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).toContain('createInternalizationQueueReadModel');
+    expect(src).toMatch(/createInternalizationQueueReadModel\(\{[^}]*readonly:\s*true/);
+  });
+
+  it('calls queue close once on main path', async () => {
+    const outDir = path.join(tempDir, 'snapshots');
+    await exportDiagnosticsBundle(tempDir, outDir);
+    expect(mockQueueClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -6,8 +6,7 @@ const {
   mockHealthClose,
   mockOrphanCandidates,
   mockQueueSnapshot,
-  mockStateManagerInit,
-  mockStateManagerClose,
+  mockQueueClose,
   mockAuditConsistency,
   mockBuildGfiSnapshot,
   mockClassifyGfiHealth,
@@ -17,8 +16,7 @@ const {
   mockHealthClose: vi.fn().mockResolvedValue(undefined),
   mockOrphanCandidates: vi.fn(),
   mockQueueSnapshot: vi.fn(),
-  mockStateManagerInit: vi.fn().mockResolvedValue(undefined),
-  mockStateManagerClose: vi.fn().mockResolvedValue(undefined),
+  mockQueueClose: vi.fn().mockResolvedValue(undefined),
   mockAuditConsistency: vi.fn(),
   mockBuildGfiSnapshot: vi.fn(),
   mockClassifyGfiHealth: vi.fn(),
@@ -38,11 +36,9 @@ vi.mock('@principles/core/runtime-v2', () => ({
   PruningReadModel: vi.fn().mockImplementation(function () {
     return { getOrphanDerivedCandidates: mockOrphanCandidates };
   }),
-  InternalizationQueueReadModel: vi.fn().mockImplementation(function () {
-    return { getSnapshot: mockQueueSnapshot, close: vi.fn().mockResolvedValue(undefined) };
-  }),
-  RuntimeStateManager: vi.fn().mockImplementation(function () {
-    return { initialize: mockStateManagerInit, close: mockStateManagerClose };
+  createInternalizationQueueReadModel: vi.fn().mockResolvedValue({
+    readModel: { getSnapshot: mockQueueSnapshot },
+    close: mockQueueClose,
   }),
   auditCandidateLedgerConsistency: mockAuditConsistency,
   buildGfiWorkspaceSnapshot: mockBuildGfiSnapshot,
@@ -89,6 +85,9 @@ function healthyQueueSnapshot() {
     pendingCount: 0, retryWaitCount: 0, countsByTaskKind: {}, countsByChannel: {},
     invalidMetadataCount: 0, sampleInvalidTaskIds: [],
     blockedSummary: { count: 0, samples: [] }, dependencyFailedSummary: { count: 0, samples: [] },
+    leaseConflictSummary: { count: 0, samples: [], sampleTaskIds: [] },
+    retryWaitPendingSummary: { count: 0, samples: [] },
+    unresolvableSummary: { count: 0, samples: [] },
     readyTasks: [], noReadyTasks: null,
   };
 }
@@ -107,8 +106,7 @@ describe('runCanaryChecks', () => {
     mockHealthClose.mockResolvedValue(undefined);
     mockOrphanCandidates.mockReturnValue({ candidates: [], dbReadable: true });
     mockQueueSnapshot.mockResolvedValue(healthyQueueSnapshot());
-    mockStateManagerInit.mockResolvedValue(undefined);
-    mockStateManagerClose.mockResolvedValue(undefined);
+    mockQueueClose.mockResolvedValue(undefined);
     mockAuditConsistency.mockResolvedValue({ status: 'ok', consumedCount: 0, orphanCandidateCount: 0, missingLedgerCount: 0 });
     mockBuildGfiSnapshot.mockReturnValue(healthyGfiSnapshot());
     mockClassifyGfiHealth.mockReturnValue({ status: 'healthy', reason: '0 active, 0 stale sessions', staleGfiDegradedThreshold: 40 });
@@ -186,16 +184,17 @@ describe('runCanaryChecks', () => {
     expect(result.recommendedNextActions.some(a => a.includes('pruning orphans') || a.includes('dry-run'))).toBe(true);
   });
 
-  it('opens RuntimeStateManager in readonly mode for queue check', async () => {
-    await runCanaryChecks(WS);
+  it('uses createInternalizationQueueReadModel with readonly: true (no RuntimeStateManager)', async () => {
+    const fs = await import('fs');
+    const src = fs.readFileSync(require.resolve('../../src/commands/runtime-canary.ts'), 'utf-8');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).toContain('createInternalizationQueueReadModel');
+    expect(src).toMatch(/createInternalizationQueueReadModel\(\{[^}]*readonly:\s*true/);
+  });
 
-    const RSM = vi.mocked(await import('@principles/core/runtime-v2')).RuntimeStateManager;
-    const calls = RSM.mock.calls;
-    const queueCall = calls.find(c => (c as Record<string, unknown>[])[0] && typeof (c[0] as Record<string, unknown>)?.readonly === 'boolean');
-    expect(queueCall).toBeTruthy();
-    if (queueCall) {
-      expect((queueCall[0] as Record<string, unknown>).readonly).toBe(true);
-    }
+  it('calls queue close once on healthy path', async () => {
+    await runCanaryChecks(WS);
+    expect(mockQueueClose).toHaveBeenCalledTimes(1);
   });
 
   it('includes nextReadyTaskKind and nextReadyTaskId in top-level internalizationQueueSummary when queue has ready tasks', async () => {
@@ -210,6 +209,7 @@ describe('runCanaryChecks', () => {
       dependencyFailedSummary: { count: 0, samples: [] },
       leaseConflictSummary: { count: 0, samples: [], sampleTaskIds: [] },
       retryWaitPendingSummary: { count: 0, samples: [] },
+      unresolvableSummary: { count: 0, samples: [] },
       readyTasks: [
         { taskId: 'task-abc-123', taskKind: 'dreamer', channel: 'pi' },
         { taskId: 'task-def-456', taskKind: 'philosopher', channel: 'pi' },
@@ -239,6 +239,7 @@ describe('runCanaryChecks', () => {
       dependencyFailedSummary: { count: 0, samples: [] },
       leaseConflictSummary: { count: 0, samples: [], sampleTaskIds: [] },
       retryWaitPendingSummary: { count: 0, samples: [] },
+      unresolvableSummary: { count: 0, samples: [] },
       readyTasks: [],
       noReadyTasks: { reason: 'all_hydration_failed', inspectedCount: 5 },
     });

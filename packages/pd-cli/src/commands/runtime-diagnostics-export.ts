@@ -4,9 +4,8 @@ import {
   OperatorHealthReadModel,
   SchemaConformanceReadModel,
   PruningReadModel,
-  InternalizationQueueReadModel,
+  createInternalizationQueueReadModel,
   InternalizationChainIntegrityReadModel,
-  RuntimeStateManager,
   auditCandidateLedgerConsistency,
   buildGfiWorkspaceSnapshot,
 } from '@principles/core/runtime-v2';
@@ -147,13 +146,11 @@ export async function exportDiagnosticsBundle(workspaceDir: string, outDir: stri
   } });
 
   await collectArtifact({ ...baseCtx, name: 'internalization-queue', fileName: 'internalization-queue.json', collector: async () => {
-    const stateManager = new RuntimeStateManager({ workspaceDir, readonly: true });
-    await stateManager.initialize();
+    const { readModel, close } = await createInternalizationQueueReadModel({ workspaceDir, readonly: true });
     try {
-      const model = new InternalizationQueueReadModel(stateManager);
-      return await model.getSnapshot();
+      return await readModel.getSnapshot();
     } finally {
-      await stateManager.close();
+      await close();
     }
   } });
 
