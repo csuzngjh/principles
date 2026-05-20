@@ -255,4 +255,91 @@ describe('evaluateInRefinerSandbox', () => {
     expect(result.failedCases[0]?.errorType).toBe('validation_failed');
     expect(result.failedCases[0]?.message).toContain('null/undefined');
   });
+
+  it('uses DEFAULT_TIMEOUT_MS when softTimeoutMs is NaN', () => {
+    const trace = makeTrace([
+      makeCase({ caseId: 'neg-1', kind: 'negative', expectedDecision: 'block' }),
+      makeCase({ caseId: 'pos-1', kind: 'positive', expectedDecision: 'allow', params: { path: '/safe.txt' } }),
+    ]);
+    const smartEvaluate: ReplayEvaluateFn = (input) => {
+      if ((input.action.paramsSummary).path === '/etc/passwd') {
+        return { decision: 'block', matched: true, reason: 'dangerous' };
+      }
+      return { decision: 'allow', matched: false, reason: 'ok' };
+    };
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: smartEvaluate,
+      softTimeoutMs: NaN,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(true);
+  });
+
+  it('uses DEFAULT_TIMEOUT_MS when softTimeoutMs is Infinity', () => {
+    const trace = makeTrace([
+      makeCase({ caseId: 'neg-1', kind: 'negative', expectedDecision: 'block' }),
+      makeCase({ caseId: 'pos-1', kind: 'positive', expectedDecision: 'allow', params: { path: '/safe.txt' } }),
+    ]);
+    const smartEvaluate: ReplayEvaluateFn = (input) => {
+      if ((input.action.paramsSummary).path === '/etc/passwd') {
+        return { decision: 'block', matched: true, reason: 'dangerous' };
+      }
+      return { decision: 'allow', matched: false, reason: 'ok' };
+    };
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: smartEvaluate,
+      softTimeoutMs: Infinity,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(true);
+  });
+
+  it('uses DEFAULT_TIMEOUT_MS when softTimeoutMs is -Infinity', () => {
+    const trace = makeTrace([
+      makeCase({ caseId: 'neg-1', kind: 'negative', expectedDecision: 'block' }),
+      makeCase({ caseId: 'pos-1', kind: 'positive', expectedDecision: 'allow', params: { path: '/safe.txt' } }),
+    ]);
+    const smartEvaluate: ReplayEvaluateFn = (input) => {
+      if ((input.action.paramsSummary).path === '/etc/passwd') {
+        return { decision: 'block', matched: true, reason: 'dangerous' };
+      }
+      return { decision: 'allow', matched: false, reason: 'ok' };
+    };
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: smartEvaluate,
+      softTimeoutMs: -Infinity,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(true);
+  });
+
+  it('distinguishes throw null from return null', () => {
+    const trace = makeTrace();
+    const throwNull: ReplayEvaluateFn = () => {
+      const err: unknown = null;
+      throw err;
+    };
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: throwNull,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('unknown');
+    expect(result.failedCases[0]?.message).toContain('null');
+    expect(result.failedCases[0]?.message).not.toContain('returned');
+  });
+
+  it('return null is classified as validation_failed, not unknown', () => {
+    const trace = makeTrace();
+    const returnNull: ReplayEvaluateFn = () => {
+      return null as unknown as ReturnType<ReplayEvaluateFn>;
+    };
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: returnNull,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('returned null/undefined');
+  });
 });

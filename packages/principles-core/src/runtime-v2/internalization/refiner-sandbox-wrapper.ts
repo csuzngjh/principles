@@ -50,6 +50,9 @@ function classifyError(err: unknown): { errorType: RefinerSandboxErrorType; mess
 }
 
 function resolveTimeoutMs(timeoutMs: number): number {
+  if (!Number.isFinite(timeoutMs)) {
+    return DEFAULT_TIMEOUT_MS;
+  }
   if (timeoutMs > MAX_TIMEOUT_MS) {
     return MAX_TIMEOUT_MS;
   }
@@ -63,7 +66,7 @@ function evaluateCaseWithTimeout(
   evaluateFn: ReplayEvaluateFn,
   traceCase: GoldenTraceCase,
   timeoutMs: number,
-): { result: RuleHostResult | null; error: unknown; timedOut: boolean } {
+): { result: RuleHostResult | null; error: unknown; timedOut: boolean; threw: boolean } {
   const input = createSyntheticRuleHostInput(
     { toolName: traceCase.toolName, params: traceCase.params },
   );
@@ -83,15 +86,15 @@ function evaluateCaseWithTimeout(
     const result = evaluateFn(input, helpers);
     const elapsed = Date.now() - start;
     if (elapsed >= timeoutMs) {
-      return { result: null, error: null, timedOut: true };
+      return { result: null, error: null, timedOut: true, threw: false };
     }
-    return { result, error: null, timedOut: false };
+    return { result, error: null, timedOut: false, threw: false };
   } catch (err) {
     const elapsed = Date.now() - start;
     if (elapsed >= timeoutMs) {
-      return { result: null, error: null, timedOut: true };
+      return { result: null, error: null, timedOut: true, threw: false };
     }
-    return { result: null, error: err, timedOut: false };
+    return { result: null, error: err, timedOut: false, threw: true };
   }
 }
 
@@ -165,7 +168,7 @@ export function evaluateInRefinerSandbox(
   const failedCases: RefinerSandboxFailedCase[] = [];
 
   for (const traceCase of goldenTrace.cases) {
-    const { result, error, timedOut } = evaluateCaseWithTimeout(evaluateFn, traceCase, timeoutMs);
+    const { result, error, timedOut, threw } = evaluateCaseWithTimeout(evaluateFn, traceCase, timeoutMs);
 
     if (timedOut) {
       failedCases.push({
@@ -176,7 +179,7 @@ export function evaluateInRefinerSandbox(
       continue;
     }
 
-    if (error !== null) {
+    if (threw) {
       const classified = classifyError(error);
       failedCases.push({
         caseId: traceCase.caseId,
