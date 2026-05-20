@@ -458,4 +458,26 @@ describe('Post-Write Checks & Pain Hook', () => {
     }));
   });
 
+  it('should fall back to numeric details.exitCode when top-level exitCode is non-numeric', () => {
+    const mockCtx = { workspaceDir, sessionId: 's-fallback-numeric', api: { logger: {} } };
+    const mockEvent = {
+      toolName: 'bash',
+      params: { arguments: 'npm test' },
+      result: { exitCode: '0', details: { exitCode: 1 } },
+      error: undefined,
+    };
+
+    vi.mocked(ioUtils.normalizePath).mockReturnValue('package.json');
+    vi.mocked(ioUtils.isRisky).mockReturnValue(false);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+
+    expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 's-fallback-numeric',
+      toolName: 'bash',
+      outcome: 'failure',
+    }));
+  });
+
 });
