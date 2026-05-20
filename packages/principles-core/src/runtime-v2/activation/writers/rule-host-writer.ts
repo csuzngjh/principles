@@ -1,4 +1,4 @@
-import type { PIArtifactSnapshot, CanActivateResult, ChannelWriter, WriterInput, WriterResult, ActivationRiskLevel } from '../activation-types.js';
+import type { PIArtifactSnapshot, CanActivateResult, ChannelWriter, WriterInput, WriterResult, ActivationRiskLevel, ApprovalEnqueueInput } from '../activation-types.js';
 import type { RefinerRuleHostGateDeps, RefinerRuleHostGateResult } from '../../internalization/refiner-rulehost-gate.js';
 import { evaluateRefinerRuleHostGate } from '../../internalization/refiner-rulehost-gate.js';
 import type { GoldenTrace } from '../../golden-trace.js';
@@ -131,5 +131,43 @@ export class RuleHostWriter implements ChannelWriter {
       action: 'code_tool_hook_shadow_activate',
       targetRef: `impl://${ruleId}`,
     };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  buildApprovalContext(
+    _input: WriterInput,
+    artifact: PIArtifactSnapshot,
+    confidence?: number,
+  ): Pick<ApprovalEnqueueInput, 'summary' | 'triggerReason' | 'confidenceExplanation' | 'effectDescription' | 'rejectionEffect'> {
+    const ruleId = typeof artifact.sourceRuleId === 'string' && artifact.sourceRuleId.trim().length > 0
+      ? artifact.sourceRuleId.trim()
+      : artifact.artifactId;
+
+    const parsed = parseContentJson(artifact.contentJson);
+    const rawPainReason = parsed?.painReasonSummary;
+    const painReasonSummary = typeof rawPainReason === 'string'
+      ? rawPainReason.trim()
+      : '';
+    const affectedTools = Array.isArray(parsed?.affectedTools)
+      ? (parsed.affectedTools as unknown[]).filter((t): t is string => typeof t === 'string')
+      : [];
+
+    const summary = `Rule activation request for code_tool_hook: ${ruleId}`;
+
+    const triggerReason = painReasonSummary.length > 0
+      ? painReasonSummary
+      : 'RuleHost candidate requires human approval before activation.';
+
+    const confidenceExplanation = confidence !== undefined && confidence !== null
+      ? `Confidence: ${Math.round(confidence * 100)}%. Evaluated through shadow replay and sandbox gate.`
+      : 'Confidence score unavailable. Manual review recommended.';
+
+    const effectDescription = affectedTools.length > 0
+      ? `This rule will intercept tool calls: ${affectedTools.join(', ')}. After approval, matching calls will be evaluated against the rule logic.`
+      : 'This candidate may affect code_tool_hook behavior after approval. Tool scope is not specified.';
+
+    const rejectionEffect = 'The rule will not be activated. Current tool calls will continue unchanged.';
+
+    return { summary, triggerReason, confidenceExplanation, effectDescription, rejectionEffect };
   }
 }

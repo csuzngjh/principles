@@ -151,13 +151,26 @@ export class ActivationDispatcher {
     }
 
     try {
+      const writer = this.writers.get(input.channel);
+      const writerContext = writer?.buildApprovalContext?.(
+        {
+          artifactId: input.artifactId,
+          channel: input.channel,
+          principleId: extractPrincipleId(artifact) ?? '',
+          idempotencyKey: _idempotencyKey,
+          now: input.now,
+        },
+        artifact,
+        input.confidence,
+      );
+
       const record = await this.approvalQueueStore.enqueue(
         {
           artifactId: input.artifactId,
           channel: input.channel,
           riskLevel,
           confidence: input.confidence,
-          ...buildApprovalContext(artifact, input.channel, riskLevel, input.confidence),
+          ...(writerContext ?? buildApprovalContext(artifact, input.channel, riskLevel, input.confidence)),
         },
         input.now,
       );
