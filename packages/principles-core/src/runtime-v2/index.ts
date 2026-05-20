@@ -918,6 +918,7 @@ export type {
 
 export {
   replayGoldenTrace,
+  diffParams,
   DEFAULT_REPLAY_VALIDATOR_CONFIG,
 } from './golden-trace-replay-validator.js';
 

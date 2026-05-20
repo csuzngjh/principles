@@ -342,4 +342,119 @@ describe('evaluateInRefinerSandbox', () => {
     expect(result.failedCases[0]?.errorType).toBe('validation_failed');
     expect(result.failedCases[0]?.message).toContain('returned null/undefined');
   });
+
+  it('propose_correction with auto_correct but missing correctionProposal fails', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pc-1',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+    }]);
+    const autoCorrectNoProposal: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'propose fix',
+    });
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: autoCorrectNoProposal,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('missing correctionProposal');
+  });
+
+  it('propose_correction with matching expectedProposedParams succeeds', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pc-2',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: { content: 'console.log' },
+    }]);
+    const correctProposal: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'propose fix',
+      correctionProposal: {
+        proposedParams: { content: 'console.log' },
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'console.log', reason: 'remove debugger' }],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: correctProposal,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(true);
+    expect(result.failedCases).toEqual([]);
+  });
+
+  it('propose_correction with mismatched expectedProposedParams fails', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pc-3',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: { content: 'console.log' },
+    }]);
+    const wrongParams: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'propose fix',
+      correctionProposal: {
+        proposedParams: { content: 'wrong_value' },
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'wrong_value', reason: 'fix' }],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: wrongParams,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('proposedParams');
+  });
+
+  it('propose_correction with mismatched expectedApplicationMode fails', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pc-4',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: { content: 'console.log' },
+      expectedApplicationMode: 'live',
+    }]);
+    const wrongMode: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'propose fix',
+      correctionProposal: {
+        proposedParams: { content: 'console.log' },
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'console.log', reason: 'fix' }],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: wrongMode,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('applicationMode');
+  });
 });

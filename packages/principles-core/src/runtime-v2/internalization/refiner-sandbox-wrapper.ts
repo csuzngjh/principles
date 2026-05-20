@@ -1,5 +1,6 @@
 import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
 import type { ReplayEvaluateFn } from '../golden-trace-replay-validator.js';
+import { diffParams } from '../golden-trace-replay-validator.js';
 import { checkForbiddenPatterns } from './rule-code-validator.js';
 import { createSyntheticRuleHostInput } from '../golden-trace.js';
 import type { RuleHostHelpers } from './rule-host-helpers.js';
@@ -116,6 +117,27 @@ function validateCaseDecision(
     case 'propose_correction':
       if (result.decision !== 'auto_correct') {
         return { passed: false, failureReason: `Expected auto_correct (propose_correction) but got ${result.decision}` };
+      }
+      if (!result.correctionProposal) {
+        return { passed: false, failureReason: 'auto_correct decision missing correctionProposal' };
+      }
+      {
+        const proposal = result.correctionProposal;
+        const reasons: string[] = [];
+        if (traceCase.expectedProposedParams) {
+          const diffs = diffParams(traceCase.expectedProposedParams, proposal.proposedParams);
+          if (diffs.length > 0) {
+            reasons.push(`proposedParams mismatch: ${diffs.join('; ')}`);
+          }
+        }
+        if (traceCase.expectedApplicationMode) {
+          if (proposal.applicationMode !== traceCase.expectedApplicationMode) {
+            reasons.push(`applicationMode mismatch: expected ${traceCase.expectedApplicationMode}, got ${proposal.applicationMode}`);
+          }
+        }
+        if (reasons.length > 0) {
+          return { passed: false, failureReason: reasons.join('; ') };
+        }
       }
       return { passed: true };
     default:

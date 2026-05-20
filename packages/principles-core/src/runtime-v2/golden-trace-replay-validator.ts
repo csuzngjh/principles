@@ -64,7 +64,7 @@ const GOLDEN_TO_HOST_BLOCK_ACCEPT: ReadonlySet<RuleHostDecision> = new Set(['blo
 // Helpers
 // ---------------------------------------------------------------------------
 
-function diffParams(
+export function diffParams(
   expected: Record<string, unknown>,
   actual: Record<string, unknown>,
 ): string[] {
