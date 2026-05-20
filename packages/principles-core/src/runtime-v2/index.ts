@@ -772,6 +772,11 @@ export type {
 export { createRecoverySweepService } from './recovery-sweep-service.js';
 export type { RecoverySweepService, RecoverySweepServiceHandle } from './recovery-sweep-service.js';
 
+// ── RuntimeStateHandle (PRI-198) ────────────────────────────────────────────
+
+export { createRuntimeStateHandle } from './runtime-state-handle.js';
+export type { RuntimeStateHandle } from './runtime-state-handle.js';
+
 // ── Idle Trigger Decision Model (PRI-143) ──────────────────────────────────
 
 export type {
