@@ -422,6 +422,35 @@ describe('RuleHostWriter.buildApprovalContext', () => {
       expect(value).not.toContain('null');
     }
   });
+
+  it('falls back for NaN confidence', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact();
+    const ctx = writer.buildApprovalContext(makeWriterInput(), artifact, NaN);
+
+    expect(ctx.confidenceExplanation).toContain('unavailable');
+    expect(ctx.confidenceExplanation).not.toContain('NaN');
+  });
+
+  it('falls back for Infinity confidence', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact();
+    const ctx = writer.buildApprovalContext(makeWriterInput(), artifact, Infinity);
+
+    expect(ctx.confidenceExplanation).toContain('unavailable');
+    expect(ctx.confidenceExplanation).not.toContain('Infinity');
+  });
+
+  it('falls back for out-of-range confidence (>1)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact();
+    const ctx = writer.buildApprovalContext(makeWriterInput(), artifact, 1.5);
+
+    expect(ctx.confidenceExplanation).toContain('unavailable');
+  });
 });
 
 describe('RuleHostWriter dispatcher integration', () => {
@@ -548,5 +577,89 @@ describe('RuleHostWriter dispatcher integration', () => {
     expect(record.confidenceExplanation).toContain('88%');
     expect(record.effectDescription).toContain('read_file');
     expect(record.rejectionEffect).toContain('not be activated');
+  });
+
+  it('refuses to enqueue malformed RuleHost artifact (no implementation code)', async () => {
+    const { RuleHostWriter } = await import('../rule-host-writer.js');
+    const {
+      ActivationDispatcher,
+      MemoryActivationStateStore,
+      MemoryArtifactReadModel,
+      MemoryApprovalQueueStore,
+    } = await import('../../index.js');
+
+    const gateDeps = makeGateDeps();
+    const ruleHostWriter = new RuleHostWriter({ gateDeps });
+    const stateStore = new MemoryActivationStateStore();
+    const artifactStore = new MemoryArtifactReadModel();
+    const approvalStore = new MemoryApprovalQueueStore();
+
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [ruleHostWriter], approvalQueueStore: approvalStore },
+    );
+
+    const malformedArtifact = makeRuleArtifact({
+      contentJson: JSON.stringify({ goldenTrace: makeGoldenTrace() }),
+    });
+    artifactStore.addArtifact(malformedArtifact);
+
+    const result = await dispatcher.dispatch({
+      artifactId: 'art-rule-001',
+      channel: 'code_tool_hook',
+      rolloutDecision: 'require_approval',
+      actor: { kind: 'system', source: 'rollout_reviewer' },
+      now: '2026-05-17T00:00:00.000Z',
+      confirm: true,
+    });
+
+    expect(result.decision).toBe('refused');
+    const record = await approvalStore.getById('apr_code_tool_hook_art-rule-001');
+    expect(record).toBeNull();
+  });
+
+  it('refuses to enqueue when gate decision is not accepted_shadow', async () => {
+    const { RuleHostWriter } = await import('../rule-host-writer.js');
+    const {
+      ActivationDispatcher,
+      MemoryActivationStateStore,
+      MemoryArtifactReadModel,
+      MemoryApprovalQueueStore,
+    } = await import('../../index.js');
+
+    const gateDeps = makeGateDeps();
+    const ruleHostWriter = new RuleHostWriter({ gateDeps });
+    const stateStore = new MemoryActivationStateStore();
+    const artifactStore = new MemoryArtifactReadModel();
+    const approvalStore = new MemoryApprovalQueueStore();
+
+    const dispatcher = new ActivationDispatcher(
+      artifactStore,
+      stateStore,
+      { writers: [ruleHostWriter], approvalQueueStore: approvalStore },
+    );
+
+    const gateFailedArtifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate() {}',
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'rejected_validation_failed',
+      }),
+    });
+    artifactStore.addArtifact(gateFailedArtifact);
+
+    const result = await dispatcher.dispatch({
+      artifactId: 'art-rule-001',
+      channel: 'code_tool_hook',
+      rolloutDecision: 'require_approval',
+      actor: { kind: 'system', source: 'rollout_reviewer' },
+      now: '2026-05-17T00:00:00.000Z',
+      confirm: true,
+    });
+
+    expect(result.decision).toBe('refused');
+    const record = await approvalStore.getById('apr_code_tool_hook_art-rule-001');
+    expect(record).toBeNull();
   });
 });

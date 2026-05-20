@@ -158,7 +158,8 @@ export class RuleHostWriter implements ChannelWriter {
       ? painReasonSummary
       : 'RuleHost candidate requires human approval before activation.';
 
-    const confidenceExplanation = confidence !== undefined && confidence !== null
+    const validConfidence = typeof confidence === 'number' && Number.isFinite(confidence) && confidence >= 0 && confidence <= 1;
+    const confidenceExplanation = validConfidence
       ? `Confidence: ${Math.round(confidence * 100)}%. Evaluated through shadow replay and sandbox gate.`
       : 'Confidence score unavailable. Manual review recommended.';
 

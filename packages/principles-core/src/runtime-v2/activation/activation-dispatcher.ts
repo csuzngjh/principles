@@ -139,6 +139,12 @@ export class ActivationDispatcher {
       };
     }
 
+    const writer = this.writers.get(input.channel);
+    if (writer) {
+      const canActivateResult = await checkCanActivate(writer, artifact);
+      if (canActivateResult.decision) return canActivateResult.decision;
+    }
+
     // Dry-run: preview what would be queued without persisting
     if (!input.confirm) {
       return {
@@ -151,7 +157,6 @@ export class ActivationDispatcher {
     }
 
     try {
-      const writer = this.writers.get(input.channel);
       const writerContext = writer?.buildApprovalContext?.(
         {
           artifactId: input.artifactId,
