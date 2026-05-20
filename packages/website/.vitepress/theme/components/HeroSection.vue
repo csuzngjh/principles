@@ -13,7 +13,7 @@
         </h1>
         <p class="hero-desc">
           {{ lang === 'zh-CN' 
-            ? '硅基生命的思维操作系统。通过原则、反思与建设性摩擦，让 AI 在执行前先停顿、质疑、校准，摆脱“零摩擦陷阱”。' 
+            ? '硅基生命的思维操作系统。通过原则、反思与建设性摩擦，让 AI 在执行前先停顿、质疑、校准，摆脱"零摩擦陷阱"。' 
             : 'A Thinking OS for silicon lifeforms. Injecting principles, reflection, and constructive friction to make AI pause, question, and calibrate before executing.' 
           }}
         </p>
@@ -44,7 +44,7 @@ const { lang } = useData()
 
 <style scoped>
 .hero-section {
-  padding: 4.5rem 1.5rem;
+  padding: 6rem 1.5rem;
   max-width: 1200px;
   margin: 0 auto;
 }
@@ -52,7 +52,7 @@ const { lang } = useData()
 .hero-container {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 3rem;
+  gap: 3.5rem;
   align-items: center;
 }
 
@@ -74,48 +74,46 @@ const { lang } = useData()
 .hero-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.65rem;
-  padding: 0.4rem 1rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(150, 170, 255, 0.08);
+  gap: 0.6rem;
+  padding: 0.35rem 0.9rem;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
   border-radius: 99px;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.75rem;
 }
 
 .badge-text {
   font-family: var(--vp-font-family-mono);
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--accent);
   text-transform: uppercase;
 }
 
 .hero-title {
   font-size: clamp(34px, 5.5vw, 56px) !important;
-  line-height: 1.15 !important;
-  letter-spacing: -0.03em !important;
-  font-weight: 700;
+  line-height: 1.12 !important;
+  letter-spacing: -0.025em !important;
+  font-weight: 400;
   color: var(--text-main);
   margin-bottom: 1.5rem;
 }
 
 .hero-highlight {
   display: block;
-  font-size: clamp(24px, 3.8vw, 36px) !important;
-  font-weight: 600;
-  background: linear-gradient(135deg, var(--blue) 0%, var(--violet) 50%, var(--amber) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  font-size: clamp(22px, 3.5vw, 34px) !important;
+  font-weight: 400;
+  color: var(--accent);
   margin-top: 0.5rem;
 }
 
 .hero-desc {
-  font-size: clamp(15px, 1.8vw, 17px) !important;
-  line-height: 1.75 !important;
+  font-size: clamp(15px, 1.6vw, 17px) !important;
+  line-height: 1.8 !important;
   color: var(--text-secondary);
-  max-width: 600px;
-  margin-bottom: 2.2rem;
+  max-width: 580px;
+  margin-bottom: 2.5rem;
 }
 
 .hero-actions {
@@ -130,7 +128,6 @@ const { lang } = useData()
   z-index: 2;
 }
 
-/* Specific aspect-ratio override for responsive behavior */
 @media (max-width: 959px) {
   .hero-visual {
     aspect-ratio: 16 / 7;

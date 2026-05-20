@@ -89,15 +89,15 @@ The core mechanism of PD (Principles Disciple) is: **Constructive Friction**.
 
 ### Scenario Comparison
 
-❌ **Ordinary Agent: The Low-Friction Poison**
-> Human: Write me a crawler script for 50 websites.
-> Agent: Generation complete.
-> **Result**: The 501st moat-less product is born, followed by a traffic collapse.
+❌ **Ordinary Agent: The Low-Friction Poison**  
+> Human: Generate 10 product marketing copies for me.  
+> Agent: Generation complete.  
+> **Result**: Yet another batch of cookie-cutter AI filler. Users scroll past after two lines.
 
-💡 **PD Agent: Constructive Friction**
-> Human: Write me a crawler script for 50 websites.
-> PD: I can write it, but there are already tens of thousands of similar scripts on the web. If acquiring information is your only moat, can you provide unique cognitive value? Let's clarify the hypothesis before doing the work.
-> **Result**: The human stops blindly stacking features and pivots to building a system with personal barriers.
+💡 **PD Agent: Constructive Friction**  
+> Human: Generate 10 product marketing copies for me.  
+> PD: I can do that, but first let me ask: who is your target audience? What do they actually care about? If you have not figured out the audience, writing more is just self-indulgence.  
+> **Result**: The human does user research first, then produces content that truly resonates.
 
 PD is by no means a simple system prompt. It is a principle-driven decision-making system:
 - Built-in cognitive models like First Principles and Anti-fragility.
