@@ -60,3 +60,6 @@ export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
 export { MemoryApprovalQueueStore } from './memory-approval-store.js';
 
 export { SqliteApprovalQueueStore } from './sqlite-approval-store.js';
+
+export { RuleHostWriter } from './writers/rule-host-writer.js';
+export type { RuleHostWriterConfig } from './writers/rule-host-writer.js';
