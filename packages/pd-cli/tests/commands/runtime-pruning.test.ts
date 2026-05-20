@@ -60,8 +60,7 @@ const { MockPruningReadModel } = vi.hoisted(() => {
 const mockAppendPruningReview = vi.hoisted(() => vi.fn());
 const mockListPruningReviews = vi.hoisted(() => vi.fn());
 const mockBuildMaskedPrincipleSet = vi.hoisted(() => vi.fn());
-const mockLoadLedger = vi.hoisted(() => vi.fn());
-const mockSaveLedger = vi.hoisted(() => vi.fn());
+const mockRemoveOrphanReferencesFromLedger = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/tmp/test-workspace'),
@@ -87,8 +86,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
   appendPruningReview: mockAppendPruningReview,
   listPruningReviews: mockListPruningReviews,
   buildMaskedPrincipleSet: mockBuildMaskedPrincipleSet,
-  loadLedger: mockLoadLedger,
-  saveLedger: mockSaveLedger,
+  removeOrphanReferencesFromLedger: mockRemoveOrphanReferencesFromLedger,
 }));
 
 import { handlePruningReport, handlePruningExplain, handlePruningReview, handlePruningRollback, handlePruningOrphans } from '../../src/commands/runtime-pruning.js';
@@ -503,8 +501,7 @@ describe('pd runtime pruning rollback', () => {
 describe('pd runtime pruning orphans', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockLoadLedger.mockReset();
-    mockSaveLedger.mockReset();
+    mockRemoveOrphanReferencesFromLedger.mockReset();
   });
 
   it('dry-run outputs orphan list with count (JSON)', () => {
@@ -544,23 +541,14 @@ describe('pd runtime pruning orphans', () => {
     expect(output.mode).toBe('dry_run');
     expect(output.status).toBe('no_op');
     expect(output.dryRun).toBe(true);
-    expect(mockSaveLedger).not.toHaveBeenCalled();
+    expect(mockRemoveOrphanReferencesFromLedger).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
 
   it('--confirm removes orphan IDs from ledger derivedFromPainIds', () => {
-    const mockLedger = {
-      tree: {
-        principles: {
-          p1: {
-            id: 'p1',
-            derivedFromPainIds: ['c_orphan1', 'c_valid1'],
-          },
-        },
-      },
-    };
-    mockLoadLedger.mockReturnValue(mockLedger);
-    mockSaveLedger.mockImplementation(() => {});
+    mockRemoveOrphanReferencesFromLedger.mockReturnValue([
+      { principleId: 'p1', removedIds: ['c_orphan1'] },
+    ]);
 
     class MockOrphanReadModel {
       getOrphanDerivedCandidates() {
@@ -578,10 +566,7 @@ describe('pd runtime pruning orphans', () => {
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     handlePruningOrphans({ json: true, confirm: true });
-    expect(mockSaveLedger).toHaveBeenCalledTimes(1);
-    // Verify the saved ledger contains the correct filtered data (immutability: original mock unchanged)
-    const savedLedgerArg = mockSaveLedger.mock.calls[0]![1];
-    expect(savedLedgerArg.tree.principles.p1.derivedFromPainIds).toEqual(['c_valid1']);
+    expect(mockRemoveOrphanReferencesFromLedger).toHaveBeenCalledTimes(1);
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
     expect(output.mode).toBe('confirm');
     expect(output.status).toBe('changed');
@@ -595,18 +580,7 @@ describe('pd runtime pruning orphans', () => {
   });
 
   it('--confirm does not touch non-orphan candidates', () => {
-    const mockLedger = {
-      tree: {
-        principles: {
-          p1: {
-            id: 'p1',
-            derivedFromPainIds: ['c_valid1', 'c_valid2'],
-          },
-        },
-      },
-    };
-    mockLoadLedger.mockReturnValue(mockLedger);
-    mockSaveLedger.mockImplementation(() => {});
+    mockRemoveOrphanReferencesFromLedger.mockReturnValue([]);
 
     class MockOrphanReadModel {
       getOrphanDerivedCandidates() {
@@ -624,7 +598,8 @@ describe('pd runtime pruning orphans', () => {
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     handlePruningOrphans({ json: true, confirm: true });
-    expect(mockLedger.tree.principles.p1.derivedFromPainIds).toEqual(['c_valid1', 'c_valid2']);
+    const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+    expect(output.removedFromPrinciples).toHaveLength(0);
     consoleSpy.mockRestore();
   });
 
@@ -656,7 +631,7 @@ describe('pd runtime pruning orphans', () => {
     const processSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as (code: number) => never);
     handlePruningOrphans({ json: false, confirm: true });
     expect(processSpy).toHaveBeenCalledWith(1);
-    expect(mockSaveLedger).not.toHaveBeenCalled();
+    expect(mockRemoveOrphanReferencesFromLedger).not.toHaveBeenCalled();
     const errOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(errOutput).toContain('REFUSED');
     consoleSpy.mockRestore();
@@ -682,7 +657,7 @@ describe('pd runtime pruning orphans', () => {
     const processSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as (code: number) => never);
     handlePruningOrphans({ json: true, confirm: true });
     expect(processSpy).toHaveBeenCalledWith(1);
-    expect(mockSaveLedger).not.toHaveBeenCalled();
+    expect(mockRemoveOrphanReferencesFromLedger).not.toHaveBeenCalled();
     const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
     expect(output.status).toBe('refused');
     expect(output.safeToConfirm).toBe(false);

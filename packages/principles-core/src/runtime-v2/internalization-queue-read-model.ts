@@ -16,7 +16,7 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 import type { TaskRecord } from './task-status.js';
-import type { RuntimeStateManager } from './store/runtime-state-manager.js';
+import { RuntimeStateManager } from './store/runtime-state-manager.js';
 import type { PeerRunnerKind, InternalizationChannel } from './internalization/peer-runner-contracts.js';
 import { isPeerRunnerKind } from './internalization/peer-runner-contracts.js';
 import { hydratePITaskRecord } from './internalization/pitask-metadata.js';
@@ -285,4 +285,23 @@ export class InternalizationQueueReadModel {
   async close(): Promise<void> {
     // No-op: RuntimeStateManager lifecycle managed by caller
   }
+}
+
+export interface InternalizationQueueReadModelHandle {
+  readModel: InternalizationQueueReadModel;
+  close: () => Promise<void>;
+}
+
+export async function createInternalizationQueueReadModel(
+  opts: { workspaceDir: string },
+): Promise<InternalizationQueueReadModelHandle> {
+  const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
+  await stateManager.initialize();
+  const readModel = new InternalizationQueueReadModel(stateManager);
+  return {
+    readModel,
+    close: async () => {
+      await stateManager.close();
+    },
+  };
 }
