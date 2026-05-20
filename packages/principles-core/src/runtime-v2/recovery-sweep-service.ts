@@ -1,4 +1,5 @@
-import { RuntimeStateManager } from './store/runtime-state-manager.js';
+import { createRuntimeStateHandle } from './runtime-state-handle.js';
+import type { RuntimeStateHandle } from './runtime-state-handle.js';
 import type { RecoveryResult } from './store/lifecycle/recovery-sweep.js';
 
 export interface RecoverySweepService {
@@ -13,7 +14,7 @@ export interface RecoverySweepServiceHandle {
 }
 
 class RecoverySweepServiceImpl implements RecoverySweepService {
-  constructor(private readonly stateManager: RuntimeStateManager) {}
+  constructor(private readonly stateManager: RuntimeStateHandle['stateManager']) {}
 
   async detectExpiredLeases(): Promise<string[]> {
     return this.stateManager.detectExpiredLeases();
@@ -23,21 +24,19 @@ class RecoverySweepServiceImpl implements RecoverySweepService {
     return this.stateManager.recoverTask(taskId);
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async close(): Promise<void> {
-    await this.stateManager.close();
+    // No-op: RuntimeStateManager lifecycle managed by handle
   }
 }
 
 export async function createRecoverySweepService(
   opts: { workspaceDir: string },
 ): Promise<RecoverySweepServiceHandle> {
-  const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
-  await stateManager.initialize();
-  const service = new RecoverySweepServiceImpl(stateManager);
+  const handle = await createRuntimeStateHandle({ workspaceDir: opts.workspaceDir });
+  const service = new RecoverySweepServiceImpl(handle.stateManager);
   return {
     service,
-    close: async () => {
-      await stateManager.close();
-    },
+    close: handle.close,
   };
 }

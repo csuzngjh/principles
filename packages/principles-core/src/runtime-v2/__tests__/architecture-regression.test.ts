@@ -150,6 +150,9 @@ const REQUIRED_SOURCE_FILES = [
   'golden-trace-candidate-builder.ts',
   // PRI-149 Tier 2
   'recovery-sweep-service.ts',
+  // PRI-146
+  'activation/writers/rule-host-writer.ts',
+  'activation/writers/index.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -211,6 +214,8 @@ const REQUIRED_TEST_FILES = [
   'golden-trace-candidate-builder.test.ts',
   // PRI-173
   '../internalization/__tests__/refiner-rulehost-gate.test.ts',
+  // PRI-146
+  '../activation/writers/__tests__/rule-host-writer.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -714,6 +719,38 @@ describe('pd-cli command boundaries', () => {
     const src = readFileSync(cmdPath, 'utf-8');
     expect(src).not.toContain('RuntimeStateManager');
     expect(src).toContain('createRecoverySweepService');
+  });
+});
+
+// ── PRI-198: RuntimeStateHandle lifecycle facade ────────────────────────────
+
+describe('PRI-198 RuntimeStateHandle lifecycle facade', () => {
+  it('runtime-state-handle.ts source file exists', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const filePath = resolve(__dirname, '..', 'runtime-state-handle.ts');
+    expect(existsSync(filePath)).toBe(true);
+  });
+
+  it('internalization-queue-read-model.ts does not import RuntimeStateManager directly', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization-queue-read-model.ts'), 'utf-8');
+    expect(src).not.toContain("from './store/runtime-state-manager.js'");
+    expect(src).toContain("from './runtime-state-handle.js'");
+  });
+
+  it('recovery-sweep-service.ts does not import RuntimeStateManager directly', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'recovery-sweep-service.ts'), 'utf-8');
+    expect(src).not.toContain("from './store/runtime-state-manager.js'");
+    expect(src).toContain("from './runtime-state-handle.js'");
+  });
+
+  it('barrel exports createRuntimeStateHandle and RuntimeStateHandle', async () => {
+    const mod = (await import('../index.js')) as Record<string, unknown>;
+    expect(mod).toHaveProperty('createRuntimeStateHandle');
   });
 });
 
@@ -2169,6 +2206,61 @@ describe('PRI-173: refiner-rulehost-gate boundary', () => {
     const src = readFileSync(resolve(__dirname, '..', 'internalization', 'refiner-rulehost-gate.ts'), 'utf-8');
     expect(src).toContain("from './refiner-sandbox-wrapper.js'");
     expect(src).toContain('RefinerSandboxResult');
+  });
+});
+
+describe('PRI-146: RuleHostWriter shadow activation boundary', () => {
+  it('CORE_PURE: rule-host-writer.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'activation', 'writers', 'rule-host-writer.ts'), 'utf-8');
+    expect(src).not.toContain('node:vm');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('eval(');
+    expect(src).not.toContain('new Function');
+  });
+
+  it('SHADOW_ONLY: rule-host-writer.ts does not implement live mode', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'activation', 'writers', 'rule-host-writer.ts'), 'utf-8');
+    expect(src).not.toContain('code_tool_hook_live_activate');
+    expect(src).toContain('code_tool_hook_shadow_activate');
+    expect(src).toContain('accepted_shadow');
+  });
+
+  it('USES_GATE: rule-host-writer.ts imports evaluateRefinerRuleHostGate', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'activation', 'writers', 'rule-host-writer.ts'), 'utf-8');
+    expect(src).toContain('evaluateRefinerRuleHostGate');
+    expect(src).toContain("from '../../internalization/refiner-rulehost-gate.js'");
+  });
+
+  it('IMPLEMENTS_CHANNEL_WRITER: rule-host-writer.ts implements ChannelWriter interface', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'activation', 'writers', 'rule-host-writer.ts'), 'utf-8');
+    expect(src).toContain('implements ChannelWriter');
+    expect(src).toContain("channel = 'code_tool_hook'");
+  });
+
+  it('BARREL_EXPORTS: activation/index.ts exports RuleHostWriter', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'activation', 'index.ts'), 'utf-8');
+    expect(src).toContain('RuleHostWriter');
+    expect(src).toContain("from './writers/rule-host-writer.js'");
+  });
+
+  it('CHANNEL_MAP: code_tool_hook is in HIGH_RISK_CHANNEL_MAP', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'activation', 'activation-types.ts'), 'utf-8');
+    expect(src).toContain("code_tool_hook: 'high'");
   });
 });
 
