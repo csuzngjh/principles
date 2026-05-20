@@ -64,19 +64,49 @@ const GOLDEN_TO_HOST_BLOCK_ACCEPT: ReadonlySet<RuleHostDecision> = new Set(['blo
 // Helpers
 // ---------------------------------------------------------------------------
 
-function diffParams(
+function safeObjectKeys(obj: Record<string, unknown>): string[] | null {
+  try {
+    return Object.keys(obj);
+  } catch {
+    return null;
+  }
+}
+
+export function diffParams(
   expected: Record<string, unknown>,
   actual: Record<string, unknown>,
 ): string[] {
   const diffs: string[] = [];
-  const allKeys = new Set([...Object.keys(expected), ...Object.keys(actual)]);
+  const expectedKeys = safeObjectKeys(expected);
+  if (!expectedKeys) {
+    diffs.push('cannot enumerate expected keys');
+    return diffs;
+  }
+  const actualKeys = safeObjectKeys(actual);
+  if (!actualKeys) {
+    diffs.push('cannot enumerate actual keys');
+    return diffs;
+  }
+  const expectedKeySet = new Set(expectedKeys);
+  const actualKeySet = new Set(actualKeys);
+  const allKeys = new Set([...expectedKeys, ...actualKeys]);
   for (const key of allKeys) {
-    if (!(key in actual)) {
+    const inExpected = expectedKeySet.has(key);
+    const inActual = actualKeySet.has(key);
+    if (!inActual) {
       diffs.push(`missing field "${key}"`);
-    } else if (!(key in expected)) {
+    } else if (!inExpected) {
       diffs.push(`unexpected field "${key}"`);
-    } else if (JSON.stringify(expected[key]) !== JSON.stringify(actual[key])) {
-      diffs.push(`field "${key}": expected ${JSON.stringify(expected[key])}, got ${JSON.stringify(actual[key])}`);
+    } else {
+      try {
+        const expectedJson = JSON.stringify(expected[key]);
+        const actualJson = JSON.stringify(actual[key]);
+        if (expectedJson !== actualJson) {
+          diffs.push(`field "${key}": expected ${expectedJson}, got ${actualJson}`);
+        }
+      } catch {
+        diffs.push(`field "${key}": comparison failed (possibly circular reference)`);
+      }
     }
   }
   return diffs;
