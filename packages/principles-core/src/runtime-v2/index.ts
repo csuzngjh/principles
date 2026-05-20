@@ -1228,6 +1228,7 @@ export type {
   RuleHostBlockedEventData,
   RuleHostRequireApprovalEventData,
   RuleHostAutoCorrectProposedEventData,
+  RuleHostAutoCorrectAppliedEventData,
   ToolCallStats,
   ErrorStats,
   PainStats,

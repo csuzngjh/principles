@@ -184,9 +184,74 @@ export function handleBeforeToolCall(
         logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_proposed: ${String(evErr)}`);
       }
 
-      // SAFETY: Never modify event.params. Shadow mode is enforced at hook level.
-      // Even if applicationMode === 'live', current implementation is shadow-only.
-      // Live mutation requires a future feature gate (PRI-115+).
+      // PRI-174: Apply live auto-corrections when applicationMode='live' and validation passes
+      if (proposal.applicationMode === 'live' && validation.valid) {
+        // Live mode: apply corrections to event.params
+        if (!event.params) {
+          return; // No params to modify
+        }
+        const originalParams = { ...event.params };
+        const nextParams: Record<string, unknown> = {};
+        const appliedFields: Array<{ field: string; original: unknown; applied: unknown }> = [];
+
+        try {
+          // Validate that correctedFields is an array before proceeding
+          if (!Array.isArray(proposal.correctedFields)) {
+            throw new Error('proposal.correctedFields is not an array');
+          }
+
+          // Apply each correction atomically
+          for (const cf of proposal.correctedFields) {
+            if (typeof cf === 'object' && cf !== null && typeof cf.field === 'string' && cf.field in event.params) {
+              const originalValue = event.params[cf.field];
+              nextParams[cf.field] = cf.proposed;
+              appliedFields.push({
+                field: cf.field,
+                original: originalValue,
+                applied: cf.proposed,
+              });
+            }
+          }
+
+          // Atomic application: only if all fields processed successfully
+          Object.assign(event.params, nextParams);
+
+          // Emit 'applied' telemetry
+          try {
+            const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+            eventLog.recordRuleHostAutoCorrectApplied({
+              toolName: event.toolName,
+              filePath: relPath,
+              ruleId: String(proposal.ruleId ?? 'unknown'),
+              principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
+              confidence: typeof proposal.confidence === 'number' ? proposal.confidence : 0,
+              reason: hostResult.reason || proposal.correctedFields?.[0]?.reason || 'auto-correct applied',
+              correctedFields: appliedFields,
+            });
+          } catch (evErr) {
+            logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_applied: ${String(evErr)}`);
+          }
+
+          // Return non-blocking warning if notifyAgent is true
+          if (proposal.notifyAgent === true && appliedFields.length > 0) {
+            const messages = appliedFields.map(f =>
+              `[PD Auto-Correct] Rule ${proposal.ruleId}: ${proposal.correctedFields?.[0]?.reason || 'correction applied'}. Parameter '${f.field}' was adjusted from ${JSON.stringify(f.original)} to ${JSON.stringify(f.applied)}.`
+            );
+            return {
+              toolArgs: event.toolArgs,
+              skipToolCall: false,
+              _pdAutoCorrectWarning: messages.join('\n'),
+            };
+          }
+        } catch (applyError: unknown) {
+          // Fail-open: restore original params on any error
+          if (event.params) {
+            Object.assign(event.params, originalParams);
+          }
+          logger?.warn?.(`[PD_GATE] Failed to apply auto-correction, using original params: ${String(applyError)}`);
+        }
+      }
+      // Shadow mode: applicationMode='shadow' or validation failed - no params mutation
     } else if (hostResult?.decision === 'auto_correct') {
       // auto_correct without correctionProposal — emit telemetry for observability
       try {

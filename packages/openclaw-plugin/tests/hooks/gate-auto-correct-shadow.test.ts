@@ -117,7 +117,7 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
     expect(event.params).toEqual(paramsCopy);
   });
 
-  it('auto_correct with applicationMode live still does NOT modify params', () => {
+  it('auto_correct with applicationMode live now modifies params (PRI-174 implemented)', () => {
     const originalParams = { file_path: '/mock/workspace/src/foo.ts', content: 'broken' };
     _mockEvaluate = vi.fn().mockReturnValue({
       decision: 'auto_correct',
@@ -128,11 +128,13 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
     });
 
     const event = makeWriteEvent(originalParams);
-    const paramsCopy = { ...event.params };
     const result = handleBeforeToolCall(event, makeCtx());
 
-    expect(result).toBeUndefined();
-    expect(event.params).toEqual(paramsCopy);
+    // PRI-174: Live mode now modifies params
+    expect(event.params.content).toBe('fixed content');
+    expect(result).toBeDefined();
+    expect(result?._pdAutoCorrectWarning).toContain('[PD Auto-Correct]');
+    expect(result?.skipToolCall).toBe(false);
   });
 
   it('auto_correct emits rulehost_auto_correct_proposed telemetry', () => {
@@ -235,7 +237,7 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
     expect(event.params).toEqual(paramsCopy);
   });
 
-  it('pluginConfig.autoCorrectLive true still shadow (current impl)', () => {
+  it('pluginConfig.autoCorrectLive true now applies live corrections (PRI-174 implemented)', () => {
     const proposal = makeValidProposal({ applicationMode: 'live' });
     _mockEvaluate = vi.fn().mockReturnValue({
       decision: 'auto_correct',
@@ -245,13 +247,14 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
     });
 
     const event = makeWriteEvent();
-    const paramsCopy = { ...event.params };
     const result = handleBeforeToolCall(event, makeCtx({
       pluginConfig: { autoCorrectLive: true },
     }));
 
-    expect(result).toBeUndefined();
-    expect(event.params).toEqual(paramsCopy);
+    // PRI-174: Live mode applies corrections
+    expect(event.params.content).toBe('fixed content');
+    expect(result).toBeDefined();
+    expect(result?._pdAutoCorrectWarning).toContain('[PD Auto-Correct]');
   });
 
 
