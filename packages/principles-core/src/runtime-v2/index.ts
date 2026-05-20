@@ -33,6 +33,9 @@ export type { RefinedTraceEvent, RefinedEventKind, RefinedTracePayload, Severity
 // Trace refiner agent shadow contract (PRI-192)
 export { createTraceRefinerAgentInput, validateTraceRefinerAgentOutput, applyTraceRefinerAgentShadowResult } from './trace-refiner-agent.js';
 export type { TraceRefinerAgentObjective, TraceRefinerAgentMode, TraceRefinerAgentInput, TraceRefinerEvidenceClaim, TraceRefinerRejectedEvidence, TraceRefinerAgentStatus, TraceRefinerAgentOutput } from './trace-refiner-agent.js';
+// GoldenTrace candidate builder (PRI-193)
+export { buildGoldenTraceCandidate } from './golden-trace-candidate-builder.js';
+export type { GoldenTraceCandidateDecision, GoldenTraceCandidateBuilderInput, GoldenTraceCandidateRefusal, GoldenTraceCandidateCreated, GoldenTraceCandidateBuilderResult } from './golden-trace-candidate-builder.js';
 // Diagnostician output schemas (Phase 2)
 export { DiagnosticianViolatedPrincipleSchema, DiagnosticianEvidenceSchema, RecommendationKindSchema, DiagnosticianRecommendationSchema, DiagnosticianOutputV1Schema, DiagnosticianInvocationInputSchema } from './diagnostician-output.js';
 // Principle tree types schemas
