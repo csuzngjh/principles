@@ -101,6 +101,9 @@ myagents/
 .qwen/
 gha-creds-*.json
 
+# Vercel CLI state
+.vercel/
+
 # Git worktrees
 .worktrees/
 .pd/
