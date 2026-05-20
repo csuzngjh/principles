@@ -167,7 +167,7 @@ export function handleBeforeToolCall(
       try {
         const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
         const correctedFields = Array.isArray(proposal.correctedFields)
-          ? proposal.correctedFields.map((f: any) => typeof f === 'object' && f !== null ? String(f.field) : String(f))
+          ? proposal.correctedFields.map((f: unknown) => typeof f === 'object' && f !== null ? String((f as { field?: string }).field) : String(f))
           : [];
         eventLog.recordRuleHostAutoCorrectProposed({
           toolName: event.toolName,
@@ -200,20 +200,42 @@ export function handleBeforeToolCall(
             throw new Error('proposal.correctedFields is not an array');
           }
 
-          // Apply each correction atomically
+          // Validate proposedParams exists and is an object
+          if (!proposal.proposedParams || typeof proposal.proposedParams !== 'object' || Array.isArray(proposal.proposedParams)) {
+            throw new Error('proposal.proposedParams must be an object');
+          }
+
+          // Pre-validation: ALL fields must exist in both event.params AND proposal.proposedParams
+          // Fail-open: if any field is missing, do not apply any corrections
           for (const cf of proposal.correctedFields) {
-            if (typeof cf === 'object' && cf !== null && typeof cf.field === 'string' && cf.field in event.params) {
-              const originalValue = event.params[cf.field];
-              nextParams[cf.field] = cf.proposed;
+            if (typeof cf !== 'object' || cf === null || typeof cf.field !== 'string') {
+              throw new Error('correctedFields entry must be an object with a string field');
+            }
+            const field = cf.field;
+            if (!(field in event.params)) {
+              throw new Error(`Field '${field}' not found in event.params`);
+            }
+            if (!(field in proposal.proposedParams)) {
+              throw new Error(`Field '${field}' not found in proposal.proposedParams`);
+            }
+          }
+
+          // All fields validated: apply corrections using proposedParams values
+          for (const cf of proposal.correctedFields) {
+            if (typeof cf === 'object' && cf !== null && typeof cf.field === 'string') {
+              const field = cf.field;
+              const originalValue = event.params[field];
+              const appliedValue = proposal.proposedParams[field];
+              nextParams[field] = appliedValue;
               appliedFields.push({
-                field: cf.field,
+                field,
                 original: originalValue,
-                applied: cf.proposed,
+                applied: appliedValue,
               });
             }
           }
 
-          // Atomic application: only if all fields processed successfully
+          // Atomic application: only if all fields validated and processed successfully
           Object.assign(event.params, nextParams);
 
           // Emit 'applied' telemetry

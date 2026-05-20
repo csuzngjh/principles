@@ -7,8 +7,9 @@
  * - applicationMode='shadow': no mutation (existing behavior preserved)
  * - notifyAgent=true: warning injected in return value
  * - notifyAgent=false: no warning, returns void
- * - Multiple correctedFields: all applied atomically
+ * - Multiple correctedFields: all applied atomically when all valid
  * - Exception during application: fail-open, no partial mutation
+ * - Strict field validation: ALL fields must exist in event.params AND proposedParams
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
@@ -47,7 +48,7 @@ vi.mock('../../src/core/event-log.js', () => ({
 
 let _mockEvaluate = vi.fn().mockReturnValue(undefined);
 vi.mock('../../src/core/rule-host.js', () => ({
-  RuleHost: vi.fn(function(this: any, _stateDir: string, _logger: any) {
+  RuleHost: vi.fn(function(this: unknown, _stateDir: string, _logger: unknown) {
     this.evaluate = _mockEvaluate;
   }),
 }));
@@ -68,7 +69,7 @@ function makeValidProposal(overrides: Record<string, unknown> = {}) {
   return {
     proposedParams: { content: 'fixed content' },
     correctedFields: [
-      { field: 'content', original: 'broken', proposed: 'fixed content', reason: 'fix typo' },
+      { field: 'content', original: 'broken', proposed: 'ignored value', reason: 'fix typo' },
     ],
     applicationMode: 'live' as const,
     confidence: 0.9,
@@ -115,7 +116,7 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     const event = makeWriteEvent(originalParams);
     const result = handleBeforeToolCall(event, makeCtx());
 
-    // Verify params were mutated
+    // Verify params were mutated using proposedParams value (not correctedFields[].proposed)
     expect(event.params.content).toBe('fixed content');
 
     // Verify both telemetry events were emitted
@@ -243,12 +244,12 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     expect(event.params.content).toBe('fixed content');
   });
 
-  it('Multiple correctedFields: all applied atomically', () => {
+  it('Multiple correctedFields: all applied atomically when ALL fields valid', () => {
     const proposal = makeValidProposal({
       proposedParams: { content: 'fixed', new_string: 'also fixed' },
       correctedFields: [
-        { field: 'content', original: 'broken1', proposed: 'fixed', reason: 'fix 1' },
-        { field: 'new_string', original: 'broken2', proposed: 'also fixed', reason: 'fix 2' },
+        { field: 'content', original: 'broken1', proposed: 'ignored1', reason: 'fix 1' },
+        { field: 'new_string', original: 'broken2', proposed: 'ignored2', reason: 'fix 2' },
       ],
     });
     _mockEvaluate = vi.fn().mockReturnValue({
@@ -262,11 +263,11 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     const event = makeWriteEvent({ new_string: 'broken2' });
     const result = handleBeforeToolCall(event, makeCtx());
 
-    // Verify both fields were applied
+    // Verify both fields were applied from proposedParams (not correctedFields[].proposed)
     expect(event.params.content).toBe('fixed');
     expect(event.params.new_string).toBe('also fixed');
 
-    // Verify 'applied' event has both fields
+    // Verify 'applied' event has both fields with proposedParams values
     const appliedCall = mockEventLogInstance.recordRuleHostAutoCorrectApplied.mock.calls[0][0];
     expect(appliedCall.correctedFields).toHaveLength(2);
     expect(appliedCall.correctedFields).toEqual([
@@ -279,7 +280,7 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     expect(result?._pdAutoCorrectWarning).toContain('new_string');
   });
 
-  it('Field not in original params: skipped gracefully, other fields still applied', () => {
+  it('Field missing from event.params: fail-open, no mutation, no applied telemetry', () => {
     const proposal = makeValidProposal({
       correctedFields: [
         { field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' },
@@ -295,29 +296,69 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     });
 
     const event = makeWriteEvent();
-    const result = handleBeforeToolCall(event, makeCtx());
+    const paramsCopy = { ...event.params };
+    const ctx = makeCtx();
+    const result = handleBeforeToolCall(event, ctx);
 
-    // Verify only existing field was applied
-    expect(event.params.content).toBe('fixed');
-    expect(event.params).not.toHaveProperty('nonexistent');
+    // Verify no fields were applied (fail-open)
+    expect(event.params).toEqual(paramsCopy);
+    expect(event.params.content).toBe('broken');
 
-    // Verify 'applied' event has only one field
-    const appliedCall = mockEventLogInstance.recordRuleHostAutoCorrectApplied.mock.calls[0][0];
-    expect(appliedCall.correctedFields).toHaveLength(1);
-    expect(appliedCall.correctedFields[0].field).toBe('content');
+    // Verify 'applied' telemetry was NOT emitted
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
+
+    // Verify no warning returned
+    expect(result).toBeUndefined();
+
+    // Verify warning logged
+    expect(ctx.logger?.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to apply auto-correction')
+    );
   });
 
-  it('Field not in original params: skipped, does not cause fail-open', () => {
+  it('Field missing from proposedParams: fail-open, no mutation, no applied telemetry', () => {
     const proposal = makeValidProposal({
+      proposedParams: { content: 'fixed content' },
       correctedFields: [
-        { field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' },
-        { field: 'nonexistent', original: null, proposed: 'value', reason: 'bad' },
+        { field: 'content', original: 'broken', proposed: 'fixed content', reason: 'fix' },
+        { field: 'new_string', original: 'broken2', proposed: 'should be ignored', reason: 'fix 2' },
       ],
     });
     _mockEvaluate = vi.fn().mockReturnValue({
       decision: 'auto_correct',
       matched: true,
-      reason: 'fix with nonexistent field',
+      reason: 'fix with missing proposedParams field',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent({ new_string: 'broken2' });
+    const paramsCopy = { ...event.params };
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    // Verify no fields were applied (fail-open)
+    expect(event.params).toEqual(paramsCopy);
+    expect(event.params.content).toBe('broken');
+    expect(event.params.new_string).toBe('broken2');
+
+    // Verify 'applied' telemetry was NOT emitted
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
+
+    // Verify no warning returned
+    expect(result).toBeUndefined();
+  });
+
+  it('correctedFields[].proposed differs from proposedParams[field]: uses proposedParams value', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { content: 'value from proposedParams' },
+      correctedFields: [
+        { field: 'content', original: 'broken', proposed: 'ignored value from correctedFields', reason: 'fix' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
       ruleId: proposal.ruleId,
       correctionProposal: proposal,
     });
@@ -325,14 +366,13 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     const event = makeWriteEvent();
     const result = handleBeforeToolCall(event, makeCtx());
 
-    // Verify only existing field was applied
-    expect(event.params.content).toBe('fixed');
-    expect(event.params).not.toHaveProperty('nonexistent');
+    // Verify applied value came from proposedParams, not correctedFields[].proposed
+    expect(event.params.content).toBe('value from proposedParams');
+    expect(event.params.content).not.toBe('ignored value from correctedFields');
 
-    // Verify 'applied' event has only one field
+    // Verify telemetry shows proposedParams value was applied
     const appliedCall = mockEventLogInstance.recordRuleHostAutoCorrectApplied.mock.calls[0][0];
-    expect(appliedCall.correctedFields).toHaveLength(1);
-    expect(appliedCall.correctedFields[0].field).toBe('content');
+    expect(appliedCall.correctedFields[0].applied).toBe('value from proposedParams');
   });
 
   it('Block still takes precedence over auto_correct', () => {
