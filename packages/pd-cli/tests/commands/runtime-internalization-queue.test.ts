@@ -7,19 +7,19 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const mockGetSnapshot = vi.fn();
-const mockClose = vi.fn().mockResolvedValue(undefined);
+const { mockGetSnapshot, mockClose } = vi.hoisted(() => ({
+  mockGetSnapshot: vi.fn(),
+  mockClose: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
 }));
 
 vi.mock('@principles/core/runtime-v2', () => ({
-  RuntimeStateManager: vi.fn().mockImplementation(function () {
-    return { initialize: vi.fn().mockResolvedValue(undefined), close: mockClose };
-  }),
-  InternalizationQueueReadModel: vi.fn().mockImplementation(function () {
-    return { getSnapshot: mockGetSnapshot, close: mockClose };
+  createInternalizationQueueReadModel: vi.fn().mockResolvedValue({
+    readModel: { getSnapshot: mockGetSnapshot, close: mockClose },
+    close: mockClose,
   }),
 }));
 
@@ -38,6 +38,8 @@ function emptySnapshot() {
     blockedSummary: { count: 0, samples: [] },
     dependencyFailedSummary: { count: 0, samples: [] },
     retryWaitPendingSummary: { count: 0, samples: [] },
+    leaseConflictSummary: { count: 0, samples: [] },
+    unresolvableSummary: { count: 0, samples: [] },
     readyTasks: [],
     noReadyTasks: { reason: 'no_candidates', inspectedCount: 0 },
   };
