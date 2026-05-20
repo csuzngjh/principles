@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { RuntimeStateManager } from '@principles/core/runtime-v2';
+import { createRecoverySweepService } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
 import type { RemediationResult } from './remediation-output.js';
@@ -48,11 +48,10 @@ export async function handleRuntimeRecoverySweep(opts: RecoverySweepOptions): Pr
   const isConfirm = opts.confirm ?? false;
   const isDryRun = !isConfirm;
 
-  const stateManager = new RuntimeStateManager({ workspaceDir });
-  await stateManager.initialize();
+  const { service, close } = await createRecoverySweepService({ workspaceDir });
 
   try {
-    const expiredLeaseTaskIds = await stateManager.detectExpiredLeases();
+    const expiredLeaseTaskIds = await service.detectExpiredLeases();
 
     const actions = expiredLeaseTaskIds.map((taskId) => remediationAction({
       action: 'recover_expired_lease',
@@ -68,7 +67,7 @@ export async function handleRuntimeRecoverySweep(opts: RecoverySweepOptions): Pr
     if (isConfirm && expiredLeaseTaskIds.length > 0) {
       for (const taskId of expiredLeaseTaskIds) {
         try {
-          const result = await stateManager.recoverTask(taskId);
+          const result = await service.recoverTask(taskId);
           if (result) {
             repairedCount++;
             const action = actions.find((a) => a.targetId === taskId);
@@ -103,6 +102,6 @@ export async function handleRuntimeRecoverySweep(opts: RecoverySweepOptions): Pr
       process.exitCode = 1;
     }
   } finally {
-    await stateManager.close();
+    await close();
   }
 }
