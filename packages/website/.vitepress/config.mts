@@ -5,6 +5,7 @@ export default defineConfig({
   description: "A Thinking OS and Evolution Sandbox for AI Agents",
   lastUpdated: true,
   cleanUrls: true,
+  ignoreDeadLinks: true,
 
   head: [
     ['link', { rel: 'icon', href: '/images/favicon.svg' }],
@@ -32,16 +33,26 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: 'Home', link: '/' },
-          { text: 'Manifesto', link: '/blog/01-the-helmsman-crisis' },
+          { text: 'Docs', link: '/docs/getting-started' },
+          { text: 'Blog', link: '/blog/01-the-helmsman-crisis' },
           { text: 'GitHub', link: 'https://github.com/csuzngjh/principles' }
         ],
         sidebar: {
+          '/docs/': [
+            {
+              text: 'Guide & Reference',
+              items: [
+                { text: 'Getting Started', link: '/docs/getting-started' },
+                { text: 'User Guide', link: '/docs/user-guide' },
+                { text: 'Development Guide', link: '/docs/development' },
+              ]
+            }
+          ],
           '/blog/': [
             {
-              text: 'The Evolution Manifesto',
+              text: "Wesley's Blog: PD Reflections",
               items: [
-                { text: '01 | The Helmsman Crisis', link: '/blog/01-the-helmsman-crisis' },
-                // Articles 02-05: translations pending — listed for navigation context only
+                { text: '01 | The Helmsman Crisis & Cyber Escape Pod', link: '/blog/01-the-helmsman-crisis' },
                 { text: '02 | The Illusion of Wisdom (coming soon)', link: '/blog/01-the-helmsman-crisis' },
                 { text: '03 | Pain as Signal (coming soon)', link: '/blog/01-the-helmsman-crisis' },
                 { text: '04 | Soft-to-Hard Alchemy (coming soon)', link: '/blog/01-the-helmsman-crisis' },
@@ -60,15 +71,24 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: '首页', link: '/zh/' },
-          { text: '进化宣言', link: '/zh/blog/01-the-helmsman-crisis' },
+          { text: '文档', link: '/zh/docs/user-guide' },
+          { text: '思考博客', link: '/zh/blog/01-the-helmsman-crisis' },
           { text: 'GitHub', link: 'https://github.com/csuzngjh/principles' }
         ],
         sidebar: {
+          '/zh/docs/': [
+            {
+              text: '使用指南与参考手册',
+              items: [
+                { text: '用户指南 (User Guide)', link: '/zh/docs/user-guide' },
+              ]
+            }
+          ],
           '/zh/blog/': [
             {
-              text: '硅基进化宣言 (连载)',
+              text: 'Wesley 的思考博客：PD 深度随笔',
               items: [
-                { text: '01 | 赛博垃圾围城与人类逃生舱', link: '/zh/blog/01-the-helmsman-crisis' },
+                { text: '01 | 赛博垃圾围城与人类逃生舱 (进化宣言)', link: '/zh/blog/01-the-helmsman-crisis' },
                 { text: '02 | 为什么"硅基鸡汤"是无效摩擦 (即将上线)', link: '/zh/blog/01-the-helmsman-crisis' },
                 { text: '03 | 前向进化的生物学硬核启示 (即将上线)', link: '/zh/blog/01-the-helmsman-crisis' },
                 { text: '04 | 软硬转换炼金术 (即将上线)', link: '/zh/blog/01-the-helmsman-crisis' },
@@ -79,6 +99,7 @@ export default defineConfig({
         }
       }
     }
+
   },
 
   themeConfig: {
