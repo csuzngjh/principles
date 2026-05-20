@@ -293,9 +293,9 @@ export interface InternalizationQueueReadModelHandle {
 }
 
 export async function createInternalizationQueueReadModel(
-  opts: { workspaceDir: string },
+  opts: { workspaceDir: string; readonly?: boolean },
 ): Promise<InternalizationQueueReadModelHandle> {
-  const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir });
+  const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir, readonly: opts.readonly ?? false });
   await stateManager.initialize();
   const readModel = new InternalizationQueueReadModel(stateManager);
   return {

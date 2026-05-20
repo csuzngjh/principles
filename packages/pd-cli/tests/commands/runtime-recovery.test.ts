@@ -2,21 +2,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockDetectExpiredLeases = vi.hoisted(() => vi.fn());
 const mockRecoverTask = vi.hoisted(() => vi.fn());
-const mockClose = vi.hoisted(() => vi.fn());
-const mockInitialize = vi.hoisted(() => vi.fn());
+const mockServiceClose = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
 }));
 
 vi.mock('@principles/core/runtime-v2', () => ({
-  RuntimeStateManager: vi.fn().mockImplementation(function () {
-    return {
-      initialize: mockInitialize,
-      close: mockClose,
+  createRecoverySweepService: vi.fn().mockResolvedValue({
+    service: {
       detectExpiredLeases: mockDetectExpiredLeases,
       recoverTask: mockRecoverTask,
-    };
+    },
+    close: mockServiceClose,
   }),
   createRemediationResult: vi.fn((input) => ({
     mode: input.mode,
@@ -40,10 +38,9 @@ describe('pd runtime recovery sweep remediation contract', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockInitialize.mockResolvedValue(undefined);
-    mockClose.mockResolvedValue(undefined);
     mockDetectExpiredLeases.mockResolvedValue([]);
     mockRecoverTask.mockResolvedValue(null);
+    mockServiceClose.mockResolvedValue(undefined);
     process.exitCode = 0;
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -64,6 +61,7 @@ describe('pd runtime recovery sweep remediation contract', () => {
     });
     expect(output.actions[0]).toMatchObject({ action: 'recover_expired_lease', targetId: 'task-1' });
     expect(mockRecoverTask).not.toHaveBeenCalled();
+    expect(mockServiceClose).toHaveBeenCalledTimes(1);
   });
 
   it('confirm JSON reports changed after recovering expired leases', async () => {
@@ -77,13 +75,22 @@ describe('pd runtime recovery sweep remediation contract', () => {
     expect(output.status).toBe('changed');
     expect(output.repairedCount).toBe(1);
     expect(mockRecoverTask).toHaveBeenCalledWith('task-1');
+    expect(mockServiceClose).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects --dry-run and --confirm together before writing', async () => {
+  it('rejects --dry-run and --confirm together before writing (no service created)', async () => {
     await handleRuntimeRecoverySweep({ workspace: '/fake/workspace', dryRun: true, confirm: true, json: true });
 
     expect(mockRecoverTask).not.toHaveBeenCalled();
+    expect(mockServiceClose).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
+  });
+
+  it('uses createRecoverySweepService (no RuntimeStateManager)', async () => {
+    const fs = await import('fs');
+    const src = fs.readFileSync(require.resolve('../../src/commands/runtime-recovery.ts'), 'utf-8');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).toContain('createRecoverySweepService');
   });
 });

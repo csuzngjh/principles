@@ -1,7 +1,6 @@
 import * as path from 'path';
-import { OperatorHealthReadModel, SchemaConformanceReadModel, PruningReadModel, InternalizationQueueReadModel, auditCandidateLedgerConsistency, buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from '@principles/core/runtime-v2';
+import { OperatorHealthReadModel, SchemaConformanceReadModel, PruningReadModel, createInternalizationQueueReadModel, auditCandidateLedgerConsistency, buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from '@principles/core/runtime-v2';
 import type { OperatorHealthSnapshot, SchemaConformanceResult, OrphanDetectionResult, InternalizationQueueSnapshot, GfiWorkspaceSnapshot, CandidateAuditResult } from '@principles/core/runtime-v2';
-import { RuntimeStateManager } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 export interface CanaryCheck {
@@ -171,11 +170,9 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
     })(),
     (async (): Promise<CanaryCheck> => {
       try {
-        const stateManager = new RuntimeStateManager({ workspaceDir, readonly: true });
-        await stateManager.initialize();
+        const { readModel, close } = await createInternalizationQueueReadModel({ workspaceDir, readonly: true });
         try {
-          const model = new InternalizationQueueReadModel(stateManager);
-          const snapshot: InternalizationQueueSnapshot = await model.getSnapshot();
+          const snapshot: InternalizationQueueSnapshot = await readModel.getSnapshot();
           const hasBlocked = snapshot.blockedSummary.count > 0;
           const hasDepFailed = snapshot.dependencyFailedSummary.count > 0;
           const hasInvalid = snapshot.invalidMetadataCount > 0;
@@ -190,7 +187,7 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
             details: snapshot,
           };
         } finally {
-          await stateManager.close();
+          await close();
         }
       } catch (err) {
         return { name: 'internalization_queue', status: 'error', summary: 'Internalization queue check failed.', error: String(err) };
