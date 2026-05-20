@@ -17,6 +17,7 @@ export default defineConfig(
       '**/ui/src/**',
       '**/test-fix.ts',
       '**/tests/**',
+      'packages/website/**',
     ],
   },
 
