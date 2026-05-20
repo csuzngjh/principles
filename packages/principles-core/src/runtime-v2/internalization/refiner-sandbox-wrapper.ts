@@ -28,7 +28,8 @@ export interface RefinerSandboxResult {
 }
 
 export interface RefinerSandboxOptions {
-  timeoutMs?: number;
+  /** Elapsed-time classification threshold (NOT hard cancellation). See evaluateInRefinerSandbox JSDoc. */
+  softTimeoutMs?: number;
 }
 
 export interface RefinerSandboxDependencies {
@@ -122,9 +123,12 @@ function validateCaseDecision(
 /**
  * Evaluate rule code against GoldenTrace cases with structured error reporting.
  *
- * Timeout is detected post-evaluation (elapsed-time check). A synchronous
- * infinite loop in generated code will block the call indefinitely; true
- * async cancellation requires node:vm or AbortController at the plugin layer.
+ * **Timeout semantics**: `softTimeoutMs` is an elapsed-time classification
+ * threshold, NOT a hard cancellation mechanism. If `evaluateCode` blocks
+ * synchronously (infinite loop, long computation), this wrapper cannot
+ * interrupt it — the timeout is only detected after `evaluateCode` returns.
+ * Hard cancellation requires `node:vm` or `AbortController` at the
+ * plugin/sandbox-adapter layer, which is out of scope for core.
  */
 export function evaluateInRefinerSandbox(
   code: string,
@@ -132,7 +136,7 @@ export function evaluateInRefinerSandbox(
   deps: RefinerSandboxDependencies & RefinerSandboxOptions,
 ): RefinerSandboxResult {
   const startTime = Date.now();
-  const timeoutMs = resolveTimeoutMs(deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const timeoutMs = resolveTimeoutMs(deps.softTimeoutMs ?? DEFAULT_TIMEOUT_MS);
 
   const forbiddenViolations = checkForbiddenPatterns(code);
   if (forbiddenViolations.length > 0) {

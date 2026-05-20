@@ -138,7 +138,7 @@ describe('evaluateInRefinerSandbox', () => {
     expect(result.failedCases[0]?.message).toContain('Cannot read property');
   });
 
-  it('classifies timeout when evaluateCode exceeds timeoutMs', () => {
+  it('classifies timeout when slow-returning evaluator exceeds softTimeoutMs', () => {
     const trace = makeTrace();
     const slowEvaluate: ReplayEvaluateFn = () => {
       const start = Date.now();
@@ -149,7 +149,7 @@ describe('evaluateInRefinerSandbox', () => {
     };
     const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
       evaluateCode: slowEvaluate,
-      timeoutMs: 1,
+      softTimeoutMs: 1,
     };
     const result = evaluateInRefinerSandbox('code', trace, deps);
     expect(result.success).toBe(false);
@@ -157,7 +157,7 @@ describe('evaluateInRefinerSandbox', () => {
     expect(result.failedCases.some((c) => c.errorType === 'timeout')).toBe(true);
   });
 
-  it('caps timeoutMs to MAX_TIMEOUT_MS when exceeded', () => {
+  it('caps softTimeoutMs to MAX_TIMEOUT_MS when exceeded', () => {
     const trace = makeTrace([
       makeCase({ caseId: 'neg-1', kind: 'negative', expectedDecision: 'block' }),
       makeCase({ caseId: 'pos-1', kind: 'positive', expectedDecision: 'allow', params: { path: '/safe.txt' } }),
@@ -170,7 +170,7 @@ describe('evaluateInRefinerSandbox', () => {
     };
     const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
       evaluateCode: smartEvaluate,
-      timeoutMs: 999999,
+      softTimeoutMs: 999999,
     };
     const result = evaluateInRefinerSandbox('code', trace, deps);
     expect(result.success).toBe(true);
