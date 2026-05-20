@@ -142,6 +142,8 @@ const REQUIRED_SOURCE_FILES = [
   'trace-refiner.ts',
   // PRI-192
   'trace-refiner-agent.ts',
+  // PRI-193
+  'golden-trace-candidate-builder.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -199,6 +201,8 @@ const REQUIRED_TEST_FILES = [
   'trace-refiner.test.ts',
   // PRI-192
   'trace-refiner-agent.test.ts',
+  // PRI-193
+  'golden-trace-candidate-builder.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
