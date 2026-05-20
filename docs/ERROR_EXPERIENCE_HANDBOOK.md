@@ -41,6 +41,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ID | Summary | Source |
 |----|---------|--------|
 | ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
+| ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
 
 ---
 
@@ -219,9 +220,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-05-20
 - **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007, ERR-009
 
+**[ERR-011]** | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades
+
+- **What happened**: `runtime-canary.ts`, `runtime-diagnostics-export.ts`, and `runtime-recovery.ts` directly imported and instantiated `RuntimeStateManager` from the Store layer, bypassing the Read Model / Service facade boundary established by ADR-0001. Additionally, `createInternalizationQueueReadModel` did not support a `readonly` option, forcing read-only CLI commands (canary, diagnostics-export) to open writable database connections.
+- **Why it's wrong**: ADR-0001 mandates that CLI commands use Read Models and Service facades, never directly access Store classes. Direct Store imports create tight coupling between CLI and database schema, making it impossible to evolve the store layer independently. Opening writable connections for read-only operations is a safety risk — a bug in the CLI could accidentally mutate state.
+- **Correct approach**: Create Tier 2 boundary facades (`createRecoverySweepService`, `createInternalizationQueueReadModel` with `readonly` support) that encapsulate `RuntimeStateManager` lifecycle. CLI commands import only these facades, never the Store directly.
+- **How to prevent**: Every new CLI command that needs database access must use an existing Read Model or Service facade from `@principles/core/runtime-v2`. If no suitable facade exists, create one first. Architecture regression tests must assert that CLI command files do not import `RuntimeStateManager`. Read-only operations must pass `readonly: true` to the facade.
+- **Source**: PRI-131 (Tier 2)
+- **Date**: 2026-05-21
+- **Recurrence**: Yes — same boundary violation pattern as PRI-129 (trace.ts) and PRI-131 Tier 1 (health.ts, runtime-pruning.ts, runtime-internalization-queue.ts)
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 10 |
-| Last updated | 2026-05-20 |
+| Total lessons | 11 |
+| Last updated | 2026-05-21 |
 | Top category | Schema & Type |
-| Recurring errors | 4 |
+| Recurring errors | 5 |
