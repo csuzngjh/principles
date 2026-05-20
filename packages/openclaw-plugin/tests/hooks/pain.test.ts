@@ -321,4 +321,95 @@ describe('Post-Write Checks & Pain Hook', () => {
     expect(trainingStateWrites).toEqual([]);
   });
 
+  it('should detect failure from nested details.exitCode (exec tool pattern)', () => {
+    const mockCtx = { workspaceDir, sessionId: 's-exec-failure', api: { logger: {} } };
+    const mockEvent = {
+      toolName: 'bash',
+      params: { arguments: 'npm test' },
+      result: { details: { exitCode: 1 } },
+      error: undefined,
+    };
+
+    vi.mocked(ioUtils.normalizePath).mockReturnValue('package.json');
+    vi.mocked(ioUtils.isRisky).mockReturnValue(false);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+
+    expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 's-exec-failure',
+      toolName: 'bash',
+      outcome: 'failure',
+    }));
+  });
+
+  it('should prefer result.exitCode over nested details.exitCode when both exist', () => {
+    const mockCtx = { workspaceDir, sessionId: 's-exec-success', api: { logger: {} } };
+    const mockEvent = {
+      toolName: 'bash',
+      params: { arguments: 'npm test' },
+      result: { exitCode: 0, details: { exitCode: 1 } },
+      error: undefined,
+    };
+
+    vi.mocked(ioUtils.normalizePath).mockReturnValue('package.json');
+    vi.mocked(ioUtils.isRisky).mockReturnValue(false);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+
+    expect(mockEmitSync).not.toHaveBeenCalled();
+    expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 's-exec-success',
+      toolName: 'bash',
+      outcome: 'success',
+    }));
+  });
+
+  it('should treat undefined exitCode as success', () => {
+    const mockCtx = { workspaceDir, sessionId: 's-no-exitcode', api: { logger: {} } };
+    const mockEvent = {
+      toolName: 'bash',
+      params: { arguments: 'echo hello' },
+      result: { output: 'hello' },
+      error: undefined,
+    };
+
+    vi.mocked(ioUtils.normalizePath).mockReturnValue('package.json');
+    vi.mocked(ioUtils.isRisky).mockReturnValue(false);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+
+    expect(mockEmitSync).not.toHaveBeenCalled();
+    expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 's-no-exitcode',
+      toolName: 'bash',
+      outcome: 'success',
+    }));
+  });
+
+  it('should treat exitCode 0 as success even when details.exitCode is non-zero', () => {
+    const mockCtx = { workspaceDir, sessionId: 's-partial-success', api: { logger: {} } };
+    const mockEvent = {
+      toolName: 'bash',
+      params: { arguments: 'npm test' },
+      result: { exitCode: 0, details: { stderr: 'some warnings', exitCode: 2 } },
+      error: undefined,
+    };
+
+    vi.mocked(ioUtils.normalizePath).mockReturnValue('package.json');
+    vi.mocked(ioUtils.isRisky).mockReturnValue(false);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+
+    expect(mockEmitSync).not.toHaveBeenCalled();
+    expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 's-partial-success',
+      toolName: 'bash',
+      outcome: 'success',
+    }));
+  });
+
 });
