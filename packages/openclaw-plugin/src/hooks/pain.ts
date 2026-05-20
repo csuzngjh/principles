@@ -228,7 +228,7 @@ export function handleAfterToolCall(
   const resultObj = (event.result && typeof event.result === 'object') ? event.result as Record<string, unknown> : null;
   const details = resultObj?.details && typeof resultObj.details === 'object' ? resultObj.details as Record<string, unknown> : null;
   const exitCode = (resultObj?.exitCode as number | undefined) ?? (details?.exitCode as number | undefined) ?? 0;
-  const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
+  const isFailure = !!event.error || exitCode !== 0;
 
   if (isFailure) {
     const failureSource = classifyToolFailureSource(event.toolName, event.error);
