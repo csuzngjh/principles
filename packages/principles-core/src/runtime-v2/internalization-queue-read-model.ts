@@ -16,7 +16,8 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  */
 import type { TaskRecord } from './task-status.js';
-import { RuntimeStateManager } from './store/runtime-state-manager.js';
+import type { RuntimeStateHandle } from './runtime-state-handle.js';
+import { createRuntimeStateHandle } from './runtime-state-handle.js';
 import type { PeerRunnerKind, InternalizationChannel } from './internalization/peer-runner-contracts.js';
 import { isPeerRunnerKind } from './internalization/peer-runner-contracts.js';
 import { hydratePITaskRecord } from './internalization/pitask-metadata.js';
@@ -110,7 +111,7 @@ function hasUnexpiredLease(
 // ── Read Model ───────────────────────────────────────────────────────────────
 
 export class InternalizationQueueReadModel {
-  constructor(private readonly stateManager: RuntimeStateManager) {}
+  constructor(private readonly stateManager: RuntimeStateHandle['stateManager']) {}
 
   async getSnapshot(): Promise<InternalizationQueueSnapshot> {
     const [pending, retryWait] = await Promise.all([
@@ -295,13 +296,10 @@ export interface InternalizationQueueReadModelHandle {
 export async function createInternalizationQueueReadModel(
   opts: { workspaceDir: string; readonly?: boolean },
 ): Promise<InternalizationQueueReadModelHandle> {
-  const stateManager = new RuntimeStateManager({ workspaceDir: opts.workspaceDir, readonly: opts.readonly ?? false });
-  await stateManager.initialize();
-  const readModel = new InternalizationQueueReadModel(stateManager);
+  const handle = await createRuntimeStateHandle({ workspaceDir: opts.workspaceDir, readonly: opts.readonly });
+  const readModel = new InternalizationQueueReadModel(handle.stateManager);
   return {
     readModel,
-    close: async () => {
-      await stateManager.close();
-    },
+    close: handle.close,
   };
 }

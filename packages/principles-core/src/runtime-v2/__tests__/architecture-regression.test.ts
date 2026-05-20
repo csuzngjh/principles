@@ -717,6 +717,38 @@ describe('pd-cli command boundaries', () => {
   });
 });
 
+// ── PRI-198: RuntimeStateHandle lifecycle facade ────────────────────────────
+
+describe('PRI-198 RuntimeStateHandle lifecycle facade', () => {
+  it('runtime-state-handle.ts source file exists', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const filePath = resolve(__dirname, '..', 'runtime-state-handle.ts');
+    expect(existsSync(filePath)).toBe(true);
+  });
+
+  it('internalization-queue-read-model.ts does not import RuntimeStateManager directly', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization-queue-read-model.ts'), 'utf-8');
+    expect(src).not.toContain("from './store/runtime-state-manager.js'");
+    expect(src).toContain("from './runtime-state-handle.js'");
+  });
+
+  it('recovery-sweep-service.ts does not import RuntimeStateManager directly', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'recovery-sweep-service.ts'), 'utf-8');
+    expect(src).not.toContain("from './store/runtime-state-manager.js'");
+    expect(src).toContain("from './runtime-state-handle.js'");
+  });
+
+  it('barrel exports createRuntimeStateHandle and RuntimeStateHandle', async () => {
+    const mod = (await import('../index.js')) as Record<string, unknown>;
+    expect(mod).toHaveProperty('createRuntimeStateHandle');
+  });
+});
+
 // ── PRI-45: RuleHost adapter boundary ────────────────────────────────────────
 
 describe('PRI-45 RuleHost adapter boundary', () => {
