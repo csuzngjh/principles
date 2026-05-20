@@ -127,7 +127,7 @@ export class ActivationDispatcher {
     return this.activateArtifact(input, artifact, idempotencyKey);
   }
 
-  private async enqueueForApproval(input: DispatchInput, artifact: PIArtifactSnapshot, _idempotencyKey: string): Promise<ActivationDecision> {
+  private async enqueueForApproval(input: DispatchInput, artifact: PIArtifactSnapshot, idempotencyKey: string): Promise<ActivationDecision> {
     const riskLevel = getChannelRiskLevel(input.channel);
 
     if (!this.approvalQueueStore) {
@@ -137,6 +137,12 @@ export class ActivationDispatcher {
         channel: input.channel,
         riskLevel,
       };
+    }
+
+    const writer = this.writers.get(input.channel);
+    if (writer) {
+      const canActivateResult = await checkCanActivate(writer, artifact);
+      if (canActivateResult.decision) return canActivateResult.decision;
     }
 
     // Dry-run: preview what would be queued without persisting
@@ -151,13 +157,25 @@ export class ActivationDispatcher {
     }
 
     try {
+      const writerContext = writer?.buildApprovalContext?.(
+        {
+          artifactId: input.artifactId,
+          channel: input.channel,
+          principleId: extractPrincipleId(artifact) ?? '',
+          idempotencyKey: idempotencyKey,
+          now: input.now,
+        },
+        artifact,
+        input.confidence,
+      );
+
       const record = await this.approvalQueueStore.enqueue(
         {
           artifactId: input.artifactId,
           channel: input.channel,
           riskLevel,
           confidence: input.confidence,
-          ...buildApprovalContext(artifact, input.channel, riskLevel, input.confidence),
+          ...(writerContext ?? buildApprovalContext(artifact, input.channel, riskLevel, input.confidence)),
         },
         input.now,
       );
