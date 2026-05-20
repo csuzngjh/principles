@@ -625,6 +625,49 @@ describe('pd-cli command boundaries', () => {
     expect(src).not.toContain('loadLedger');
     expect(src).toContain('PainChainReadModel');
   });
+
+  it('health.ts does not import loadLedger', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const cmdPath = resolve(
+      __dirname,
+      '../../../../pd-cli/src/commands/health.ts',
+    );
+    expect(existsSync(cmdPath)).toBe(true);
+    const src = readFileSync(cmdPath, 'utf-8');
+    expect(src).not.toContain('loadLedger');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).toContain('PruningReadModel');
+  });
+
+  it('runtime-pruning.ts does not import loadLedger or saveLedger', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const cmdPath = resolve(
+      __dirname,
+      '../../../../pd-cli/src/commands/runtime-pruning.ts',
+    );
+    expect(existsSync(cmdPath)).toBe(true);
+    const src = readFileSync(cmdPath, 'utf-8');
+    expect(src).not.toContain('loadLedger');
+    expect(src).not.toContain('saveLedger');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).toContain('removeOrphanReferencesFromLedger');
+  });
+
+  it('runtime-internalization-queue.ts does not import RuntimeStateManager', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const cmdPath = resolve(
+      __dirname,
+      '../../../../pd-cli/src/commands/runtime-internalization-queue.ts',
+    );
+    expect(existsSync(cmdPath)).toBe(true);
+    const src = readFileSync(cmdPath, 'utf-8');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).not.toContain('loadLedger');
+    expect(src).toContain('createInternalizationQueueReadModel');
+  });
 });
 
 // ── PRI-45: RuleHost adapter boundary ────────────────────────────────────────

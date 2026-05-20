@@ -5,14 +5,15 @@
  *
  * Reads workspace/.pd/state.db and workspace/.state/principle_training_state.json
  * to provide Runtime V2 health diagnostics.
- * Does NOT depend on openclaw-plugin source paths.
+ * Uses read models from @principles/core/runtime-v2 (no direct ledger access).
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { loadLedger, getLedgerFilePathPublic } from '@principles/core/runtime-v2';
+import { PruningReadModel, PainChainReadModel, auditCandidateLedgerConsistency, getLedgerFilePathPublic } from '@principles/core/runtime-v2';
+import type { PainChainTrace } from '@principles/core/runtime-v2';
 
 interface LastSuccessfulChain {
   painId?: string;
@@ -43,6 +44,24 @@ interface HealthOptions {
   json?: boolean;
 }
 
+function painChainTraceToLastSuccessfulChain(trace: PainChainTrace): LastSuccessfulChain {
+  const totalMs = (trace.latencyMs.painToTask ?? 0)
+    + (trace.latencyMs.taskToRun ?? 0)
+    + (trace.latencyMs.runToArtifact ?? 0);
+
+  return {
+    painId: trace.painId,
+    taskId: trace.taskId,
+    runId: trace.runId ?? '',
+    artifactId: trace.artifactId ?? '',
+    candidateIds: trace.candidateIds,
+    ledgerEntryIds: trace.ledgerEntryIds,
+    latencyMs: { totalMs: totalMs > 0 ? totalMs : undefined },
+    failureCategory: trace.failureCategory,
+    checkedAt: trace.checkedAt,
+  };
+}
+
 export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
@@ -53,32 +72,16 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
   const ledgerStateDir = path.join(workspaceDir, '.state');
   const ledgerPath = getLedgerFilePathPublic(ledgerStateDir);
 
-  // Load ledger
-  const ledger = loadLedger(ledgerStateDir);
-  const principleEntries = Object.values(ledger.tree.principles);
+  const pruningModel = new PruningReadModel({ workspaceDir });
+  const healthSummary = pruningModel.getHealthSummary();
+  const ledgerByStatus = healthSummary.byStatus;
 
-  // Count by status in ledger
-  const ledgerByStatus: Record<string, number> = {};
-  for (const p of principleEntries) {
-    const status = (p as { status?: string }).status || 'unknown';
-    ledgerByStatus[status] = (ledgerByStatus[status] || 0) + 1;
-  }
+  const { missingLedgerCount } = await auditCandidateLedgerConsistency(workspaceDir);
 
-  // Build candidateId → ledgerEntryId reverse map once
-  const candidateToLedgerEntry = new Map<string, string>();
-  for (const entry of principleEntries) {
-    const e = entry as { id: string; derivedFromPainIds?: string[] };
-    for (const cid of e.derivedFromPainIds ?? []) {
-      candidateToLedgerEntry.set(cid, e.id);
-    }
-  }
-
-  // Load PD state.db metrics
   let candidatesTotal = 0, candidatesConsumed = 0, candidatesPending = 0;
   let tasksTotal = 0;
   const tasksByStatus: Record<string, number> = {};
   let pdDbExists = false;
-  let missingLedgerCount = 0;
   let lastSuccessfulChain: LastSuccessfulChain | undefined = undefined;
   let partialHealth = false;
 
@@ -91,7 +94,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       ledger: {
         path: ledgerPath,
         exists: fs.existsSync(ledgerPath),
-        totalPrinciples: principleEntries.length,
+        totalPrinciples: healthSummary.totalPrinciples,
         byStatus: ledgerByStatus,
       },
       candidates: { total: candidatesTotal, consumed: candidatesConsumed, pending: candidatesPending },
@@ -162,56 +165,18 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
         tasksByStatus[r.status] = r.total;
       }
 
-      // Candidate/ledger consistency check
-      const consumedRows = db.prepare("SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'").all() as { candidate_id: string }[];
-      for (const r of consumedRows) {
-        if (!candidateToLedgerEntry.has(r.candidate_id)) missingLedgerCount++;
+      const painChainModel = new PainChainReadModel({ workspaceDir });
+      try {
+        const chain = await painChainModel.getLastSuccessfulChain();
+        if (chain) {
+          lastSuccessfulChain = painChainTraceToLastSuccessfulChain(chain);
+        }
+      } catch {
+        partialHealth = true;
+      } finally {
+        await painChainModel.close();
       }
-
-      // Last successful chain query — graceful degradation if schema incomplete
-      const lastSucceeded = db.prepare(
-        "SELECT task_id, input_ref, created_at FROM tasks WHERE status = 'succeeded' ORDER BY updated_at DESC LIMIT 1"
-      ).get() as { task_id: string; input_ref: string | null; created_at: string } | undefined;
-      if (!lastSucceeded) { db.close(); writeHealth(); return; }
-
-      const run = db.prepare(
-        "SELECT run_id FROM runs WHERE task_id = ? AND execution_status = 'succeeded' ORDER BY started_at DESC LIMIT 1"
-      ).get(lastSucceeded.task_id) as { run_id: string } | undefined;
-      if (!run) { db.close(); writeHealth(); return; }
-
-      const artifacts = db.prepare(
-        "SELECT artifact_id, created_at FROM artifacts WHERE run_id = ? ORDER BY created_at DESC LIMIT 1"
-      ).get(run.run_id) as { artifact_id: string; created_at: string } | undefined;
-      if (!artifacts) { db.close(); writeHealth(); return; }
-
-      const candidates = db.prepare(
-        "SELECT candidate_id FROM principle_candidates WHERE artifact_id = ?"
-      ).all(artifacts.artifact_id) as { candidate_id: string }[];
-      if (candidates.length === 0) { db.close(); writeHealth(); return; }
-
-      const ledgerEntryIds: string[] = [];
-      for (const c of candidates) {
-        const entryId = candidateToLedgerEntry.get(c.candidate_id);
-        if (entryId) ledgerEntryIds.push(entryId);
-      }
-
-      lastSuccessfulChain = {
-        painId: lastSucceeded.input_ref ?? undefined,
-        taskId: lastSucceeded.task_id,
-        runId: run.run_id,
-        artifactId: artifacts.artifact_id,
-        candidateIds: candidates.map(c => c.candidate_id),
-        ledgerEntryIds,
-        latencyMs: {
-          totalMs: lastSucceeded.created_at
-            ? Math.max(0, new Date(artifacts.created_at).getTime() - new Date(lastSucceeded.created_at).getTime())
-            : undefined,
-        },
-        failureCategory: null,
-        checkedAt: generatedAt,
-      };
     } catch (err) {
-      // Schema mismatch or transient SQLite error — emit partial health report
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`Warning: could not read full state.db metrics — partial health data: ${msg}`);
       partialHealth = true;
