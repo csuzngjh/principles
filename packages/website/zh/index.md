@@ -12,10 +12,3 @@ description: 通过原则、反思与建设性摩擦，让 AI 在执行前先停
   <EvolutionMenu />
   <ThinkingLogCard />
 </div>
-
-<style>
-/* Reset standard VPHome container spacing to let custom sections flow nicely */
-:deep(.VPHome) {
-  padding-bottom: 0 !important;
-}
-</style>

@@ -286,7 +286,7 @@ const { lang } = useData()
 }
 
 .friction-trigger .friction-node {
-  animation: pulseFriction 2.5s ease-in-out infinite;
+  animation: pulse-friction 2.5s ease-in-out infinite;
 }
 
 .friction-trigger .step-lbl {

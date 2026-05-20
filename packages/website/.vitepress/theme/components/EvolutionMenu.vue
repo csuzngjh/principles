@@ -3,7 +3,7 @@
     <div class="header-container">
       <div class="evo-subtitle">
         <span class="friction-node"></span>
-        <span class="evo-sub-text">{{ lang === 'zh-CN' ? 'PD SYSTEM ARCHITECTURE' : 'PD SYSTEM ARCHITECTURE' }}</span>
+        <span class="evo-sub-text">{{ lang === 'zh-CN' ? 'PD 系统架构' : 'PD SYSTEM ARCHITECTURE' }}</span>
       </div>
       <h2 class="section-title">{{ lang === 'zh-CN' ? '核心心智演化引擎' : 'Core Mind Evolution Engine' }}</h2>
       <p class="evo-desc">

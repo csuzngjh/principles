@@ -58,7 +58,7 @@ function safeErrorMessage(err: unknown): string {
     return err.toString();
   }
   try {
-    return JSON.stringify(err);
+    return JSON.stringify(err) ?? String(err);
   } catch {
     return '[unserializable]';
   }
