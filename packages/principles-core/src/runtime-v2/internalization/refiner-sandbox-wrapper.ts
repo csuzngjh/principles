@@ -119,6 +119,13 @@ function validateCaseDecision(
   }
 }
 
+/**
+ * Evaluate rule code against GoldenTrace cases with structured error reporting.
+ *
+ * Timeout is detected post-evaluation (elapsed-time check). A synchronous
+ * infinite loop in generated code will block the call indefinitely; true
+ * async cancellation requires node:vm or AbortController at the plugin layer.
+ */
 export function evaluateInRefinerSandbox(
   code: string,
   goldenTrace: GoldenTrace,
@@ -176,15 +183,22 @@ export function evaluateInRefinerSandbox(
       continue;
     }
 
-    if (result) {
-      const validation = validateCaseDecision(traceCase, result);
-      if (!validation.passed) {
-        failedCases.push({
-          caseId: traceCase.caseId,
-          errorType: 'validation_failed',
-          message: validation.failureReason ?? 'Validation failed',
-        });
-      }
+    if (!result) {
+      failedCases.push({
+        caseId: traceCase.caseId,
+        errorType: 'validation_failed',
+        message: 'Evaluator returned null/undefined result',
+      });
+      continue;
+    }
+
+    const validation = validateCaseDecision(traceCase, result);
+    if (!validation.passed) {
+      failedCases.push({
+        caseId: traceCase.caseId,
+        errorType: 'validation_failed',
+        message: validation.failureReason ?? 'Validation failed',
+      });
     }
   }
 

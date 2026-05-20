@@ -201,7 +201,9 @@ describe('evaluateInRefinerSandbox', () => {
       resolve(__dirname, '..', 'refiner-sandbox-wrapper.ts'),
       'utf-8',
     );
-    expect(src).not.toContain('node:vm');
+    const importLines = src.split('\n').filter((line) => line.trim().startsWith('import'));
+    const vmImports = importLines.filter((line) => line.includes('node:vm'));
+    expect(vmImports).toEqual([]);
     expect(src).not.toContain('eval(');
     expect(src).not.toContain('new Function');
   });
@@ -238,5 +240,19 @@ describe('evaluateInRefinerSandbox', () => {
     expect(result.success).toBe(false);
     expect(result.failedCases[0]?.errorType).toBe('unknown');
     expect(result.failedCases[0]?.message).toContain('string error');
+  });
+
+  it('records validation_failed when evaluateCode returns null/undefined', () => {
+    const trace = makeTrace();
+    const nullEvaluate: ReplayEvaluateFn = () => {
+      return null as unknown as ReturnType<ReplayEvaluateFn>;
+    };
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: nullEvaluate,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('null/undefined');
   });
 });

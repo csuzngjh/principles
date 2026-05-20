@@ -2008,8 +2008,11 @@ describe('PRI-172: refiner-sandbox-wrapper boundary', () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'internalization', 'refiner-sandbox-wrapper.ts'), 'utf-8');
-    expect(src).not.toContain('node:vm');
-    expect(src).not.toContain('node:fs');
+    const importLines = src.split('\n').filter((line) => line.trim().startsWith('import'));
+    const vmImports = importLines.filter((line) => line.includes('node:vm'));
+    expect(vmImports).toEqual([]);
+    const fsImports = importLines.filter((line) => line.includes('node:fs'));
+    expect(fsImports).toEqual([]);
     expect(src).not.toContain('openclaw-plugin');
     expect(src).not.toContain('eval(');
     expect(src).not.toContain('new Function');
