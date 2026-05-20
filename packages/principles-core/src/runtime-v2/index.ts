@@ -273,8 +273,8 @@ export { EvolutionQueueItemMigrator } from './store/task-migration.js';
 export { loadLedger, saveLedger, getLedgerFilePathPublic, updatePrinciple } from '../principle-tree-ledger.js';
 
 // Pruning read model (PRI-15)
-export { PruningReadModel } from './pruning-read-model.js';
-export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, OrphanDerivedCandidate, OrphanDetectionResult } from './pruning-read-model.js';
+export { PruningReadModel, removeOrphanReferencesFromLedger } from './pruning-read-model.js';
+export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, OrphanDerivedCandidate, OrphanDetectionResult, RemovedOrphanReference } from './pruning-read-model.js';
 
 // Pruning review audit log (PRI-24)
 export { appendPruningReview, listPruningReviews } from './pruning-review-log.js';
@@ -753,7 +753,7 @@ export {
 
 // ── Internalization Queue Read Model (PRI-73) ──────────────────────────────
 
-export { InternalizationQueueReadModel } from './internalization-queue-read-model.js';
+export { InternalizationQueueReadModel, createInternalizationQueueReadModel } from './internalization-queue-read-model.js';
 export type {
   InternalizationQueueSnapshot,
   NoReadyTasksDiagnosis,
@@ -764,6 +764,7 @@ export type {
   RetryWaitPendingSample,
   LeaseConflictSample,
   UnresolvableSample,
+  InternalizationQueueReadModelHandle,
 } from './internalization-queue-read-model.js';
 
 // ── Idle Trigger Decision Model (PRI-143) ──────────────────────────────────
@@ -918,6 +919,7 @@ export type {
 
 export {
   replayGoldenTrace,
+  diffParams,
   DEFAULT_REPLAY_VALIDATOR_CONFIG,
 } from './golden-trace-replay-validator.js';
 
@@ -1014,6 +1016,22 @@ export type {
   ReplayCodeInput,
   SandboxEvaluateLoader,
 } from './golden-trace-replay-adapter.js';
+
+// ── Refiner Sandbox Wrapper (PRI-172) ────────────────────────────────────
+
+export {
+  evaluateInRefinerSandbox,
+  DEFAULT_TIMEOUT_MS,
+  MAX_TIMEOUT_MS,
+} from './internalization/refiner-sandbox-wrapper.js';
+
+export type {
+  RefinerSandboxErrorType,
+  RefinerSandboxFailedCase,
+  RefinerSandboxResult,
+  RefinerSandboxOptions,
+  RefinerSandboxDependencies,
+} from './internalization/refiner-sandbox-wrapper.js';
 
 // ── Nocturnal Trinity Types (migrated from openclaw-plugin) ────────────────
 

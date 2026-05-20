@@ -224,8 +224,16 @@ export function handleAfterToolCall(
   }
 
   // 1. Determine if this was a failure
-  const exitCode = (event.result && typeof event.result === 'object') ? (event.result as Record<string, unknown>).exitCode : 0;
-  const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
+  // Support nested details structure where OpenClaw exec tool stores exitCode in result.details.exitCode
+  // Prefer the first *numeric* exit code: if result.exitCode is non-numeric, fall back to details.exitCode
+  const resultObj = (event.result && typeof event.result === 'object') ? event.result as Record<string, unknown> : null;
+  const details = resultObj?.details && typeof resultObj.details === 'object' ? resultObj.details as Record<string, unknown> : null;
+  const topExitCode = resultObj?.exitCode;
+  const detailExitCode = details?.exitCode;
+  const exitCode = typeof topExitCode === 'number' ? topExitCode
+    : typeof detailExitCode === 'number' ? detailExitCode
+    : 0;
+  const isFailure = !!event.error || exitCode !== 0;
 
   if (isFailure) {
     const failureSource = classifyToolFailureSource(event.toolName, event.error);
