@@ -93,6 +93,8 @@ const REQUIRED_SOURCE_FILES = [
   'golden-trace-replay-adapter.ts',
   // PRI-172
   'internalization/refiner-sandbox-wrapper.ts',
+  // PRI-173
+  'internalization/refiner-rulehost-gate.ts',
   // Phase 2 migration: evolution types
   'evolution/evolution-types.ts',
   'evolution/index.ts',
@@ -205,6 +207,8 @@ const REQUIRED_TEST_FILES = [
   'trace-refiner-agent.test.ts',
   // PRI-193
   'golden-trace-candidate-builder.test.ts',
+  // PRI-173
+  '../internalization/__tests__/refiner-rulehost-gate.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -2085,6 +2089,43 @@ describe('PRI-172: refiner-sandbox-wrapper boundary', () => {
     const src = readFileSync(resolve(__dirname, '..', 'internalization', 'refiner-sandbox-wrapper.ts'), 'utf-8');
     expect(src).toContain("from './rule-code-validator.js'");
     expect(src).toContain('checkForbiddenPatterns');
+  });
+});
+
+
+// ── PRI-173: Refiner RuleHost Gate boundary ────────────────────────────
+
+describe('PRI-173: refiner-rulehost-gate boundary', () => {
+  it('CORE_PURE: refiner-rulehost-gate.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'refiner-rulehost-gate.ts'), 'utf-8');
+    expect(src).not.toContain('node:vm');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('node:path');
+    expect(src).not.toContain('node:process');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('eval(');
+    expect(src).not.toContain('new Function');
+  });
+
+  it('BARREL_EXPORTS: runtime-v2/index.ts exports evaluateRefinerRuleHostGate and types', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('evaluateRefinerRuleHostGate');
+    expect(src).toContain('RefinerRuleHostGateDecision');
+    expect(src).toContain('RefinerRuleHostGateInput');
+    expect(src).toContain('RefinerRuleHostGateResult');
+    expect(src).toContain("from './internalization/refiner-rulehost-gate.js'");
+  });
+
+  it('USES_SANDBOX: refiner-rulehost-gate.ts imports RefinerSandboxResult from refiner-sandbox-wrapper', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'refiner-rulehost-gate.ts'), 'utf-8');
+    expect(src).toContain("from './refiner-sandbox-wrapper.js'");
+    expect(src).toContain('RefinerSandboxResult');
   });
 });
 

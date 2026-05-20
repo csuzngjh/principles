@@ -1033,6 +1033,19 @@ export type {
   RefinerSandboxDependencies,
 } from './internalization/refiner-sandbox-wrapper.js';
 
+// ── Refiner RuleHost Gate (PRI-173) ──────────────────────────────────────
+
+export {
+  evaluateRefinerRuleHostGate,
+} from './internalization/refiner-rulehost-gate.js';
+
+export type {
+  RefinerRuleHostGateDecision,
+  RefinerRuleHostGateInput,
+  RefinerRuleHostGateResult,
+  RefinerRuleHostGateDeps,
+} from './internalization/refiner-rulehost-gate.js';
+
 // ── Nocturnal Trinity Types (migrated from openclaw-plugin) ────────────────
 
 export type {
