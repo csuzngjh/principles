@@ -91,6 +91,8 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-115
   'golden-trace-replay-validator.ts',
   'golden-trace-replay-adapter.ts',
+  // PRI-172
+  'internalization/refiner-sandbox-wrapper.ts',
   // Phase 2 migration: evolution types
   'evolution/evolution-types.ts',
   'evolution/index.ts',
@@ -1996,6 +1998,47 @@ describe('PRI-114: correction-proposal boundary', () => {
     expect(src).toContain('validateProposedParams');
     expect(src).toContain('validateCorrectionProposal');
     expect(src).toContain("from './internalization/correction-proposal.js'");
+  });
+});
+
+// ── PRI-172: Refiner Sandbox Wrapper boundary ────────────────────────────
+
+describe('PRI-172: refiner-sandbox-wrapper boundary', () => {
+  it('CORE_PURE: refiner-sandbox-wrapper.ts has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'refiner-sandbox-wrapper.ts'), 'utf-8');
+    expect(src).not.toContain('node:vm');
+    expect(src).not.toContain('node:fs');
+    expect(src).not.toContain('openclaw-plugin');
+    expect(src).not.toContain('eval(');
+    expect(src).not.toContain('new Function');
+  });
+
+  it('BARREL_EXPORTS: runtime-v2/index.ts exports RefinerSandboxResult and evaluateInRefinerSandbox', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    expect(src).toContain('evaluateInRefinerSandbox');
+    expect(src).toContain('RefinerSandboxResult');
+    expect(src).toContain('RefinerSandboxFailedCase');
+    expect(src).toContain("from './internalization/refiner-sandbox-wrapper.js'");
+  });
+
+  it('REUSES_REPLAY: refiner-sandbox-wrapper.ts imports ReplayEvaluateFn from replay validator', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'refiner-sandbox-wrapper.ts'), 'utf-8');
+    expect(src).toContain("from '../golden-trace-replay-validator.js'");
+    expect(src).toContain('ReplayEvaluateFn');
+  });
+
+  it('REUSES_FORBIDDEN: refiner-sandbox-wrapper.ts imports checkForbiddenPatterns from rule-code-validator', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization', 'refiner-sandbox-wrapper.ts'), 'utf-8');
+    expect(src).toContain("from './rule-code-validator.js'");
+    expect(src).toContain('checkForbiddenPatterns');
   });
 });
 
