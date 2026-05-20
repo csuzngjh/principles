@@ -457,4 +457,36 @@ describe('evaluateInRefinerSandbox', () => {
     expect(result.failedCases[0]?.errorType).toBe('validation_failed');
     expect(result.failedCases[0]?.message).toContain('applicationMode');
   });
+
+  it('does not crash when evaluateCode throws Object.create(null)', () => {
+    const trace = makeTrace();
+    const throwNullProto: ReplayEvaluateFn = () => {
+      const err: unknown = Object.create(null);
+      throw err;
+    };
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: throwNullProto,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('unknown');
+    expect(typeof result.failedCases[0]?.message).toBe('string');
+    expect(result.failedCases[0]?.message.length).toBeGreaterThan(0);
+  });
+
+  it('does not crash when evaluateCode throws a Symbol', () => {
+    const trace = makeTrace();
+    const throwSymbol: ReplayEvaluateFn = () => {
+      const err: unknown = Symbol('x');
+      throw err;
+    };
+    const deps: RefinerSandboxDependencies & RefinerSandboxOptions = {
+      evaluateCode: throwSymbol,
+    };
+    const result = evaluateInRefinerSandbox('code', trace, deps);
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('unknown');
+    expect(typeof result.failedCases[0]?.message).toBe('string');
+    expect(result.failedCases[0]?.message.length).toBeGreaterThan(0);
+  });
 });

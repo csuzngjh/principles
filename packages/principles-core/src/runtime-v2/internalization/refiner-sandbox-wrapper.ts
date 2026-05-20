@@ -40,6 +40,22 @@ export interface RefinerSandboxDependencies {
 export const DEFAULT_TIMEOUT_MS = 5000;
 export const MAX_TIMEOUT_MS = 30000;
 
+function safeErrorMessage(err: unknown): string {
+  try {
+    if (typeof err === 'string') return err;
+    if (typeof err === 'number' || typeof err === 'boolean' || typeof err === 'bigint') return String(err);
+    if (err === null) return 'null';
+    if (err === undefined) return 'undefined';
+    return String(err);
+  } catch {
+    try {
+      return Object.prototype.toString.call(err);
+    } catch {
+      return 'Unstringifiable thrown value';
+    }
+  }
+}
+
 function classifyError(err: unknown): { errorType: RefinerSandboxErrorType; message: string; stack?: string } {
   if (err instanceof SyntaxError) {
     return { errorType: 'syntax_error', message: err.message, stack: err.stack };
@@ -47,7 +63,7 @@ function classifyError(err: unknown): { errorType: RefinerSandboxErrorType; mess
   if (err instanceof Error) {
     return { errorType: 'runtime_error', message: err.message, stack: err.stack };
   }
-  return { errorType: 'unknown', message: String(err) };
+  return { errorType: 'unknown', message: safeErrorMessage(err) };
 }
 
 function resolveTimeoutMs(timeoutMs: number): number {
