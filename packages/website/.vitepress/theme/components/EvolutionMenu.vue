@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="evo-section">
     <div class="header-container">
       <div class="evo-subtitle">
@@ -80,7 +80,7 @@ const zhItems = [
   },
   {
     title: '长程自主生命周期 (BALM & LRAS)',
-    description: '为解决 LLM 在严苛会话超时和 Token 裁剪下碎片化“失忆”的痛点，PD 提供了长程会话支持 (LRAS) 与内置生命周期管理器 (BALM)，支撑长周期 OKR 独立进化。',
+    description: '为解决 LLM 在严苛会话超时和 Token 裁剪下碎片化' + '失忆' + '的痛点，PD 提供了长程会话支持 (LRAS) 与内置生命周期管理器 (BALM)，支撑长周期 OKR 独立进化。',
     points: [
       'BALM 独立管理器：自主管理内置代理的休眠、唤醒与长线生命周期监控',
       'LRAS 长程会话连接：支持流式事件状态长连接，长效维持代理的深度认知上下文',
@@ -134,197 +134,31 @@ const localizedItems = computed(() => {
 </script>
 
 <style scoped>
-.evo-section {
-  padding: 4.5rem 1.5rem;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.header-container {
-  text-align: center;
-  max-width: 800px;
-  margin: 0 auto 4rem auto;
-}
-
-.evo-subtitle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.85rem;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(150, 170, 255, 0.08);
-  border-radius: 99px;
-  margin-bottom: 1.25rem;
-}
-
-.evo-sub-text {
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--blue);
-  text-transform: uppercase;
-}
-
-.section-title {
-  font-size: clamp(28px, 3.8vw, 42px) !important;
-  font-weight: 800;
-  margin-bottom: 1.25rem;
-  color: var(--text-main);
-  letter-spacing: -0.02em;
-}
-
-.evo-desc {
-  font-size: 1.05rem;
-  line-height: 1.8;
-  color: var(--text-secondary);
-}
-
-.evo-container {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
-}
-
-@media (min-width: 768px) {
-  .evo-container {
-    flex-direction: row;
-    min-height: 440px;
-  }
-}
-
-.evo-sidebar {
-  display: flex;
-  flex-direction: column;
-  background: rgba(0, 0, 0, 0.15);
-  border-bottom: 1px solid rgba(150, 170, 255, 0.08);
-  min-width: 300px;
-  padding: 1.5rem 0;
-}
-
-@media (min-width: 768px) {
-  .evo-sidebar {
-    border-bottom: none;
-    border-right: 1px solid rgba(150, 170, 255, 0.08);
-    padding: 2rem 0;
-  }
-}
-
-.evo-tab {
-  display: flex;
-  align-items: center;
-  padding: 1.25rem 2rem;
-  font-size: 1.02rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  border-left: 4px solid transparent;
-}
-
-.evo-tab:hover {
-  color: var(--text-main);
-  background: rgba(91, 141, 255, 0.04);
-  padding-left: 2.25rem;
-}
-
-.evo-tab.active {
-  color: var(--blue);
-  background: rgba(91, 141, 255, 0.06);
-  border-left-color: var(--blue);
-  padding-left: 2.25rem;
-}
-
-.tab-number {
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.9rem;
-  margin-right: 1.25rem;
-  color: var(--blue);
-  opacity: 0.6;
-}
-
-.active .tab-number {
-  opacity: 1;
-  font-weight: 700;
-}
-
-.tab-title {
-  flex-grow: 1;
-}
-
-.evo-content-area {
-  flex: 1;
-  padding: 3.5rem;
-  position: relative;
-  background: transparent;
-  display: flex;
-  align-items: center;
-}
-
-@media (max-width: 767px) {
-  .evo-content-area {
-    padding: 2.5rem 1.8rem;
-  }
-}
-
-.evo-content {
-  width: 100%;
-}
-
-.content-title {
-  font-size: 1.6rem;
-  font-weight: 800;
-  margin-bottom: 1.25rem;
-  color: var(--text-main);
-  letter-spacing: -0.01em;
-}
-
-.content-desc {
-  font-size: 1.02rem;
-  line-height: 1.75;
-  color: var(--text-secondary);
-  margin-bottom: 2rem;
-}
-
-.content-points {
-  list-style: none;
-  padding: 0;
-}
-
-.content-points li {
-  position: relative;
-  padding-left: 1.75rem;
-  margin-bottom: 0.95rem;
-  font-size: 0.96rem;
-  line-height: 1.65;
-  color: var(--text-secondary);
-}
-
-.content-points li::before {
-  content: '✦';
-  position: absolute;
-  left: 0;
-  top: 0.05rem;
-  color: var(--amber);
-  font-size: 1rem;
-}
-
-/* Page transitions */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.fade-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
-}
-.fade-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
-}
+.evo-section { padding: 5rem 1.5rem; max-width: 1200px; margin: 0 auto; }
+.header-container { text-align: center; max-width: 780px; margin: 0 auto 4rem auto; }
+.evo-subtitle { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.8rem; background: var(--accent-dim); border: 1px solid var(--accent-border); border-radius: 99px; margin-bottom: 1.25rem; }
+.evo-sub-text { font-family: var(--vp-font-family-mono); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.1em; color: var(--accent); text-transform: uppercase; }
+.section-title { font-size: clamp(28px, 3.5vw, 40px) !important; font-weight: 400; margin-bottom: 1.25rem; color: var(--text-main); letter-spacing: -0.02em; }
+.evo-desc { font-size: 1rem; line-height: 1.85; color: var(--text-secondary); }
+.evo-container { display: flex; flex-direction: column; overflow: hidden; }
+@media (min-width: 768px) { .evo-container { flex-direction: row; min-height: 420px; } }
+.evo-sidebar { display: flex; flex-direction: column; background: rgba(0,0,0,0.12); border-bottom: 1px solid var(--border); min-width: 300px; padding: 1rem 0; }
+@media (min-width: 768px) { .evo-sidebar { border-bottom: none; border-right: 1px solid var(--border); padding: 1.5rem 0; } }
+.evo-tab { display: flex; align-items: center; padding: 1.15rem 2rem; font-size: 0.95rem; font-weight: 400; color: var(--text-secondary); border: none; background: transparent; cursor: pointer; text-align: left; transition: all 0.25s ease; border-left: 2px solid transparent; }
+.evo-tab:hover { color: var(--text-main); background: rgba(255,255,255,0.02); }
+.evo-tab.active { color: var(--accent); background: var(--accent-dim); border-left-color: var(--accent); }
+.tab-number { font-family: var(--vp-font-family-mono); font-size: 0.85rem; margin-right: 1.2rem; color: var(--accent); opacity: 0.4; }
+.active .tab-number { opacity: 1; }
+.tab-title { flex-grow: 1; }
+.evo-content-area { flex: 1; padding: 3rem; position: relative; display: flex; align-items: center; }
+@media (max-width: 767px) { .evo-content-area { padding: 2rem 1.5rem; } }
+.evo-content { width: 100%; }
+.content-title { font-size: 1.4rem; font-weight: 500; margin-bottom: 1.2rem; color: var(--text-main); letter-spacing: -0.01em; }
+.content-desc { font-size: 0.98rem; line-height: 1.8; color: var(--text-secondary); margin-bottom: 2rem; }
+.content-points { list-style: none; padding: 0; }
+.content-points li { position: relative; padding-left: 1.5rem; margin-bottom: 0.85rem; font-size: 0.92rem; line-height: 1.7; color: var(--text-secondary); }
+.content-points li::before { content: ''; position: absolute; left: 0; top: 0.55rem; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: 0.5; }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.fade-enter-from { opacity: 0; transform: translateY(6px); }
+.fade-leave-to { opacity: 0; transform: translateY(-6px); }
 </style>

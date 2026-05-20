@@ -1,63 +1,42 @@
 /* ── Font Stack & CSS Variables ─────────────────────────── */
 :root {
-  /* Font Families */
-  --vp-font-family-base: 'Space Grotesk', 'Noto Sans SC', system-ui, sans-serif;
+  --vp-font-family-base: 'Inter', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
   --vp-font-family-mono: 'JetBrains Mono', monospace;
 
-  /* Premium PD Color System */
-  --bg: #070A12;
-  --panel: rgba(16, 21, 35, 0.72);
-  --panel-solid: #121726;
-  --border: rgba(150, 170, 255, 0.12);
-
-  --text-main: #F4F7FB;
-  --text-secondary: #A7B0C0;
-  --text-muted: #6F7A8D;
-
-  --cyan: #2FD7FF;
-  --blue: #5B8DFF;
-  --violet: #8B5CF6;
-  --amber: #F6B44B;
-
-  --glow-blue: rgba(47, 215, 255, 0.22);
-  --glow-violet: rgba(139, 92, 246, 0.20);
-  --glow-amber: rgba(246, 180, 75, 0.22);
-
-  /* Override standard VitePress variables globally */
-  --vp-c-bg: #070A12;
-  --vp-c-bg-soft: rgba(16, 21, 35, 0.72);
-  --vp-c-bg-alt: #121726;
-  --vp-c-border: rgba(150, 170, 255, 0.12);
-  --vp-c-text-1: #F4F7FB;
-  --vp-c-text-2: #A7B0C0;
-  --vp-c-text-3: #6F7A8D;
-  --vp-c-brand-1: #5B8DFF;
-  --vp-c-brand-2: #8B5CF6;
+  /* Light mode defaults */
+  --accent: #5B8DFF;
+  --accent-dim: rgba(91, 141, 255, 0.08);
+  --accent-border: rgba(91, 141, 255, 0.15);
+  
+  --surface: #F7F8FA;
+  --border: rgba(0, 0, 0, 0.08);
+  --text-main: #1A1D23;
+  --text-secondary: #5A5F6B;
+  --text-muted: #8A8F99;
 }
 
-/* ── Deep Global Background & Subtle Grid ─────────────── */
-body {
-  background:
-    radial-gradient(circle at 70% 8%, rgba(76, 107, 255, 0.10), transparent 32%),
-    radial-gradient(circle at 18% 30%, rgba(135, 87, 255, 0.06), transparent 28%),
-    linear-gradient(180deg, #070A12 0%, #080B13 48%, #06080E 100%) !important;
-  position: relative;
-  min-height: 100vh;
+/* Dark mode — serene values */
+:root.dark {
+  --accent: #7EB8DA;
+  --accent-dim: rgba(126, 184, 218, 0.10);
+  --accent-border: rgba(126, 184, 218, 0.12);
+  
+  --surface: #13151A;
+  --border: rgba(255, 255, 255, 0.06);
+  --text-main: #E0E2E6;
+  --text-secondary: #8A8F99;
+  --text-muted: #555960;
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: linear-gradient(to bottom, black, transparent 75%);
-  -webkit-mask-image: linear-gradient(to bottom, black, transparent 75%);
-  pointer-events: none;
-  z-index: 1;
+/* Legacy compat — map old names to accent */
+:root {
+  --cyan: var(--accent);
+  --blue: var(--accent);
+  --violet: var(--accent);
+  --amber: var(--accent);
 }
+
+/* Don't override VitePress theme vars — let them handle light/dark */
 
 /* ── Typography & Fluid Scales ──────────────────────────── */
 .pd-home-wrapper {
@@ -67,88 +46,59 @@ body::before {
 }
 
 .pd-home-wrapper h1 {
-  font-size: clamp(38px, 5.5vw, 68px);
-  line-height: 1.15;
-  letter-spacing: -0.03em;
-  font-weight: 700;
-  background: linear-gradient(135deg, var(--text-main) 30%, var(--text-secondary) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  font-size: clamp(36px, 5.5vw, 64px);
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+  font-weight: 400;
+  color: var(--text-main);
   margin-bottom: 1.5rem;
 }
 
 .pd-home-wrapper h2 {
-  font-size: clamp(26px, 3vw, 38px);
+  font-size: clamp(24px, 3vw, 36px);
   line-height: 1.25;
-  letter-spacing: -0.02em;
-  font-weight: 700;
+  letter-spacing: -0.015em;
+  font-weight: 500;
   color: var(--text-main);
   margin-bottom: 1rem;
 }
 
 .pd-home-wrapper p {
   font-size: 16px;
-  line-height: 1.8;
+  line-height: 1.85;
   color: var(--text-secondary);
 }
 
-/* ── Premium Glassmorphic Cards ────────────────────────── */
+/* ── Minimal Cards ───────────────────────────────────────── */
 .pd-card {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018)),
-    rgba(16, 21, 35, 0.72);
-  border: 1px solid rgba(150, 170, 255, 0.12);
-  border-radius: 20px;
-  box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.26),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  transition: border-color 0.3s ease;
 }
 
 .pd-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(91, 141, 255, 0.26);
-  box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.34),
-    0 0 32px rgba(91, 141, 255, 0.08);
+  border-color: var(--accent-border);
 }
 
-/* ── Breathing Friction Node ✦ ──────────────────────────── */
+/* ── Friction Node — static, calm ───────────────────────── */
 .friction-node {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  background: var(--amber);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.5;
   display: inline-block;
   vertical-align: middle;
-  animation: pulse-friction 2.8s ease-in-out infinite;
 }
 
-@keyframes pulse-friction {
-  0%, 100% {
-    box-shadow:
-      0 0 0 5px rgba(246, 180, 75, 0.08),
-      0 0 20px rgba(246, 180, 75, 0.32);
-  }
-  50% {
-    box-shadow:
-      0 0 0 8px rgba(246, 180, 75, 0.12),
-      0 0 30px rgba(246, 180, 75, 0.48);
-  }
-}
-
-/* ── Hero Image Glass Container ─────────────────────────── */
+/* ── Hero Image Container ────────────────────────────────── */
 .hero-visual {
   position: relative;
-  border-radius: 24px;
+  border-radius: 16px;
   overflow: hidden;
-  border: 1px solid rgba(120, 150, 255, 0.14);
-  background: rgba(10, 14, 28, 0.55);
-  box-shadow:
-    0 24px 80px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  background: var(--surface);
   animation: hero-fade 900ms ease-out both;
   aspect-ratio: 21 / 9;
   width: 100%;
@@ -158,77 +108,74 @@ body::before {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.92;
+  opacity: 0.85;
 }
 
-.hero-visual::after {
+:root.dark .hero-visual::after {
   content: "";
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(circle at 70% 45%, rgba(91, 141, 255, 0.12), transparent 42%),
-    linear-gradient(90deg, rgba(7, 10, 18, 0.32), transparent 45%);
+  background: linear-gradient(180deg, transparent 60%, rgba(11, 13, 17, 0.5) 100%);
   pointer-events: none;
 }
 
 @keyframes hero-fade {
   from {
     opacity: 0;
-    transform: translateY(12px) scale(0.985);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
-/* ── Buttons & Interactive Elements ─────────────────────── */
+/* ── Buttons ─────────────────────────────────────────────── */
 .pd-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0 1.75rem;
-  min-height: 46px; /* Optimized for mobile click target size >= 44px */
+  min-height: 44px;
   border-radius: 99px;
-  font-size: 0.95rem;
-  font-weight: 600;
+  font-size: 0.9rem;
+  font-weight: 500;
   text-decoration: none !important;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.25s ease;
   cursor: pointer;
 }
 
 .pd-btn-brand {
-  background: linear-gradient(135deg, var(--blue) 0%, #4776e6 100%);
-  color: #ffffff !important;
-  box-shadow: 0 4px 15px rgba(91, 141, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--accent);
+  color: #fff !important;
+  border: none;
+}
+
+:root.dark .pd-btn-brand {
+  color: #0B0D11 !important;
 }
 
 .pd-btn-brand:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(91, 141, 255, 0.35);
-  opacity: 0.95;
+  opacity: 0.88;
 }
 
 .pd-btn-alt {
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-main) !important;
+  background: transparent;
+  color: var(--text-secondary) !important;
   border: 1px solid var(--border);
 }
 
 .pd-btn-alt:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(91, 141, 255, 0.25);
-  color: #ffffff !important;
+  color: var(--text-main) !important;
+  border-color: var(--accent-border);
 }
 
-/* ── VitePress Overrides & Cleanups ────────────────────── */
+/* ── VitePress Overrides ────────────────────────────────── */
 .VPHome {
   padding-bottom: 0 !important;
   background: transparent !important;
 }
 
-/* Coming Soon styling for sidebar */
 .VPSidebarItem .text:has(+ .coming-soon),
 a[href*="coming-soon"] {
   opacity: 0.45;
@@ -236,10 +183,9 @@ a[href*="coming-soon"] {
   pointer-events: none;
 }
 
-/* Glassmorphism for VP Header */
 .VPNavBar {
-  background-color: rgba(7, 10, 18, 0.7) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  border-bottom: 1px solid rgba(150, 170, 255, 0.08) !important;
+  background-color: rgba(var(--vp-c-bg-rgb), 0.85) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  border-bottom: 1px solid var(--vp-c-border) !important;
 }
