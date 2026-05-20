@@ -1,0 +1,4 @@
+# Vercel CLI state - should not be committed
+.vercel/
+.vercel/project.json
+.vercel/.vercel/
