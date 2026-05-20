@@ -32,7 +32,8 @@ export type EventType =
       | 'rulehost_evaluated'
       | 'rulehost_blocked'
       | 'rulehost_requireApproval'
-      | 'rulehost_auto_correct_proposed';
+      | 'rulehost_auto_correct_proposed'
+      | 'rulehost_auto_correct_applied';
 
 export const EventTypeSchema = Type.Union([
   Type.Literal('tool_call'),
@@ -59,6 +60,7 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('rulehost_blocked'),
   Type.Literal('rulehost_requireApproval'),
   Type.Literal('rulehost_auto_correct_proposed'),
+  Type.Literal('rulehost_auto_correct_applied'),
 ]);
 
 export type EventCategory =
@@ -600,6 +602,40 @@ export const RuleHostAutoCorrectProposedEventDataSchema = Type.Object({
   validationValid: Type.Boolean(),
 });
 export type RuleHostAutoCorrectProposedEventDataStatic = Static<typeof RuleHostAutoCorrectProposedEventDataSchema>;
+
+/**
+ * rulehost_auto_correct_applied — Gate applied a live auto-correction (PRI-174).
+ * Emitted from gate.ts when applicationMode='live' and validation passed.
+ * Distinct from 'proposed' event - this confirms params were actually mutated.
+ */
+export interface RuleHostAutoCorrectAppliedEventData {
+  toolName: string;
+  filePath: string;
+  ruleId: string;
+  principleId?: string;
+  confidence: number;
+  reason: string;
+  correctedFields: {
+    field: string;
+    original: unknown;
+    applied: unknown;
+  }[];
+}
+
+export const RuleHostAutoCorrectAppliedEventDataSchema = Type.Object({
+  toolName: Type.String(),
+  filePath: Type.String(),
+  ruleId: Type.String(),
+  principleId: Type.Optional(Type.String()),
+  confidence: Type.Number(),
+  reason: Type.String(),
+  correctedFields: Type.Array(Type.Object({
+    field: Type.String(),
+    original: Type.Unknown(),
+    applied: Type.Unknown(),
+  })),
+});
+export type RuleHostAutoCorrectAppliedEventDataStatic = Static<typeof RuleHostAutoCorrectAppliedEventDataSchema>;
 
 // ============== Daily Statistics ==============
 
