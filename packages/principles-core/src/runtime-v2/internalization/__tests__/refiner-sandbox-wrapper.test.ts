@@ -489,4 +489,319 @@ describe('evaluateInRefinerSandbox', () => {
     expect(typeof result.failedCases[0]?.message).toBe('string');
     expect(result.failedCases[0]?.message.length).toBeGreaterThan(0);
   });
+
+  it('propose_correction with proposal.proposedParams=null → validation_failed, no throw', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pp-null',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: { content: 'console.log' },
+    }]);
+    const nullParams: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: null as unknown as Record<string, unknown>,
+        correctedFields: [],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: nullParams });
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('correctionProposal invalid');
+  });
+
+  it('propose_correction with proposal.proposedParams=[] → validation_failed, no throw', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pp-array',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: { content: 'console.log' },
+    }]);
+    const arrayParams: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: [] as unknown as Record<string, unknown>,
+        correctedFields: [],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: arrayParams });
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('correctionProposal invalid');
+  });
+
+  it('propose_correction with proposal.proposedParams="bad" → validation_failed, no throw', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pp-string',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: { content: 'console.log' },
+    }]);
+    const stringParams: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: 'bad' as unknown as Record<string, unknown>,
+        correctedFields: [],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: stringParams });
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('correctionProposal invalid');
+  });
+
+  it('propose_correction with expectedProposedParams=null → validation_failed, no throw', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'ep-null',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: null as unknown as Record<string, unknown>,
+    }]);
+    const validProposal: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: { content: 'console.log' },
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'console.log', reason: 'fix' }],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: validProposal });
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('expectedProposedParams');
+  });
+
+  it('propose_correction with expectedProposedParams=[] → validation_failed, no throw', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'ep-array',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: [] as unknown as Record<string, unknown>,
+    }]);
+    const validProposal: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: { content: 'console.log' },
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'console.log', reason: 'fix' }],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: validProposal });
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('expectedProposedParams');
+  });
+
+  it('propose_correction with expectedProposedParams as ownKeys-throwing Proxy → validation_failed, no throw', () => {
+    const throwingProxy = new Proxy({} as Record<string, unknown>, {
+      ownKeys() { throw new Error('ownKeys trapped'); },
+    });
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'ep-proxy',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: throwingProxy,
+    }]);
+    const validProposal: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: { content: 'console.log' },
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'console.log', reason: 'fix' }],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: validProposal });
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('expectedProposedParams');
+  });
+
+  it('propose_correction with proposal.proposedParams as ownKeys-throwing Proxy → validation_failed, no throw', () => {
+    const throwingProxy = new Proxy({} as Record<string, unknown>, {
+      ownKeys() { throw new Error('ownKeys trapped'); },
+    });
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pp-proxy',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: { content: 'console.log' },
+    }]);
+    const proxyParams: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: throwingProxy,
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'console.log', reason: 'fix' }],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: proxyParams });
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('proposedParams');
+  });
+
+  it('propose_correction with circular proposedParams → validation_failed, no throw', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pp-circular',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: { content: 'console.log' },
+    }]);
+    const circularParams: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: circular,
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'console.log', reason: 'fix' }],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: circularParams });
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('correctionProposal invalid');
+  });
+
+  it('propose_correction with missing applicationMode → validation_failed', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pc-no-mode',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+    }]);
+    const noMode: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: { content: 'console.log' },
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'console.log', reason: 'fix' }],
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      } as unknown as NonNullable<ReturnType<ReplayEvaluateFn>['correctionProposal']>,
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: noMode });
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('correctionProposal invalid');
+    expect(result.failedCases[0]?.message).toContain('applicationMode');
+  });
+
+  it('propose_correction with invalid applicationMode → validation_failed', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pc-bad-mode',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+    }]);
+    const badMode: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: { content: 'console.log' },
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'console.log', reason: 'fix' }],
+        applicationMode: 'invalid_mode' as unknown as 'shadow' | 'live',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: badMode });
+    expect(result.success).toBe(false);
+    expect(result.failedCases[0]?.errorType).toBe('validation_failed');
+    expect(result.failedCases[0]?.message).toContain('correctionProposal invalid');
+    expect(result.failedCases[0]?.message).toContain('applicationMode');
+  });
+
+  it('valid propose_correction with matching proposedParams and applicationMode still passes', () => {
+    const trace = makeTrace([{
+      ...makeCase(),
+      caseId: 'pc-valid',
+      kind: 'positive',
+      expectedDecision: 'propose_correction',
+      params: { path: '/src/foo.ts', content: 'debugger' },
+      expectedProposedParams: { content: 'console.log' },
+      expectedApplicationMode: 'shadow',
+    }]);
+    const validProposal: ReplayEvaluateFn = () => ({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: { content: 'console.log' },
+        correctedFields: [{ field: 'content', original: 'debugger', proposed: 'console.log', reason: 'remove debugger' }],
+        applicationMode: 'shadow',
+        confidence: 0.9,
+        ruleId: 'r1',
+        notifyAgent: true,
+      },
+    });
+    const result = evaluateInRefinerSandbox('code', trace, { evaluateCode: validProposal });
+    expect(result.success).toBe(true);
+    expect(result.failedCases).toEqual([]);
+  });
 });

@@ -5,6 +5,7 @@ import { checkForbiddenPatterns } from './rule-code-validator.js';
 import { createSyntheticRuleHostInput } from '../golden-trace.js';
 import type { RuleHostHelpers } from './rule-host-helpers.js';
 import type { RuleHostResult } from './rule-host-contracts.js';
+import { validateCorrectionProposal } from './correction-proposal.js';
 
 export type RefinerSandboxErrorType =
   | 'forbidden_pattern'
@@ -53,6 +54,16 @@ function safeErrorMessage(err: unknown): string {
     } catch {
       return 'Unstringifiable thrown value';
     }
+  }
+}
+
+function isSafeRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  try {
+    Object.keys(value);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -138,15 +149,29 @@ function validateCaseDecision(
         return { passed: false, failureReason: 'auto_correct decision missing correctionProposal' };
       }
       {
+        const proposalValidation = validateCorrectionProposal(result.correctionProposal);
+        if (!proposalValidation.valid) {
+          return { passed: false, failureReason: `correctionProposal invalid: ${proposalValidation.errors.join('; ')}` };
+        }
         const proposal = result.correctionProposal;
         const reasons: string[] = [];
-        if (traceCase.expectedProposedParams) {
-          const diffs = diffParams(traceCase.expectedProposedParams, proposal.proposedParams);
-          if (diffs.length > 0) {
-            reasons.push(`proposedParams mismatch: ${diffs.join('; ')}`);
+        if (traceCase.expectedProposedParams !== undefined) {
+          if (!isSafeRecord(traceCase.expectedProposedParams)) {
+            reasons.push('expectedProposedParams is not a safe record');
+          } else if (!isSafeRecord(proposal.proposedParams)) {
+            reasons.push('proposedParams is not a safe record');
+          } else {
+            try {
+              const diffs = diffParams(traceCase.expectedProposedParams, proposal.proposedParams);
+              if (diffs.length > 0) {
+                reasons.push(`proposedParams mismatch: ${diffs.join('; ')}`);
+              }
+            } catch (err) {
+              reasons.push(`proposedParams comparison failed: ${safeErrorMessage(err)}`);
+            }
           }
         }
-        if (traceCase.expectedApplicationMode) {
+        if (traceCase.expectedApplicationMode !== undefined) {
           if (proposal.applicationMode !== traceCase.expectedApplicationMode) {
             reasons.push(`applicationMode mismatch: expected ${traceCase.expectedApplicationMode}, got ${proposal.applicationMode}`);
           }
