@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+  <!-- Hexagon shape representing the "disciple" node -->
+  <polygon points="16,2 28,9 28,23 16,30 4,23 4,9"
+           fill="none" stroke="url(#g)" stroke-width="2"/>
+  <!-- Inner triangle: the "principle" spark -->
+  <polygon points="16,8 23,20 9,20"
+           fill="url(#g)" opacity="0.85"/>
+</svg>
