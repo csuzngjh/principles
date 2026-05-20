@@ -127,7 +127,7 @@ export class ActivationDispatcher {
     return this.activateArtifact(input, artifact, idempotencyKey);
   }
 
-  private async enqueueForApproval(input: DispatchInput, artifact: PIArtifactSnapshot, _idempotencyKey: string): Promise<ActivationDecision> {
+  private async enqueueForApproval(input: DispatchInput, artifact: PIArtifactSnapshot, idempotencyKey: string): Promise<ActivationDecision> {
     const riskLevel = getChannelRiskLevel(input.channel);
 
     if (!this.approvalQueueStore) {
@@ -157,7 +157,7 @@ export class ActivationDispatcher {
           artifactId: input.artifactId,
           channel: input.channel,
           principleId: extractPrincipleId(artifact) ?? '',
-          idempotencyKey: _idempotencyKey,
+          idempotencyKey: idempotencyKey,
           now: input.now,
         },
         artifact,
