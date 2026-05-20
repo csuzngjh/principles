@@ -67,6 +67,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-007 | Non-string evidenceRefs silently skipped instead of rejected in validator | PRI-192 |
 | ERR-008 | Missing lineage field validation allows agent to return trace with wrong attribution | PRI-192 |
 | ERR-009 | Validator silently skips missing/malformed required array fields instead of failing loud | PRI-192 |
+| ERR-010 | Falsy evaluator return silently passes validation instead of recording failure | PRI-172 |
 
 ---
 
@@ -208,9 +209,19 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-05-19
 - **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007
 
+**[ERR-010]** | Falsy evaluator return silently passes validation instead of recording failure
+
+- **What happened**: In `evaluateInRefinerSandbox`, the code used `if (result)` to guard validation, meaning a null/undefined return from `evaluateCode` was treated as a pass (no failure recorded).
+- **Why it's wrong**: A null/undefined evaluator result is a validation failure — the evaluator failed to produce a decision. Silently passing it violates the invariant that every case must have an explicit pass/fail outcome. Same class as ERR-001/ERR-005/ERR-007/ERR-009 where falsy/invalid values bypass validation.
+- **Correct approach**: Use `if (!result)` to record a `validation_failed` failure for null/undefined results, then `continue`. Only proceed to `validateCaseDecision` when `result` is truthy.
+- **How to prevent**: When writing validation logic, always handle the falsy/null/undefined case explicitly as a failure. Never use `if (value)` to skip validation — use `if (!value)` to record failure.
+- **Source**: PRI-172
+- **Date**: 2026-05-20
+- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007, ERR-009
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 9 |
-| Last updated | 2026-05-19 |
+| Total lessons | 10 |
+| Last updated | 2026-05-20 |
 | Top category | Schema & Type |
-| Recurring errors | 3 |
+| Recurring errors | 4 |
