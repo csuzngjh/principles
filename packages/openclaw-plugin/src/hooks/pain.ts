@@ -227,7 +227,8 @@ export function handleAfterToolCall(
   // Support nested details structure where OpenClaw exec tool stores exitCode in result.details.exitCode
   const resultObj = (event.result && typeof event.result === 'object') ? event.result as Record<string, unknown> : null;
   const details = resultObj?.details && typeof resultObj.details === 'object' ? resultObj.details as Record<string, unknown> : null;
-  const exitCode = (resultObj?.exitCode as number | undefined) ?? (details?.exitCode as number | undefined) ?? 0;
+  const rawExitCode = (resultObj?.exitCode as number | undefined) ?? (details?.exitCode as number | undefined);
+  const exitCode = typeof rawExitCode === 'number' ? rawExitCode : 0;
   const isFailure = !!event.error || exitCode !== 0;
 
   if (isFailure) {
