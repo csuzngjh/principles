@@ -8,7 +8,7 @@
 
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { PruningReadModel, appendPruningReview, listPruningReviews, buildMaskedPrincipleSet, loadLedger, saveLedger } from '@principles/core/runtime-v2';
+import { PruningReadModel, appendPruningReview, listPruningReviews, buildMaskedPrincipleSet, removeOrphanReferencesFromLedger } from '@principles/core/runtime-v2';
 import type { PruningReviewDecision, OrphanDerivedCandidate, OrphanDetectionResult } from '@principles/core/runtime-v2';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
 import type { RemediationResult } from './remediation-output.js';
@@ -395,38 +395,15 @@ export function handlePruningOrphans(opts: PruningOrphansOptions): void {
   }
 
   const stateDir = path.join(workspaceDir, '.state');
-  const ledger = loadLedger(stateDir);
-  const removedFromPrinciples: { principleId: string; removedIds: string[] }[] = [];
-
-  // Deep clone ledger to avoid mutating the loaded object (immutability requirement)
-  const nextLedger = JSON.parse(JSON.stringify(ledger)) as typeof ledger;
-
-  for (const [principleId, orphanIds] of orphanIdsByPrinciple) {
-    const entry = nextLedger.tree.principles[principleId];
-    if (!entry) continue;
-
-    const originalIds = entry.derivedFromPainIds ?? [];
-    const orphanIdSet = orphanIds;
-    const filteredIds = originalIds.filter((id: string) => !orphanIdSet.has(id));
-
-    if (filteredIds.length !== originalIds.length) {
-      entry.derivedFromPainIds = filteredIds;
-      removedFromPrinciples.push({
-        principleId,
-        removedIds: originalIds.filter((id: string) => orphanIdSet.has(id)),
-      });
-    }
-  }
-
-  if (removedFromPrinciples.length > 0) {
+  const removedFromPrinciples = (() => {
     try {
-      saveLedger(stateDir, nextLedger);
+      return removeOrphanReferencesFromLedger(stateDir, orphanIdsByPrinciple);
     } catch (err) {
       console.error(`❌ Failed to save ledger: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
-      return;
+      return [] as { principleId: string; removedIds: string[] }[];
     }
-  }
+  })();
 
   const removedCount = removedFromPrinciples.reduce((sum, item) => sum + item.removedIds.length, 0);
   const result: RemediationResult = createRemediationResult({
