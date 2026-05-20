@@ -16,7 +16,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
-import { loadLedger } from '../principle-tree-ledger.js';
+import { loadLedger, saveLedger } from '../principle-tree-ledger.js';
 import { DEFAULT_L1_HARD_CAP, validateL1CapConfig } from './l1-hard-cap.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────────
@@ -342,4 +342,40 @@ export class PruningReadModel {
 
     return { candidates: orphans, dbReadable };
   }
+}
+
+export interface RemovedOrphanReference {
+  principleId: string;
+  removedIds: string[];
+}
+
+export function removeOrphanReferencesFromLedger(
+  stateDir: string,
+  orphanIdsByPrinciple: Map<string, Set<string>>,
+): RemovedOrphanReference[] {
+  const ledger = loadLedger(stateDir);
+  const nextLedger = JSON.parse(JSON.stringify(ledger)) as typeof ledger;
+  const removedFromPrinciples: RemovedOrphanReference[] = [];
+
+  for (const [principleId, orphanIds] of orphanIdsByPrinciple) {
+    const entry = nextLedger.tree.principles[principleId];
+    if (!entry) continue;
+
+    const originalIds = entry.derivedFromPainIds ?? [];
+    const filteredIds = originalIds.filter((id: string) => !orphanIds.has(id));
+
+    if (filteredIds.length !== originalIds.length) {
+      entry.derivedFromPainIds = filteredIds;
+      removedFromPrinciples.push({
+        principleId,
+        removedIds: originalIds.filter((id: string) => orphanIds.has(id)),
+      });
+    }
+  }
+
+  if (removedFromPrinciples.length > 0) {
+    saveLedger(stateDir, nextLedger);
+  }
+
+  return removedFromPrinciples;
 }
