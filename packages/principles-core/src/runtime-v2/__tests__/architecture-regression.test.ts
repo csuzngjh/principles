@@ -148,6 +148,8 @@ const REQUIRED_SOURCE_FILES = [
   'trace-refiner-agent.ts',
   // PRI-193
   'golden-trace-candidate-builder.ts',
+  // PRI-149 Tier 2
+  'recovery-sweep-service.ts',
 ] as const;
 
 const REQUIRED_TEST_FILES = [
@@ -266,6 +268,8 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     'checkForbiddenPatterns',
     // PRI-45
     'mergeDecisions',
+    // PRI-149 Tier 2
+    'createRecoverySweepService',
   ];
 
   for (const name of REQUIRED_EXPORTS) {
@@ -671,6 +675,45 @@ describe('pd-cli command boundaries', () => {
     expect(src).not.toContain('RuntimeStateManager');
     expect(src).not.toContain('loadLedger');
     expect(src).toContain('createInternalizationQueueReadModel');
+  });
+
+  it('runtime-canary.ts does not import RuntimeStateManager', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const cmdPath = resolve(
+      __dirname,
+      '../../../../pd-cli/src/commands/runtime-canary.ts',
+    );
+    expect(existsSync(cmdPath)).toBe(true);
+    const src = readFileSync(cmdPath, 'utf-8');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).toContain('createInternalizationQueueReadModel');
+  });
+
+  it('runtime-diagnostics-export.ts does not import RuntimeStateManager', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const cmdPath = resolve(
+      __dirname,
+      '../../../../pd-cli/src/commands/runtime-diagnostics-export.ts',
+    );
+    expect(existsSync(cmdPath)).toBe(true);
+    const src = readFileSync(cmdPath, 'utf-8');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).toContain('createInternalizationQueueReadModel');
+  });
+
+  it('runtime-recovery.ts does not import RuntimeStateManager', async () => {
+    const { existsSync, readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const cmdPath = resolve(
+      __dirname,
+      '../../../../pd-cli/src/commands/runtime-recovery.ts',
+    );
+    expect(existsSync(cmdPath)).toBe(true);
+    const src = readFileSync(cmdPath, 'utf-8');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).toContain('createRecoverySweepService');
   });
 });
 

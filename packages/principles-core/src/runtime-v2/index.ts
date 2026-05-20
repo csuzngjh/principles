@@ -767,6 +767,11 @@ export type {
   InternalizationQueueReadModelHandle,
 } from './internalization-queue-read-model.js';
 
+// ── Recovery Sweep Service (PRI-149 Tier 2) ────────────────────────────────
+
+export { createRecoverySweepService } from './recovery-sweep-service.js';
+export type { RecoverySweepService, RecoverySweepServiceHandle } from './recovery-sweep-service.js';
+
 // ── Idle Trigger Decision Model (PRI-143) ──────────────────────────────────
 
 export type {
