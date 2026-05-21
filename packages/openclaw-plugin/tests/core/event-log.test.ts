@@ -279,5 +279,40 @@ describe('EventLog', () => {
       // Other sub-counters should not be set
       expect(stats.evolution.reportsMissingJson).toBe(0);
     });
+
+    it('should count rulehost_auto_correct_applied events', () => {
+      const today = new Date().toISOString().slice(0, 10);
+
+      eventLog.recordRuleHostAutoCorrectProposed({
+        toolName: 'write',
+        filePath: '/test/file.ts',
+        ruleId: 'r1',
+        confidence: 0.9,
+        reason: 'fix typo',
+        applicationMode: 'live',
+        correctedFields: ['content'],
+        validationValid: true,
+      });
+      eventLog.recordRuleHostAutoCorrectApplied({
+        toolName: 'write',
+        filePath: '/test/file.ts',
+        ruleId: 'r1',
+        confidence: 0.9,
+        reason: 'fix typo',
+        correctedFields: [{ field: 'content', original: 'broken', applied: 'fixed' }],
+      });
+
+      const stats = eventLog.getDailyStats(today);
+      expect(stats.evolution.rulehostAutoCorrectProposed).toBe(1);
+      expect(stats.evolution.rulehostAutoCorrectApplied).toBe(1);
+    });
+
+    it('should have rulehostAutoCorrectApplied field in evolution stats', () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const stats = eventLog.getDailyStats(today);
+
+      expect(stats.evolution).toBeDefined();
+      expect(stats.evolution.rulehostAutoCorrectApplied).toBe(0);
+    });
   });
 });
