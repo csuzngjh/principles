@@ -1103,4 +1103,259 @@ describe('PiAiRuntimeAdapter', () => {
       expect(output?.payload).toMatchObject({ valid: true, taskId: 'task-dreamer-1' });
     });
   });
+
+  // ── PRI-200: Structured output repair loop with evidence pack ──
+
+  describe('PRI-200: structured output repair loop with evidence pack', () => {
+    const INVALID_DIAGNOSIS_SCHEMA = {
+      valid: true,
+      diagnosisId: 'diag-pri200-1',
+      taskId: 'task-pri200-1',
+      summary: 'Test PRI-200',
+      rootCause: 'Test root cause',
+      violatedPrinciples: [],
+      evidence: [],
+      recommendations: [{ kind: 'Rule', description: 'Fix casing' }],
+      confidence: '85%',
+    };
+
+    function makeDiagnosticianInput(overrides: Partial<StartRunInput> = {}): StartRunInput {
+      return makeStartRunInput({
+        outputSchemaRef: 'diagnostician-output-v1',
+        taskRef: { taskId: 'task-pri200-1' },
+        ...overrides,
+      });
+    }
+
+    function resetMock() {
+      mockComplete.mockReset();
+      mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+    }
+
+    it('1. valid JSON + valid schema → no repair triggered', async () => {
+      resetMock();
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeDiagnosticianInput());
+
+      expect(mockComplete).toHaveBeenCalledTimes(1);
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ confidence: 0.9 });
+
+      const repairEvent = findTelemetryEvent('output_repair_attempted');
+      expect(repairEvent).toBeUndefined();
+      const schemaInvalidEvent = findTelemetryEvent('output_schema_invalid');
+      expect(schemaInvalidEvent).toBeUndefined();
+    });
+
+    it('2. prose-wrapped JSON extraction succeeds → no repair triggered', async () => {
+      resetMock();
+      const proseWrapped = `Here is the analysis:\n${JSON.stringify(VALID_DIAGNOSIS)}\nDone.`;
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(proseWrapped));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeDiagnosticianInput());
+
+      expect(mockComplete).toHaveBeenCalledTimes(1);
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ diagnosisId: 'diag-test-1' });
+    });
+
+    it('3. extraction failed → output_extraction_failed telemetry + output_invalid', async () => {
+      resetMock();
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage('No JSON here at all'));
+
+      const adapter = makeAdapter();
+      try { await adapter.startRun(makeDiagnosticianInput()); } catch { /* expected */ }
+
+      const extractionEvent = findTelemetryEvent('output_extraction_failed');
+      expect(extractionEvent).toBeDefined();
+      const payload = extractionEvent?.payload as Record<string, unknown>;
+      expect(payload.outputSchemaRef).toBe('diagnostician-output-v1');
+      expect(payload.provider).toBe('openrouter');
+      expect(payload.model).toBe('anthropic/claude-sonnet-4');
+      expect(typeof payload.rawOutputPreview).toBe('string');
+    });
+
+    it('4. schema invalid once, repair returns valid → success + repairAttempts[0].repaired=true', async () => {
+      resetMock();
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS_SCHEMA)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeDiagnosticianInput());
+
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject({ confidence: 0.9 });
+
+      const repairEvent = findTelemetryEvent('output_repair_attempted');
+      expect(repairEvent).toBeDefined();
+      const repairPayload = repairEvent?.payload as Record<string, unknown>;
+      expect(repairPayload.repaired).toBe(true);
+      expect(repairPayload.attemptsUsed).toBe(1);
+    });
+
+    it('5. schema invalid, repair also invalid → output_repair_exhausted + output_invalid', async () => {
+      resetMock();
+      mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS_SCHEMA)));
+
+      const adapter = makeAdapter();
+      await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
+        category: 'output_invalid',
+      });
+
+      const exhaustedEvent = findTelemetryEvent('output_repair_exhausted');
+      expect(exhaustedEvent).toBeDefined();
+      const exhaustedPayload = exhaustedEvent?.payload as Record<string, unknown>;
+      expect(exhaustedPayload.outputSchemaRef).toBe('diagnostician-output-v1');
+      expect(exhaustedPayload.provider).toBe('openrouter');
+      expect(exhaustedPayload.model).toBe('anthropic/claude-sonnet-4');
+      expect(typeof exhaustedPayload.rawOutputPreview).toBe('string');
+      expect(Array.isArray(exhaustedPayload.validationErrors)).toBe(true);
+      expect(Array.isArray(exhaustedPayload.repairAttempts)).toBe(true);
+      expect(typeof exhaustedPayload.finalFailureReason).toBe('string');
+    });
+
+    it('6. repair loop never exceeds configured max attempts', async () => {
+      resetMock();
+      mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS_SCHEMA)));
+
+      const adapter = makeAdapter();
+      await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
+        category: 'output_invalid',
+      });
+
+      // 1 original + 1 repair (default maxRepairAttempts=1) = 2 calls total
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+    });
+
+    it('7. repair prompt includes schemaRef and error paths', async () => {
+      resetMock();
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS_SCHEMA)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      await adapter.startRun(makeDiagnosticianInput());
+
+      const [, context] = mockComplete.mock.calls[1] as [unknown, { messages: { content: string }[] }];
+      const repairMessage = context.messages[0]?.content ?? '';
+      expect(repairMessage).toContain('diagnostician-output-v1');
+      expect(repairMessage).toContain('/confidence');
+    });
+
+    it('8. repair attempt must not override lineage fields silently', async () => {
+      resetMock();
+      const originalWithLineage = {
+        ...INVALID_DIAGNOSIS_SCHEMA,
+        taskId: 'task-original-1',
+      };
+      const repairedWithChangedLineage = {
+        ...VALID_DIAGNOSIS,
+        taskId: 'task-CHANGED-by-llm',
+      };
+
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(originalWithLineage)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(repairedWithChangedLineage)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeDiagnosticianInput({
+        taskRef: { taskId: 'task-original-1' },
+      }));
+
+      const output = await adapter.fetchOutput(handle.runId);
+      const payload = output?.payload as Record<string, unknown>;
+      expect(payload.taskId).toBe('task-original-1');
+    });
+
+    it('9. provider/model/rawOutputPreview are present in evidence pack', async () => {
+      resetMock();
+      mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS_SCHEMA)));
+
+      const adapter = makeAdapter();
+      try { await adapter.startRun(makeDiagnosticianInput()); } catch { /* expected */ }
+
+      const exhaustedEvent = findTelemetryEvent('output_repair_exhausted');
+      expect(exhaustedEvent).toBeDefined();
+      const payload = exhaustedEvent?.payload as Record<string, unknown>;
+      expect(payload.provider).toBe('openrouter');
+      expect(payload.model).toBe('anthropic/claude-sonnet-4');
+      expect(typeof (payload.rawOutputPreview as string)).toBe('string');
+      expect((payload.rawOutputPreview as string).length).toBeGreaterThan(0);
+    });
+
+    it('10. unknown schemaRef keeps existing backward-compatible behavior', async () => {
+      resetMock();
+      const arbitraryOutput = { foo: 'bar', baz: 42 };
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(arbitraryOutput)));
+
+      const adapter = makeAdapter();
+      const handle = await adapter.startRun(makeStartRunInput({
+        outputSchemaRef: 'custom-unknown-v1',
+      }));
+
+      expect(mockComplete).toHaveBeenCalledTimes(1);
+      const output = await adapter.fetchOutput(handle.runId);
+      expect(output?.payload).toMatchObject(arbitraryOutput);
+    });
+
+    it('emits output_schema_invalid telemetry before repair attempt', async () => {
+      resetMock();
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS_SCHEMA)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      await adapter.startRun(makeDiagnosticianInput());
+
+      const schemaInvalidEvent = findTelemetryEvent('output_schema_invalid');
+      expect(schemaInvalidEvent).toBeDefined();
+      const payload = schemaInvalidEvent?.payload as Record<string, unknown>;
+      expect(payload.outputSchemaRef).toBe('diagnostician-output-v1');
+      expect(payload.provider).toBe('openrouter');
+      expect(payload.model).toBe('anthropic/claude-sonnet-4');
+      expect(typeof (payload.rawOutputPreview as string)).toBe('string');
+      expect(Array.isArray(payload.validationErrors)).toBe(true);
+      expect((payload.validationErrors as unknown[]).length).toBeGreaterThan(0);
+    });
+
+    it('evidence pack includes repairAttempts with schemaRef and attempt number', async () => {
+      resetMock();
+      mockComplete.mockResolvedValue(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS_SCHEMA)));
+
+      const adapter = makeAdapter();
+      try { await adapter.startRun(makeDiagnosticianInput()); } catch { /* expected */ }
+
+      const exhaustedEvent = findTelemetryEvent('output_repair_exhausted');
+      expect(exhaustedEvent).toBeDefined();
+      const payload = exhaustedEvent?.payload as Record<string, unknown>;
+      const attempts = payload.repairAttempts as Record<string, unknown>[];
+      expect(attempts.length).toBeGreaterThan(0);
+      expect(attempts[0]?.schemaRef).toBe('diagnostician-output-v1');
+      expect(typeof attempts[0]?.attempt).toBe('number');
+      expect(typeof attempts[0]?.repaired).toBe('boolean');
+    });
+
+    it('output_schema_invalid telemetry includes validation error paths', async () => {
+      resetMock();
+      mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS_SCHEMA)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter();
+      await adapter.startRun(makeDiagnosticianInput());
+
+      const schemaInvalidEvent = findTelemetryEvent('output_schema_invalid');
+      expect(schemaInvalidEvent).toBeDefined();
+      const payload = schemaInvalidEvent?.payload as Record<string, unknown>;
+      const errors = payload.validationErrors as Record<string, unknown>[];
+      expect(errors.length).toBeGreaterThan(0);
+      const errorPaths = errors.map(e => e.path);
+      expect(errorPaths.some(p => typeof p === 'string' && p.includes('confidence'))).toBe(true);
+    });
+  });
 });
