@@ -91,7 +91,9 @@ The `record-error` skill handles: classify → number → Linear comment → tag
 Before handing off a PR (pushing, creating PR, or reporting completion), execute this checklist:
 
 **Fetch and resolve PR comments**
-- `gh pr view <PR> --comments` and `gh pr review <PR> --comments`
+- `gh pr view <PR> --json comments,reviews,latestReviews,files,statusCheckRollup`
+- `gh api repos/:owner/:repo/pulls/<PR>/comments --paginate`
+- `gh api repos/:owner/:repo/issues/<PR>/comments --paginate`
 - Fetch ALL comments (not just the first page). Retry at least 2 times on API failure.
 - Fix every valid P0/P1/P2 finding. For each handled comment, note the fix.
 - If a comment cannot be fixed, explain why in the PR body.

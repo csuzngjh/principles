@@ -55,8 +55,9 @@
 
 ```
 □ 获取所有 PR 评论和审查意见（若有现有 PR）
-  - gh pr view <PR> --comments
-  - gh pr review <PR> --comments
+  - gh pr view <PR> --json comments,reviews,latestReviews,files,statusCheckRollup
+  - gh api repos/:owner/:repo/pulls/<PR>/comments --paginate
+  - gh api repos/:owner/:repo/issues/<PR>/comments --paginate
   - 重试至少 2 次，API 超时不跳过
   - 确认真实人工评论与自动化评论的区别，处理所有 P0/P1/P2 发现项
   - 每个已处理的评论注明修复方式
