@@ -359,6 +359,38 @@ describe('attemptStructuredOutputRepair', () => {
 
     expect(prompt).toContain('SCHEMA REF: diagnostician-output-v1');
   });
+
+  it('refreshes schema errors across repair attempts (PRI-200)', async () => {
+    const callPrompts: string[] = [];
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async (prompt: string) => {
+      callPrompts.push(prompt);
+      callCount++;
+      if (callCount < 2) return JSON.stringify(SAMPLE_INVALID_JSON);
+      return JSON.stringify(VALID_REPAIRED_JSON);
+    };
+
+    const firstErrors = [{ path: '/confidence', message: 'Expected number got string', value: '85%' }];
+    const secondErrors = [{ path: '/confidence', message: 'Expected number got string v2', value: '90%' }];
+
+    await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      firstErrors,
+      {
+        llmCaller,
+        schemaCheck: (v) => {
+          const obj = v as Record<string, unknown>;
+          return typeof obj.confidence === 'number';
+        },
+        schemaErrors: (_v: unknown) => secondErrors,
+      },
+      { maxRepairAttempts: 2 },
+    );
+
+    expect(callPrompts.length).toBe(2);
+    expect(callPrompts[0]).toContain('Expected number got string');
+    expect(callPrompts[1]).toContain('Expected number got string v2');
+  });
 });
 
 // ── DEFAULT_REPAIR_CONFIG ──

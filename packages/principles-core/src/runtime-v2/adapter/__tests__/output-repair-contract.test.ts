@@ -113,11 +113,18 @@ describe('output-repair-contract', () => {
   });
 
   describe('formatValidationErrorEntry', () => {
-    it('formats string values as-is', () => {
+    it('formats short string values as-is', () => {
       const entry = formatValidationErrorEntry('/confidence', 'Expected number', '85%');
       expect(entry.path).toBe('/confidence');
       expect(entry.expected).toBe('Expected number');
       expect(entry.actualPreview).toBe('85%');
+    });
+
+    it('truncates long string values', () => {
+      const longString = 'x'.repeat(200);
+      const entry = formatValidationErrorEntry('/field', 'Expected number', longString);
+      expect(entry.actualPreview.length).toBeLessThan(longString.length);
+      expect(entry.actualPreview.endsWith('...')).toBe(true);
     });
 
     it('formats non-string values as JSON', () => {

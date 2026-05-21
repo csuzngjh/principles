@@ -152,22 +152,23 @@ export async function attemptStructuredOutputRepair<T>(
 ): Promise<RepairResult<T>> {
   const cfg = { ...DEFAULT_REPAIR_CONFIG, ...config };
   const repairAttempts: OutputRepairAttempt[] = [];
+  let currentErrors: readonly SchemaValidationError[] = schemaErrors;
 
-  if (schemaErrors.length === 0 || cfg.maxRepairAttempts <= 0) {
+  if (currentErrors.length === 0 || cfg.maxRepairAttempts <= 0) {
     return {
       repaired: false,
       output: null,
       attemptsUsed: 0,
-      repairSummary: `Repair skipped: ${schemaErrors.length === 0 ? 'no errors' : 'maxRepairAttempts=0'}`,
+      repairSummary: `Repair skipped: ${currentErrors.length === 0 ? 'no errors' : 'maxRepairAttempts=0'}`,
       repairAttempts,
     };
   }
 
-  const errorSummary = `${schemaErrors.length} errors: ${schemaErrors.slice(0, 3).map(e => e.path).join(', ')}`;
-  const initialValidationErrors = buildValidationErrorEntries(schemaErrors);
+  const errorSummary = `${currentErrors.length} errors: ${currentErrors.slice(0, 3).map(e => e.path).join(', ')}`;
+  const initialValidationErrors = buildValidationErrorEntries(currentErrors);
 
   for (let attempt = 0; attempt < cfg.maxRepairAttempts; attempt++) {
-    const prompt = formatRepairPrompt(invalidOutput, schemaErrors, cfg);
+    const prompt = formatRepairPrompt(invalidOutput, currentErrors, cfg);
 
     // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try block below
     let rawResponse: string | null;
@@ -253,6 +254,9 @@ export async function attemptStructuredOutputRepair<T>(
     });
 
     invalidOutput = candidateWithLineage;
+    if (callbacks.schemaErrors) {
+      currentErrors = callbacks.schemaErrors(candidateWithLineage);
+    }
   }
 
   return {

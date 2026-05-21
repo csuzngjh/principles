@@ -89,7 +89,7 @@ export function formatValidationErrorEntry(
   value: unknown,
 ): OutputValidationErrorEntry {
   const actualPreview = typeof value === 'string'
-    ? value
+    ? truncatePreview(value, 100)
     : value === undefined || value === null
       ? String(value)
       : truncatePreview(JSON.stringify(value), 100);
