@@ -178,9 +178,9 @@ describe('Synthetic Baseline pure helpers (PRI-206)', () => {
       expect(output.valid).toBe(true);
       expect(output.confidence).toBe(0.95);
       expect(output.diagnosisId).toBe('synth-diag-test-pain-123');
-      const [rec] = output.recommendations;
-      expect(rec).toBeDefined();
-      expect(rec.kind).toBe('principle');
+      const firstRec = output.recommendations.find(() => true);
+      expect(firstRec).toBeDefined();
+      expect(firstRec?.kind).toBe('principle');
     });
   });
 });
