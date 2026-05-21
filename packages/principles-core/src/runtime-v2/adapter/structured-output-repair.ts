@@ -250,7 +250,7 @@ export async function attemptStructuredOutputRepair<T>(
       schemaRef: cfg.schemaRef ?? 'unknown',
       attempt: attempt + 1,
       rawOutputPreview: truncatePreview(rawResponse),
-      validationErrors: buildValidationErrorEntries(nextErrors),
+      validationErrors: attemptValidationErrors,
       repairPromptVersion: REPAIR_PROMPT_VERSION,
       repaired: false,
     });
