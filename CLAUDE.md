@@ -76,9 +76,29 @@ docs/                    # Architecture docs, design documents, maps
 
 **Before starting ANY coding task**, you MUST read `docs/ERROR_EXPERIENCE_HANDBOOK.md`. This file records real errors caught in code reviews. Reading it prevents you from repeating mistakes that other AI assistants made on this project.
 
-**After a code review catches your error**: You MUST invoke the `record-error` skill immediately. This is not optional — even if the fix was trivial. The skill handles the full workflow: classify → number → Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
+### Error Handbook Gate
 
-**Mandatory rule**: Any code review (pr-review skill, self-review, or ad-hoc review) that discovers a real issue (bug, type safety violation, architecture violation, logic error) MUST invoke `record-error` before closing. Do NOT skip this step with excuses like "the fix was trivial" or "I'll do it later". Without recording, the same class of error will recur across sessions.
+Before implementation:
+
+1. Read `docs/ERROR_EXPERIENCE_HANDBOOK.md` **in full**.
+2. List the relevant ERR entries for the current task (minimum 3). Reference specific IDs and titles.
+3. State how this PR avoids recurrence of each listed ERR. Write this in your implementation brief.
+4. If fixing a bug: note which known ERR class the bug belongs to.
+
+After code review (if a real bug is found):
+
+1. **New error class**: Create a new ERR entry in the handbook with full details.
+2. **Recurring error class**: Update the existing entry's Recurrence field with the new date and issue.
+3. Tag the Linear issue with `lesson-learned` label.
+4. Mention handbook updates in the PR body.
+
+### Error Recording (MANDATORY)
+
+**Rule**: Any code review (pr-review skill, self-review, or ad-hoc review) that discovers a real issue (bug, type safety violation, architecture violation, logic error) MUST invoke `record-error` before closing.
+
+You MUST invoke the `record-error` skill immediately. This is not optional — even if the fix was trivial. The skill handles the full workflow: classify → number → Linear comment → tag `lesson-learned` → edit handbook → update stats → commit & PR.
+
+**Do NOT skip this step** with excuses like "the fix was trivial" or "I'll do it later". Without recording, the same class of error will recur across sessions.
 
 ## Critical Boundaries
 
@@ -103,6 +123,24 @@ These rules prevent architectural drift. Violating them will break the project.
 - Code that contradicts an ADR is a bug. Fix the code or update the ADR — never silently ignore.
 - See `docs/agents/domain.md` for the full workflow.
 
+## Runtime Contract Rules
+
+All code that handles untrusted data (parsed JSON, LLM output, DB `diagnosticJson`, artifact metadata) must follow these 9 rules. Each rule maps to real error patterns in the Error Experience Handbook. Review these rules during implementation AND during code review.
+
+| # | Rule | Key constraint | ERR ref |
+|---|------|----------------|---------|
+| 1 | Treat parsed JSON / LLM output / DB `diagnosticJson` / artifact metadata as `unknown` | Never use `any`; require runtime validation before use | ERR-001 |
+| 2 | Do not use `as` to bypass runtime validation | Use `typeof`, `Array.isArray()`, or type guards for runtime checks | ERR-001, ERR-005 |
+| 3 | Required fields must fail loud when missing or malformed | Use `if (!valid) { error }` pattern, not `if (valid) { skip }` | ERR-009, ERR-010 |
+| 4 | Validate array element types | Use `filter(isString)` or element-wise `typeof` on unknown arrays | ERR-005, ERR-007 |
+| 5 | Use `Object.hasOwn()`, not `in`, for untrusted object keys | `in` matches inherited properties (toString, constructor) | ERR-013 |
+| 6 | Lineage and evidence fields must come from the same source; add mismatch tests | sourceTaskId/sourceRunIds/sourcePainId must be internally consistent | ERR-004, ERR-008 |
+| 7 | Retry/repair loops must distinguish current, next, and recorded state | Get fresh errors each iteration; record with current-iteration data | ERR-015, ERR-018, ERR-019 |
+| 8 | Preview and telemetry paths must be bounded and use safe serialization | Use `safeStringifyPreview`; never raw `JSON.stringify` on unknown values | ERR-014, ERR-016, ERR-017 |
+| 9 | Graceful degradation must include a reason via structured error, notes, telemetry, or logs | Silent fallback = bug. Observability is mandatory. | ERR-002 |
+
+**Enforcement**: Code review must check every rule that applies to the changed code. If a rule doesn't apply, state why.
+
 ## Key Conventions
 
 ### File Naming
@@ -125,6 +163,36 @@ These rules prevent architectural drift. Violating them will break the project.
 - **禁止 AI 直接合并 PR** — 所有 PR 必须由用户手动完成合并，不得使用 `gh pr merge` 或任何 git 命令自动合并
 - AI 可创建 PR、推送分支、同步 Linear 状态，但合并操作必须由用户执行
 - 如需合并提示，应明确告知用户前往 GitHub 页面手动完成
+
+## PR Pre-Review Gate
+
+Before handing off a PR (pushing, creating PR, or reporting completion), execute this checklist:
+
+**Fetch and resolve PR comments**
+- `gh pr view <PR> --json comments,reviews,latestReviews,files,statusCheckRollup`
+- `gh api repos/:owner/:repo/pulls/<PR>/comments --paginate`
+- `gh api repos/:owner/:repo/issues/<PR>/comments --paginate`
+- Fetch ALL comments (not just the first page). Retry at least 2 times on API failure.
+- Fix every valid P0/P1/P2 finding. For each handled comment, note the fix.
+- If a comment cannot be fixed, explain why in the PR body.
+
+**Check diff scope**
+- `gh pr diff <PR> --name-only` (or `git diff origin/main --name-only`)
+- Confirm no unrelated files were modified.
+- Confirm no stale-main rollback of already-merged code (see ERR-012).
+
+**Run tests**
+- `cd packages/principles-core && npm run test`
+- `cd packages/openclaw-plugin && npm run test`
+- `npm run lint` (if available)
+- `npm run verify:merge` (if available)
+
+**Final summary**
+Include in the PR body or completion report:
+- Relevant ERR checklist (which ERR entries were considered and how avoided)
+- PR comments handled (count and resolution)
+- Tests run (which commands, what results)
+- Remaining risk (known issues, skipped coverage, trade-offs)
 
 ## Key Files
 
