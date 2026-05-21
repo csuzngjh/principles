@@ -263,6 +263,84 @@ describe('RuleHostWriter', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('no_implementation_code');
   });
+
+  it('returns high riskLevel when affectedTools is empty array', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate() {}',
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: [],
+      }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(true);
+    expect(result.riskLevel).toBe('high');
+  });
+
+  it('returns critical riskLevel for tools containing destructive prefixes (substring match)', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate() {}',
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['my-edit-wrapper', 'pre-write-hook', 'post-delete-callback'],
+      }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(true);
+    expect(result.riskLevel).toBe('critical');
+  });
+
+  it('returns high riskLevel for mixed tools where none contain destructive prefixes', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate() {}',
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: ['search', 'grep', 'list_files'],
+      }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(true);
+    expect(result.riskLevel).toBe('high');
+  });
+
+  it('treats non-string items in affectedTools as safe', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact({
+      contentJson: JSON.stringify({
+        implementationCode: 'function evaluate() {}',
+        goldenTrace: makeGoldenTrace(),
+        ruleHostGateDecision: 'accepted_shadow',
+        affectedTools: [123, null, undefined, {}],
+      }),
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(true);
+    expect(result.riskLevel).toBe('high');
+  });
+
+  it('rejects artifact with invalid validationStatus', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact();
+    Object.defineProperty(artifact, 'validationStatus', {
+      value: 'unknown',
+      writable: false,
+      configurable: true,
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('artifact_validation_status');
+  });
 });
 
 describe('RuleHostWriter.buildApprovalContext', () => {
