@@ -305,9 +305,6 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
   });
 
   it('ATTACK-5: correctionProposal semantic contradiction — correctedFields vs proposedParams mismatch', () => {
-    // NOTE: This documents a known validateCorrectionProposal gap for ruleId
-    // R_attack_5. The validator currently permits correctedFields entries that
-    // are not present in proposedParams; gate.ts still fail-opens before mutation.
     const proposal = {
       proposedParams: { content: 'fixed' },
       correctedFields: [
@@ -322,7 +319,8 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
 
     const validation = validateCorrectionProposal(proposal);
 
-    expect(validation.valid).toBe(true);
+    expect(validation.valid).toBe(false);
+    expect(validation.errors.some((e: string) => e.includes('file_path'))).toBe(true);
   });
 
   it('ATTACK-6: LLM returns empty recommendations — bridge must report failure, not silent success', async () => {

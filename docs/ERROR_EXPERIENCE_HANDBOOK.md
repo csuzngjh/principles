@@ -69,6 +69,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-008 | Missing lineage field validation allows agent to return trace with wrong attribution | PRI-192 |
 | ERR-009 | Validator silently skips missing/malformed required array fields instead of failing loud | PRI-192 |
 | ERR-010 | Falsy evaluator return silently passes validation instead of recording failure | PRI-172 |
+| ERR-013 | `in` operator on untrusted object matches inherited Object.prototype properties | PRI-201 |
 
 ---
 
@@ -244,9 +245,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-013]** | `in` operator on untrusted object matches inherited Object.prototype properties
+
+- **What happened**: In `validateCorrectionProposal()`, the cross-check for `correctedFields[].field` against `proposedParams` used `cf.field in proposal.proposedParams`. The `in` operator traverses the prototype chain, so inherited properties like `toString`, `constructor`, `valueOf` would match even though they are not actual keys in `proposedParams`. A `correctedFields` entry with `field: 'toString'` would incorrectly pass validation, allowing the semantic-contradiction bug the cross-check was designed to prevent.
+- **Why it's wrong**: When checking whether a key exists in an untrusted object (one that came from LLM output), the `in` operator is the wrong tool because it matches inherited properties from `Object.prototype`. This is the same class of error as ERR-001/ERR-005/ERR-007 where runtime semantics differ from the developer's intent due to type-system/primitive mismatches.
+- **Correct approach**: Use `Object.hasOwn(obj, key)` which only checks own properties and does not traverse the prototype chain. This is the correct semantics for "is this key present in the data the agent provided".
+- **How to prevent**: When checking key existence in untrusted objects (LLM output, parsed JSON, `Record<string, unknown>`), always use `Object.hasOwn()` or `Object.prototype.hasOwnProperty.call()`, never the `in` operator. Add a test case with an inherited property name (e.g., `toString`) to every validator that checks key existence.
+- **Source**: PRI-201 / PR #663 (Codex review)
+- **Date**: 2026-05-21
+- **Recurrence**: Yes - same class as ERR-001/ERR-005/ERR-007 where runtime semantics bypass validation intent
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 12 |
+| Total lessons | 13 |
 | Last updated | 2026-05-21 |
 | Top category | Schema & Type |
-| Recurring errors | 5 |
+| Recurring errors | 6 |
