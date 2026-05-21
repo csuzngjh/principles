@@ -479,4 +479,67 @@ describe('validateCorrectionProposal', () => {
     expect(result.errors.some((e: string) => e.includes('toString'))).toBe(true);
   });
 
+  it('rejects correctedFields field "toString" when proposedParams is empty object', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: {},
+      correctedFields: [
+        { field: 'toString', original: 'old', proposed: 'new', reason: 'bypass' },
+      ],
+      applicationMode: 'live',
+      confidence: 0.9,
+      ruleId: 'R_inherit_toString',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('toString'))).toBe(true);
+  });
+
+  it('rejects correctedFields field "constructor" when proposedParams is empty object', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: {},
+      correctedFields: [
+        { field: 'constructor', original: 'old', proposed: 'new', reason: 'bypass' },
+      ],
+      applicationMode: 'live',
+      confidence: 0.9,
+      ruleId: 'R_inherit_constructor',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('constructor'))).toBe(true);
+  });
+
+  it('rejects correctedFields field "hasOwnProperty" when proposedParams is empty object', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: {},
+      correctedFields: [
+        { field: 'hasOwnProperty', original: 'old', proposed: 'new', reason: 'bypass' },
+      ],
+      applicationMode: 'live',
+      confidence: 0.9,
+      ruleId: 'R_inherit_hasOwnProperty',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('hasOwnProperty'))).toBe(true);
+  });
+
+  it('accepts correctedFields field "toString" when proposedParams explicitly contains { toString: null }', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: { toString: null },
+      correctedFields: [
+        { field: 'toString', original: 'old', proposed: null, reason: 'explicit own key' },
+      ],
+      applicationMode: 'live',
+      confidence: 0.9,
+      ruleId: 'R_explicit_toString',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(true);
+  });
+
 });
