@@ -10,10 +10,15 @@
  *   - Callback-based — schemaCheck and llmCaller are injected, no pi-ai imports
  *   - Bounded — all prompts and error summaries are size-limited
  *   - Fail-closed — if repair output still fails schemaCheck, return repaired=false
+ *   - Lineage-safe — repair must not silently override lineage fields (PRI-200)
  *
  * PRI-71: First integration target is Diagnostician via PiAiRuntimeAdapter.
+ * PRI-200: Evidence pack, schemaRef in prompt, lineage protection, repairAttempts[].
  * Future peer runners (Dreamer, Philosopher, etc.) can reuse the same module.
  */
+
+import type { OutputRepairAttempt, OutputValidationErrorEntry } from './output-repair-contract.js';
+import { REPAIR_PROMPT_VERSION, preserveLineageFields, truncatePreview, formatValidationErrorEntry, normalizeMaxRepairAttempts, safeStringifyPreview } from './output-repair-contract.js';
 
 /** A single TypeBox validation error from Value.Errors(). */
 export interface SchemaValidationError {
@@ -32,10 +37,14 @@ export interface RepairConfig {
   readonly maxErrorChars?: number;
   /** Maximum characters of raw JSON to include in prompt. Default: 2000. */
   readonly maxRawOutputChars?: number;
+  /** Schema reference for the output being repaired (PRI-200). Included in repair prompt. */
+  readonly schemaRef?: string;
+  /** Original output with lineage fields to preserve during repair (PRI-200). */
+  readonly originalOutput?: Record<string, unknown>;
 }
 
 /** Sensible defaults for repair configuration. */
-export const DEFAULT_REPAIR_CONFIG: Required<RepairConfig> = {
+export const DEFAULT_REPAIR_CONFIG: Required<Omit<RepairConfig, 'schemaRef' | 'originalOutput'>> = {
   maxRepairAttempts: 1,
   maxErrorsInPrompt: 10,
   maxErrorChars: 200,
@@ -52,6 +61,8 @@ export interface RepairResult<T> {
   readonly attemptsUsed: number;
   /** Bounded summary of what was tried (for telemetry). */
   readonly repairSummary: string;
+  /** Detailed repair attempt records for evidence pack (PRI-200). */
+  readonly repairAttempts: readonly OutputRepairAttempt[];
 }
 
 /** Callback for invoking an LLM during repair. Runtime-agnostic. */
@@ -61,6 +72,8 @@ export type RepairLLMCaller = (prompt: string) => Promise<string | null>;
 export interface RepairCallbacks {
   readonly llmCaller: RepairLLMCaller;
   readonly schemaCheck: (value: unknown) => boolean;
+  /** Optional: re-validate schema errors on repaired output for evidence pack. */
+  readonly schemaErrors?: (value: unknown) => SchemaValidationError[];
 }
 
 // Re-export from json-extractor so callers can use a single import path
@@ -69,6 +82,8 @@ import { extractJsonObject } from './json-extractor.js';
 
 /**
  * Format TypeBox schema errors into a bounded, human-readable repair prompt.
+ *
+ * PRI-200: Includes schemaRef when available.
  */
 export function formatRepairPrompt(
   invalidJson: unknown,
@@ -77,7 +92,7 @@ export function formatRepairPrompt(
 ): string {
   const cfg = { ...DEFAULT_REPAIR_CONFIG, ...config };
 
-  let rawJson = JSON.stringify(invalidJson, null, 2);
+  let rawJson = safeStringifyPreview(invalidJson, cfg.maxRawOutputChars);
   if (rawJson.length > cfg.maxRawOutputChars) {
     rawJson = rawJson.slice(0, cfg.maxRawOutputChars) + '\n...[truncated]';
   }
@@ -94,9 +109,14 @@ export function formatRepairPrompt(
     ? errors.length - cfg.maxErrorsInPrompt
     : 0;
 
+  const schemaRefLine = cfg.schemaRef
+    ? [`SCHEMA REF: ${cfg.schemaRef}`, '']
+    : [];
+
   return [
     'This is a schema validation repair loop. Your previous JSON output still has errors. Fix ALL remaining errors and return the complete corrected JSON object.',
     '',
+    ...schemaRefLine,
     'PREVIOUS OUTPUT:',
     rawJson,
     '',
@@ -108,12 +128,20 @@ export function formatRepairPrompt(
   ].join('\n');
 }
 
+function buildValidationErrorEntries(
+  errors: readonly SchemaValidationError[],
+): OutputValidationErrorEntry[] {
+  return errors.slice(0, 10).map(e => formatValidationErrorEntry(e.path, e.message, e.value));
+}
+
 /**
  * Attempt to repair structurally invalid LLM output by re-prompting
  * the LLM with specific validation errors.
  *
  * Returns RepairResult<T> — either repaired+validated output or null.
  * Bounded by maxRepairAttempts (default 1).
+ *
+ * PRI-200: Returns repairAttempts[] for evidence pack, protects lineage fields.
  */
 // eslint-disable-next-line @typescript-eslint/max-params -- callbacks and config are intentionally separate for clarity
 export async function attemptStructuredOutputRepair<T>(
@@ -122,21 +150,25 @@ export async function attemptStructuredOutputRepair<T>(
   callbacks: RepairCallbacks,
   config?: RepairConfig,
 ): Promise<RepairResult<T>> {
-  const cfg = { ...DEFAULT_REPAIR_CONFIG, ...config };
+  const cfg = { ...DEFAULT_REPAIR_CONFIG, ...config, maxRepairAttempts: normalizeMaxRepairAttempts(config?.maxRepairAttempts, DEFAULT_REPAIR_CONFIG.maxRepairAttempts) };
+  const repairAttempts: OutputRepairAttempt[] = [];
+  let currentErrors: readonly SchemaValidationError[] = schemaErrors;
 
-  if (schemaErrors.length === 0 || cfg.maxRepairAttempts <= 0) {
+  if (currentErrors.length === 0 || cfg.maxRepairAttempts <= 0) {
     return {
       repaired: false,
       output: null,
       attemptsUsed: 0,
-      repairSummary: `Repair skipped: ${schemaErrors.length === 0 ? 'no errors' : 'maxRepairAttempts=0'}`,
+      repairSummary: `Repair skipped: ${currentErrors.length === 0 ? 'no errors' : 'maxRepairAttempts=0'}`,
+      repairAttempts,
     };
   }
 
-  const errorSummary = `${schemaErrors.length} errors: ${schemaErrors.slice(0, 3).map(e => e.path).join(', ')}`;
+  const errorSummary = `${currentErrors.length} errors: ${currentErrors.slice(0, 3).map(e => e.path).join(', ')}`;
 
   for (let attempt = 0; attempt < cfg.maxRepairAttempts; attempt++) {
-    const prompt = formatRepairPrompt(invalidOutput, schemaErrors, cfg);
+    const attemptValidationErrors = buildValidationErrorEntries(currentErrors);
+    const prompt = formatRepairPrompt(invalidOutput, currentErrors, cfg);
 
     // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try block below
     let rawResponse: string | null;
@@ -144,33 +176,87 @@ export async function attemptStructuredOutputRepair<T>(
       rawResponse = await callbacks.llmCaller(prompt);
     } catch (err: unknown) {
       const errorDetail = err instanceof Error ? err.message : String(err);
+      repairAttempts.push({
+        schemaRef: cfg.schemaRef ?? 'unknown',
+        attempt: attempt + 1,
+        rawOutputPreview: safeStringifyPreview(invalidOutput),
+        validationErrors: attemptValidationErrors,
+        repairPromptVersion: REPAIR_PROMPT_VERSION,
+        repaired: false,
+      });
       return {
         repaired: false,
         output: null,
         attemptsUsed: attempt + 1,
         repairSummary: `Repair failed at attempt ${attempt + 1}: llmCaller threw "${errorDetail}". ${errorSummary}`,
+        repairAttempts,
       };
     }
 
     if (!rawResponse) {
+      repairAttempts.push({
+        schemaRef: cfg.schemaRef ?? 'unknown',
+        attempt: attempt + 1,
+        rawOutputPreview: safeStringifyPreview(invalidOutput),
+        validationErrors: attemptValidationErrors,
+        repairPromptVersion: REPAIR_PROMPT_VERSION,
+        repaired: false,
+      });
       continue;
     }
 
     const repairedCandidate = extractJsonObject(rawResponse);
     if (!repairedCandidate) {
+      repairAttempts.push({
+        schemaRef: cfg.schemaRef ?? 'unknown',
+        attempt: attempt + 1,
+        rawOutputPreview: truncatePreview(rawResponse),
+        validationErrors: attemptValidationErrors,
+        repairPromptVersion: REPAIR_PROMPT_VERSION,
+        repaired: false,
+      });
       continue;
     }
 
-    if (callbacks.schemaCheck(repairedCandidate)) {
+    // PRI-200: Protect lineage fields — if originalOutput provided, preserve lineage
+    let candidateWithLineage = repairedCandidate;
+    if (cfg.originalOutput && typeof repairedCandidate === 'object' && repairedCandidate !== null) {
+      candidateWithLineage = preserveLineageFields(cfg.originalOutput, repairedCandidate as Record<string, unknown>);
+    }
+
+    if (callbacks.schemaCheck(candidateWithLineage)) {
+      repairAttempts.push({
+        schemaRef: cfg.schemaRef ?? 'unknown',
+        attempt: attempt + 1,
+        rawOutputPreview: truncatePreview(rawResponse),
+        validationErrors: attemptValidationErrors,
+        repairPromptVersion: REPAIR_PROMPT_VERSION,
+        repaired: true,
+      });
       return {
         repaired: true,
-        output: repairedCandidate as T,
+        output: candidateWithLineage as T,
         attemptsUsed: attempt + 1,
         repairSummary: `Repair succeeded at attempt ${attempt + 1}. ${errorSummary}`,
+        repairAttempts,
       };
     }
 
-    invalidOutput = repairedCandidate;
+    const nextErrors = callbacks.schemaErrors
+      ? callbacks.schemaErrors(candidateWithLineage)
+      : currentErrors;
+
+    repairAttempts.push({
+      schemaRef: cfg.schemaRef ?? 'unknown',
+      attempt: attempt + 1,
+      rawOutputPreview: truncatePreview(rawResponse),
+      validationErrors: attemptValidationErrors,
+      repairPromptVersion: REPAIR_PROMPT_VERSION,
+      repaired: false,
+    });
+
+    invalidOutput = candidateWithLineage;
+    currentErrors = nextErrors;
   }
 
   return {
@@ -178,5 +264,6 @@ export async function attemptStructuredOutputRepair<T>(
     output: null,
     attemptsUsed: cfg.maxRepairAttempts,
     repairSummary: `Repair failed after ${cfg.maxRepairAttempts} attempt(s). ${errorSummary}`,
+    repairAttempts,
   };
 }

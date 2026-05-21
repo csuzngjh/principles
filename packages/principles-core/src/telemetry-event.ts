@@ -59,6 +59,8 @@ import { Value } from '@sinclair/typebox/value';
  * - output_validation_failed — output validation failed
  * - output_repair_attempted — PRI-71 schema repair attempted (bounded by maxRepairAttempts)
  * - output_extraction_failed — JSON extraction from LLM response failed (no parseable JSON found)
+ * - output_schema_invalid — PRI-200 schema validation failed (before repair)
+ * - output_repair_exhausted — PRI-200 repair loop exhausted, output still invalid
  */
 export const TelemetryEventType = Type.Union([
   Type.Literal('pain_detected'),
@@ -100,6 +102,8 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('output_validation_failed'),
   Type.Literal('output_repair_attempted'),
   Type.Literal('output_extraction_failed'),
+  Type.Literal('output_schema_invalid'),
+  Type.Literal('output_repair_exhausted'),
   // PRI-67: Dreamer runner events
   Type.Literal('dreamer_task_leased'),
   Type.Literal('dreamer_context_built'),
