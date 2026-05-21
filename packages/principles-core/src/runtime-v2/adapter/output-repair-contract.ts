@@ -46,6 +46,40 @@ export interface OutputEvidencePack {
 
 export const REPAIR_PROMPT_VERSION = '1';
 
+export const MAX_REPAIR_ATTEMPTS = 2;
+
+export function normalizeMaxRepairAttempts(raw: number | undefined, defaultVal: number): number {
+  if (raw === undefined) return defaultVal;
+  if (!Number.isFinite(raw)) return defaultVal;
+  if (raw < 0) return 0;
+  const floored = Math.floor(raw);
+  if (floored > MAX_REPAIR_ATTEMPTS) return MAX_REPAIR_ATTEMPTS;
+  return floored;
+}
+
+export function truncatePreview(text: string, maxLen = 500): string {
+  if (!text) return '';
+  if (text.length <= maxLen) return text;
+  const sliceLen = Math.max(0, maxLen - 3);
+  return text.slice(0, sliceLen) + '...';
+}
+
+export function safeStringifyPreview(value: unknown, maxLen = 500): string {
+  try {
+    if (value === undefined) return 'undefined';
+    if (value === null) return 'null';
+    if (typeof value === 'bigint') return truncatePreview(`${value}n`, maxLen);
+    const serialized = JSON.stringify(value);
+    return truncatePreview(serialized, maxLen);
+  } catch {
+    if (typeof value === 'object' && value !== null) {
+      const ctor = (value as Record<string, unknown>).constructor;
+      return truncatePreview(`[unserializable: ${ctor?.name ?? 'Object'}]`, maxLen);
+    }
+    return truncatePreview(String(value), maxLen);
+  }
+}
+
 export const LINEAGE_FIELDS = [
   'taskId',
   'sourcePainId',
@@ -76,13 +110,6 @@ export function preserveLineageFields(
   return result;
 }
 
-export function truncatePreview(text: string, maxLen = 500): string {
-  if (!text) return '';
-  if (text.length <= maxLen) return text;
-  const sliceLen = Math.max(0, maxLen - 3);
-  return text.slice(0, sliceLen) + '...';
-}
-
 export function formatValidationErrorEntry(
   path: string,
   message: string,
@@ -92,7 +119,7 @@ export function formatValidationErrorEntry(
     ? truncatePreview(value, 100)
     : value === undefined || value === null
       ? String(value)
-      : truncatePreview(JSON.stringify(value), 100);
+      : safeStringifyPreview(value, 100);
   return {
     path,
     expected: message,

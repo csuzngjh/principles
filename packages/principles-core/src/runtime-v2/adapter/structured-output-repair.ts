@@ -18,7 +18,7 @@
  */
 
 import type { OutputRepairAttempt, OutputValidationErrorEntry } from './output-repair-contract.js';
-import { REPAIR_PROMPT_VERSION, preserveLineageFields, truncatePreview, formatValidationErrorEntry } from './output-repair-contract.js';
+import { REPAIR_PROMPT_VERSION, preserveLineageFields, truncatePreview, formatValidationErrorEntry, normalizeMaxRepairAttempts, safeStringifyPreview } from './output-repair-contract.js';
 
 /** A single TypeBox validation error from Value.Errors(). */
 export interface SchemaValidationError {
@@ -92,7 +92,7 @@ export function formatRepairPrompt(
 ): string {
   const cfg = { ...DEFAULT_REPAIR_CONFIG, ...config };
 
-  let rawJson = JSON.stringify(invalidJson, null, 2);
+  let rawJson = safeStringifyPreview(invalidJson, cfg.maxRawOutputChars);
   if (rawJson.length > cfg.maxRawOutputChars) {
     rawJson = rawJson.slice(0, cfg.maxRawOutputChars) + '\n...[truncated]';
   }
@@ -150,7 +150,7 @@ export async function attemptStructuredOutputRepair<T>(
   callbacks: RepairCallbacks,
   config?: RepairConfig,
 ): Promise<RepairResult<T>> {
-  const cfg = { ...DEFAULT_REPAIR_CONFIG, ...config };
+  const cfg = { ...DEFAULT_REPAIR_CONFIG, ...config, maxRepairAttempts: normalizeMaxRepairAttempts(config?.maxRepairAttempts, DEFAULT_REPAIR_CONFIG.maxRepairAttempts) };
   const repairAttempts: OutputRepairAttempt[] = [];
   let currentErrors: readonly SchemaValidationError[] = schemaErrors;
 
@@ -179,7 +179,7 @@ export async function attemptStructuredOutputRepair<T>(
       repairAttempts.push({
         schemaRef: cfg.schemaRef ?? 'unknown',
         attempt: attempt + 1,
-        rawOutputPreview: truncatePreview(JSON.stringify(invalidOutput)),
+        rawOutputPreview: safeStringifyPreview(invalidOutput),
         validationErrors: initialValidationErrors,
         repairPromptVersion: REPAIR_PROMPT_VERSION,
         repaired: false,
@@ -197,7 +197,7 @@ export async function attemptStructuredOutputRepair<T>(
       repairAttempts.push({
         schemaRef: cfg.schemaRef ?? 'unknown',
         attempt: attempt + 1,
-        rawOutputPreview: truncatePreview(JSON.stringify(invalidOutput)),
+        rawOutputPreview: safeStringifyPreview(invalidOutput),
         validationErrors: initialValidationErrors,
         repairPromptVersion: REPAIR_PROMPT_VERSION,
         repaired: false,

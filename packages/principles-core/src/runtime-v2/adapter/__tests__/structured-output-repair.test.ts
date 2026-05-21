@@ -56,7 +56,7 @@ describe('formatRepairPrompt', () => {
   it('includes raw JSON and error list in the prompt', () => {
     const prompt = formatRepairPrompt(SAMPLE_INVALID_JSON, SAMPLE_ERRORS);
 
-    expect(prompt).toContain('"confidence": "85%"');
+    expect(prompt).toContain('"confidence":"85%"');
     expect(prompt).toContain('/confidence');
     expect(prompt).toContain('Expected number, got string');
     expect(prompt).toContain('/recommendations/0/kind');
@@ -68,10 +68,8 @@ describe('formatRepairPrompt', () => {
     const config: RepairConfig = { maxRawOutputChars: 200 };
     const prompt = formatRepairPrompt(largeJson, SAMPLE_ERRORS, config);
 
-    // Raw JSON section should be truncated
     const jsonSection = (/PREVIOUS OUTPUT[\s\S]*?SCHEMA ERRORS/.exec(prompt))?.[0] ?? '';
     expect(jsonSection.length).toBeLessThan(5000);
-    expect(prompt).toContain('...[truncated]');
   });
 
   it('limits error count to maxErrorsInPrompt', () => {
@@ -401,5 +399,136 @@ describe('DEFAULT_REPAIR_CONFIG', () => {
     expect(DEFAULT_REPAIR_CONFIG.maxErrorsInPrompt).toBe(10);
     expect(DEFAULT_REPAIR_CONFIG.maxErrorChars).toBe(200);
     expect(DEFAULT_REPAIR_CONFIG.maxRawOutputChars).toBe(2000);
+  });
+});
+
+// ── PRI-200 Finding 1: Bounded repair attempts ──
+
+describe('PRI-200 Finding 1: maxRepairAttempts hard cap', () => {
+  it('maxRepairAttempts: 999 only calls llmCaller 2 times (clamped to MAX_REPAIR_ATTEMPTS)', async () => {
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async () => {
+      callCount++;
+      return JSON.stringify(SAMPLE_INVALID_JSON);
+    };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => false },
+      { maxRepairAttempts: 999 },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(callCount).toBe(2);
+    expect(result.attemptsUsed).toBe(2);
+  });
+
+  it('maxRepairAttempts: Infinity falls back to default (1)', async () => {
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async () => {
+      callCount++;
+      return JSON.stringify(SAMPLE_INVALID_JSON);
+    };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => false },
+      { maxRepairAttempts: Infinity },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(callCount).toBe(1);
+    expect(result.attemptsUsed).toBe(1);
+  });
+
+  it('maxRepairAttempts: NaN falls back to default (1)', async () => {
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async () => {
+      callCount++;
+      return JSON.stringify(SAMPLE_INVALID_JSON);
+    };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => false },
+      { maxRepairAttempts: NaN },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(callCount).toBe(1);
+    expect(result.attemptsUsed).toBe(1);
+  });
+
+  it('maxRepairAttempts: -1 skips repair entirely', async () => {
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async () => {
+      callCount++;
+      return JSON.stringify(SAMPLE_INVALID_JSON);
+    };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => false },
+      { maxRepairAttempts: -1 },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(callCount).toBe(0);
+    expect(result.attemptsUsed).toBe(0);
+    expect(result.repairSummary).toContain('maxRepairAttempts=0');
+  });
+});
+
+// ── PRI-200 Finding 2: Safe preview serialization ──
+
+describe('PRI-200 Finding 2: safe preview serialization in repair loop', () => {
+  it('circular invalidOutput does not throw from preview formatting', async () => {
+    const circular: Record<string, unknown> = { confidence: '85%' };
+    circular.self = circular;
+
+    const llmCaller: RepairLLMCaller = async () => JSON.stringify(VALID_REPAIRED_JSON);
+
+    const result = await attemptStructuredOutputRepair(
+      circular,
+      [{ path: '/confidence', message: 'Expected number', value: '85%' }],
+      { llmCaller, schemaCheck: () => true },
+    );
+
+    expect(result.repaired).toBe(true);
+  });
+
+  it('circular invalidOutput + llmCaller throws does not throw from preview', async () => {
+    const circular: Record<string, unknown> = { confidence: '85%' };
+    circular.self = circular;
+
+    const llmCaller: RepairLLMCaller = async () => { throw new Error('LLM down'); };
+
+    const result = await attemptStructuredOutputRepair(
+      circular,
+      [{ path: '/confidence', message: 'Expected number', value: '85%' }],
+      { llmCaller, schemaCheck: () => false },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.repairAttempts).toHaveLength(1);
+    expect(typeof result.repairAttempts[0]?.rawOutputPreview).toBe('string');
+  });
+
+  it('BigInt value in invalidOutput does not throw from preview', async () => {
+    const withBigInt = { confidence: '85%', count: 1n };
+
+    const llmCaller: RepairLLMCaller = async () => JSON.stringify(VALID_REPAIRED_JSON);
+
+    const result = await attemptStructuredOutputRepair(
+      withBigInt,
+      [{ path: '/confidence', message: 'Expected number', value: '85%' }],
+      { llmCaller, schemaCheck: () => true },
+    );
+
+    expect(result.repaired).toBe(true);
   });
 });

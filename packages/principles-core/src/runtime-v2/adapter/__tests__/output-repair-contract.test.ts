@@ -16,6 +16,9 @@ import {
   formatValidationErrorEntry,
   LINEAGE_FIELDS,
   REPAIR_PROMPT_VERSION,
+  MAX_REPAIR_ATTEMPTS,
+  normalizeMaxRepairAttempts,
+  safeStringifyPreview,
 } from '../output-repair-contract.js';
 import type {
   OutputEvidencePack,
@@ -176,6 +179,108 @@ describe('output-repair-contract', () => {
     it('all OutputFailureKind values are valid', () => {
       const kinds: OutputFailureKind[] = ['extraction_failed', 'schema_invalid', 'repair_exhausted'];
       expect(kinds).toHaveLength(3);
+    });
+  });
+
+  describe('normalizeMaxRepairAttempts', () => {
+    it('returns default for undefined', () => {
+      expect(normalizeMaxRepairAttempts(undefined, 1)).toBe(1);
+    });
+
+    it('returns default for Infinity', () => {
+      expect(normalizeMaxRepairAttempts(Infinity, 1)).toBe(1);
+    });
+
+    it('returns default for -Infinity', () => {
+      expect(normalizeMaxRepairAttempts(-Infinity, 1)).toBe(1);
+    });
+
+    it('returns default for NaN', () => {
+      expect(normalizeMaxRepairAttempts(NaN, 1)).toBe(1);
+    });
+
+    it('returns 0 for negative', () => {
+      expect(normalizeMaxRepairAttempts(-1, 1)).toBe(0);
+    });
+
+    it('floors decimal values', () => {
+      expect(normalizeMaxRepairAttempts(1.9, 1)).toBe(1);
+    });
+
+    it('clamps to MAX_REPAIR_ATTEMPTS', () => {
+      expect(normalizeMaxRepairAttempts(999, 1)).toBe(MAX_REPAIR_ATTEMPTS);
+    });
+
+    it('passes through valid values within range', () => {
+      expect(normalizeMaxRepairAttempts(0, 1)).toBe(0);
+      expect(normalizeMaxRepairAttempts(1, 1)).toBe(1);
+      expect(normalizeMaxRepairAttempts(2, 1)).toBe(2);
+    });
+  });
+
+  describe('safeStringifyPreview', () => {
+    it('serializes plain objects', () => {
+      expect(safeStringifyPreview({ a: 1 })).toBe('{"a":1}');
+    });
+
+    it('serializes arrays', () => {
+      expect(safeStringifyPreview([1, 2])).toBe('[1,2]');
+    });
+
+    it('handles undefined', () => {
+      expect(safeStringifyPreview(undefined)).toBe('undefined');
+    });
+
+    it('handles null', () => {
+      expect(safeStringifyPreview(null)).toBe('null');
+    });
+
+    it('handles BigInt without throwing', () => {
+      const result = safeStringifyPreview(1n);
+      expect(result).toBe('1n');
+    });
+
+    it('handles circular objects without throwing', () => {
+      const obj: Record<string, unknown> = {};
+      obj.self = obj;
+      const result = safeStringifyPreview(obj);
+      expect(typeof result).toBe('string');
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it('handles Object.create(null) without throwing', () => {
+      const obj = Object.create(null) as Record<string, unknown>;
+      obj.key = 'value';
+      const result = safeStringifyPreview(obj);
+      expect(result).toContain('key');
+    });
+
+    it('truncates long output', () => {
+      const obj = { data: 'x'.repeat(1000) };
+      const result = safeStringifyPreview(obj, 50);
+      expect(result.length).toBeLessThanOrEqual(53);
+    });
+  });
+
+  describe('formatValidationErrorEntry with safe serialization', () => {
+    it('handles BigInt values without throwing', () => {
+      const entry = formatValidationErrorEntry('/x', 'Expected string', 1n);
+      expect(entry.actualPreview).toBe('1n');
+    });
+
+    it('handles circular objects without throwing', () => {
+      const obj: Record<string, unknown> = {};
+      obj.self = obj;
+      const entry = formatValidationErrorEntry('/x', 'Expected string', obj);
+      expect(typeof entry.actualPreview).toBe('string');
+      expect(entry.actualPreview.length).toBeGreaterThan(0);
+    });
+
+    it('handles Object.create(null) without throwing', () => {
+      const obj = Object.create(null) as Record<string, unknown>;
+      obj.key = 'value';
+      const entry = formatValidationErrorEntry('/x', 'Expected string', obj);
+      expect(typeof entry.actualPreview).toBe('string');
     });
   });
 });

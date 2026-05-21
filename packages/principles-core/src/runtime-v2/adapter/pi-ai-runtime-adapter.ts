@@ -32,7 +32,7 @@ import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair } from './structured-output-repair.js';
 import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-repair-contract.js';
-import { truncatePreview, formatValidationErrorEntry } from './output-repair-contract.js';
+import { formatValidationErrorEntry, safeStringifyPreview } from './output-repair-contract.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -447,7 +447,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           .slice(0, 10)
           .map(e => formatValidationErrorEntry(e.path, e.message, e.value));
 
-        const rawOutputPreview = truncatePreview(JSON.stringify(validatedOutput));
+        const rawOutputPreview = safeStringifyPreview(validatedOutput);
 
         this.eventEmitter.emitTelemetry({
           eventType: 'output_schema_invalid',
