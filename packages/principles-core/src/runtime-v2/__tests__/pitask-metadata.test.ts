@@ -272,20 +272,42 @@ describe('hydratePITaskRecord', () => {
     expect(pi.outputArtifactRefs).toEqual([{ artifactType: 'rule', ref: 'artifact-2' }]);
   });
 
-  it('taskKind not a PeerRunnerKind → still hydrates metadata (isValidPITaskRecord checks taskKind separately)', () => {
-    // The hydration function does NOT check taskKind; that is the adapter's concern.
-    // hydratePITaskRecord only checks that metadata is valid PI metadata.
-    // Note: isValidPITaskRecord() will return false here because taskKind='diagnostician'
-    // is not a PeerRunnerKind — that is intentional; the adapter filters by taskKind first.
+  it('taskKind not a PeerRunnerKind (e.g. diagnostician) → returns null (fail closed)', () => {
+    // hydratePITaskRecord now rejects non-peer task kinds at the hydration boundary.
+    // This closes the Agent-Software Contract gap where a non-PI task with valid
+    // pi_metadata in diagnosticJson could be treated as a PITaskRecord.
     const meta = makeMetadata({ channel: 'defer_archive' });
     const task = makeBaseTaskRecord({ taskId: 'task-diagnostician', taskKind: 'diagnostician' });
     (task as Record<string, unknown>).diagnosticJson = createPITaskDiagnosticJson(meta);
 
     const result = hydratePITaskRecord(task);
-    expect(result).not.toBeNull();
-    expect((result as PITaskRecord).channel).toBe('defer_archive');
-    // isValidPITaskRecord would return false here (diagnostician is not a PeerRunnerKind)
-    // — the adapter's filter pipeline (isPeerRunnerKind first, then hydrate) handles this
+    expect(result).toBeNull();
+  });
+
+  it('every valid PeerRunnerKind still hydrates successfully', () => {
+    const validKinds = ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'trainer', 'rollout_reviewer'] as const;
+    const meta = makeMetadata({ channel: 'prompt', timeoutMs: 60000 });
+
+    for (const kind of validKinds) {
+      const task = makeBaseTaskRecord({ taskId: `task-${kind}`, taskKind: kind });
+      (task as Record<string, unknown>).diagnosticJson = createPITaskDiagnosticJson(meta);
+
+      const result = hydratePITaskRecord(task);
+      expect(result).not.toBeNull();
+      if (result !== null) {
+        expect(result.taskKind).toBe(kind);
+        expect(result.channel).toBe('prompt');
+        expect(result.timeoutMs).toBe(60000);
+      }
+    }
+  });
+
+  it('diagnostician with valid pi_metadata is rejected', () => {
+    const meta = makeMetadata({ channel: 'prompt', timeoutMs: 60000 });
+    const task = makeBaseTaskRecord({ taskId: 'task-diag-reject', taskKind: 'diagnostician' });
+    (task as Record<string, unknown>).diagnosticJson = createPITaskDiagnosticJson(meta);
+
+    expect(hydratePITaskRecord(task)).toBeNull();
   });
 
   it('parentTaskId and correlationId present → hydrates correctly', () => {
