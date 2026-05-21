@@ -26,6 +26,12 @@ export type SyntheticBaselineStageName =
   | 'internalization_queue_ready'
   | 'canary_health';
 
+export type SyntheticBaselineFailStage =
+  | 'before_pain_intake'
+  | 'after_pain_intake'
+  | 'after_candidate_created'
+  | 'after_ledger_consistent';
+
 export interface SyntheticBaselineStage {
   name: SyntheticBaselineStageName;
   status: 'passed' | 'failed' | 'skipped';
@@ -44,7 +50,7 @@ export interface SyntheticBaselineSummary {
 export interface SyntheticBaselineOptions {
   workspaceDir: string;
   workspaceMode: 'temp' | 'explicit_workspace';
-  failAfterStage?: string;
+  failAfterStage?: SyntheticBaselineFailStage;
 }
 
 const MAX_REASON_LENGTH = 500;
@@ -71,16 +77,22 @@ function boundedEvidence(evidence: Record<string, unknown>): Record<string, unkn
   if (json.length <= MAX_EVIDENCE_JSON_LENGTH) return evidence;
   const keys = Object.keys(evidence);
   const truncated: Record<string, unknown> = {};
-  let budget = MAX_EVIDENCE_JSON_LENGTH;
+  let budget = MAX_EVIDENCE_JSON_LENGTH - 2;
+  let first = true;
   for (const key of keys) {
+    const comma = first ? 0 : 1;
     const entry = `"${key}":${safeStringify(evidence[key])}`;
-    if (entry.length <= budget) {
+    if (entry.length + comma <= budget) {
       truncated[key] = evidence[key];
-      budget -= entry.length;
+      budget -= entry.length + comma;
+      first = false;
     } else {
       truncated[key] = '[truncated]';
       break;
     }
+  }
+  if (JSON.stringify(truncated).length > MAX_EVIDENCE_JSON_LENGTH) {
+    return { _truncated: true, keys: keys.slice(0, 3) };
   }
   return truncated;
 }
@@ -111,14 +123,11 @@ function makeDeterministicDiagnosticianOutput(painId: string): DiagnosticianOutp
 }
 
 function computeOverallStatus(stages: SyntheticBaselineStage[]): 'passed' | 'failed' | 'degraded' {
-  const failed = stages.some(s => s.status === 'failed');
-  const skipped = stages.some(s => s.status === 'skipped');
-  if (failed && skipped) return 'failed';
-  if (failed) {
-    const passed = stages.some(s => s.status === 'passed');
-    return passed ? 'degraded' : 'failed';
-  }
-  if (skipped) return 'degraded';
+  const hasFailed = stages.some(s => s.status === 'failed');
+  const hasSkipped = stages.some(s => s.status === 'skipped');
+  const hasPassed = stages.some(s => s.status === 'passed');
+  if (hasFailed && !hasPassed) return 'failed';
+  if (hasFailed || hasSkipped) return 'degraded';
   return 'passed';
 }
 
@@ -150,8 +159,8 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineOptions): Prom
 
   const pdDir = path.join(workspaceDir, '.pd');
   const stateDir = path.join(workspaceDir, '.state');
-  fs.mkdirSync(pdDir, { recursive: true });
-  fs.mkdirSync(stateDir, { recursive: true });
+  await fs.promises.mkdir(pdDir, { recursive: true });
+  await fs.promises.mkdir(stateDir, { recursive: true });
 
   const painId = `synth-pain-${Date.now()}`;
   const diagnosticianOutput = makeDeterministicDiagnosticianOutput(painId);
@@ -321,11 +330,11 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineOptions): Prom
     });
     try {
       const queueSnapshot = await queueReadModel.getSnapshot();
-      const queueReady = queueSnapshot.readyTasks.length > 0 || queueSnapshot.pendingCount > 0;
+      const queueReady = queueSnapshot.readyTasks.length > 0;
       stages.push({
         name: 'internalization_queue_ready',
         status: queueReady ? 'passed' : 'failed',
-        ...(queueReady ? {} : { reason: truncateReason(`Queue has no ready or pending tasks. noReadyTasks=${queueSnapshot.noReadyTasks?.reason ?? 'n/a'}`) }),
+        ...(queueReady ? {} : { reason: truncateReason(`Queue has no ready tasks. pendingCount=${queueSnapshot.pendingCount} noReadyTasks=${queueSnapshot.noReadyTasks?.reason ?? 'n/a'}`) }),
         evidence: boundedEvidence({
           readyCount: queueSnapshot.readyTasks.length,
           pendingCount: queueSnapshot.pendingCount,

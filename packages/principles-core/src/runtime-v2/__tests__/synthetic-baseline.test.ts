@@ -125,16 +125,15 @@ describe('Synthetic Baseline (PRI-206)', () => {
       }
     });
 
-    it('recommendedNextIssue is present when status is failed', async () => {
+    it('recommendedNextIssue is present when status is failed or degraded', async () => {
       const result = await runSyntheticBaseline({
         workspaceDir: tempDir,
         workspaceMode: 'temp',
         failAfterStage: 'before_pain_intake',
       });
 
-      if (result.status === 'failed') {
-        expect(result.recommendedNextIssue).toBeTruthy();
-      }
+      expect(result.status).not.toBe('passed');
+      expect(result.recommendedNextIssue).toBeTruthy();
     });
   });
 
@@ -172,7 +171,9 @@ describe('Synthetic Baseline (PRI-206)', () => {
       });
 
       const dbPath = path.join(tempDir, '.pd', 'state.db');
-      if (!fs.existsSync(dbPath)) return;
+      if (!fs.existsSync(dbPath)) {
+        throw new Error(`DB not found at ${dbPath} — baseline should have created it`);
+      }
 
       const sizeAfterBaseline = fs.statSync(dbPath).size;
 
@@ -198,9 +199,9 @@ describe('Synthetic Baseline (PRI-206)', () => {
 
       for (const stage of result.stages) {
         if (stage.evidence) {
-          const evidenceStr = JSON.stringify(stage.evidence);
-          expect(evidenceStr).not.toContain('ruleHost');
-          expect(evidenceStr).not.toContain('autoCorrect');
+          const evidenceStr = JSON.stringify(stage.evidence).toLowerCase();
+          expect(evidenceStr).not.toContain('rulehost');
+          expect(evidenceStr).not.toContain('autocorrect');
         }
       }
     });
@@ -216,9 +217,11 @@ describe('Synthetic Baseline (PRI-206)', () => {
 
       const failedStages = result.stages.filter(s => s.status === 'failed');
       for (const stage of failedStages) {
-        expect(stage.reason).toBeTruthy();
+        if (stage.reason === undefined) {
+          throw new Error(`Stage ${stage.name} is failed but has no reason`);
+        }
         expect(typeof stage.reason).toBe('string');
-        expect((stage.reason as string).length).toBeGreaterThan(0);
+        expect(stage.reason.length).toBeGreaterThan(0);
       }
     });
 
@@ -229,7 +232,7 @@ describe('Synthetic Baseline (PRI-206)', () => {
         failAfterStage: 'after_ledger_consistent',
       });
 
-      expect(['failed', 'degraded']).toContain(result.status);
+      expect(result.status).toBe('degraded');
       const passedStages = result.stages.filter(s => s.status === 'passed');
       const failedStages = result.stages.filter(s => s.status === 'failed');
       expect(passedStages.length).toBeGreaterThan(0);

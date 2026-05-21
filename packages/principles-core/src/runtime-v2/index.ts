@@ -290,7 +290,7 @@ export type { OperatorHealthSnapshot, OperatorHealthReadModelOptions, OverallHea
 
 // Synthetic baseline (PRI-206)
 export { runSyntheticBaseline } from './synthetic-baseline.js';
-export type { SyntheticBaselineSummary, SyntheticBaselineStage, SyntheticBaselineStageName, SyntheticBaselineOptions } from './synthetic-baseline.js';
+export type { SyntheticBaselineSummary, SyntheticBaselineStage, SyntheticBaselineStageName, SyntheticBaselineFailStage, SyntheticBaselineOptions } from './synthetic-baseline.js';
 
 // Internalization contracts (PRI-42)
 export type {

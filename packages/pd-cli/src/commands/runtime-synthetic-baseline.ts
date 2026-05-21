@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import { runSyntheticBaseline } from '@principles/core/runtime-v2';
 import type { SyntheticBaselineSummary } from '@principles/core/runtime-v2';
 
-interface SyntheticBaselineOptions {
+interface CliBaselineOptions {
   workspace?: string;
   json?: boolean;
 }
@@ -35,7 +35,7 @@ function formatTextOutput(summary: SyntheticBaselineSummary): string {
   return lines.join('\n');
 }
 
-export async function handleRuntimeSyntheticBaseline(opts: SyntheticBaselineOptions): Promise<void> {
+export async function handleRuntimeSyntheticBaseline(opts: CliBaselineOptions): Promise<void> {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
     : fs.mkdtempSync(path.join(os.tmpdir(), 'pd-synth-baseline-'));
