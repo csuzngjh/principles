@@ -307,13 +307,13 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     // Verify 'applied' telemetry was NOT emitted
     expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
 
+    // Verify proposed telemetry was emitted with validationValid: false
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectProposed).toHaveBeenCalledTimes(1);
+    const proposedCall = mockEventLogInstance.recordRuleHostAutoCorrectProposed.mock.calls[0][0];
+    expect(proposedCall.validationValid).toBe(false);
+
     // Verify no warning returned
     expect(result).toBeUndefined();
-
-    // Verify warning logged
-    expect(ctx.logger?.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to apply auto-correction')
-    );
   });
 
   it('Field missing from proposedParams: fail-open, no mutation, no applied telemetry', () => {

@@ -170,7 +170,7 @@ export function validateCorrectionProposal(
     errors.push('correctedFields must contain objects with non-empty field and reason');
   } else if (isPlainObject(proposal.proposedParams)) {
     for (const cf of proposal.correctedFields) {
-      if (!(cf.field in proposal.proposedParams)) {
+      if (!Object.hasOwn(proposal.proposedParams, cf.field)) {
         errors.push(`correctedFields entry "${cf.field}" is not present in proposedParams`);
       }
     }

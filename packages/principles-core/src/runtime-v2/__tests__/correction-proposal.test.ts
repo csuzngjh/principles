@@ -462,4 +462,21 @@ describe('validateCorrectionProposal', () => {
     expect(result.valid).toBe(true);
   });
 
+  it('rejects correctedFields field matching inherited Object.prototype property (e.g. toString)', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: { content: 'fixed' },
+      correctedFields: [
+        { field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' },
+        { field: 'toString', original: 'old', proposed: 'new', reason: 'bypass' },
+      ],
+      applicationMode: 'live',
+      confidence: 0.9,
+      ruleId: 'R_crosscheck_8',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('toString'))).toBe(true);
+  });
+
 });
