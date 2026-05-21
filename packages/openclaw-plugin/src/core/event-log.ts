@@ -461,6 +461,8 @@ export class EventLog {
       stats.evolution.rulehostRequireApproval++;
     } else if (entry.type === 'rulehost_auto_correct_proposed') {
       stats.evolution.rulehostAutoCorrectProposed++;
+    } else if (entry.type === 'rulehost_auto_correct_applied') {
+      stats.evolution.rulehostAutoCorrectApplied++;
     }
   }
 
