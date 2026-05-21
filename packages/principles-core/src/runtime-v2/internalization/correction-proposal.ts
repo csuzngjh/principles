@@ -168,6 +168,12 @@ export function validateCorrectionProposal(
     typeof f.reason === 'string' && f.reason.trim().length > 0
   )) {
     errors.push('correctedFields must contain objects with non-empty field and reason');
+  } else if (isPlainObject(proposal.proposedParams)) {
+    for (const cf of proposal.correctedFields) {
+      if (!(cf.field in proposal.proposedParams)) {
+        errors.push(`correctedFields entry "${cf.field}" is not present in proposedParams`);
+      }
+    }
   }
 
   // applicationMode — required, must be 'shadow' or 'live'

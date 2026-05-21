@@ -349,4 +349,117 @@ describe('validateCorrectionProposal', () => {
     expect(result.errors.some((e: string) => e.includes('sessionId'))).toBe(true);
   });
 
+  // PRI-201: correctedFields vs proposedParams cross-check
+  it('rejects correctedFields field not present in proposedParams', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: { content: 'fixed' },
+      correctedFields: [
+        { field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' },
+        { field: 'file_path', original: '/old/path', proposed: '/new/path', reason: 'fix path' },
+      ],
+      applicationMode: 'live',
+      confidence: 0.9,
+      ruleId: 'R_crosscheck_1',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('file_path'))).toBe(true);
+  });
+
+  it('accepts correctedFields field with null value in proposedParams (key exists)', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: { file_path: null },
+      correctedFields: [
+        { field: 'file_path', original: '/old/path', proposed: null, reason: 'fix' },
+      ],
+      applicationMode: 'live',
+      confidence: 0.9,
+      ruleId: 'R_crosscheck_2',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts correctedFields field with false value in proposedParams (key exists)', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: { enabled: false },
+      correctedFields: [
+        { field: 'enabled', original: true, proposed: false, reason: 'disable' },
+      ],
+      applicationMode: 'shadow',
+      confidence: 0.8,
+      ruleId: 'R_crosscheck_3',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts correctedFields field with 0 value in proposedParams (key exists)', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: { count: 0 },
+      correctedFields: [
+        { field: 'count', original: 5, proposed: 0, reason: 'reset' },
+      ],
+      applicationMode: 'shadow',
+      confidence: 0.7,
+      ruleId: 'R_crosscheck_4',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts correctedFields field with empty string value in proposedParams (key exists)', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: { name: '' },
+      correctedFields: [
+        { field: 'name', original: 'old', proposed: '', reason: 'clear' },
+      ],
+      applicationMode: 'shadow',
+      confidence: 0.6,
+      ruleId: 'R_crosscheck_5',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects multiple correctedFields fields not present in proposedParams', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: { content: 'fixed' },
+      correctedFields: [
+        { field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' },
+        { field: 'missing_a', original: 'a', proposed: 'b', reason: 'fix a' },
+        { field: 'missing_b', original: 'c', proposed: 'd', reason: 'fix b' },
+      ],
+      applicationMode: 'live',
+      confidence: 0.9,
+      ruleId: 'R_crosscheck_6',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('missing_a'))).toBe(true);
+    expect(result.errors.some((e: string) => e.includes('missing_b'))).toBe(true);
+  });
+
+  it('accepts valid correctedFields where all fields exist in proposedParams', async () => {
+    const { validateCorrectionProposal } = await getModule();
+    const result = validateCorrectionProposal({
+      proposedParams: { content: 'fixed', encoding: 'utf-8' },
+      correctedFields: [
+        { field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' },
+        { field: 'encoding', original: 'ascii', proposed: 'utf-8', reason: 'upgrade' },
+      ],
+      applicationMode: 'live',
+      confidence: 0.9,
+      ruleId: 'R_crosscheck_7',
+      notifyAgent: false,
+    });
+    expect(result.valid).toBe(true);
+  });
+
 });
