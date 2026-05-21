@@ -51,7 +51,7 @@ Errors where AI assistants skipped required testing or verification steps.
 
 | ID | Summary | Source |
 |----|---------|--------|
-| *(No entries yet)* | | |
+| ERR-012 | PR branch based on stale main reverts already-merged telemetry fields | PR #659 |
 
 ---
 
@@ -232,9 +232,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-012]** | PR branch based on stale main reverts already-merged telemetry fields
+
+- **What happened**: PR #659 was created from a branch that did not include the latest `origin/main` after PRI-174 merged. The PR was mostly documentation/tests, but its diff would have removed `rulehostAutoCorrectApplied` from daily stats types, initialization, update logic, and tests.
+- **Why it's wrong**: A retrospective or test PR must not silently roll back code from already-merged feature work. This would have broken RuleHost auto-correct observability right after Phase 1A declared it complete.
+- **Correct approach**: Before opening or reviewing a PR after related merges, rebase or merge latest `origin/main`, then inspect `git diff origin/main..HEAD --name-only` for unintended product-file regressions.
+- **How to prevent**: Treat unexpected deletions in already-merged source/test files as a blocking review finding. For doc/test PRs, verify the PR diff does not include product-code rollback unless explicitly intended.
+- **Source**: PR #659
+- **Date**: 2026-05-21
+- **Recurrence**: None
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 11 |
+| Total lessons | 12 |
 | Last updated | 2026-05-21 |
 | Top category | Schema & Type |
 | Recurring errors | 5 |

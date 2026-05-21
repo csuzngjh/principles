@@ -416,4 +416,59 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     expect(result).toBeUndefined();
     expect(mockEventLogInstance.recordRuleHostEvaluated).toHaveBeenCalledTimes(1);
   });
+
+  it('live auto_correct does not modify unlisted fields (only correctedFields are applied)', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { content: 'fixed content' },
+      correctedFields: [
+        { field: 'content', original: 'broken', proposed: 'fixed content', reason: 'fix typo' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix typo',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent({ extra_param: 'should_stay', another: 42 });
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    expect(event.params.content).toBe('fixed content');
+    expect(event.params.extra_param).toBe('should_stay');
+    expect(event.params.another).toBe(42);
+    expect(event.params.file_path).toBe('/mock/workspace/src/foo.ts');
+
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).toHaveBeenCalledTimes(1);
+    const appliedCall = mockEventLogInstance.recordRuleHostAutoCorrectApplied.mock.calls[0][0];
+    expect(appliedCall.correctedFields).toHaveLength(1);
+    expect(appliedCall.correctedFields[0].field).toBe('content');
+  });
+
+  it('malformed correctedFields entries (non-object, null) rejected by validator, no mutation', () => {
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      correctionProposal: {
+        proposedParams: { content: 'fixed' },
+        correctedFields: [42, null, 'string'],
+        applicationMode: 'live' as const,
+        confidence: 0.9,
+        ruleId: 'R_malformed_cf',
+        notifyAgent: false,
+      },
+    });
+
+    const event = makeWriteEvent();
+    const paramsCopy = { ...event.params };
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    expect(event.params).toEqual(paramsCopy);
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectProposed).toHaveBeenCalledTimes(1);
+    const proposedCall = mockEventLogInstance.recordRuleHostAutoCorrectProposed.mock.calls[0][0];
+    expect(proposedCall.validationValid).toBe(false);
+  });
 });
