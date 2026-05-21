@@ -503,11 +503,6 @@ function writeBuildFingerprint() {
         console.warn(`⚠️  Could not write fingerprint: ${err.message}`);
     }
 
-    try {
-        const rootManifest = JSON.parse(readFileSync(manifestSrc, 'utf-8'));
-        rootManifest.buildFingerprint = manifest.buildFingerprint;
-        writeFileAtomic(manifestSrc, JSON.stringify(rootManifest, null, 2) + '\n');
-    } catch { /* ignore */ }
 }
 
 /**
