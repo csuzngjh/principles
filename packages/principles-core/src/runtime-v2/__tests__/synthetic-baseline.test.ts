@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { SyntheticBaselineSummary } from '../synthetic-baseline.js';
-import { runSyntheticBaseline } from '../synthetic-baseline.js';
+import type { SyntheticBaselineSummary, SyntheticBaselineStage } from '../synthetic-baseline.js';
+import { runSyntheticBaseline, computeOverallStatus, boundedEvidence } from '../synthetic-baseline.js';
 
 function createTempWorkspace(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-synth-baseline-'));
@@ -20,6 +20,10 @@ function destroyWorkspace(dir: string): void {
   }
 }
 
+function makeStage(status: SyntheticBaselineStage['status'], name: string = 'pain_intake'): SyntheticBaselineStage {
+  return { name: name as SyntheticBaselineStage['name'], status };
+}
+
 describe('Synthetic Baseline (PRI-206)', () => {
   let tempDir = '';
 
@@ -29,6 +33,94 @@ describe('Synthetic Baseline (PRI-206)', () => {
 
   afterEach(() => {
     destroyWorkspace(tempDir);
+  });
+
+  describe('computeOverallStatus', () => {
+    it('returns passed when all stages passed', () => {
+      const stages = [
+        makeStage('passed', 'pain_intake'),
+        makeStage('passed', 'diagnostician_task_created'),
+        makeStage('passed', 'candidate_created'),
+      ];
+      expect(computeOverallStatus(stages)).toBe('passed');
+    });
+
+    it('returns failed when all stages failed', () => {
+      const stages = [
+        makeStage('failed', 'pain_intake'),
+        makeStage('failed', 'diagnostician_task_created'),
+        makeStage('failed', 'candidate_created'),
+      ];
+      expect(computeOverallStatus(stages)).toBe('failed');
+    });
+
+    it('returns degraded when some passed and some failed', () => {
+      const stages = [
+        makeStage('passed', 'pain_intake'),
+        makeStage('failed', 'diagnostician_task_created'),
+      ];
+      expect(computeOverallStatus(stages)).toBe('degraded');
+    });
+
+    it('returns degraded when passed, failed, and skipped are mixed', () => {
+      const stages = [
+        makeStage('passed', 'pain_intake'),
+        makeStage('failed', 'diagnostician_task_created'),
+        makeStage('skipped', 'candidate_created'),
+      ];
+      expect(computeOverallStatus(stages)).toBe('degraded');
+    });
+
+    it('returns degraded when all stages are skipped', () => {
+      const stages = [
+        makeStage('skipped', 'pain_intake'),
+        makeStage('skipped', 'diagnostician_task_created'),
+      ];
+      expect(computeOverallStatus(stages)).toBe('degraded');
+    });
+  });
+
+  describe('boundedEvidence', () => {
+    it('returns evidence as-is when within budget', () => {
+      const evidence = { key: 'value', count: 42 };
+      const result = boundedEvidence(evidence);
+      expect(result).toEqual(evidence);
+    });
+
+    it('truncates evidence with super-long keys', () => {
+      const longKey = 'x'.repeat(1900);
+      const evidence: Record<string, unknown> = {};
+      evidence[longKey] = 'value';
+      const result = boundedEvidence(evidence);
+      const json = JSON.stringify(result);
+      expect(json.length).toBeLessThanOrEqual(2000);
+    });
+
+    it('handles circular references safely', () => {
+      const evidence: Record<string, unknown> = {};
+      evidence.self = evidence;
+      const result = boundedEvidence(evidence);
+      const json = JSON.stringify(result);
+      expect(json.length).toBeLessThanOrEqual(2000);
+    });
+
+    it('handles BigInt values', () => {
+      const evidence: Record<string, unknown> = { bigNum: BigInt(9007199254740991) };
+      const result = boundedEvidence(evidence);
+      const json = JSON.stringify(result);
+      expect(json.length).toBeLessThanOrEqual(2000);
+      expect(json).toContain('9007199254740991n');
+    });
+
+    it('truncates when multiple fields exceed budget at boundary', () => {
+      const evidence: Record<string, unknown> = {};
+      for (let i = 0; i < 100; i++) {
+        evidence[`field_${String(i).padStart(3, '0')}`] = 'x'.repeat(50);
+      }
+      const result = boundedEvidence(evidence);
+      const json = JSON.stringify(result);
+      expect(json.length).toBeLessThanOrEqual(2000);
+    });
   });
 
   describe('success path', () => {
@@ -73,9 +165,7 @@ describe('Synthetic Baseline (PRI-206)', () => {
       expect(painStage?.status).toBe('failed');
       expect(painStage?.reason).toBeTruthy();
 
-      const laterStages = result.stages.filter(
-        s => s.name !== 'pain_intake' && s.status !== 'skipped',
-      );
+      const laterStages = result.stages.filter(s => s.name !== 'pain_intake');
       for (const stage of laterStages) {
         expect(stage.status).toBe('failed');
       }
@@ -94,6 +184,13 @@ describe('Synthetic Baseline (PRI-206)', () => {
       const taskStage = result.stages.find(s => s.name === 'diagnostician_task_created');
       expect(taskStage?.status).toBe('failed');
       expect(taskStage?.reason).toBeTruthy();
+
+      const laterStages = result.stages.filter(
+        s => s.name !== 'pain_intake' && s.name !== 'diagnostician_task_created',
+      );
+      for (const stage of laterStages) {
+        expect(stage.status).toBe('failed');
+      }
     });
   });
 
@@ -163,8 +260,8 @@ describe('Synthetic Baseline (PRI-206)', () => {
     });
   });
 
-  describe('read-only verification', () => {
-    it('verification stages use readonly handles and do not modify DB', async () => {
+  describe('DB integrity across runs', () => {
+    it('second baseline run does not shrink or corrupt existing DB', async () => {
       const result = await runSyntheticBaseline({
         workspaceDir: tempDir,
         workspaceMode: 'temp',
@@ -240,7 +337,7 @@ describe('Synthetic Baseline (PRI-206)', () => {
     });
   });
 
-  describe('CLI handler contract', () => {
+  describe('summary output contract', () => {
     it('default workspace mode is temp when not specified', async () => {
       const result = await runSyntheticBaseline({
         workspaceDir: tempDir,
@@ -250,7 +347,7 @@ describe('Synthetic Baseline (PRI-206)', () => {
       expect(result.workspaceMode).toBe('temp');
     });
 
-    it('--json output contains all required fields', async () => {
+    it('summary contains all required fields', async () => {
       const result = await runSyntheticBaseline({
         workspaceDir: tempDir,
         workspaceMode: 'temp',

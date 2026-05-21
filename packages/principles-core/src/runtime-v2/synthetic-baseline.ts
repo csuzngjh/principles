@@ -7,7 +7,6 @@ import { StoreEventEmitter } from './store/event-emitter.js';
 import { DiagnosticianRunner } from './runner/diagnostician-runner.js';
 import { PassThroughValidator } from './runner/diagnostician-validator.js';
 import { SqliteDiagnosticianCommitter } from './store/commit/diagnostician-committer.js';
-import type { SqliteConnection } from './store/sqlite-connection.js';
 import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { TestDoubleRuntimeAdapter } from './adapter/test-double-runtime-adapter.js';
 import { PainSignalBridge } from './pain-signal-bridge.js';
@@ -72,9 +71,14 @@ function safeStringify(value: unknown): string {
   }
 }
 
-function boundedEvidence(evidence: Record<string, unknown>): Record<string, unknown> {
-  const json = JSON.stringify(evidence);
-  if (json.length <= MAX_EVIDENCE_JSON_LENGTH) return evidence;
+export function boundedEvidence(evidence: Record<string, unknown>): Record<string, unknown> {
+  let json: string | null = null;
+  try {
+    json = JSON.stringify(evidence);
+  } catch {
+    // circular or BigInt — fall through to truncation
+  }
+  if (json !== null && json.length <= MAX_EVIDENCE_JSON_LENGTH) return evidence;
   const keys = Object.keys(evidence);
   const truncated: Record<string, unknown> = {};
   let budget = MAX_EVIDENCE_JSON_LENGTH - 2;
@@ -83,7 +87,7 @@ function boundedEvidence(evidence: Record<string, unknown>): Record<string, unkn
     const comma = first ? 0 : 1;
     const entry = `"${key}":${safeStringify(evidence[key])}`;
     if (entry.length + comma <= budget) {
-      truncated[key] = evidence[key];
+      truncated[key] = safeStringify(evidence[key]);
       budget -= entry.length + comma;
       first = false;
     } else {
@@ -91,8 +95,10 @@ function boundedEvidence(evidence: Record<string, unknown>): Record<string, unkn
       break;
     }
   }
-  if (JSON.stringify(truncated).length > MAX_EVIDENCE_JSON_LENGTH) {
-    return { _truncated: true, keys: keys.slice(0, 3) };
+  const truncatedJson = JSON.stringify(truncated);
+  if (truncatedJson.length > MAX_EVIDENCE_JSON_LENGTH) {
+    const safeKeys = keys.slice(0, 3).map(k => k.length > 50 ? k.slice(0, 47) + '...' : k);
+    return { _truncated: true, keys: safeKeys };
   }
   return truncated;
 }
@@ -122,7 +128,7 @@ function makeDeterministicDiagnosticianOutput(painId: string): DiagnosticianOutp
   };
 }
 
-function computeOverallStatus(stages: SyntheticBaselineStage[]): 'passed' | 'failed' | 'degraded' {
+export function computeOverallStatus(stages: SyntheticBaselineStage[]): 'passed' | 'failed' | 'degraded' {
   const hasFailed = stages.some(s => s.status === 'failed');
   const hasSkipped = stages.some(s => s.status === 'skipped');
   const hasPassed = stages.some(s => s.status === 'passed');
@@ -184,9 +190,7 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineOptions): Prom
       return { status, workspaceMode, generatedAt, stages, recommendedNextIssue: recommendNextIssue(stages) };
     }
 
-    const sqliteConn = (stateManager as unknown as { connection: unknown }).connection as SqliteConnection;
-    const taskStore = (stateManager as unknown as { taskStore: unknown }).taskStore as never;
-    const runStore = (stateManager as unknown as { runStore: unknown }).runStore as never;
+    const { connection: sqliteConn, taskStore, runStore } = stateManager;
     const historyQuery = new SqliteHistoryQuery(sqliteConn);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
     const eventEmitter = new StoreEventEmitter();
@@ -194,7 +198,7 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineOptions): Prom
     const validator = new PassThroughValidator();
 
     const runtimeAdapter = new TestDoubleRuntimeAdapter(
-      { onFetchOutput: () => ({ runId: `synth-${painId}`, payload: diagnosticianOutput as unknown as Record<string, unknown> }) },
+      { onFetchOutput: () => ({ runId: `synth-${painId}`, payload: diagnosticianOutput }) },
       `diagnosis_${painId}`,
     );
 
