@@ -40,17 +40,17 @@ export async function runSyntheticBaseline(opts: SyntheticBaselineRunnerOptions)
   const stages: SyntheticBaselineStage[] = [];
   const generatedAt = new Date().toISOString();
 
-  const pdDir = path.join(workspaceDir, '.pd');
-  const stateDir = path.join(workspaceDir, '.state');
-  await fs.promises.mkdir(pdDir, { recursive: true });
-  await fs.promises.mkdir(stateDir, { recursive: true });
-
   const painId = `synth-pain-${Date.now()}`;
   const diagnosticianOutput = makeDeterministicDiagnosticianOutput(painId);
 
   let stateManager: RuntimeStateManager | null = null;
 
   try {
+    const pdDir = path.join(workspaceDir, '.pd');
+    const stateDir = path.join(workspaceDir, '.state');
+    await fs.promises.mkdir(pdDir, { recursive: true });
+    await fs.promises.mkdir(stateDir, { recursive: true });
+
     stateManager = new RuntimeStateManager({ workspaceDir });
     await stateManager.initialize();
 

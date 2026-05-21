@@ -232,4 +232,18 @@ describe('handleRuntimeSyntheticBaseline (CLI handler)', () => {
       logSpy.mockRestore();
     }
   });
+
+  it('runner rejection propagates and temp workspace is still cleaned up', async () => {
+    mockRunSyntheticBaseline.mockRejectedValue(new Error('EACCES: permission denied, mkdir'));
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await expect(handleRuntimeSyntheticBaseline({})).rejects.toThrow('EACCES');
+      const calledDir = mockRunSyntheticBaseline.mock.calls[0][0].workspaceDir;
+      expect(fs.existsSync(calledDir)).toBe(false);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
