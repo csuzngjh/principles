@@ -285,4 +285,25 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
     expect(call.reason).toContain('no proposal');
   });
 
+  it('non-write/bash/agent tool does not trigger auto_correct evaluation', () => {
+    const proposal = makeValidProposal({ applicationMode: 'live' });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = {
+      toolName: 'read',
+      params: { file_path: '/mock/workspace/src/foo.ts', content: 'broken' },
+    };
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    expect(result).toBeUndefined();
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectProposed).not.toHaveBeenCalled();
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
+  });
+
 });
