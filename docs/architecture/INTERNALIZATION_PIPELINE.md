@@ -3,7 +3,7 @@
 > **状态**: Active
 > **最后更新**: 2026-05-15
 > **关联 ADR**: ADR-0001（服务边界）, ADR-0003（Peer Agent 状态机）, ADR-0005（Nocturnal 合并）, ADR-0006（混合激活）
-> **关联文档**: `PD_ARCHITECTURE_OVERVIEW.md`, `ACTIVATION_CHANNELS.md`, `GLOSSARY.md`
+> **关联文档**: `PD_ARCHITECTURE_OVERVIEW.md`, `ACTIVATION_CHANNELS.md`, `AGENT_SOFTWARE_CONTRACT.md`, `GLOSSARY.md`
 
 本文档定义 PD 系统从**痛苦信号**到**已激活实现**的**完整端到端流水线**。它是 ADR-0003 / ADR-0005 / ADR-0006 决议在工程层的具象化。
 
@@ -131,6 +131,8 @@ PD 的痛苦信号按重要性分为三层。**只有 Layer 1 和 Layer 2 独立
 | `DiagnosticianValidator` | core | RawOutput | 校验通过/失败 | 失败 → output_invalid，可重试 |
 | `DiagnosticianCommitter` | core | output | commitId | 失败 → artifact_commit_failed，重试 |
 | `CandidateIntakeService` | core | candidateId | LedgerPrincipleEntry | 失败 → 抛 CandidateIntakeError，候选保持 pending |
+
+LLM/代理输出进入软件系统的通用边界见 [`AGENT_SOFTWARE_CONTRACT.md`](./AGENT_SOFTWARE_CONTRACT.md)。Runner 可以请求代理推理，但最终写入、schema validation、lineage 校验和审计必须由 PD core/CLI 执行。
 
 ### 2.4 关键不变量
 
