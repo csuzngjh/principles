@@ -389,6 +389,169 @@ describe('attemptStructuredOutputRepair', () => {
     expect(callPrompts[0]).toContain('Expected number got string');
     expect(callPrompts[1]).toContain('Expected number got string v2');
   });
+
+  it('repairAttempts records current errors per attempt, not initial errors', async () => {
+    const llmCaller: RepairLLMCaller = async () => {
+      return JSON.stringify(SAMPLE_INVALID_JSON);
+    };
+
+    const firstErrors = [{ path: '/confidence', message: 'Expected number', value: '85%' }];
+    const secondErrors = [{ path: '/summary', message: 'Expected string', value: 42 }];
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      firstErrors,
+      {
+        llmCaller,
+        schemaCheck: () => false,
+        schemaErrors: () => secondErrors,
+      },
+      { maxRepairAttempts: 2 },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.repairAttempts).toHaveLength(2);
+    const [attempt0, attempt1] = result.repairAttempts;
+    expect(attempt0).toBeDefined();
+    expect(attempt1).toBeDefined();
+    const attempt0Paths = attempt0?.validationErrors.map(e => e.path) ?? [];
+    const attempt1Paths = attempt1?.validationErrors.map(e => e.path) ?? [];
+    expect(attempt0Paths).toContain('/summary');
+    expect(attempt1Paths).toContain('/summary');
+    expect(attempt0Paths).not.toContain('/confidence');
+    expect(attempt1Paths).not.toContain('/confidence');
+  });
+
+  it('repairAttempts records current errors when attempt 2 succeeds', async () => {
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async () => {
+      callCount++;
+      if (callCount < 2) return JSON.stringify(SAMPLE_INVALID_JSON);
+      return JSON.stringify(VALID_REPAIRED_JSON);
+    };
+
+    const firstErrors = [{ path: '/confidence', message: 'Expected number', value: '85%' }];
+    const secondErrors = [{ path: '/summary', message: 'Expected string', value: 42 }];
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      firstErrors,
+      {
+        llmCaller,
+        schemaCheck: (v) => {
+          const obj = v as Record<string, unknown>;
+          return typeof obj.confidence === 'number';
+        },
+        schemaErrors: () => secondErrors,
+      },
+      { maxRepairAttempts: 2 },
+    );
+
+    expect(result.repaired).toBe(true);
+    expect(result.repairAttempts).toHaveLength(2);
+    const [attempt0, attempt1] = result.repairAttempts;
+    expect(attempt0).toBeDefined();
+    expect(attempt1).toBeDefined();
+    const attempt0Paths = attempt0?.validationErrors.map(e => e.path) ?? [];
+    const attempt1Paths = attempt1?.validationErrors.map(e => e.path) ?? [];
+    expect(attempt0Paths).toContain('/summary');
+    expect(attempt1Paths).toContain('/summary');
+    expect(attempt0Paths).not.toContain('/confidence');
+    expect(attempt1Paths).not.toContain('/confidence');
+  });
+
+  it('repairAttempts records current errors when attempt 2 llmCaller throws', async () => {
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async () => {
+      callCount++;
+      if (callCount === 1) return JSON.stringify(SAMPLE_INVALID_JSON);
+      throw new Error('LLM down');
+    };
+
+    const firstErrors = [{ path: '/confidence', message: 'Expected number', value: '85%' }];
+    const secondErrors = [{ path: '/summary', message: 'Expected string', value: 42 }];
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      firstErrors,
+      {
+        llmCaller,
+        schemaCheck: () => false,
+        schemaErrors: () => secondErrors,
+      },
+      { maxRepairAttempts: 2 },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.repairAttempts).toHaveLength(2);
+    const [, attempt1] = result.repairAttempts;
+    expect(attempt1).toBeDefined();
+    const attempt1Paths = attempt1?.validationErrors.map(e => e.path) ?? [];
+    expect(attempt1Paths).toContain('/summary');
+    expect(attempt1Paths).not.toContain('/confidence');
+  });
+
+  it('repairAttempts records current errors when attempt 2 returns null', async () => {
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async () => {
+      callCount++;
+      if (callCount === 1) return JSON.stringify(SAMPLE_INVALID_JSON);
+      return null;
+    };
+
+    const firstErrors = [{ path: '/confidence', message: 'Expected number', value: '85%' }];
+    const secondErrors = [{ path: '/summary', message: 'Expected string', value: 42 }];
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      firstErrors,
+      {
+        llmCaller,
+        schemaCheck: () => false,
+        schemaErrors: () => secondErrors,
+      },
+      { maxRepairAttempts: 2 },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.repairAttempts).toHaveLength(2);
+    const [, attempt1] = result.repairAttempts;
+    expect(attempt1).toBeDefined();
+    const attempt1Paths = attempt1?.validationErrors.map(e => e.path) ?? [];
+    expect(attempt1Paths).toContain('/summary');
+    expect(attempt1Paths).not.toContain('/confidence');
+  });
+
+  it('repairAttempts records current errors when attempt 2 returns no JSON', async () => {
+    let callCount = 0;
+    const llmCaller: RepairLLMCaller = async () => {
+      callCount++;
+      if (callCount === 1) return JSON.stringify(SAMPLE_INVALID_JSON);
+      return 'not json at all';
+    };
+
+    const firstErrors = [{ path: '/confidence', message: 'Expected number', value: '85%' }];
+    const secondErrors = [{ path: '/summary', message: 'Expected string', value: 42 }];
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      firstErrors,
+      {
+        llmCaller,
+        schemaCheck: () => false,
+        schemaErrors: () => secondErrors,
+      },
+      { maxRepairAttempts: 2 },
+    );
+
+    expect(result.repaired).toBe(false);
+    expect(result.repairAttempts).toHaveLength(2);
+    const [, attempt1] = result.repairAttempts;
+    expect(attempt1).toBeDefined();
+    const attempt1Paths = attempt1?.validationErrors.map(e => e.path) ?? [];
+    expect(attempt1Paths).toContain('/summary');
+    expect(attempt1Paths).not.toContain('/confidence');
+  });
 });
 
 // ── DEFAULT_REPAIR_CONFIG ──

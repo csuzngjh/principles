@@ -165,9 +165,9 @@ export async function attemptStructuredOutputRepair<T>(
   }
 
   const errorSummary = `${currentErrors.length} errors: ${currentErrors.slice(0, 3).map(e => e.path).join(', ')}`;
-  const initialValidationErrors = buildValidationErrorEntries(currentErrors);
 
   for (let attempt = 0; attempt < cfg.maxRepairAttempts; attempt++) {
+    const attemptValidationErrors = buildValidationErrorEntries(currentErrors);
     const prompt = formatRepairPrompt(invalidOutput, currentErrors, cfg);
 
     // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try block below
@@ -180,7 +180,7 @@ export async function attemptStructuredOutputRepair<T>(
         schemaRef: cfg.schemaRef ?? 'unknown',
         attempt: attempt + 1,
         rawOutputPreview: safeStringifyPreview(invalidOutput),
-        validationErrors: initialValidationErrors,
+        validationErrors: attemptValidationErrors,
         repairPromptVersion: REPAIR_PROMPT_VERSION,
         repaired: false,
       });
@@ -198,7 +198,7 @@ export async function attemptStructuredOutputRepair<T>(
         schemaRef: cfg.schemaRef ?? 'unknown',
         attempt: attempt + 1,
         rawOutputPreview: safeStringifyPreview(invalidOutput),
-        validationErrors: initialValidationErrors,
+        validationErrors: attemptValidationErrors,
         repairPromptVersion: REPAIR_PROMPT_VERSION,
         repaired: false,
       });
@@ -211,7 +211,7 @@ export async function attemptStructuredOutputRepair<T>(
         schemaRef: cfg.schemaRef ?? 'unknown',
         attempt: attempt + 1,
         rawOutputPreview: truncatePreview(rawResponse),
-        validationErrors: initialValidationErrors,
+        validationErrors: attemptValidationErrors,
         repairPromptVersion: REPAIR_PROMPT_VERSION,
         repaired: false,
       });
@@ -229,7 +229,7 @@ export async function attemptStructuredOutputRepair<T>(
         schemaRef: cfg.schemaRef ?? 'unknown',
         attempt: attempt + 1,
         rawOutputPreview: truncatePreview(rawResponse),
-        validationErrors: initialValidationErrors,
+        validationErrors: attemptValidationErrors,
         repairPromptVersion: REPAIR_PROMPT_VERSION,
         repaired: true,
       });
@@ -242,21 +242,21 @@ export async function attemptStructuredOutputRepair<T>(
       };
     }
 
+    const nextErrors = callbacks.schemaErrors
+      ? callbacks.schemaErrors(candidateWithLineage)
+      : currentErrors;
+
     repairAttempts.push({
       schemaRef: cfg.schemaRef ?? 'unknown',
       attempt: attempt + 1,
       rawOutputPreview: truncatePreview(rawResponse),
-      validationErrors: callbacks.schemaErrors
-        ? buildValidationErrorEntries(callbacks.schemaErrors(candidateWithLineage))
-        : initialValidationErrors,
+      validationErrors: buildValidationErrorEntries(nextErrors),
       repairPromptVersion: REPAIR_PROMPT_VERSION,
       repaired: false,
     });
 
     invalidOutput = candidateWithLineage;
-    if (callbacks.schemaErrors) {
-      currentErrors = callbacks.schemaErrors(candidateWithLineage);
-    }
+    currentErrors = nextErrors;
   }
 
   return {
