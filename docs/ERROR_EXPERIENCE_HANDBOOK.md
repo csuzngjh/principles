@@ -70,6 +70,8 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-009 | Validator silently skips missing/malformed required array fields instead of failing loud | PRI-192 |
 | ERR-010 | Falsy evaluator return silently passes validation instead of recording failure | PRI-172 |
 | ERR-013 | `in` operator on untrusted object matches inherited Object.prototype properties | PRI-201 |
+| ERR-014 | `formatValidationErrorEntry` string values not truncated — evidence pack unbounded | PRI-200 |
+| ERR-015 | Repair loop uses stale schema errors across attempts — reduced repair effectiveness | PRI-200 |
 
 ---
 
@@ -257,9 +259,33 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-014]** | `formatValidationErrorEntry` string values not truncated — evidence pack unbounded
+
+- **What happened**: In `formatValidationErrorEntry()`, the `actualPreview` field returned raw string values without truncation: `typeof value === 'string' ? value : ...`. Only non-string values went through `truncatePreview()`. This violated the "bounded preview" design goal of the evidence pack — a very long string value (e.g., a 10KB error message) would bloat the evidence pack and could leak sensitive content.
+- **Why it's wrong**: The evidence pack is designed to be observable and bounded. All preview fields must be size-limited. Leaving string values unbounded creates an asymmetry where `actualPreview` for strings can be arbitrarily large while non-string previews are capped at 100 chars. This is the same class as ERR-001/ERR-005 where type-specific handling creates validation gaps.
+- **Correct approach**: Apply `truncatePreview(value, 100)` to the string branch as well, so all `actualPreview` values are uniformly bounded.
+- **How to prevent**: When implementing "bounded preview" or "truncated" fields, verify ALL code paths that produce the field value apply the same truncation logic. Add a test case with a long string value to verify truncation.
+- **Source**: PRI-200 / PR #665 (CodeRabbit review)
+- **Date**: 2026-05-21
+- **Recurrence**: Yes - same class as ERR-001/ERR-005 where type-specific branches bypass validation
+
+---
+
+**[ERR-015]** | Repair loop uses stale schema errors across attempts — reduced repair effectiveness
+
+- **What happened**: In `attemptStructuredOutputRepair()`, the repair loop always passed the original `schemaErrors` to `formatRepairPrompt()` for every attempt, even after the candidate output had changed. When `maxRepairAttempts > 1`, the second and subsequent repair prompts would contain errors from the original output, not the current candidate. This reduces repair effectiveness because the LLM is asked to fix errors that may no longer exist while missing new errors introduced by the previous repair attempt.
+- **Why it's wrong**: The repair loop updates `invalidOutput` to `candidateWithLineage` after each failed attempt, but the prompt still references the original errors. This means the LLM gets a misleading prompt — "fix these errors" — when the actual errors have changed. The `callbacks.schemaErrors` callback was available to get fresh errors but was only used for the `repairAttempts` record, not for the next prompt.
+- **Correct approach**: Track `currentErrors` as a mutable variable initialized from `schemaErrors`. After each failed attempt, if `callbacks.schemaErrors` is available, refresh `currentErrors` with the latest errors from the failed candidate. Pass `currentErrors` to `formatRepairPrompt()` on each iteration.
+- **How to prevent**: When implementing a retry/repair loop that re-prompts an LLM, always refresh the error context from the latest attempt before building the next prompt. Never assume the errors are static across iterations. Add a test with `maxRepairAttempts > 1` and `callbacks.schemaErrors` returning different errors on each call to verify the prompt uses updated errors.
+- **Source**: PRI-200 / PR #665 (CodeRabbit review)
+- **Date**: 2026-05-21
+- **Recurrence**: No
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 13 |
+| Total lessons | 15 |
 | Last updated | 2026-05-21 |
 | Top category | Schema & Type |
-| Recurring errors | 6 |
+| Recurring errors | 8 |
