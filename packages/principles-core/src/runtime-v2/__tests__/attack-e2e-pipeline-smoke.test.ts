@@ -566,7 +566,7 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
     }
   });
 
-  it('ATTACK-15: PITask with wrong taskKind — hydration accepts non-peer-runner kinds (BUG: should reject)', () => {
+  it('ATTACK-15: PITask with wrong taskKind — hydration rejects non-peer-runner kinds (bug fixed)', () => {
     const task: TaskRecord = {
       taskId: 'task_wrong_kind',
       taskKind: 'diagnostician',
@@ -586,10 +586,9 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
 
     const piTask = hydratePITaskRecord(task);
 
-    expect(piTask).not.toBeNull();
-    if (piTask) {
-      expect(piTask.taskKind).toBe('diagnostician');
-      expect(piTask.channel).toBe('prompt');
-    }
+    // hydratePITaskRecord now rejects non-peer-runner task kinds at the hydration
+    // boundary, closing the gap where a diagnostician task with valid pi_metadata
+    // could be treated as a PITaskRecord by the InternalizationOrchestrator.
+    expect(piTask).toBeNull();
   });
 });
