@@ -19,6 +19,7 @@
 | 在做 hooks / 错误处理 | [`ERROR_ARCHITECTURE.md`](./ERROR_ARCHITECTURE.md) |
 | 在做 storage / 数据相关 | [`DATA_ARCHITECTURE.md`](./DATA_ARCHITECTURE.md) |
 | 想观测 / 加日志 / 加指标 | [`OBSERVABILITY_ARCHITECTURE.md`](./OBSERVABILITY_ARCHITECTURE.md) |
+| 在处理 LLM/内置代理输出、JSON schema、agent 写入边界 | [`AGENT_SOFTWARE_CONTRACT.md`](./AGENT_SOFTWARE_CONTRACT.md) |
 | 安全 / 沙箱 / 审批问题 | [`SECURITY_ARCHITECTURE.md`](./SECURITY_ARCHITECTURE.md) |
 | 配置 / 环境变量 | [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) |
 | Schema 演化 / API 兼容 | [`VERSIONING_AND_COMPATIBILITY.md`](./VERSIONING_AND_COMPATIBILITY.md) |
@@ -87,6 +88,7 @@
 | [`DATA_ARCHITECTURE.md`](./DATA_ARCHITECTURE.md) | Active | 数据存储 |
 | [`ERROR_ARCHITECTURE.md`](./ERROR_ARCHITECTURE.md) | Active | 错误处理 |
 | [`OBSERVABILITY_ARCHITECTURE.md`](./OBSERVABILITY_ARCHITECTURE.md) | Active | 可观测性 |
+| [`AGENT_SOFTWARE_CONTRACT.md`](./AGENT_SOFTWARE_CONTRACT.md) | Active | LLM/代理输出进入软件系统的契约 |
 | [`SECURITY_ARCHITECTURE.md`](./SECURITY_ARCHITECTURE.md) | Active | 安全 |
 | [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) | Active | 配置管理 |
 | [`VERSIONING_AND_COMPATIBILITY.md`](./VERSIONING_AND_COMPATIBILITY.md) | Active | 版本与兼容 |
@@ -112,6 +114,7 @@
 | **错误类别选什么** | `ERROR_ARCHITECTURE.md` §1 |
 | **数据存哪里** | `DATA_ARCHITECTURE.md` §2 |
 | **怎么加 telemetry / metric** | `OBSERVABILITY_ARCHITECTURE.md` |
+| **LLM 输出/JSON 解析/代理写入边界怎么设计** | `AGENT_SOFTWARE_CONTRACT.md` |
 | **Sandbox / 工作区隔离** | `SECURITY_ARCHITECTURE.md` |
 | **配置文件怎么写** | `CONFIGURATION_ARCHITECTURE.md` |
 | **Schema 升级怎么做** | `VERSIONING_AND_COMPATIBILITY.md` |
