@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-21
 **Scope:** RuleHost activation / approval / auto_correct boundary audit
-**Branch:** `codex/phase-1a-rulehost-retrospective`
+**Branch:** `phase-1a-rulehost-retrospective-tiv05g`
 
 ---
 
@@ -10,7 +10,7 @@
 
 | Issue | Title | PR | Status |
 |-------|-------|-----|--------|
-| PRI-146 | RuleHostWriter | #654 | Merged |
+| PRI-146 | RuleHostWriter | #650 | Merged |
 | PRI-185 | RuleHost approval context | #654 | Merged |
 | PRI-174 | Host live auto_correct gate | #655 | Merged |
 
@@ -18,7 +18,7 @@
 
 ## 2. RuleHost Activation Data Flow
 
-```
+```text
                     ┌──────────────────────┐
                     │  Rollout Reviewer     │
                     │  (decides route)      │
@@ -56,7 +56,7 @@
 
 ### Gate-level flow (gate.ts)
 
-```
+```text
 before_tool_call event
         │
         ▼
@@ -104,8 +104,8 @@ before_tool_call event
 | 14 | `notifyAgent=true` | As per mode | As per mode | Warning string with field details | ✅ `gate-auto-correct.test.ts` |
 | 15 | `notifyAgent=false` | As per mode | As per mode | `undefined` | ✅ `gate-auto-correct.test.ts` |
 | 16 | RuleHost.evaluate throws | **No** | None (degraded) | `undefined` (allow) | ✅ Implicit in gate.ts catch |
-| 17 | Partial correctedFields — unlisted fields untouched | **No mutation on unlisted** | — | — | ⚠️ **GAP** — no explicit test |
-| 18 | Malformed correctedFields entries (non-object, null) | **No** (fail-open) | — | — | ⚠️ **GAP** — no explicit test |
+| 17 | Partial correctedFields — unlisted fields untouched | **No mutation on unlisted** | `applied` with only listed fields | — | ✅ `gate-auto-correct.test.ts` |
+| 18 | Malformed correctedFields entries (non-object, null) | **No** (fail-open) | `proposed` (validationValid=false), no `applied` | `undefined` | ✅ `gate-auto-correct.test.ts` |
 | 19 | Unsupported channel in dispatcher | **N/A** | `refused` (no_writer_for_channel) | — | ✅ Dispatcher tests |
 | 20 | `code_tool_hook` always routes to approval queue | **N/A** | `queued_for_approval` | — | ✅ `rule-host-writer.test.ts` |
 
@@ -145,23 +145,23 @@ before_tool_call event
 
 ---
 
-## 5. Test Gaps Identified
+## 5. Test Gaps Identified And Closed
 
 ### GAP-1: Partial correctedFields — unlisted fields must remain untouched
 
 **Risk:** If `Object.assign(event.params, nextParams)` somehow introduces extra keys, unlisted params could be silently modified.
 
-**Current state:** The implementation correctly only adds keys from `correctedFields`, but no test explicitly verifies that a param NOT in `correctedFields` (e.g., `file_path`) remains unchanged after live auto_correct.
+**Current state:** Closed in this PR. `gate-auto-correct.test.ts` now verifies that a param NOT in `correctedFields` remains unchanged after live auto_correct.
 
-**Recommendation:** Add a test that applies live auto_correct to `content` only and verifies `file_path` is unchanged.
+**Resolution:** Added a test that applies live auto_correct to `content` only and verifies `file_path` and unrelated params are unchanged.
 
 ### GAP-2: Malformed correctedFields entries trigger fail-open
 
 **Risk:** If `correctedFields` contains non-object entries (e.g., `[42, null, "string"]`), the gate.ts code should throw and trigger fail-open.
 
-**Current state:** The test for "invalid proposal" uses `proposedParams: 'not-an-object'` but doesn't test malformed `correctedFields` entries specifically.
+**Current state:** Closed in this PR. `gate-auto-correct.test.ts` now covers malformed `correctedFields` entries specifically.
 
-**Recommendation:** Add a test with `correctedFields: [42, null]` and verify fail-open behavior.
+**Resolution:** Added a test with `correctedFields: [42, null, "string"]` and verified no mutation, no `applied` event, and `validationValid=false`.
 
 ### GAP-3: auto_correct applied event content completeness
 
@@ -173,7 +173,7 @@ before_tool_call event
 
 **Observation:** The pure validator in `correction-proposal.ts` validates `correctedFields` structure and `proposedParams` shape independently, but does not verify that each `correctedFields[].field` has a corresponding key in `proposedParams`. This cross-check happens at runtime in `gate.ts` (lines 215-221).
 
-**Assessment:** The runtime check in gate.ts is sufficient for safety. Adding the cross-check to the pure validator would be a defense-in-depth improvement for Phase 1B, but is not a safety gap since the runtime check prevents any mutation.
+**Assessment:** The runtime check in gate.ts prevents unsafe mutation, but ATTACK-5 documents this as a pure-validator quality gap. A follow-up should make `validateCorrectionProposal()` reject `correctedFields` entries whose `field` is absent from `proposedParams`, so invalid agent output is rejected before the plugin gate has to fail open.
 
 ---
 
@@ -236,4 +236,4 @@ Phase 1A is **complete and safe for production shadow mode**. The key safety pro
 5. ✅ FROZEN LEGACY files are untouched
 6. ✅ Architecture regression tests include Phase 1A entries
 
-Two minor test gaps (GAP-1, GAP-2) should be addressed before Phase 1B. No code bugs were found.
+GAP-1 and GAP-2 were closed in this PR. The added attack smoke tests also surfaced two follow-up bugs outside this retrospective's fix scope: PITask hydration accepts non-peer task kinds, and `validateCorrectionProposal()` does not cross-check `correctedFields` against `proposedParams`.

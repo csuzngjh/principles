@@ -302,6 +302,7 @@ describe('PRI-114: Gate auto_correct shadow mode', () => {
     const result = handleBeforeToolCall(event, makeCtx());
 
     expect(result).toBeUndefined();
+    expect(_mockEvaluate).not.toHaveBeenCalled();
     expect(mockEventLogInstance.recordRuleHostAutoCorrectProposed).not.toHaveBeenCalled();
     expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
   });

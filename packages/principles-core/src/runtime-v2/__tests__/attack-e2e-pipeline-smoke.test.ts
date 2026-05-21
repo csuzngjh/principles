@@ -262,7 +262,7 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
     expect(routeDecision.route).toBe('rule-candidate');
   });
 
-  it('ATTACK-4: PITask hydration failure — orchestrator must not stall', async () => {
+  it('ATTACK-4: PITask diagnosticJson with partial metadata — orchestrator must not stall', async () => {
     const taskId = 'attack_bad_hydration';
     const badDiagnosticJson = JSON.stringify({
       pi_metadata: {
@@ -305,6 +305,9 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
   });
 
   it('ATTACK-5: correctionProposal semantic contradiction — correctedFields vs proposedParams mismatch', () => {
+    // NOTE: This documents a known validateCorrectionProposal gap for ruleId
+    // R_attack_5. The validator currently permits correctedFields entries that
+    // are not present in proposedParams; gate.ts still fail-opens before mutation.
     const proposal = {
       proposedParams: { content: 'fixed' },
       correctedFields: [
@@ -461,7 +464,12 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
     const result = await runner.run(taskId);
 
     expect(result.status).toMatch(/^(succeeded|failed|retried)$/);
-    expect(result.status).not.toBe('leased');
+
+    const task = await stateManager.getTask(taskId);
+    expect(task).toBeDefined();
+    if (task) {
+      expect(task.status).not.toBe('leased');
+    }
   });
 
   it('ATTACK-11: fetchOutput throws — runner must transition task out of leased', async () => {

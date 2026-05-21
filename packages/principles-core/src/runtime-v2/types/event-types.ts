@@ -818,6 +818,7 @@ export interface EventEvolutionStats {
   rulehostBlocked: number;
   rulehostRequireApproval: number;
   rulehostAutoCorrectProposed: number;
+  rulehostAutoCorrectApplied: number;
 }
 
 // Backward compatibility alias
@@ -843,6 +844,7 @@ export const EventEvolutionStatsSchema = Type.Object({
   rulehostBlocked: Type.Number(),
   rulehostRequireApproval: Type.Number(),
   rulehostAutoCorrectProposed: Type.Number(),
+  rulehostAutoCorrectApplied: Type.Number(),
 });
 export type EventEvolutionStatsStatic = Static<typeof EventEvolutionStatsSchema>;
 
@@ -1016,6 +1018,7 @@ export function createEmptyDailyStats(date: string): DailyStats {
       rulehostBlocked: 0,
       rulehostRequireApproval: 0,
       rulehostAutoCorrectProposed: 0,
+      rulehostAutoCorrectApplied: 0,
     },
     hooks: {
       total: 0,
