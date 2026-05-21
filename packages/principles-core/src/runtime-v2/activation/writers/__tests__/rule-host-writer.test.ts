@@ -328,18 +328,26 @@ describe('RuleHostWriter', () => {
     expect(result.riskLevel).toBe('high');
   });
 
-  it('rejects artifact with invalid validationStatus', async () => {
+  it('rejects artifact with pending validationStatus', async () => {
     const { RuleHostWriter } = await importWriter();
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
-    const artifact = makeRuleArtifact();
-    Object.defineProperty(artifact, 'validationStatus', {
-      value: 'unknown',
-      writable: false,
-      configurable: true,
+    const artifact = makeRuleArtifact({
+      validationStatus: 'pending',
     });
     const result = await writer.canActivate(artifact);
     expect(result.ok).toBe(false);
-    expect(result.reason).toContain('artifact_validation_status');
+    expect(result.reason).toContain('artifact_validation_status_pending');
+  });
+
+  it('rejects artifact with rejected validationStatus', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    const artifact = makeRuleArtifact({
+      validationStatus: 'rejected',
+    });
+    const result = await writer.canActivate(artifact);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('artifact_validation_status_rejected');
   });
 });
 

@@ -1,17 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { RuntimeStateHandle } from '../runtime-state-handle.js';
 import { createRecoverySweepService } from '../recovery-sweep-service.js';
 
 const mockDetectExpiredLeases = vi.fn();
 const mockRecoverTask = vi.fn();
 const mockStateManagerClose = vi.fn();
+const mockInitialize = vi.fn();
+const mockAssertInitialized = vi.fn();
 
 vi.mock('../store/runtime-state-manager.js', () => ({
   RuntimeStateManager: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
-    this.initialize = vi.fn().mockResolvedValue(undefined);
+    this.initialize = mockInitialize;
     this.close = mockStateManagerClose;
     this.detectExpiredLeases = mockDetectExpiredLeases;
     this.recoverTask = mockRecoverTask;
+    this.assertInitialized = mockAssertInitialized;
     this.isInitialized = true;
   }),
 }));
@@ -20,9 +22,11 @@ describe('createRecoverySweepService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    mockInitialize.mockResolvedValue(undefined);
     mockDetectExpiredLeases.mockResolvedValue([]);
     mockRecoverTask.mockResolvedValue(null);
     mockStateManagerClose.mockResolvedValue(undefined);
+    mockAssertInitialized.mockReturnValue(undefined);
   });
 
   it('creates service with stateManager and close handle', async () => {
@@ -39,11 +43,23 @@ describe('createRecoverySweepService', () => {
     expect(mockDetectExpiredLeases).toHaveBeenCalledTimes(1);
   });
 
-  it('recoverTask delegates to stateManager', async () => {
-    mockRecoverTask.mockResolvedValue({ previousStatus: 'leased', newStatus: 'retry_wait' });
+  it('recoverTask delegates to stateManager and returns full RecoveryResult', async () => {
+    mockRecoverTask.mockResolvedValue({
+      taskId: 'task-1',
+      recoveredAt: '2026-05-21T00:00:00.000Z',
+      previousStatus: 'leased',
+      newStatus: 'retry_wait',
+      wasLeaseExpired: true,
+    });
     const handle = await createRecoverySweepService({ workspaceDir: '/tmp/test-ws' });
     const result = await handle.service.recoverTask('task-1');
-    expect(result).toEqual({ previousStatus: 'leased', newStatus: 'retry_wait' });
+    expect(result).toEqual({
+      taskId: 'task-1',
+      recoveredAt: '2026-05-21T00:00:00.000Z',
+      previousStatus: 'leased',
+      newStatus: 'retry_wait',
+      wasLeaseExpired: true,
+    });
     expect(mockRecoverTask).toHaveBeenCalledWith('task-1');
   });
 
@@ -66,5 +82,11 @@ describe('createRecoverySweepService', () => {
     const handle = await createRecoverySweepService({ workspaceDir: '/tmp/test-ws' });
     await handle.service.close();
     expect(mockStateManagerClose).not.toHaveBeenCalled();
+  });
+
+  it('propagates initialization failure from RuntimeStateManager', async () => {
+    mockInitialize.mockRejectedValueOnce(new Error('DB init failed'));
+    await expect(createRecoverySweepService({ workspaceDir: '/tmp/test-ws' }))
+      .rejects.toThrow('DB init failed');
   });
 });
