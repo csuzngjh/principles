@@ -1,10 +1,10 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { runSyntheticBaseline } from '@principles/core/runtime-v2';
+import { runSyntheticBaseline } from '../services/synthetic-baseline-runner.js';
 import type { SyntheticBaselineSummary } from '@principles/core/runtime-v2';
 
-interface CliBaselineOptions {
+interface CliSyntheticBaselineOptions {
   workspace?: string;
   json?: boolean;
 }
@@ -35,7 +35,7 @@ function formatTextOutput(summary: SyntheticBaselineSummary): string {
   return lines.join('\n');
 }
 
-export async function handleRuntimeSyntheticBaseline(opts: CliBaselineOptions): Promise<void> {
+export async function handleRuntimeSyntheticBaseline(opts: CliSyntheticBaselineOptions): Promise<void> {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
     : fs.mkdtempSync(path.join(os.tmpdir(), 'pd-synth-baseline-'));

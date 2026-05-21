@@ -4,7 +4,7 @@ const { mockRunSyntheticBaseline } = vi.hoisted(() => ({
   mockRunSyntheticBaseline: vi.fn(),
 }));
 
-vi.mock('@principles/core/runtime-v2', () => ({
+vi.mock('../../src/services/synthetic-baseline-runner.js', () => ({
   runSyntheticBaseline: mockRunSyntheticBaseline,
 }));
 
@@ -173,6 +173,61 @@ describe('handleRuntimeSyntheticBaseline (CLI handler)', () => {
     try {
       await handleRuntimeSyntheticBaseline({ workspace: tempDir });
       expect(fs.existsSync(tempDir)).toBe(true);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('injected failure produces structured reason and recommendedNextIssue', async () => {
+    mockRunSyntheticBaseline.mockResolvedValue({
+      status: 'failed',
+      workspaceMode: 'temp',
+      generatedAt: new Date().toISOString(),
+      stages: [
+        { name: 'pain_intake', status: 'failed', reason: 'Injected failure: pain intake stage forced to fail' },
+        { name: 'diagnostician_task_created', status: 'failed', reason: 'Prerequisite stage pain_intake failed' },
+      ],
+      recommendedNextIssue: 'PRI-207: Pain intake pipeline broken — check PainSignalBridge and DiagnosticianRunner',
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await handleRuntimeSyntheticBaseline({ json: true });
+      const output = logSpy.mock.calls[0][0];
+      const parsed = JSON.parse(output);
+      expect(parsed.status).toBe('failed');
+      expect(parsed.recommendedNextIssue).toContain('PRI-207');
+      expect(process.exitCode).toBe(1);
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('no RuleHost/autoCorrect evidence, case-insensitive', async () => {
+    mockRunSyntheticBaseline.mockResolvedValue({
+      ...makePassedSummary(),
+      stages: [
+        { name: 'pain_intake', status: 'passed', evidence: { painId: 'test', bridgeStatus: 'succeeded' } },
+        { name: 'diagnostician_task_created', status: 'passed', evidence: { taskId: 't1', taskStatus: 'succeeded' } },
+        { name: 'candidate_created', status: 'passed', evidence: { candidateCount: 1 } },
+        { name: 'ledger_consistent', status: 'passed', evidence: { auditStatus: 'ok' } },
+        { name: 'internalization_queue_ready', status: 'passed', evidence: { readyCount: 1 } },
+        { name: 'canary_health', status: 'passed', evidence: { overallStatus: 'healthy' } },
+      ],
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await handleRuntimeSyntheticBaseline({ json: true });
+      const output = logSpy.mock.calls[0][0];
+      const parsed = JSON.parse(output);
+      const evidenceStr = JSON.stringify(parsed.stages).toLowerCase();
+      expect(evidenceStr).not.toContain('rulehost');
+      expect(evidenceStr).not.toContain('autocorrect');
     } finally {
       logSpy.mockRestore();
     }
