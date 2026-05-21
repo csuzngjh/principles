@@ -42,10 +42,9 @@ These files have absolutely NO I/O imports (no `fs`, `path`, `os`, `crypto`, `ur
 | `correction-types.ts` | 16 | None (zero imports) | **Trivial** — type definitions. |
 | `principle-injection.ts` | 16 | None (zero imports) | **Pure logic** — selection and mapping. |
 | `nocturnal-snapshot-contract.ts` | 14 | None (zero imports) | **Trivial** — interface contract. |
-| `principle-compiler/index.ts` | 13 | None (zero imports) | **Trivial** — pure index file. |
 | `principle-compiler/template-generator.ts` | 8 | None (zero imports) | **Pure generator** — stateless template builder. |
 
-### Subtotal: 15 files, 2,222 lines (6.91% of total lines)
+### Subtotal: 14 files, 2,209 lines (6.87% of total lines)
 
 ---
 
@@ -66,9 +65,10 @@ These files reside at the I/O boundary but act strictly as thin adapters or wrap
 | `principle-internalization/lifecycle-read-model.ts` | 40 | Facade query model fed by a filesystem datasource. |
 | `principle-internalization/filesystem-lifecycle-datasource.ts` | 31 | Concrete implementation of the core `LifecycleDatasource` using file I/O. |
 | `config-service.ts` | 29 | Service wrapper providing access to config file variables. |
+| `principle-compiler/index.ts` | 13 | **Compatibility Barrel** — Zero imports does not represent purity here. The target modules of the barrel exports (e.g. `compiler.ts`, `code-validator.ts`, `ledger-registrar.ts`) are I/O bound or plugin-bound APIs. Its boundary properties are determined by its exports. **Cannot be a core migration candidate.** |
 | `principle-internalization/lifecycle-refresh.ts` | 11 | Instantiation helper for the internalization lifecycle. |
 
-### Subtotal: 12 files, 1,295 lines (4.03% of total lines)
+### Subtotal: 13 files, 1,308 lines (4.07% of total lines)
 
 ---
 
@@ -190,8 +190,8 @@ These files are test suites and are not candidates for migration.
 | Category | File Count | Line Count | Percentage of Total Lines |
 |----------|------------|------------|---------------------------|
 | **Frozen Legacy (ADR-0005)** | 2 | 3,585 | 11.15% |
-| **Pure Domain Logic Candidates** | 15 | 2,222 | 6.91% |
-| **Thin Adapter Candidates** | 12 | 1,295 | 4.03% |
+| **Pure Domain Logic Candidates** | 14 | 2,209 | 6.87% |
+| **Thin Adapter Candidates** | 13 | 1,308 | 4.07% |
 | **Do Not Move** | 30 | 4,848 | 15.08% |
 | **I/O Boundary** | 48 | 19,808 | 61.63% |
 | **Test Files** | 2 | 384 | 1.20% |
