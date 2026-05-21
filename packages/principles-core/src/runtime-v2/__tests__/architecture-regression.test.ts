@@ -155,6 +155,197 @@ const REQUIRED_SOURCE_FILES = [
   'activation/writers/index.ts',
 ] as const;
 
+// ── PRI-212: Plugin core anti-growth guard ────────────────────────────────────
+//
+// Baseline: PRI-211 inventory (docs/reviews/plugin-core-inventory-2026-05.md)
+// Prevents silent growth of packages/openclaw-plugin/src/core/ by requiring
+// explicit classification for every new file.
+//
+// New pure domain logic → @principles/core
+// New I/O adapters → must be classified as plugin-specific
+// ADR-0005 frozen files → must NOT be modified as part of cleanup
+// ERR-011 reference: never bypass architecture boundary facades
+// ERR-012 reference: stale-main PR rollback must not delete baseline entries
+//
+// To add a new plugin I/O adapter legitimately, add its relative path
+// (from packages/openclaw-plugin/src/core/) to the KNOWN_PLUGIN_CORE_FILES
+// set below with a comment explaining why it is plugin-specific.
+
+const KNOWN_PLUGIN_CORE_FILES = new Set([
+  // ── Frozen Legacy (ADR-0005) — must NOT be modified ──────────────────────
+  'nocturnal-trinity.ts',
+  'nocturnal-arbiter.ts',
+
+  // ── Pure Domain Logic Candidates — exist today but new pure logic belongs in @principles/core ──
+  'nocturnal-compliance.ts',
+  'trajectory-types.ts',
+  'profile.ts',
+  'pain-signal.ts',
+  'pd-task-types.ts',
+  'evolution-types.ts',
+  'telemetry-event.ts',
+  'nocturnal-trinity-types.ts',
+  'nocturnal-candidate-scoring.ts',
+  'empathy-types.ts',
+  'correction-types.ts',
+  'principle-injection.ts',
+  'nocturnal-snapshot-contract.ts',
+  'principle-compiler/template-generator.ts',
+
+  // ── Thin Adapter Candidates — plugin I/O boundary wrappers ──────────────
+  'local-worker-routing.ts',
+  'principle-tree-migration.ts',
+  'principle-internalization/principle-lifecycle-service.ts',
+  'principle-tree-ledger-adapter.ts',
+  'principle-compiler/ledger-registrar.ts',
+  'principle-compiler/code-validator.ts',
+  'principle-injector.ts',
+  'pd-task-service.ts',
+  'principle-internalization/lifecycle-read-model.ts',
+  'principle-internalization/filesystem-lifecycle-datasource.ts',
+  'config-service.ts',
+  'principle-compiler/index.ts',
+  'principle-internalization/lifecycle-refresh.ts',
+
+  // ── Do Not Move — intrinsically plugin-specific ─────────────────────────
+  'event-log.ts',
+  'schema/schema-definitions.ts',
+  'path-resolver.ts',
+  'init.ts',
+  'workspace-context.ts',
+  'reflection/reflection-context.ts',
+  'bootstrap-rules.ts',
+  'schema/migration-runner.ts',
+  'rule-host.ts',
+  'principle-training-state.ts',
+  'pain-diagnostic-gate.ts',
+  'hygiene/tracker.ts',
+  'schema/migrations/002-init-central.ts',
+  'workspace-dir-service.ts',
+  'paths.ts',
+  'schema/migrations/004-add-thinking-and-gfi.ts',
+  'evolution-hook.ts',
+  'storage-adapter.ts',
+  'schema/migrations/003-init-workflow.ts',
+  'workspace-dir-validation.ts',
+  'pain-signal-adapter.ts',
+  'rule-implementation-runtime.ts',
+  'detection-service.ts',
+  'schema/migrations/index.ts',
+  'dictionary-service.ts',
+  'schema/index.ts',
+  'schema/db-types.ts',
+  'rule-host-types.ts',
+  'rule-host-helpers.ts',
+  'schema/migrations/001-init-trajectory.ts',
+
+  // ── I/O Boundary ────────────────────────────────────────────────────────
+  'trajectory.ts',
+  'evolution-reducer.ts',
+  'promotion-gate.ts',
+  'model-training-registry.ts',
+  'nocturnal-dataset.ts',
+  'focus-history.ts',
+  'model-deployment-registry.ts',
+  'training-program.ts',
+  'replay-engine.ts',
+  'external-training-contract.ts',
+  'nocturnal-trajectory-extractor.ts',
+  'merge-gate-audit.ts',
+  'shadow-observation-registry.ts',
+  'nocturnal-export.ts',
+  'adaptive-thresholds.ts',
+  'control-ui-db.ts',
+  'nocturnal-executability.ts',
+  'thinking-models.ts',
+  'nocturnal-artificer.ts',
+  'pd-task-reconciler.ts',
+  'correction-cue-learner.ts',
+  'nocturnal-reasoning-deriver.ts',
+  'principle-compiler/compiler.ts',
+  'pain.ts',
+  'pain-context-extractor.ts',
+  'config.ts',
+  'nocturnal-rule-implementation-validator.ts',
+  'code-implementation-storage.ts',
+  'nocturnal-paths.ts',
+  'observability.ts',
+  'file-storage-adapter.ts',
+  'workflow-funnel-loader.ts',
+  'dictionary.ts',
+  'thinking-os-parser.ts',
+  'system-logger.ts',
+  'detection-funnel.ts',
+  'risk-calculator.ts',
+  'nocturnal-artifact-lineage.ts',
+  'migration.ts',
+  'file-store.ts',
+  'pd-task-store.ts',
+  'evolution-migration.ts',
+  'empathy-keyword-matcher.ts',
+  'pain-lifecycle.ts',
+  'session-tracker.ts',
+  'principle-tree-ledger.ts',
+  'evolution-logger.ts',
+  'evolution-engine.ts',
+
+  // ── Test Files ──────────────────────────────────────────────────────────
+  '__tests__/focus-history.test.ts',
+  'principle-compiler/__tests__/compiler-replay-gate.test.ts',
+]);
+
+describe('PRI-212 plugin core anti-growth guard', () => {
+  const PLUGIN_CORE_RELPATH = '../../../../openclaw-plugin/src/core';
+
+  it('every plugin-core file is in the known baseline', async () => {
+    const { readdirSync, existsSync } = await import('node:fs');
+    const { resolve, relative, sep } = await import('node:path');
+
+    const pluginCoreDir = resolve(__dirname, PLUGIN_CORE_RELPATH);
+    expect(existsSync(pluginCoreDir)).toBe(true);
+
+    // Collect all .ts files recursively (relative to plugin-core root)
+    const allFiles: string[] = [];
+    function collectDir(dir: string): void {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = resolve(dir, entry.name);
+        if (entry.isDirectory()) {
+          collectDir(fullPath);
+        } else if (entry.name.endsWith('.ts')) {
+          allFiles.push(relative(pluginCoreDir, fullPath).split(sep).join('/'));
+        }
+      }
+    }
+    collectDir(pluginCoreDir);
+
+    const unknownFiles = allFiles.filter((f) => !KNOWN_PLUGIN_CORE_FILES.has(f));
+
+    if (unknownFiles.length > 0) {
+      const msg = [
+        `Found ${unknownFiles.length} unclassified file(s) in packages/openclaw-plugin/src/core/:`,
+        ...unknownFiles.map((f) => `  ${f}`),
+        '',
+        'Each new file in plugin core must be explicitly classified:',
+        '  1. New pure domain logic → packages/principles-core (zero I/O, testable with no mocks)',
+        '  2. New plugin I/O adapter → add to KNOWN_PLUGIN_CORE_FILES with classification comment',
+        '  3. See docs/reviews/plugin-core-inventory-2026-05.md for the PRI-211 baseline',
+        '  4. ADR-0005 frozen files (nocturnal-trinity.ts, nocturnal-arbiter.ts) must NOT be modified',
+        '',
+        'ERR-011: never bypass architecture boundary facades',
+        'ERR-012: baseline entries must survive rebase — check diff for unintended deletions',
+      ].join('\n');
+      expect.fail(msg);
+    }
+  });
+
+  it('known baseline count is self-consistent (109 files)', async () => {
+    // Sanity check: if the baseline grows, update this number.
+    // Prevents accidental baseline bloat from going unnoticed.
+    // See docs/reviews/plugin-core-inventory-2026-05.md §7
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(109);
+  });
+});
+
 const REQUIRED_TEST_FILES = [
   'pain-to-principle-service.test.ts',
   'pain-chain-read-model.test.ts',
