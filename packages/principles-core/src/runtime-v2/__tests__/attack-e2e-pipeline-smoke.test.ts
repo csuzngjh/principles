@@ -357,8 +357,8 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
   });
 
   it('ATTACK-7: LLM returns unknown recommendation kind — route must defer safely', () => {
-    const recommendation: Record<string, string> = {
-      kind: 'unknown_kind',
+    const recommendation = {
+      kind: 'unknown_kind' as 'prompt' | 'principle' | 'rule' | 'implementation' | 'defer',
       description: 'An unknown recommendation type',
     };
 
