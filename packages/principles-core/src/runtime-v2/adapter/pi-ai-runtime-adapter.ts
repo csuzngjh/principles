@@ -31,6 +31,8 @@ import { TrainerOutputV1Schema } from '../internalization/trainer-output.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair } from './structured-output-repair.js';
+import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-repair-contract.js';
+import { truncatePreview, formatValidationErrorEntry } from './output-repair-contract.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -427,29 +429,94 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         throw new PDRuntimeError('output_invalid', 'No valid JSON found in LLM response');
       }
 
-      // Validate with schema from registry (keyed by outputSchemaRef)
       const schemaRef = input.outputSchemaRef;
       const schema = schemaRef ? OUTPUT_SCHEMA_REGISTRY.get(schemaRef) : undefined;
 
       if (schema && !Value.Check(schema, validatedOutput)) {
-        let repairSucceeded = false;
-        let schemaErrors: { path: string; message: string; value: unknown }[] = [];
-
-        schemaErrors = [...Value.Errors(schema, validatedOutput)]
+        const schemaErrors = [...Value.Errors(schema, validatedOutput)]
           .map(e => ({ path: e.path, message: e.message, value: e.value }));
 
-        if (schemaErrors.length > 0) {
-          const repairResult = await attemptStructuredOutputRepair<Record<string, unknown>>(
-            validatedOutput,
-            schemaErrors,
-            {
-              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey }),
-              schemaCheck: (value: unknown) => Value.Check(schema, value),
-            },
+        if (schemaErrors.length === 0) {
+          throw new PDRuntimeError(
+            'output_invalid',
+            `LLM output does not match ${schemaRef ?? 'unknown'} schema (no specific errors enumerated)`,
           );
+        }
+
+        const validationErrorEntries: OutputValidationErrorEntry[] = schemaErrors
+          .slice(0, 10)
+          .map(e => formatValidationErrorEntry(e.path, e.message, e.value));
+
+        const rawOutputPreview = truncatePreview(JSON.stringify(validatedOutput));
+
+        this.eventEmitter.emitTelemetry({
+          eventType: 'output_schema_invalid',
+          traceId: input.taskRef?.taskId ?? runId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'pi-ai-adapter',
+          agentId: 'pi-ai-adapter',
+          payload: {
+            runId,
+            runtimeKind: 'pi-ai',
+            outputSchemaRef: schemaRef ?? 'unknown',
+            provider: this.config.provider,
+            model: this.config.model,
+            rawOutputPreview,
+            validationErrors: validationErrorEntries,
+          },
+        });
+
+        const originalOutput = typeof validatedOutput === 'object' && validatedOutput !== null
+          ? validatedOutput as Record<string, unknown>
+          : undefined;
+
+        const repairResult = await attemptStructuredOutputRepair<Record<string, unknown>>(
+          validatedOutput,
+          schemaErrors,
+          {
+            llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey }),
+            schemaCheck: (value: unknown) => Value.Check(schema, value),
+            schemaErrors: (value: unknown) =>
+              [...Value.Errors(schema, value)].map(e => ({ path: e.path, message: e.message, value: e.value })),
+          },
+          {
+            schemaRef: schemaRef ?? 'unknown',
+            originalOutput,
+          },
+        );
+
+        this.eventEmitter.emitTelemetry({
+          eventType: 'output_repair_attempted',
+          traceId: input.taskRef?.taskId ?? runId,
+          timestamp: new Date().toISOString(),
+          sessionId: 'pi-ai-adapter',
+          agentId: 'pi-ai-adapter',
+          payload: {
+            runId,
+            runtimeKind: 'pi-ai',
+            outputSchemaRef: schemaRef ?? 'unknown',
+            repaired: repairResult.repaired,
+            attemptsUsed: repairResult.attemptsUsed,
+            repairSummary: repairResult.repairSummary,
+            repairAttempts: repairResult.repairAttempts,
+          },
+        });
+
+        if (repairResult.repaired && repairResult.output) {
+          validatedOutput = repairResult.output;
+        } else {
+          const evidencePack: OutputEvidencePack = {
+            schemaRef: schemaRef ?? 'unknown',
+            provider: this.config.provider,
+            model: this.config.model,
+            rawOutputPreview,
+            validationErrors: validationErrorEntries,
+            repairAttempts: repairResult.repairAttempts,
+            finalFailureReason: 'repair_exhausted',
+          };
 
           this.eventEmitter.emitTelemetry({
-            eventType: 'output_repair_attempted',
+            eventType: 'output_repair_exhausted',
             traceId: input.taskRef?.taskId ?? runId,
             timestamp: new Date().toISOString(),
             sessionId: 'pi-ai-adapter',
@@ -458,39 +525,19 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               runId,
               runtimeKind: 'pi-ai',
               outputSchemaRef: schemaRef ?? 'unknown',
-              repaired: repairResult.repaired,
-              attemptsUsed: repairResult.attemptsUsed,
-              repairSummary: repairResult.repairSummary,
+              provider: this.config.provider,
+              model: this.config.model,
+              rawOutputPreview,
+              validationErrors: validationErrorEntries,
+              repairAttempts: evidencePack.repairAttempts,
+              finalFailureReason: evidencePack.finalFailureReason,
             },
           });
 
-          if (repairResult.repaired && repairResult.output) {
-            validatedOutput = repairResult.output;
-            repairSucceeded = true;
-          }
-        }
-
-        if (!repairSucceeded) {
-          if (schemaErrors.length > 0) {
-            this.eventEmitter.emitTelemetry({
-              eventType: 'output_repair_attempted',
-              traceId: input.taskRef?.taskId ?? runId,
-              timestamp: new Date().toISOString(),
-              sessionId: 'pi-ai-adapter',
-              agentId: 'pi-ai-adapter',
-              payload: {
-                runId,
-                runtimeKind: 'pi-ai',
-                outputSchemaRef: schemaRef ?? 'unknown',
-                repaired: false,
-                attemptsUsed: 0,
-                repairSummary: `Repair failed for outputSchemaRef=${schemaRef}`,
-              },
-            });
-          }
           throw new PDRuntimeError(
             'output_invalid',
             `LLM output does not match ${schemaRef ?? 'unknown'} schema`,
+            { evidencePack },
           );
         }
       }

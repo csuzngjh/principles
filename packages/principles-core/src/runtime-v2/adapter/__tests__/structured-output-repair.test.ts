@@ -267,6 +267,98 @@ describe('attemptStructuredOutputRepair', () => {
     expect(result.attemptsUsed).toBe(2);
     expect(result.output).toBeDefined();
   });
+
+  it('returns repairAttempts[] with attempt details (PRI-200)', async () => {
+    const llmCaller: RepairLLMCaller = async () => JSON.stringify(VALID_REPAIRED_JSON);
+    const schemaCheck = (v: unknown): boolean => {
+      const obj = v as Record<string, unknown>;
+      return typeof obj.confidence === 'number';
+    };
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck },
+      { schemaRef: 'diagnostician-output-v1' },
+    );
+
+    expect(result.repairAttempts).toHaveLength(1);
+    expect(result.repairAttempts[0]?.schemaRef).toBe('diagnostician-output-v1');
+    expect(result.repairAttempts[0]?.attempt).toBe(1);
+    expect(result.repairAttempts[0]?.repaired).toBe(true);
+    expect(result.repairAttempts[0]?.repairPromptVersion).toBe('1');
+  });
+
+  it('repairAttempts records failed attempts (PRI-200)', async () => {
+    const llmCaller: RepairLLMCaller = async () => JSON.stringify(SAMPLE_INVALID_JSON);
+    const schemaCheck = (_v: unknown): boolean => false;
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck },
+      { schemaRef: 'diagnostician-output-v1' },
+    );
+
+    expect(result.repairAttempts).toHaveLength(1);
+    expect(result.repairAttempts[0]?.repaired).toBe(false);
+  });
+
+  it('repairAttempts defaults schemaRef to "unknown" when not provided (PRI-200)', async () => {
+    const llmCaller: RepairLLMCaller = async () => null;
+
+    const result = await attemptStructuredOutputRepair(
+      SAMPLE_INVALID_JSON,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck: () => false },
+    );
+
+    expect(result.repairAttempts).toHaveLength(1);
+    expect(result.repairAttempts[0]?.schemaRef).toBe('unknown');
+  });
+
+  it('preserves lineage fields when originalOutput is provided (PRI-200)', async () => {
+    const originalWithLineage = {
+      ...SAMPLE_INVALID_JSON,
+      taskId: 'task-original',
+      sourcePainId: 'pain-original',
+    };
+    const repairedWithChangedLineage = {
+      ...VALID_REPAIRED_JSON,
+      taskId: 'task-CHANGED',
+      sourcePainId: 'pain-CHANGED',
+    };
+
+    const llmCaller: RepairLLMCaller = async () => JSON.stringify(repairedWithChangedLineage);
+    const schemaCheck = (v: unknown): boolean => {
+      const obj = v as Record<string, unknown>;
+      return typeof obj.confidence === 'number';
+    };
+
+    const result = await attemptStructuredOutputRepair(
+      originalWithLineage,
+      SAMPLE_ERRORS,
+      { llmCaller, schemaCheck },
+      {
+        schemaRef: 'diagnostician-output-v1',
+        originalOutput: originalWithLineage as Record<string, unknown>,
+      },
+    );
+
+    expect(result.repaired).toBe(true);
+    const output = result.output as Record<string, unknown>;
+    expect(output.taskId).toBe('task-original');
+    expect(output.sourcePainId).toBe('pain-original');
+    expect(output.confidence).toBe(0.85);
+  });
+
+  it('formatRepairPrompt includes schemaRef when provided (PRI-200)', () => {
+    const prompt = formatRepairPrompt(SAMPLE_INVALID_JSON, SAMPLE_ERRORS, {
+      schemaRef: 'diagnostician-output-v1',
+    });
+
+    expect(prompt).toContain('SCHEMA REF: diagnostician-output-v1');
+  });
 });
 
 // ── DEFAULT_REPAIR_CONFIG ──
