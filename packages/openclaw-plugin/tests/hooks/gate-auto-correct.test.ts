@@ -471,4 +471,56 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     const proposedCall = mockEventLogInstance.recordRuleHostAutoCorrectProposed.mock.calls[0][0];
     expect(proposedCall.validationValid).toBe(false);
   });
+
+  it('inherited prototype property (toString) in correctedFields: fail-open, no mutation', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { toString: 'overridden', content: 'fixed' },
+      correctedFields: [
+        { field: 'toString', original: '[Function]', proposed: 'overridden', reason: 'bypass' },
+        { field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'inherited property bypass attempt',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent();
+    const paramsCopy = { ...event.params };
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    expect(event.params).toEqual(paramsCopy);
+    expect(event.params.content).toBe('broken');
+    expect(typeof event.params.toString).toBe('function');
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
+  });
+
+  it('inherited prototype property (constructor) in correctedFields: fail-open, no mutation', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { constructor: 'overridden', content: 'fixed' },
+      correctedFields: [
+        { field: 'constructor', original: '[Function]', proposed: 'overridden', reason: 'bypass' },
+        { field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'inherited property bypass attempt',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent();
+    const paramsCopy = { ...event.params };
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    expect(event.params).toEqual(paramsCopy);
+    expect(event.params.content).toBe('broken');
+    expect(typeof event.params.constructor).toBe('function');
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
+  });
 });
