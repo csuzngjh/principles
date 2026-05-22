@@ -5,7 +5,7 @@ description: Deep PR code review with automated issue detection, reviewer feedba
 
 # PR Review
 
-Deep PR code review with 7-phase workflow covering parallel info fetch, diff-based review, triage, fix, verify, push, and CI gate check.
+Deep PR code review with an iterative fetch → triage → fix → verify → push → re-fetch loop. The goal is to remove the user from the reviewer-comment relay path: once invoked on a PR, the reviewer agent must fetch comments itself, fix every valid P0/P1/P2 issue, push, and re-check until no blocking findings remain.
 
 ## When to Trigger
 
@@ -18,20 +18,30 @@ Deep PR code review with 7-phase workflow covering parallel info fetch, diff-bas
 
 ### Phase 1: Gather
 
-Fetch PR info in parallel:
-- PR diff (`gh pr diff`)
-- PR metadata (`gh pr view --json`)
-- Reviewer comments (`gh api repos/{owner}/{repo}/pulls/{number}/comments`)
-- CI status (`gh pr checks`)
-- Changed files list
+Fetch PR info in parallel. Retry GitHub API failures at least 2 times before asking the user to paste comments:
+- PR diff (`gh pr diff <PR>`)
+- Changed files (`gh pr diff <PR> --name-only`)
+- PR metadata (`gh pr view <PR> --json comments,reviews,latestReviews,files,statusCheckRollup,mergeable,headRefName,baseRefName`)
+- Review comments (`gh api repos/:owner/:repo/pulls/<PR>/comments --paginate`)
+- Issue comments (`gh api repos/:owner/:repo/issues/<PR>/comments --paginate`)
+- CI status (`gh pr checks <PR>` or the `statusCheckRollup` payload)
+
+Stop early and report if the PR diff contains unrelated files or stale-main rollback risk.
 
 ### Phase 2: Triage Review Comments
 
 Classify each reviewer comment:
-- **Real bug**: Must fix — code is incorrect or breaks functionality
-- **Style preference**: Optional — suggest but don't block
-- **Misunderstanding**: Respond with explanation, no code change needed
+- **P0/P1/P2 real bug**: Must fix — code is incorrect, unsafe, unobservable, or breaks project contracts
+- **P3/nit/style preference**: Optional — fix if cheap, otherwise defer with reason
+- **Duplicate**: Already fixed or covered by another finding
+- **Misunderstanding**: No code change; respond with exact code/test evidence
 - **AI coding error**: If the error was made by an AI assistant → invoke `record-error` skill after fixing
+
+Maintain a review ledger in the final report:
+- total comments fetched
+- valid fixed
+- deferred with reason
+- duplicates/misunderstandings with evidence
 
 ### Phase 3: Deep Diff Review
 
@@ -43,6 +53,14 @@ Review the diff against a structured checklist:
 - Performance: N+1 queries, unnecessary re-renders, blocking operations
 - Testing: Missing tests for changed behavior
 
+For CLI/operator changes under `packages/pd-cli/src/commands/**` or CLI registration, also apply the CLI gate:
+- `--json` emits exactly one parseable JSON object on stdout
+- every `process.exit(...)` path immediately `return`s or throws
+- failure paths do not continue into DB/ledger/artifact side effects when `process.exit` is stubbed
+- Commander `--no-*`, `--dry-run`, and `--confirm` behavior has parser or command-registration tests
+- failed/degraded/refused JSON outputs include structured reason and nextAction
+- state mutation happens through the intended service path, not direct status flipping
+
 ### Phase 4: Fix Real Issues
 
 Fix only real bugs and required changes:
@@ -51,23 +69,33 @@ Fix only real bugs and required changes:
 3. Add regression tests for each fix
 4. Run local build + lint + typecheck
 
+Do not expand scope. Do not refactor adjacent code unless required to fix the finding. Do not touch frozen legacy files unless the user explicitly approves.
+
 ### Phase 5: Verify
 
-Run the full verification suite:
+Run the relevant verification suite first, then the repository merge gate when available:
 ```bash
-npm run build && npm run test && npm run lint
+npm run verify:merge
 ```
 
 If failures: fix and re-verify until green.
 
-### Phase 6: Push & CI Gate
+For narrow local debugging, run the smallest test command that covers the fix before the full gate.
+
+### Phase 6: Push, Re-fetch, and CI Gate
 
 ```bash
 git push
-gh pr checks --watch
+gh pr view <PR> --json comments,reviews,latestReviews,files,statusCheckRollup
+gh api repos/:owner/:repo/pulls/<PR>/comments --paginate
+gh api repos/:owner/:repo/issues/<PR>/comments --paginate
+gh pr checks <PR>
 ```
 
-Wait for CI to pass. If CI fails: read logs, fix, push again.
+After every push, re-fetch comments and checks. If new valid P0/P1/P2 comments appear, return to Phase 2. A PR is not ready until:
+- no valid unresolved P0/P1/P2 comments remain
+- required CI checks are green, or any failing check is explained as unrelated infrastructure
+- the final report states that comments were re-fetched after the last push
 
 ### Phase 6.5: Record Errors (MANDATORY)
 
@@ -88,10 +116,14 @@ Steps:
 ### Phase 7: Report
 
 Summarize:
+- PR URL and issue ID
+- Review loop counts: comments fetched, valid fixed, deferred, duplicates/misunderstandings
 - Issues found and fixed
-- Issues deferred (with reason)
-- CI status
-- Remaining reviewer comments to address
+- Issues deferred, with reason and follow-up if needed
+- Tests and CI status
+- For CLI/operator PRs: JSON-only stdout, exit-path, flag-wiring, and failure no-mutation evidence
+- Whether `record-error` was invoked, or "No real issues found — skipping record-error"
+- Remaining risk
 
 **Do NOT merge the PR.** User merges manually.
 
@@ -108,8 +140,11 @@ When Phase 2 or 3 identifies an AI coding error:
 - [ ] PR diff and metadata gathered
 - [ ] Reviewer comments triaged
 - [ ] Deep diff review completed
+- [ ] CLI/operator gate applied when relevant
 - [ ] Real issues fixed with regression tests
 - [ ] Build + lint + test pass locally
+- [ ] Changes pushed
+- [ ] PR comments and checks re-fetched after the last push
 - [ ] CI gate passes
 - [ ] Real issues recorded via `record-error` (Phase 6.5) — or explicitly noted "no real issues"
 - [ ] Report delivered
