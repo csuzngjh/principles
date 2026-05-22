@@ -6,6 +6,7 @@ import AgentContrast from './components/AgentContrast.vue'
 import SystemPipeline from './components/SystemPipeline.vue'
 import EvolutionMenu from './components/EvolutionMenu.vue'
 import ThinkingLogCard from './components/ThinkingLogCard.vue'
+import MottoSection from './components/MottoSection.vue'
 
 export default {
   extends: DefaultTheme,
@@ -16,5 +17,6 @@ export default {
     app.component('SystemPipeline', SystemPipeline)
     app.component('EvolutionMenu', EvolutionMenu)
     app.component('ThinkingLogCard', ThinkingLogCard)
+    app.component('MottoSection', MottoSection)
   }
 }

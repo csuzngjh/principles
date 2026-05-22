@@ -24,31 +24,31 @@
       
       <div class="journal-body">
         <div class="journal-meta">
-          <span class="journal-series">LOG #001</span>
+          <span class="journal-series">LOG #002</span>
           <span class="meta-dot">&middot;</span>
-          <span class="journal-date">2026-05-20</span>
+          <span class="journal-date">2026-05-22</span>
         </div>
         
         <h3 class="journal-title">
-          {{ lang === 'zh-CN' ? '赛博垃圾围城与人类的逃生舱' : 'The Cyber Trash Siege & Human Escape Pod' }}
+          {{ lang === 'zh-CN' ? '为什么“硅基鸡汤”注定沦为赛博噪音？' : 'Why Silicon Chicken Soup is Destined to be Noise' }}
         </h3>
         
         <p class="journal-excerpt">
           {{ lang === 'zh-CN'
-            ? '当执行力变得像自来水一样廉价，无序的机器轮转将让这个世界充斥着代码垃圾与低质信息。在这个时刻，真正稀缺的不再是效率，而是我们赖以生存的判断力、第一性原则和反思机制。'
-            : 'As low-level execution turns as cheap as tap water, unordered machines will flood our digital world with cognitive spam. In this age of abundance, the ultimate scarcity is meta-cognitive judgment, principles, and pausing.'
+            ? '扒下提示词工程的底裤。为什么明明大模型的参数空间里包含所有人类智慧，却在干活时表现得像个毫无原则的赛博莽夫？我们需要在模型外部，重新夺回宏观思考的权力。'
+            : 'Stripping the pretense of Prompt Engineering. Why do LLMs behave like unprincipled brutes despite possessing human wisdom? We must reclaim macro-thinking outside the model.'
           }}
         </p>
 
         <div class="journal-tags">
-          <span class="j-tag">{{ lang === 'zh-CN' ? '建设性摩擦' : 'Constructive Friction' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '赛博垃圾' : 'Cyber Junk' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '认知外脑' : 'Cognitive Moat' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '数学暴政' : 'Math Bias' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '目标函数' : 'Objective Function' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '宏观引擎' : 'Macro Engine' }}</span>
         </div>
 
         <div class="journal-action">
-          <a :href="lang === 'zh-CN' ? '/zh/blog/01-the-helmsman-crisis' : '/blog/01-the-helmsman-crisis'" class="read-link">
-            <span>{{ lang === 'zh-CN' ? '阅读全文' : 'Read Full Text' }}</span>
+          <a :href="lang === 'zh-CN' ? '/zh/abyss/02-poisonous-chicken-soup' : '/abyss/02-poisonous-chicken-soup'" class="read-link">
+            <span>{{ lang === 'zh-CN' ? '凝视深渊' : 'Gaze into the Abyss' }}</span>
             <span class="arrow">&rarr;</span>
           </a>
         </div>

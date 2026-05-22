@@ -18,8 +18,8 @@
           }}
         </p>
         <div class="hero-actions">
-          <a :href="lang === 'zh-CN' ? '/zh/blog/01-the-helmsman-crisis' : '/blog/01-the-helmsman-crisis'" class="pd-btn pd-btn-brand">
-            {{ lang === 'zh-CN' ? '阅读项目思考 (Blog)' : 'Read the Blog' }}
+          <a :href="lang === 'zh-CN' ? '/zh/abyss/01-the-helmsman-crisis' : '/abyss/01-the-helmsman-crisis'" class="pd-btn pd-btn-brand">
+            {{ lang === 'zh-CN' ? '阅读思维深渊 (Abyss)' : 'Enter the Abyss' }}
           </a>
           <a href="https://github.com/csuzngjh/principles" target="_blank" rel="noopener" class="pd-btn pd-btn-alt">
             {{ lang === 'zh-CN' ? 'GitHub 开源' : 'GitHub Repository' }}
