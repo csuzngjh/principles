@@ -153,6 +153,8 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-146
   'activation/writers/rule-host-writer.ts',
   'activation/writers/index.ts',
+  // PRI-215
+  'synthetic-baseline.ts',
 ] as const;
 
 // ── PRI-212: Plugin core anti-growth guard ────────────────────────────────────
@@ -407,6 +409,8 @@ const REQUIRED_TEST_FILES = [
   '../internalization/__tests__/refiner-rulehost-gate.test.ts',
   // PRI-146
   '../activation/writers/__tests__/rule-host-writer.test.ts',
+  // PRI-215
+  'synthetic-baseline.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -3406,6 +3410,164 @@ describe('PRI-192 TraceRefinerAgent shadow contract boundary', () => {
         allowedModules.some((mod) => line.includes(mod))
       ).toBe(true);
     }
+  });
+});
+
+// ── PRI-215: Synthetic baseline architecture boundary ──────────────────────
+//
+// After PRI-206, the architecture is:
+//   Core: packages/principles-core/src/runtime-v2/synthetic-baseline.ts
+//     (pure contract/helper code — zero I/O)
+//   I/O Runner: packages/pd-cli/src/services/synthetic-baseline-runner.ts
+//   CLI Command: packages/pd-cli/src/commands/runtime-synthetic-baseline.ts
+//
+// These guards prevent future PRs from moving I/O back into core.
+// ERR-011 reference: core must not import runtime orchestration classes
+// ERR-012 reference: guard against stale-main rollback of baseline
+// ERR-002 reference: not applicable — no degrade path in these tests
+
+const FORBIDDEN_NODE_IO_MODULES = new Set([
+  'fs',
+  'fs/promises',
+  'path',
+  'os',
+  'child_process',
+  'process',
+  'better-sqlite3',
+  'node:fs',
+  'node:path',
+  'node:os',
+  'node:child_process',
+  'node:process',
+]);
+
+const FORBIDDEN_RUNTIME_ORCHESTRATION_CLASSES = new Set([
+  'RuntimeStateManager',
+  'SqliteContextAssembler',
+  'SqliteHistoryQuery',
+  'SqliteDiagnosticianCommitter',
+  'PainSignalBridge',
+  'DiagnosticianRunner',
+  'TestDoubleRuntimeAdapter',
+  'OperatorHealthReadModel',
+  'createInternalizationQueueReadModel',
+  'PrincipleTreeLedgerAdapter',
+  'CandidateIntakeService',
+]);
+
+describe('PRI-215 synthetic baseline architecture boundary', () => {
+  function extractImportModulePaths(src: string): string[] {
+    const paths: string[] = [];
+    for (const m of src.matchAll(/import\s+[\s\S]*?from\s+['"]([^'"]+)['"]/g)) {
+      if (m[1] != null) paths.push(m[1]);
+    }
+    for (const m of src.matchAll(/import\s+['"]([^'"]+)['"]/g)) {
+      if (m[1] != null && !paths.includes(m[1])) paths.push(m[1]);
+    }
+    return paths;
+  }
+
+  function extractImportIdentifiers(src: string): string[] {
+    const ids: string[] = [];
+    for (const block of src.matchAll(/import\s+([\s\S]*?)\s+from\s+['"][^'"]+['"]/g)) {
+      if (block[1] == null) continue;
+      const clause = block[1].trim();
+      const defaultMatch = /^(\w+)/.exec(clause);
+      if (defaultMatch?.[1]) ids.push(defaultMatch[1]);
+      const namedMatch = /\{([\s\S]*)\}/.exec(clause);
+      if (namedMatch?.[1]) {
+        namedMatch[1].split(',').forEach((part) => {
+          const trimmed = part.trim();
+          if (!trimmed) return;
+          const asParts = trimmed.split(/\s+as\s+/);
+          if (asParts[0]) ids.push(asParts[0].trim());
+          if (asParts.length > 1) {
+            const alias = asParts[asParts.length - 1];
+            if (alias) ids.push(alias.trim());
+          }
+        });
+      }
+    }
+    return ids;
+  }
+
+  // ── Core boundary: no Node I/O imports ──────────────────────────────────
+  it('CORE_NO_NODE_IO: synthetic-baseline.ts does not import Node I/O modules', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'synthetic-baseline.ts'), 'utf-8');
+    const importModulePaths = extractImportModulePaths(src);
+    for (const mod of FORBIDDEN_NODE_IO_MODULES) {
+      const found = importModulePaths.filter((p) => p === mod || p.startsWith(mod + '/'));
+      expect(found).toEqual([]);
+    }
+  });
+
+  // ── Core boundary: no runtime orchestration imports ─────────────────────
+  it('CORE_NO_RUNTIME_CLASSES: synthetic-baseline.ts does not import runtime orchestration classes', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'synthetic-baseline.ts'), 'utf-8');
+    const importIdentifiers = extractImportIdentifiers(src);
+    for (const cls of FORBIDDEN_RUNTIME_ORCHESTRATION_CLASSES) {
+      expect(importIdentifiers).not.toContain(cls);
+    }
+  });
+
+  // ── Import parsing: side-effect import detection ────────────────────────
+  it('IMPORT_PARSING_SIDE_EFFECT: extractImportModulePaths catches side-effect imports like import "node:fs"', () => {
+    const src = `import 'node:fs';\nimport { foo } from 'bar';\n`;
+    const paths = extractImportModulePaths(src);
+    expect(paths).toContain('node:fs');
+    expect(paths).toContain('bar');
+  });
+
+  // ── Import parsing: multiline import detection ──────────────────────────
+  it('IMPORT_PARSING_MULTILINE: extractImportModulePaths catches multiline imports from forbidden modules', () => {
+    const src = `import {\n  RuntimeStateManager,\n  SqliteContextAssembler\n} from './runtime';\n`;
+    const paths = extractImportModulePaths(src);
+    expect(paths).toContain('./runtime');
+  });
+
+  // ── Import parsing: aliased named import detection ──────────────────────
+  it('IMPORT_PARSING_ALIAS: extractImportIdentifiers catches both original and alias for "as" imports', () => {
+    const src = `import { RuntimeStateManager as RSM, PainSignalBridge } from './runtime';\n`;
+    const ids = extractImportIdentifiers(src);
+    expect(ids).toContain('RuntimeStateManager');
+    expect(ids).toContain('RSM');
+    expect(ids).toContain('PainSignalBridge');
+  });
+
+  // ── I/O Runner location ─────────────────────────────────────────────────
+  it('IO_RUNNER_OUTSIDE_CORE: I/O runner exists at pd-cli/src/services/synthetic-baseline-runner.ts', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const runnerPath = resolve(
+      __dirname,
+      '../../../../pd-cli/src/services/synthetic-baseline-runner.ts',
+    );
+    expect(existsSync(runnerPath)).toBe(true);
+  });
+
+  // ── CLI Command location ────────────────────────────────────────────────
+  it('CLI_COMMAND_OUTSIDE_CORE: CLI command exists at pd-cli/src/commands/runtime-synthetic-baseline.ts', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const cmdPath = resolve(
+      __dirname,
+      '../../../../pd-cli/src/commands/runtime-synthetic-baseline.ts',
+    );
+    expect(existsSync(cmdPath)).toBe(true);
+  });
+
+  // ── Frozen legacy untouched ────────────────────────────────────────────
+  it('FROZEN_LEGACY_UNTOUCHED: ADR-0005 frozen files are not imported by synthetic-baseline.ts', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'synthetic-baseline.ts'), 'utf-8');
+    expect(src).not.toContain('nocturnal-trinity');
+    expect(src).not.toContain('nocturnal-arbiter');
+    expect(src).not.toContain('nocturnal-service');
   });
 });
 
