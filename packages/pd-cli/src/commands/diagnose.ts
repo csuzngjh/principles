@@ -276,8 +276,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       },
     );
 
-    console.log(`\nRunning diagnostician for task: ${opts.taskId}`);
-    console.log(`Workspace: ${workspaceDir}\n`);
+    if (!opts.json) {
+      console.log(`\nRunning diagnostician for task: ${opts.taskId}`);
+      console.log(`Workspace: ${workspaceDir}\n`);
+    }
 
     const result = await diagnoseRun({
       taskId: opts.taskId,
@@ -305,7 +307,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     }
 
     const candidates = await stateManager.getCandidatesByTaskId(opts.taskId);
-    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string }[] = [];
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string }[] = [];
     let intakeFailed = false;
 
     if (opts.noIntake) {
@@ -337,6 +339,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             candidateId: candidate.candidateId,
             status: 'intake_failed',
             error: intakeErrorMessage,
+            nextAction: `pd candidate intake --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}"`,
           });
         }
       }

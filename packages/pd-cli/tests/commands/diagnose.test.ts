@@ -292,6 +292,7 @@ describe('pd diagnose run — auto-intake after success', () => {
     expect(parsed.intake.candidates[0].status).toBe('consumed');
     expect(parsed.intake.candidates[1].status).toBe('intake_failed');
     expect(parsed.intake.candidates[1].error).toContain('Ledger write failed');
+    expect(parsed.intake.candidates[1].nextAction).toContain('pd candidate intake --candidate-id cand-fail');
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleSpy.mockRestore();
@@ -499,6 +500,59 @@ describe('pd diagnose run — auto-intake after success', () => {
     expect(allOutput).toContain('cand-1: consumed');
     expect(allOutput).toContain('ledger-1');
     expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('INTAKE-10: --json mode outputs exactly one console.log with parseable JSON (no text header leak)', async () => {
+    mockGetCandidatesByTaskId.mockResolvedValue([]);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    const rawOutput = consoleSpy.mock.calls[0][0] as string;
+    const parsed = JSON.parse(rawOutput);
+    expect(parsed.status).toBe('succeeded');
+    expect(parsed.intake).toBeDefined();
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('INTAKE-11: --json intake failure nextAction contains executable command with workspace', async () => {
+    const candidates = [
+      { candidateId: 'cand-err', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
+    ];
+    mockGetCandidatesByTaskId.mockResolvedValue(candidates);
+    mockIntake.mockImplementation(() => { throw new Error('DB locked'); });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    const rawOutput = consoleSpy.mock.calls[0][0] as string;
+    const parsed = JSON.parse(rawOutput);
+    const failed = parsed.intake.candidates[0];
+    expect(failed.status).toBe('intake_failed');
+    expect(failed.nextAction).toMatch(/^pd candidate intake --candidate-id cand-err --workspace "/);
+    expect(failed.nextAction).toContain('/tmp/fake-workspace');
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
