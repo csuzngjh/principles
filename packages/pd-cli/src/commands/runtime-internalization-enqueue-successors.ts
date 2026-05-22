@@ -164,13 +164,45 @@ function emitFailure(error: string, isDryRun: boolean, json: boolean): void {
   process.exitCode = 1;
 }
 
+async function findExistingSuccessor(
+  stateManager: RuntimeStateManager,
+  opts: { parentTaskId: string; successorKind: string; channel: string },
+): Promise<{ taskId: string } | null> {
+  const pendingTasks = await stateManager.listTasks({ status: 'pending' });
+  const retryWaitTasks = await stateManager.listTasks({ status: 'retry_wait' });
+  const candidates = [...pendingTasks, ...retryWaitTasks];
+  for (const task of candidates) {
+    if (task.taskKind !== opts.successorKind) continue;
+    const piTask = hydratePITaskRecord(task);
+    if (!piTask) continue;
+    if (piTask.parentTaskId === opts.parentTaskId && piTask.channel === opts.channel) {
+      return { taskId: task.taskId };
+    }
+  }
+  return null;
+}
+
 export async function handleRuntimeInternalizationEnqueueSuccessors(opts: EnqueueSuccessorsOptions): Promise<void> {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
     : resolveWorkspaceDir();
 
   if (opts.dryRun && opts.confirm) {
-    console.error('Error: --dry-run and --confirm are mutually exclusive. Specify one or the other.');
+    if (opts.json) {
+      const conflictOutput: EnqueueSuccessorsOutput = {
+        status: 'refused',
+        dryRun: true,
+        scannedCount: 0,
+        createdCount: 0,
+        existingCount: 0,
+        skippedCount: 0,
+        actions: [],
+        error: '--dry-run and --confirm are mutually exclusive. Specify one or the other.',
+      };
+      console.log(JSON.stringify(conflictOutput, null, 2));
+    } else {
+      console.error('Error: --dry-run and --confirm are mutually exclusive. Specify one or the other.');
+    }
     process.exit(1);
     return;
   }
@@ -234,13 +266,32 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             reason: 'No valid successor in job graph for this task kind and channel',
           });
         } else {
-          actions.push({
-            taskId: task.taskId,
-            taskKind: piTask.taskKind,
-            decision: 'would_create_successor',
-            successorKind: proposalResult.proposal.taskKind,
-          });
-          createdCount++;
+          const existingSuccessor = await findExistingSuccessor(
+            stateManager,
+            {
+              parentTaskId: task.taskId,
+              successorKind: proposalResult.proposal.taskKind,
+              channel: proposalResult.proposal.channel,
+            },
+          );
+          if (existingSuccessor) {
+            actions.push({
+              taskId: task.taskId,
+              taskKind: piTask.taskKind,
+              decision: 'successor_exists',
+              successorKind: proposalResult.proposal.taskKind,
+              successorTaskId: existingSuccessor.taskId,
+            });
+            existingCount++;
+          } else {
+            actions.push({
+              taskId: task.taskId,
+              taskKind: piTask.taskKind,
+              decision: 'would_create_successor',
+              successorKind: proposalResult.proposal.taskKind,
+            });
+            createdCount++;
+          }
         }
       } else {
         const commitResult = await orchestrator.commitNextTaskProposal(task.taskId);

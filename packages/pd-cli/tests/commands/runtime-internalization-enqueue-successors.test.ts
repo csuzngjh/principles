@@ -320,12 +320,16 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(output.actions[0].decision).toBe('successor_created');
   });
 
-  it('--dry-run --confirm is rejected with exit 1 and no writes', async () => {
+  it('--dry-run --confirm is rejected with exit 1 and no writes, JSON mode emits structured error', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => { throw new Error(`process.exit:${code}`); });
 
     await expect(
       handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, confirm: true, json: true }),
     ).rejects.toThrow('process.exit:1');
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.status).toBe('refused');
+    expect(output.error).toContain('mutually exclusive');
 
     expect(mockCommitNextTaskProposal).not.toHaveBeenCalled();
     exitSpy.mockRestore();
@@ -503,6 +507,41 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.actions[0].decision).toBe('no_successor');
     expect(output.actions[0].taskId).toBe('trainer-dry-001');
+  });
+
+  it('dry-run with existing successor: reports successor_exists', async () => {
+    const dreamerTask = makeSucceededTask('dreamer-existing-succ', 'dreamer');
+    const philosopherPending = {
+      taskId: 'philosopher-dreamer-existing-succ-prompt',
+      taskKind: 'philosopher',
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      inputRef: undefined,
+      resultRef: undefined,
+      lastError: undefined,
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
+      diagnosticJson: makePIMetadata({ parentTaskId: 'dreamer-existing-succ', channel: 'prompt' }),
+    };
+    mockListTasks
+      .mockResolvedValueOnce([dreamerTask])
+      .mockResolvedValueOnce([philosopherPending])
+      .mockResolvedValueOnce([]);
+    mockProposeNextTask.mockResolvedValue({
+      decision: 'proposal_created',
+      taskId: 'dreamer-existing-succ',
+      taskKind: 'dreamer',
+      proposal: { taskKind: 'philosopher', channel: 'prompt', dependencyTaskIds: ['dreamer-existing-succ'], inputArtifactRefs: [], parentTaskId: 'dreamer-existing-succ', correlationId: 'corr-existing' },
+    });
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.actions[0].decision).toBe('successor_exists');
+    expect(output.actions[0].successorTaskId).toBe('philosopher-dreamer-existing-succ-prompt');
+    expect(output.existingCount).toBe(1);
+    expect(output.createdCount).toBe(0);
   });
 });
 
