@@ -62,12 +62,26 @@ function buildRecommendedActions(checks: CanaryCheck[]): string[] {
       case 'pruning_orphans':
         actions.push('Run `pd runtime pruning orphans --workspace <path> --dry-run` to inspect orphan candidates.');
         break;
-      case 'internalization_queue':
-        actions.push('Check internalization queue for blocked or dependency-failed tasks.');
+      case 'internalization_queue': {
+        const queueDetails = check.details as InternalizationQueueSnapshot | undefined;
+        if (queueDetails && queueDetails.noReadyTasks?.reason === 'no_candidates' && queueDetails.noReadyTasks.inspectedCount === 0) {
+          actions.push('No internalization tasks found. If candidates exist, run `pd candidate internalization backfill --dry-run` to check, then `--confirm` to create dreamer tasks.');
+        } else {
+          actions.push('Check internalization queue for blocked or dependency-failed tasks.');
+        }
         break;
-      case 'runtime_health':
-        actions.push('Review runtime health snapshot for specific failure categories.');
+      }
+      case 'runtime_health': {
+        const details = check.details as OperatorHealthSnapshot | undefined;
+        if (details && details.totalTaskCount === 0) {
+          actions.push('Runtime V2 pipeline has never been exercised. Run `pd pain record --reason "test" --workspace <path>` to trigger the pain-to-principle chain.');
+        } else if (details && details.painChain.lastSuccessfulChain === null) {
+          actions.push('Run `pd runtime uat --workspace <path> --count 3` to establish baseline.');
+        } else {
+          actions.push('Review runtime health snapshot for specific failure categories.');
+        }
         break;
+      }
       case 'pd_shim_info':
         actions.push('Verify pd CLI installation and sync-plugin configuration.');
         break;

@@ -67,7 +67,7 @@ describe('OperatorHealthReadModel.getSnapshot', () => {
   });
 
   it('returns healthy when all checks pass', async () => {
-    const { model, painChain, pruning } = createModel();
+    const { model, painChain, pruning } = createModel(1);
     painChain.getLastSuccessfulChain.mockResolvedValue(healthyChain());
     pruning.getHealthSummary.mockReturnValue(cleanPruning());
 

@@ -38,4 +38,5 @@ export interface CandidateStore {
    *          or its current status did not match `expectedStatus`.
    */
   transitionCandidateStatus(candidateId: string, expectedStatus: CandidateRecord['status'], newStatus: CandidateRecord['status']): Promise<boolean>;
+
 }

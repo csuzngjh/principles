@@ -234,6 +234,10 @@ export class OperatorHealthReadModel {
       recommendedActions.push('Run `pd runtime uat --workspace <path> --count 3` to establish baseline.');
     }
 
+    if (totalTaskCount === 0 && dbExists) {
+      recommendedActions.push('Runtime V2 pipeline has never been exercised. Run `pd pain record --reason "test" --workspace <path>` to trigger the pain-to-principle chain.');
+    }
+
     return {
       generatedAt,
       workspace: this.workspaceDir,
