@@ -313,7 +313,7 @@ describe('pd diagnose run — auto-intake after success', () => {
       workspace: '/tmp/fake-workspace',
       runtime: 'test-double',
       json: true,
-      noIntake: true,
+      intake: false,
     } as DiagnoseRunOptions);
 
     expect(mockIntake).not.toHaveBeenCalled();
@@ -351,7 +351,7 @@ describe('pd diagnose run — auto-intake after success', () => {
       workspace: '/tmp/fake-workspace',
       runtime: 'test-double',
       json: false,
-      noIntake: true,
+      intake: false,
     } as DiagnoseRunOptions);
 
     const allOutput = consoleSpy.mock.calls.map(call => call[0]).join('\n');

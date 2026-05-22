@@ -50,7 +50,7 @@ interface DiagnoseRunOptions {
   baseUrl?: string;
   maxRetries?: number;
   timeoutMs?: number;
-  noIntake?: boolean;
+  intake?: boolean;
 }
 
 /**
@@ -310,7 +310,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string }[] = [];
     let intakeFailed = false;
 
-    if (opts.noIntake) {
+    if (opts.intake === false) {
       for (const candidate of candidates) {
         intakeResults.push({
           candidateId: candidate.candidateId,
@@ -349,7 +349,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       const jsonOutput = {
         ...result,
         intake: {
-          enabled: !opts.noIntake,
+          enabled: opts.intake !== false,
           candidates: intakeResults,
         },
       };
@@ -392,7 +392,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     }
 
-    if (opts.noIntake && candidates.length > 0) {
+    if (opts.intake === false && candidates.length > 0) {
       console.log(`\n  Note: --no-intake was set. Candidates remain at 'pending'.`);
       console.log(`  To intake manually:`);
       for (const c of candidates) {
