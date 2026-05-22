@@ -281,6 +281,7 @@ diagnoseCmd
   .option('--baseUrl <url>', 'Custom base URL — for pi-ai, falls back to policy')
   .option('--maxRetries <n>', 'Max retry attempts for LLM failures — for pi-ai, falls back to policy', parseInt)
   .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
+  .option('--no-intake', 'Skip candidate intake after successful diagnosis')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleDiagnoseRun(opts);
