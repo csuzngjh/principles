@@ -115,4 +115,16 @@ describe('OperatorHealthReadModel — cold-start vs. real degradation', () => {
     expect(snapshot.overallStatus).toBe('healthy');
     expect(snapshot.painChain.lastSuccessfulChain).not.toBeNull();
   });
+
+  it('provides cold-start recommendedAction when zero tasks exist and DB is present', async () => {
+    const { model } = createModel(null, cleanPruning(), 0);
+
+    const snapshot = await model.getSnapshot();
+    await model.close();
+
+    expect(snapshot.overallStatus).toBe('healthy');
+    expect(snapshot.recommendedActions).toContainEqual(
+      expect.stringContaining('pain record')
+    );
+  });
 });
