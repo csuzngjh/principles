@@ -21,11 +21,14 @@ import {
   PiAiRuntimeAdapter,
   PDRuntimeError,
   resolveRuntimeConfig,
+  CandidateIntakeService,
   run as diagnoseRun,
   status as diagnoseStatus,
 } from '@principles/core/runtime-v2';
 import type { PDRuntimeAdapter } from '@principles/core/runtime-v2';
+import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import * as path from 'path';
 
 interface DiagnoseStatusOptions {
   taskId: string;
@@ -47,6 +50,7 @@ interface DiagnoseRunOptions {
   baseUrl?: string;
   maxRetries?: number;
   timeoutMs?: number;
+  intake?: boolean;
 }
 
 /**
@@ -68,6 +72,7 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
     if (!result) {
       console.error(`Task not found: ${opts.taskId}`);
       process.exit(1);
+      return;
     }
 
     if (opts.json) {
@@ -272,8 +277,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       },
     );
 
-    console.log(`\nRunning diagnostician for task: ${opts.taskId}`);
-    console.log(`Workspace: ${workspaceDir}\n`);
+    if (!opts.json) {
+      console.log(`\nRunning diagnostician for task: ${opts.taskId}`);
+      console.log(`Workspace: ${workspaceDir}\n`);
+    }
 
     const result = await diagnoseRun({
       taskId: opts.taskId,
@@ -281,9 +288,75 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       runner,
     });
 
+    if (result.status !== 'succeeded') {
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`\nResult:`);
+        console.log(`  Status:         ${result.status}`);
+        console.log(`  Task ID:        ${result.taskId}`);
+        if (result.errorCategory) {
+          console.log(`  Error Category: ${result.errorCategory}`);
+        }
+        if (result.failureReason) {
+          console.log(`  Failure Reason: ${result.failureReason}`);
+        }
+        console.log(`  Attempt Count:  ${result.attemptCount}`);
+        console.log('');
+      }
+      process.exit(1);
+      return;
+    }
+
+    const candidates = await stateManager.getCandidatesByTaskId(opts.taskId);
+    const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string }[] = [];
+    let intakeFailed = false;
+
+    if (opts.intake === false) {
+      for (const candidate of candidates) {
+        intakeResults.push({
+          candidateId: candidate.candidateId,
+          status: 'skipped',
+        });
+      }
+    } else {
+      const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+      const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+
+      for (const candidate of candidates) {
+        try {
+          const entry = await intakeService.intake(candidate.candidateId);
+          if (candidate.status !== 'consumed') {
+            await stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
+          }
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            ledgerEntryId: entry.id,
+            status: 'consumed',
+          });
+        } catch (intakeErr: unknown) {
+          intakeFailed = true;
+          const intakeErrorMessage = intakeErr instanceof Error ? intakeErr.message : String(intakeErr);
+          intakeResults.push({
+            candidateId: candidate.candidateId,
+            status: 'intake_failed',
+            error: intakeErrorMessage,
+            nextAction: `pd candidate intake --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}"`,
+          });
+        }
+      }
+    }
+
     if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
-      if (result.status !== 'succeeded') {
+      const jsonOutput = {
+        ...result,
+        intake: {
+          enabled: opts.intake !== false,
+          candidates: intakeResults,
+        },
+      };
+      console.log(JSON.stringify(jsonOutput, null, 2));
+      if (intakeFailed) {
         process.exit(1);
       }
       return;
@@ -305,16 +378,33 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         }
       }
     }
-    if (result.errorCategory) {
-      console.log(`  Error Category: ${result.errorCategory}`);
-    }
-    if (result.failureReason) {
-      console.log(`  Failure Reason: ${result.failureReason}`);
-    }
     console.log(`  Attempt Count:  ${result.attemptCount}`);
+
+    if (intakeResults.length > 0) {
+      console.log(`\n  Candidate Intake:`);
+      for (const ir of intakeResults) {
+        if (ir.status === 'consumed') {
+          console.log(`    ${ir.candidateId}: consumed (ledger: ${ir.ledgerEntryId})`);
+        } else if (ir.status === 'skipped') {
+          console.log(`    ${ir.candidateId}: skipped (--no-intake)`);
+        } else if (ir.status === 'intake_failed') {
+          console.log(`    ${ir.candidateId}: INTAKE FAILED — ${ir.error}`);
+          console.log(`      Next action: pd candidate intake --candidate-id ${ir.candidateId} --workspace "${workspaceDir}"`);
+        }
+      }
+    }
+
+    if (opts.intake === false && candidates.length > 0) {
+      console.log(`\n  Note: --no-intake was set. Candidates remain at 'pending'.`);
+      console.log(`  To intake manually:`);
+      for (const c of candidates) {
+        console.log(`    pd candidate intake --candidate-id ${c.candidateId} --workspace "${workspaceDir}"`);
+      }
+    }
+
     console.log('');
 
-    if (result.status !== 'succeeded') {
+    if (intakeFailed) {
       process.exit(1);
     }
   } catch (error: unknown) {
