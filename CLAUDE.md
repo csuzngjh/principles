@@ -141,6 +141,18 @@ All code that handles untrusted data (parsed JSON, LLM output, DB `diagnosticJso
 
 **Enforcement**: Code review must check every rule that applies to the changed code. If a rule doesn't apply, state why.
 
+## CLI / Operator Command Gate
+
+Apply this gate to every change touching `packages/pd-cli/src/commands/**`, CLI registration, remediation commands, queue/run commands, or operator workflows.
+
+1. **JSON mode is strict**: `--json` output must be exactly one parseable JSON object on stdout. No banners, headings, explanatory text, or mixed stdout logs.
+2. **Exit paths must stop execution**: after `process.exit(...)` inside an async handler, immediately `return` or throw. Tests that stub `process.exit` must prove no later DB/ledger/artifact side effects happen.
+3. **Negated flags need parser tests**: Commander `--no-*` flags must be registered as `--no-name` and read as `opts.name === false`. Add parser-level tests, not only handler tests.
+4. **Dry-run/confirm semantics are mandatory**: commands that can mutate state must default to dry-run unless the established command contract says otherwise. `--dry-run` and `--confirm` must be mutually exclusive when both exist.
+5. **Failure paths must not mutate state**: failed diagnoses, failed validation, unsupported runners, missing input, and non-succeeded upstream stages must not intake, enqueue, write artifacts, update ledger, or create successors.
+6. **Operator output needs next action**: every degraded/refused/failed CLI result must include a structured reason and next action in JSON output.
+7. **Test the real command wiring**: when behavior depends on Commander options, add a command-registration or parser test that exercises the actual flags.
+
 ## Key Conventions
 
 ### File Naming
@@ -168,6 +180,12 @@ All code that handles untrusted data (parsed JSON, LLM output, DB `diagnosticJso
 
 Before handing off a PR (pushing, creating PR, or reporting completion), execute this checklist:
 
+**Self-review/fix loop**
+- A PR is not ready just because code was pushed. It is ready only after the fetch → fix → verify → re-fetch loop has no valid unresolved P0/P1/P2 findings and required checks are green.
+- After every push that addresses review feedback, fetch PR reviews/comments/checks again. Do not ask the user to relay comments unless GitHub API access fails after at least 2 retries.
+- Classify each review comment as: fixed, deferred with reason, duplicate, or misunderstanding with evidence. Put this classification in the PR comment or completion report.
+- If a real bug was found, run the Error Recording workflow before final handoff.
+
 **Fetch and resolve PR comments**
 - `gh pr view <PR> --json comments,reviews,latestReviews,files,statusCheckRollup`
 - `gh api repos/:owner/:repo/pulls/<PR>/comments --paginate`
@@ -190,8 +208,9 @@ Before handing off a PR (pushing, creating PR, or reporting completion), execute
 **Final summary**
 Include in the PR body or completion report:
 - Relevant ERR checklist (which ERR entries were considered and how avoided)
-- PR comments handled (count and resolution)
+- PR comments handled (total fetched, valid fixed, deferred, duplicates/misunderstandings)
 - Tests run (which commands, what results)
+- For CLI/operator changes: JSON-mode check, exit-path check, flag-wiring tests, and mutation/no-mutation evidence
 - Remaining risk (known issues, skipped coverage, trade-offs)
 
 ## Key Files
