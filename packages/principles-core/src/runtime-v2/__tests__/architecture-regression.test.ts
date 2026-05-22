@@ -3456,19 +3456,47 @@ const FORBIDDEN_RUNTIME_ORCHESTRATION_CLASSES = new Set([
 ]);
 
 describe('PRI-215 synthetic baseline architecture boundary', () => {
+  function extractImportModulePaths(src: string): string[] {
+    const paths: string[] = [];
+    for (const m of src.matchAll(/import\s+[\s\S]*?from\s+['"]([^'"]+)['"]/g)) {
+      if (m[1] != null) paths.push(m[1]);
+    }
+    for (const m of src.matchAll(/import\s+['"]([^'"]+)['"]/g)) {
+      if (m[1] != null && !paths.includes(m[1])) paths.push(m[1]);
+    }
+    return paths;
+  }
+
+  function extractImportIdentifiers(src: string): string[] {
+    const ids: string[] = [];
+    for (const block of src.matchAll(/import\s+([\s\S]*?)\s+from\s+['"][^'"]+['"]/g)) {
+      if (block[1] == null) continue;
+      const clause = block[1].trim();
+      const defaultMatch = /^(\w+)/.exec(clause);
+      if (defaultMatch?.[1]) ids.push(defaultMatch[1]);
+      const namedMatch = /\{([\s\S]*)\}/.exec(clause);
+      if (namedMatch?.[1]) {
+        namedMatch[1].split(',').forEach((part) => {
+          const trimmed = part.trim();
+          if (!trimmed) return;
+          const asParts = trimmed.split(/\s+as\s+/);
+          if (asParts[0]) ids.push(asParts[0].trim());
+          if (asParts.length > 1) {
+            const alias = asParts[asParts.length - 1];
+            if (alias) ids.push(alias.trim());
+          }
+        });
+      }
+    }
+    return ids;
+  }
+
   // ── Core boundary: no Node I/O imports ──────────────────────────────────
   it('CORE_NO_NODE_IO: synthetic-baseline.ts does not import Node I/O modules', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'synthetic-baseline.ts'), 'utf-8');
-    const importModulePaths = src
-      .split('\n')
-      .filter((l) => l.trim().startsWith('import'))
-      .map((l) => {
-        const m = l.match(/from\s+['"]([^'"]+)['"]/);
-        return m ? m[1] : null;
-      })
-      .filter((p): p is string => p !== null);
+    const importModulePaths = extractImportModulePaths(src);
     for (const mod of FORBIDDEN_NODE_IO_MODULES) {
       const found = importModulePaths.filter((p) => p === mod || p.startsWith(mod + '/'));
       expect(found).toEqual([]);
@@ -3480,25 +3508,34 @@ describe('PRI-215 synthetic baseline architecture boundary', () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'synthetic-baseline.ts'), 'utf-8');
-    const importIdentifiers = src
-      .split('\n')
-      .filter((l) => l.trim().startsWith('import'))
-      .flatMap((l) => {
-        const ids: string[] = [];
-        const defaultMatch = l.match(/import\s+(\w+)\s+from/);
-        if (defaultMatch?.[1]) ids.push(defaultMatch[1]);
-        const namedMatch = l.match(/\{\s*([^}]+)\s*\}/);
-        if (namedMatch?.[1]) {
-          namedMatch[1].split(',').forEach((part) => {
-            const trimmed = part.trim().split(/\s+as\s+/).pop()?.trim();
-            if (trimmed) ids.push(trimmed);
-          });
-        }
-        return ids;
-      });
+    const importIdentifiers = extractImportIdentifiers(src);
     for (const cls of FORBIDDEN_RUNTIME_ORCHESTRATION_CLASSES) {
       expect(importIdentifiers).not.toContain(cls);
     }
+  });
+
+  // ── Import parsing: side-effect import detection ────────────────────────
+  it('IMPORT_PARSING_SIDE_EFFECT: extractImportModulePaths catches side-effect imports like import "node:fs"', () => {
+    const src = `import 'node:fs';\nimport { foo } from 'bar';\n`;
+    const paths = extractImportModulePaths(src);
+    expect(paths).toContain('node:fs');
+    expect(paths).toContain('bar');
+  });
+
+  // ── Import parsing: multiline import detection ──────────────────────────
+  it('IMPORT_PARSING_MULTILINE: extractImportModulePaths catches multiline imports from forbidden modules', () => {
+    const src = `import {\n  RuntimeStateManager,\n  SqliteContextAssembler\n} from './runtime';\n`;
+    const paths = extractImportModulePaths(src);
+    expect(paths).toContain('./runtime');
+  });
+
+  // ── Import parsing: aliased named import detection ──────────────────────
+  it('IMPORT_PARSING_ALIAS: extractImportIdentifiers catches both original and alias for "as" imports', () => {
+    const src = `import { RuntimeStateManager as RSM, PainSignalBridge } from './runtime';\n`;
+    const ids = extractImportIdentifiers(src);
+    expect(ids).toContain('RuntimeStateManager');
+    expect(ids).toContain('RSM');
+    expect(ids).toContain('PainSignalBridge');
   });
 
   // ── I/O Runner location ─────────────────────────────────────────────────
