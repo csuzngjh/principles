@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Command } from 'commander';
 
 const { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus } = vi.hoisted(() => {
   const mockGetCandidatesByTaskId = vi.fn().mockResolvedValue([]);
@@ -556,5 +557,43 @@ describe('pd diagnose run — auto-intake after success', () => {
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
+  });
+});
+
+describe('Commander wiring for --no-intake', () => {
+  function createDiagnoseProgram(): { program: Command; capturedOpts: Record<string, unknown> } {
+    const program = new Command();
+    program.exitOverride();
+    const capturedOpts: Record<string, unknown> = {};
+
+    program
+      .command('diagnose')
+      .command('run')
+      .option('--no-intake', 'Skip candidate intake after successful diagnosis')
+      .option('--json', 'Output raw JSON')
+      .action(async (opts) => {
+        Object.assign(capturedOpts, opts);
+      });
+
+    return { program, capturedOpts };
+  }
+
+  it('CMD-01: --no-intake accepted, sets opts.intake === false', async () => {
+    const { program, capturedOpts } = createDiagnoseProgram();
+    await program.parseAsync(['node', 'pd', 'diagnose', 'run', '--no-intake']);
+    expect(capturedOpts.intake).toBe(false);
+  });
+
+  it('CMD-02: default (no flag) → opts.intake === true', async () => {
+    const { program, capturedOpts } = createDiagnoseProgram();
+    await program.parseAsync(['node', 'pd', 'diagnose', 'run']);
+    expect(capturedOpts.intake).toBe(true);
+  });
+
+  it('CMD-03: --intake is not a valid option (Commander rejects it)', async () => {
+    const { program } = createDiagnoseProgram();
+    await expect(
+      program.parseAsync(['node', 'pd', 'diagnose', 'run', '--intake'])
+    ).rejects.toThrow();
   });
 });
