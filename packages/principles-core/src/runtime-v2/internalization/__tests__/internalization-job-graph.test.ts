@@ -75,72 +75,72 @@ describe('Internalization Job Graph (PRI-61)', () => {
     });
 
     it('returns true for single edge', () => {
-      expect(isAcyclic([['a', 'b']])).toBe(true);
+      expect(isAcyclic([['a', 'b'] as const])).toBe(true);
     });
 
     it('returns true for valid DAG', () => {
       const edges = [
-        ['dreamer', 'philosopher'],
-        ['philosopher', 'scribe'],
-        ['scribe', 'artificer'],
+        ['dreamer', 'philosopher'] as const,
+        ['philosopher', 'scribe'] as const,
+        ['scribe', 'artificer'] as const,
       ];
       expect(isAcyclic(edges)).toBe(true);
     });
 
     it('returns false for simple cycle', () => {
       const edges = [
-        ['a', 'b'],
-        ['b', 'a'],
+        ['a', 'b'] as const,
+        ['b', 'a'] as const,
       ];
       expect(isAcyclic(edges)).toBe(false);
     });
 
     it('returns false for longer cycle', () => {
       const edges = [
-        ['dreamer', 'philosopher'],
-        ['philosopher', 'scribe'],
-        ['scribe', 'dreamer'],
+        ['dreamer', 'philosopher'] as const,
+        ['philosopher', 'scribe'] as const,
+        ['scribe', 'dreamer'] as const,
       ];
       expect(isAcyclic(edges)).toBe(false);
     });
 
     it('returns true for DAG with multiple branches', () => {
       const edges = [
-        ['a', 'b'],
-        ['a', 'c'],
-        ['b', 'd'],
-        ['c', 'd'],
+        ['a', 'b'] as const,
+        ['a', 'c'] as const,
+        ['b', 'd'] as const,
+        ['c', 'd'] as const,
       ];
       expect(isAcyclic(edges)).toBe(true);
     });
 
     it('returns false for cycle in larger graph', () => {
       const edges = [
-        ['dreamer', 'philosopher'],
-        ['philosopher', 'scribe'],
-        ['scribe', 'artificer'],
-        ['artificer', 'philosopher'],
+        ['dreamer', 'philosopher'] as const,
+        ['philosopher', 'scribe'] as const,
+        ['scribe', 'artificer'] as const,
+        ['artificer', 'philosopher'] as const,
       ];
       expect(isAcyclic(edges)).toBe(false);
     });
 
     it('returns false for self-loop', () => {
-      expect(isAcyclic([['a', 'a']])).toBe(false);
+      expect(isAcyclic([['a', 'a'] as const])).toBe(false);
     });
 
     it('returns true for disconnected DAG components', () => {
       const edges = [
-        ['a', 'b'],
-        ['c', 'd'],
+        ['a', 'b'] as const,
+        ['c', 'd'] as const,
       ];
       expect(isAcyclic(edges)).toBe(true);
     });
 
     it('returns false when one disconnected component has a cycle', () => {
       const edges = [
-        ['a', 'b'],
-        ['c', 'd'],
-        ['d', 'c'],
+        ['a', 'b'] as const,
+        ['c', 'd'] as const,
+        ['d', 'c'] as const,
       ];
       expect(isAcyclic(edges)).toBe(false);
     });
