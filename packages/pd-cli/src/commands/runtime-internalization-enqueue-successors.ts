@@ -168,9 +168,12 @@ async function findExistingSuccessor(
   stateManager: RuntimeStateManager,
   opts: { parentTaskId: string; successorKind: string; channel: string },
 ): Promise<{ taskId: string } | null> {
-  const pendingTasks = await stateManager.listTasks({ status: 'pending' });
-  const retryWaitTasks = await stateManager.listTasks({ status: 'retry_wait' });
-  const candidates = [...pendingTasks, ...retryWaitTasks];
+  const [pendingTasks, retryWaitTasks, succeededTasks] = await Promise.all([
+    stateManager.listTasks({ status: 'pending' }),
+    stateManager.listTasks({ status: 'retry_wait' }),
+    stateManager.listTasks({ status: 'succeeded' }),
+  ]);
+  const candidates = [...pendingTasks, ...retryWaitTasks, ...succeededTasks];
   for (const task of candidates) {
     if (task.taskKind !== opts.successorKind) continue;
     const piTask = hydratePITaskRecord(task);
@@ -266,14 +269,28 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             reason: 'No valid successor in job graph for this task kind and channel',
           });
         } else {
-          const existingSuccessor = await findExistingSuccessor(
-            stateManager,
-            {
-              parentTaskId: task.taskId,
-              successorKind: proposalResult.proposal.taskKind,
-              channel: proposalResult.proposal.channel,
-            },
-          );
+          let existingSuccessor: { taskId: string } | null = null;
+          try {
+            existingSuccessor = await findExistingSuccessor(
+              stateManager,
+              {
+                parentTaskId: task.taskId,
+                successorKind: proposalResult.proposal.taskKind,
+                channel: proposalResult.proposal.channel,
+              },
+            );
+          } catch (dedupeErr) {
+            const dedupeMessage = dedupeErr instanceof Error ? dedupeErr.message : String(dedupeErr);
+            actions.push({
+              taskId: task.taskId,
+              taskKind: piTask.taskKind,
+              decision: 'skipped',
+              reason: `dedupe_scan_failed: ${dedupeMessage}`,
+              nextAction: 'Re-run or investigate DB availability',
+            });
+            skippedCount++;
+            continue;
+          }
           if (existingSuccessor) {
             actions.push({
               taskId: task.taskId,

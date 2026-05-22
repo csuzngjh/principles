@@ -148,7 +148,11 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
 
   it('succeeded dreamer with artifact and no philosopher successor: dry-run reports would_create_successor', async () => {
     const dreamerTask = makeSucceededTask('dreamer-001', 'dreamer');
-    mockListTasks.mockResolvedValue([dreamerTask]);
+    mockListTasks
+      .mockResolvedValueOnce([dreamerTask])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
       taskId: 'dreamer-001',
@@ -286,7 +290,11 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
 
   it('default mode is dry-run', async () => {
     const dreamerTask = makeSucceededTask('dreamer-default', 'dreamer');
-    mockListTasks.mockResolvedValue([dreamerTask]);
+    mockListTasks
+      .mockResolvedValueOnce([dreamerTask])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
       taskId: 'dreamer-default',
@@ -474,7 +482,11 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
 
   it('dry-run does not call commitNextTaskProposal', async () => {
     const dreamerTask = makeSucceededTask('dreamer-dry', 'dreamer');
-    mockListTasks.mockResolvedValue([dreamerTask]);
+    mockListTasks
+      .mockResolvedValueOnce([dreamerTask])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
       taskId: 'dreamer-dry',
@@ -509,6 +521,27 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(output.actions[0].taskId).toBe('trainer-dry-001');
   });
 
+  it('dry-run findExistingSuccessor DB error: skipped with reason', async () => {
+    const dreamerTask = makeSucceededTask('dreamer-dedupe-err', 'dreamer');
+    mockListTasks
+      .mockResolvedValueOnce([dreamerTask])
+      .mockRejectedValueOnce(new Error('Database locked during dedupe'));
+    mockProposeNextTask.mockResolvedValue({
+      decision: 'proposal_created',
+      taskId: 'dreamer-dedupe-err',
+      taskKind: 'dreamer',
+      proposal: { taskKind: 'philosopher', channel: 'prompt', dependencyTaskIds: ['dreamer-dedupe-err'], inputArtifactRefs: [], parentTaskId: 'dreamer-dedupe-err', correlationId: 'corr-dedupe' },
+    });
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.actions[0].decision).toBe('skipped');
+    expect(output.actions[0].reason).toContain('dedupe_scan_failed');
+    expect(output.actions[0].nextAction).toBeDefined();
+    expect(output.skippedCount).toBe(1);
+  });
+
   it('dry-run with existing successor: reports successor_exists', async () => {
     const dreamerTask = makeSucceededTask('dreamer-existing-succ', 'dreamer');
     const philosopherPending = {
@@ -527,6 +560,7 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     mockListTasks
       .mockResolvedValueOnce([dreamerTask])
       .mockResolvedValueOnce([philosopherPending])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
