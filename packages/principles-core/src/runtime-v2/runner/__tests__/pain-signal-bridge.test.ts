@@ -49,6 +49,7 @@ function makeMockStateManager(overrides: {
     getCandidatesByTaskId: async () => overrides.candidates ?? [],
     getRunsByTask: async () => overrides.runs ?? ([] as any),
     getTask: async () => ({ taskId: TASK_ID, status: 'succeeded', leaseExpiresAt: null } as any),
+    updateCandidateStatus: async () => { /* noop mock */ },
   } as unknown as RuntimeStateManager;
 }
 
