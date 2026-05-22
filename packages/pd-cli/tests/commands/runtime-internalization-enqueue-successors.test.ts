@@ -57,6 +57,17 @@ import { handleRuntimeInternalizationEnqueueSuccessors } from '../../src/command
 
 const WS = '/fake/workspace';
 
+function mockDryRunListTasks(succeededTasks: ReturnType<typeof makeSucceededTask>[]) {
+  mockListTasks
+    .mockResolvedValueOnce(succeededTasks)
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([]);
+}
+
 function makePIMetadata(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     dependencyTaskIds: [],
@@ -148,11 +159,7 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
 
   it('succeeded dreamer with artifact and no philosopher successor: dry-run reports would_create_successor', async () => {
     const dreamerTask = makeSucceededTask('dreamer-001', 'dreamer');
-    mockListTasks
-      .mockResolvedValueOnce([dreamerTask])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+    mockDryRunListTasks([dreamerTask]);
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
       taskId: 'dreamer-001',
@@ -290,11 +297,7 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
 
   it('default mode is dry-run', async () => {
     const dreamerTask = makeSucceededTask('dreamer-default', 'dreamer');
-    mockListTasks
-      .mockResolvedValueOnce([dreamerTask])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+    mockDryRunListTasks([dreamerTask]);
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
       taskId: 'dreamer-default',
@@ -482,11 +485,7 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
 
   it('dry-run does not call commitNextTaskProposal', async () => {
     const dreamerTask = makeSucceededTask('dreamer-dry', 'dreamer');
-    mockListTasks
-      .mockResolvedValueOnce([dreamerTask])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+    mockDryRunListTasks([dreamerTask]);
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
       taskId: 'dreamer-dry',
@@ -507,6 +506,20 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.status).toBe('failed');
     expect(process.exitCode).toBe(1);
+  });
+
+  it('confirm path commitNextTaskProposal throws: skipped with reason', async () => {
+    const dreamerTask = makeSucceededTask('dreamer-commit-err', 'dreamer');
+    mockListTasks.mockResolvedValue([dreamerTask]);
+    mockCommitNextTaskProposal.mockRejectedValue(new Error('Database locked during commit'));
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, confirm: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.actions[0].decision).toBe('skipped');
+    expect(output.actions[0].reason).toContain('commit_failed');
+    expect(output.actions[0].nextAction).toBeDefined();
+    expect(output.skippedCount).toBe(1);
   });
 
   it('dry-run with no_successor proposal: reports no_successor', async () => {
@@ -560,6 +573,9 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     mockListTasks
       .mockResolvedValueOnce([dreamerTask])
       .mockResolvedValueOnce([philosopherPending])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     mockProposeNextTask.mockResolvedValue({

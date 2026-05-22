@@ -168,12 +168,11 @@ async function findExistingSuccessor(
   stateManager: RuntimeStateManager,
   opts: { parentTaskId: string; successorKind: string; channel: string },
 ): Promise<{ taskId: string } | null> {
-  const [pendingTasks, retryWaitTasks, succeededTasks] = await Promise.all([
-    stateManager.listTasks({ status: 'pending' }),
-    stateManager.listTasks({ status: 'retry_wait' }),
-    stateManager.listTasks({ status: 'succeeded' }),
-  ]);
-  const candidates = [...pendingTasks, ...retryWaitTasks, ...succeededTasks];
+  const allStatuses: ('pending' | 'retry_wait' | 'succeeded' | 'leased' | 'failed' | 'needs_human_review')[] = ['pending', 'retry_wait', 'succeeded', 'leased', 'failed', 'needs_human_review'];
+  const results = await Promise.all(
+    allStatuses.map(status => stateManager.listTasks({ status })),
+  );
+  const candidates = results.flat();
   for (const task of candidates) {
     if (task.taskKind !== opts.successorKind) continue;
     const piTask = hydratePITaskRecord(task);
@@ -311,7 +310,25 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
           }
         }
       } else {
-        const commitResult = await orchestrator.commitNextTaskProposal(task.taskId);
+        const commitResult = await orchestrator.commitNextTaskProposal(task.taskId).catch((commitErr: unknown) => {
+          const commitMessage = commitErr instanceof Error ? commitErr.message : String(commitErr);
+          return {
+            decision: 'commit_failed' as const,
+            taskId: task.taskId,
+            reason: commitMessage,
+          };
+        });
+        if ('decision' in commitResult && commitResult.decision === 'commit_failed') {
+          actions.push({
+            taskId: task.taskId,
+            taskKind: piTask.taskKind,
+            decision: 'skipped',
+            reason: `commit_failed: ${commitResult.reason}`,
+            nextAction: 'Re-run or investigate DB availability',
+          });
+          skippedCount++;
+          continue;
+        }
         const action = mapCommitDecisionToAction(commitResult);
         action.taskKind = piTask.taskKind;
         actions.push(action);
