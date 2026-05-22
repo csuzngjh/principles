@@ -110,7 +110,7 @@ export function validateProposedParams(
       continue;
     }
 
-    if (!(key in originalParams)) {
+    if (!Object.hasOwn(originalParams, key)) {
       errors.push(`proposedParams key "${key}" is not present in original params`);
       continue;
     }
