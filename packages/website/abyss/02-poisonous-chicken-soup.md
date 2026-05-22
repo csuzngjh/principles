@@ -8,7 +8,7 @@
 
 ## Prologue: The "Cyber Brute" Wearing a Philosophical Crown
 
-After realizing the "Helmsman Crisis" and the necessity of "Constructive Friction" mentioned in [Part 1], I once naively thought that injecting a soul into AI required nothing more than a perfect "instruction manual."
+After realizing the "Helmsman Crisis" and the necessity of "Constructive Friction" mentioned in [Part 1](/abyss/01-the-helmsman-crisis), I once naively thought that injecting a soul into AI required nothing more than a perfect "instruction manual."
 
 If we wanted to create friction and force the AI to slow down and think, wouldn't the simplest solution be to teach it the most brilliant mental models in human history?
 
