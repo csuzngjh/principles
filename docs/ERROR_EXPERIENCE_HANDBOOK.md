@@ -76,6 +76,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-017 | JSON.stringify on unknown values can throw (BigInt, circular) — preview paths crash | PRI-200 |
 | ERR-018 | repairAttempts records stale initialValidationErrors instead of per-attempt currentErrors | PRI-200 |
 | ERR-019 | schemaCheck failure branch writes next iteration's errors into current attempt's record | PRI-200 |
+| ERR-020 | Commander negated boolean `--no-intake` ignored — checking wrong property name | PRI-217 |
 
 ---
 
@@ -335,9 +336,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-020]** | Commander negated boolean `--no-intake` ignored — checking wrong property name
+
+- **What happened**: Added a `--no-intake` CLI flag to skip candidate intake in `pd diagnose run`. The code checked `opts.noIntake` to determine whether to skip intake, but Commander.js negated boolean options are exposed without the `no-` prefix — `--no-intake` sets `opts.intake` (not `opts.noIntake`), defaulting to `true` when not passed and `false` when `--no-intake` is passed. Since `opts.noIntake` was always `undefined`, the `--no-intake` escape hatch was completely ineffective.
+- **Why it's wrong**: The `--no-intake` flag was documented as an escape hatch for debugging, but it silently did nothing. Users running `pd diagnose run --no-intake` would expect candidates to remain at `pending`, but they would still be consumed and written to the ledger, potentially triggering unintended side effects.
+- **Correct approach**: Define the flag as `--intake` (defaulting to `true`), which allows Commander to properly expose `--no-intake` to set it to `false`. Check `opts.intake === false` instead of `opts.noIntake`.
+- **How to prevent**: When using Commander.js negated boolean flags (`--no-*`), always check the property without the `no-` prefix. Add a test that verifies the flag actually works by calling the CLI with the flag and asserting the expected behavior.
+- **Source**: PRI-217 / PR #677 (Codex review)
+- **Date**: 2026-05-22
+- **Recurrence**: None
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 19 |
-| Last updated | 2026-05-21 |
+| Total lessons | 20 |
+| Last updated | 2026-05-22 |
 | Top category | Schema & Type |
 | Recurring errors | 11 |
