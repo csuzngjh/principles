@@ -36,9 +36,7 @@
   --amber: var(--accent);
 }
 
-/* Don't override VitePress theme vars — let them handle light/dark */
-
-/* ── Typography & Fluid Scales ──────────────────────────── */
+/* Typography & Fluid Scales */
 .pd-home-wrapper {
   color: var(--text-main);
   font-family: var(--vp-font-family-base);
@@ -69,7 +67,7 @@
   color: var(--text-secondary);
 }
 
-/* ── Minimal Cards ───────────────────────────────────────── */
+/* Minimal Cards */
 .pd-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -81,7 +79,7 @@
   border-color: var(--accent-border);
 }
 
-/* ── Friction Node — static, calm ───────────────────────── */
+/* Friction Node */
 .friction-node {
   width: 6px;
   height: 6px;
@@ -92,7 +90,7 @@
   vertical-align: middle;
 }
 
-/* ── Hero Image Container ────────────────────────────────── */
+/* Hero Image Container */
 .hero-visual {
   position: relative;
   border-radius: 16px;
@@ -120,17 +118,11 @@
 }
 
 @keyframes hero-fade {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Buttons ─────────────────────────────────────────────── */
+/* Buttons */
 .pd-btn {
   display: inline-flex;
   align-items: center;
@@ -151,13 +143,8 @@
   border: none;
 }
 
-:root.dark .pd-btn-brand {
-  color: #0B0D11 !important;
-}
-
-.pd-btn-brand:hover {
-  opacity: 0.88;
-}
+:root.dark .pd-btn-brand { color: #0B0D11 !important; }
+.pd-btn-brand:hover { opacity: 0.88; }
 
 .pd-btn-alt {
   background: transparent;
@@ -170,22 +157,52 @@
   border-color: var(--accent-border);
 }
 
-/* ── VitePress Overrides ────────────────────────────────── */
-.VPHome {
-  padding-bottom: 0 !important;
-  background: transparent !important;
+/* VitePress Overrides */
+.VPHome { padding-bottom: 0 !important; background: transparent !important; }
+.VPSidebarItem .text:has(+ .coming-soon), a[href*="coming-soon"] { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+.VPNavBar { background-color: rgba(var(--vp-c-bg-rgb), 0.85) !important; backdrop-filter: blur(8px) !important; border-bottom: 1px solid var(--vp-c-border) !important; }
+
+/* ── Macro Engine Flowchart ──────────────────────────────── */
+.macro-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin: 3rem 0;
+  padding: 2rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 16px;
+  border: 1px solid var(--border);
 }
 
-.VPSidebarItem .text:has(+ .coming-soon),
-a[href*="coming-soon"] {
-  opacity: 0.45;
-  cursor: not-allowed;
-  pointer-events: none;
+.flow-node {
+  padding: 0.75rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.85rem;
+  color: var(--text-main);
+  text-align: center;
+  min-width: 180px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
-.VPNavBar {
-  background-color: rgba(var(--vp-c-bg-rgb), 0.85) !important;
-  backdrop-filter: blur(8px) !important;
-  -webkit-backdrop-filter: blur(8px) !important;
-  border-bottom: 1px solid var(--vp-c-border) !important;
+.flow-node.highlight { border-color: var(--accent); background: var(--accent-dim); }
+
+.flow-arrow {
+  width: 2px;
+  height: 20px;
+  background: linear-gradient(to bottom, var(--accent), transparent);
+  position: relative;
+}
+
+.flow-arrow::after {
+  content: "▼";
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  color: var(--accent);
 }

@@ -34,7 +34,7 @@ export default defineConfig({
         nav: [
           { text: 'Home', link: '/' },
           { text: 'Docs', link: '/docs/getting-started' },
-          { text: 'Blog', link: '/blog/01-the-helmsman-crisis' },
+          { text: 'Abyss', link: '/abyss/' },
           { text: 'GitHub', link: 'https://github.com/csuzngjh/principles' }
         ],
         sidebar: {
@@ -48,15 +48,13 @@ export default defineConfig({
               ]
             }
           ],
-          '/blog/': [
+          '/abyss/': [
             {
-              text: "Wesley's Blog: PD Reflections",
+              text: "Abyss of Thought",
               items: [
-                { text: '01 | The Helmsman Crisis & Cyber Escape Pod', link: '/blog/01-the-helmsman-crisis' },
-                { text: '02 | The Illusion of Wisdom (coming soon)' },
-                { text: '03 | Pain as Signal (coming soon)' },
-                { text: '04 | Soft-to-Hard Alchemy (coming soon)' },
-                { text: '05 | The Silicon Musk (coming soon)' },
+                { text: 'Introduction', link: '/abyss/' },
+                { text: '01 | The Helmsman Crisis & Cyber Escape Pod', link: '/abyss/01-the-helmsman-crisis' },
+                { text: '02 | The Illusion of Wisdom', link: '/abyss/02-poisonous-chicken-soup' },
               ]
             }
           ]
@@ -72,7 +70,7 @@ export default defineConfig({
         nav: [
           { text: '首页', link: '/zh/' },
           { text: '文档', link: '/zh/docs/user-guide' },
-          { text: '思考博客', link: '/zh/blog/01-the-helmsman-crisis' },
+          { text: '思维深渊', link: '/zh/abyss/' },
           { text: 'GitHub', link: 'https://github.com/csuzngjh/principles' }
         ],
         sidebar: {
@@ -84,15 +82,13 @@ export default defineConfig({
               ]
             }
           ],
-          '/zh/blog/': [
+          '/zh/abyss/': [
             {
-              text: 'Wesley 的思考博客：PD 深度随笔',
+              text: '思维深渊',
               items: [
-                { text: '01 | 赛博垃圾围城与人类逃生舱 (进化宣言)', link: '/zh/blog/01-the-helmsman-crisis' },
-                { text: '02 | 为什么"硅基鸡汤"是无效摩擦 (即将上线)' },
-                { text: '03 | 前向进化的生物学硬核启示 (即将上线)' },
-                { text: '04 | 软硬转换炼金术 (即将上线)' },
-                { text: '05 | 逃生舱里的沙盒：打造硅基马斯克 (即将上线)' },
+                { text: '深渊导引', link: '/zh/abyss/' },
+                { text: '01 | 赛博垃圾围城与人类逃生舱', link: '/zh/abyss/01-the-helmsman-crisis' },
+                { text: '02 | 为什么"硅基鸡汤"是无效摩擦', link: '/zh/abyss/02-poisonous-chicken-soup' },
               ]
             }
           ]
