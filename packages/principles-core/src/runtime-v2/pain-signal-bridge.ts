@@ -178,6 +178,9 @@ export class PainSignalBridge {
       for (const candidate of candidates) {
         const intakeResult = await this.intakeService.intake(candidate.candidateId);
         ledgerEntryIds.push(intakeResult.id);
+        if (candidate.status !== 'consumed') {
+          await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
+        }
       }
     }
     // HG-4: When autoIntakeEnabled=false, chain runs but intake is skipped
@@ -253,6 +256,9 @@ export class PainSignalBridge {
       for (const candidate of candidates) {
         const ledgerEntry = this.ledgerAdapter.existsForCandidate(candidate.candidateId);
         if (ledgerEntry) ledgerEntryIds.push(ledgerEntry.id);
+        if (candidate.status !== 'consumed' && ledgerEntry) {
+          await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
+        }
       }
       if (ledgerEntryIds.length === 0) {
         return {
