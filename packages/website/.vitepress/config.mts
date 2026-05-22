@@ -107,7 +107,3 @@ export default defineConfig({
     ]
   }
 })
- 'https://github.com/csuzngjh/principles' }
-    ]
-  }
-})
