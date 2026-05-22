@@ -35,6 +35,7 @@ import { handleRuntimeInternalizationRunOnce } from './commands/runtime-internal
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize, handleCandidateInternalizationBackfill } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
 import { handleRuntimeCanary } from './commands/runtime-canary.js';
+import { handleRuntimeSyntheticBaseline } from './commands/runtime-synthetic-baseline.js';
 import { handleRuntimeInternalizationIntegrity } from './commands/runtime-internalization-integrity.js';
 import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-internalization-integrity-repair.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
@@ -298,6 +299,17 @@ runtimeCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeCanary({ workspace: opts.workspace, json: opts.json });
+  });
+
+runtimeCmd
+  .command('synthetic')
+  .description('Synthetic workload baseline commands')
+  .command('baseline')
+  .description('Run synthetic PD workload baseline (PRI-206) — deterministic, no LLM required')
+  .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeSyntheticBaseline({ workspace: opts.workspace, json: opts.json });
   });
 
 runtimeCmd
