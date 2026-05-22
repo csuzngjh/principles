@@ -212,10 +212,10 @@ export function handleBeforeToolCall(
               throw new Error('correctedFields entry must be an object with a string field');
             }
             const field = cf.field;
-            if (!(field in event.params)) {
+            if (!Object.hasOwn(event.params, field)) {
               throw new Error(`Field '${field}' not found in event.params`);
             }
-            if (!(field in proposal.proposedParams)) {
+            if (!Object.hasOwn(proposal.proposedParams, field)) {
               throw new Error(`Field '${field}' not found in proposal.proposedParams`);
             }
           }
