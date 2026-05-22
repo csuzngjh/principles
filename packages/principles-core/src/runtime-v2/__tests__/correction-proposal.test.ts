@@ -129,6 +129,35 @@ describe('validateProposedParams', () => {
     );
     expect(result.valid).toBe(false);
   });
+
+  it('rejects inherited prototype property (toString) not present as own key in originalParams', async () => {
+    const { validateProposedParams } = await getModule();
+    const result = validateProposedParams(
+      { toString: 'overridden' },
+      { content: 'original', path: '/foo.ts' },
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('toString') || e.includes('not present'))).toBe(true);
+  });
+
+  it('rejects inherited prototype property (constructor) not present as own key in originalParams', async () => {
+    const { validateProposedParams } = await getModule();
+    const result = validateProposedParams(
+      { constructor: 'overridden' },
+      { content: 'original', path: '/foo.ts' },
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('constructor') || e.includes('not present'))).toBe(true);
+  });
+
+  it('accepts own property named toString when originalParams explicitly has it', async () => {
+    const { validateProposedParams } = await getModule();
+    const result = validateProposedParams(
+      { toString: 'new value' },
+      { toString: 'old value', path: '/foo.ts' },
+    );
+    expect(result.valid).toBe(true);
+  });
 });
 
 describe('validateCorrectionProposal', () => {
