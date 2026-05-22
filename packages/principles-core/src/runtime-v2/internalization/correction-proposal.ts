@@ -149,7 +149,7 @@ export function validateCorrectionProposal(
   }
 
   // proposedParams — required, must be a plain object
-  if (!('proposedParams' in proposal)) {
+  if (!Object.hasOwn(proposal, 'proposedParams')) {
     errors.push('proposedParams is required');
   } else if (!isPlainObject(proposal.proposedParams)) {
     errors.push('proposedParams must be a plain object');
@@ -157,8 +157,7 @@ export function validateCorrectionProposal(
     errors.push('proposedParams is not JSON-serializable');
   }
 
-  // correctedFields — required, must be array of {field, reason}
-  if (!('correctedFields' in proposal)) {
+  if (!Object.hasOwn(proposal, 'correctedFields')) {
     errors.push('correctedFields is required');
   } else if (!Array.isArray(proposal.correctedFields)) {
     errors.push('correctedFields must be an array');
@@ -176,29 +175,25 @@ export function validateCorrectionProposal(
     }
   }
 
-  // applicationMode — required, must be 'shadow' or 'live'
-  if (!('applicationMode' in proposal)) {
+  if (!Object.hasOwn(proposal, 'applicationMode')) {
     errors.push('applicationMode is required');
   } else if (proposal.applicationMode !== 'shadow' && proposal.applicationMode !== 'live') {
     errors.push(`applicationMode must be "shadow" or "live", got "${String(proposal.applicationMode)}"`);
   }
 
-  // confidence — required, number in [0, 1]
-  if (!('confidence' in proposal)) {
+  if (!Object.hasOwn(proposal, 'confidence')) {
     errors.push('confidence is required');
   } else if (typeof proposal.confidence !== 'number' || !Number.isFinite(proposal.confidence) || proposal.confidence < 0 || proposal.confidence > 1) {
     errors.push(`confidence must be a number in [0, 1], got ${String(proposal.confidence)}`);
   }
 
-  // ruleId — required, non-empty string
-  if (!('ruleId' in proposal)) {
+  if (!Object.hasOwn(proposal, 'ruleId')) {
     errors.push('ruleId is required');
   } else if (typeof proposal.ruleId !== 'string' || proposal.ruleId.length === 0) {
     errors.push('ruleId must be a non-empty string');
   }
 
-  // notifyAgent — required, boolean
-  if (!('notifyAgent' in proposal)) {
+  if (!Object.hasOwn(proposal, 'notifyAgent')) {
     errors.push('notifyAgent is required');
   } else if (typeof proposal.notifyAgent !== 'boolean') {
     errors.push(`notifyAgent must be a boolean, got ${typeof proposal.notifyAgent}`);
