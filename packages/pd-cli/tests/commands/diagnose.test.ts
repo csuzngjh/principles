@@ -558,6 +558,35 @@ describe('pd diagnose run — auto-intake after success', () => {
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  it('INTAKE-12: failed diagnosis does not trigger intake (process.exit stubbed)', async () => {
+    const { run } = await import('@principles/core/runtime-v2');
+    vi.mocked(run).mockResolvedValueOnce({
+      status: 'failed',
+      taskId: 'test-task-1',
+      errorCategory: 'timeout',
+      failureReason: 'LLM call timed out',
+      attemptCount: 3,
+    });
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'test-double',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    expect(mockGetCandidatesByTaskId).not.toHaveBeenCalled();
+    expect(mockIntake).not.toHaveBeenCalled();
+    expect(mockUpdateCandidateStatus).not.toHaveBeenCalled();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 describe('Commander wiring for --no-intake', () => {

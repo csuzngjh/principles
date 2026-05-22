@@ -72,6 +72,7 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
     if (!result) {
       console.error(`Task not found: ${opts.taskId}`);
       process.exit(1);
+      return;
     }
 
     if (opts.json) {
@@ -304,6 +305,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         console.log('');
       }
       process.exit(1);
+      return;
     }
 
     const candidates = await stateManager.getCandidatesByTaskId(opts.taskId);

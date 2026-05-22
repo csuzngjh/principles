@@ -86,7 +86,8 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 
 | ID | Summary | Source |
 |----|---------|--------|
-| *(No entries yet)* | | |
+| ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
+| ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
 
 ---
 
@@ -96,7 +97,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 
 | ID | Summary | Source |
 |----|---------|--------|
-| *(No entries yet)* | | |
+| ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
 
 ---
 
@@ -106,7 +107,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | ID | Summary | Source |
 |----|---------|--------|
-| *(No entries yet)* | | |
+| ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
 
 ---
 
@@ -348,9 +349,33 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-021]** | Handler-only tests miss Commander flag→opts mapping bugs
+
+- **What happened**: Added `--no-intake` CLI flag to `pd diagnose run`. All tests called `handleDiagnoseRun()` directly with manually constructed `opts` objects, bypassing Commander entirely. This hid two bugs: (1) Commander negated booleans strip the `no-` prefix, so `opts.noIntake` was always `undefined`; (2) `.option('--intake', ...)` does not auto-create `--no-intake`, so `pd diagnose run --no-intake` threw "unknown option".
+- **Why it's wrong**: Handler-level tests prove the handler logic works, but they don't prove the CLI flag actually reaches the handler with the correct property name and value. The gap between Commander parsing and handler invocation was completely untested.
+- **Correct approach**: When adding a new CLI flag, always add Commander wiring tests that: (1) parse the flag through Commander and capture the resulting opts; (2) verify the opts property name matches what the handler checks; (3) verify the default value when the flag is not passed.
+- **How to prevent**: Add a "Commander wiring test" checklist item to the PR template. Every new `.option()` must have a corresponding test that calls `program.parseAsync()` with the flag and asserts the opts shape.
+- **Source**: PRI-217 / PR #677
+- **Date**: 2026-05-22
+- **Recurrence**: None
+
+---
+
+**[ERR-022]** | process.exit(1) without return allows fallthrough to intake on failed diagnosis
+
+- **What happened**: In `handleDiagnoseRun()`, the `result.status !== 'succeeded'` branch called `process.exit(1)` without a subsequent `return`. When `process.exit` is stubbed in tests (or when the handler is called from embedded contexts), execution continues past the exit call into the candidate intake code, potentially writing ledger entries for a failed diagnosis.
+- **Why it's wrong**: `process.exit()` is not guaranteed to halt execution — it can be stubbed, intercepted, or the code may run in a non-Node context. Every `process.exit()` must be followed by `return` to ensure the function exits cleanly even if `process.exit` is no-op'd.
+- **Correct approach**: Always add `return;` after `process.exit()`. This is a defensive coding pattern that prevents fallthrough regardless of whether `process.exit` is intercepted.
+- **How to prevent**: Add an ESLint rule or lefthook check that flags `process.exit()` without a subsequent `return`. Alternatively, use a shared `fatalExit(code)` helper that always throws after exit.
+- **Source**: PRI-217 / PR #677
+- **Date**: 2026-05-22
+- **Recurrence**: None
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 20 |
+| Total lessons | 22 |
 | Last updated | 2026-05-22 |
 | Top category | Schema & Type |
 | Recurring errors | 11 |
