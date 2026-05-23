@@ -38,6 +38,7 @@ import { handleRuntimeCanary } from './commands/runtime-canary.js';
 import { handleRuntimeSyntheticBaseline } from './commands/runtime-synthetic-baseline.js';
 import { handleRuntimeInternalizationIntegrity } from './commands/runtime-internalization-integrity.js';
 import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-internalization-integrity-repair.js';
+import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtime-internalization-enqueue-successors.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeIdleTriggerEvaluate } from './commands/runtime-idle-trigger.js';
@@ -464,6 +465,17 @@ internalizationCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeInternalizationIntegrityRepair({ workspace: opts.workspace, confirm: opts.confirm, dryRun: opts.dryRun, json: opts.json });
+  });
+
+internalizationCmd
+  .command('enqueue-successors')
+  .description('Enqueue successor tasks for succeeded internalization tasks missing successors')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--dry-run', 'Report only, no modifications (default)')
+  .option('--confirm', 'Actually create successor tasks')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
   });
 
 const idleTriggerCmd = runtimeCmd
