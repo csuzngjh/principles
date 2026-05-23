@@ -268,7 +268,7 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
     return;
   }
 
-  const stateManager = new RuntimeStateManager({ workspaceDir });
+  const stateManager = new RuntimeStateManager({ workspaceDir, readonly: isDryRun });
 
   try {
     try {

@@ -7,13 +7,15 @@ const mockCommitNextTaskProposal = vi.hoisted(() => vi.fn());
 const mockProposeNextTask = vi.hoisted(() => vi.fn());
 const mockClose = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const mockInitialize = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockRuntimeStateManagerOpts = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
 }));
 
 vi.mock('@principles/core/runtime-v2', () => ({
-  RuntimeStateManager: vi.fn().mockImplementation(function () {
+  RuntimeStateManager: vi.fn().mockImplementation(function (opts: Record<string, unknown>) {
+    mockRuntimeStateManagerOpts(opts);
     return {
       initialize: mockInitialize,
       close: mockClose,
@@ -769,5 +771,33 @@ describe('Commander wiring for enqueue-successors', () => {
     const rawOutput = consoleLogSpy.mock.calls[0][0];
     const parsed = JSON.parse(rawOutput);
     expect(parsed).toBeDefined();
+  });
+
+  it('no flags -> RuntimeStateManager readonly=true (dry-run default)', async () => {
+    const program = createTestProgram();
+    await program.parseAsync(['node', 'pd', 'internalization', 'enqueue-successors', '--workspace', WS, '--json']);
+
+    expect(mockRuntimeStateManagerOpts).toHaveBeenCalledWith(
+      expect.objectContaining({ readonly: true }),
+    );
+  });
+
+  it('--dry-run -> RuntimeStateManager readonly=true', async () => {
+    const program = createTestProgram();
+    await program.parseAsync(['node', 'pd', 'internalization', 'enqueue-successors', '--workspace', WS, '--dry-run', '--json']);
+
+    expect(mockRuntimeStateManagerOpts).toHaveBeenCalledWith(
+      expect.objectContaining({ readonly: true }),
+    );
+  });
+
+  it('--confirm -> RuntimeStateManager readonly=false', async () => {
+    mockListTasks.mockResolvedValue([]);
+    const program = createTestProgram();
+    await program.parseAsync(['node', 'pd', 'internalization', 'enqueue-successors', '--workspace', WS, '--confirm', '--json']);
+
+    expect(mockRuntimeStateManagerOpts).toHaveBeenCalledWith(
+      expect.objectContaining({ readonly: false }),
+    );
   });
 });
