@@ -25,6 +25,7 @@ import {
   maxEvidencePreviewLength,
   formatContextBudgetSummary,
   truncateReason,
+  FLOOD_SCENARIO_EXPECTATIONS,
 } from '@principles/core/runtime-v2';
 
 export interface PainFloodSimulationRunnerOptions {
@@ -59,6 +60,7 @@ async function runScenario(
   const errors: string[] = [];
   let skippedDuplicateCount = 0;
   let failedSignalCount = 0;
+  const seenTaskIds = new Set<string>();
 
   const tasksBefore = await stateManager.listTasks();
   let candidatesBefore = 0;
@@ -76,11 +78,17 @@ async function runScenario(
         reason: signal.reason,
       });
 
-      if (result.status === 'skipped') {
-        skippedDuplicateCount++;
-      } else if (result.status === 'failed' || result.status === 'retried') {
+      if (result.status === 'failed' || result.status === 'retried') {
         failedSignalCount++;
         errors.push(`${signal.painId}: bridge returned ${result.status} — ${result.message ?? 'no message'}`);
+      } else if (result.status === 'skipped') {
+        skippedDuplicateCount++;
+      } else if (result.status === 'succeeded') {
+        if (seenTaskIds.has(result.taskId)) {
+          skippedDuplicateCount++;
+        } else {
+          seenTaskIds.add(result.taskId);
+        }
       }
     } catch (err) {
       failedSignalCount++;
@@ -97,7 +105,12 @@ async function runScenario(
 
   const deltaTasks = tasksAfter.length - tasksBefore.length;
   const deltaCandidates = candidatesAfter - candidatesBefore;
-  const passed = errors.length === 0;
+
+  const expectation = FLOOD_SCENARIO_EXPECTATIONS[scenarioName];
+  const maxAllowedTasks = Math.ceil(painSignals.length * expectation.maxTaskRatio);
+  const dedupeViolation = deltaTasks > maxAllowedTasks;
+
+  const passed = errors.length === 0 && !dedupeViolation;
 
   const stage: PainFloodStage = {
     scenarioName,
@@ -113,6 +126,7 @@ async function runScenario(
       acceptedCount: deltaTasks,
       skippedCount: skippedDuplicateCount,
       failedCount: failedSignalCount,
+      uniqueTaskIds: seenTaskIds.size,
       deltaTasks,
       deltaCandidates,
       errorCount: errors.length,
@@ -121,6 +135,8 @@ async function runScenario(
 
   if (errors.length > 0) {
     stage.reason = truncateReason(`Scenario ${scenarioName}: ${errors.length} errors. First: ${errors[0]}`);
+  } else if (dedupeViolation) {
+    stage.reason = truncateReason(`Scenario ${scenarioName}: dedupe violation — created ${deltaTasks} tasks, expected at most ${maxAllowedTasks} (${expectation.description})`);
   }
 
   return stage;
@@ -137,13 +153,16 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
 
   const pdDir = path.join(workspaceDir, '.pd');
   const stateDir = path.join(workspaceDir, '.state');
-  await fs.promises.mkdir(pdDir, { recursive: true });
-  await fs.promises.mkdir(stateDir, { recursive: true });
 
-  const stateManager = new RuntimeStateManager({ workspaceDir });
-  await stateManager.initialize();
+  let stateManager: RuntimeStateManager | undefined = undefined;
 
   try {
+    await fs.promises.mkdir(pdDir, { recursive: true });
+    await fs.promises.mkdir(stateDir, { recursive: true });
+
+    stateManager = new RuntimeStateManager({ workspaceDir });
+    await stateManager.initialize();
+
     // Create shared infrastructure
     const { connection: sqliteConn, taskStore, runStore } = stateManager;
     const historyQuery = new SqliteHistoryQuery(sqliteConn);
@@ -252,6 +271,15 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
     const totals = computeFloodTotals(stages);
     const maxPreview = maxEvidencePreviewLength(stages);
     const status = computeFloodStatus(stages);
+    const recommendedNextIssue = recommendFloodNextIssue(stages);
+
+    const failedStages = stages.filter(s => s.status === 'failed');
+    const reason = failedStages.length > 0
+      ? truncateReason(`${failedStages.length} scenario(s) failed: ${failedStages.map(s => s.scenarioName).join(', ')}. ${failedStages[0].reason ?? 'unknown reason'}`)
+      : undefined;
+    const nextAction = recommendedNextIssue
+      ? `Investigate: ${recommendedNextIssue}`
+      : undefined;
 
     return {
       status,
@@ -266,7 +294,9 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
       maxEvidencePreviewLength: maxPreview,
       contextBudgetSummary: formatContextBudgetSummary(maxPreview),
       stages,
-      recommendedNextIssue: recommendFloodNextIssue(stages),
+      reason,
+      nextAction,
+      recommendedNextIssue,
     };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -296,6 +326,7 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
 
     const partialTotals = computeFloodTotals(stages);
     const partialMaxPreview = maxEvidencePreviewLength(stages);
+    const recommendedNextIssue = recommendFloodNextIssue(stages);
 
     return {
       status: 'error',
@@ -310,9 +341,13 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
       maxEvidencePreviewLength: partialMaxPreview,
       contextBudgetSummary: formatContextBudgetSummary(partialMaxPreview),
       stages,
-      recommendedNextIssue: recommendFloodNextIssue(stages),
+      reason: truncateReason(`Simulation error: ${errorMessage}`),
+      nextAction: 'Check workspace permissions and disk space, then re-run',
+      recommendedNextIssue,
     };
   } finally {
-    await stateManager.close();
+    if (stateManager) {
+      await stateManager.close();
+    }
   }
 }

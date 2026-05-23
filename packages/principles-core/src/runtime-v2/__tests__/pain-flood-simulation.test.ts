@@ -8,6 +8,7 @@ import {
   boundedFloodEvidence,
   maxEvidencePreviewLength,
   safeStringify,
+  FLOOD_SCENARIO_EXPECTATIONS,
 } from '../pain-flood-simulation.js';
 
 function makeStage(overrides: Partial<PainFloodStage> & { scenarioName: PainFloodStage['scenarioName']; status: PainFloodStage['status'] }): PainFloodStage {
@@ -222,6 +223,33 @@ describe('PainFloodSimulation pure helpers (PRI-208)', () => {
       const result = safeStringify(obj);
       expect(result).toContain('key');
       expect(result).toContain('value');
+    });
+  });
+
+  describe('FLOOD_SCENARIO_EXPECTATIONS', () => {
+    it('has expectations for all 5 scenario names', () => {
+      const names = Object.keys(FLOOD_SCENARIO_EXPECTATIONS);
+      expect(names).toEqual(['identical_flood', 'similar_flood', 'duplicate_submission', 'tool_failure_flood', 'stress_test']);
+    });
+
+    it('identical_flood expects at most 1 task per signal (maxTaskRatio=1)', () => {
+      expect(FLOOD_SCENARIO_EXPECTATIONS.identical_flood.maxTaskRatio).toBe(1);
+      expect(FLOOD_SCENARIO_EXPECTATIONS.identical_flood.description).toContain('identical');
+    });
+
+    it('duplicate_submission expects at most 0.5 task per signal (maxTaskRatio=0.5)', () => {
+      expect(FLOOD_SCENARIO_EXPECTATIONS.duplicate_submission.maxTaskRatio).toBe(0.5);
+    });
+
+    it('tool_failure_flood expects at most 0.2 task per signal (maxTaskRatio=0.2)', () => {
+      expect(FLOOD_SCENARIO_EXPECTATIONS.tool_failure_flood.maxTaskRatio).toBe(0.2);
+    });
+
+    it('all expectations have a description', () => {
+      for (const [, exp] of Object.entries(FLOOD_SCENARIO_EXPECTATIONS)) {
+        expect(exp.description.length).toBeGreaterThan(0);
+        expect(exp.maxTaskRatio).toBeGreaterThan(0);
+      }
     });
   });
 });

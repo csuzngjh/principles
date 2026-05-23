@@ -5,6 +5,19 @@ export type PainFloodScenarioName =
   | 'tool_failure_flood'
   | 'stress_test';
 
+export interface PainFloodScenarioExpectation {
+  maxTaskRatio: number;
+  description: string;
+}
+
+export const FLOOD_SCENARIO_EXPECTATIONS: Record<PainFloodScenarioName, PainFloodScenarioExpectation> = {
+  identical_flood: { maxTaskRatio: 1, description: 'All identical pains should produce at most 1 task' },
+  similar_flood: { maxTaskRatio: 1, description: 'Each unique pain should produce its own task' },
+  duplicate_submission: { maxTaskRatio: 0.5, description: 'Duplicate pain pair should produce at most 1 task' },
+  tool_failure_flood: { maxTaskRatio: 0.2, description: 'Identical tool failures should produce at most 1 task' },
+  stress_test: { maxTaskRatio: 1, description: 'Mixed unique/duplicate pains should deduplicate correctly' },
+};
+
 export interface PainFloodStage {
   scenarioName: PainFloodScenarioName;
   status: 'passed' | 'failed' | 'skipped';
@@ -31,6 +44,8 @@ export interface PainFloodSimulationSummary {
   maxEvidencePreviewLength: number;
   contextBudgetSummary: string;
   stages: PainFloodStage[];
+  reason?: string;
+  nextAction?: string;
   recommendedNextIssue?: string;
 }
 

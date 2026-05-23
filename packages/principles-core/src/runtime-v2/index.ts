@@ -295,9 +295,9 @@ export type { SyntheticBaselineSummary, SyntheticBaselineStage, SyntheticBaselin
 // Pain flood simulation (PRI-208) — pure contract/helpers only; I/O runner lives in pd-cli
 export {
   computeFloodStatus, computeFloodTotals, formatContextBudgetSummary, recommendFloodNextIssue,
-  boundedFloodEvidence, maxEvidencePreviewLength,
+  boundedFloodEvidence, maxEvidencePreviewLength, FLOOD_SCENARIO_EXPECTATIONS,
 } from './pain-flood-simulation.js';
-export type { PainFloodSimulationSummary, PainFloodStage, PainFloodScenarioName, PainFloodSimulationOptions } from './pain-flood-simulation.js';
+export type { PainFloodSimulationSummary, PainFloodStage, PainFloodScenarioName, PainFloodSimulationOptions, PainFloodScenarioExpectation } from './pain-flood-simulation.js';
 
 // Internalization contracts (PRI-42)
 export type {

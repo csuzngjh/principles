@@ -45,6 +45,14 @@ function formatTextOutput(summary: PainFloodSimulationSummary): string {
     lines.push(`Recommended next issue: ${summary.recommendedNextIssue}`);
   }
 
+  if (summary.reason) {
+    lines.push(`reason: ${summary.reason}`);
+  }
+
+  if (summary.nextAction) {
+    lines.push(`nextAction: ${summary.nextAction}`);
+  }
+
   return lines.join('\n');
 }
 
