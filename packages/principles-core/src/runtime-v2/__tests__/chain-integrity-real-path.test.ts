@@ -148,7 +148,7 @@ describe('Chain Integrity — Real Production Path', () => {
     const model = new InternalizationChainIntegrityReadModel({ workspaceDir });
     const { brokenLinks, overallStatus } = model.check();
 
-    expect(['ok', 'degraded']).toContain(overallStatus);
+    expect(overallStatus).toBe('ok');
     expect(brokenLinks.some(l => l.type === 'missing_dreamer_pi_artifact')).toBe(false);
   });
 
