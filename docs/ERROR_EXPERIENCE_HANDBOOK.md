@@ -54,6 +54,7 @@ Errors where AI assistants skipped required testing or verification steps.
 |----|---------|--------|
 | ERR-012 | PR branch based on stale main reverts already-merged telemetry fields | PR #659 |
 | ERR-025 | Test coverage proves isolated helper behavior, not real production defense | PRI-209 |
+| ERR-026 | Hand-written test database schema drifts from production, allowing invalid SQL to pass tests | PRI-209 |
 
 ---
 
@@ -208,7 +209,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For any agent contract that processes trace data, add explicit lineage field validation: `sourceTaskId`, `sourcePainId`, `sourceRunIds` must match the deterministic trace.
 - **Source**: PRI-192 / PR #638 (Codex review)
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `decideDownstreamGate()` checked artifact kind-level existence instead of per-dependency lineage, causing dependency B's missing artifact to be misclassified as `lineage_mismatch` when dependency A had a matching artifact. Fixed by implementing true `lineage_mismatch` detection (task `result_ref` points to artifact with wrong `source_task_id`) and distinguishing from `missing_dreamer_pi_artifact` (no artifact found at all).
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `result_ref` points to an artifact whose `task_id` differs from the owning task, but the read model only checked artifact kind-level existence instead of per-dependency lineage. This caused dependency B's missing artifact to be misclassified as `lineage_mismatch` when dependency A had a matching artifact. Fixed by implementing true `lineage_mismatch` detection (query `SELECT task_id FROM artifacts WHERE artifact_id = ?` and compare with owning task's `task_id`) and distinguishing from `missing_dreamer_pi_artifact` (no artifact found at all) and `result_ref_missing_artifact` (result_ref points to nonexistent artifact).
 
 ---
 
@@ -412,9 +413,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-026]** | Hand-written test database schema drifts from production, allowing invalid SQL to pass tests
+
+- **What happened**: Real-path tests for `InternalizationChainIntegrityReadModel` created a hand-written SQLite schema with `source_task_id` in the `artifacts` table, but the production schema (in `SqliteConnection`) uses `task_id`. The `lineage_mismatch` SQL query (`SELECT source_task_id FROM artifacts`) would fail in production with "no such column", but tests passed because the test schema matched the wrong column name. Additionally, the test schema omitted `NOT NULL` constraints present in production (e.g., `content_json`), allowing test data that production would reject.
+- **Why it's wrong**: When test schemas drift from production, tests provide false confidence. Invalid SQL, missing columns, and wrong column names all pass in tests but fail in production. The test becomes a tautology — it proves the code works against the test schema, not against the real schema. This is the same class as ERR-025 (tests prove isolated behavior, not production defense) and ERR-012 (stale base causes rollback) — the test environment does not reflect the real environment.
+- **Correct approach**: For SQLite real-path tests, prefer using the production schema initializer (e.g., `SqliteConnection` or the actual migration function) to create the test database. If a hand-written test schema is unavoidable, add `PRAGMA table_info(tableName)` assertions that verify critical columns exist and match production definitions. Never assume column names — assert them.
+- **How to prevent**: (1) Prefer production schema initializers for test databases. (2) If hand-writing test schemas, add `PRAGMA table_info` assertions for every column referenced in production SQL. (3) When a query references a column, the test must prove that column exists in the production schema definition. Review trigger: any PR that creates a `CREATE TABLE` statement in a test file must also include a `PRAGMA table_info` assertion or use the production initializer.
+- **Source**: PRI-209 / PR #689
+- **Date**: 2026-05-23
+- **Recurrence**: None
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 25 |
+| Total lessons | 26 |
 | Last updated | 2026-05-23 |
 | Top category | Schema & Type |
 | Recurring errors | 12 |
