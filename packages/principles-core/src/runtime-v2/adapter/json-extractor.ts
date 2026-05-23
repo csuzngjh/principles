@@ -21,6 +21,7 @@ export function extractJsonObject(text: string): Record<string, unknown> | null 
         if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
           return parsed;
         }
+        return null;
       } catch { /* fall through */ }
     }
   }

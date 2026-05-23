@@ -125,6 +125,26 @@ describe('Chaos 6: Malformed JSON that cannot be repaired', () => {
     expect(result).toBeNull();
   });
 
+  it('6d: fenced array — fail-closed, returns null (no fall-through to brace scan)', () => {
+    const result = extractJsonObject('```json\n[{"taskId":"t1"},{"taskId":"t2"}]\n```');
+    expect(result).toBeNull();
+  });
+
+  it('6e: fenced null — fail-closed, returns null', () => {
+    const result = extractJsonObject('```json\nnull\n```');
+    expect(result).toBeNull();
+  });
+
+  it('6f: fenced string — fail-closed, returns null', () => {
+    const result = extractJsonObject('```json\n"hello"\n```');
+    expect(result).toBeNull();
+  });
+
+  it('6g: fenced valid object — returns object (regression)', () => {
+    const result = extractJsonObject('```json\n{"taskId":"t1","confidence":0.9}\n```');
+    expect(result).toEqual({ taskId: 't1', confidence: 0.9 });
+  });
+
   it('6c: hybrid malformed: mixed brackets that cannot be balanced', () => {
     const input = '{"items": [1,2,3], "nested": {"a":[}]}';
     const result = extractJsonObject(input);
