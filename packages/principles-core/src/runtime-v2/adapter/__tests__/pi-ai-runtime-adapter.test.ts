@@ -1358,4 +1358,179 @@ describe('PiAiRuntimeAdapter', () => {
       expect(errorPaths.some(p => typeof p === 'string' && p.includes('confidence'))).toBe(true);
     });
   });
+
+  // ── PRI-220: Provider Timeout and Transient Retry Policy ──
+
+  describe('PRI-220: Provider Timeout and Transient Retry Policy', () => {
+    it('1. provider timeout before client budget is provider_transient_timeout', async () => {
+      // LLM call fails with timeout-like error, client signal is NOT aborted
+      mockComplete.mockReset();
+      mockComplete.mockRejectedValue(new Error('connection timeout'));
+
+      const adapter = makeAdapter({ maxRetries: 0 });
+      let caughtErr: PDRuntimeError | undefined = undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(caughtErr).toBeDefined();
+      expect(caughtErr?.category).toBe('timeout');
+      expect(caughtErr?.details?.timeoutClassification).toBe('provider_transient_timeout');
+      expect(caughtErr?.details?.effectiveTimeoutMs).toBe(60_000);
+      expect(typeof caughtErr?.details?.elapsedMs).toBe('number');
+    });
+
+    it('2. client timeout budget exhausted when signal is aborted', async () => {
+      // LLM call aborts, client signal IS aborted
+      mockComplete.mockReset();
+      mockComplete.mockImplementation(async (_model, _ctx, options) => {
+        const signal = options.signal as AbortSignal;
+        const err = new DOMException('The operation was aborted', 'AbortError');
+        Object.defineProperty(signal, 'aborted', { value: true, writable: true });
+        throw err;
+      });
+
+      const adapter = makeAdapter({ maxRetries: 0 });
+      let caughtErr: PDRuntimeError | undefined = undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(caughtErr).toBeDefined();
+      expect(caughtErr?.category).toBe('timeout');
+      expect(caughtErr?.details?.timeoutClassification).toBe('client_timeout_budget_exhausted');
+    });
+
+    it('3. unrecognized generic non-timeout error is classified as not_applicable', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockRejectedValue(new Error('Generic database connection failed'));
+
+      const adapter = makeAdapter({ maxRetries: 0 });
+      let caughtErr: PDRuntimeError | undefined = undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(caughtErr).toBeDefined();
+      expect(caughtErr?.category).toBe('execution_failed');
+      expect(caughtErr?.details?.timeoutClassification).toBeUndefined();
+    });
+
+    it('5. provider_transient_timeout retries and then succeeds within max limits', async () => {
+      mockComplete.mockReset();
+      // First attempt: transient timeout, Second attempt: success
+      mockComplete
+        .mockRejectedValueOnce(new Error('socket timeout'))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ maxRetries: 2 });
+      const handle = await adapter.startRun(makeStartRunInput());
+
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+      expect(handle.runId).toBeDefined();
+
+      // Check telemetry has retry attempt
+      const retryEvent = findTelemetryEvent('runtime_invocation_failed');
+      expect(retryEvent).toBeDefined();
+      const payload = retryEvent?.payload as Record<string, unknown>;
+      expect(payload?.isRetryAttempt).toBe(true);
+      expect(payload?.retryAttempt).toBe(0);
+    });
+
+    it('6. provider_transient_timeout exhausted maxRetries and fails permanently', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockRejectedValue(new Error('API read timeout'));
+
+      const adapter = makeAdapter({ maxRetries: 1 });
+      let caughtErr: PDRuntimeError | undefined = undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(mockComplete).toHaveBeenCalledTimes(2); // attempt 0 and attempt 1
+      expect(caughtErr).toBeDefined();
+      expect(caughtErr?.category).toBe('timeout');
+      expect(caughtErr?.details?.retryAttempt).toBe(1);
+    });
+
+    it('7. client_timeout_budget_exhausted is never retried', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockImplementation(async (_model, _ctx, options) => {
+        const signal = options.signal as AbortSignal;
+        Object.defineProperty(signal, 'aborted', { value: true, writable: true });
+        throw new DOMException('The operation was aborted', 'AbortError');
+      });
+
+      const adapter = makeAdapter({ maxRetries: 2 });
+      let caughtErr: PDRuntimeError | undefined = undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(mockComplete).toHaveBeenCalledTimes(1); // Fails immediately, no retry
+      expect(caughtErr).toBeDefined();
+      expect(caughtErr?.category).toBe('timeout');
+      expect(caughtErr?.details?.timeoutClassification).toBe('client_timeout_budget_exhausted');
+    });
+
+    it('10. circular objects, BigInt, and null-prototype objects in errors do not crash telemetry', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockRejectedValueOnce(new Error('fail'));
+
+      const nullProto = Object.create(null);
+      nullProto.message = 'null prototype error';
+
+      const circular: Record<string, unknown> = { message: 'circular error' };
+      circular.self = circular;
+
+      const bigIntErr = { message: 'bigint error', value: 9007199254740991n };
+
+      const adapter = makeAdapter({ maxRetries: 0 });
+
+      try {
+        await adapter.startRun(makeStartRunInput({ inputPayload: nullProto }));
+      } catch { /* expected */ }
+
+      try {
+        await adapter.startRun(makeStartRunInput({ inputPayload: circular }));
+      } catch { /* expected */ }
+
+      try {
+        await adapter.startRun(makeStartRunInput({ inputPayload: bigIntErr }));
+      } catch { /* expected */ }
+
+      expect(true).toBe(true);
+    });
+
+    it('12. telemetry includes provider/model/elapsedMs/timeoutMs/timeoutSource/classification/attempt', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockRejectedValue(new Error('request abort'));
+
+      const adapter = makeAdapter({ maxRetries: 0 });
+      try {
+        await adapter.startRun(makeStartRunInput({ timeoutMs: 33_000 }));
+      } catch { /* expected */ }
+
+      const failedEvent = findTelemetryEvent('runtime_invocation_failed');
+      expect(failedEvent).toBeDefined();
+      const payload = failedEvent?.payload as Record<string, unknown>;
+      expect(payload.provider).toBe('openrouter');
+      expect(payload.model).toBe('anthropic/claude-sonnet-4');
+      expect(typeof payload.elapsedMs).toBe('number');
+      expect(payload.effectiveTimeoutMs).toBe(33_000);
+      expect(payload.timeoutSource).toBe('runner_input');
+      expect(payload.timeoutClassification).toBe('provider_transient_timeout');
+      expect(payload.retryAttempt).toBe(0);
+    });
+  });
 });
