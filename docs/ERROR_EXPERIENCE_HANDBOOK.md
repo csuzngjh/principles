@@ -124,7 +124,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` type assertions on values from untrusted JSON sources (`Record<string, unknown>`). Always validate with `typeof` checks before using the value. When extracting fields from parsed JSON, treat every field as `unknown` and narrow with runtime type guards.
 - **Source**: PRI-189
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-213 (PR #688): `event.data.toolName as string` and `event.data.score as number` in `groupEventsIntoSessions()` bypassed runtime validation on `RawEventEntry.data` fields. `score: NaN` and `score: Infinity` passed `typeof === 'number'` check. `validatePainSignal()` used `as Record<string, unknown>` instead of type guard.
+- **Recurrence**: Yes - 2026-05-23 PRI-213 (PR #688): `event.data.toolName as string` and `event.data.score as number` in `groupEventsIntoSessions()` bypassed runtime validation on `RawEventEntry.data` fields. `score: NaN` and `score: Infinity` passed `typeof === 'number'` check. `validatePainSignal()` used `as Record<string, unknown>` instead of type guard. Fixed by excluding malformed entries from scoring arrays and adding `isStringRecord()` type guard.
 
 ---
 
@@ -136,7 +136,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Every catch-and-degrade pattern must expose the failure reason via `ambiguityNotes` / telemetry / logging. Review all catch blocks that return fallback values and verify they communicate why the fallback was triggered.
 - **Source**: PRI-171
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-210 (PR #690): `isPathWithinWorkspace()` used `startsWith(normalizedWorkspace)` for containment, allowing sibling-prefix bypass (`/home/user/project2` matched `/home/user/project`). `replace(/\/+/, '/')` lacked global flag. `validateProposedPathBounds()` existed but was not wired into gate.ts live auto-correct path — validator without enforcement is the same class as catch-and-degrade without observability.
+- **Recurrence**: None
 
 ---
 
@@ -148,7 +148,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: PII sanitizer key matching must use exact match or segment-boundary match. Never use `includes()` for key matching. Every sanitization rule must have a negative test case to verify it does not over-sanitize.
 - **Source**: PRI-171
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `decideDownstreamGate()` misclassified `missing_artifact` as `lineage_mismatch` when dependency A had an artifact of the same kind but dependency B was missing — the function checked kind-level existence instead of per-dependency lineage consistency.
+- **Recurrence**: None
 
 ---
 
@@ -172,7 +172,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` array type casts on untrusted JSON arrays without validating element types first. Always apply element-wise type guards when preserving data from invalid payloads.
 - **Source**: PRI-191
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Same class as ERR-001 where `as` bypasses runtime validation on parsed JSON.
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Fixed by replacing `as Record` with `readOwnProperty` helper and `Array.from().filter()` for element-wise validation.
 
 ---
 
@@ -208,7 +208,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For any agent contract that processes trace data, add explicit lineage field validation: `sourceTaskId`, `sourcePainId`, `sourceRunIds` must match the deterministic trace.
 - **Source**: PRI-192 / PR #638 (Codex review)
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `decideDownstreamGate()` checked artifact kind-level existence instead of per-dependency lineage, causing dependency B's missing artifact to be misclassified as `lineage_mismatch` when dependency A had a matching artifact.
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `decideDownstreamGate()` checked artifact kind-level existence instead of per-dependency lineage, causing dependency B's missing artifact to be misclassified as `lineage_mismatch` when dependency A had a matching artifact. Fixed by implementing true `lineage_mismatch` detection (task `result_ref` points to artifact with wrong `source_task_id`) and distinguishing from `missing_dreamer_pi_artifact` (no artifact found at all).
 
 ---
 
@@ -417,4 +417,4 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 25 |
 | Last updated | 2026-05-23 |
 | Top category | Schema & Type |
-| Recurring errors | 14 |
+| Recurring errors | 12 |
