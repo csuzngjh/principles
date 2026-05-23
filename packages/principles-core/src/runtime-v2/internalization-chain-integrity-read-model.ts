@@ -36,35 +36,82 @@ function readOwnProperty(obj: object, key: string): unknown {
   return undefined;
 }
 
-export function extractPIMetadata(diagJson: string | null): { parentTaskId?: string; dependencyTaskIds?: string[] } {
-  if (!diagJson) return {};
+export type PIMetadataParseResult =
+  | { status: 'missing' }
+  | {
+      status: 'parsed';
+      parentTaskId?: string;
+      dependencyTaskIds?: string[];
+    }
+  | {
+      status: 'malformed';
+      reason: string;
+    };
+
+const REASON_MAX_LENGTH = 120;
+
+function truncateReason(raw: string): string {
+  if (raw.length <= REASON_MAX_LENGTH) return raw;
+  return raw.slice(0, REASON_MAX_LENGTH - 3) + '...';
+}
+
+function safeJsonParse(json: string): { status: 'ok'; value: unknown } | { status: 'malformed'; reason: string } {
   try {
-    const parsed: unknown = JSON.parse(diagJson);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return { status: 'ok', value: JSON.parse(json) };
+  } catch {
+    return { status: 'malformed', reason: truncateReason('diagnosticJson is not valid JSON') };
+  }
+}
 
-    let meta: unknown = parsed;
-    const piMeta = readOwnProperty(parsed, 'pi_metadata');
-    if (piMeta !== undefined) {
-      meta = piMeta;
-    }
-    if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) return {};
+export function extractPIMetadata(diagJson: string | null): PIMetadataParseResult {
+  if (!diagJson) return { status: 'missing' };
 
-    const result: { parentTaskId?: string; dependencyTaskIds?: string[] } = {};
-    const parentTaskId = readOwnProperty(meta, 'parentTaskId');
-    if (typeof parentTaskId === 'string') {
-      result.parentTaskId = parentTaskId;
+  const parsed = safeJsonParse(diagJson);
+  if (parsed.status === 'malformed') return parsed;
+
+  if (typeof parsed.value !== 'object' || parsed.value === null || Array.isArray(parsed.value)) {
+    return { status: 'malformed', reason: truncateReason('diagnosticJson parsed to non-object') };
+  }
+
+  let meta: object = parsed.value;
+  const piMeta = readOwnProperty(parsed.value, 'pi_metadata');
+  if (piMeta !== undefined) {
+    if (typeof piMeta !== 'object' || piMeta === null || Array.isArray(piMeta)) {
+      return { status: 'malformed', reason: truncateReason('pi_metadata is not an object') };
     }
-    const depIds = readOwnProperty(meta, 'dependencyTaskIds');
-    if (Array.isArray(depIds)) {
-      const validated = Array.from(depIds).filter((id: unknown): id is string => typeof id === 'string');
-      if (validated.length > 0) {
-        result.dependencyTaskIds = validated;
+    meta = piMeta;
+  }
+
+  const parentTaskId = readOwnProperty(meta, 'parentTaskId');
+  const depIds = readOwnProperty(meta, 'dependencyTaskIds');
+
+  if (parentTaskId !== undefined && typeof parentTaskId !== 'string') {
+    return { status: 'malformed', reason: truncateReason('parentTaskId is not a string') };
+  }
+
+  if (depIds !== undefined) {
+    if (!Array.isArray(depIds)) {
+      return { status: 'malformed', reason: truncateReason('dependencyTaskIds is not an array') };
+    }
+    for (let i = 0; i < depIds.length; i++) {
+      if (typeof depIds[i] !== 'string') {
+        return { status: 'malformed', reason: truncateReason('dependencyTaskIds contains non-string element') };
       }
     }
-    return result;
-  } catch {
-    return {};
   }
+
+  if (parentTaskId === undefined && depIds === undefined) {
+    return { status: 'missing' };
+  }
+
+  const result: { status: 'parsed'; parentTaskId?: string; dependencyTaskIds?: string[] } = { status: 'parsed' };
+  if (typeof parentTaskId === 'string') {
+    result.parentTaskId = parentTaskId;
+  }
+  if (Array.isArray(depIds)) {
+    result.dependencyTaskIds = depIds as string[];
+  }
+  return result;
 }
 
 export class InternalizationChainIntegrityReadModel {
@@ -168,7 +215,10 @@ export class InternalizationChainIntegrityReadModel {
 
         const hasPhilosopherSuccessor = philosopherTasks.some(pt => {
           const meta = extractPIMetadata(pt.diagnostic_json);
-          return meta.parentTaskId === dreamerTask.task_id || meta.dependencyTaskIds?.includes(dreamerTask.task_id);
+          if (meta.status === 'parsed') {
+            return meta.parentTaskId === dreamerTask.task_id || meta.dependencyTaskIds?.includes(dreamerTask.task_id);
+          }
+          return false;
         });
         if (!hasPhilosopherSuccessor) {
           brokenLinks.push({
@@ -182,10 +232,20 @@ export class InternalizationChainIntegrityReadModel {
       }
 
       for (const philosopherTask of philosopherTasks) {
+        const philMeta = extractPIMetadata(philosopherTask.diagnostic_json);
+        if (philMeta.status === 'malformed') {
+          brokenLinks.push({
+            type: 'metadata_malformed',
+            severity: 'warning',
+            taskId: philosopherTask.task_id,
+            reason: philMeta.reason,
+            recommendedAction: 'Investigate diagnostic_json corruption. Re-seed task with valid metadata or clear diagnostic_json.',
+          });
+        }
+
         if (philosopherTask.status === 'pending' || philosopherTask.status === 'leased') {
           let hasDreamerDependency = false;
-          const philMeta = extractPIMetadata(philosopherTask.diagnostic_json);
-          if (philMeta.dependencyTaskIds && philMeta.dependencyTaskIds.length > 0) {
+          if (philMeta.status === 'parsed' && philMeta.dependencyTaskIds && philMeta.dependencyTaskIds.length > 0) {
             hasDreamerDependency = philMeta.dependencyTaskIds.some((id: string) => taskMap.has(id) && taskMap.get(id)?.task_kind === 'dreamer');
           }
 

@@ -171,26 +171,35 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
     expect(broken?.recommendedAction.length).toBeGreaterThan(0);
   });
 
-  it('malformed metadata: extractPIMetadata with null, invalid JSON, missing fields', () => {
-    expect(extractPIMetadata(null)).toEqual({});
-    expect(extractPIMetadata('')).toEqual({});
-    expect(extractPIMetadata('not-json{{{')).toEqual({});
-    expect(extractPIMetadata('42')).toEqual({});
-    expect(extractPIMetadata('"hello"')).toEqual({});
-    expect(extractPIMetadata('[]')).toEqual({});
-    expect(extractPIMetadata('{}')).toEqual({});
-    expect(extractPIMetadata('{"parentTaskId":42}')).toEqual({});
-    expect(extractPIMetadata('{"dependencyTaskIds":"not-array"}')).toEqual({});
-    expect(extractPIMetadata('{"dependencyTaskIds":[42,true]}')).toEqual({});
-    expect(extractPIMetadata('{"parentTaskId":"t1","dependencyTaskIds":["t2"]}')).toEqual({ parentTaskId: 't1', dependencyTaskIds: ['t2'] });
-    expect(extractPIMetadata('{"pi_metadata":{"parentTaskId":"t3"}}')).toEqual({ parentTaskId: 't3' });
-    expect(extractPIMetadata('{"pi_metadata":{"parentTaskId":123}}')).toEqual({});
-    expect(extractPIMetadata('{"dependencyTaskIds":["t1",42,"t3"]}')).toEqual({ dependencyTaskIds: ['t1', 't3'] });
+  it('malformed metadata: extractPIMetadata returns discriminated union', () => {
+    expect(extractPIMetadata(null).status).toBe('missing');
+    expect(extractPIMetadata('').status).toBe('missing');
+    expect(extractPIMetadata('not-json{{{').status).toBe('malformed');
+    expect(extractPIMetadata('42').status).toBe('malformed');
+    expect(extractPIMetadata('"hello"').status).toBe('malformed');
+    expect(extractPIMetadata('[]').status).toBe('malformed');
+    expect(extractPIMetadata('{}').status).toBe('missing');
+    expect(extractPIMetadata('{"parentTaskId":42}').status).toBe('malformed');
+    expect(extractPIMetadata('{"dependencyTaskIds":"not-array"}').status).toBe('malformed');
+    expect(extractPIMetadata('{"dependencyTaskIds":[42,true]}').status).toBe('malformed');
+    const parsed = extractPIMetadata('{"parentTaskId":"t1","dependencyTaskIds":["t2"]}');
+    expect(parsed.status).toBe('parsed');
+    if (parsed.status === 'parsed') {
+      expect(parsed.parentTaskId).toBe('t1');
+      expect(parsed.dependencyTaskIds).toEqual(['t2']);
+    }
+    const nested = extractPIMetadata('{"pi_metadata":{"parentTaskId":"t3"}}');
+    expect(nested.status).toBe('parsed');
+    if (nested.status === 'parsed') {
+      expect(nested.parentTaskId).toBe('t3');
+    }
+    expect(extractPIMetadata('{"pi_metadata":{"parentTaskId":123}}').status).toBe('malformed');
+    expect(extractPIMetadata('{"dependencyTaskIds":["t1",42,"t3"]}').status).toBe('malformed');
   });
 
   it('inherited property "constructor" is not read as pi_metadata', () => {
     const result = extractPIMetadata(JSON.stringify({ constructor: 'malicious' }));
-    expect(result).toEqual({});
+    expect(result.status).toBe('missing');
   });
 
   it('unrelated artifact: artifact with different sourceTaskId → task reports missing, not mismatch', () => {
