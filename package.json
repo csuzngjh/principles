@@ -15,6 +15,7 @@
     "typecheck:pd-console": "cd packages/pd-console && npx tsc --noEmit",
     "check:generated-artifacts": "node scripts/check-generated-artifacts.cjs",
     "verify:merge": "npm run check:generated-artifacts && npm run lint && npm run build && npm run build --workspace=@principles/pd-cli && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console",
+    "verify:publish": "npm run build && cd packages/openclaw-plugin && npm pack --dry-run",
     "pre-commit": "lint-staged",
     "ai-sprint": "node packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs",
     "ai-sprint:test": "node --test packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/test/*.mjs",

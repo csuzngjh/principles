@@ -24,6 +24,29 @@ jobs:
       - name: Run canonical merge gate
         run: npm run verify:merge
 
+  release-parity:
+    name: Release Build Parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies (workspace root)
+        run: npm ci --ignore-scripts
+
+      - name: Build workspace (core then plugin)
+        run: npm run build
+
+      - name: Verify publish dry-run
+        working-directory: packages/openclaw-plugin
+        run: |
+          set -o pipefail
+          npm pack --dry-run 2>&1 | head -50
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
