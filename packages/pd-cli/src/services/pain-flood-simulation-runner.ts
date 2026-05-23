@@ -1,0 +1,309 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import { RuntimeStateManager } from '@principles/core/runtime-v2';
+import { SqliteContextAssembler } from '@principles/core/runtime-v2';
+import { SqliteHistoryQuery } from '@principles/core/runtime-v2';
+import { StoreEventEmitter } from '@principles/core/runtime-v2';
+import { DiagnosticianRunner } from '@principles/core/runtime-v2';
+import { PassThroughValidator } from '@principles/core/runtime-v2';
+import { SqliteDiagnosticianCommitter } from '@principles/core/runtime-v2';
+import { TestDoubleRuntimeAdapter } from '@principles/core/runtime-v2';
+import { PainSignalBridge } from '@principles/core/runtime-v2';
+import { CandidateIntakeService } from '@principles/core/runtime-v2';
+import { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
+import { makeDeterministicDiagnosticianOutput } from '@principles/core/runtime-v2';
+import type {
+  PainFloodSimulationSummary,
+  PainFloodStage,
+  PainFloodScenarioName,
+} from '@principles/core/runtime-v2';
+import {
+  computeFloodStatus,
+  computeFloodTotals,
+  recommendFloodNextIssue,
+  boundedFloodEvidence,
+  maxEvidencePreviewLength,
+  formatContextBudgetSummary,
+  truncateReason,
+} from '@principles/core/runtime-v2';
+
+export interface PainFloodSimulationRunnerOptions {
+  workspaceDir: string;
+  workspaceMode: 'temp' | 'explicit_workspace';
+  identicalCount?: number;
+  similarCount?: number;
+  stressCount?: number;
+}
+
+function generatePainId(prefix: string, index: number): string {
+  return `flood-${prefix}-${index}`;
+}
+
+function generateSimilarReason(index: number): string {
+  return `Flood simulation pain signal #${index}: deterministic test message with small variation.`;
+}
+
+type PainSignalInput = { painId: string; painType: 'tool_failure' | 'subagent_error'; reason: string };
+
+interface RunScenarioOptions {
+  stateManager: RuntimeStateManager;
+  bridge: PainSignalBridge;
+}
+
+async function runScenario(
+  deps: RunScenarioOptions,
+  scenarioName: PainFloodScenarioName,
+  painSignals: PainSignalInput[],
+): Promise<PainFloodStage> {
+  const { stateManager, bridge } = deps;
+  const uniquePainIds = new Set<string>();
+  const errors: string[] = [];
+
+  // Record before counts to compute per-scenario deltas
+  const tasksBefore = await stateManager.listTasks();
+  let candidatesBefore = 0;
+  for (const task of tasksBefore) {
+    const candidates = await stateManager.getCandidatesByTaskId(task.taskId);
+    candidatesBefore += candidates.length;
+  }
+
+  for (const signal of painSignals) {
+    uniquePainIds.add(signal.painId);
+    try {
+      const result = await bridge.onPainDetected({
+        painId: signal.painId,
+        painType: signal.painType,
+        source: 'pain-flood-simulation',
+        reason: signal.reason,
+      });
+
+      if (result.status === 'failed' || result.status === 'retried') {
+        errors.push(`${signal.painId}: bridge returned ${result.status} — ${result.message ?? 'no message'}`);
+      }
+    } catch (err) {
+      errors.push(`${signal.painId}: threw — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Compute deltas
+  const tasksAfter = await stateManager.listTasks();
+  let candidatesAfter = 0;
+  for (const task of tasksAfter) {
+    const candidates = await stateManager.getCandidatesByTaskId(task.taskId);
+    candidatesAfter += candidates.length;
+  }
+
+  const deltaTasks = tasksAfter.length - tasksBefore.length;
+  const deltaCandidates = candidatesAfter - candidatesBefore;
+  const skippedCount = painSignals.length - deltaTasks;
+  const passed = errors.length === 0;
+
+  const stage: PainFloodStage = {
+    scenarioName,
+    status: passed ? 'passed' : 'failed',
+    inputCount: painSignals.length,
+    acceptedCount: deltaTasks,
+    skippedCount,
+    taskCount: deltaTasks,
+    candidateCount: deltaCandidates,
+    evidence: boundedFloodEvidence({
+      inputCount: painSignals.length,
+      acceptedCount: deltaTasks,
+      skippedCount,
+      deltaTasks,
+      deltaCandidates,
+      errorCount: errors.length,
+    }),
+  };
+
+  if (errors.length > 0) {
+    stage.reason = truncateReason(`Scenario ${scenarioName}: ${errors.length} errors. First: ${errors[0]}`);
+  }
+
+  return stage;
+}
+
+export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOptions): Promise<PainFloodSimulationSummary> {
+  const { workspaceDir, workspaceMode } = opts;
+  const identicalCount = opts.identicalCount ?? 10;
+  const similarCount = opts.similarCount ?? 10;
+  const stressCount = opts.stressCount ?? 50;
+
+  const stages: PainFloodStage[] = [];
+  const generatedAt = new Date().toISOString();
+
+  const pdDir = path.join(workspaceDir, '.pd');
+  const stateDir = path.join(workspaceDir, '.state');
+  await fs.promises.mkdir(pdDir, { recursive: true });
+  await fs.promises.mkdir(stateDir, { recursive: true });
+
+  const stateManager = new RuntimeStateManager({ workspaceDir });
+  await stateManager.initialize();
+
+  try {
+    // Create shared infrastructure
+    const { connection: sqliteConn, taskStore, runStore } = stateManager;
+    const historyQuery = new SqliteHistoryQuery(sqliteConn);
+    const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore);
+    const eventEmitter = new StoreEventEmitter();
+    const committer = new SqliteDiagnosticianCommitter(sqliteConn);
+    const validator = new PassThroughValidator();
+
+    // Single test-double adapter handles all pains with deterministic output
+    const runtimeAdapter = new TestDoubleRuntimeAdapter({
+      onFetchOutput: (runId: string) => ({
+        runId,
+        payload: makeDeterministicDiagnosticianOutput(runId),
+      }),
+    });
+
+    const runner = new DiagnosticianRunner(
+      {
+        stateManager,
+        contextAssembler,
+        runtimeAdapter,
+        eventEmitter,
+        validator,
+        committer,
+      },
+      {
+        owner: 'pain-flood-simulation',
+        runtimeKind: 'test-double',
+        pollIntervalMs: 50,
+        timeoutMs: 10000,
+      },
+    );
+
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
+    const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner,
+      intakeService,
+      ledgerAdapter,
+      autoIntakeEnabled: true,
+    });
+
+    // ── Scenario 1: Identical flood ──────────────────────────────────────────────
+    const identicalPainId = 'flood-identical-shared';
+    const identicalSignals = Array.from({ length: identicalCount }, () => ({
+      painId: identicalPainId,
+      painType: 'tool_failure' as const,
+      reason: 'Identical pain flood: repeated tool failure signal',
+    }));
+    stages.push(await runScenario({ stateManager, bridge }, 'identical_flood', identicalSignals));
+
+    // ── Scenario 2: Similar flood ────────────────────────────────────────────────
+    const similarSignals = Array.from({ length: similarCount }, (_, i) => ({
+      painId: generatePainId('similar', i),
+      painType: 'tool_failure' as const,
+      reason: generateSimilarReason(i),
+    }));
+    stages.push(await runScenario({ stateManager, bridge }, 'similar_flood', similarSignals));
+
+    // ── Scenario 3: Duplicate submission ─────────────────────────────────────────
+    const dupPainId = 'flood-dup-test';
+    const dupSignals = [
+      { painId: dupPainId, painType: 'tool_failure' as const, reason: 'Duplicate submission: first' },
+      { painId: dupPainId, painType: 'tool_failure' as const, reason: 'Duplicate submission: repeat' },
+    ];
+    stages.push(await runScenario({ stateManager, bridge }, 'duplicate_submission', dupSignals));
+
+    // ── Scenario 4: Tool failure flood ───────────────────────────────────────────
+    const toolFailPainId = 'flood-tool-failure-shared';
+    const toolFailSignals = Array.from({ length: 5 }, (_, i) => ({
+      painId: toolFailPainId,
+      painType: 'tool_failure' as const,
+      reason: `Tool failure flood #${i}: EACCES error on file write`,
+    }));
+    stages.push(await runScenario({ stateManager, bridge }, 'tool_failure_flood', toolFailSignals));
+
+    // ── Scenario 5: Stress test ──────────────────────────────────────────────────
+    const stressSignals: PainSignalInput[] = [];
+    // 60% unique, 40% duplicates using shared painIds
+    const stressUniqueCount = Math.floor(stressCount * 0.6);
+    const stressDupCount = stressCount - stressUniqueCount;
+
+    for (let i = 0; i < stressUniqueCount; i++) {
+      stressSignals.push({
+        painId: generatePainId('stress-unique', i),
+        painType: i % 3 === 0 ? 'subagent_error' : 'tool_failure',
+        reason: `Stress test unique pain #${i}`,
+      });
+    }
+    // Add duplicate batches using shared painIds
+    const sharedIds = ['flood-stress-shared-A', 'flood-stress-shared-B', 'flood-stress-shared-C'];
+    for (let i = 0; i < stressDupCount; i++) {
+      const sharedId = sharedIds[i % sharedIds.length];
+      stressSignals.push({
+        painId: sharedId,
+        painType: 'tool_failure',
+        reason: `Stress test duplicate batch ${i}`,
+      });
+    }
+
+    stages.push(await runScenario({ stateManager, bridge }, 'stress_test', stressSignals));
+
+    // ── Build summary ────────────────────────────────────────────────────────────
+    const totals = computeFloodTotals(stages);
+    const maxPreview = maxEvidencePreviewLength(stages);
+    const status = computeFloodStatus(stages);
+
+    return {
+      status,
+      workspaceMode,
+      generatedAt,
+      inputPainCount: totals.inputPainCount,
+      acceptedPainCount: totals.acceptedPainCount,
+      skippedDuplicateCount: totals.skippedDuplicateCount,
+      candidateCount: totals.candidateCount,
+      taskCount: totals.taskCount,
+      maxEvidencePreviewLength: maxPreview,
+      contextBudgetSummary: formatContextBudgetSummary(maxPreview),
+      stages,
+      recommendedNextIssue: recommendFloodNextIssue(stages),
+    };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const scenarioNames: PainFloodScenarioName[] = [
+      'identical_flood',
+      'similar_flood',
+      'duplicate_submission',
+      'tool_failure_flood',
+      'stress_test',
+    ];
+    const existingNames = new Set(stages.map(s => s.scenarioName));
+    for (const name of scenarioNames) {
+      if (!existingNames.has(name)) {
+        stages.push({
+          scenarioName: name,
+          status: 'failed',
+          inputCount: 0,
+          acceptedCount: 0,
+          skippedCount: 0,
+          taskCount: 0,
+          candidateCount: 0,
+          reason: truncateReason(`Unexpected error: ${errorMessage}`),
+        });
+      }
+    }
+
+    return {
+      status: 'error',
+      workspaceMode,
+      generatedAt,
+      inputPainCount: 0,
+      acceptedPainCount: 0,
+      skippedDuplicateCount: 0,
+      candidateCount: 0,
+      taskCount: 0,
+      maxEvidencePreviewLength: 0,
+      contextBudgetSummary: formatContextBudgetSummary(0),
+      stages,
+      recommendedNextIssue: recommendFloodNextIssue(stages),
+    };
+  } finally {
+    await stateManager.close();
+  }
+}

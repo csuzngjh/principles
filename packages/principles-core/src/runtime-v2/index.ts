@@ -292,6 +292,13 @@ export type { OperatorHealthSnapshot, OperatorHealthReadModelOptions, OverallHea
 export { computeOverallStatus, boundedEvidence, safeStringify, truncateReason, makeDeterministicDiagnosticianOutput, recommendNextIssue } from './synthetic-baseline.js';
 export type { SyntheticBaselineSummary, SyntheticBaselineStage, SyntheticBaselineStageName, SyntheticBaselineFailStage, SyntheticBaselineOptions } from './synthetic-baseline.js';
 
+// Pain flood simulation (PRI-208) — pure contract/helpers only; I/O runner lives in pd-cli
+export {
+  computeFloodStatus, computeFloodTotals, formatContextBudgetSummary, recommendFloodNextIssue,
+  boundedFloodEvidence, maxEvidencePreviewLength,
+} from './pain-flood-simulation.js';
+export type { PainFloodSimulationSummary, PainFloodStage, PainFloodScenarioName, PainFloodSimulationOptions } from './pain-flood-simulation.js';
+
 // Internalization contracts (PRI-42)
 export type {
   RuleHostInput,
