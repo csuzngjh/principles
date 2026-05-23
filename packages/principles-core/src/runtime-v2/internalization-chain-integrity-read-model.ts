@@ -29,15 +29,39 @@ export interface InternalizationChainIntegrityReadModelOptions {
   workspaceDir: string;
 }
 
+function readOwnProperty(obj: object, key: string): unknown {
+  if (Object.hasOwn(obj, key)) {
+    return (obj as Record<string, unknown>)[key];
+  }
+  return undefined;
+}
+
 export function extractPIMetadata(diagJson: string | null): { parentTaskId?: string; dependencyTaskIds?: string[] } {
   if (!diagJson) return {};
   try {
-    const parsed = JSON.parse(diagJson);
-    const meta = parsed?.pi_metadata ?? parsed;
-    return {
-      parentTaskId: meta?.parentTaskId,
-      dependencyTaskIds: meta?.dependencyTaskIds,
-    };
+    const parsed: unknown = JSON.parse(diagJson);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+
+    let meta: unknown = parsed;
+    const piMeta = readOwnProperty(parsed, 'pi_metadata');
+    if (piMeta !== undefined) {
+      meta = piMeta;
+    }
+    if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) return {};
+
+    const result: { parentTaskId?: string; dependencyTaskIds?: string[] } = {};
+    const parentTaskId = readOwnProperty(meta, 'parentTaskId');
+    if (typeof parentTaskId === 'string') {
+      result.parentTaskId = parentTaskId;
+    }
+    const depIds = readOwnProperty(meta, 'dependencyTaskIds');
+    if (Array.isArray(depIds)) {
+      const validated = Array.from(depIds).filter((id: unknown): id is string => typeof id === 'string');
+      if (validated.length > 0) {
+        result.dependencyTaskIds = validated;
+      }
+    }
+    return result;
   } catch {
     return {};
   }
@@ -227,6 +251,20 @@ export class InternalizationChainIntegrityReadModel {
                 reason: `Task ${task.task_id} result_ref ${ref} does not exist in artifacts table`,
                 recommendedAction: 'Investigate artifact commit failure or data corruption.',
               });
+            } else {
+              const artifactRow = db.prepare(
+                'SELECT task_id FROM artifacts WHERE artifact_id = ?'
+              ).get(ref) as { task_id: string } | undefined;
+              if (artifactRow && artifactRow.task_id !== task.task_id) {
+                brokenLinks.push({
+                  type: 'lineage_mismatch',
+                  severity: 'error',
+                  taskId: task.task_id,
+                  artifactId: ref,
+                  reason: `Task ${task.task_id} result_ref ${ref} has task_id ${artifactRow.task_id} which does not match owning task_id`,
+                  recommendedAction: 'Investigate artifact assignment logic or data corruption.',
+                });
+              }
             }
           }
         }
