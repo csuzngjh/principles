@@ -73,17 +73,31 @@ interface AuditResult {
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
 /** Update candidate status. Sets consumed_at when status='consumed'. */
-async function updateCandidateStatus(stateManager: RuntimeStateManager, candidateId: string, status: string): Promise<void> {
+interface UpdateCandidateStatusOptions {
+  stateManager: RuntimeStateManager;
+  candidateId: string;
+  targetStatus: string;
+  expectedCurrentStatus?: string;
+}
+
+async function updateCandidateStatus(opts: UpdateCandidateStatusOptions): Promise<void> {
+  const { stateManager, candidateId, targetStatus, expectedCurrentStatus } = opts;
   const db = stateManager.connection;
   const now = new Date().toISOString();
-  if (status === 'consumed') {
-    db.getDb().prepare(
-      'UPDATE principle_candidates SET status = ?, consumed_at = ? WHERE candidate_id = ?'
-    ).run(status, now, candidateId);
+  if (targetStatus === 'consumed') {
+    const result = db.getDb().prepare(
+      'UPDATE principle_candidates SET status = ?, consumed_at = ? WHERE candidate_id = ? AND status = ?'
+    ).run(targetStatus, now, candidateId, expectedCurrentStatus ?? targetStatus);
+    if (result.changes === 0) {
+      throw new Error(`Guarded transition failed: candidate ${candidateId} is not in expected status '${expectedCurrentStatus ?? targetStatus}'`);
+    }
   } else {
-    db.getDb().prepare(
-      'UPDATE principle_candidates SET status = ? WHERE candidate_id = ?'
-    ).run(status, candidateId);
+    const result = db.getDb().prepare(
+      'UPDATE principle_candidates SET status = ? WHERE candidate_id = ? AND status = ?'
+    ).run(targetStatus, candidateId, expectedCurrentStatus ?? targetStatus);
+    if (result.changes === 0) {
+      throw new Error(`Guarded transition failed: candidate ${candidateId} is not in expected status '${expectedCurrentStatus ?? targetStatus}'`);
+    }
   }
 }
 
@@ -491,7 +505,7 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
 
     // Update DB status — this must succeed; if it fails, exit non-zero
     try {
-      await updateCandidateStatus(stateManager, opts.candidateId, 'consumed');
+      await updateCandidateStatus({ stateManager, candidateId: opts.candidateId, targetStatus: 'consumed' });
     } catch (err) {
       const msg = `Ledger write succeeded (entry ${entry.id}) but DB status update failed: ${err instanceof Error ? err.message : String(err)}. ` +
         `Candidate ${opts.candidateId} may be in inconsistent state.`;
@@ -939,7 +953,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
 
       if (!isConfirm) {
         output.missingDreamerTask++;
-        output.results.push({ candidateId, route: decision.route, status: 'would_intake_and_create', taskId, channel, statusBefore: 'pending', statusAfter: 'consumed', intakeDecision: 'would_intake', seedDecision: 'would_seed', nextAction: 'Run with --confirm to intake and seed' });
+        output.results.push({ candidateId, route: decision.route, status: 'would_intake_and_create', taskId, channel, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'would_intake', seedDecision: 'would_seed', nextAction: 'Run with --confirm to intake and seed' });
         continue;
       }
 
@@ -957,7 +971,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       }
 
       try {
-        await updateCandidateStatus(stateManager, candidateId, 'consumed');
+        await updateCandidateStatus({ stateManager, candidateId, targetStatus: 'consumed', expectedCurrentStatus: 'pending' });
       } catch (statusErr) {
         const statusMsg = `Ledger write succeeded (entry ${intakeEntry.id}) but DB status update failed: ${statusErr instanceof Error ? statusErr.message : String(statusErr)}`;
         output.intakeFailed++;

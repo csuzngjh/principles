@@ -8,6 +8,7 @@ const mockGetTask = vi.hoisted(() => vi.fn());
 const mockCreateTask = vi.hoisted(() => vi.fn());
 const mockUpdateTaskDiagnosticJson = vi.hoisted(() => vi.fn());
 const mockPrepareAll = vi.hoisted(() => vi.fn());
+const mockPrepareRun = vi.hoisted(() => vi.fn());
 const mockRuntimeStateManagerOpts = vi.hoisted(() => vi.fn());
 const mockIntake = vi.hoisted(() => vi.fn());
 const mockExistsForCandidate = vi.hoisted(() => vi.fn());
@@ -40,7 +41,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
         updateTaskDiagnosticJson: mockUpdateTaskDiagnosticJson,
         connection: {
           getDb: () => ({
-            prepare: (sql: string) => ({ all: () => mockPrepareAll(sql), get: vi.fn(), run: vi.fn() }),
+            prepare: (sql: string) => ({ all: () => mockPrepareAll(sql), get: vi.fn(), run: () => mockPrepareRun(sql) }),
           }),
         },
       };
@@ -131,6 +132,7 @@ function setupDefaultMocks(): void {
     if (sql.includes("'pending'")) return [];
     return [];
   });
+  mockPrepareRun.mockReturnValue({ changes: 1 });
   mockGetCandidate.mockImplementation((id: string) =>
     Promise.resolve({
       candidateId: id,
@@ -195,7 +197,7 @@ describe('pd candidate internalization backfill', () => {
       candidateId: 'cand-pending-1',
       status: 'would_intake_and_create',
       statusBefore: 'pending',
-      statusAfter: 'consumed',
+      statusAfter: 'pending',
       intakeDecision: 'would_intake',
       seedDecision: 'would_seed',
     });
@@ -275,6 +277,34 @@ describe('pd candidate internalization backfill', () => {
       intakeDecision: 'intake_succeeded',
       seedDecision: 'existing',
     });
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+
+  it('guarded transition: status update fails when candidate is not pending', async () => {
+    mockPrepareAll.mockImplementation((sql: string) => {
+      if (sql.includes("'consumed'")) return [];
+      if (sql.includes("'pending'")) return [{ candidate_id: 'cand-pending-1' }];
+      return [];
+    });
+    mockPrepareRun.mockImplementation((sql: string) => {
+      if (sql.includes('UPDATE')) return { changes: 0 };
+      return { changes: 1 };
+    });
+
+    await handleCandidateInternalizationBackfill({ workspace: WS, includePending: true, confirm: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
+    expect(output.details.intakeFailed).toBe(1);
+    expect(output.details.created).toBe(0);
+    expect(output.details.results).toHaveLength(1);
+    expect(output.details.results[0]).toMatchObject({
+      candidateId: 'cand-pending-1',
+      statusBefore: 'pending',
+      statusAfter: 'pending',
+      intakeDecision: 'intake_failed',
+      seedDecision: 'skipped',
+    });
+    expect(output.details.results[0].reason).toContain('Guarded transition failed');
     expect(mockCreateTask).not.toHaveBeenCalled();
   });
 
