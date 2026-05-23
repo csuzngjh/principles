@@ -232,17 +232,25 @@ describe('PainFloodSimulation pure helpers (PRI-208)', () => {
       expect(names).toEqual(['identical_flood', 'similar_flood', 'duplicate_submission', 'tool_failure_flood', 'stress_test']);
     });
 
-    it('identical_flood expects at most 1 task per signal (maxTaskRatio=1)', () => {
-      expect(FLOOD_SCENARIO_EXPECTATIONS.identical_flood.maxTaskRatio).toBe(1);
+    it('identical_flood expects at most 1 task total (maxTaskCount=1)', () => {
+      expect(FLOOD_SCENARIO_EXPECTATIONS.identical_flood.maxTaskCount).toBe(1);
       expect(FLOOD_SCENARIO_EXPECTATIONS.identical_flood.description).toContain('identical');
     });
 
-    it('duplicate_submission expects at most 0.5 task per signal (maxTaskRatio=0.5)', () => {
-      expect(FLOOD_SCENARIO_EXPECTATIONS.duplicate_submission.maxTaskRatio).toBe(0.5);
+    it('duplicate_submission expects at most 1 task total (maxTaskCount=1)', () => {
+      expect(FLOOD_SCENARIO_EXPECTATIONS.duplicate_submission.maxTaskCount).toBe(1);
     });
 
-    it('tool_failure_flood expects at most 0.2 task per signal (maxTaskRatio=0.2)', () => {
-      expect(FLOOD_SCENARIO_EXPECTATIONS.tool_failure_flood.maxTaskRatio).toBe(0.2);
+    it('tool_failure_flood expects at most 1 task total (maxTaskCount=1)', () => {
+      expect(FLOOD_SCENARIO_EXPECTATIONS.tool_failure_flood.maxTaskCount).toBe(1);
+    });
+
+    it('similar_flood has no absolute cap (maxTaskCount undefined)', () => {
+      expect(FLOOD_SCENARIO_EXPECTATIONS.similar_flood.maxTaskCount).toBeUndefined();
+    });
+
+    it('stress_test has no absolute cap (maxTaskCount undefined)', () => {
+      expect(FLOOD_SCENARIO_EXPECTATIONS.stress_test.maxTaskCount).toBeUndefined();
     });
 
     it('all expectations have a description', () => {

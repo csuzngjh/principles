@@ -7,14 +7,15 @@ export type PainFloodScenarioName =
 
 export interface PainFloodScenarioExpectation {
   maxTaskRatio: number;
+  maxTaskCount?: number;
   description: string;
 }
 
 export const FLOOD_SCENARIO_EXPECTATIONS: Record<PainFloodScenarioName, PainFloodScenarioExpectation> = {
-  identical_flood: { maxTaskRatio: 1, description: 'All identical pains should produce at most 1 task' },
+  identical_flood: { maxTaskRatio: 1, maxTaskCount: 1, description: 'All identical pains should produce at most 1 task' },
   similar_flood: { maxTaskRatio: 1, description: 'Each unique pain should produce its own task' },
-  duplicate_submission: { maxTaskRatio: 0.5, description: 'Duplicate pain pair should produce at most 1 task' },
-  tool_failure_flood: { maxTaskRatio: 0.2, description: 'Identical tool failures should produce at most 1 task' },
+  duplicate_submission: { maxTaskRatio: 0.5, maxTaskCount: 1, description: 'Duplicate pain pair should produce at most 1 task' },
+  tool_failure_flood: { maxTaskRatio: 0.2, maxTaskCount: 1, description: 'Identical tool failures should produce at most 1 task' },
   stress_test: { maxTaskRatio: 1, description: 'Mixed unique/duplicate pains should deduplicate correctly' },
 };
 

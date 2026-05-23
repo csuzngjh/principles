@@ -107,7 +107,10 @@ async function runScenario(
   const deltaCandidates = candidatesAfter - candidatesBefore;
 
   const expectation = FLOOD_SCENARIO_EXPECTATIONS[scenarioName];
-  const maxAllowedTasks = Math.ceil(painSignals.length * expectation.maxTaskRatio);
+  const maxFromRatio = Math.ceil(painSignals.length * expectation.maxTaskRatio);
+  const maxAllowedTasks = expectation.maxTaskCount != null
+    ? Math.min(maxFromRatio, expectation.maxTaskCount)
+    : maxFromRatio;
   const dedupeViolation = deltaTasks > maxAllowedTasks;
 
   const passed = errors.length === 0 && !dedupeViolation;
