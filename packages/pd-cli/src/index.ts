@@ -732,9 +732,10 @@ candidateInternalizationCmd
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--dry-run', 'Report only, no modifications (default)')
   .option('--confirm', 'Actually create missing dreamer tasks')
+  .option('--include-pending', 'Include pending candidates (intake first, then seed dreamer)')
   .option('--json', 'Output as JSON')
   .action(async (opts) => {
-    await handleCandidateInternalizationBackfill({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
+    await handleCandidateInternalizationBackfill({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, includePending: opts.includePending, json: opts.json });
   });
 
 // ── Artifact inspection commands ────────────────────────────────────────────
