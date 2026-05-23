@@ -180,6 +180,13 @@ Apply this gate to every change touching `packages/pd-cli/src/commands/**`, CLI 
 
 Before handing off a PR (pushing, creating PR, or reporting completion), execute this checklist:
 
+**Review convergence and throughput**
+- Perform one adversarial self-review before first handoff. Check every applicable Runtime Contract rule and CLI / Operator rule against the entire diff, then fix all in-scope P0/P1/P2 findings in one batch.
+- The first external review is the single broad review pass. When responding to review fixes, verify the named blockers and modified regression surface only; do not expand into unrelated improvements.
+- Block merge only for P0/P1 issues or P2 issues that violate the current Linear issue acceptance criteria. Capture other observations as follow-up issues without modifying this PR.
+- When multiple findings share a root cause, update the Error Handbook once after the fix cycle rather than generating one lesson per comment.
+- During review iterations run targeted tests for changed behavior; before handoff run the required merge gate once. Avoid expanding the test matrix for unrelated observations.
+
 **Self-review/fix loop**
 - A PR is not ready just because code was pushed. It is ready only after the fetch → fix → verify → re-fetch loop has no valid unresolved P0/P1/P2 findings and required checks are green.
 - After every push that addresses review feedback, fetch PR reviews/comments/checks again. Do not ask the user to relay comments unless GitHub API access fails after at least 2 retries.
