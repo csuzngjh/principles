@@ -300,6 +300,21 @@ export {
 } from './pain-flood-simulation.js';
 export type { PainFloodSimulationSummary, PainFloodStage, PainFloodScenarioName, PainFloodSimulationOptions, PainFloodScenarioExpectation } from './pain-flood-simulation.js';
 
+// Broken artifact recovery simulation (PRI-209) — pure contract/helpers only; I/O runner lives in pd-cli
+export {
+  detectMissingArtifact, validateArtifactMetadata, checkLineageConsistency,
+  resolveDuplicateArtifacts, decideDownstreamGate, computeSimulationStatus,
+  recommendNextIssue as recommendBrokenArtifactNextIssue, buildSimulationSummary,
+  truncateReason as truncateBrokenArtifactReason, safeStringify as safeStringifyBrokenArtifact,
+  boundedEvidence as boundedBrokenArtifactEvidence,
+} from './broken-artifact-simulation.js';
+export type {
+  BrokenArtifactScenarioName, BrokenArtifactScenario, BrokenArtifactSimulationSummary,
+  SimulatedUpstreamTask, SimulatedArtifact, SimulatedDownstreamTask,
+  BrokenLinkDetection, ArtifactMetadataValidation, LineageConsistencyCheck,
+  DuplicateArtifactResolution, DownstreamGateDecision,
+} from './broken-artifact-simulation.js';
+
 // Internalization contracts (PRI-42)
 export type {
   RuleHostInput,
