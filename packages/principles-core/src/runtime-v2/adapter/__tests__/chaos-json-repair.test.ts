@@ -21,6 +21,11 @@ import {
 import { attemptStructuredOutputRepair } from '../structured-output-repair.js';
 import type { SchemaValidationError, RepairLLMCaller } from '../structured-output-repair.js';
 
+function asRecord(v: unknown): Record<string, unknown> | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
+  return v as Record<string, unknown>;
+}
+
 // ── Scenario 1: Prose-wrapped valid JSON ──
 
 describe('Chaos 1: Prose-wrapped valid JSON', () => {
@@ -115,11 +120,9 @@ describe('Chaos 6: Malformed JSON that cannot be repaired', () => {
     expect(result).toBeNull();
   });
 
-  it('6b: response is valid JSON but not an object (top-level array) — extractor finds first inner object', () => {
-    // The balanced-bracket scanner finds the first {…} pair at depth 0,
-    // which is the first element of the array. It returns the inner object.
+  it('6b: response is valid JSON but not an object (top-level array) — fail-closed, returns null', () => {
     const result = extractJsonObject('[{"taskId":"t1"},{"taskId":"t2"}]');
-    expect(result).toEqual({ taskId: 't1' });
+    expect(result).toBeNull();
   });
 
   it('6c: hybrid malformed: mixed brackets that cannot be balanced', () => {
@@ -143,7 +146,7 @@ describe('Chaos 7: Schema-invalid JSON that can be repaired', () => {
   it('7a: string-to-number repair succeeds on first attempt', async () => {
     const llmCaller: RepairLLMCaller = async () => JSON.stringify(VALID_OUTPUT);
     const schemaCheck = (v: unknown): boolean => {
-      const obj = v as Record<string, unknown>;
+      const obj = asRecord(v); if (!obj) return false;
       return typeof obj.confidence === 'number';
     };
 
@@ -166,7 +169,7 @@ describe('Chaos 7: Schema-invalid JSON that can be repaired', () => {
       return JSON.stringify(VALID_OUTPUT);
     };
     const schemaCheck = (v: unknown): boolean => {
-      const obj = v as Record<string, unknown>;
+      const obj = asRecord(v); if (!obj) return false;
       return typeof obj.confidence === 'number';
     };
 
@@ -193,7 +196,7 @@ describe('Chaos 7: Schema-invalid JSON that can be repaired', () => {
 
     const llmCaller: RepairLLMCaller = async () => JSON.stringify(validMulti);
     const schemaCheck = (v: unknown): boolean => {
-      const obj = v as Record<string, unknown>;
+      const obj = asRecord(v); if (!obj) return false;
       return typeof obj.confidence === 'number'
         && typeof obj.score === 'number'
         && typeof obj.count === 'number';
@@ -221,7 +224,7 @@ describe('Chaos 8: Schema-invalid JSON that repair still fails', () => {
   it('8a: repair fails all attempts — returns repaired=false, output=null', async () => {
     const llmCaller: RepairLLMCaller = async () => JSON.stringify({ confidence: 'still-string', summary: 'test' });
     const schemaCheck = (v: unknown): boolean => {
-      const obj = v as Record<string, unknown>;
+      const obj = asRecord(v); if (!obj) return false;
       return typeof obj.confidence === 'number';
     };
 
@@ -239,7 +242,7 @@ describe('Chaos 8: Schema-invalid JSON that repair still fails', () => {
   it('8b: repair returns prose (not JSON) — extraction fails — repaired=false', async () => {
     const llmCaller: RepairLLMCaller = async () => 'The confidence value should be a number like 0.85.';
     const schemaCheck = (v: unknown): boolean => {
-      const obj = v as Record<string, unknown>;
+      const obj = asRecord(v); if (!obj) return false;
       return typeof obj.confidence === 'number';
     };
 
@@ -279,12 +282,12 @@ describe('Chaos 8: Schema-invalid JSON that repair still fails', () => {
     };
 
     const schemaCheck = (v: unknown): boolean => {
-      const obj = v as Record<string, unknown>;
+      const obj = asRecord(v); if (!obj) return false;
       return typeof obj.confidence === 'number' && typeof obj.summary === 'string';
     };
 
     const schemaErrorsFn = (v: unknown): SchemaValidationError[] => {
-      const obj = v as Record<string, unknown>;
+      const obj = asRecord(v); if (!obj) return [];
       const errs: SchemaValidationError[] = [];
       if (typeof obj.confidence !== 'number') {
         errs.push({ path: '/confidence', message: 'Expected number', value: obj.confidence });
@@ -388,7 +391,7 @@ describe('Chaos 9: Lineage field preservation', () => {
     let attemptIdx = 0;
     const llmCaller: RepairLLMCaller = async () => llmAttempts[attemptIdx++] ?? null;
     const schemaCheck = (v: unknown): boolean => {
-      const obj = v as Record<string, unknown>;
+      const obj = asRecord(v); if (!obj) return false;
       return typeof obj.confidence === 'number';
     };
 
@@ -449,7 +452,7 @@ describe('Chaos 9: Lineage field preservation', () => {
         summary: 'test',
       });
     const schemaCheck = (v: unknown): boolean => {
-      const obj = v as Record<string, unknown>;
+      const obj = asRecord(v); if (!obj) return false;
       return typeof obj.confidence === 'number';
     };
 
