@@ -3574,3 +3574,12 @@ describe('PRI-215 synthetic baseline architecture boundary', () => {
   });
 });
 
+describe('PRI-225: No unsafe type assertions on untrusted metadata arrays', () => {
+  it('INTEGRITY_READ_MODEL_NO_AS_STRING_ARRAY: internalization-chain-integrity-read-model.ts must not use `as string[]` on untrusted data', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'internalization-chain-integrity-read-model.ts'), 'utf-8');
+    expect(src).not.toContain('as string[]');
+  });
+});
+

@@ -131,7 +131,15 @@ export function extractPIMetadata(diagJson: string | null): PIMetadataParseResul
     result.parentTaskId = parentTaskId;
   }
   if (Array.isArray(depIds)) {
-    result.dependencyTaskIds = depIds as string[];
+    const validatedDependencyTaskIds: string[] = [];
+    for (const id of depIds) {
+      if (typeof id === 'string') {
+        validatedDependencyTaskIds.push(id);
+      }
+    }
+    if (validatedDependencyTaskIds.length > 0) {
+      result.dependencyTaskIds = validatedDependencyTaskIds;
+    }
   }
   return result;
 }
@@ -272,6 +280,8 @@ export class InternalizationChainIntegrityReadModel {
           let hasDreamerDependency = false;
           if (philMeta.status === 'parsed' && philMeta.dependencyTaskIds && philMeta.dependencyTaskIds.length > 0) {
             hasDreamerDependency = philMeta.dependencyTaskIds.some((id: string) => taskMap.has(id) && taskMap.get(id)?.task_kind === 'dreamer');
+          } else if (philMeta.status === 'malformed' && philMeta.bestEffortParentIds.length > 0) {
+            hasDreamerDependency = philMeta.bestEffortParentIds.some((id: string) => taskMap.has(id) && taskMap.get(id)?.task_kind === 'dreamer');
           }
 
           if (!hasDreamerDependency) {
