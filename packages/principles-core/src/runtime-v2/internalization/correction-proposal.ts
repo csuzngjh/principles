@@ -40,6 +40,21 @@ export interface CorrectionProposalValidationResult {
 
 const IDENTITY_FIELDS = new Set(['toolName', 'sessionId']);
 
+const PATH_FIELDS = new Set(['file_path', 'path', 'filePath']);
+
+const PROTOTYPE_POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+const SELF_MODIFICATION_PATTERNS = [
+  /\.principles[\\/]/i,
+  /\.pd[\\/]/i,
+  /\.openclaw[\\/]/i,
+  /principles-disciple/i,
+  /openclaw\.plugin\.json/i,
+  /rule-host/i,
+  /nocturnal-/i,
+  /symphony/i,
+];
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -81,6 +96,97 @@ function isJsonSerializable(value: unknown, seen: Set<unknown> = new Set()): boo
 }
 
 // ---------------------------------------------------------------------------
+// Path boundary validation (PRI-210)
+// ---------------------------------------------------------------------------
+
+export interface PathValidationResult {
+  valid: boolean;
+  reason: string;
+}
+
+export function isPathWithinWorkspace(
+  proposedPath: string,
+  workspaceDir: string,
+): PathValidationResult {
+  if (typeof proposedPath !== 'string' || proposedPath.trim().length === 0) {
+    return { valid: false, reason: 'proposed path is empty or not a string' };
+  }
+
+  const normalizedPath = proposedPath.replace(/\\/g, '/');
+  const normalizedWorkspace = workspaceDir.replace(/\\/g, '/').replace(/\/+$/, '');
+
+  if (normalizedPath.includes('..')) {
+    const resolved = normalizedPath.replace(/\/+/, '/');
+    const segments = resolved.split('/');
+    const resolvedSegments: string[] = [];
+    for (const seg of segments) {
+      if (seg === '..') {
+        if (resolvedSegments.length === 0) {
+          return { valid: false, reason: `path traversal ".." escapes workspace root: ${proposedPath}` };
+        }
+        resolvedSegments.pop();
+      } else if (seg !== '.' && seg.length > 0) {
+        resolvedSegments.push(seg);
+      }
+    }
+    const resolvedPath = resolvedSegments.join('/');
+    const wsSegments = normalizedWorkspace.split('/').filter((s: string) => s.length > 0);
+    const wsResolved = wsSegments.join('/');
+    if (!resolvedPath.startsWith(wsResolved + '/') && resolvedPath !== wsResolved) {
+      return { valid: false, reason: `path traversal ".." resolves outside workspace: ${proposedPath}` };
+    }
+  }
+
+  if (/^[a-zA-Z]:[\\/]/i.test(proposedPath)) {
+    const driveLetter = proposedPath.substring(0, 1).toUpperCase();
+    const workspaceDrive = normalizedWorkspace.substring(0, 1).toUpperCase();
+    if (driveLetter !== workspaceDrive) {
+      return { valid: false, reason: `Windows drive-letter path targets different drive: ${proposedPath}` };
+    }
+    if (!normalizedPath.startsWith(normalizedWorkspace)) {
+      return { valid: false, reason: `absolute Windows path outside workspace: ${proposedPath}` };
+    }
+  }
+
+  if (/^\/[a-zA-Z]/.test(proposedPath) && !normalizedPath.startsWith(normalizedWorkspace)) {
+    return { valid: false, reason: `absolute path outside workspace: ${proposedPath}` };
+  }
+
+  if (/^\\\\/.test(proposedPath) || /^\/\/[^/]/.test(proposedPath)) {
+    return { valid: false, reason: `UNC/network path not allowed: ${proposedPath}` };
+  }
+
+  for (const pattern of SELF_MODIFICATION_PATTERNS) {
+    if (pattern.test(proposedPath)) {
+      return { valid: false, reason: `self-modification path targets PD/Symphony control files: ${proposedPath}` };
+    }
+  }
+
+  return { valid: true, reason: '' };
+}
+
+export function validateProposedPathBounds(
+  proposedParams: Record<string, unknown>,
+  workspaceDir: string,
+): PathValidationResult {
+  if (typeof workspaceDir !== 'string' || workspaceDir.trim().length === 0) {
+    return { valid: false, reason: 'workspaceDir is required for path boundary validation' };
+  }
+
+  for (const key of Object.keys(proposedParams)) {
+    if (!PATH_FIELDS.has(key)) continue;
+    const value = proposedParams[key];
+    if (typeof value !== 'string') continue;
+    const pathResult = isPathWithinWorkspace(value, workspaceDir);
+    if (!pathResult.valid) {
+      return { valid: false, reason: `proposedParams["${key}"]: ${pathResult.reason}` };
+    }
+  }
+
+  return { valid: true, reason: '' };
+}
+
+// ---------------------------------------------------------------------------
 // validateProposedParams
 // ---------------------------------------------------------------------------
 
@@ -102,8 +208,18 @@ export function validateProposedParams(
     return { valid: false, errors };
   }
 
+  for (const ppKey of PROTOTYPE_POLLUTION_KEYS) {
+    if (Object.hasOwn(proposedParams, ppKey)) {
+      errors.push(`proposedParams must not contain prototype pollution key "${ppKey}"`);
+    }
+  }
+
   for (const key of Object.keys(proposedParams)) {
     const value = proposedParams[key];
+
+    if (PROTOTYPE_POLLUTION_KEYS.has(key)) {
+      continue;
+    }
 
     if (IDENTITY_FIELDS.has(key)) {
       errors.push(`proposedParams must not modify identity field "${key}"`);
@@ -155,6 +271,12 @@ export function validateCorrectionProposal(
     errors.push('proposedParams must be a plain object');
   } else if (!isJsonSerializable(proposal.proposedParams)) {
     errors.push('proposedParams is not JSON-serializable');
+  } else {
+    for (const ppKey of PROTOTYPE_POLLUTION_KEYS) {
+      if (Object.hasOwn(proposal.proposedParams, ppKey)) {
+        errors.push(`proposedParams must not contain prototype pollution key "${ppKey}"`);
+      }
+    }
   }
 
   if (!Object.hasOwn(proposal, 'correctedFields')) {
@@ -169,6 +291,10 @@ export function validateCorrectionProposal(
     errors.push('correctedFields must contain objects with non-empty field and reason');
   } else if (isPlainObject(proposal.proposedParams)) {
     for (const cf of proposal.correctedFields) {
+      if (PROTOTYPE_POLLUTION_KEYS.has(cf.field)) {
+        errors.push(`correctedFields entry "${cf.field}" is a prototype pollution key`);
+        continue;
+      }
       if (!Object.hasOwn(proposal.proposedParams, cf.field)) {
         errors.push(`correctedFields entry "${cf.field}" is not present in proposedParams`);
       }
