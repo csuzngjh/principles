@@ -221,7 +221,7 @@ export async function attemptStructuredOutputRepair<T>(
     // PRI-200: Protect lineage fields — if originalOutput provided, preserve lineage
     let candidateWithLineage = repairedCandidate;
     if (cfg.originalOutput && typeof repairedCandidate === 'object' && repairedCandidate !== null) {
-      candidateWithLineage = preserveLineageFields(cfg.originalOutput, repairedCandidate as Record<string, unknown>);
+      candidateWithLineage = preserveLineageFields(cfg.originalOutput, repairedCandidate);
     }
 
     if (callbacks.schemaCheck(candidateWithLineage)) {
