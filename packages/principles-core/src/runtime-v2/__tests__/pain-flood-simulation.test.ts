@@ -263,8 +263,15 @@ describe('PainFloodSimulation pure helpers (PRI-208)', () => {
   });
 
   describe('computeMaxAllowedTasks', () => {
-    const sharedSignals = (count: number, distinctCount: number) =>
-      Array.from({ length: count }, (_, i) => ({ painId: `p-${i % distinctCount}` }));
+    const sharedSignals = (count: number, distinctCount: number) => {
+      if (distinctCount <= 0) throw new Error('distinctCount must be positive');
+      return Array.from({ length: count }, (_, i) => ({ painId: `p-${i % distinctCount}` }));
+    };
+
+    it('returns 0 for empty signals', () => {
+      const max = computeMaxAllowedTasks([], FLOOD_SCENARIO_EXPECTATIONS.identical_flood);
+      expect(max).toBe(0);
+    });
 
     it('identical flood: all signals create new tasks => exceeds maxTaskCount (not healthy)', () => {
       const signals = sharedSignals(10, 10); // 10 distinct painIds, each should produce task
