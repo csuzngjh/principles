@@ -170,7 +170,7 @@ describe('Chain Integrity — Real Production Path', () => {
     expect(link?.taskId).toBe('dreamer-2');
   });
 
-  it('artifact sourceTaskId mismatch → lineage_mismatch detected', () => {
+  it('unrelated artifact with different sourceTaskId → task reports missing, not mismatch', () => {
     insertTask({
       taskId: 'dreamer-3',
       taskKind: 'dreamer',
@@ -184,6 +184,48 @@ describe('Chain Integrity — Real Production Path', () => {
     const result = model.check();
 
     expect(result.brokenLinks.some(l => l.type === 'missing_dreamer_pi_artifact' && l.taskId === 'dreamer-3')).toBe(true);
+  });
+
+  it('succeeded task result_ref points to artifact with wrong source_task_id → lineage_mismatch', () => {
+    insertTask({
+      taskId: 'dreamer-lm',
+      taskKind: 'dreamer',
+      status: 'succeeded',
+      resultRef: 'artifact-lm',
+    });
+    insertRun({ runId: 'run-lm', taskId: 'dreamer-lm', executionStatus: 'succeeded' });
+    _insertArtifact({
+      artifactId: 'artifact-lm',
+      artifactKind: 'principle',
+      sourceTaskId: 'wrong-task-id',
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir });
+    const result = model.check();
+
+    const mismatch = result.brokenLinks.find(l => l.type === 'lineage_mismatch' && l.taskId === 'dreamer-lm');
+    expect(mismatch).toBeDefined();
+    expect(mismatch?.artifactId).toBe('artifact-lm');
+    expect(mismatch?.reason).toContain('wrong-task-id');
+  });
+
+  it('unrelated artifact remains missing, not lineage_mismatch (multi-dep)', () => {
+    insertTask({
+      taskId: 'dreamer-X',
+      taskKind: 'dreamer',
+      status: 'succeeded',
+    });
+    insertRun({ runId: 'run-X', taskId: 'dreamer-X', executionStatus: 'succeeded' });
+    insertPIArtifact({ artifactId: 'pi-unrelated', artifactKind: 'principle', sourceTaskId: 'other-task' });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir });
+    const result = model.check();
+
+    const missing = result.brokenLinks.find(l => l.type === 'missing_dreamer_pi_artifact' && l.taskId === 'dreamer-X');
+    expect(missing).toBeDefined();
+
+    const mismatch = result.brokenLinks.find(l => l.type === 'lineage_mismatch' && l.taskId === 'dreamer-X');
+    expect(mismatch).toBeUndefined();
   });
 
   it('dependency A has artifact, dependency B missing → B is missing_artifact, not lineage_mismatch', () => {
@@ -354,5 +396,12 @@ describe('extractPIMetadata — malformed inputs', () => {
   it('object with only unrelated fields → {}', () => {
     const result = extractPIMetadata(JSON.stringify({ foo: 'bar', baz: 42 }));
     expect(result).toEqual({});
+  });
+
+  it('inherited property "constructor" is not read as parentTaskId', () => {
+    const obj = Object.create({ parentTaskId: 'inherited' });
+    obj.ownField = 'value';
+    const result = extractPIMetadata(JSON.stringify(obj));
+    expect(result.parentTaskId).toBeUndefined();
   });
 });

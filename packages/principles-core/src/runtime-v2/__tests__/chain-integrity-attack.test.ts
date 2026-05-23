@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS pi_artifacts (
 
 CREATE TABLE IF NOT EXISTS artifacts (
   artifact_id TEXT PRIMARY KEY,
-  task_id TEXT NOT NULL,
+  source_task_id TEXT NOT NULL,
   artifact_kind TEXT NOT NULL,
   content_json TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -119,11 +119,11 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
     db.close();
   }
 
-  function _insertArtifact(opts: { artifactId: string; taskId: string; artifactKind: string }): void {
+  function _insertArtifact(opts: { artifactId: string; sourceTaskId: string; artifactKind: string }): void {
     const db = new Database(dbPath);
     db.prepare(
-      `INSERT OR REPLACE INTO artifacts (artifact_id, task_id, artifact_kind) VALUES (?, ?, ?)`,
-    ).run(opts.artifactId, opts.taskId, opts.artifactKind);
+      `INSERT OR REPLACE INTO artifacts (artifact_id, source_task_id, artifact_kind) VALUES (?, ?, ?)`,
+    ).run(opts.artifactId, opts.sourceTaskId, opts.artifactKind);
     db.close();
   }
 
@@ -187,7 +187,12 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
     expect(extractPIMetadata('{"dependencyTaskIds":["t1",42,"t3"]}')).toEqual({ dependencyTaskIds: ['t1', 't3'] });
   });
 
-  it('sourceTaskId mismatch: artifact with different sourceTaskId than expected', () => {
+  it('inherited property "constructor" is not read as pi_metadata', () => {
+    const result = extractPIMetadata(JSON.stringify({ constructor: 'malicious' }));
+    expect(result).toEqual({});
+  });
+
+  it('unrelated artifact: artifact with different sourceTaskId → task reports missing, not mismatch', () => {
     insertTask({ taskId: 'dreamer-003', taskKind: 'dreamer', status: 'succeeded' });
     insertRun({ runId: 'run-d3', taskId: 'dreamer-003', executionStatus: 'succeeded' });
     insertPIArtifact({ artifactId: 'pi-mismatch', sourceTaskId: 'dreamer-wrong', artifactKind: 'principle' });
@@ -197,6 +202,19 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
 
     const missingArtifact = result.brokenLinks.find(l => l.type === 'missing_dreamer_pi_artifact' && l.taskId === 'dreamer-003');
     expect(missingArtifact).toBeDefined();
+  });
+
+  it('lineage_mismatch: succeeded task result_ref points to artifact with wrong source_task_id', () => {
+    insertTask({ taskId: 'dreamer-lm', taskKind: 'dreamer', status: 'succeeded', resultRef: 'artifact-lm' });
+    insertRun({ runId: 'run-lm', taskId: 'dreamer-lm', executionStatus: 'succeeded' });
+    _insertArtifact({ artifactId: 'artifact-lm', sourceTaskId: 'wrong-task', artifactKind: 'principle' });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: tmpDir });
+    const result = model.check();
+
+    const mismatch = result.brokenLinks.find(l => l.type === 'lineage_mismatch' && l.taskId === 'dreamer-lm');
+    expect(mismatch).toBeDefined();
+    expect(mismatch?.artifactId).toBe('artifact-lm');
   });
 
   it('multi-dependency: A has artifact, B missing — B reported as missing_dreamer_pi_artifact, NOT lineage_mismatch', () => {
