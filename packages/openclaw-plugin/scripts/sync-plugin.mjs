@@ -1079,7 +1079,7 @@ function restartGatewayWindows() {
             console.log('   Scheduled task not available, trying direct gateway start via PowerShell...');
             try {
                 execSync(
-                    'powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -NoNewWindow -FilePath \'openclaw\' -ArgumentList \'gateway\'"',
+                    'powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath \'openclaw\' -ArgumentList \'gateway\'"',
                     { stdio: 'pipe', timeout: 5000 }
                 );
                 gatewayStarted = true;
@@ -1090,7 +1090,7 @@ function restartGatewayWindows() {
 
         // Wait for gateway to be listening on port (同步等待，不异步)
         const port = 18789;
-        const deadline = Date.now() + 15000; // 缩短等待时间，避免卡住
+        const deadline = Date.now() + 30000; // Gateway 初始化可能需要 20+ 秒 (如 Windows schtasks 重启)
         let gatewayListening = false;
 
         while (Date.now() < deadline) {
