@@ -102,6 +102,14 @@ The `record-error` skill handles: classify → number → Linear comment → tag
 
 Before handing off a PR (pushing, creating PR, or reporting completion), execute this checklist:
 
+**Review convergence and throughput**
+- The implementation agent performs one adversarial self-review before the first handoff. It must check the applicable Runtime Contract and CLI / Operator gates against the whole diff and fix all in-scope P0/P1/P2 findings together.
+- The first external review is the only full-scope review pass for the PR. It should report all currently visible in-scope P0/P1/P2 findings in one batch.
+- After a fix push, reviewers verify the listed blockers and regression surface only. Do not reopen broad review or request adjacent hardening unless the new change introduces a P0/P1 production or safety regression.
+- A finding blocks the current PR only if it is P0/P1, or a P2 violation of this issue's stated acceptance criteria. Improvements outside that boundary become a follow-up Linear issue and do not delay merge.
+- Group recurring errors by root cause and perform one Error Handbook update per root cause after the fix cycle. Do not create one handbook entry per review comment.
+- Use targeted tests while iterating on review fixes; run the required merge gate once before final handoff. Do not add broad unrelated tests or refactors solely because a neighboring weakness was noticed.
+
 **Self-review/fix loop**
 - A PR is not ready just because code was pushed. It is ready only after the fetch → fix → verify → re-fetch loop has no valid unresolved P0/P1/P2 findings and required checks are green.
 - After every push that addresses review feedback, fetch PR reviews/comments/checks again. Do not ask the user to relay comments unless GitHub API access fails after at least 2 retries.

@@ -54,14 +54,22 @@
 提交代码、创建 PR 或通知完成前，必须执行以下检查清单：
 
 ```
+□ 一次性对抗性自审（首次 handoff 前）
+  - 对照当前 issue 的 Acceptance Criteria 审查整个 diff
+  - 对照适用的 Runtime Contract Rules / CLI Operator Gate 逐条核查
+  - 将当前 scope 内全部 P0/P1/P2 一次性修复后再请求外部评审
+  - scope 外的改进只记录 follow-up issue，不混入当前 PR
+
 □ 获取所有 PR 评论和审查意见（若有现有 PR）
   - gh pr view <PR> --json comments,reviews,latestReviews,files,statusCheckRollup
   - gh api repos/:owner/:repo/pulls/<PR>/comments --paginate
   - gh api repos/:owner/:repo/issues/<PR>/comments --paginate
   - 重试至少 2 次，API 超时不跳过
-  - 确认真实人工评论与自动化评论的区别，处理所有 P0/P1/P2 发现项
+  - 确认真实人工评论与自动化评论的区别
+  - 首轮评审：处理全部当前 scope 内 P0/P1/P2 发现项
+  - 修复后复核：仅核验已列 blocker 与修复修改产生的回归面，不重新扩大审计范围
   - 每个已处理的评论注明修复方式
-  - 无法处理的评论在 PR body 中说明原因
+  - scope 外/非阻塞建议在 PR body 中说明并转 follow-up issue，不拖延当前合并
 
 □ 检查差异文件范围
   - gh pr diff <PR> --name-only（或 git diff origin/main --name-only）
@@ -69,24 +77,39 @@
   - 确认没有基于过时 main 分支导致的合入代码回滚
 
 □ 运行测试
-  - cd packages/principles-core && npm run test
-  - cd packages/openclaw-plugin && npm run test
-  - npm run lint（如果存在）
-  - npm run verify:merge（如果存在）
+  - 迭代修复期间：仅运行与改动直接相关的 targeted tests + 必要 build/typecheck
+  - 最终 handoff 前：npm run verify:merge（如果存在）
+  - 只有当前 diff 触及对应 package/跨包 contract，或 merge gate 要求时，再运行完整 package tests
+  - 不因 scope 外观察项扩展当前 PR 的测试矩阵和代码范围
 
 □ 最终总结
   - 相关 ERR 条目清单及避免方式
-  - PR 评论已处理的总结
+  - PR 评论已处理的总结（fixed / deferred-follow-up / duplicate / misunderstanding）
   - 测试运行结果
   - 剩余风险说明
 
 □ Error Recording Gate
   - 如果本次工作中发现了真正的 bug（通过代码审查或自我审查）：
+    - 按 root cause 分组；同一根因只记录一次，不按评论数量重复记录
     - 从未有过的新错误类 → 在 Error Handbook 中创建新 ERR 条目
     - 已有条目的重复 → 更新该条目的 Recurrence 字段
     - 在 Linear issue 上添加 lesson-learned 标签
     - 在 PR body 中说明 handbook 更新
 ```
+
+### Step 5: Merge-Blocking Boundary (强制收敛)
+
+当前 PR 的合并阻塞范围固定如下：
+
+| 等级 | 是否阻塞当前 PR | 处理方式 |
+|------|----------------|----------|
+| P0 数据破坏、安全问题、架构边界破坏 | 是 | 当前 PR 修复 |
+| P1 生产链路错误、错误状态写入、lineage 污染、operator safety 违规 | 是 | 当前 PR 修复 |
+| P2 违反当前 Linear issue 明确验收标准 | 是 | 当前 PR 修复 |
+| P2 但超出当前 issue scope 的增强/硬化 | 否 | 创建 follow-up issue |
+| P3、风格、可选优化、旁支重构 | 否 | 评论记录或 follow-up |
+
+外部 reviewer 首轮可全面审查一次。修复提交后的 reviewer 只确认上述 blocker 被关闭以及修复本身没有引入 P0/P1 回归；不得把邻近改进不断追加到当前 PR。
 
 ---
 
@@ -132,20 +155,25 @@ Symphony 调度的工作流按以下步骤执行。
 
 ```
 13. 执行 PR Pre-Review 检查清单：
+    □ 首次 handoff 前完成一次全 diff 对抗性自审，并一次修复当前 scope 内 P0/P1/P2
     □ 获取并处理所有 PR 评论
     □ 检查差异文件范围（无无关文件、无回滚）
-    □ 运行全部测试
+    □ 迭代运行 targeted tests；最终运行 merge gate
     □ 编写最终总结（ERR 清单、评论处理、测试结果、剩余风险）
 14. 如果发现真正 bug，执行 Error Recording：
-    □ 新建 ERR 或更新现有条目
+    □ 按 root cause 分组，新建 ERR 或更新现有条目一次
     □ 添加 lesson-learned 标签
     □ 在 PR body 中说明
+15. Reviewer 修复轮次规则：
+    □ 首轮 review 允许全面检查
+    □ 修复后只核验既有 blockers 及修复回归面
+    □ scope 外建议建 follow-up，不追加到当前 PR
 ```
 
 ### 阶段 6: 完成
 
 ```
-15. 写 .symphony/agent-completion.json
-16. 状态设为 ready_for_review
-17. 不手动创建 PR，不手动变更 issue 状态 — Symphony 会自动处理
+16. 写 .symphony/agent-completion.json
+17. 状态设为 ready_for_review
+18. 不手动创建 PR，不手动变更 issue 状态 — Symphony 会自动处理
 ```
