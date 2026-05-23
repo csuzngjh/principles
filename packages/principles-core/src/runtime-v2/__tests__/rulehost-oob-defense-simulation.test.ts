@@ -442,12 +442,14 @@ describe('PRI-210: RuleHost out-of-bounds write defense simulation', () => {
       expect(result.valid).toBe(true);
     });
 
-    it('accepts non-string path values (skip validation, handled by type checks)', () => {
+    it('rejects non-string path values via validateProposedPathBounds', () => {
       const result = validateProposedPathBounds(
         { file_path: 42, content: 'fixed' },
         WORKSPACE,
       );
-      expect(result.valid).toBe(true);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('file_path');
+      expect(result.reason).toContain('string');
     });
 
     it('does not reject normal file names containing "rule" but not targeting control files', () => {
@@ -597,6 +599,68 @@ describe('PRI-210: RuleHost out-of-bounds write defense simulation', () => {
       );
       expect(result.valid).toBe(false);
       expect(result.reason).toContain('filePath');
+    });
+
+    it('POSIX sibling-prefix /home/user/project2/file with workspace /home/user/project → invalid', () => {
+      const result = isPathWithinWorkspace('/home/user/project2/file', WORKSPACE);
+      expect(result.valid).toBe(false);
+    });
+
+    it('Windows sibling-prefix D:/code/projectevil/file with workspace D:/code/project → invalid', () => {
+      const result = isPathWithinWorkspace('D:/code/projectevil/file', WIN_WORKSPACE);
+      expect(result.valid).toBe(false);
+    });
+
+    it('POSIX absolute /.evil with workspace /home/user/project → invalid', () => {
+      const result = isPathWithinWorkspace('/.evil', WORKSPACE);
+      expect(result.valid).toBe(false);
+    });
+
+    it('POSIX absolute /0evil with workspace /home/user/project → invalid', () => {
+      const result = isPathWithinWorkspace('/0evil', WORKSPACE);
+      expect(result.valid).toBe(false);
+    });
+
+    it('Multiple separators src///utils.ts with workspace /home/user/project → valid', () => {
+      const result = isPathWithinWorkspace('src///utils.ts', WORKSPACE);
+      expect(result.valid).toBe(true);
+    });
+
+    it('Dot traversal ../etc/passwd with workspace /home/user/project → invalid', () => {
+      const result = isPathWithinWorkspace('../etc/passwd', WORKSPACE);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('..');
+    });
+
+    it('Dot-dot traversal within workspace src/../src/foo.ts with workspace /home/user/project → valid', () => {
+      const result = isPathWithinWorkspace('src/../src/foo.ts', WORKSPACE);
+      expect(result.valid).toBe(true);
+    });
+
+    it('Windows drive case-insensitive d:/code/project/file with workspace D:/code/project → valid', () => {
+      const result = isPathWithinWorkspace('d:/code/project/file', WIN_WORKSPACE);
+      expect(result.valid).toBe(true);
+    });
+
+    it('UNC path \\\\server\\share → invalid', () => {
+      const result = isPathWithinWorkspace('\\\\server\\share', WORKSPACE);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('UNC');
+    });
+
+    it('Workspace root itself → valid', () => {
+      const result = isPathWithinWorkspace('/home/user/project', WORKSPACE);
+      expect(result.valid).toBe(true);
+    });
+
+    it('Non-string path field via validateProposedPathBounds → invalid (not silently skipped)', () => {
+      const result = validateProposedPathBounds(
+        { file_path: 123 as unknown as string, content: 'data' },
+        WORKSPACE,
+      );
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('file_path');
+      expect(result.reason).toContain('string');
     });
   });
 });

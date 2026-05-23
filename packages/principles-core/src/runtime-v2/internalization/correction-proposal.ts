@@ -112,48 +112,107 @@ export function isPathWithinWorkspace(
     return { valid: false, reason: 'proposed path is empty or not a string' };
   }
 
-  const normalizedPath = proposedPath.replace(/\\/g, '/');
-  const normalizedWorkspace = workspaceDir.replace(/\\/g, '/').replace(/\/+$/, '');
-
-  if (normalizedPath.includes('..')) {
-    const resolved = normalizedPath.replace(/\/+/, '/');
-    const segments = resolved.split('/');
-    const resolvedSegments: string[] = [];
-    for (const seg of segments) {
-      if (seg === '..') {
-        if (resolvedSegments.length === 0) {
-          return { valid: false, reason: `path traversal ".." escapes workspace root: ${proposedPath}` };
-        }
-        resolvedSegments.pop();
-      } else if (seg !== '.' && seg.length > 0) {
-        resolvedSegments.push(seg);
-      }
-    }
-    const resolvedPath = resolvedSegments.join('/');
-    const wsSegments = normalizedWorkspace.split('/').filter((s: string) => s.length > 0);
-    const wsResolved = wsSegments.join('/');
-    if (!resolvedPath.startsWith(wsResolved + '/') && resolvedPath !== wsResolved) {
-      return { valid: false, reason: `path traversal ".." resolves outside workspace: ${proposedPath}` };
-    }
-  }
-
-  if (/^[a-zA-Z]:[\\/]/i.test(proposedPath)) {
-    const driveLetter = proposedPath.substring(0, 1).toUpperCase();
-    const workspaceDrive = normalizedWorkspace.substring(0, 1).toUpperCase();
-    if (driveLetter !== workspaceDrive) {
-      return { valid: false, reason: `Windows drive-letter path targets different drive: ${proposedPath}` };
-    }
-    if (!normalizedPath.startsWith(normalizedWorkspace)) {
-      return { valid: false, reason: `absolute Windows path outside workspace: ${proposedPath}` };
-    }
-  }
-
-  if (/^\/[a-zA-Z]/.test(proposedPath) && !normalizedPath.startsWith(normalizedWorkspace)) {
-    return { valid: false, reason: `absolute path outside workspace: ${proposedPath}` };
-  }
+  const normalizedPath = proposedPath.replace(/\\/g, '/').replace(/\/+/g, '/');
+  const normalizedWorkspace = workspaceDir.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/+$/, '');
 
   if (/^\\\\/.test(proposedPath) || /^\/\/[^/]/.test(proposedPath)) {
     return { valid: false, reason: `UNC/network path not allowed: ${proposedPath}` };
+  }
+
+  function resolveSegments(path: string): string[] {
+    const segments = path.split('/').filter(s => s.length > 0);
+    const resolved: string[] = [];
+    for (const seg of segments) {
+      if (seg === '..') {
+        if (resolved.length > 0) resolved.pop();
+      } else if (seg !== '.') {
+        resolved.push(seg);
+      }
+    }
+    return resolved;
+  }
+
+  function isWithin(pathSegs: string[], wsSegs: string[], caseInsensitive: boolean): boolean {
+    if (wsSegs.length > pathSegs.length) return false;
+    for (let i = 0; i < wsSegs.length; i++) {
+      const pSeg = pathSegs[i] ?? '';
+      const wSeg = wsSegs[i] ?? '';
+      const p = caseInsensitive ? pSeg.toLowerCase() : pSeg;
+      const w = caseInsensitive ? wSeg.toLowerCase() : wSeg;
+      if (p !== w) return false;
+    }
+    return true;
+  }
+
+  const pathIsWindowsDrive = normalizedPath.length >= 2 && normalizedPath[1] === ':';
+  const wsIsWindowsDrive = normalizedWorkspace.length >= 2 && normalizedWorkspace[1] === ':';
+  const pathIsPosixAbsolute = !pathIsWindowsDrive && normalizedPath.startsWith('/');
+  const wsIsPosixAbsolute = !wsIsWindowsDrive && normalizedWorkspace.startsWith('/');
+  const caseInsensitive = pathIsWindowsDrive && wsIsWindowsDrive;
+
+  function resolveWorkspaceSegments(): string[] {
+    if (wsIsWindowsDrive) return resolveSegments(normalizedWorkspace.substring(2));
+    if (wsIsPosixAbsolute) return resolveSegments(normalizedWorkspace.substring(1));
+    return resolveSegments(normalizedWorkspace);
+  }
+
+  const wsSegments = resolveWorkspaceSegments();
+
+  function resolvePathSegments(): string[] {
+    if (pathIsWindowsDrive) {
+      const driveLetter = (normalizedPath[0] ?? '').toUpperCase();
+      const workspaceDrive = (normalizedWorkspace[0] ?? '').toUpperCase();
+      if (driveLetter !== workspaceDrive) {
+        return [];
+      }
+      return resolveSegments(normalizedPath.substring(2));
+    }
+    if (pathIsPosixAbsolute) {
+      return resolveSegments(normalizedPath.substring(1));
+    }
+    const rawSegments = normalizedPath.split('/').filter(s => s.length > 0);
+    const resolved = [...wsSegments];
+    for (const seg of rawSegments) {
+      if (seg === '..') {
+        if (resolved.length === 0) {
+          return [];
+        }
+        resolved.pop();
+      } else if (seg !== '.') {
+        resolved.push(seg);
+      }
+    }
+    return resolved;
+  }
+
+  if (pathIsWindowsDrive && !wsIsWindowsDrive) {
+    return { valid: false, reason: `Windows drive-letter path with non-Windows workspace: ${proposedPath}` };
+  }
+  if (pathIsWindowsDrive) {
+    const driveLetter = (normalizedPath[0] ?? '').toUpperCase();
+    const workspaceDrive = (normalizedWorkspace[0] ?? '').toUpperCase();
+    if (driveLetter !== workspaceDrive) {
+      return { valid: false, reason: `Windows drive-letter path targets different drive: ${proposedPath}` };
+    }
+  }
+
+  const pathSegments = resolvePathSegments();
+
+  if (pathSegments.length === 0 && normalizedPath.includes('..') && !pathIsWindowsDrive && !pathIsPosixAbsolute) {
+    return { valid: false, reason: `path traversal ".." escapes workspace root: ${proposedPath}` };
+  }
+
+  if (!isWithin(pathSegments, wsSegments, caseInsensitive)) {
+    if (normalizedPath.includes('..')) {
+      return { valid: false, reason: `path traversal ".." resolves outside workspace: ${proposedPath}` };
+    }
+    if (pathIsWindowsDrive) {
+      return { valid: false, reason: `absolute Windows path outside workspace: ${proposedPath}` };
+    }
+    if (pathIsPosixAbsolute) {
+      return { valid: false, reason: `absolute path outside workspace: ${proposedPath}` };
+    }
+    return { valid: false, reason: `relative path resolves outside workspace: ${proposedPath}` };
   }
 
   for (const pattern of SELF_MODIFICATION_PATTERNS) {
@@ -176,7 +235,9 @@ export function validateProposedPathBounds(
   for (const key of Object.keys(proposedParams)) {
     if (!PATH_FIELDS.has(key)) continue;
     const value = proposedParams[key];
-    if (typeof value !== 'string') continue;
+    if (typeof value !== 'string') {
+      return { valid: false, reason: `proposedParams["${key}"]: path field must be a string, got ${typeof value}` };
+    }
     const pathResult = isPathWithinWorkspace(value, workspaceDir);
     if (!pathResult.valid) {
       return { valid: false, reason: `proposedParams["${key}"]: ${pathResult.reason}` };
