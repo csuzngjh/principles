@@ -1094,41 +1094,54 @@ export function groupEventsIntoSessions(events: RawEventEntry[]): Map<string, Se
     if (!session) continue;
 
     switch (event.type) {
-      case 'tool_call':
+      case 'tool_call': {
+        const { toolName } = event.data;
+        if (typeof toolName !== 'string' || toolName.length === 0) break;
         session.toolCalls.push({
-          toolName: typeof event.data.toolName === 'string' ? event.data.toolName : 'unknown',
+          toolName,
           filePath: typeof event.data.filePath === 'string' ? event.data.filePath : undefined,
           outcome: event.data.error ? 'failure' : 'success',
           errorType: typeof event.data.errorType === 'string' ? event.data.errorType : undefined,
           errorMessage: typeof event.data.error === 'string' ? event.data.error : undefined,
         });
         break;
-      case 'pain_signal':
+      }
+      case 'pain_signal': {
+        const { score } = event.data;
+        if (typeof score !== 'number' || !Number.isFinite(score)) break;
         session.painSignals.push({
           source: typeof event.data.source === 'string' ? event.data.source : 'unknown',
-          score: typeof event.data.score === 'number' && Number.isFinite(event.data.score) ? event.data.score : 0,
+          score,
           severity: event.data.severity === 'mild' || event.data.severity === 'moderate' || event.data.severity === 'severe' ? event.data.severity : undefined,
           reason: typeof event.data.reason === 'string' ? event.data.reason : undefined,
         });
         break;
-      case 'gate_block':
+      }
+      case 'gate_block': {
+        const { toolName, reason } = event.data;
+        if (typeof toolName !== 'string' || toolName.length === 0) break;
+        if (typeof reason !== 'string' || reason.length === 0) break;
         session.gateBlocks.push({
-          toolName: typeof event.data.toolName === 'string' ? event.data.toolName : 'unknown',
+          toolName,
           filePath: typeof event.data.filePath === 'string' ? event.data.filePath : undefined,
-          reason: typeof event.data.reason === 'string' ? event.data.reason : '',
+          reason,
         });
         break;
+      }
       case 'empathy_rollback':
         session.userCorrections.push({
           correctionCue: typeof event.data.reason === 'string' ? event.data.reason : undefined,
         });
         break;
-      case 'plan_approval':
+      case 'plan_approval': {
+        const { toolName } = event.data;
+        if (typeof toolName !== 'string' || toolName.length === 0) break;
         session.planApprovals.push({
-          toolName: typeof event.data.toolName === 'string' ? event.data.toolName : 'unknown',
+          toolName,
           filePath: typeof event.data.filePath === 'string' ? event.data.filePath : undefined,
         });
         break;
+      }
     }
   }
 

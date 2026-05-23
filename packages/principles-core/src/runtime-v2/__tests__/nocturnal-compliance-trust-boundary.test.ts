@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   groupEventsIntoSessions,
+  detectOpportunity,
   type RawEventEntry,
   type SessionEvents,
 } from '../nocturnal/nocturnal-compliance.js';
@@ -25,20 +26,20 @@ function getSession(events: RawEventEntry[]): SessionEvents {
 
 describe('nocturnal-compliance trust boundary', () => {
   describe('groupEventsIntoSessions — non-string toolName', () => {
-    it('rejects numeric toolName, yields "unknown"', () => {
+    it('rejects numeric toolName, entry skipped from toolCalls', () => {
       const events: RawEventEntry[] = [
         makeEvent({ type: 'tool_call', data: { toolName: 42 } }),
       ];
       const session = getSession(events);
-      expect(session.toolCalls[0]?.toolName).toBe('unknown');
+      expect(session.toolCalls).toHaveLength(0);
     });
 
-    it('rejects array toolName, yields "unknown"', () => {
+    it('rejects array toolName, entry skipped from toolCalls', () => {
       const events: RawEventEntry[] = [
         makeEvent({ type: 'tool_call', data: { toolName: ['Write'] } }),
       ];
       const session = getSession(events);
-      expect(session.toolCalls[0]?.toolName).toBe('unknown');
+      expect(session.toolCalls).toHaveLength(0);
     });
   });
 
@@ -61,28 +62,28 @@ describe('nocturnal-compliance trust boundary', () => {
   });
 
   describe('groupEventsIntoSessions — score NaN/Infinity', () => {
-    it('rejects NaN score, yields 0', () => {
+    it('rejects NaN score, entry skipped from painSignals', () => {
       const events: RawEventEntry[] = [
         makeEvent({ type: 'pain_signal', data: { score: NaN, source: 'test' } }),
       ];
       const session = getSession(events);
-      expect(session.painSignals[0]?.score).toBe(0);
+      expect(session.painSignals).toHaveLength(0);
     });
 
-    it('rejects Infinity score, yields 0', () => {
+    it('rejects Infinity score, entry skipped from painSignals', () => {
       const events: RawEventEntry[] = [
         makeEvent({ type: 'pain_signal', data: { score: Infinity, source: 'test' } }),
       ];
       const session = getSession(events);
-      expect(session.painSignals[0]?.score).toBe(0);
+      expect(session.painSignals).toHaveLength(0);
     });
 
-    it('rejects -Infinity score, yields 0', () => {
+    it('rejects -Infinity score, entry skipped from painSignals', () => {
       const events: RawEventEntry[] = [
         makeEvent({ type: 'pain_signal', data: { score: -Infinity, source: 'test' } }),
       ];
       const session = getSession(events);
-      expect(session.painSignals[0]?.score).toBe(0);
+      expect(session.painSignals).toHaveLength(0);
     });
   });
 
@@ -92,6 +93,7 @@ describe('nocturnal-compliance trust boundary', () => {
         makeEvent({ type: 'pain_signal', data: { score: 50, source: 'test', severity: 'critical' } }),
       ];
       const session = getSession(events);
+      expect(session.painSignals).toHaveLength(1);
       expect(session.painSignals[0]?.severity).toBeUndefined();
     });
 
@@ -100,6 +102,7 @@ describe('nocturnal-compliance trust boundary', () => {
         makeEvent({ type: 'pain_signal', data: { score: 50, source: 'test', severity: 3 } }),
       ];
       const session = getSession(events);
+      expect(session.painSignals).toHaveLength(1);
       expect(session.painSignals[0]?.severity).toBeUndefined();
     });
   });
@@ -111,10 +114,59 @@ describe('nocturnal-compliance trust boundary', () => {
         makeEvent({ type: 'pain_signal', data: { toolName: [1, 2, 3], score: 'high', source: 99 } }),
       ];
       const session = getSession(events);
-      expect(session.toolCalls).toHaveLength(1);
-      expect(session.toolCalls[0]?.toolName).toBe('unknown');
-      expect(session.painSignals[0]?.source).toBe('unknown');
-      expect(session.painSignals[0]?.score).toBe(0);
+      expect(session.toolCalls).toHaveLength(0);
+      expect(session.painSignals).toHaveLength(0);
+    });
+  });
+
+  describe('groupEventsIntoSessions — skip behavior', () => {
+    it('invalid toolName row skipped and does not increment toolCalls length', () => {
+      const events: RawEventEntry[] = [
+        makeEvent({ type: 'tool_call', data: { toolName: 'Write', filePath: '/foo.ts' } }),
+        makeEvent({ type: 'tool_call', data: { toolName: 42 } }),
+        makeEvent({ type: 'tool_call', data: { toolName: 'Read', filePath: '/bar.ts' } }),
+      ];
+      const session = getSession(events);
+      expect(session.toolCalls).toHaveLength(2);
+      expect(session.toolCalls[0]?.toolName).toBe('Write');
+      expect(session.toolCalls[1]?.toolName).toBe('Read');
+    });
+
+    it('invalid toolName cannot trigger T-09 opportunity', () => {
+      const events: RawEventEntry[] = [
+        makeEvent({ type: 'tool_call', data: { toolName: 42 } }),
+        makeEvent({ type: 'tool_call', data: { toolName: 99 } }),
+        makeEvent({ type: 'tool_call', data: { toolName: [1, 2] } }),
+      ];
+      const session = getSession(events);
+      expect(session.toolCalls).toHaveLength(0);
+      const opp = detectOpportunity('T-09', session);
+      expect(opp.applicable).toBe(false);
+    });
+
+    it('NaN pain score skipped and does not trigger pain-derived opportunity', () => {
+      const events: RawEventEntry[] = [
+        makeEvent({ type: 'pain_signal', data: { score: NaN, source: 'test' } }),
+      ];
+      const session = getSession(events);
+      expect(session.painSignals).toHaveLength(0);
+    });
+
+    it('malformed gate block skipped and does not count as violation', () => {
+      const events: RawEventEntry[] = [
+        makeEvent({ type: 'gate_block', data: { toolName: 42, reason: 'dangerous' } }),
+        makeEvent({ type: 'gate_block', data: { toolName: 'bash', reason: '' } }),
+      ];
+      const session = getSession(events);
+      expect(session.gateBlocks).toHaveLength(0);
+    });
+
+    it('malformed plan approval skipped', () => {
+      const events: RawEventEntry[] = [
+        makeEvent({ type: 'plan_approval', data: { toolName: [1, 2] } }),
+      ];
+      const session = getSession(events);
+      expect(session.planApprovals).toHaveLength(0);
     });
   });
 
