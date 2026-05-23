@@ -11,17 +11,46 @@
  * Extract JSON object from text (handles prose-wrapped and code-fenced JSON).
  * Returns the parsed object, or null if no valid JSON found.
  */
-export function extractJsonObject(text: string): unknown | null {
-  // Try code-fenced JSON first: ```json ... ``` or ``` ... ```
+export function extractJsonObject(text: string): Record<string, unknown> | null {
   const fencedMatch = /```(?:json)?\s*\n?([\s\S]*?)\n?```/.exec(text);
   if (fencedMatch) {
     const [, fencedContent] = fencedMatch;
     if (fencedContent) {
-      try { return JSON.parse(fencedContent.trim()); } catch { /* fall through */ }
+      try {
+        const parsed = JSON.parse(fencedContent.trim());
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          return parsed;
+        }
+        return null;
+      } catch { /* fall through */ }
     }
   }
 
-  // Balanced-bracket scan for first top-level {...}
+  const trimmed = text.trimStart();
+  if (trimmed.length > 0 && trimmed[0] === '[') {
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    let end = -1;
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\' && inStr) { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '[' || ch === '{') depth++;
+      else if (ch === ']' || ch === '}') depth--;
+      if (depth === 0) { end = i; break; }
+    }
+    if (end >= 0) {
+      try {
+        const parsed = JSON.parse(trimmed.slice(0, end + 1));
+        if (Array.isArray(parsed)) return null;
+        if (typeof parsed === 'object' && parsed !== null) return parsed;
+      } catch { /* fall through to brace scan */ }
+    }
+  }
+
   let depth = 0;
   let start = -1;
   for (let i = 0; i < text.length; i++) {
@@ -32,7 +61,13 @@ export function extractJsonObject(text: string): unknown | null {
     } else if (ch === '}') {
       depth--;
       if (depth === 0 && start >= 0) {
-        try { return JSON.parse(text.slice(start, i + 1)); } catch { start = -1; }
+        try {
+          const parsed = JSON.parse(text.slice(start, i + 1));
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            return parsed;
+          }
+          start = -1;
+        } catch { start = -1; }
       }
     }
   }

@@ -217,7 +217,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When writing validators for untrusted data, never use `if (hasCorrectType) { validate }` — always use `if (!hasCorrectType) { error } else { validate }`. The "skip on wrong type" pattern is always wrong for required fields.
 - **Source**: PRI-192 / PR #638 (reviewer feedback)
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007
+- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007. Recurred 2026-05-23 in PRI-207 (PR #680): `extractJsonObject` fenced-code path parsed valid non-object JSON (array/null/string/number/boolean) but fell through to brace scan instead of returning null, allowing array payloads to be treated as objects. Same root cause: validator (fenced parse) silently skips invalid type instead of failing loud.
 
 **[ERR-010]** | Falsy evaluator return silently passes validation instead of recording failure
 
