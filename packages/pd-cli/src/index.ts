@@ -36,6 +36,7 @@ import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handle
 import { handleArtifactShow } from './commands/artifact.js';
 import { handleRuntimeCanary } from './commands/runtime-canary.js';
 import { handleRuntimeSyntheticBaseline } from './commands/runtime-synthetic-baseline.js';
+import { handleRuntimePainFlood } from './commands/runtime-pain-flood-simulation.js';
 import { handleRuntimeInternalizationIntegrity } from './commands/runtime-internalization-integrity.js';
 import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-internalization-integrity-repair.js';
 import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtime-internalization-enqueue-successors.js';
@@ -303,15 +304,35 @@ runtimeCmd
     await handleRuntimeCanary({ workspace: opts.workspace, json: opts.json });
   });
 
-runtimeCmd
+const synthCmd = runtimeCmd
   .command('synthetic')
-  .description('Synthetic workload baseline commands')
+  .description('Synthetic workload baseline commands');
+
+synthCmd
   .command('baseline')
   .description('Run synthetic PD workload baseline (PRI-206) — deterministic, no LLM required')
   .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeSyntheticBaseline({ workspace: opts.workspace, json: opts.json });
+  });
+
+synthCmd
+  .command('flood')
+  .description('Run pain flood simulation (PRI-208) — deterministic dedup/stress test, no LLM required')
+  .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
+  .option('--json', 'Output raw JSON')
+  .option('--identical-count <n>', 'Number of identical pain signals (default: 10)', parseInt)
+  .option('--similar-count <n>', 'Number of similar pain signals (default: 10)', parseInt)
+  .option('--stress-count <n>', 'Number of stress test pain signals (default: 50)', parseInt)
+  .action(async (opts) => {
+    await handleRuntimePainFlood({
+      workspace: opts.workspace,
+      json: opts.json,
+      identicalCount: opts.identicalCount,
+      similarCount: opts.similarCount,
+      stressCount: opts.stressCount,
+    });
   });
 
 runtimeCmd
