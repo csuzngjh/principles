@@ -41,6 +41,8 @@ interface EnqueueSuccessorsOutput {
   skippedCount: number;
   actions: EnqueueAction[];
   error?: string;
+  reason?: string;
+  nextAction?: string;
 }
 
 const OWNER = 'pd-cli-enqueue-successors';
@@ -145,53 +147,98 @@ function formatTextOutput(output: EnqueueSuccessorsOutput): string {
   return lines.join('\n');
 }
 
-function emitFailure(error: string, isDryRun: boolean, json: boolean): void {
+interface EmitFailureOptions {
+  error: string;
+  isDryRun: boolean;
+  json: boolean;
+  reason?: string;
+  nextAction?: string;
+}
+
+function emitFailure(opts: EmitFailureOptions): void {
   const failOutput: EnqueueSuccessorsOutput = {
     status: 'failed',
-    dryRun: isDryRun,
+    dryRun: opts.isDryRun,
     scannedCount: 0,
     createdCount: 0,
     existingCount: 0,
     skippedCount: 0,
     actions: [],
-    error,
+    error: opts.error,
+    reason: opts.reason ?? opts.error,
+    nextAction: opts.nextAction ?? 'Check workspace path and storage availability, then re-run',
   };
-  if (json) {
+  if (opts.json) {
     console.log(JSON.stringify(failOutput, null, 2));
   } else {
-    console.error(`Error: ${error}`);
+    console.error(`Error: ${opts.error}`);
+    if (opts.nextAction) console.error(`Next action: ${opts.nextAction}`);
   }
   process.exitCode = 1;
 }
 
-async function findExistingSuccessor(
+interface SuccessorIndexEntry {
+  taskId: string;
+  taskKind: string;
+  parentTaskId: string | null;
+  channel: string;
+  hydrated: boolean;
+}
+
+async function buildSuccessorIndex(
   stateManager: RuntimeStateManager,
-  opts: { parentTaskId: string; successorKind: string; channel: string },
-): Promise<{ taskId: string } | null> {
+): Promise<Map<string, SuccessorIndexEntry>> {
   const allStatuses: ('pending' | 'retry_wait' | 'succeeded' | 'leased' | 'failed' | 'needs_human_review')[] = ['pending', 'retry_wait', 'succeeded', 'leased', 'failed', 'needs_human_review'];
+  const index = new Map<string, SuccessorIndexEntry>();
   const results = await Promise.all(
     allStatuses.map(status => stateManager.listTasks({ status })),
   );
-  const candidates = results.flat();
-  for (const task of candidates) {
-    if (task.taskKind !== opts.successorKind) continue;
+  for (const task of results.flat()) {
+    if (!isPeerRunnerKind(task.taskKind)) continue;
     const piTask = hydratePITaskRecord(task);
-    if (!piTask) continue;
-    if (piTask.parentTaskId === opts.parentTaskId && piTask.channel === opts.channel) {
-      return { taskId: task.taskId };
+    index.set(task.taskId, {
+      taskId: task.taskId,
+      taskKind: task.taskKind,
+      parentTaskId: piTask?.parentTaskId ?? null,
+      channel: piTask?.channel ?? '',
+      hydrated: piTask !== null,
+    });
+  }
+  return index;
+}
+
+function findSuccessorInIndex(
+  index: Map<string, SuccessorIndexEntry>,
+  opts: { parentTaskId: string; successorKind: string; channel: string; deterministicTaskId: string },
+): { taskId: string; hydrated: boolean } | null {
+  const byTaskId = index.get(opts.deterministicTaskId);
+  if (byTaskId) {
+    return { taskId: byTaskId.taskId, hydrated: byTaskId.hydrated };
+  }
+  for (const entry of index.values()) {
+    if (entry.taskKind === opts.successorKind && entry.parentTaskId === opts.parentTaskId && entry.channel === opts.channel) {
+      return { taskId: entry.taskId, hydrated: entry.hydrated };
     }
   }
   return null;
 }
 
 export async function handleRuntimeInternalizationEnqueueSuccessors(opts: EnqueueSuccessorsOptions): Promise<void> {
+  const isDryRun = !opts.confirm;
+
   const workspaceDirResult = await Promise.resolve().then(() =>
     opts.workspace
       ? path.resolve(opts.workspace)
       : resolveWorkspaceDir(),
   ).catch((resolveErr: unknown) => {
     const message = resolveErr instanceof Error ? resolveErr.message : String(resolveErr);
-    emitFailure(`Failed to resolve workspace: ${message}`, true, !!opts.json);
+    emitFailure({
+      error: `Failed to resolve workspace: ${message}`,
+      isDryRun,
+      json: !!opts.json,
+      reason: `workspace_resolve_failed: ${message}`,
+      nextAction: 'Provide a valid --workspace path or ensure .principles directory exists',
+    });
     return null;
   });
   if (workspaceDirResult === null) {
@@ -219,8 +266,6 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
     return;
   }
 
-  const isDryRun = !opts.confirm;
-
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
@@ -228,13 +273,25 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
       await stateManager.initialize();
     } catch (initErr) {
       const message = initErr instanceof Error ? initErr.message : String(initErr);
-      emitFailure(`Failed to initialize storage: ${message}`, isDryRun, !!opts.json);
+      emitFailure({
+        error: `Failed to initialize storage: ${message}`,
+        isDryRun,
+        json: !!opts.json,
+        reason: `storage_init_failed: ${message}`,
+        nextAction: 'Check workspace path and .principles directory permissions',
+      });
       return;
     }
 
     const succeededTasks = await stateManager.listTasks({ status: 'succeeded' }).catch((listErr: unknown) => {
       const message = listErr instanceof Error ? listErr.message : String(listErr);
-      emitFailure(`Failed to list tasks: ${message}`, isDryRun, !!opts.json);
+      emitFailure({
+        error: `Failed to list tasks: ${message}`,
+        isDryRun,
+        json: !!opts.json,
+        reason: `list_tasks_failed: ${message}`,
+        nextAction: 'Check database availability and re-run',
+      });
       return null;
     });
     if (succeededTasks === null) {
@@ -242,6 +299,21 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
     }
 
     const piSucceededTasks = succeededTasks.filter(t => isPeerRunnerKind(t.taskKind));
+
+    const successorIndex = await buildSuccessorIndex(stateManager).catch((indexErr: unknown) => {
+      const message = indexErr instanceof Error ? indexErr.message : String(indexErr);
+      emitFailure({
+        error: `Failed to build successor index: ${message}`,
+        isDryRun,
+        json: !!opts.json,
+        reason: `successor_index_failed: ${message}`,
+        nextAction: 'Check database availability and re-run',
+      });
+      return null;
+    });
+    if (successorIndex === null) {
+      return;
+    }
 
     const orchestrator = new InternalizationOrchestrator(
       { stateManager },
@@ -295,37 +367,36 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
             reason: 'No valid successor in job graph for this task kind and channel',
           });
         } else {
-          let existingSuccessor: { taskId: string } | null = null;
-          try {
-            existingSuccessor = await findExistingSuccessor(
-              stateManager,
-              {
-                parentTaskId: task.taskId,
-                successorKind: proposalResult.proposal.taskKind,
-                channel: proposalResult.proposal.channel,
-              },
-            );
-          } catch (dedupeErr) {
-            const dedupeMessage = dedupeErr instanceof Error ? dedupeErr.message : String(dedupeErr);
-            actions.push({
-              taskId: task.taskId,
-              taskKind: piTask.taskKind,
-              decision: 'skipped',
-              reason: `dedupe_scan_failed: ${dedupeMessage}`,
-              nextAction: 'Re-run or investigate DB availability',
-            });
-            skippedCount++;
-            continue;
-          }
-          if (existingSuccessor) {
-            actions.push({
-              taskId: task.taskId,
-              taskKind: piTask.taskKind,
-              decision: 'successor_exists',
+          const deterministicTaskId = `${proposalResult.proposal.taskKind}-${task.taskId}-${proposalResult.proposal.channel}`;
+          const existingSuccessor = findSuccessorInIndex(
+            successorIndex,
+            {
+              parentTaskId: task.taskId,
               successorKind: proposalResult.proposal.taskKind,
-              successorTaskId: existingSuccessor.taskId,
-            });
-            existingCount++;
+              channel: proposalResult.proposal.channel,
+              deterministicTaskId,
+            },
+          );
+          if (existingSuccessor) {
+            if (!existingSuccessor.hydrated) {
+              actions.push({
+                taskId: task.taskId,
+                taskKind: piTask.taskKind,
+                decision: 'skipped',
+                reason: `successor_exists_with_malformed_metadata: taskId=${existingSuccessor.taskId} has unparseable diagnosticJson`,
+                nextAction: 'Run integrity-repair on the successor task, then re-run enqueue-successors',
+              });
+              skippedCount++;
+            } else {
+              actions.push({
+                taskId: task.taskId,
+                taskKind: piTask.taskKind,
+                decision: 'successor_exists',
+                successorKind: proposalResult.proposal.taskKind,
+                successorTaskId: existingSuccessor.taskId,
+              });
+              existingCount++;
+            }
           } else {
             actions.push({
               taskId: task.taskId,

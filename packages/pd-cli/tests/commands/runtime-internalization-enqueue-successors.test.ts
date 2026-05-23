@@ -31,9 +31,10 @@ vi.mock('@principles/core/runtime-v2', () => ({
     ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer', 'trainer'].includes(k),
   ),
   hydratePITaskRecord: vi.fn().mockImplementation((task: Record<string, unknown>) => {
-    if (!task.diagnosticJson) return null;
+    if (typeof task.diagnosticJson !== 'string' || task.diagnosticJson.length === 0) return null;
     try {
-      const meta = JSON.parse(task.diagnosticJson as string);
+      const meta = JSON.parse(task.diagnosticJson);
+      if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) return null;
       return {
         taskId: task.taskId,
         taskKind: task.taskKind,
@@ -57,10 +58,10 @@ import { handleRuntimeInternalizationEnqueueSuccessors } from '../../src/command
 
 const WS = '/fake/workspace';
 
-function mockDryRunListTasks(succeededTasks: ReturnType<typeof makeSucceededTask>[]) {
+function mockDryRunListTasks(succeededTasks: ReturnType<typeof makeSucceededTask>[], successorTasks: ReturnType<typeof makeSucceededTask>[] = []) {
   mockListTasks
     .mockResolvedValueOnce(succeededTasks)
-    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce(successorTasks)
     .mockResolvedValueOnce([])
     .mockResolvedValueOnce([])
     .mockResolvedValueOnce([])
@@ -534,50 +535,26 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(output.actions[0].taskId).toBe('trainer-dry-001');
   });
 
-  it('dry-run findExistingSuccessor DB error: skipped with reason', async () => {
-    const dreamerTask = makeSucceededTask('dreamer-dedupe-err', 'dreamer');
+  it('successor index build failure: fails closed with structured error', async () => {
+    const dreamerTask = makeSucceededTask('dreamer-index-err', 'dreamer');
     mockListTasks
       .mockResolvedValueOnce([dreamerTask])
-      .mockRejectedValueOnce(new Error('Database locked during dedupe'));
-    mockProposeNextTask.mockResolvedValue({
-      decision: 'proposal_created',
-      taskId: 'dreamer-dedupe-err',
-      taskKind: 'dreamer',
-      proposal: { taskKind: 'philosopher', channel: 'prompt', dependencyTaskIds: ['dreamer-dedupe-err'], inputArtifactRefs: [], parentTaskId: 'dreamer-dedupe-err', correlationId: 'corr-dedupe' },
-    });
+      .mockRejectedValueOnce(new Error('Database locked during index build'));
 
     await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
-    expect(output.actions[0].decision).toBe('skipped');
-    expect(output.actions[0].reason).toContain('dedupe_scan_failed');
-    expect(output.actions[0].nextAction).toBeDefined();
-    expect(output.skippedCount).toBe(1);
+    expect(output.status).toBe('failed');
+    expect(output.reason).toContain('successor_index_failed');
+    expect(output.nextAction).toBeDefined();
+    expect(process.exitCode).toBe(1);
   });
 
   it('dry-run with existing successor: reports successor_exists', async () => {
     const dreamerTask = makeSucceededTask('dreamer-existing-succ', 'dreamer');
-    const philosopherPending = {
-      taskId: 'philosopher-dreamer-existing-succ-prompt',
-      taskKind: 'philosopher',
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: 3,
-      inputRef: undefined,
-      resultRef: undefined,
-      lastError: undefined,
-      leaseOwner: undefined,
-      leaseExpiresAt: undefined,
-      diagnosticJson: makePIMetadata({ parentTaskId: 'dreamer-existing-succ', channel: 'prompt' }),
-    };
-    mockListTasks
-      .mockResolvedValueOnce([dreamerTask])
-      .mockResolvedValueOnce([philosopherPending])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+    const philosopherPending = makeSucceededTask('philosopher-dreamer-existing-succ-prompt', 'philosopher', { parentTaskId: 'dreamer-existing-succ', channel: 'prompt' });
+    philosopherPending.status = 'pending';
+    mockDryRunListTasks([dreamerTask], [philosopherPending]);
     mockProposeNextTask.mockResolvedValue({
       decision: 'proposal_created',
       taskId: 'dreamer-existing-succ',
@@ -606,6 +583,117 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(output.actions[0].reason).toContain('propose_failed');
     expect(output.actions[0].nextAction).toBeDefined();
     expect(output.skippedCount).toBe(1);
+  });
+
+  it('failed JSON output includes reason and nextAction', async () => {
+    mockInitialize.mockRejectedValue(new Error('Cannot open database'));
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, confirm: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.status).toBe('failed');
+    expect(output.reason).toContain('storage_init_failed');
+    expect(output.nextAction).toBeDefined();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('--confirm workspace resolve failure reports dryRun=false', async () => {
+    const { resolveWorkspaceDir } = await import('../../src/resolve-workspace.js');
+    vi.mocked(resolveWorkspaceDir).mockImplementationOnce(() => { throw new Error('No workspace found'); });
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ confirm: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.status).toBe('failed');
+    expect(output.dryRun).toBe(false);
+    expect(output.reason).toContain('workspace_resolve_failed');
+    expect(output.nextAction).toBeDefined();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('dry-run existing successor with malformed metadata: skipped, not would_create_successor', async () => {
+    const dreamerTask = makeSucceededTask('dreamer-malformed-succ', 'dreamer');
+    const malformedSuccessor = {
+      taskId: 'philosopher-dreamer-malformed-succ-prompt',
+      taskKind: 'philosopher',
+      status: 'pending' as const,
+      attemptCount: 0,
+      maxAttempts: 3,
+      inputRef: undefined,
+      resultRef: undefined,
+      lastError: undefined,
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
+      diagnosticJson: 'not-valid-json{{{',
+    };
+    mockDryRunListTasks([dreamerTask], [malformedSuccessor]);
+    mockProposeNextTask.mockResolvedValue({
+      decision: 'proposal_created',
+      taskId: 'dreamer-malformed-succ',
+      taskKind: 'dreamer',
+      proposal: { taskKind: 'philosopher', channel: 'prompt', dependencyTaskIds: ['dreamer-malformed-succ'], inputArtifactRefs: [], parentTaskId: 'dreamer-malformed-succ', correlationId: 'corr-malformed' },
+    });
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.actions[0].decision).toBe('skipped');
+    expect(output.actions[0].reason).toContain('successor_exists_with_malformed_metadata');
+    expect(output.actions[0].nextAction).toContain('integrity-repair');
+    expect(output.skippedCount).toBe(1);
+    expect(output.createdCount).toBe(0);
+  });
+
+  it('dedupe scan is not N×full-table per source task (buildSuccessorIndex called once)', async () => {
+    const dreamer1 = makeSucceededTask('dreamer-dedup-1', 'dreamer');
+    const dreamer2 = makeSucceededTask('dreamer-dedup-2', 'dreamer');
+    mockDryRunListTasks([dreamer1, dreamer2]);
+    mockProposeNextTask
+      .mockResolvedValueOnce({
+        decision: 'proposal_created',
+        taskId: 'dreamer-dedup-1',
+        taskKind: 'dreamer',
+        proposal: { taskKind: 'philosopher', channel: 'prompt', dependencyTaskIds: ['dreamer-dedup-1'], inputArtifactRefs: [], parentTaskId: 'dreamer-dedup-1', correlationId: 'corr-1' },
+      })
+      .mockResolvedValueOnce({
+        decision: 'proposal_created',
+        taskId: 'dreamer-dedup-2',
+        taskKind: 'dreamer',
+        proposal: { taskKind: 'philosopher', channel: 'prompt', dependencyTaskIds: ['dreamer-dedup-2'], inputArtifactRefs: [], parentTaskId: 'dreamer-dedup-2', correlationId: 'corr-2' },
+      });
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
+
+    expect(mockListTasks.mock.calls.length).toBe(7);
+    const allCalls = mockListTasks.mock.calls.map(c => c[0]?.status);
+    const succeededCalls = allCalls.filter(s => s === 'succeeded').length;
+    expect(succeededCalls).toBe(2);
+  });
+
+  it('diagnosticJson non-string returns null, no throw', async () => {
+    const taskWithNonStringDiag = {
+      taskId: 'task-nonstring-diag',
+      taskKind: 'dreamer',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      inputRef: undefined,
+      resultRef: 'ref-nonstring',
+      lastError: undefined,
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
+      diagnosticJson: 42,
+    };
+    mockListTasks.mockResolvedValue([taskWithNonStringDiag]);
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, confirm: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.scannedCount).toBe(1);
+    expect(output.skippedCount).toBe(1);
+    expect(output.actions[0].decision).toBe('skipped');
+    expect(output.actions[0].reason).toContain('Failed to hydrate');
+    expect(mockCommitNextTaskProposal).not.toHaveBeenCalled();
   });
 
   it('resolveWorkspaceDir throws: fails closed with structured error', async () => {
