@@ -201,6 +201,10 @@ export class InternalizationIntegrityRemediation {
           if (meta.parentTaskId) {
             philosopherParentIds.add(meta.parentTaskId);
           }
+        } else if (meta.status === 'malformed') {
+          for (const id of meta.bestEffortParentIds) {
+            philosopherParentIds.add(id);
+          }
         }
       }
 
@@ -259,6 +263,10 @@ export class InternalizationIntegrityRemediation {
         const meta = extractPIMetadata(pt.diagnostic_json);
         if (meta.status === 'parsed') {
           if (meta.dependencyTaskIds?.includes(dreamerTaskId) || meta.parentTaskId === dreamerTaskId) {
+            return pt.task_id;
+          }
+        } else if (meta.status === 'malformed') {
+          if (meta.bestEffortParentIds.includes(dreamerTaskId)) {
             return pt.task_id;
           }
         }

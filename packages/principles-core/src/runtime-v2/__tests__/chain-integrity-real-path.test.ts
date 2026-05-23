@@ -414,6 +414,33 @@ describe('Chain Integrity — Real Production Path', () => {
     const malformed = result.brokenLinks.find(l => l.type === 'metadata_malformed' && l.taskId === 'phil-null');
     expect(malformed).toBeUndefined();
   });
+
+  it('philosopher with mixed dependencyTaskIds → metadata_malformed but no false missing_philosopher_successor (PRI-225)', () => {
+    insertCandidate({ candidateId: 'c-be', taskId: 'dreamer-be', status: 'consumed', sourceRunId: 'run-be' });
+    insertTask({
+      taskId: 'dreamer-be',
+      taskKind: 'dreamer',
+      status: 'succeeded',
+      diagnosticJson: JSON.stringify({ candidateId: 'c-be' }),
+    });
+    insertRun({ runId: 'run-be', taskId: 'dreamer-be', executionStatus: 'succeeded' });
+    insertPIArtifact({ artifactId: 'pi-be', artifactKind: 'principle', sourceTaskId: 'dreamer-be' });
+    insertTask({
+      taskId: 'phil-be',
+      taskKind: 'philosopher',
+      status: 'pending',
+      diagnosticJson: JSON.stringify({ dependencyTaskIds: ['dreamer-be', 42] }),
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir });
+    const result = model.check();
+
+    const malformed = result.brokenLinks.find(l => l.type === 'metadata_malformed' && l.taskId === 'phil-be');
+    expect(malformed).toBeDefined();
+
+    const missingSuccessor = result.brokenLinks.find(l => l.type === 'missing_philosopher_successor' && l.taskId === 'dreamer-be');
+    expect(missingSuccessor).toBeUndefined();
+  });
 });
 
 describe('extractPIMetadata — PIMetadataParseResult contract (PRI-225)', () => {
@@ -534,12 +561,40 @@ describe('extractPIMetadata — PIMetadataParseResult contract (PRI-225)', () =>
     expect(r.status).toBe('malformed');
     if (r.status === 'malformed') {
       expect(r.reason).toContain('dependencyTaskIds');
+      expect(r.bestEffortParentIds).toEqual(['valid']);
     }
   });
 
   it('dependencyTaskIds with all non-string elements → malformed', () => {
     const r = extractPIMetadata(JSON.stringify({ dependencyTaskIds: [42, null, true] }));
     expect(r.status).toBe('malformed');
+    if (r.status === 'malformed') {
+      expect(r.bestEffortParentIds).toEqual([]);
+    }
+  });
+
+  it('parentTaskId is number → malformed, bestEffortParentIds empty', () => {
+    const r = extractPIMetadata(JSON.stringify({ parentTaskId: 42 }));
+    expect(r.status).toBe('malformed');
+    if (r.status === 'malformed') {
+      expect(r.bestEffortParentIds).toEqual([]);
+    }
+  });
+
+  it('malformed JSON → bestEffortParentIds empty', () => {
+    const r = extractPIMetadata('not-json{{{');
+    expect(r.status).toBe('malformed');
+    if (r.status === 'malformed') {
+      expect(r.bestEffortParentIds).toEqual([]);
+    }
+  });
+
+  it('malformed with valid parentTaskId + invalid dependencyTaskIds → bestEffortParentIds includes parentTaskId', () => {
+    const r = extractPIMetadata(JSON.stringify({ parentTaskId: 'dreamer-1', dependencyTaskIds: [42] }));
+    expect(r.status).toBe('malformed');
+    if (r.status === 'malformed') {
+      expect(r.bestEffortParentIds).toEqual(['dreamer-1']);
+    }
   });
 
   it('empty object → missing (no pi metadata fields)', () => {

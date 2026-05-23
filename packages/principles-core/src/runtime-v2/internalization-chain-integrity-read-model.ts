@@ -46,6 +46,7 @@ export type PIMetadataParseResult =
   | {
       status: 'malformed';
       reason: string;
+      bestEffortParentIds: string[];
     };
 
 const REASON_MAX_LENGTH = 120;
@@ -63,21 +64,39 @@ function safeJsonParse(json: string): { status: 'ok'; value: unknown } | { statu
   }
 }
 
+function extractBestEffortParentIds(meta: object): string[] {
+  const ids: string[] = [];
+  const parentTaskId = readOwnProperty(meta, 'parentTaskId');
+  if (typeof parentTaskId === 'string') {
+    ids.push(parentTaskId);
+  }
+  const depIds = readOwnProperty(meta, 'dependencyTaskIds');
+  if (Array.isArray(depIds)) {
+    for (const id of depIds) {
+      if (typeof id === 'string') {
+        ids.push(id);
+      }
+    }
+  }
+  return ids;
+}
+
 export function extractPIMetadata(diagJson: string | null): PIMetadataParseResult {
   if (!diagJson) return { status: 'missing' };
 
   const parsed = safeJsonParse(diagJson);
-  if (parsed.status === 'malformed') return parsed;
+  if (parsed.status === 'malformed') return { ...parsed, bestEffortParentIds: [] };
 
   if (typeof parsed.value !== 'object' || parsed.value === null || Array.isArray(parsed.value)) {
-    return { status: 'malformed', reason: truncateReason('diagnosticJson parsed to non-object') };
+    return { status: 'malformed', reason: truncateReason('diagnosticJson parsed to non-object'), bestEffortParentIds: [] };
   }
 
   let meta: object = parsed.value;
   const piMeta = readOwnProperty(parsed.value, 'pi_metadata');
   if (piMeta !== undefined) {
     if (typeof piMeta !== 'object' || piMeta === null || Array.isArray(piMeta)) {
-      return { status: 'malformed', reason: truncateReason('pi_metadata is not an object') };
+      const bestEffort = extractBestEffortParentIds(parsed.value);
+      return { status: 'malformed', reason: truncateReason('pi_metadata is not an object'), bestEffortParentIds: bestEffort };
     }
     meta = piMeta;
   }
@@ -86,16 +105,19 @@ export function extractPIMetadata(diagJson: string | null): PIMetadataParseResul
   const depIds = readOwnProperty(meta, 'dependencyTaskIds');
 
   if (parentTaskId !== undefined && typeof parentTaskId !== 'string') {
-    return { status: 'malformed', reason: truncateReason('parentTaskId is not a string') };
+    const bestEffort = extractBestEffortParentIds(meta);
+    return { status: 'malformed', reason: truncateReason('parentTaskId is not a string'), bestEffortParentIds: bestEffort };
   }
 
   if (depIds !== undefined) {
     if (!Array.isArray(depIds)) {
-      return { status: 'malformed', reason: truncateReason('dependencyTaskIds is not an array') };
+      const bestEffort = extractBestEffortParentIds(meta);
+      return { status: 'malformed', reason: truncateReason('dependencyTaskIds is not an array'), bestEffortParentIds: bestEffort };
     }
     for (let i = 0; i < depIds.length; i++) {
       if (typeof depIds[i] !== 'string') {
-        return { status: 'malformed', reason: truncateReason('dependencyTaskIds contains non-string element') };
+        const bestEffort = extractBestEffortParentIds(meta);
+        return { status: 'malformed', reason: truncateReason('dependencyTaskIds contains non-string element'), bestEffortParentIds: bestEffort };
       }
     }
   }
@@ -217,6 +239,9 @@ export class InternalizationChainIntegrityReadModel {
           const meta = extractPIMetadata(pt.diagnostic_json);
           if (meta.status === 'parsed') {
             return meta.parentTaskId === dreamerTask.task_id || meta.dependencyTaskIds?.includes(dreamerTask.task_id);
+          }
+          if (meta.status === 'malformed') {
+            return meta.bestEffortParentIds.includes(dreamerTask.task_id);
           }
           return false;
         });

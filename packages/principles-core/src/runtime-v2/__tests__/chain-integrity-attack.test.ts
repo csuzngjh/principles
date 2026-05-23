@@ -174,14 +174,25 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
   it('malformed metadata: extractPIMetadata returns discriminated union', () => {
     expect(extractPIMetadata(null).status).toBe('missing');
     expect(extractPIMetadata('').status).toBe('missing');
-    expect(extractPIMetadata('not-json{{{').status).toBe('malformed');
-    expect(extractPIMetadata('42').status).toBe('malformed');
-    expect(extractPIMetadata('"hello"').status).toBe('malformed');
-    expect(extractPIMetadata('[]').status).toBe('malformed');
+    const notJson = extractPIMetadata('not-json{{{');
+    expect(notJson.status).toBe('malformed');
+    if (notJson.status === 'malformed') { expect(notJson.bestEffortParentIds).toEqual([]); }
+    const num = extractPIMetadata('42');
+    expect(num.status).toBe('malformed');
+    if (num.status === 'malformed') { expect(num.bestEffortParentIds).toEqual([]); }
+    const str = extractPIMetadata('"hello"');
+    expect(str.status).toBe('malformed');
+    const arr = extractPIMetadata('[]');
+    expect(arr.status).toBe('malformed');
     expect(extractPIMetadata('{}').status).toBe('missing');
-    expect(extractPIMetadata('{"parentTaskId":42}').status).toBe('malformed');
-    expect(extractPIMetadata('{"dependencyTaskIds":"not-array"}').status).toBe('malformed');
-    expect(extractPIMetadata('{"dependencyTaskIds":[42,true]}').status).toBe('malformed');
+    const ptNum = extractPIMetadata('{"parentTaskId":42}');
+    expect(ptNum.status).toBe('malformed');
+    if (ptNum.status === 'malformed') { expect(ptNum.bestEffortParentIds).toEqual([]); }
+    const depStr = extractPIMetadata('{"dependencyTaskIds":"not-array"}');
+    expect(depStr.status).toBe('malformed');
+    const depMixed = extractPIMetadata('{"dependencyTaskIds":[42,true]}');
+    expect(depMixed.status).toBe('malformed');
+    if (depMixed.status === 'malformed') { expect(depMixed.bestEffortParentIds).toEqual([]); }
     const parsed = extractPIMetadata('{"parentTaskId":"t1","dependencyTaskIds":["t2"]}');
     expect(parsed.status).toBe('parsed');
     if (parsed.status === 'parsed') {
@@ -193,8 +204,11 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
     if (nested.status === 'parsed') {
       expect(nested.parentTaskId).toBe('t3');
     }
-    expect(extractPIMetadata('{"pi_metadata":{"parentTaskId":123}}').status).toBe('malformed');
-    expect(extractPIMetadata('{"dependencyTaskIds":["t1",42,"t3"]}').status).toBe('malformed');
+    const nestedBad = extractPIMetadata('{"pi_metadata":{"parentTaskId":123}}');
+    expect(nestedBad.status).toBe('malformed');
+    const depMixedValid = extractPIMetadata('{"dependencyTaskIds":["t1",42,"t3"]}');
+    expect(depMixedValid.status).toBe('malformed');
+    if (depMixedValid.status === 'malformed') { expect(depMixedValid.bestEffortParentIds).toEqual(['t1', 't3']); }
   });
 
   it('inherited property "constructor" is not read as pi_metadata', () => {
