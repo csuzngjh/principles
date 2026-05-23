@@ -42,6 +42,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 |----|---------|--------|
 | ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
+| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210 |
 
 ---
 
@@ -52,6 +53,8 @@ Errors where AI assistants skipped required testing or verification steps.
 | ID | Summary | Source |
 |----|---------|--------|
 | ERR-012 | PR branch based on stale main reverts already-merged telemetry fields | PR #659 |
+| ERR-025 | Test coverage proves isolated helper behavior, not real production defense | PRI-209 |
+| ERR-026 | Hand-written test database schema drifts from production, allowing invalid SQL to pass tests | PRI-209 |
 
 ---
 
@@ -122,7 +125,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` type assertions on values from untrusted JSON sources (`Record<string, unknown>`). Always validate with `typeof` checks before using the value. When extracting fields from parsed JSON, treat every field as `unknown` and narrow with runtime type guards.
 - **Source**: PRI-189
 - **Date**: 2026-05-19
-- **Recurrence**: None
+- **Recurrence**: Yes - 2026-05-23 PRI-213 (PR #688): `event.data.toolName as string` and `event.data.score as number` in `groupEventsIntoSessions()` bypassed runtime validation on `RawEventEntry.data` fields. `score: NaN` and `score: Infinity` passed `typeof === 'number'` check. `validatePainSignal()` used `as Record<string, unknown>` instead of type guard. Fixed by excluding malformed entries from scoring arrays and adding `isStringRecord()` type guard.
 
 ---
 
@@ -170,7 +173,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` array type casts on untrusted JSON arrays without validating element types first. Always apply element-wise type guards when preserving data from invalid payloads.
 - **Source**: PRI-191
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - similar pattern to ERR-001 where `as` bypassed validation
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Fixed by replacing `as Record` with `readOwnProperty` helper and `Array.from().filter()` for element-wise validation.
 
 ---
 
@@ -206,7 +209,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For any agent contract that processes trace data, add explicit lineage field validation: `sourceTaskId`, `sourcePainId`, `sourceRunIds` must match the deterministic trace.
 - **Source**: PRI-192 / PR #638 (Codex review)
 - **Date**: 2026-05-19
-- **Recurrence**: No
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `result_ref` points to an artifact whose `task_id` differs from the owning task, but the read model only checked artifact kind-level existence instead of per-dependency lineage. This caused dependency B's missing artifact to be misclassified as `lineage_mismatch` when dependency A had a matching artifact. Fixed by implementing true `lineage_mismatch` detection (query `SELECT task_id FROM artifacts WHERE artifact_id = ?` and compare with owning task's `task_id`) and distinguishing from `missing_dreamer_pi_artifact` (no artifact found at all) and `result_ref_missing_artifact` (result_ref points to nonexistent artifact).
 
 ---
 
@@ -386,9 +389,45 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-024]** | Security validator exists but is not wired into enforcement path — defense is illusory
+
+- **What happened**: `isPathWithinWorkspace()` and `validateProposedPathBounds()` were added to core as path boundary validation functions, but they were only called by tests and barrel exports. The real live auto-correct apply path in `gate.ts` still used `validateCorrectionProposal()` alone and directly applied `proposal.proposedParams` without checking path boundaries. An out-of-bounds path correction would be applied despite the validator existing.
+- **Why it's wrong**: A validator that is not called from the enforcement path provides zero runtime defense. Tests against the validator prove the validator works, but they do not prove the system is defended. This is the same class as ERR-002 (catch-and-degrade without observability) — the defense exists in code but not in the actual execution path.
+- **Correct approach**: When adding a security or validation function, it MUST be wired into the actual enforcement path, not just tested in isolation. The PR that introduces the validator must also modify the production code path to call it. If the enforcement wiring is out of scope, the PR must explicitly state this and the validator must not be presented as providing defense.
+- **How to prevent**: For every new validation/security function, the PR must include: (1) a test proving the production path calls the function, (2) a test proving the production path rejects/defends when the function returns invalid. If neither exists, the validator is not actually defending anything. Review trigger: any PR that adds a validation function without modifying the code that handles the untrusted input.
+- **Source**: PRI-210 / PR #690
+- **Date**: 2026-05-23
+- **Recurrence**: None
+
+---
+
+**[ERR-025]** | Test coverage proves isolated helper behavior, not real production defense
+
+- **What happened**: `broken-artifact-simulation.ts` was added with `decideDownstreamGate()` and 54 tests, but no production code called it. The real `InternalizationChainIntegrityReadModel` and `InternalizationIntegrityRemediation` were completely untested. Tests proved the helper's logic, but the production system had no defense against the scenarios the helper covered.
+- **Why it's wrong**: Tests that exercise a standalone helper without verifying that production code calls it create a false sense of security. All tests pass, but the production path remains unprotected. This is the same class as ERR-024 (validator without enforcement) and ERR-002 (degradation without observability) — the mechanism exists but is not connected to the real system.
+- **Correct approach**: When adding a feature that is supposed to defend against a class of failures, tests must exercise the REAL production path (read model, remediation, CLI command), not just a standalone helper. If the helper is a contract specification, it must be wired into production code within the same PR. If the production wiring is out of scope, the PR must explicitly state that the system is NOT yet defended.
+- **How to prevent**: For every PR that adds defensive logic, verify that at least one test exercises the production path that would invoke the defense. If no production path calls the new code, the PR must not claim to provide defense. Review trigger: any PR where the diff adds a new module but does not modify any existing production code to call it.
+- **Source**: PRI-209 / PR #689
+- **Date**: 2026-05-23
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): Healthy baseline test used `expect(['ok', 'degraded']).toContain(overallStatus)`, allowing `degraded` to pass. This meant a regression that introduced new warning-level broken links in the healthy path would not be caught. The test proved the code didn't crash, but not that the healthy path remained healthy. Fixed by tightening to `expect(overallStatus).toBe('ok')`.
+
+---
+
+**[ERR-026]** | Hand-written test database schema drifts from production, allowing invalid SQL to pass tests
+
+- **What happened**: Real-path tests for `InternalizationChainIntegrityReadModel` created a hand-written SQLite schema with `source_task_id` in the `artifacts` table, but the production schema (in `SqliteConnection`) uses `task_id`. The `lineage_mismatch` SQL query (`SELECT source_task_id FROM artifacts`) would fail in production with "no such column", but tests passed because the test schema matched the wrong column name. Additionally, the test schema omitted `NOT NULL` constraints present in production (e.g., `content_json`), allowing test data that production would reject.
+- **Why it's wrong**: When test schemas drift from production, tests provide false confidence. Invalid SQL, missing columns, and wrong column names all pass in tests but fail in production. The test becomes a tautology — it proves the code works against the test schema, not against the real schema. This is the same class as ERR-025 (tests prove isolated behavior, not production defense) and ERR-012 (stale base causes rollback) — the test environment does not reflect the real environment.
+- **Correct approach**: For SQLite real-path tests, prefer using the production schema initializer (e.g., `SqliteConnection` or the actual migration function) to create the test database. If a hand-written test schema is unavoidable, add `PRAGMA table_info(tableName)` assertions that verify critical columns exist and match production definitions. Never assume column names — assert them.
+- **How to prevent**: (1) Prefer production schema initializers for test databases. (2) If hand-writing test schemas, add `PRAGMA table_info` assertions for every column referenced in production SQL. (3) When a query references a column, the test must prove that column exists in the production schema definition. Review trigger: any PR that creates a `CREATE TABLE` statement in a test file must also include a `PRAGMA table_info` assertion or use the production initializer.
+- **Source**: PRI-209 / PR #689
+- **Date**: 2026-05-23
+- **Recurrence**: None
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 23 |
+| Total lessons | 26 |
 | Last updated | 2026-05-23 |
 | Top category | Schema & Type |
-| Recurring errors | 11 |
+| Recurring errors | 13 |
