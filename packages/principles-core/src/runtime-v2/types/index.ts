@@ -204,3 +204,36 @@ export {
   isEvolutionTaskEventEntry,
   isEmpathyRollbackEventEntry,
 } from './event-payload.js';
+
+// Pain signal
+export type {
+  PainSeverity as TypeboxPainSeverity,
+  PainSignal,
+  PainSignalValidationResult,
+} from './pain-signal.js';
+
+export {
+  PainSeverity as PainSeveritySchema,
+  PainSignalSchema,
+  deriveSeverity,
+  validatePainSignal,
+} from './pain-signal.js';
+
+// PD Task types
+export type {
+  PDTaskSchedule,
+  PDTaskExecution,
+  PDTaskDelivery,
+  PDTaskMeta,
+  PDTaskSpec,
+} from './pd-task-types.js';
+
+export {
+  PDTaskScheduleSchema,
+  PDTaskExecutionSchema,
+  PDTaskDeliverySchema,
+  PDTaskMetaSchema,
+  PDTaskSpecSchema,
+  BUILTIN_PD_TASKS,
+} from './pd-task-types.js';
+
