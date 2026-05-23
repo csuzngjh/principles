@@ -363,6 +363,32 @@ export type {
   PrincipleTreeStore,
 } from './types/index.js';
 
+// Migrated types & schemas (PRI-213)
+export type {
+  TypeboxPainSeverity as PainSeverity,
+  PainSignal,
+  PainSignalValidationResult,
+  PDTaskSchedule,
+  PDTaskExecution,
+  PDTaskDelivery,
+  PDTaskMeta,
+  PDTaskSpec,
+} from './types/index.js';
+
+export {
+  PainSeveritySchema,
+  PainSignalSchema,
+  deriveSeverity,
+  validatePainSignal,
+  PDTaskScheduleSchema,
+  PDTaskExecutionSchema,
+  PDTaskDeliverySchema,
+  PDTaskMetaSchema,
+  PDTaskSpecSchema,
+  BUILTIN_PD_TASKS,
+} from './types/index.js';
+
+
 // Lifecycle read model types (PRI-51)
 export type {
   LifecycleClassificationTotals,
@@ -1164,6 +1190,28 @@ export {
   NocturnalSessionSnapshotSchema,
   NocturnalSnapshotContractResultSchema,
 } from './nocturnal/index.js';
+
+// ── Nocturnal Compliance (migrated from openclaw-plugin) ────────────────────
+
+export type {
+  SessionEvents,
+  ToolCallRecord,
+  PainSignalRecord,
+  GateBlockRecord,
+  UserCorrectionRecord,
+  PlanApprovalRecord,
+  ComplianceResult,
+  RawEventEntry,
+} from './nocturnal/index.js';
+
+export {
+  detectOpportunity,
+  detectViolation,
+  computeCompliance,
+  computeAllCompliance,
+  groupEventsIntoSessions,
+} from './nocturnal/index.js';
+
 
 // ── Correction Cue Keyword Types (migrated from openclaw-plugin) ──────────
 

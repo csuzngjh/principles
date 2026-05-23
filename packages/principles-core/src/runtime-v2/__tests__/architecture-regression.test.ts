@@ -105,6 +105,7 @@ const REQUIRED_SOURCE_FILES = [
   'nocturnal/trinity-types.ts',
   'nocturnal/candidate-scoring.ts',
   'nocturnal/snapshot-contract.ts',
+  'nocturnal/nocturnal-compliance.ts',
   'nocturnal/index.ts',
   // Phase 2 migration: types directory
   'types/queue-types.ts',
@@ -112,6 +113,8 @@ const REQUIRED_SOURCE_FILES = [
   'types/runtime-summary-types.ts',
   'types/event-types.ts',
   'types/event-payload.ts',
+  'types/pain-signal.ts',
+  'types/pd-task-types.ts',
   // Phase 2 migration: principle-tree data structures
   'types/principle-dependency.ts',
   'types/principle-value-metrics.ts',

@@ -91,3 +91,24 @@ export {
   NocturnalSessionSnapshotSchema,
   NocturnalSnapshotContractResultSchema,
 } from './snapshot-contract.js';
+
+// Compliance
+export type {
+  SessionEvents,
+  ToolCallRecord,
+  PainSignalRecord,
+  GateBlockRecord,
+  UserCorrectionRecord,
+  PlanApprovalRecord,
+  ComplianceResult,
+  RawEventEntry,
+} from './nocturnal-compliance.js';
+
+export {
+  detectOpportunity,
+  detectViolation,
+  computeCompliance,
+  computeAllCompliance,
+  groupEventsIntoSessions,
+} from './nocturnal-compliance.js';
+
