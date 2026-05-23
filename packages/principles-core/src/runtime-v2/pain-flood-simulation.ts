@@ -158,6 +158,17 @@ export function computeFloodStatus(stages: PainFloodStage[]): 'healthy' | 'degra
   return 'healthy';
 }
 
+export function computeMaxAllowedTasks(
+  painSignals: { painId: string }[],
+  expectation: PainFloodScenarioExpectation,
+): number {
+  const distinctPainIdCount = new Set(painSignals.map(s => s.painId)).size;
+  const maxFromRatio = Math.ceil(distinctPainIdCount * expectation.maxTaskRatio);
+  return expectation.maxTaskCount != null
+    ? Math.min(maxFromRatio, expectation.maxTaskCount)
+    : maxFromRatio;
+}
+
 export function formatContextBudgetSummary(maxPreviewLength: number): string {
   if (maxPreviewLength <= 0) return 'no evidence produced';
   if (maxPreviewLength <= 100) return `bounded (max ${maxPreviewLength} chars)`;
