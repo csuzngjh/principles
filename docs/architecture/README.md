@@ -98,7 +98,7 @@
 
 | 文档 | 状态 | 处理 |
 |------|------|------|
-| `pd-task-manager.md` | Partially Implemented | 保留作迁移参考；多数概念已被 TaskRecord + IdleTrigger 替代 |
+| `pd-task-manager.md` | Partially Implemented | 保留作迁移参考；多数概念已被 TaskRecord + Runtime V2 explicit scheduling 替代，`IdleTrigger` 已由 ADR-0012 废止 |
 
 ---
 
@@ -140,6 +140,7 @@
 | ADR-0009 | Accepted | Long-Running Agent Session（LRAS）|
 | ADR-0010 | Accepted | Goal-Aligned Pain Signal（GAP）|
 | ADR-0011 | Accepted | Three-Tier Task Model and MissionScheduler |
+| [ADR-0012](../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) | Accepted | Runtime V2 独立调度与 legacy execution 退役；取代 IdleTrigger 保留决策 |
 
 ### 架构治理（Governance）
 

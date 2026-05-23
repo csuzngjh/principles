@@ -1,7 +1,9 @@
 # PD 数据架构（Data Architecture）
 
 > **状态**: Active（2026-05-15 修订版）
-> **最后更新**: 2026-05-15（与 ADR-0005 / ADR-0006 / ADR-0007 对齐）
+> **最后更新**: 2026-05-23（与 ADR-0005 / ADR-0006 / ADR-0007 / ADR-0012 对齐）
+
+> **ADR-0012 修订**: Nocturnal 数据仅在证明存在历史读取/导出需求时保留 read-only adapter；不得为了兼容旧数据保留 Nocturnal 业务执行或 OpenClaw idle/night 调度。新的运行配置和 workspace resolution 应属于 PD-owned config/SDK boundary。
 > **取代**: 2026-05-09 版（已归档）
 > **关联**: `PD_ARCHITECTURE_OVERVIEW.md`, `DOMAIN_MODEL.md`, `VERSIONING_AND_COMPATIBILITY.md`
 

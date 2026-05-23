@@ -139,7 +139,7 @@ PD 系统有 5 类组件：
 |------|-----|----|----|----|----|------|
 | `InternalizationOrchestrator` | 🔵 Service | core | `runtime-v2/internalization/internalization-orchestrator.ts` | taskKind? | WakeOnceResult | ✅ |
 | `IntakeToInternalizationBridge` | 🟠 Bridge | core | `runtime-v2/internalization/intake-to-internalization-bridge.ts` | ProbationCreatedInput | BridgeResult | ✅ 已落地 |
-| `IdleTrigger` | 🔵 Service | core | `runtime-v2/idle-trigger/`（纯策略） | idle config | wakeOnce 决策 | ✅ Done（core 纯策略；plugin 宿主适配待建）|
+| `IdleTrigger` | 🔵 Service | core | `runtime-v2/idle-trigger/`（历史策略） | idle config | wakeOnce 决策 | ⚠️ Deprecated；ADR-0012 要求停止扩建并随 idle/night 入口删除 |
 | `InternalizationStateMachine` | 🔧 Util | core | `runtime-v2/internalization/internalization-state-machine.ts` | task / dependencies | gate decision | ✅ |
 | `InternalizationJobGraph` | 🔧 Util | core | `runtime-v2/internalization/internalization-job-graph.ts` | n/a | ALLOWED_EDGES | ✅ |
 | `InternalizationIntegrityRemediation` | 🔵 Service | core | `runtime-v2/internalization-integrity-remediation.ts` | broken link | remediation | ✅ |
@@ -328,7 +328,7 @@ PD 系统有 5 类组件：
 
 **不变量**：
 - `SCHED-1`：MissionScheduler 调度决策必须可解释（reason 字段非空）
-- `SCHED-2`：IdleTrigger 唤起后调用 MissionScheduler，不直接调用 Orchestrator
+- `SCHED-2`：调度入口必须由 PD 自有 config/SDK/operator 或 host-agnostic scheduler 驱动；不得依赖 OpenClaw idle/night 事件
 
 ### 3.6 GFI（Global Friction Index）
 
@@ -373,8 +373,8 @@ PD 系统有 5 类组件：
 
 | 组件 | 类型 | 包 | 文件 | 职责 | 状态 |
 |------|-----|----|----|----|------|
-| `EvolutionWorkerService` | 🔵 Service | plugin | `service/evolution-worker.ts` | 进化队列调度 | ⚠️ 需重构（合并后）|
-| `IdleTrigger` | 🔵 Service | core | `runtime-v2/idle-trigger/`（纯策略） | 空闲检测策略 + wakeOnce 决策 | ✅ Done（core 纯策略模块；plugin 宿主适配层待后续 issue）|
+| `EvolutionWorkerService` | 🔵 Service | plugin | `service/evolution-worker.ts` | legacy 进化队列调度 | ⚠️ 退役切换目标；不得增加职责 |
+| `IdleTrigger` | 🔵 Service | core | `runtime-v2/idle-trigger/`（历史策略） | 空闲检测策略 + wakeOnce 决策 | ⚠️ 退役目标；不再建设 plugin 宿主适配 |
 | `TrajectoryService` | 🔵 Service | plugin | `service/trajectory-service.ts` | 轨迹存储 | ✅ |
 | `PDTaskService` | 🔵 Service | plugin | `core/pd-task-service.ts` | 后台任务调度 | ⚠️ 部分实现 |
 | `CentralSyncService` | 🔵 Service | plugin | `service/central-sync-service.ts` | 跨工作区同步 | ✅ |
@@ -385,15 +385,17 @@ PD 系统有 5 类组件：
 | `EventLogAuditor` | 🔵 Service | plugin | `service/event-log-auditor.ts` | 事件日志审计 | ✅ |
 | `StartupReconciler` | 🔵 Service | plugin | `service/startup-reconciler.ts` | 启动一致性校验 | ✅ |
 
-### 4.3 Plugin Services（计划删除/迁移，参见 ADR-0005）
+### 4.3 Plugin Services（计划删除/迁移，参见 ADR-0005 与 ADR-0012）
+
+> ADR-0012 更新：不再建立或保留 plugin-owned `IdleTrigger` / sleep/night scheduler。Plugin 仅保留 event/runtime adapter；Nocturnal 执行与调度组件按 caller cutover 后删除。
 
 | 组件 | 包 | 文件 | 处理方式 |
 |------|----|----|---------|
-| `NocturnalService` | plugin | `service/nocturnal-service.ts` | 拆解：触发部分迁入 IdleTrigger，业务部分删除 |
+| `NocturnalService` | plugin | `service/nocturnal-service.ts` | 删除；触发部分不再迁入 IdleTrigger |
 | `NocturnalRuntime` | plugin | `service/nocturnal-runtime.ts` | 删除 |
 | `NocturnalConfig` | plugin | `service/nocturnal-config.ts` | 部分迁入 internalization config |
 | `NocturnalTargetSelector` | plugin | `service/nocturnal-target-selector.ts` | 删除（被 InternalizationQueueReadModel 替代） |
-| `SleepCycle` | plugin | `service/sleep-cycle.ts` | 简化：只保留唤起判断 |
+| `SleepCycle` | plugin | `service/sleep-cycle.ts` | 删除 idle/night 调度职责；不作为 Runtime V2 入口 |
 | `TrinityRuntimeAdapter` | plugin | `core/nocturnal-trinity.ts` | 删除（被 PDRuntimeAdapter 替代） |
 | `nocturnal-trinity` | plugin | `core/nocturnal-trinity.ts` | 删除 |
 | `nocturnal-arbiter` | plugin | `core/nocturnal-arbiter.ts` | 删除 |
@@ -558,7 +560,7 @@ Owner 标记规则：
 `DreamerRunner` §3.2.2 ✅
 `EvaluatorRunner` §3.2.2 ✅
 `EvolutionWorkerService` §4.2 ⚠️
-`IdleTrigger` §4.2 ✅
+`IdleTrigger` §4.2 ⚠️ Deprecated / retirement target (ADR-0012)
 `InternalizationOrchestrator` §3.2.1 ✅
 `IntakeToInternalizationBridge` §3.2.1 ✅
 `LeaseManager` §2.2 ✅
