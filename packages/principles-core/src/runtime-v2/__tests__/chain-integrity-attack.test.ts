@@ -54,9 +54,10 @@ CREATE TABLE IF NOT EXISTS pi_artifacts (
 
 CREATE TABLE IF NOT EXISTS artifacts (
   artifact_id TEXT PRIMARY KEY,
-  source_task_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
   artifact_kind TEXT NOT NULL,
-  content_json TEXT,
+  content_json TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `;
@@ -119,11 +120,11 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
     db.close();
   }
 
-  function _insertArtifact(opts: { artifactId: string; sourceTaskId: string; artifactKind: string }): void {
+  function _insertArtifact(opts: { artifactId: string; taskId: string; artifactKind: string; runId?: string; contentJson?: string }): void {
     const db = new Database(dbPath);
     db.prepare(
-      `INSERT OR REPLACE INTO artifacts (artifact_id, source_task_id, artifact_kind) VALUES (?, ?, ?)`,
-    ).run(opts.artifactId, opts.sourceTaskId, opts.artifactKind);
+      `INSERT OR REPLACE INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json) VALUES (?, ?, ?, ?, ?)`,
+    ).run(opts.artifactId, opts.runId ?? 'run-default', opts.taskId, opts.artifactKind, opts.contentJson ?? '{}');
     db.close();
   }
 
@@ -204,10 +205,10 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
     expect(missingArtifact).toBeDefined();
   });
 
-  it('lineage_mismatch: succeeded task result_ref points to artifact with wrong source_task_id', () => {
+  it('lineage_mismatch: succeeded task result_ref points to artifact with wrong task_id', () => {
     insertTask({ taskId: 'dreamer-lm', taskKind: 'dreamer', status: 'succeeded', resultRef: 'artifact-lm' });
     insertRun({ runId: 'run-lm', taskId: 'dreamer-lm', executionStatus: 'succeeded' });
-    _insertArtifact({ artifactId: 'artifact-lm', sourceTaskId: 'wrong-task', artifactKind: 'principle' });
+    _insertArtifact({ artifactId: 'artifact-lm', taskId: 'wrong-task', artifactKind: 'principle' });
 
     const model = new InternalizationChainIntegrityReadModel({ workspaceDir: tmpDir });
     const result = model.check();
@@ -281,5 +282,14 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
 
     expect(result2.repairedCount).toBe(0);
     expect(getTaskStatus('dreamer-001')).toBe('retry_wait');
+  });
+
+  it('test artifacts schema matches production: has task_id, no source_task_id', () => {
+    const db = new Database(dbPath, { readonly: true });
+    const columns = db.prepare('PRAGMA table_info(artifacts)').all() as { name: string }[];
+    db.close();
+    const columnNames = columns.map(c => c.name);
+    expect(columnNames).toContain('task_id');
+    expect(columnNames).not.toContain('source_task_id');
   });
 });

@@ -38,10 +38,10 @@ CREATE TABLE IF NOT EXISTS pi_artifacts (
 
 CREATE TABLE IF NOT EXISTS artifacts (
   artifact_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
   artifact_kind TEXT NOT NULL,
-  source_task_id TEXT NOT NULL,
-  content_json TEXT,
-  metadata_json TEXT,
+  content_json TEXT NOT NULL,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -116,10 +116,10 @@ describe('Chain Integrity — Real Production Path', () => {
     ).run(opts.artifactId, opts.artifactKind, opts.sourceTaskId);
   }
 
-  function _insertArtifact(opts: { artifactId: string; artifactKind: string; sourceTaskId: string; contentJson?: string }) {
+  function _insertArtifact(opts: { artifactId: string; artifactKind: string; taskId: string; runId?: string; contentJson?: string }) {
     db.prepare(
-      `INSERT OR REPLACE INTO artifacts (artifact_id, artifact_kind, source_task_id, content_json) VALUES (?, ?, ?, ?)`,
-    ).run(opts.artifactId, opts.artifactKind, opts.sourceTaskId, opts.contentJson ?? null);
+      `INSERT OR REPLACE INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json) VALUES (?, ?, ?, ?, ?)`,
+    ).run(opts.artifactId, opts.runId ?? 'run-default', opts.taskId, opts.artifactKind, opts.contentJson ?? '{}');
   }
 
   function insertCandidate(opts: { candidateId: string; taskId: string; status: string; sourceRunId?: string }) {
@@ -186,7 +186,7 @@ describe('Chain Integrity — Real Production Path', () => {
     expect(result.brokenLinks.some(l => l.type === 'missing_dreamer_pi_artifact' && l.taskId === 'dreamer-3')).toBe(true);
   });
 
-  it('succeeded task result_ref points to artifact with wrong source_task_id → lineage_mismatch', () => {
+  it('succeeded task result_ref points to artifact with wrong task_id → lineage_mismatch', () => {
     insertTask({
       taskId: 'dreamer-lm',
       taskKind: 'dreamer',
@@ -197,7 +197,7 @@ describe('Chain Integrity — Real Production Path', () => {
     _insertArtifact({
       artifactId: 'artifact-lm',
       artifactKind: 'principle',
-      sourceTaskId: 'wrong-task-id',
+      taskId: 'wrong-task-id',
     });
 
     const model = new InternalizationChainIntegrityReadModel({ workspaceDir });
@@ -325,6 +325,12 @@ describe('Chain Integrity — Real Production Path', () => {
 
     const requeueAction = result2.actions.find(a => a.taskId === 'dreamer-6' && a.recommendedAction === 'requeue');
     expect(requeueAction).toBeUndefined();
+  });
+  it('test artifacts schema matches production: has task_id, no source_task_id', () => {
+    const columns = db.prepare('PRAGMA table_info(artifacts)').all() as { name: string }[];
+    const columnNames = columns.map(c => c.name);
+    expect(columnNames).toContain('task_id');
+    expect(columnNames).not.toContain('source_task_id');
   });
 });
 

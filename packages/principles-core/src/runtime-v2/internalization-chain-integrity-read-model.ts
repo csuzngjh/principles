@@ -253,15 +253,15 @@ export class InternalizationChainIntegrityReadModel {
               });
             } else {
               const artifactRow = db.prepare(
-                'SELECT source_task_id FROM artifacts WHERE artifact_id = ?'
-              ).get(ref) as { source_task_id: string } | undefined;
-              if (artifactRow && artifactRow.source_task_id !== task.task_id) {
+                'SELECT task_id FROM artifacts WHERE artifact_id = ?'
+              ).get(ref) as { task_id: string } | undefined;
+              if (artifactRow && artifactRow.task_id !== task.task_id) {
                 brokenLinks.push({
                   type: 'lineage_mismatch',
                   severity: 'error',
                   taskId: task.task_id,
                   artifactId: ref,
-                  reason: `Task ${task.task_id} result_ref ${ref} has source_task_id ${artifactRow.source_task_id} which does not match task_id`,
+                  reason: `Task ${task.task_id} result_ref ${ref} has task_id ${artifactRow.task_id} which does not match owning task_id`,
                   recommendedAction: 'Investigate artifact assignment logic or data corruption.',
                 });
               }
