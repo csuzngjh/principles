@@ -70,6 +70,8 @@ export interface PiAiRuntimeAdapterConfig {
   eventEmitter?: StoreEventEmitter;
   /** Reasoning/thinking level. Set to false to disable thinking for models that enable it by default (e.g., MiniMax). Default: undefined (use model default). */
   reasoning?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | false;
+  /** Internal override for the retry delay backoff, primarily for fast unit testing. */
+  _testBackoffDelayMs?: number;
 }
 
 /**
@@ -127,12 +129,76 @@ function resolveModel(provider: string, modelId: string, baseUrl?: string) {
  * Excludes PDRuntimeError to avoid false positives from our own wrapped
  * error messages that may contain "timed out".
  */
+function isObjectWithKey<K extends string>(obj: unknown, key: K): obj is Record<K, unknown> {
+  return typeof obj === 'object' && obj !== null && Object.hasOwn(obj, key);
+}
+
 function isAbortError(err: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true;
   if (err instanceof DOMException && err.name === 'AbortError') return true;
-  if (typeof err === 'object' && err !== null && 'name' in err && (err as { name?: unknown }).name === 'AbortError') return true;
+  if (isObjectWithKey(err, 'name')) {
+    const rawName = err.name;
+    if (typeof rawName === 'string' && rawName === 'AbortError') {
+      return true;
+    }
+  }
   if (err instanceof Error && !(err instanceof PDRuntimeError) && (/abort/i.test(err.message) || /timeout/i.test(err.message))) return true;
   return false;
+}
+
+interface TimeoutClassificationResult {
+  category: 'timeout' | 'execution_failed';
+  classification: 'provider_transient_timeout' | 'client_timeout_budget_exhausted' | 'timeout_unclassified' | 'not_applicable';
+}
+
+function classifyFailure(
+  err: unknown,
+  signal?: AbortSignal,
+): TimeoutClassificationResult {
+  if (signal?.aborted) {
+    return {
+      category: 'timeout',
+      classification: 'client_timeout_budget_exhausted',
+    };
+  }
+
+  let errorMsg = '';
+  let name = '';
+  if (err instanceof Error) {
+    const { message, name: errName } = err;
+    errorMsg = message;
+    name = errName;
+  } else if (typeof err === 'object' && err !== null) {
+    if (isObjectWithKey(err, 'message')) {
+      const rawMessage = err.message;
+      if (typeof rawMessage === 'string') {
+        errorMsg = rawMessage;
+      }
+    }
+    if (isObjectWithKey(err, 'name')) {
+      const rawName = err.name;
+      if (typeof rawName === 'string') {
+        name = rawName;
+      }
+    }
+  } else {
+    errorMsg = String(err);
+  }
+
+  const isAbort = name === 'AbortError' || (err instanceof DOMException && err.name === 'AbortError');
+  const hasTimeoutKeywords = /timeout|timed\s*out/i.test(errorMsg) || /abort/i.test(errorMsg);
+
+  if (isAbort || hasTimeoutKeywords) {
+    return {
+      category: 'timeout',
+      classification: 'provider_transient_timeout',
+    };
+  }
+
+  return {
+    category: 'execution_failed',
+    classification: 'not_applicable',
+  };
 }
 
 /**
@@ -401,7 +467,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
     try {
       // Call LLM with retry — pass effectiveTimeoutMs so provider request uses runner timeout
-      const response = await this.completeWithRetry(model, context, { signal, apiKey, effectiveTimeoutMs });
+      const response = await this.completeWithRetry(model, context, { signal, apiKey, effectiveTimeoutMs, timeoutSource, input, runId });
 
       // extractAssistantTextOrThrow normalizes resolved-error responses
       // (e.g., stopReason:'error' + errorMessage:'401 Unauthorized')
@@ -565,15 +631,53 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       const endedAt = new Date().toISOString();
       runState.endedAt = endedAt;
 
+      const elapsedMs = Date.now() - Date.parse(startedAt);
+      const maxRetries = this.config.maxRetries ?? 2;
+      let timeoutClassification = 'not_applicable';
+      let providerEvidence = '';
+      let retryAttempt = 0;
+
+      if (err instanceof PDRuntimeError && err.details) {
+        const { details } = err;
+        if (isObjectWithKey(details, 'timeoutClassification')) {
+          const { timeoutClassification: tc } = details;
+          if (typeof tc === 'string') timeoutClassification = tc;
+        }
+        if (isObjectWithKey(details, 'providerEvidence')) {
+          const { providerEvidence: pe } = details;
+          if (typeof pe === 'string') providerEvidence = pe;
+        }
+        if (isObjectWithKey(details, 'retryAttempt')) {
+          const { retryAttempt: ra } = details;
+          if (typeof ra === 'number') retryAttempt = ra;
+        }
+      }
+
       if (isAbortError(err, signal)) {
         runState.status = 'timed_out';
-        runState.reason = `[timeout] LLM request timed out after ${effectiveTimeoutMs}ms (timeoutSource=runner_poll)`;
+        runState.reason = `[timeout] LLM request timed out after ${effectiveTimeoutMs}ms (timeoutSource=${timeoutSource})`;
+        if (timeoutClassification === 'not_applicable') {
+          timeoutClassification = signal?.aborted ? 'client_timeout_budget_exhausted' : 'provider_transient_timeout';
+        }
+        if (!providerEvidence) {
+          providerEvidence = safeStringifyPreview(err, 300);
+        }
       } else if (err instanceof PDRuntimeError) {
         runState.status = 'failed';
         runState.reason = err.message;
+        if (err.category === 'timeout') {
+          runState.status = 'timed_out';
+          if (timeoutClassification === 'not_applicable') {
+            timeoutClassification = 'provider_transient_timeout';
+          }
+        }
+        if (!providerEvidence) {
+          providerEvidence = safeStringifyPreview(err, 300);
+        }
       } else {
         runState.status = 'failed';
         runState.reason = err instanceof Error ? err.message : String(err);
+        providerEvidence = safeStringifyPreview(err, 300);
       }
 
       // Emit runtime_invocation_failed telemetry
@@ -587,8 +691,19 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         payload: {
           runId,
           runtimeKind: 'pi-ai',
-          errorCategory,
+          runnerKind: input.agentSpec.agentId,
+          provider: this.config.provider,
+          model: this.config.model,
+          effectiveTimeoutMs,
+          timeoutSource,
+          elapsedMs,
+          timeoutClassification,
+          retryAttempt,
+          maxRetries,
+          providerEvidence,
           errorMessage: runState.reason,
+          errorCategory,
+          finalFailure: true,
         },
       });
 
@@ -599,6 +714,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       throw new PDRuntimeError(
         'execution_failed',
         `LLM completion failed: ${err instanceof Error ? err.message : String(err)}`,
+        {
+          elapsedMs,
+          providerEvidence,
+        }
       );
     }
 
@@ -703,19 +822,62 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private async completeWithRetry(
     model: ReturnType<typeof resolveModel>,
     context: Context,
-    options: { signal: AbortSignal; apiKey: string; effectiveTimeoutMs?: number },
+    options: {
+      signal: AbortSignal;
+      apiKey: string;
+      effectiveTimeoutMs?: number;
+      timeoutSource?: string;
+      input?: StartRunInput;
+      runId?: string;
+    },
   ): Promise<AssistantMessage> {
     const maxRetries = this.config.maxRetries ?? 2;
-    // Use the timeout resolved in startRun (runner > config > default) — never re-derive from config alone
-    const effectiveTimeoutMs = options.effectiveTimeoutMs ?? this.config.timeoutMs ?? 300_000;
+    const {
+      effectiveTimeoutMs = this.config.timeoutMs ?? 300_000,
+      timeoutSource = 'default',
+      input,
+      runId = crypto.randomUUID(),
+    } = options;
     let lastError: unknown = undefined;
+    const overallStartTime = Date.now();
+    const getDelay = (attemptIndex: number) => {
+      return this.config._testBackoffDelayMs !== undefined
+        ? this.config._testBackoffDelayMs
+        : Math.min(1000 * Math.pow(2, attemptIndex), 30_000);
+    };
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const elapsedMs = Date.now() - overallStartTime;
+      const remainingMs = effectiveTimeoutMs - elapsedMs;
+
+      // Fail fast if overall budget signal is aborted, or if we have already run out of budget time
+      if (options.signal?.aborted || remainingMs <= 0) {
+        const errorDetails = {
+          timeoutClassification: 'client_timeout_budget_exhausted',
+          effectiveTimeoutMs,
+          timeoutSource,
+          elapsedMs,
+          retryAttempt: attempt,
+          maxRetries,
+          providerEvidence: options.signal?.aborted
+            ? 'Client budget signal aborted'
+            : `Overall timeout budget exhausted (elapsed ${elapsedMs}ms of ${effectiveTimeoutMs}ms)`,
+        };
+        throw new PDRuntimeError(
+          'timeout',
+          `LLM request timed out after ${effectiveTimeoutMs}ms (timeoutSource=client_budget_exhausted)`,
+          errorDetails,
+        );
+      }
+
+      // Cap the individual attempt timeout to the remaining budget to honor the timeout budget contract
+      const currentTimeoutMs = Math.min(effectiveTimeoutMs, remainingMs);
+
       try {
         const completeOptions: SimpleStreamOptions = {
           signal: options.signal,
           apiKey: options.apiKey,
-          timeoutMs: effectiveTimeoutMs,
+          timeoutMs: currentTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
         };
         if (this.config.reasoning !== undefined && this.config.reasoning !== false) {
@@ -724,39 +886,184 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         const response = await completeSimple(model, context, completeOptions);
 
         // If provider resolved with an error response, classify and potentially retry.
-        // Only retry execution_failed (transient provider errors); timeout/output_invalid are not retryable.
         if (response.stopReason === 'error' || response.stopReason === 'aborted') {
           const rawMessage = response.errorMessage ?? 'unknown provider error';
+          const elapsedMsAfter = Date.now() - overallStartTime;
+
           const isTimeout = response.stopReason === 'aborted'
             || options.signal?.aborted
             || /timeout|timed\s*out/i.test(rawMessage)
             || /abort/i.test(rawMessage);
 
+          const classification = (options.signal?.aborted || elapsedMsAfter >= effectiveTimeoutMs)
+            ? 'client_timeout_budget_exhausted'
+            : isTimeout
+              ? 'provider_transient_timeout'
+              : 'not_applicable';
+
           if (isTimeout) {
-            throw new PDRuntimeError('timeout', `[timeout] LLM request timed out after ${effectiveTimeoutMs}ms (timeoutSource=provider_request)`);
+            const errorDetails = {
+              timeoutClassification: classification,
+              effectiveTimeoutMs,
+              timeoutSource,
+              elapsedMs: elapsedMsAfter,
+              retryAttempt: attempt,
+              maxRetries,
+              providerEvidence: safeStringifyPreview(rawMessage, 300),
+            };
+
+            const pdErr = new PDRuntimeError(
+              'timeout',
+              `[timeout] LLM request timed out after ${effectiveTimeoutMs}ms (timeoutSource=provider_request)`,
+              errorDetails,
+            );
+            lastError = pdErr;
+
+            if (classification === 'provider_transient_timeout' && attempt < maxRetries) {
+              if (input) {
+                this.emitAttemptTelemetry({
+                  input,
+                  runId,
+                  attempt,
+                  maxRetries,
+                  err: pdErr,
+                  elapsedMs: elapsedMsAfter,
+                  timeoutSource,
+                  effectiveTimeoutMs,
+                });
+              }
+              const delay = getDelay(attempt);
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+
+            throw pdErr;
           }
 
           // execution_failed — retryable if attempts remain
-          lastError = new PDRuntimeError('execution_failed', `LLM execution failed: ${rawMessage.substring(0, 300)}`);
+          const pdErr = new PDRuntimeError(
+            'execution_failed',
+            `LLM execution failed: ${rawMessage.substring(0, 300)}`,
+            {
+              retryAttempt: attempt,
+              maxRetries,
+              elapsedMs: elapsedMsAfter,
+              providerEvidence: safeStringifyPreview(rawMessage, 300),
+            },
+          );
+          lastError = pdErr;
+
           if (attempt < maxRetries) {
-            const delay = Math.min(1000 * Math.pow(2, attempt), 30_000);
+            if (input) {
+              this.emitAttemptTelemetry({
+                input,
+                runId,
+                attempt,
+                maxRetries,
+                err: pdErr,
+                elapsedMs: elapsedMsAfter,
+                timeoutSource,
+                effectiveTimeoutMs,
+              });
+            }
+            const delay = getDelay(attempt);
             await new Promise(r => setTimeout(r, delay));
             continue;
           }
-          throw lastError;
+          throw pdErr;
         }
 
         return response;
       } catch (err) {
-        lastError = err;
-        if (isAbortError(err, options.signal)) {
-          throw new PDRuntimeError('timeout', `LLM request timed out after ${effectiveTimeoutMs}ms`);
+        const elapsedMsAfter = Date.now() - overallStartTime;
+        let classificationResult = classifyFailure(err, options.signal);
+
+        if (options.signal?.aborted || elapsedMsAfter >= effectiveTimeoutMs) {
+          classificationResult = {
+            category: 'timeout',
+            classification: 'client_timeout_budget_exhausted',
+          };
         }
+
+        // If it's a client budget exhaustion, throw immediately (no retry)
+        if (classificationResult.classification === 'client_timeout_budget_exhausted') {
+          const errorDetails = {
+            timeoutClassification: 'client_timeout_budget_exhausted',
+            effectiveTimeoutMs,
+            timeoutSource,
+            elapsedMs: elapsedMsAfter,
+            retryAttempt: attempt,
+            maxRetries,
+            providerEvidence: safeStringifyPreview(err, 300),
+          };
+          throw new PDRuntimeError('timeout', `LLM request timed out after ${effectiveTimeoutMs}ms`, errorDetails);
+        }
+
+        if (classificationResult.category === 'timeout') {
+          const errorDetails = {
+            timeoutClassification: 'provider_transient_timeout',
+            effectiveTimeoutMs,
+            timeoutSource,
+            elapsedMs: elapsedMsAfter,
+            retryAttempt: attempt,
+            maxRetries,
+            providerEvidence: safeStringifyPreview(err, 300),
+          };
+          const pdErr = new PDRuntimeError('timeout', `LLM request timed out after ${effectiveTimeoutMs}ms`, errorDetails);
+          lastError = pdErr;
+
+          if (attempt < maxRetries) {
+            if (input) {
+              this.emitAttemptTelemetry({
+                input,
+                runId,
+                attempt,
+                maxRetries,
+                err: pdErr,
+                elapsedMs: elapsedMsAfter,
+                timeoutSource,
+                effectiveTimeoutMs,
+              });
+            }
+            const delay = getDelay(attempt);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+          throw pdErr;
+        }
+
         if (err instanceof PDRuntimeError) {
-          throw err; // PDRuntimeError (timeout from above) — don't retry
+          throw err; // don't retry standard PDRuntimeError if it is permanent or already handled
         }
+
+        // It is an execution_failed (network, etc.)
+        const errorDetails = {
+          retryAttempt: attempt,
+          maxRetries,
+          elapsedMs: elapsedMsAfter,
+          providerEvidence: safeStringifyPreview(err, 300),
+        };
+        const pdErr = new PDRuntimeError(
+          'execution_failed',
+          `LLM completion failed: ${err instanceof Error ? err.message : String(err)}`,
+          errorDetails,
+        );
+        lastError = pdErr;
+
         if (attempt < maxRetries) {
-          const delay = Math.min(1000 * Math.pow(2, attempt), 30_000);
+          if (input) {
+            this.emitAttemptTelemetry({
+              input,
+              runId,
+              attempt,
+              maxRetries,
+              err: pdErr,
+              elapsedMs: elapsedMsAfter,
+              timeoutSource,
+              effectiveTimeoutMs,
+            });
+          }
+          const delay = getDelay(attempt);
           await new Promise(r => setTimeout(r, delay));
         }
       }
@@ -770,5 +1077,65 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       'execution_failed',
       `LLM completion failed after ${maxRetries + 1} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
     );
+  }
+
+  private emitAttemptTelemetry(params: {
+    input: StartRunInput;
+    runId: string;
+    attempt: number;
+    maxRetries: number;
+    err: PDRuntimeError;
+    elapsedMs: number;
+    timeoutSource: string;
+    effectiveTimeoutMs: number;
+  }) {
+    const {
+      input,
+      runId,
+      attempt,
+      maxRetries,
+      err,
+      elapsedMs,
+      timeoutSource,
+      effectiveTimeoutMs,
+    } = params;
+    const endedAt = new Date().toISOString();
+    const { details } = err;
+    let timeoutClassification = 'not_applicable';
+    let providerEvidence = '';
+    if (details && typeof details === 'object') {
+      if (isObjectWithKey(details, 'timeoutClassification')) {
+        const { timeoutClassification: tc } = details;
+        if (typeof tc === 'string') timeoutClassification = tc;
+      }
+      if (isObjectWithKey(details, 'providerEvidence')) {
+        const { providerEvidence: pe } = details;
+        if (typeof pe === 'string') providerEvidence = pe;
+      }
+    }
+
+    this.eventEmitter.emitTelemetry({
+      eventType: 'runtime_invocation_failed',
+      traceId: input.taskRef?.taskId ?? runId,
+      timestamp: endedAt,
+      sessionId: 'pi-ai-adapter',
+      agentId: 'pi-ai-adapter',
+      payload: {
+        runId,
+        runtimeKind: 'pi-ai',
+        runnerKind: input.agentSpec.agentId,
+        provider: this.config.provider,
+        model: this.config.model,
+        effectiveTimeoutMs,
+        timeoutSource,
+        elapsedMs,
+        timeoutClassification,
+        retryAttempt: attempt,
+        maxRetries,
+        providerEvidence,
+        errorMessage: err.message,
+        isRetryAttempt: true,
+      },
+    });
   }
 }
