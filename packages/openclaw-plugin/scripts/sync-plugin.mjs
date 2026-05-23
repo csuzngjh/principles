@@ -1073,10 +1073,15 @@ function restartGatewayWindows() {
             execSync('schtasks /Run /TN "OpenClaw Gateway"', { stdio: 'pipe' });
             gatewayStarted = true;
         } catch {
-            // schtasks failed — try direct CLI fallback
-            console.log('   Scheduled task not available, trying direct gateway start...');
+            // schtasks failed — try direct CLI fallback via PowerShell
+            // PowerShell shim resolves paths correctly in Anaconda environments
+            // where cmd /c can produce wrong path prefixes (e.g. conda prefix + npm path)
+            console.log('   Scheduled task not available, trying direct gateway start via PowerShell...');
             try {
-                execSync('start /b cmd /c "openclaw gateway > nul 2>&1"', { stdio: 'pipe', shell: true });
+                execSync(
+                    'powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -NoNewWindow -FilePath \'openclaw\' -ArgumentList \'gateway\'"',
+                    { stdio: 'pipe', timeout: 5000 }
+                );
                 gatewayStarted = true;
             } catch {
                 // Gateway may already be running or no perms — not fatal
