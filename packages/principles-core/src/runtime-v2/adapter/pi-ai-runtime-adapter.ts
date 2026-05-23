@@ -70,6 +70,8 @@ export interface PiAiRuntimeAdapterConfig {
   eventEmitter?: StoreEventEmitter;
   /** Reasoning/thinking level. Set to false to disable thinking for models that enable it by default (e.g., MiniMax). Default: undefined (use model default). */
   reasoning?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | false;
+  /** Internal override for the retry delay backoff, primarily for fast unit testing. */
+  _testBackoffDelayMs?: number;
 }
 
 /**
@@ -127,10 +129,19 @@ function resolveModel(provider: string, modelId: string, baseUrl?: string) {
  * Excludes PDRuntimeError to avoid false positives from our own wrapped
  * error messages that may contain "timed out".
  */
+function isObjectWithKey<K extends string>(obj: unknown, key: K): obj is Record<K, unknown> {
+  return typeof obj === 'object' && obj !== null && Object.hasOwn(obj, key);
+}
+
 function isAbortError(err: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) return true;
   if (err instanceof DOMException && err.name === 'AbortError') return true;
-  if (typeof err === 'object' && err !== null && 'name' in err && (err as { name?: unknown }).name === 'AbortError') return true;
+  if (isObjectWithKey(err, 'name')) {
+    const rawName = err.name;
+    if (typeof rawName === 'string' && rawName === 'AbortError') {
+      return true;
+    }
+  }
   if (err instanceof Error && !(err instanceof PDRuntimeError) && (/abort/i.test(err.message) || /timeout/i.test(err.message))) return true;
   return false;
 }
@@ -158,14 +169,17 @@ function classifyFailure(
     errorMsg = message;
     name = errName;
   } else if (typeof err === 'object' && err !== null) {
-    const obj = err as Record<string, unknown>;
-    if ('message' in obj && typeof obj.message === 'string') {
-      const { message } = obj as { message: string };
-      errorMsg = message;
+    if (isObjectWithKey(err, 'message')) {
+      const rawMessage = err.message;
+      if (typeof rawMessage === 'string') {
+        errorMsg = rawMessage;
+      }
     }
-    if ('name' in obj && typeof obj.name === 'string') {
-      const { name: objName } = obj as { name: string };
-      name = objName;
+    if (isObjectWithKey(err, 'name')) {
+      const rawName = err.name;
+      if (typeof rawName === 'string') {
+        name = rawName;
+      }
     }
   } else {
     errorMsg = String(err);
@@ -624,9 +638,19 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       let retryAttempt = 0;
 
       if (err instanceof PDRuntimeError && err.details) {
-        timeoutClassification = (err.details.timeoutClassification as string) ?? timeoutClassification;
-        providerEvidence = (err.details.providerEvidence as string) ?? providerEvidence;
-        retryAttempt = (err.details.retryAttempt as number) ?? retryAttempt;
+        const { details } = err;
+        if (isObjectWithKey(details, 'timeoutClassification')) {
+          const { timeoutClassification: tc } = details;
+          if (typeof tc === 'string') timeoutClassification = tc;
+        }
+        if (isObjectWithKey(details, 'providerEvidence')) {
+          const { providerEvidence: pe } = details;
+          if (typeof pe === 'string') providerEvidence = pe;
+        }
+        if (isObjectWithKey(details, 'retryAttempt')) {
+          const { retryAttempt: ra } = details;
+          if (typeof ra === 'number') retryAttempt = ra;
+        }
       }
 
       if (isAbortError(err, signal)) {
@@ -816,13 +840,44 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     } = options;
     let lastError: unknown = undefined;
     const overallStartTime = Date.now();
+    const getDelay = (attemptIndex: number) => {
+      return this.config._testBackoffDelayMs !== undefined
+        ? this.config._testBackoffDelayMs
+        : Math.min(1000 * Math.pow(2, attemptIndex), 30_000);
+    };
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const elapsedMs = Date.now() - overallStartTime;
+      const remainingMs = effectiveTimeoutMs - elapsedMs;
+
+      // Fail fast if overall budget signal is aborted, or if we have already run out of budget time
+      if (options.signal?.aborted || remainingMs <= 0) {
+        const errorDetails = {
+          timeoutClassification: 'client_timeout_budget_exhausted',
+          effectiveTimeoutMs,
+          timeoutSource,
+          elapsedMs,
+          retryAttempt: attempt,
+          maxRetries,
+          providerEvidence: options.signal?.aborted
+            ? 'Client budget signal aborted'
+            : `Overall timeout budget exhausted (elapsed ${elapsedMs}ms of ${effectiveTimeoutMs}ms)`,
+        };
+        throw new PDRuntimeError(
+          'timeout',
+          `LLM request timed out after ${effectiveTimeoutMs}ms (timeoutSource=client_budget_exhausted)`,
+          errorDetails,
+        );
+      }
+
+      // Cap the individual attempt timeout to the remaining budget to honor the timeout budget contract
+      const currentTimeoutMs = Math.min(effectiveTimeoutMs, remainingMs);
+
       try {
         const completeOptions: SimpleStreamOptions = {
           signal: options.signal,
           apiKey: options.apiKey,
-          timeoutMs: effectiveTimeoutMs,
+          timeoutMs: currentTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
         };
         if (this.config.reasoning !== undefined && this.config.reasoning !== false) {
@@ -833,14 +888,14 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         // If provider resolved with an error response, classify and potentially retry.
         if (response.stopReason === 'error' || response.stopReason === 'aborted') {
           const rawMessage = response.errorMessage ?? 'unknown provider error';
-          const elapsedMs = Date.now() - overallStartTime;
+          const elapsedMsAfter = Date.now() - overallStartTime;
 
           const isTimeout = response.stopReason === 'aborted'
             || options.signal?.aborted
             || /timeout|timed\s*out/i.test(rawMessage)
             || /abort/i.test(rawMessage);
 
-          const classification = options.signal?.aborted
+          const classification = (options.signal?.aborted || elapsedMsAfter >= effectiveTimeoutMs)
             ? 'client_timeout_budget_exhausted'
             : isTimeout
               ? 'provider_transient_timeout'
@@ -851,7 +906,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               timeoutClassification: classification,
               effectiveTimeoutMs,
               timeoutSource,
-              elapsedMs,
+              elapsedMs: elapsedMsAfter,
               retryAttempt: attempt,
               maxRetries,
               providerEvidence: safeStringifyPreview(rawMessage, 300),
@@ -872,12 +927,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                   attempt,
                   maxRetries,
                   err: pdErr,
-                  elapsedMs,
+                  elapsedMs: elapsedMsAfter,
                   timeoutSource,
                   effectiveTimeoutMs,
                 });
               }
-              const delay = Math.min(1000 * Math.pow(2, attempt), 30_000);
+              const delay = getDelay(attempt);
               await new Promise(r => setTimeout(r, delay));
               continue;
             }
@@ -892,7 +947,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             {
               retryAttempt: attempt,
               maxRetries,
-              elapsedMs,
+              elapsedMs: elapsedMsAfter,
               providerEvidence: safeStringifyPreview(rawMessage, 300),
             },
           );
@@ -906,12 +961,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 attempt,
                 maxRetries,
                 err: pdErr,
-                elapsedMs,
+                elapsedMs: elapsedMsAfter,
                 timeoutSource,
                 effectiveTimeoutMs,
               });
             }
-            const delay = Math.min(1000 * Math.pow(2, attempt), 30_000);
+            const delay = getDelay(attempt);
             await new Promise(r => setTimeout(r, delay));
             continue;
           }
@@ -920,8 +975,15 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
         return response;
       } catch (err) {
-        const elapsedMs = Date.now() - overallStartTime;
-        const classificationResult = classifyFailure(err, options.signal);
+        const elapsedMsAfter = Date.now() - overallStartTime;
+        let classificationResult = classifyFailure(err, options.signal);
+
+        if (options.signal?.aborted || elapsedMsAfter >= effectiveTimeoutMs) {
+          classificationResult = {
+            category: 'timeout',
+            classification: 'client_timeout_budget_exhausted',
+          };
+        }
 
         // If it's a client budget exhaustion, throw immediately (no retry)
         if (classificationResult.classification === 'client_timeout_budget_exhausted') {
@@ -929,7 +991,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             timeoutClassification: 'client_timeout_budget_exhausted',
             effectiveTimeoutMs,
             timeoutSource,
-            elapsedMs,
+            elapsedMs: elapsedMsAfter,
             retryAttempt: attempt,
             maxRetries,
             providerEvidence: safeStringifyPreview(err, 300),
@@ -942,7 +1004,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             timeoutClassification: 'provider_transient_timeout',
             effectiveTimeoutMs,
             timeoutSource,
-            elapsedMs,
+            elapsedMs: elapsedMsAfter,
             retryAttempt: attempt,
             maxRetries,
             providerEvidence: safeStringifyPreview(err, 300),
@@ -958,12 +1020,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 attempt,
                 maxRetries,
                 err: pdErr,
-                elapsedMs,
+                elapsedMs: elapsedMsAfter,
                 timeoutSource,
                 effectiveTimeoutMs,
               });
             }
-            const delay = Math.min(1000 * Math.pow(2, attempt), 30_000);
+            const delay = getDelay(attempt);
             await new Promise(r => setTimeout(r, delay));
             continue;
           }
@@ -978,7 +1040,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         const errorDetails = {
           retryAttempt: attempt,
           maxRetries,
-          elapsedMs,
+          elapsedMs: elapsedMsAfter,
           providerEvidence: safeStringifyPreview(err, 300),
         };
         const pdErr = new PDRuntimeError(
@@ -996,12 +1058,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               attempt,
               maxRetries,
               err: pdErr,
-              elapsedMs,
+              elapsedMs: elapsedMsAfter,
               timeoutSource,
               effectiveTimeoutMs,
             });
           }
-          const delay = Math.min(1000 * Math.pow(2, attempt), 30_000);
+          const delay = getDelay(attempt);
           await new Promise(r => setTimeout(r, delay));
         }
       }
@@ -1038,8 +1100,19 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       effectiveTimeoutMs,
     } = params;
     const endedAt = new Date().toISOString();
-    const timeoutClassification = err.details?.timeoutClassification as string ?? 'not_applicable';
-    const providerEvidence = err.details?.providerEvidence as string ?? '';
+    const { details } = err;
+    let timeoutClassification = 'not_applicable';
+    let providerEvidence = '';
+    if (details && typeof details === 'object') {
+      if (isObjectWithKey(details, 'timeoutClassification')) {
+        const { timeoutClassification: tc } = details;
+        if (typeof tc === 'string') timeoutClassification = tc;
+      }
+      if (isObjectWithKey(details, 'providerEvidence')) {
+        const { providerEvidence: pe } = details;
+        if (typeof pe === 'string') providerEvidence = pe;
+      }
+    }
 
     this.eventEmitter.emitTelemetry({
       eventType: 'runtime_invocation_failed',

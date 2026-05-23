@@ -93,6 +93,7 @@ function makeAdapter(overrides: Record<string, unknown> = {}) {
     provider: 'openrouter',
     model: 'anthropic/claude-sonnet-4',
     apiKeyEnv: 'TEST_API_KEY',
+    _testBackoffDelayMs: 0,
     ...overrides,
   });
 }
@@ -1531,6 +1532,73 @@ describe('PiAiRuntimeAdapter', () => {
       expect(payload.timeoutSource).toBe('runner_input');
       expect(payload.timeoutClassification).toBe('provider_transient_timeout');
       expect(payload.retryAttempt).toBe(0);
+    });
+
+    it('13. caps subsequent retry attempt timeoutMs to remaining overall budget', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockImplementationOnce(async (_model, _ctx, _options) => {
+        await new Promise(resolve => setTimeout(resolve, 40));
+        throw new Error('transient timeout');
+      });
+      mockComplete.mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ maxRetries: 2 });
+      await adapter.startRun(makeStartRunInput({ timeoutMs: 100 }));
+
+      expect(mockComplete).toHaveBeenCalledTimes(2);
+      const secondCallOpts = mockComplete.mock.calls[1]?.[2] as Record<string, unknown>;
+      expect(secondCallOpts).toBeDefined();
+      const tc = secondCallOpts.timeoutMs;
+      expect(typeof tc).toBe('number');
+      expect(tc).toBeLessThanOrEqual(70);
+      expect(tc).toBeGreaterThan(0);
+    });
+
+    it('14. fails fast with client_timeout_budget_exhausted when budget is exhausted', async () => {
+      mockComplete.mockReset();
+      mockComplete.mockImplementation(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        throw new Error('transient timeout');
+      });
+
+      const adapter = makeAdapter({ maxRetries: 2 });
+      let caughtErr: PDRuntimeError | undefined = undefined;
+      try {
+        await adapter.startRun(makeStartRunInput({ timeoutMs: 30 }));
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(mockComplete).toHaveBeenCalledTimes(1);
+      expect(caughtErr).toBeDefined();
+      expect(caughtErr?.category).toBe('timeout');
+      expect(caughtErr?.details?.timeoutClassification).toBe('client_timeout_budget_exhausted');
+    });
+
+    it('15. untrusted error classification ignores inherited properties and handles malformed fields safely', async () => {
+      mockComplete.mockReset();
+      
+      const proto = {
+        message: 'timeout - inherited but should be ignored if not own property',
+        name: 'AbortError',
+      };
+      const malformedErr = Object.create(proto) as Record<string, unknown>;
+      malformedErr.message = 'ordinary own message';
+      malformedErr.name = 'OrdinaryError';
+
+      mockComplete.mockRejectedValueOnce(malformedErr);
+
+      const adapter = makeAdapter({ maxRetries: 0 });
+      let caughtErr: PDRuntimeError | undefined = undefined;
+      try {
+        await adapter.startRun(makeStartRunInput());
+      } catch (err) {
+        if (err instanceof PDRuntimeError) caughtErr = err;
+      }
+
+      expect(caughtErr).toBeDefined();
+      expect(caughtErr?.category).toBe('execution_failed');
+      expect(caughtErr?.details?.timeoutClassification).toBeUndefined();
     });
   });
 });
