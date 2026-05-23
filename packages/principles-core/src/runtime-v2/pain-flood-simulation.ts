@@ -11,6 +11,7 @@ export interface PainFloodStage {
   inputCount: number;
   acceptedCount: number;
   skippedCount: number;
+  failedCount: number;
   taskCount: number;
   candidateCount: number;
   reason?: string;
@@ -24,6 +25,7 @@ export interface PainFloodSimulationSummary {
   inputPainCount: number;
   acceptedPainCount: number;
   skippedDuplicateCount: number;
+  failedCount: number;
   candidateCount: number;
   taskCount: number;
   maxEvidencePreviewLength: number;
@@ -101,11 +103,14 @@ export function computeFloodTotals(stages: PainFloodStage[]): {
   inputPainCount: number;
   acceptedPainCount: number;
   skippedDuplicateCount: number;
+  failedCount: number;
   candidateCount: number;
   taskCount: number;
 } {
   let inputPainCount = 0;
   let acceptedPainCount = 0;
+  let skippedDuplicateCount = 0;
+  let failedCount = 0;
   let candidateCount = 0;
   let taskCount = 0;
 
@@ -113,6 +118,8 @@ export function computeFloodTotals(stages: PainFloodStage[]): {
     if (stage.status === 'skipped') continue;
     inputPainCount += stage.inputCount;
     acceptedPainCount += stage.acceptedCount;
+    skippedDuplicateCount += stage.skippedCount;
+    failedCount += stage.failedCount;
     candidateCount += stage.candidateCount;
     taskCount += stage.taskCount;
   }
@@ -120,7 +127,8 @@ export function computeFloodTotals(stages: PainFloodStage[]): {
   return {
     inputPainCount,
     acceptedPainCount,
-    skippedDuplicateCount: inputPainCount - acceptedPainCount,
+    skippedDuplicateCount,
+    failedCount,
     candidateCount,
     taskCount,
   };

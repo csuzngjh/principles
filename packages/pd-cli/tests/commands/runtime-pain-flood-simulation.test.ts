@@ -21,6 +21,7 @@ function makePassedSummary() {
     inputPainCount: 77,
     acceptedPainCount: 22,
     skippedDuplicateCount: 55,
+    failedCount: 0,
     candidateCount: 22,
     taskCount: 22,
     maxEvidencePreviewLength: 450,
@@ -32,6 +33,7 @@ function makePassedSummary() {
         inputCount: 10,
         acceptedCount: 1,
         skippedCount: 9,
+        failedCount: 0,
         taskCount: 1,
         candidateCount: 1,
       },
@@ -41,6 +43,7 @@ function makePassedSummary() {
         inputCount: 10,
         acceptedCount: 10,
         skippedCount: 0,
+        failedCount: 0,
         taskCount: 10,
         candidateCount: 10,
       },
@@ -50,6 +53,7 @@ function makePassedSummary() {
         inputCount: 2,
         acceptedCount: 1,
         skippedCount: 1,
+        failedCount: 0,
         taskCount: 1,
         candidateCount: 1,
       },
@@ -59,6 +63,7 @@ function makePassedSummary() {
         inputCount: 5,
         acceptedCount: 1,
         skippedCount: 4,
+        failedCount: 0,
         taskCount: 1,
         candidateCount: 1,
       },
@@ -68,6 +73,7 @@ function makePassedSummary() {
         inputCount: 50,
         acceptedCount: 33,
         skippedCount: 17,
+        failedCount: 0,
         taskCount: 33,
         candidateCount: 33,
       },
@@ -157,6 +163,7 @@ describe('handleRuntimePainFlood (CLI handler)', () => {
       expect(parsed).toHaveProperty('inputPainCount');
       expect(parsed).toHaveProperty('acceptedPainCount');
       expect(parsed).toHaveProperty('skippedDuplicateCount');
+      expect(parsed).toHaveProperty('failedCount');
       expect(parsed).toHaveProperty('candidateCount');
       expect(parsed).toHaveProperty('taskCount');
       expect(parsed).toHaveProperty('maxEvidencePreviewLength');
@@ -246,11 +253,11 @@ describe('handleRuntimePainFlood (CLI handler)', () => {
       ...makePassedSummary(),
       status: 'degraded',
       stages: [
-        { scenarioName: 'identical_flood', status: 'passed', inputCount: 10, acceptedCount: 1, skippedCount: 9, taskCount: 1, candidateCount: 1 },
-        { scenarioName: 'similar_flood', status: 'failed', inputCount: 10, acceptedCount: 0, skippedCount: 10, taskCount: 0, candidateCount: 0, reason: 'bridge error' },
-        { scenarioName: 'duplicate_submission', status: 'passed', inputCount: 2, acceptedCount: 1, skippedCount: 1, taskCount: 1, candidateCount: 1 },
-        { scenarioName: 'tool_failure_flood', status: 'passed', inputCount: 5, acceptedCount: 1, skippedCount: 4, taskCount: 1, candidateCount: 1 },
-        { scenarioName: 'stress_test', status: 'passed', inputCount: 50, acceptedCount: 33, skippedCount: 17, taskCount: 33, candidateCount: 33 },
+        { scenarioName: 'identical_flood', status: 'passed', inputCount: 10, acceptedCount: 1, skippedCount: 9, failedCount: 0, taskCount: 1, candidateCount: 1 },
+        { scenarioName: 'similar_flood', status: 'failed', inputCount: 10, acceptedCount: 0, skippedCount: 0, failedCount: 10, taskCount: 0, candidateCount: 0, reason: 'bridge error' },
+        { scenarioName: 'duplicate_submission', status: 'passed', inputCount: 2, acceptedCount: 1, skippedCount: 1, failedCount: 0, taskCount: 1, candidateCount: 1 },
+        { scenarioName: 'tool_failure_flood', status: 'passed', inputCount: 5, acceptedCount: 1, skippedCount: 4, failedCount: 0, taskCount: 1, candidateCount: 1 },
+        { scenarioName: 'stress_test', status: 'passed', inputCount: 50, acceptedCount: 33, skippedCount: 17, failedCount: 0, taskCount: 33, candidateCount: 33 },
       ],
     });
 
@@ -320,17 +327,18 @@ describe('handleRuntimePainFlood (CLI handler)', () => {
       generatedAt: new Date().toISOString(),
       inputPainCount: 77,
       acceptedPainCount: 22,
-      skippedDuplicateCount: 55,
+      skippedDuplicateCount: 31,
+      failedCount: 10,
       candidateCount: 22,
       taskCount: 22,
       maxEvidencePreviewLength: 0,
       contextBudgetSummary: 'no evidence produced',
       stages: [
-        { scenarioName: 'identical_flood', status: 'passed', inputCount: 10, acceptedCount: 1, skippedCount: 9, taskCount: 1, candidateCount: 1 },
-        { scenarioName: 'similar_flood', status: 'failed', inputCount: 10, acceptedCount: 0, skippedCount: 10, taskCount: 0, candidateCount: 0, reason: 'Injected failure: stress test overflow' },
-        { scenarioName: 'duplicate_submission', status: 'passed', inputCount: 2, acceptedCount: 1, skippedCount: 1, taskCount: 1, candidateCount: 1 },
-        { scenarioName: 'tool_failure_flood', status: 'passed', inputCount: 5, acceptedCount: 1, skippedCount: 4, taskCount: 1, candidateCount: 1 },
-        { scenarioName: 'stress_test', status: 'passed', inputCount: 50, acceptedCount: 33, skippedCount: 17, taskCount: 33, candidateCount: 33 },
+        { scenarioName: 'identical_flood', status: 'passed', inputCount: 10, acceptedCount: 1, skippedCount: 9, failedCount: 0, taskCount: 1, candidateCount: 1 },
+        { scenarioName: 'similar_flood', status: 'failed', inputCount: 10, acceptedCount: 0, skippedCount: 0, failedCount: 10, taskCount: 0, candidateCount: 0, reason: 'Injected failure: stress test overflow' },
+        { scenarioName: 'duplicate_submission', status: 'passed', inputCount: 2, acceptedCount: 1, skippedCount: 1, failedCount: 0, taskCount: 1, candidateCount: 1 },
+        { scenarioName: 'tool_failure_flood', status: 'passed', inputCount: 5, acceptedCount: 1, skippedCount: 4, failedCount: 0, taskCount: 1, candidateCount: 1 },
+        { scenarioName: 'stress_test', status: 'passed', inputCount: 50, acceptedCount: 33, skippedCount: 17, failedCount: 0, taskCount: 33, candidateCount: 33 },
       ],
       recommendedNextIssue: 'PRI-208: Similar pain flood caused unbounded task creation — check dedup and evidence budget',
     });

@@ -56,10 +56,10 @@ async function runScenario(
   painSignals: PainSignalInput[],
 ): Promise<PainFloodStage> {
   const { stateManager, bridge } = deps;
-  const uniquePainIds = new Set<string>();
   const errors: string[] = [];
+  let skippedDuplicateCount = 0;
+  let failedSignalCount = 0;
 
-  // Record before counts to compute per-scenario deltas
   const tasksBefore = await stateManager.listTasks();
   let candidatesBefore = 0;
   for (const task of tasksBefore) {
@@ -68,7 +68,6 @@ async function runScenario(
   }
 
   for (const signal of painSignals) {
-    uniquePainIds.add(signal.painId);
     try {
       const result = await bridge.onPainDetected({
         painId: signal.painId,
@@ -77,15 +76,18 @@ async function runScenario(
         reason: signal.reason,
       });
 
-      if (result.status === 'failed' || result.status === 'retried') {
+      if (result.status === 'skipped') {
+        skippedDuplicateCount++;
+      } else if (result.status === 'failed' || result.status === 'retried') {
+        failedSignalCount++;
         errors.push(`${signal.painId}: bridge returned ${result.status} — ${result.message ?? 'no message'}`);
       }
     } catch (err) {
+      failedSignalCount++;
       errors.push(`${signal.painId}: threw — ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  // Compute deltas
   const tasksAfter = await stateManager.listTasks();
   let candidatesAfter = 0;
   for (const task of tasksAfter) {
@@ -95,7 +97,6 @@ async function runScenario(
 
   const deltaTasks = tasksAfter.length - tasksBefore.length;
   const deltaCandidates = candidatesAfter - candidatesBefore;
-  const skippedCount = painSignals.length - deltaTasks;
   const passed = errors.length === 0;
 
   const stage: PainFloodStage = {
@@ -103,13 +104,15 @@ async function runScenario(
     status: passed ? 'passed' : 'failed',
     inputCount: painSignals.length,
     acceptedCount: deltaTasks,
-    skippedCount,
+    skippedCount: skippedDuplicateCount,
+    failedCount: failedSignalCount,
     taskCount: deltaTasks,
     candidateCount: deltaCandidates,
     evidence: boundedFloodEvidence({
       inputCount: painSignals.length,
       acceptedCount: deltaTasks,
-      skippedCount,
+      skippedCount: skippedDuplicateCount,
+      failedCount: failedSignalCount,
       deltaTasks,
       deltaCandidates,
       errorCount: errors.length,
@@ -257,6 +260,7 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
       inputPainCount: totals.inputPainCount,
       acceptedPainCount: totals.acceptedPainCount,
       skippedDuplicateCount: totals.skippedDuplicateCount,
+      failedCount: totals.failedCount,
       candidateCount: totals.candidateCount,
       taskCount: totals.taskCount,
       maxEvidencePreviewLength: maxPreview,
@@ -282,6 +286,7 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
           inputCount: 0,
           acceptedCount: 0,
           skippedCount: 0,
+          failedCount: 0,
           taskCount: 0,
           candidateCount: 0,
           reason: truncateReason(`Unexpected error: ${errorMessage}`),
@@ -299,6 +304,7 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
       inputPainCount: partialTotals.inputPainCount,
       acceptedPainCount: partialTotals.acceptedPainCount,
       skippedDuplicateCount: partialTotals.skippedDuplicateCount,
+      failedCount: partialTotals.failedCount,
       candidateCount: partialTotals.candidateCount,
       taskCount: partialTotals.taskCount,
       maxEvidencePreviewLength: partialMaxPreview,

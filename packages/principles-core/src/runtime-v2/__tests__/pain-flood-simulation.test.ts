@@ -15,6 +15,7 @@ function makeStage(overrides: Partial<PainFloodStage> & { scenarioName: PainFloo
     inputCount: 0,
     acceptedCount: 0,
     skippedCount: 0,
+    failedCount: 0,
     taskCount: 0,
     candidateCount: 0,
     ...overrides,
@@ -23,18 +24,39 @@ function makeStage(overrides: Partial<PainFloodStage> & { scenarioName: PainFloo
 
 describe('PainFloodSimulation pure helpers (PRI-208)', () => {
   describe('computeFloodTotals', () => {
-    it('sums input and accepted counts across stages', () => {
+    it('sums input, accepted, skipped, and failed counts across stages', () => {
       const stages: PainFloodStage[] = [
-        makeStage({ scenarioName: 'identical_flood', status: 'passed', inputCount: 10, acceptedCount: 1, candidateCount: 1, taskCount: 1 }),
-        makeStage({ scenarioName: 'similar_flood', status: 'passed', inputCount: 5, acceptedCount: 5, candidateCount: 5, taskCount: 5 }),
-        makeStage({ scenarioName: 'duplicate_submission', status: 'passed', inputCount: 2, acceptedCount: 1, candidateCount: 1, taskCount: 1 }),
+        makeStage({ scenarioName: 'identical_flood', status: 'passed', inputCount: 10, acceptedCount: 1, skippedCount: 9, candidateCount: 1, taskCount: 1 }),
+        makeStage({ scenarioName: 'similar_flood', status: 'passed', inputCount: 5, acceptedCount: 5, skippedCount: 0, candidateCount: 5, taskCount: 5 }),
+        makeStage({ scenarioName: 'duplicate_submission', status: 'passed', inputCount: 2, acceptedCount: 1, skippedCount: 1, candidateCount: 1, taskCount: 1 }),
       ];
       const totals = computeFloodTotals(stages);
       expect(totals.inputPainCount).toBe(17);
       expect(totals.acceptedPainCount).toBe(7);
       expect(totals.skippedDuplicateCount).toBe(10);
+      expect(totals.failedCount).toBe(0);
       expect(totals.candidateCount).toBe(7);
       expect(totals.taskCount).toBe(7);
+    });
+
+    it('sums failedCount across stages', () => {
+      const stages: PainFloodStage[] = [
+        makeStage({ scenarioName: 'identical_flood', status: 'failed', inputCount: 10, acceptedCount: 1, skippedCount: 0, failedCount: 9, candidateCount: 1, taskCount: 1 }),
+        makeStage({ scenarioName: 'similar_flood', status: 'passed', inputCount: 5, acceptedCount: 5, skippedCount: 0, failedCount: 0, candidateCount: 5, taskCount: 5 }),
+      ];
+      const totals = computeFloodTotals(stages);
+      expect(totals.failedCount).toBe(9);
+      expect(totals.skippedDuplicateCount).toBe(0);
+    });
+
+    it('unique signal failure produces zero skippedDuplicateCount', () => {
+      const stages: PainFloodStage[] = [
+        makeStage({ scenarioName: 'identical_flood', status: 'failed', inputCount: 3, acceptedCount: 0, skippedCount: 0, failedCount: 3, candidateCount: 0, taskCount: 0 }),
+      ];
+      const totals = computeFloodTotals(stages);
+      expect(totals.skippedDuplicateCount).toBe(0);
+      expect(totals.failedCount).toBe(3);
+      expect(totals.acceptedPainCount).toBe(0);
     });
 
     it('skips stages with status "skipped"', () => {
@@ -52,6 +74,7 @@ describe('PainFloodSimulation pure helpers (PRI-208)', () => {
       expect(totals.inputPainCount).toBe(0);
       expect(totals.acceptedPainCount).toBe(0);
       expect(totals.skippedDuplicateCount).toBe(0);
+      expect(totals.failedCount).toBe(0);
       expect(totals.candidateCount).toBe(0);
       expect(totals.taskCount).toBe(0);
     });

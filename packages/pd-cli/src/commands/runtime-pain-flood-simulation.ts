@@ -24,6 +24,7 @@ function formatTextOutput(summary: PainFloodSimulationSummary): string {
   lines.push(`  inputPainCount: ${summary.inputPainCount}`);
   lines.push(`  acceptedPainCount: ${summary.acceptedPainCount}`);
   lines.push(`  skippedDuplicateCount: ${summary.skippedDuplicateCount}`);
+  lines.push(`  failedCount: ${summary.failedCount}`);
   lines.push(`  candidateCount: ${summary.candidateCount}`);
   lines.push(`  taskCount: ${summary.taskCount}`);
   lines.push(`  maxEvidencePreviewLength: ${summary.maxEvidencePreviewLength}`);
@@ -33,7 +34,7 @@ function formatTextOutput(summary: PainFloodSimulationSummary): string {
   for (const stage of summary.stages) {
     const stageIcon = stage.status === 'passed' ? '✓' : stage.status === 'skipped' ? '○' : '✗';
     lines.push(`  ${stageIcon} ${stage.scenarioName}: ${stage.status}`);
-    lines.push(`      input=${stage.inputCount} accepted=${stage.acceptedCount} skipped=${stage.skippedCount} tasks=${stage.taskCount} candidates=${stage.candidateCount}`);
+    lines.push(`      input=${stage.inputCount} accepted=${stage.acceptedCount} skipped=${stage.skippedCount} failed=${stage.failedCount} tasks=${stage.taskCount} candidates=${stage.candidateCount}`);
     if (stage.reason) {
       lines.push(`      reason: ${stage.reason}`);
     }
