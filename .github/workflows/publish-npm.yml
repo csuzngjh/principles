@@ -34,7 +34,63 @@ on:
       - 'packages/create-principles-disciple/**'
 
 jobs:
+  publish-dry-run:
+    name: Publish Build Parity Gate
+    if: (github.event_name == 'pull_request' && github.event.pull_request.merged == true) || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Determine package
+        id: package
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.package }}" = "principles-disciple" ]; then
+              echo "pkg=openclaw-plugin" >> $GITHUB_OUTPUT
+            else
+              echo "pkg=create-principles-disciple" >> $GITHUB_OUTPUT
+            fi
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "pkg=openclaw-plugin" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "pkg=openclaw-plugin" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies (workspace root)
+        run: npm ci --ignore-scripts
+
+      - name: Build workspace (core then plugin)
+        if: steps.package.outputs.pkg == 'openclaw-plugin'
+        run: npm run build
+
+      - name: Build package (standalone)
+        if: steps.package.outputs.pkg == 'create-principles-disciple'
+        working-directory: packages/create-principles-disciple
+        run: npm ci && npm run build
+
+      - name: Verify package dry-run
+        working-directory: packages/${{ steps.package.outputs.pkg }}
+        run: npm pack --dry-run 2>&1 | head -50
+
+      - name: Summary
+        run: |
+          echo "## Publish Build Parity Gate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | \`${{ steps.package.outputs.pkg }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Result | Build parity verified (no publish) |" >> $GITHUB_STEP_SUMMARY
+
   release:
+    name: Publish to npm
+    needs: publish-dry-run
     if: (github.event_name == 'pull_request' && github.event.pull_request.merged == true) || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -44,7 +100,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0  # 获取完整历史用于分析 commits
+          fetch-depth: 0
 
       - name: Determine package
         id: package
@@ -64,40 +120,36 @@ jobs:
       - name: Get npm latest version
         id: npm-version
         run: |
-          # 从 npm 获取最新版本（这是真正的"已发布"版本）
           NPM_VERSION=$(npm view principles-disciple version 2>/dev/null || echo "0.0.0")
           echo "npm_version=$NPM_VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Latest npm version: $NPM_VERSION"
+          echo "Latest npm version: $NPM_VERSION"
 
       - name: Analyze commits for version bump
         id: analyze
         if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.version_bump == 'auto')
         run: |
-          # 获取 npm 最新版本对应的 tag
           NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
           LAST_TAG="v$NPM_VERSION"
-          
-          # 检查 tag 是否存在
+
           if git rev-parse "$LAST_TAG" >/dev/null 2>&1; then
             COMMITS=$(git log $LAST_TAG..HEAD --oneline)
           else
             COMMITS=$(git log -10 --oneline)
           fi
-          
+
           echo "Commits since npm v$NPM_VERSION:"
           echo "$COMMITS"
-          
-          # 分析 commit 类型
-          BUMP="patch"  # 默认 patch
-          
+
+          BUMP="patch"
+
           if echo "$COMMITS" | grep -qE "^[a-f0-9]+ (feat|feature)(\(.+\))?!:"; then
-            BUMP="major"  # feat! 或 feat(...)! 表示 breaking change
+            BUMP="major"
           elif echo "$COMMITS" | grep -qE "^[a-f0-9]+ .+!:"; then
-            BUMP="major"  # 任何 ! 后缀表示 breaking change
+            BUMP="major"
           elif echo "$COMMITS" | grep -qE "^[a-f0-9]+ (feat|feature)(\(.+\))?:"; then
-            BUMP="minor"  # feat 表示新功能
+            BUMP="minor"
           fi
-          
+
           echo "Detected version bump: $BUMP"
           echo "bump=$BUMP" >> $GITHUB_OUTPUT
 
@@ -107,13 +159,17 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install dependencies
-        working-directory: packages/${{ steps.package.outputs.pkg }}
-        run: npm ci
+      - name: Install dependencies (workspace root)
+        run: npm ci --ignore-scripts
 
-      - name: Build
-        working-directory: packages/${{ steps.package.outputs.pkg }}
+      - name: Build workspace (core then plugin)
+        if: steps.package.outputs.pkg == 'openclaw-plugin'
         run: npm run build
+
+      - name: Build package (standalone)
+        if: steps.package.outputs.pkg == 'create-principles-disciple'
+        working-directory: packages/create-principles-disciple
+        run: npm ci && npm run build
 
       - name: Run tests
         if: steps.package.outputs.pkg == 'openclaw-plugin'
@@ -130,7 +186,7 @@ jobs:
           elif [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "type=${{ steps.analyze.outputs.bump || 'patch' }}" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "type=none" >> $GITHUB_OUTPUT  # Tag push, don't bump
+            echo "type=none" >> $GITHUB_OUTPUT
           else
             echo "type=patch" >> $GITHUB_OUTPUT
           fi
@@ -143,105 +199,95 @@ jobs:
           BUMP="${{ steps.bump.outputs.type }}"
           NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
           LOCAL_VERSION=$(node -p "require('./package.json').version")
-          
-          echo "📊 Version check:"
+
+          echo "Version check:"
           echo "  - npm latest: $NPM_VERSION"
           echo "  - local: $LOCAL_VERSION"
-          
-          # 如果本地版本比 npm 新，说明有未发布的版本，警告但继续
+
           if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
-            echo "⚠️  Local version ($LOCAL_VERSION) differs from npm ($NPM_VERSION)"
-            echo "   Will bump from npm version: $NPM_VERSION"
+            echo "Local version ($LOCAL_VERSION) differs from npm ($NPM_VERSION)"
+            echo "Will bump from npm version: $NPM_VERSION"
           fi
-          
-          # 先同步到 npm 版本，再 bump
+
           npm version $NPM_VERSION --no-git-tag-version
           npm version $BUMP -m "chore(release): %s [skip ci]"
-          
+
           NEW_VERSION=$(node -p "require('./package.json').version")
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "old_version=$NPM_VERSION" >> $GITHUB_OUTPUT
-          
-          echo "✅ Bumped: $NPM_VERSION → $NEW_VERSION"
+
+          echo "Bumped: $NPM_VERSION -> $NEW_VERSION"
 
       - name: Sync version to all files
         run: |
-          # Always sync - extracts version from package.json (already bumped by bump step, or from tag push commit)
           VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
-          echo "🔄 Syncing version $VERSION to all files..."
-          
-          # 1. Sync openclaw.plugin.json
+          echo "Syncing version $VERSION to all files..."
+
           PLUGIN_JSON="packages/openclaw-plugin/openclaw.plugin.json"
           if [ -f "$PLUGIN_JSON" ]; then
             sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$PLUGIN_JSON"
-            echo "✅ Synced: $PLUGIN_JSON"
+            echo "Synced: $PLUGIN_JSON"
           fi
-          
-          # 2. Sync dist/openclaw.plugin.json (embedded in npm package)
+
           DIST_PLUGIN_JSON="packages/openclaw-plugin/dist/openclaw.plugin.json"
           if [ -f "$DIST_PLUGIN_JSON" ]; then
             sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$DIST_PLUGIN_JSON"
-            echo "✅ Synced: $DIST_PLUGIN_JSON"
+            echo "Synced: $DIST_PLUGIN_JSON"
           fi
-          
-          # 3. Sync root package.json
+
           ROOT_PKG="package.json"
           if [ -f "$ROOT_PKG" ]; then
             sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$ROOT_PKG"
-            echo "✅ Synced: $ROOT_PKG"
+            echo "Synced: $ROOT_PKG"
           fi
-          
-          # 4. Sync README.md
+
           README="README.md"
           if [ -f "$README" ]; then
             sed -i "s/(v[0-9]\+\.[0-9]\+\.[0-9]\+)/(v$VERSION)/g" "$README"
-            echo "✅ Synced: $README"
+            echo "Synced: $README"
           fi
-          
-          # 5. Sync README_ZH.md
+
           README_ZH="README_ZH.md"
           if [ -f "$README_ZH" ]; then
             sed -i "s/(v[0-9]\+\.[0-9]\+\.[0-9]\+)/(v$VERSION)/g" "$README_ZH"
-            echo "✅ Synced: $README_ZH"
+            echo "Synced: $README_ZH"
           fi
-          
-          echo "🎉 All files synced to version $VERSION"
+
+          echo "All files synced to version $VERSION"
 
       - name: Generate changelog
         id: changelog
         if: github.event_name == 'pull_request'
         run: |
-          # 使用 npm 最新版本的 tag
           NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
           LAST_TAG="v$NPM_VERSION"
-          
+
           if git rev-parse "$LAST_TAG" >/dev/null 2>&1; then
             COMMITS=$(git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges)
           else
             COMMITS=$(git log -20 --pretty=format:"- %s (%h)" --no-merges)
           fi
-          
-          # 分类 commits
+
           FEATURES=$(echo "$COMMITS" | grep -E "^- feat" || true)
           FIXES=$(echo "$COMMITS" | grep -E "^- fix" || true)
           OTHER=$(echo "$COMMITS" | grep -vE "^- (feat|fix)" || true)
-          
+
           CHANGELOG="## What's Changed\n\n"
-          
+
           if [ -n "$FEATURES" ]; then
-            CHANGELOG+="### 🚀 Features\n$FEATURES\n\n"
+            CHANGELOG+="### Features\n$FEATURES\n\n"
           fi
-          
+
           if [ -n "$FIXES" ]; then
-            CHANGELOG+="### 🐛 Bug Fixes\n$FIXES\n\n"
+            CHANGELOG+="### Bug Fixes\n$FIXES\n\n"
           fi
-          
+
           if [ -n "$OTHER" ]; then
-            CHANGELOG+="### 🔧 Other Changes\n$OTHER\n\n"
+            CHANGELOG+="### Other Changes\n$OTHER\n\n"
           fi
-          
+
           CHANGELOG+="\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LAST_TAG}...v${{ steps.version.outputs.version }}"
-          
+
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
           echo -e "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -257,7 +303,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           OLD_VERSION="${{ steps.version.outputs.old_version }}"
-          
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -265,7 +311,7 @@ jobs:
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin HEAD:main --force-with-lease
           git push origin "v$VERSION"
-          echo "✅ Created and pushed tag: v$VERSION (from npm v$OLD_VERSION)"
+          echo "Created and pushed tag: v$VERSION (from npm v$OLD_VERSION)"
 
       - name: Create GitHub Release
         if: steps.bump.outputs.type != 'none'
@@ -281,7 +327,7 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## 📦 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -290,4 +336,4 @@ jobs:
           echo "| Bump Type | \`${{ steps.bump.outputs.type }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Trigger | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Published to npm and GitHub" >> $GITHUB_STEP_SUMMARY
+          echo "Published to npm and GitHub" >> $GITHUB_STEP_SUMMARY
