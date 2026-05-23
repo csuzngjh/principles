@@ -43,7 +43,9 @@ jobs:
 
       - name: Verify publish dry-run
         working-directory: packages/openclaw-plugin
-        run: npm pack --dry-run 2>&1 | head -50
+        run: |
+          set -o pipefail
+          npm pack --dry-run 2>&1 | head -50
 
   lint:
     name: Lint

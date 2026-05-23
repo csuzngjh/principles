@@ -76,7 +76,9 @@ jobs:
 
       - name: Verify package dry-run
         working-directory: packages/${{ steps.package.outputs.pkg }}
-        run: npm pack --dry-run 2>&1 | head -50
+        run: |
+          set -o pipefail
+          npm pack --dry-run 2>&1 | head -50
 
       - name: Summary
         run: |
