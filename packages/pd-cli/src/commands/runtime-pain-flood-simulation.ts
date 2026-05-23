@@ -48,10 +48,39 @@ function formatTextOutput(summary: PainFloodSimulationSummary): string {
 }
 
 export async function handleRuntimePainFlood(opts: CliPainFloodOptions): Promise<void> {
-  const workspaceDir = opts.workspace
-    ? path.resolve(opts.workspace)
-    : fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-flood-'));
-  const workspaceMode: 'temp' | 'explicit_workspace' = opts.workspace ? 'explicit_workspace' : 'temp';
+  if (opts.workspace) {
+    if (opts.json) {
+      console.log(JSON.stringify({ status: 'error', reason: 'Explicit workspace is not allowed for pain flood simulation — this command mutates state and must run in an auto-created temp workspace only.', nextAction: 'Remove --workspace flag and re-run to use a temp workspace.' }));
+    } else {
+      console.error('Error: --workspace is not allowed for pain flood simulation. This command mutates state and must run in an auto-created temp workspace only.');
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  const countFields: { name: 'identicalCount' | 'similarCount' | 'stressCount'; value: number | undefined; min: number }[] = [
+    { name: 'identicalCount', value: opts.identicalCount, min: 1 },
+    { name: 'similarCount', value: opts.similarCount, min: 1 },
+    { name: 'stressCount', value: opts.stressCount, min: 1 },
+  ];
+
+  for (const field of countFields) {
+    if (field.value !== undefined) {
+      if (!Number.isFinite(field.value) || !Number.isInteger(field.value) || field.value < field.min) {
+        const reason = `--${field.name === 'identicalCount' ? 'identical-count' : field.name === 'similarCount' ? 'similar-count' : 'stress-count'} must be a finite integer >= ${field.min}, got ${field.value}`;
+        if (opts.json) {
+          console.log(JSON.stringify({ status: 'error', reason, nextAction: `Provide a valid --${field.name === 'identicalCount' ? 'identical-count' : field.name === 'similarCount' ? 'similar-count' : 'stress-count'} value` }));
+        } else {
+          console.error(`Error: ${reason}`);
+        }
+        process.exitCode = 1;
+        return;
+      }
+    }
+  }
+
+  const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-flood-'));
+  const workspaceMode = 'temp' as const;
 
   try {
     const summary = await runPainFloodSimulation({
@@ -74,12 +103,10 @@ export async function handleRuntimePainFlood(opts: CliPainFloodOptions): Promise
       process.exitCode = 1;
     }
   } finally {
-    if (workspaceMode === 'temp') {
-      try {
-        fs.rmSync(workspaceDir, { recursive: true, force: true });
-      } catch {
-        // ignore cleanup errors on Windows
-      }
+    try {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors on Windows
     }
   }
 }

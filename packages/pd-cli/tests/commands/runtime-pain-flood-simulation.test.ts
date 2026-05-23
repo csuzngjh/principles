@@ -109,20 +109,37 @@ describe('handleRuntimePainFlood (CLI handler)', () => {
     expect(calledDir).toContain('pd-pain-flood-');
   });
 
-  it('uses explicit workspace when --workspace is provided', async () => {
-    mockRunPainFloodSimulation.mockResolvedValue({
-      ...makePassedSummary(),
-      workspaceMode: 'explicit_workspace',
-    });
+  it('rejects explicit --workspace with error and does not call runner', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await handleRuntimePainFlood({ workspace: tempDir });
+    try {
+      await handleRuntimePainFlood({ workspace: tempDir });
 
-    expect(mockRunPainFloodSimulation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceDir: tempDir,
-        workspaceMode: 'explicit_workspace',
-      }),
-    );
+      expect(mockRunPainFloodSimulation).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('not allowed'));
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('rejects explicit --workspace with JSON error output', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await handleRuntimePainFlood({ workspace: tempDir, json: true });
+
+      expect(mockRunPainFloodSimulation).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.status).toBe('error');
+      expect(output.reason).toContain('not allowed');
+      expect(output.nextAction).toBeDefined();
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 
   it('--json output contains all expected measurement fields', async () => {
@@ -166,6 +183,64 @@ describe('handleRuntimePainFlood (CLI handler)', () => {
     );
   });
 
+  it('rejects NaN count with error and does not call runner', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await handleRuntimePainFlood({ identicalCount: NaN });
+
+      expect(mockRunPainFloodSimulation).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('finite integer'));
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('rejects negative count with error and does not call runner', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await handleRuntimePainFlood({ stressCount: -5 });
+
+      expect(mockRunPainFloodSimulation).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('finite integer'));
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('rejects zero count with error and does not call runner', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await handleRuntimePainFlood({ similarCount: 0 });
+
+      expect(mockRunPainFloodSimulation).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('finite integer'));
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('rejects non-integer count with JSON error output', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await handleRuntimePainFlood({ identicalCount: 3.5, json: true });
+
+      expect(mockRunPainFloodSimulation).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+      const output = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(output.status).toBe('error');
+      expect(output.reason).toContain('finite integer');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it('sets process.exitCode = 1 when status is degraded', async () => {
     mockRunPainFloodSimulation.mockResolvedValue({
       ...makePassedSummary(),
@@ -183,7 +258,7 @@ describe('handleRuntimePainFlood (CLI handler)', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
-      await handleRuntimePainFlood({ workspace: tempDir });
+      await handleRuntimePainFlood({});
       expect(process.exitCode).toBe(1);
     } finally {
       logSpy.mockRestore();
@@ -201,7 +276,7 @@ describe('handleRuntimePainFlood (CLI handler)', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
-      await handleRuntimePainFlood({ workspace: tempDir });
+      await handleRuntimePainFlood({});
       expect(process.exitCode).toBe(1);
     } finally {
       logSpy.mockRestore();
@@ -219,25 +294,6 @@ describe('handleRuntimePainFlood (CLI handler)', () => {
 
       const calledDir = mockRunPainFloodSimulation.mock.calls[0][0].workspaceDir;
       expect(fs.existsSync(calledDir)).toBe(false);
-    } finally {
-      logSpy.mockRestore();
-    }
-  });
-
-  it('does not delete explicit workspace after run', async () => {
-    fs.mkdirSync(path.join(tempDir, '.pd'), { recursive: true });
-    fs.mkdirSync(path.join(tempDir, '.state'), { recursive: true });
-
-    mockRunPainFloodSimulation.mockResolvedValue({
-      ...makePassedSummary(),
-      workspaceMode: 'explicit_workspace',
-    });
-
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    try {
-      await handleRuntimePainFlood({ workspace: tempDir });
-      expect(fs.existsSync(tempDir)).toBe(true);
     } finally {
       logSpy.mockRestore();
     }
