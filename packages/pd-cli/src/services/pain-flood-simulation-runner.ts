@@ -26,6 +26,7 @@ import {
   formatContextBudgetSummary,
   truncateReason,
   FLOOD_SCENARIO_EXPECTATIONS,
+  computeMaxAllowedTasks,
 } from '@principles/core/runtime-v2';
 
 export interface PainFloodSimulationRunnerOptions {
@@ -107,10 +108,7 @@ async function runScenario(
   const deltaCandidates = candidatesAfter - candidatesBefore;
 
   const expectation = FLOOD_SCENARIO_EXPECTATIONS[scenarioName];
-  const maxFromRatio = Math.ceil(painSignals.length * expectation.maxTaskRatio);
-  const maxAllowedTasks = expectation.maxTaskCount != null
-    ? Math.min(maxFromRatio, expectation.maxTaskCount)
-    : maxFromRatio;
+  const maxAllowedTasks = computeMaxAllowedTasks(painSignals, expectation);
   const dedupeViolation = deltaTasks > maxAllowedTasks;
 
   const passed = errors.length === 0 && !dedupeViolation;

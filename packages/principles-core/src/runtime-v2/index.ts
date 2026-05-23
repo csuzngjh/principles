@@ -296,6 +296,7 @@ export type { SyntheticBaselineSummary, SyntheticBaselineStage, SyntheticBaselin
 export {
   computeFloodStatus, computeFloodTotals, formatContextBudgetSummary, recommendFloodNextIssue,
   boundedFloodEvidence, maxEvidencePreviewLength, FLOOD_SCENARIO_EXPECTATIONS,
+  computeMaxAllowedTasks,
 } from './pain-flood-simulation.js';
 export type { PainFloodSimulationSummary, PainFloodStage, PainFloodScenarioName, PainFloodSimulationOptions, PainFloodScenarioExpectation } from './pain-flood-simulation.js';
 

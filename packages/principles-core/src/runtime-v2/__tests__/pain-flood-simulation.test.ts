@@ -9,6 +9,7 @@ import {
   maxEvidencePreviewLength,
   safeStringify,
   FLOOD_SCENARIO_EXPECTATIONS,
+  computeMaxAllowedTasks,
 } from '../pain-flood-simulation.js';
 
 function makeStage(overrides: Partial<PainFloodStage> & { scenarioName: PainFloodStage['scenarioName']; status: PainFloodStage['status'] }): PainFloodStage {
@@ -258,6 +259,55 @@ describe('PainFloodSimulation pure helpers (PRI-208)', () => {
         expect(exp.description.length).toBeGreaterThan(0);
         expect(exp.maxTaskRatio).toBeGreaterThan(0);
       }
+    });
+  });
+
+  describe('computeMaxAllowedTasks', () => {
+    const sharedSignals = (count: number, distinctCount: number) =>
+      Array.from({ length: count }, (_, i) => ({ painId: `p-${i % distinctCount}` }));
+
+    it('identical flood: all signals create new tasks => exceeds maxTaskCount (not healthy)', () => {
+      const signals = sharedSignals(10, 10); // 10 distinct painIds, each should produce task
+      const max = computeMaxAllowedTasks(signals, FLOOD_SCENARIO_EXPECTATIONS.identical_flood);
+      // maxTaskCount=1 hard cap: ceil(10*1)=10, min(10,1)=1
+      expect(max).toBe(1);
+    });
+
+    it('stress: duplicate portion all create new tasks => exceeds distinct count (not healthy)', () => {
+      const signals = sharedSignals(50, 50); // all distinct, no dedupe possible
+      const max = computeMaxAllowedTasks(signals, FLOOD_SCENARIO_EXPECTATIONS.stress_test);
+      // maxTaskRatio=1: ceil(50*1)=50 — all 50 distinct painIds could each produce a task
+      expect(max).toBe(50);
+    });
+
+    it('identical flood: sharing one painId produces at most 1 task (healthy)', () => {
+      const signals = sharedSignals(10, 1); // 1 distinct painId, bridge will dedupe
+      const max = computeMaxAllowedTasks(signals, FLOOD_SCENARIO_EXPECTATIONS.identical_flood);
+      // maxTaskCount=1: ceil(1*1)=1, min(1,1)=1
+      expect(max).toBe(1);
+    });
+
+    it('stress: distinct painId count sets ceiling — duplicates dont expand it (healthy)', () => {
+      const signals = sharedSignals(50, 33); // 33 distinct painIds, 17 duplicates
+      const max = computeMaxAllowedTasks(signals, FLOOD_SCENARIO_EXPECTATIONS.stress_test);
+      // ceil(33*1)=33 — distinct count, not total input count
+      expect(max).toBe(33);
+      // If all 50 signals create tasks, 50 > 33 → violation caught
+      expect(50 > max).toBe(true);
+    });
+
+    it('duplicate_submission: all distinct => maxTaskCount=1 caps it', () => {
+      const signals = sharedSignals(5, 5);
+      const max = computeMaxAllowedTasks(signals, FLOOD_SCENARIO_EXPECTATIONS.duplicate_submission);
+      // ceil(5*0.5)=3, min(3,1)=1
+      expect(max).toBe(1);
+    });
+
+    it('similar_flood: each unique painId allows one task', () => {
+      const signals = sharedSignals(10, 10);
+      const max = computeMaxAllowedTasks(signals, FLOOD_SCENARIO_EXPECTATIONS.similar_flood);
+      // ceil(10*1)=10
+      expect(max).toBe(10);
     });
   });
 });
