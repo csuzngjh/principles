@@ -409,7 +409,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For every PR that adds defensive logic, verify that at least one test exercises the production path that would invoke the defense. If no production path calls the new code, the PR must not claim to provide defense. Review trigger: any PR where the diff adds a new module but does not modify any existing production code to call it.
 - **Source**: PRI-209 / PR #689
 - **Date**: 2026-05-23
-- **Recurrence**: None
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): Healthy baseline test used `expect(['ok', 'degraded']).toContain(overallStatus)`, allowing `degraded` to pass. This meant a regression that introduced new warning-level broken links in the healthy path would not be caught. The test proved the code didn't crash, but not that the healthy path remained healthy. Fixed by tightening to `expect(overallStatus).toBe('ok')`.
 
 ---
 
@@ -430,4 +430,4 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 26 |
 | Last updated | 2026-05-23 |
 | Top category | Schema & Type |
-| Recurring errors | 12 |
+| Recurring errors | 13 |
