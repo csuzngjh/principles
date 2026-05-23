@@ -398,7 +398,7 @@ describe('NocturnalDataset updateReviewStatus', () => {
 
     expect(updated.reviewStatus).toBe('approved_for_training');
     expect(updated.reviewReason).toBe('Looks good for training');
-    expect(updated.updatedAt).not.toBe(record.createdAt);
+    expect(updated.updatedAt >= record.createdAt).toBe(true);
   });
 
   it('updates updatedAt timestamp', () => {

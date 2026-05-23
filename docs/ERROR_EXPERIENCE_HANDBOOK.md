@@ -88,6 +88,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 |----|---------|--------|
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
+| ERR-023 | CLI dry-run command opens writable database connection instead of readonly | PRI-218 |
 
 ---
 
@@ -217,7 +218,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When writing validators for untrusted data, never use `if (hasCorrectType) { validate }` — always use `if (!hasCorrectType) { error } else { validate }`. The "skip on wrong type" pattern is always wrong for required fields.
 - **Source**: PRI-192 / PR #638 (reviewer feedback)
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007
+- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007. Recurred 2026-05-23 in PRI-207 (PR #680): `extractJsonObject` fenced-code path parsed valid non-object JSON (array/null/string/number/boolean) but fell through to brace scan instead of returning null, allowing array payloads to be treated as objects. Same root cause: validator (fenced parse) silently skips invalid type instead of failing loud.
 
 **[ERR-010]** | Falsy evaluator return silently passes validation instead of recording failure
 
@@ -373,9 +374,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-023]** | CLI dry-run command opens writable database connection instead of readonly
+
+- **What happened**: `pd runtime internalization enqueue-successors` defaulted to dry-run mode but constructed `RuntimeStateManager` without `readonly: true`. This meant the dry-run path opened a writable SQLite connection, potentially mutating the database (schema migration, WAL files) even though the command was only supposed to report what it would do.
+- **Why it's wrong**: Dry-run/default mode must never mutate state. Opening a writable DB connection violates the CLI dry-run contract (Command Gate rule 4: commands that can mutate state must default to dry-run). Even if no explicit write operations occur, the DB connection itself can trigger schema migration or WAL creation.
+- **Correct approach**: When constructing `RuntimeStateManager` in a CLI command, always pass `readonly: isDryRun`. Dry-run/default mode must use `readonly: true`; only `--confirm` mode should use `readonly: false`.
+- **How to prevent**: Add a "readonly wiring test" checklist item for every CLI command that uses `RuntimeStateManager`. Test that: (1) no flags / `--dry-run` → `readonly: true`; (2) `--confirm` → `readonly: false`.
+- **Source**: PRI-218 / PR #681
+- **Date**: 2026-05-23
+- **Recurrence**: None
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 22 |
-| Last updated | 2026-05-22 |
+| Total lessons | 23 |
+| Last updated | 2026-05-23 |
 | Top category | Schema & Type |
 | Recurring errors | 11 |
