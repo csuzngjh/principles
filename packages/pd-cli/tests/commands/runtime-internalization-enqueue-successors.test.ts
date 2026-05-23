@@ -593,6 +593,32 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(output.existingCount).toBe(1);
     expect(output.createdCount).toBe(0);
   });
+
+  it('dry-run proposeNextTask throws: skipped with reason', async () => {
+    const dreamerTask = makeSucceededTask('dreamer-propose-err', 'dreamer');
+    mockListTasks.mockResolvedValueOnce([dreamerTask]);
+    mockProposeNextTask.mockRejectedValue(new Error('Orchestrator internal error'));
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.actions[0].decision).toBe('skipped');
+    expect(output.actions[0].reason).toContain('propose_failed');
+    expect(output.actions[0].nextAction).toBeDefined();
+    expect(output.skippedCount).toBe(1);
+  });
+
+  it('resolveWorkspaceDir throws: fails closed with structured error', async () => {
+    const { resolveWorkspaceDir } = await import('../../src/resolve-workspace.js');
+    vi.mocked(resolveWorkspaceDir).mockImplementationOnce(() => { throw new Error('No workspace found'); });
+
+    await handleRuntimeInternalizationEnqueueSuccessors({ json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.status).toBe('failed');
+    expect(output.error).toContain('Failed to resolve workspace');
+    expect(process.exitCode).toBe(1);
+  });
 });
 
 describe('Commander wiring for enqueue-successors', () => {

@@ -185,9 +185,19 @@ async function findExistingSuccessor(
 }
 
 export async function handleRuntimeInternalizationEnqueueSuccessors(opts: EnqueueSuccessorsOptions): Promise<void> {
-  const workspaceDir = opts.workspace
-    ? path.resolve(opts.workspace)
-    : resolveWorkspaceDir();
+  const workspaceDirResult = await Promise.resolve().then(() =>
+    opts.workspace
+      ? path.resolve(opts.workspace)
+      : resolveWorkspaceDir(),
+  ).catch((resolveErr: unknown) => {
+    const message = resolveErr instanceof Error ? resolveErr.message : String(resolveErr);
+    emitFailure(`Failed to resolve workspace: ${message}`, true, !!opts.json);
+    return null;
+  });
+  if (workspaceDirResult === null) {
+    return;
+  }
+  const workspaceDir = workspaceDirResult;
 
   if (opts.dryRun && opts.confirm) {
     if (opts.json) {
@@ -259,7 +269,24 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
       }
 
       if (isDryRun) {
-        const proposalResult = await orchestrator.proposeNextTask(task.taskId);
+        const proposalResult = await orchestrator.proposeNextTask(task.taskId).catch((proposeErr: unknown) => {
+          const proposeMessage = proposeErr instanceof Error ? proposeErr.message : String(proposeErr);
+          return {
+            _proposeFailed: true as const,
+            reason: proposeMessage,
+          };
+        });
+        if (proposalResult !== null && '_proposeFailed' in proposalResult) {
+          actions.push({
+            taskId: task.taskId,
+            taskKind: piTask.taskKind,
+            decision: 'skipped',
+            reason: `propose_failed: ${proposalResult.reason}`,
+            nextAction: 'Re-run or investigate DB availability',
+          });
+          skippedCount++;
+          continue;
+        }
         if (!proposalResult) {
           actions.push({
             taskId: task.taskId,
