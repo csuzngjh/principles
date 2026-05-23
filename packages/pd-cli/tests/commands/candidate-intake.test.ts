@@ -11,7 +11,7 @@ const { mockStateManager, mockAdapter, mockService, MockRuntimeStateManager, Moc
     connection: {
       getDb: () => ({
         prepare: () => ({
-          run: vi.fn(),
+          run: vi.fn().mockReturnValue({ changes: 1 }),
         }),
       }),
     },
@@ -494,5 +494,96 @@ describe('pd candidate intake', () => {
     );
 
     expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('guarded transition: UPDATE uses WHERE status = pending for intake path', async () => {
+    const mockCandidate = {
+      candidateId: 'valid-id',
+      artifactId: 'artifact-1',
+      taskId: 'task-1',
+      title: 'Test Principle',
+      description: 'Test description',
+      status: 'pending',
+    };
+    const mockEntry = {
+      id: 'ledger-entry-1',
+      title: 'Test Principle',
+      text: 'Test text',
+      status: 'probation',
+    };
+
+    mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
+    mockService.intake.mockResolvedValue(mockEntry);
+
+    const capturedPrepareCalls: { sql: string; runArgs: unknown[] }[] = [];
+    const originalConnection = mockStateManager.connection;
+    mockStateManager.connection = {
+      getDb: () => ({
+        prepare: (sql: string) => ({
+          run: (...args: unknown[]) => {
+            capturedPrepareCalls.push({ sql, runArgs: args });
+            return { changes: 1 };
+          },
+        }),
+      }),
+    };
+
+    try {
+      await handleCandidateIntake({
+        candidateId: 'valid-id',
+        workspace: '/tmp/test-workspace',
+        json: true,
+      });
+
+      const updateCall = capturedPrepareCalls.find(c => c.sql.includes('UPDATE'));
+      expect(updateCall).toBeDefined();
+      expect(updateCall!.sql).toContain('AND status = ?');
+      expect(updateCall!.runArgs[0]).toBe('consumed');
+      expect(updateCall!.runArgs[3]).toBe('pending');
+    } finally {
+      mockStateManager.connection = originalConnection;
+    }
+  });
+
+  it('guarded transition: intake fails when candidate is not pending', async () => {
+    const mockCandidate = {
+      candidateId: 'valid-id',
+      artifactId: 'artifact-1',
+      taskId: 'task-1',
+      title: 'Test Principle',
+      description: 'Test description',
+      status: 'pending',
+    };
+    const mockEntry = {
+      id: 'ledger-entry-1',
+      title: 'Test Principle',
+      text: 'Test text',
+      status: 'probation',
+    };
+
+    mockStateManager.getCandidate.mockResolvedValue(mockCandidate);
+    mockService.intake.mockResolvedValue(mockEntry);
+
+    const originalConnection = mockStateManager.connection;
+    mockStateManager.connection = {
+      getDb: () => ({
+        prepare: (sql: string) => ({
+          run: () => ({ changes: 0 }),
+        }),
+      }),
+    };
+
+    try {
+      await handleCandidateIntake({
+        candidateId: 'valid-id',
+        workspace: '/tmp/test-workspace',
+        json: true,
+      });
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Guarded transition failed'));
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      mockStateManager.connection = originalConnection;
+    }
   });
 });

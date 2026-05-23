@@ -505,7 +505,7 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
 
     // Update DB status — this must succeed; if it fails, exit non-zero
     try {
-      await updateCandidateStatus({ stateManager, candidateId: opts.candidateId, targetStatus: 'consumed' });
+      await updateCandidateStatus({ stateManager, candidateId: opts.candidateId, targetStatus: 'consumed', expectedCurrentStatus: 'pending' });
     } catch (err) {
       const msg = `Ledger write succeeded (entry ${entry.id}) but DB status update failed: ${err instanceof Error ? err.message : String(err)}. ` +
         `Candidate ${opts.candidateId} may be in inconsistent state.`;
