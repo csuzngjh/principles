@@ -16,7 +16,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
 import type { RuleHostInput } from '@principles/core/runtime-v2';
-import { validateCorrectionProposal } from '@principles/core/runtime-v2';
+import { validateCorrectionProposal, validateProposedPathBounds } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { getSession, hasRecentThinking } from '../core/session-tracker.js';
@@ -184,29 +184,36 @@ export function handleBeforeToolCall(
         logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_proposed: ${String(evErr)}`);
       }
 
-      // PRI-174: Apply live auto-corrections when applicationMode='live' and validation passes
       if (proposal.applicationMode === 'live' && validation.valid) {
-        // Live mode: apply corrections to event.params
         if (!event.params) {
-          return; // No params to modify
+          return;
         }
         const originalParams = { ...event.params };
         const nextParams: Record<string, unknown> = {};
         const appliedFields: Array<{ field: string; original: unknown; applied: unknown }> = [];
 
         try {
-          // Validate that correctedFields is an array before proceeding
           if (!Array.isArray(proposal.correctedFields)) {
             throw new Error('proposal.correctedFields is not an array');
           }
 
-          // Validate proposedParams exists and is an object
           if (!proposal.proposedParams || typeof proposal.proposedParams !== 'object' || Array.isArray(proposal.proposedParams)) {
             throw new Error('proposal.proposedParams must be an object');
           }
 
-          // Pre-validation: ALL fields must exist in both event.params AND proposal.proposedParams
-          // Fail-open: if any field is missing, do not apply any corrections
+          const trustedWorkspaceDir = ctx.workspaceDir;
+          if (typeof trustedWorkspaceDir === 'string' && trustedWorkspaceDir.trim().length > 0) {
+            const pathBoundsResult = validateProposedPathBounds(proposal.proposedParams, trustedWorkspaceDir);
+            if (!pathBoundsResult.valid) {
+              throw new Error(`Path boundary violation: ${pathBoundsResult.reason}`);
+            }
+          } else {
+            const hasPathField = Object.keys(proposal.proposedParams).some(k => typeof proposal.proposedParams[k] === 'string' && (k === 'file_path' || k === 'path' || k === 'filePath'));
+            if (hasPathField) {
+              throw new Error('Cannot apply live auto-correction with path fields: no trusted workspace directory available');
+            }
+          }
+
           for (const cf of proposal.correctedFields) {
             if (typeof cf !== 'object' || cf === null || typeof cf.field !== 'string') {
               throw new Error('correctedFields entry must be an object with a string field');
@@ -220,7 +227,6 @@ export function handleBeforeToolCall(
             }
           }
 
-          // All fields validated: apply corrections using proposedParams values
           for (const cf of proposal.correctedFields) {
             if (typeof cf === 'object' && cf !== null && typeof cf.field === 'string') {
               const field = cf.field;
@@ -235,10 +241,8 @@ export function handleBeforeToolCall(
             }
           }
 
-          // Atomic application: only if all fields validated and processed successfully
           Object.assign(event.params, nextParams);
 
-          // Emit 'applied' telemetry
           try {
             const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
             eventLog.recordRuleHostAutoCorrectApplied({
@@ -254,7 +258,6 @@ export function handleBeforeToolCall(
             logger?.warn?.(`[PD_GATE] Failed to record rulehost_auto_correct_applied: ${String(evErr)}`);
           }
 
-          // Return non-blocking warning if notifyAgent is true
           if (proposal.notifyAgent === true && appliedFields.length > 0) {
             const messages = appliedFields.map(f =>
               `[PD Auto-Correct] Rule ${proposal.ruleId}: ${proposal.correctedFields?.[0]?.reason || 'correction applied'}. Parameter '${f.field}' was adjusted from ${JSON.stringify(f.original)} to ${JSON.stringify(f.applied)}.`
@@ -266,14 +269,36 @@ export function handleBeforeToolCall(
             };
           }
         } catch (applyError: unknown) {
-          // Fail-open: restore original params on any error
           if (event.params) {
             Object.assign(event.params, originalParams);
           }
-          logger?.warn?.(`[PD_GATE] Failed to apply auto-correction, using original params: ${String(applyError)}`);
+          const errorMsg = String(applyError);
+          const isPathViolation = errorMsg.includes('Path boundary violation') || errorMsg.includes('no trusted workspace directory');
+          if (isPathViolation) {
+            logger?.warn?.(`[PD_GATE] Live auto-correction rejected — path out of bounds: ${errorMsg}`);
+            try {
+              const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+              eventLog.recordRuleHostAutoCorrectProposed({
+                toolName: event.toolName,
+                filePath: relPath,
+                ruleId: String(proposal.ruleId ?? 'unknown'),
+                principleId: proposal.principleId != null ? String(proposal.principleId) : undefined,
+                confidence: typeof proposal.confidence === 'number' ? proposal.confidence : 0,
+                reason: `Path boundary rejected: ${errorMsg}`,
+                applicationMode: 'shadow',
+                correctedFields: Array.isArray(proposal.correctedFields)
+                  ? proposal.correctedFields.map((f: unknown) => typeof f === 'object' && f !== null ? String((f as { field?: string }).field) : String(f))
+                  : [],
+                validationValid: false,
+              });
+            } catch (evErr) {
+              logger?.warn?.(`[PD_GATE] Failed to record path rejection telemetry: ${String(evErr)}`);
+            }
+          } else {
+            logger?.warn?.(`[PD_GATE] Failed to apply auto-correction, using original params: ${errorMsg}`);
+          }
         }
       }
-      // Shadow mode: applicationMode='shadow' or validation failed - no params mutation
     } else if (hostResult?.decision === 'auto_correct') {
       // auto_correct without correctionProposal — emit telemetry for observability
       try {

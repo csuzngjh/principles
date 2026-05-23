@@ -523,4 +523,143 @@ describe('PRI-174: Gate auto_correct live mode', () => {
     expect(typeof event.params.constructor).toBe('function');
     expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
   });
+
+  it('PRI-210: out-of-bounds auto-correction is not applied (sibling prefix)', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { file_path: '/mock/workspace2/evil.ts', content: 'fixed' },
+      correctedFields: [
+        { field: 'file_path', original: '/mock/workspace/src/foo.ts', proposed: '/mock/workspace2/evil.ts', reason: 'redirect' },
+        { field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'redirect path',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent();
+    const paramsCopy = { ...event.params };
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    expect(event.params).toEqual(paramsCopy);
+    expect(event.params.file_path).toBe('/mock/workspace/src/foo.ts');
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
+  });
+
+  it('PRI-210: event.params remains unchanged when path out of bounds', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { file_path: '/etc/passwd', content: 'fixed' },
+      correctedFields: [
+        { field: 'file_path', original: '/mock/workspace/src/foo.ts', proposed: '/etc/passwd', reason: 'escape' },
+        { field: 'content', original: 'broken', proposed: 'fixed', reason: 'fix' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'escape attempt',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent();
+    const paramsCopy = { ...event.params };
+    handleBeforeToolCall(event, makeCtx());
+
+    expect(event.params).toEqual(paramsCopy);
+  });
+
+  it('PRI-210: no rulehostAutoCorrectApplied event emitted on path rejection', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { file_path: '/tmp/evil.ts', content: 'fixed' },
+      correctedFields: [
+        { field: 'file_path', original: '/mock/workspace/src/foo.ts', proposed: '/tmp/evil.ts', reason: 'escape' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'escape',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    handleBeforeToolCall(makeWriteEvent(), makeCtx());
+
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectProposed).toHaveBeenCalled();
+  });
+
+  it('PRI-210: valid in-workspace auto-correction is still applied', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { file_path: '/mock/workspace/src/bar.ts', content: 'fixed content' },
+      correctedFields: [
+        { field: 'file_path', original: '/mock/workspace/src/foo.ts', proposed: '/mock/workspace/src/bar.ts', reason: 'rename' },
+        { field: 'content', original: 'broken', proposed: 'fixed content', reason: 'fix' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'rename and fix',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent();
+    const result = handleBeforeToolCall(event, makeCtx());
+
+    expect(event.params.file_path).toBe('/mock/workspace/src/bar.ts');
+    expect(event.params.content).toBe('fixed content');
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).toHaveBeenCalledTimes(1);
+  });
+
+  it('PRI-210: missing trusted workspace root fails closed for path-bearing live correction', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { file_path: '/some/path.ts', content: 'fixed' },
+      correctedFields: [
+        { field: 'file_path', original: '/mock/workspace/src/foo.ts', proposed: '/some/path.ts', reason: 'redirect' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'redirect',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent();
+    const paramsCopy = { ...event.params };
+    const result = handleBeforeToolCall(event, makeCtx({ workspaceDir: '' }));
+
+    expect(event.params).toEqual(paramsCopy);
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).not.toHaveBeenCalled();
+  });
+
+  it('PRI-210: non-path live correction works without workspace dir', () => {
+    const proposal = makeValidProposal({
+      proposedParams: { content: 'fixed content' },
+      correctedFields: [
+        { field: 'content', original: 'broken', proposed: 'fixed content', reason: 'fix' },
+      ],
+    });
+    _mockEvaluate = vi.fn().mockReturnValue({
+      decision: 'auto_correct',
+      matched: true,
+      reason: 'fix content',
+      ruleId: proposal.ruleId,
+      correctionProposal: proposal,
+    });
+
+    const event = makeWriteEvent();
+    const paramsCopy = { ...event.params };
+    handleBeforeToolCall(event, makeCtx({ workspaceDir: '/mock/workspace' }));
+
+    expect(event.params.content).toBe('fixed content');
+    expect(mockEventLogInstance.recordRuleHostAutoCorrectApplied).toHaveBeenCalledTimes(1);
+  });
 });
