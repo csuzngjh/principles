@@ -405,6 +405,68 @@ describe('Chaos 9: Lineage field preservation', () => {
     expect(output.sourcePainId).toBe('protected-pain');
     expect(output.confidence).toBe(0.9);
   });
+
+  it('9e: mismatch between sourceTaskId/sourceRunIds/sourcePainId — original values preserved (consistent overwrite policy)', () => {
+    const original: Record<string, unknown> = {
+      taskId: 'task-1',
+      sourceTaskId: 'source-A',
+      sourceRunIds: ['run-from-B'],
+      sourcePainId: 'pain-from-C',
+      confidence: 0.85,
+    };
+    const repaired: Record<string, unknown> = {
+      taskId: 'task-1',
+      sourceTaskId: 'source-X',
+      sourceRunIds: ['run-from-Y'],
+      sourcePainId: 'pain-from-Z',
+      confidence: 0.95,
+    };
+
+    const result = preserveLineageFields(original, repaired);
+
+    expect(result.sourceTaskId).toBe('source-A');
+    expect(result.sourceRunIds).toEqual(['run-from-B']);
+    expect(result.sourcePainId).toBe('pain-from-C');
+    expect(result.confidence).toBe(0.95);
+  });
+
+  it('9f: lineage mismatch in original preserved through repair loop — consistent overwrite policy', async () => {
+    const originalOutput = {
+      taskId: 'task-1',
+      sourceTaskId: 'source-A',
+      sourceRunIds: ['run-from-B'],
+      sourcePainId: 'pain-from-C',
+      confidence: 'high',
+      summary: 'test',
+    };
+    const llmCaller: RepairLLMCaller = async () =>
+      JSON.stringify({
+        taskId: 'task-1',
+        sourceTaskId: 'source-X',
+        sourceRunIds: ['run-from-Y'],
+        sourcePainId: 'pain-from-Z',
+        confidence: 0.9,
+        summary: 'test',
+      });
+    const schemaCheck = (v: unknown): boolean => {
+      const obj = v as Record<string, unknown>;
+      return typeof obj.confidence === 'number';
+    };
+
+    const result = await attemptStructuredOutputRepair(
+      originalOutput,
+      [{ path: '/confidence', message: 'Expected number', value: 'high' }],
+      { llmCaller, schemaCheck },
+      { originalOutput, schemaRef: 'test-v1' },
+    );
+
+    expect(result.repaired).toBe(true);
+    const output = result.output as Record<string, unknown>;
+    expect(output.sourceTaskId).toBe('source-A');
+    expect(output.sourceRunIds).toEqual(['run-from-B']);
+    expect(output.sourcePainId).toBe('pain-from-C');
+    expect(output.confidence).toBe(0.9);
+  });
 });
 
 // ── Scenario 10: BigInt/circular/unstringifiable preview values ──
