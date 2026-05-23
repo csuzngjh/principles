@@ -32,12 +32,22 @@ export interface InternalizationChainIntegrityReadModelOptions {
 export function extractPIMetadata(diagJson: string | null): { parentTaskId?: string; dependencyTaskIds?: string[] } {
   if (!diagJson) return {};
   try {
-    const parsed = JSON.parse(diagJson);
-    const meta = parsed?.pi_metadata ?? parsed;
-    return {
-      parentTaskId: meta?.parentTaskId,
-      dependencyTaskIds: meta?.dependencyTaskIds,
-    };
+    const parsed: unknown = JSON.parse(diagJson);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const meta = Object.hasOwn(parsed, 'pi_metadata') ? (parsed as Record<string, unknown>).pi_metadata : parsed;
+    if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) return {};
+    const metaObj = meta as Record<string, unknown>;
+    const result: { parentTaskId?: string; dependencyTaskIds?: string[] } = {};
+    if (Object.hasOwn(metaObj, 'parentTaskId') && typeof metaObj.parentTaskId === 'string') {
+      result.parentTaskId = metaObj.parentTaskId;
+    }
+    if (Object.hasOwn(metaObj, 'dependencyTaskIds') && Array.isArray(metaObj.dependencyTaskIds)) {
+      const validated = metaObj.dependencyTaskIds.filter((id: unknown): id is string => typeof id === 'string');
+      if (validated.length > 0) {
+        result.dependencyTaskIds = validated;
+      }
+    }
+    return result;
   } catch {
     return {};
   }
