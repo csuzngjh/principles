@@ -87,6 +87,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ID | Summary | Source |
 |----|---------|--------|
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
+| ERR-024 | Error catch block zeroes partial computation results instead of preserving them | PRI-208 |
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
 | ERR-023 | CLI dry-run command opens writable database connection instead of readonly | PRI-218 |
 
@@ -386,9 +387,22 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-024]** | Error catch block zeroes partial computation results instead of preserving them
+
+- **What happened**: In `pain-flood-simulation-runner.ts`, the catch block for the main simulation loop set all aggregate counters (`inputPainCount`, `acceptedPainCount`, `skippedDuplicateCount`, `candidateCount`, `taskCount`) to zero, even though the `stages` array still contained data from scenarios that completed successfully before the error. This produced internally inconsistent output where `stages` showed completed work but top-level counters reported zero.
+- **Why it's wrong**: When an error occurs after partial computation, zeroing aggregate counters fabricates data — it claims nothing happened when some scenarios actually completed. This violates ERR-002 (graceful degradation must include a reason) and makes error output unobservable and internally inconsistent. Consumers that check top-level counters get a misleading picture.
+- **Correct approach**: Use the existing `computeFloodTotals(stages)` helper to derive aggregate counters from the actual completed stages, preserving partial results. The error status still signals failure, but the metrics reflect reality.
+- **How to prevent**: When writing catch blocks that return error/fallback results, never fabricate default values for metrics that can be derived from partial computation state. Always compute from actual data. Review all catch blocks that set counters/summaries to zero or default values and verify whether partial data is available.
+- **Source**: PRI-208 / PR #684
+- **Date**: 2026-05-23
+- **Recurrence**: None
+- **Related**: ERR-002 (silent fallback), ERR-018/ERR-019 (stale loop state)
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 23 |
+| Total lessons | 24 |
 | Last updated | 2026-05-23 |
 | Top category | Schema & Type |
 | Recurring errors | 11 |
