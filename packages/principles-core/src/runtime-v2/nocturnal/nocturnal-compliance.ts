@@ -1095,41 +1095,40 @@ export function groupEventsIntoSessions(events: RawEventEntry[]): Map<string, Se
 
     switch (event.type) {
       case 'tool_call':
-        if (event.data.toolName) {
+        if (typeof event.data.toolName === 'string') {
           session.toolCalls.push({
-            toolName: event.data.toolName as string,
-            filePath: event.data.filePath as string | undefined,
-            outcome: (event.data.error ? 'failure' : 'success') as 'success' | 'failure' | 'blocked',
-            errorType: event.data.errorType as string | undefined,
-            errorMessage: event.data.error as string | undefined,
+            toolName: event.data.toolName,
+            filePath: typeof event.data.filePath === 'string' ? event.data.filePath : undefined,
+            outcome: event.data.error ? 'failure' : 'success',
+            errorType: typeof event.data.errorType === 'string' ? event.data.errorType : undefined,
+            errorMessage: typeof event.data.error === 'string' ? event.data.error : undefined,
           });
         }
         break;
       case 'pain_signal':
         session.painSignals.push({
-          source: (event.data.source as string) ?? 'unknown',
-          score: (event.data.score as number) ?? 0,
-          severity: event.data.severity as 'mild' | 'moderate' | 'severe' | undefined,
-          reason: event.data.reason as string | undefined,
+          source: typeof event.data.source === 'string' ? event.data.source : 'unknown',
+          score: typeof event.data.score === 'number' ? event.data.score : 0,
+          severity: event.data.severity === 'mild' || event.data.severity === 'moderate' || event.data.severity === 'severe' ? event.data.severity : undefined,
+          reason: typeof event.data.reason === 'string' ? event.data.reason : undefined,
         });
         break;
       case 'gate_block':
         session.gateBlocks.push({
-          toolName: (event.data.toolName as string) ?? 'unknown',
-          filePath: event.data.filePath as string | undefined,
-          reason: (event.data.reason as string) ?? '',
+          toolName: typeof event.data.toolName === 'string' ? event.data.toolName : 'unknown',
+          filePath: typeof event.data.filePath === 'string' ? event.data.filePath : undefined,
+          reason: typeof event.data.reason === 'string' ? event.data.reason : '',
         });
         break;
       case 'empathy_rollback':
-        // User corrections are flagged via empathy rollback
         session.userCorrections.push({
-          correctionCue: event.data.reason as string | undefined,
+          correctionCue: typeof event.data.reason === 'string' ? event.data.reason : undefined,
         });
         break;
       case 'plan_approval':
         session.planApprovals.push({
-          toolName: (event.data.toolName as string) ?? 'unknown',
-          filePath: event.data.filePath as string | undefined,
+          toolName: typeof event.data.toolName === 'string' ? event.data.toolName : 'unknown',
+          filePath: typeof event.data.filePath === 'string' ? event.data.filePath : undefined,
         });
         break;
     }

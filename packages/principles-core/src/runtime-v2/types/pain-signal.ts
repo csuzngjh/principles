@@ -106,7 +106,7 @@ export function validatePainSignal(input: unknown): PainSignalValidationResult {
     return { valid: false, errors: ['Input must be a non-null object'] };
   }
 
-  const raw = input as Record<string, unknown>;
+  const raw = input as Record<string, unknown>; // safe: typeof + null + Array guards above
 
   // Apply defaults for optional fields before validation
   const hydrated = {
