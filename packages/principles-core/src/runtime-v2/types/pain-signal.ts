@@ -101,12 +101,16 @@ export interface PainSignalValidationResult {
  * Missing optional fields (domain, severity, context) are filled with defaults
  * before validation so callers get a fully-formed signal back.
  */
+function isStringRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function validatePainSignal(input: unknown): PainSignalValidationResult {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+  if (!isStringRecord(input)) {
     return { valid: false, errors: ['Input must be a non-null object'] };
   }
 
-  const raw = input as Record<string, unknown>; // safe: typeof + null + Array guards above
+  const raw = input;
 
   // Apply defaults for optional fields before validation
   const hydrated = {

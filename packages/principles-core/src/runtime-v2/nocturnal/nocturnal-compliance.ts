@@ -1095,20 +1095,18 @@ export function groupEventsIntoSessions(events: RawEventEntry[]): Map<string, Se
 
     switch (event.type) {
       case 'tool_call':
-        if (typeof event.data.toolName === 'string') {
-          session.toolCalls.push({
-            toolName: event.data.toolName,
-            filePath: typeof event.data.filePath === 'string' ? event.data.filePath : undefined,
-            outcome: event.data.error ? 'failure' : 'success',
-            errorType: typeof event.data.errorType === 'string' ? event.data.errorType : undefined,
-            errorMessage: typeof event.data.error === 'string' ? event.data.error : undefined,
-          });
-        }
+        session.toolCalls.push({
+          toolName: typeof event.data.toolName === 'string' ? event.data.toolName : 'unknown',
+          filePath: typeof event.data.filePath === 'string' ? event.data.filePath : undefined,
+          outcome: event.data.error ? 'failure' : 'success',
+          errorType: typeof event.data.errorType === 'string' ? event.data.errorType : undefined,
+          errorMessage: typeof event.data.error === 'string' ? event.data.error : undefined,
+        });
         break;
       case 'pain_signal':
         session.painSignals.push({
           source: typeof event.data.source === 'string' ? event.data.source : 'unknown',
-          score: typeof event.data.score === 'number' ? event.data.score : 0,
+          score: typeof event.data.score === 'number' && Number.isFinite(event.data.score) ? event.data.score : 0,
           severity: event.data.severity === 'mild' || event.data.severity === 'moderate' || event.data.severity === 'severe' ? event.data.severity : undefined,
           reason: typeof event.data.reason === 'string' ? event.data.reason : undefined,
         });
