@@ -289,17 +289,20 @@ export async function runPainFloodSimulation(opts: PainFloodSimulationRunnerOpti
       }
     }
 
+    const partialTotals = computeFloodTotals(stages);
+    const partialMaxPreview = maxEvidencePreviewLength(stages);
+
     return {
       status: 'error',
       workspaceMode,
       generatedAt,
-      inputPainCount: 0,
-      acceptedPainCount: 0,
-      skippedDuplicateCount: 0,
-      candidateCount: 0,
-      taskCount: 0,
-      maxEvidencePreviewLength: 0,
-      contextBudgetSummary: formatContextBudgetSummary(0),
+      inputPainCount: partialTotals.inputPainCount,
+      acceptedPainCount: partialTotals.acceptedPainCount,
+      skippedDuplicateCount: partialTotals.skippedDuplicateCount,
+      candidateCount: partialTotals.candidateCount,
+      taskCount: partialTotals.taskCount,
+      maxEvidencePreviewLength: partialMaxPreview,
+      contextBudgetSummary: formatContextBudgetSummary(partialMaxPreview),
       stages,
       recommendedNextIssue: recommendFloodNextIssue(stages),
     };
