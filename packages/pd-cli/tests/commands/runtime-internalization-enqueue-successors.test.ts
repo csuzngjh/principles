@@ -332,19 +332,17 @@ describe('handleRuntimeInternalizationEnqueueSuccessors', () => {
     expect(output.actions[0].decision).toBe('successor_created');
   });
 
-  it('--dry-run --confirm is rejected with exit 1 and no writes, JSON mode emits structured error', async () => {
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => { throw new Error(`process.exit:${code}`); });
-
-    await expect(
-      handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, confirm: true, json: true }),
-    ).rejects.toThrow('process.exit:1');
+  it('--dry-run --confirm is rejected with exitCode 1 and no writes, JSON mode emits structured error with reason/nextAction', async () => {
+    await handleRuntimeInternalizationEnqueueSuccessors({ workspace: WS, dryRun: true, confirm: true, json: true });
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.status).toBe('refused');
     expect(output.error).toContain('mutually exclusive');
+    expect(output.reason).toContain('flag_conflict');
+    expect(output.nextAction).toBeDefined();
+    expect(process.exitCode).toBe(1);
 
     expect(mockCommitNextTaskProposal).not.toHaveBeenCalled();
-    exitSpy.mockRestore();
   });
 
   it('--json emits parseable JSON only', async () => {
@@ -756,16 +754,12 @@ describe('Commander wiring for enqueue-successors', () => {
     expect(output.status).toBe('dry_run');
   });
 
-  it('--dry-run --confirm together → rejected with exit 1', async () => {
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => { throw new Error(`process.exit:${code}`); });
-
+  it('--dry-run --confirm together → rejected with exitCode 1', async () => {
     const program = createTestProgram();
-    await expect(
-      program.parseAsync(['node', 'pd', 'internalization', 'enqueue-successors', '--workspace', WS, '--dry-run', '--confirm', '--json']),
-    ).rejects.toThrow('process.exit:1');
+    await program.parseAsync(['node', 'pd', 'internalization', 'enqueue-successors', '--workspace', WS, '--dry-run', '--confirm', '--json']);
 
+    expect(process.exitCode).toBe(1);
     expect(mockCommitNextTaskProposal).not.toHaveBeenCalled();
-    exitSpy.mockRestore();
   });
 
   it('--json flag produces parseable output', async () => {

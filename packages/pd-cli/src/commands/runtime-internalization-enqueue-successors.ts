@@ -257,12 +257,14 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
         skippedCount: 0,
         actions: [],
         error: '--dry-run and --confirm are mutually exclusive. Specify one or the other.',
+        reason: 'flag_conflict: --dry-run and --confirm are mutually exclusive',
+        nextAction: 'Specify either --dry-run or --confirm, not both',
       };
       console.log(JSON.stringify(conflictOutput, null, 2));
     } else {
       console.error('Error: --dry-run and --confirm are mutually exclusive. Specify one or the other.');
     }
-    process.exit(1);
+    process.exitCode = 1;
     return;
   }
 
@@ -300,19 +302,23 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
 
     const piSucceededTasks = succeededTasks.filter(t => isPeerRunnerKind(t.taskKind));
 
-    const successorIndex = await buildSuccessorIndex(stateManager).catch((indexErr: unknown) => {
-      const message = indexErr instanceof Error ? indexErr.message : String(indexErr);
-      emitFailure({
-        error: `Failed to build successor index: ${message}`,
-        isDryRun,
-        json: !!opts.json,
-        reason: `successor_index_failed: ${message}`,
-        nextAction: 'Check database availability and re-run',
+    let successorIndex: Map<string, SuccessorIndexEntry> | null = null;
+    if (isDryRun) {
+      const index = await buildSuccessorIndex(stateManager).catch((indexErr: unknown) => {
+        const message = indexErr instanceof Error ? indexErr.message : String(indexErr);
+        emitFailure({
+          error: `Failed to build successor index: ${message}`,
+          isDryRun,
+          json: !!opts.json,
+          reason: `successor_index_failed: ${message}`,
+          nextAction: 'Check database availability and re-run',
+        });
+        return null;
       });
-      return null;
-    });
-    if (successorIndex === null) {
-      return;
+      if (index === null) {
+        return;
+      }
+      successorIndex = index;
     }
 
     const orchestrator = new InternalizationOrchestrator(
@@ -368,6 +374,17 @@ export async function handleRuntimeInternalizationEnqueueSuccessors(opts: Enqueu
           });
         } else {
           const deterministicTaskId = `${proposalResult.proposal.taskKind}-${task.taskId}-${proposalResult.proposal.channel}`;
+          if (!successorIndex) {
+            actions.push({
+              taskId: task.taskId,
+              taskKind: piTask.taskKind,
+              decision: 'skipped',
+              reason: 'successor_index_unavailable: index not built for dry-run path',
+              nextAction: 'Re-run the command',
+            });
+            skippedCount++;
+            continue;
+          }
           const existingSuccessor = findSuccessorInIndex(
             successorIndex,
             {
