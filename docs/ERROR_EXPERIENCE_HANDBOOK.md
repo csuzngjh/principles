@@ -42,6 +42,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 |----|---------|--------|
 | ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
+| ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210 |
 
 ---
 
@@ -52,6 +53,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ID | Summary | Source |
 |----|---------|--------|
 | ERR-012 | PR branch based on stale main reverts already-merged telemetry fields | PR #659 |
+| ERR-025 | Test coverage proves isolated helper behavior, not real production defense | PRI-209 |
 
 ---
 
@@ -122,7 +124,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` type assertions on values from untrusted JSON sources (`Record<string, unknown>`). Always validate with `typeof` checks before using the value. When extracting fields from parsed JSON, treat every field as `unknown` and narrow with runtime type guards.
 - **Source**: PRI-189
 - **Date**: 2026-05-19
-- **Recurrence**: None
+- **Recurrence**: Yes - 2026-05-23 PRI-213 (PR #688): `event.data.toolName as string` and `event.data.score as number` in `groupEventsIntoSessions()` bypassed runtime validation on `RawEventEntry.data` fields. `score: NaN` and `score: Infinity` passed `typeof === 'number'` check. `validatePainSignal()` used `as Record<string, unknown>` instead of type guard.
 
 ---
 
@@ -134,7 +136,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Every catch-and-degrade pattern must expose the failure reason via `ambiguityNotes` / telemetry / logging. Review all catch blocks that return fallback values and verify they communicate why the fallback was triggered.
 - **Source**: PRI-171
 - **Date**: 2026-05-19
-- **Recurrence**: None
+- **Recurrence**: Yes - 2026-05-23 PRI-210 (PR #690): `isPathWithinWorkspace()` used `startsWith(normalizedWorkspace)` for containment, allowing sibling-prefix bypass (`/home/user/project2` matched `/home/user/project`). `replace(/\/+/, '/')` lacked global flag. `validateProposedPathBounds()` existed but was not wired into gate.ts live auto-correct path — validator without enforcement is the same class as catch-and-degrade without observability.
 
 ---
 
@@ -146,7 +148,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: PII sanitizer key matching must use exact match or segment-boundary match. Never use `includes()` for key matching. Every sanitization rule must have a negative test case to verify it does not over-sanitize.
 - **Source**: PRI-171
 - **Date**: 2026-05-19
-- **Recurrence**: None
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `decideDownstreamGate()` misclassified `missing_artifact` as `lineage_mismatch` when dependency A had an artifact of the same kind but dependency B was missing — the function checked kind-level existence instead of per-dependency lineage consistency.
 
 ---
 
@@ -170,7 +172,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` array type casts on untrusted JSON arrays without validating element types first. Always apply element-wise type guards when preserving data from invalid payloads.
 - **Source**: PRI-191
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - similar pattern to ERR-001 where `as` bypassed validation
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Same class as ERR-001 where `as` bypasses runtime validation on parsed JSON.
 
 ---
 
@@ -206,7 +208,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For any agent contract that processes trace data, add explicit lineage field validation: `sourceTaskId`, `sourcePainId`, `sourceRunIds` must match the deterministic trace.
 - **Source**: PRI-192 / PR #638 (Codex review)
 - **Date**: 2026-05-19
-- **Recurrence**: No
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `decideDownstreamGate()` checked artifact kind-level existence instead of per-dependency lineage, causing dependency B's missing artifact to be misclassified as `lineage_mismatch` when dependency A had a matching artifact.
 
 ---
 
@@ -386,9 +388,33 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-024]** | Security validator exists but is not wired into enforcement path — defense is illusory
+
+- **What happened**: `isPathWithinWorkspace()` and `validateProposedPathBounds()` were added to core as path boundary validation functions, but they were only called by tests and barrel exports. The real live auto-correct apply path in `gate.ts` still used `validateCorrectionProposal()` alone and directly applied `proposal.proposedParams` without checking path boundaries. An out-of-bounds path correction would be applied despite the validator existing.
+- **Why it's wrong**: A validator that is not called from the enforcement path provides zero runtime defense. Tests against the validator prove the validator works, but they do not prove the system is defended. This is the same class as ERR-002 (catch-and-degrade without observability) — the defense exists in code but not in the actual execution path.
+- **Correct approach**: When adding a security or validation function, it MUST be wired into the actual enforcement path, not just tested in isolation. The PR that introduces the validator must also modify the production code path to call it. If the enforcement wiring is out of scope, the PR must explicitly state this and the validator must not be presented as providing defense.
+- **How to prevent**: For every new validation/security function, the PR must include: (1) a test proving the production path calls the function, (2) a test proving the production path rejects/defends when the function returns invalid. If neither exists, the validator is not actually defending anything. Review trigger: any PR that adds a validation function without modifying the code that handles the untrusted input.
+- **Source**: PRI-210 / PR #690
+- **Date**: 2026-05-23
+- **Recurrence**: None
+
+---
+
+**[ERR-025]** | Test coverage proves isolated helper behavior, not real production defense
+
+- **What happened**: `broken-artifact-simulation.ts` was added with `decideDownstreamGate()` and 54 tests, but no production code called it. The real `InternalizationChainIntegrityReadModel` and `InternalizationIntegrityRemediation` were completely untested. Tests proved the helper's logic, but the production system had no defense against the scenarios the helper covered.
+- **Why it's wrong**: Tests that exercise a standalone helper without verifying that production code calls it create a false sense of security. All tests pass, but the production path remains unprotected. This is the same class as ERR-024 (validator without enforcement) and ERR-002 (degradation without observability) — the mechanism exists but is not connected to the real system.
+- **Correct approach**: When adding a feature that is supposed to defend against a class of failures, tests must exercise the REAL production path (read model, remediation, CLI command), not just a standalone helper. If the helper is a contract specification, it must be wired into production code within the same PR. If the production wiring is out of scope, the PR must explicitly state that the system is NOT yet defended.
+- **How to prevent**: For every PR that adds defensive logic, verify that at least one test exercises the production path that would invoke the defense. If no production path calls the new code, the PR must not claim to provide defense. Review trigger: any PR where the diff adds a new module but does not modify any existing production code to call it.
+- **Source**: PRI-209 / PR #689
+- **Date**: 2026-05-23
+- **Recurrence**: None
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 23 |
+| Total lessons | 25 |
 | Last updated | 2026-05-23 |
 | Top category | Schema & Type |
-| Recurring errors | 11 |
+| Recurring errors | 14 |
