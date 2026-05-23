@@ -695,47 +695,85 @@ interface CandidateBackfillOptions {
   json?: boolean;
   dryRun?: boolean;
   confirm?: boolean;
+  includePending?: boolean;
 }
 
 interface BackfillCandidateResult {
   candidateId: string;
   route: string;
-  status: 'would_create' | 'created' | 'existing' | 'deferred' | 'error';
+  status: 'would_create' | 'created' | 'existing' | 'deferred' | 'error' | 'would_intake_and_create' | 'intake_failed' | 'intake_succeeded_existing_task';
   taskId?: string;
   channel?: string;
   reason?: string;
+  statusBefore?: string;
+  statusAfter?: string;
+  intakeDecision?: 'would_intake' | 'intake_succeeded' | 'intake_failed' | 'skipped' | 'not_needed';
+  seedDecision?: 'would_seed' | 'seeded' | 'existing' | 'skipped' | 'not_needed';
+  nextAction?: string;
 }
 
 interface BackfillOutput {
   mode: 'dry-run' | 'confirm';
   totalConsumed: number;
+  totalPending: number;
   missingDreamerTask: number;
   alreadyHaveTask: number;
   deferred: number;
   created: number;
+  intakeSucceeded: number;
+  intakeFailed: number;
   errors: number;
   results: BackfillCandidateResult[];
 }
 
 function createBackfillRemediationResult(output: BackfillOutput): RemediationResult {
   const actions = output.results
-    .filter((result) => result.status === 'would_create' || result.status === 'created')
-    .map((result) => remediationAction({
-      action: result.status === 'created' ? 'create_dreamer_task' : 'would_create_dreamer_task',
-      targetId: result.candidateId,
-      previousState: 'consumed_candidate_without_dreamer',
-      nextState: result.status === 'created' ? 'dreamer_task_created' : 'dreamer_task_would_be_created',
-      reason: result.reason ?? `Backfill ${result.status === 'created' ? 'created' : 'would create'} dreamer task${result.taskId ? ` ${result.taskId}` : ''}`,
-    }));
+    .filter((result) => result.status === 'would_create' || result.status === 'created' || result.status === 'would_intake_and_create' || result.status === 'intake_failed' || result.status === 'intake_succeeded_existing_task')
+    .map((result) => {
+      if (result.status === 'would_intake_and_create') {
+        return remediationAction({
+          action: 'would_intake_and_create_dreamer_task',
+          targetId: result.candidateId,
+          previousState: 'pending_candidate_without_dreamer',
+          nextState: 'dreamer_task_would_be_created',
+          reason: result.reason ?? `Backfill would intake pending candidate and create dreamer task${result.taskId ? ` ${result.taskId}` : ''}`,
+        });
+      }
+      if (result.status === 'intake_failed') {
+        return remediationAction({
+          action: 'intake_failed',
+          targetId: result.candidateId,
+          previousState: 'pending_candidate',
+          nextState: 'pending_candidate_intake_failed',
+          reason: result.reason ?? `Backfill intake failed for pending candidate`,
+        });
+      }
+      if (result.status === 'intake_succeeded_existing_task') {
+        return remediationAction({
+          action: 'intake_succeeded_existing_task',
+          targetId: result.candidateId,
+          previousState: 'pending_candidate',
+          nextState: 'consumed_candidate_with_existing_dreamer',
+          reason: result.reason ?? `Backfill intake succeeded but dreamer task already exists`,
+        });
+      }
+      return remediationAction({
+        action: result.status === 'created' ? 'create_dreamer_task' : 'would_create_dreamer_task',
+        targetId: result.candidateId,
+        previousState: 'consumed_candidate_without_dreamer',
+        nextState: result.status === 'created' ? 'dreamer_task_created' : 'dreamer_task_would_be_created',
+        reason: result.reason ?? `Backfill ${result.status === 'created' ? 'created' : 'would create'} dreamer task${result.taskId ? ` ${result.taskId}` : ''}`,
+      });
+    });
 
   return createRemediationResult({
     mode: output.mode === 'confirm' ? 'confirm' : 'dry_run',
     repairedCount: output.created,
-    skippedCount: output.alreadyHaveTask + output.deferred + output.errors,
+    skippedCount: output.alreadyHaveTask + output.deferred + output.errors + output.intakeFailed,
     actions,
-    warnings: output.errors > 0 ? [`${output.errors} candidate(s) could not be backfilled.`] : [],
-    status: output.errors > 0 && output.created === 0 ? 'error' : undefined,
-    safeToConfirm: output.mode === 'dry-run' && output.missingDreamerTask > 0 && output.errors === 0,
+    warnings: output.errors > 0 ? [`${output.errors} candidate(s) could not be backfilled.`] : (output.intakeFailed > 0 ? [`${output.intakeFailed} pending candidate(s) intake failed.`] : []),
+    status: (output.errors > 0 || output.intakeFailed > 0) && output.created === 0 ? 'error' : undefined,
+    safeToConfirm: output.mode === 'dry-run' && (output.missingDreamerTask > 0 || output.totalPending > 0) && output.errors === 0,
   });
 }
 
@@ -743,11 +781,12 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
   if (opts.dryRun && opts.confirm) {
     console.error('Error: --dry-run and --confirm are mutually exclusive');
     process.exit(1);
+    return;
   }
 
   const workspaceDir = resolveWorkspaceDir(opts.workspace);
-  const stateManager = new RuntimeStateManager({ workspaceDir });
   const isConfirm = opts.confirm ?? false;
+  const stateManager = new RuntimeStateManager({ workspaceDir, readonly: !isConfirm });
 
   try {
     await stateManager.initialize();
@@ -758,13 +797,23 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       "SELECT candidate_id FROM principle_candidates WHERE status = 'consumed'"
     ).all() as { candidate_id: string }[];
 
+    let pendingRows: { candidate_id: string }[] = [];
+    if (opts.includePending) {
+      pendingRows = db.prepare(
+        "SELECT candidate_id FROM principle_candidates WHERE status = 'pending'"
+      ).all() as { candidate_id: string }[];
+    }
+
     const output: BackfillOutput = {
       mode: isConfirm ? 'confirm' : 'dry-run',
       totalConsumed: consumedRows.length,
+      totalPending: pendingRows.length,
       missingDreamerTask: 0,
       alreadyHaveTask: 0,
       deferred: 0,
       created: 0,
+      intakeSucceeded: 0,
+      intakeFailed: 0,
       errors: 0,
       results: [],
     };
@@ -775,7 +824,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       const candidate = await stateManager.getCandidate(candidateId);
       if (!candidate) {
         output.errors++;
-        output.results.push({ candidateId, route: 'unknown', status: 'error', reason: 'Candidate not found in DB' });
+        output.results.push({ candidateId, route: 'unknown', status: 'error', reason: 'Candidate not found in DB', statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped', nextAction: 'Investigate why consumed candidate is missing from DB' });
         continue;
       }
 
@@ -796,7 +845,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
         const reason = bridgeDecision.decision === 'already_exists'
           ? `Task ${bridgeDecision.taskId} already exists`
           : bridgeDecision.reason;
-        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason });
+        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped' });
         continue;
       }
 
@@ -815,14 +864,14 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
           } catch { /* best-effort */ }
         }
         output.alreadyHaveTask++;
-        output.results.push({ candidateId, route: decision.route, status: 'existing', taskId: existingTask.taskId, channel });
+        output.results.push({ candidateId, route: decision.route, status: 'existing', taskId: existingTask.taskId, channel, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'existing' });
         continue;
       }
 
       output.missingDreamerTask++;
 
       if (!isConfirm) {
-        output.results.push({ candidateId, route: decision.route, status: 'would_create', taskId, channel });
+        output.results.push({ candidateId, route: decision.route, status: 'would_create', taskId, channel, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'would_seed' });
         continue;
       }
 
@@ -830,7 +879,7 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
         const seed = buildDreamerTaskSeed(bridgeInput);
         if ('decision' in seed) {
           output.errors++;
-          output.results.push({ candidateId, route: decision.route, status: 'error', reason: (seed as { reason: string }).reason });
+          output.results.push({ candidateId, route: decision.route, status: 'error', reason: (seed as { reason: string }).reason, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped', nextAction: 'Investigate bridge seed failure' });
           continue;
         }
 
@@ -844,10 +893,109 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
         });
 
         output.created++;
-        output.results.push({ candidateId, route: decision.route, status: 'created', taskId: task.taskId, channel });
+        output.results.push({ candidateId, route: decision.route, status: 'created', taskId: task.taskId, channel, statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'seeded' });
       } catch (err) {
         output.errors++;
-        output.results.push({ candidateId, route: decision.route, status: 'error', reason: err instanceof Error ? err.message : String(err) });
+        output.results.push({ candidateId, route: decision.route, status: 'error', reason: err instanceof Error ? err.message : String(err), statusBefore: 'consumed', statusAfter: 'consumed', intakeDecision: 'not_needed', seedDecision: 'skipped', nextAction: 'Investigate dreamer task creation failure' });
+      }
+    }
+
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+    const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
+
+    for (const row of pendingRows) {
+      const candidateId = row.candidate_id;
+
+      const candidate = await stateManager.getCandidate(candidateId);
+      if (!candidate) {
+        output.errors++;
+        output.results.push({ candidateId, route: 'unknown', status: 'error', reason: 'Pending candidate not found in DB', statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'skipped', seedDecision: 'skipped', nextAction: 'Investigate why pending candidate is missing from DB' });
+        continue;
+      }
+
+      const recommendation = resolveCandidateRecommendation(candidate, stateManager, candidateId);
+      const decision = decideInternalizationRoute(recommendation as Parameters<typeof decideInternalizationRoute>[0]);
+
+      const bridgeInput = {
+        candidateId,
+        recommendationKind: recommendation.kind,
+        route: decision.route,
+        ready: decision.ready,
+      };
+
+      const bridgeDecision = computeBridgeDecision(bridgeInput);
+
+      if (bridgeDecision.decision !== 'seeded') {
+        output.deferred++;
+        const reason = bridgeDecision.decision === 'already_exists'
+          ? `Task ${bridgeDecision.taskId} already exists`
+          : bridgeDecision.reason;
+        output.results.push({ candidateId, route: decision.route, status: 'deferred', reason, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'skipped', seedDecision: 'skipped', nextAction: 'Investigate why bridge decision is not seeded' });
+        continue;
+      }
+
+      const {channel} = bridgeDecision;
+      const {taskId} = bridgeDecision;
+
+      if (!isConfirm) {
+        output.missingDreamerTask++;
+        output.results.push({ candidateId, route: decision.route, status: 'would_intake_and_create', taskId, channel, statusBefore: 'pending', statusAfter: 'consumed', intakeDecision: 'would_intake', seedDecision: 'would_seed', nextAction: 'Run with --confirm to intake and seed' });
+        continue;
+      }
+
+      const intakeEntry = await intakeService.intake(candidateId).catch((intakeErr: unknown) => {
+        output.intakeFailed++;
+        const intakeReason = intakeErr instanceof CandidateIntakeError
+          ? `Intake failed [${(intakeErr as { code?: string }).code ?? 'unknown'}]: ${intakeErr.message}`
+          : `Intake failed: ${intakeErr instanceof Error ? intakeErr.message : String(intakeErr)}`;
+        output.results.push({ candidateId, route: decision.route, status: 'intake_failed', reason: intakeReason, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'intake_failed', seedDecision: 'skipped', nextAction: 'Fix intake issue and re-run backfill' });
+        return null;
+      });
+
+      if (!intakeEntry) {
+        continue;
+      }
+
+      try {
+        await updateCandidateStatus(stateManager, candidateId, 'consumed');
+      } catch (statusErr) {
+        const statusMsg = `Ledger write succeeded (entry ${intakeEntry.id}) but DB status update failed: ${statusErr instanceof Error ? statusErr.message : String(statusErr)}`;
+        output.intakeFailed++;
+        output.results.push({ candidateId, route: decision.route, status: 'intake_failed', reason: statusMsg, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'intake_failed', seedDecision: 'skipped', nextAction: 'Candidate may be in inconsistent state — check ledger and DB manually' });
+        continue;
+      }
+
+      output.intakeSucceeded++;
+
+      const existingTask = await stateManager.getTask(taskId);
+      if (existingTask) {
+        output.alreadyHaveTask++;
+        output.results.push({ candidateId, route: decision.route, status: 'intake_succeeded_existing_task', taskId: existingTask.taskId, channel, statusBefore: 'pending', statusAfter: 'consumed', intakeDecision: 'intake_succeeded', seedDecision: 'existing', reason: `Intake succeeded but dreamer task ${existingTask.taskId} already exists` });
+        continue;
+      }
+
+      try {
+        const seed = buildDreamerTaskSeed(bridgeInput);
+        if ('decision' in seed) {
+          output.errors++;
+          output.results.push({ candidateId, route: decision.route, status: 'error', reason: (seed as { reason: string }).reason, statusBefore: 'pending', statusAfter: 'consumed', intakeDecision: 'intake_succeeded', seedDecision: 'skipped', nextAction: 'Intake succeeded but dreamer seed failed — candidate is consumed, re-run backfill for consumed candidates' });
+          continue;
+        }
+
+        const task = await stateManager.createTask({
+          taskId: seed.taskId,
+          taskKind: seed.taskKind,
+          status: seed.status,
+          attemptCount: seed.attemptCount,
+          maxAttempts: seed.maxAttempts,
+          diagnosticJson: seed.diagnosticJson,
+        });
+
+        output.created++;
+        output.results.push({ candidateId, route: decision.route, status: 'created', taskId: task.taskId, channel, statusBefore: 'pending', statusAfter: 'consumed', intakeDecision: 'intake_succeeded', seedDecision: 'seeded' });
+      } catch (err) {
+        output.errors++;
+        output.results.push({ candidateId, route: decision.route, status: 'error', reason: err instanceof Error ? err.message : String(err), statusBefore: 'pending', statusAfter: 'consumed', intakeDecision: 'intake_succeeded', seedDecision: 'skipped', nextAction: 'Intake succeeded but dreamer task creation failed — candidate is consumed, re-run backfill for consumed candidates' });
       }
     }
 
@@ -859,23 +1007,31 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
       console.log(`  status:              ${remediation.status}`);
       console.log(`  safe_to_confirm:     ${remediation.safeToConfirm}`);
       console.log(`  total_consumed:      ${output.totalConsumed}`);
+      if (opts.includePending) {
+        console.log(`  total_pending:       ${output.totalPending}`);
+      }
       console.log(`  missing_dreamer:     ${output.missingDreamerTask}`);
       console.log(`  already_have_task:   ${output.alreadyHaveTask}`);
       console.log(`  deferred:            ${output.deferred}`);
       if (isConfirm) {
         console.log(`  created:             ${output.created}`);
         console.log(`  errors:              ${output.errors}`);
+        if (opts.includePending) {
+          console.log(`  intake_succeeded:    ${output.intakeSucceeded}`);
+          console.log(`  intake_failed:       ${output.intakeFailed}`);
+        }
       }
       for (const r of output.results) {
-        console.log(`  ${r.candidateId}: ${r.status} (${r.route})${r.taskId ? ` → ${r.taskId}` : ''}${r.reason ? ` — ${r.reason}` : ''}`);
+        const prefix = r.statusBefore === 'pending' ? '[pending]' : '[consumed]';
+        console.log(`  ${prefix} ${r.candidateId}: ${r.status} (${r.route})${r.taskId ? ` → ${r.taskId}` : ''}${r.reason ? ` — ${r.reason}` : ''}`);
       }
-      if (!isConfirm && output.missingDreamerTask > 0) {
-        console.log(`\n  (use --confirm to create missing dreamer tasks)`);
+      if (!isConfirm && (output.missingDreamerTask > 0 || output.totalPending > 0)) {
+        console.log(`\n  (use --confirm to create missing dreamer tasks${opts.includePending ? ' and intake pending candidates' : ''})`);
       }
       console.log('');
     }
 
-    if (output.missingDreamerTask > 0 && !isConfirm) {
+    if ((output.missingDreamerTask > 0 || output.totalPending > 0) && !isConfirm) {
       process.exitCode = 1;
     }
   } finally {
