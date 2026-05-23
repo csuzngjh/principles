@@ -192,13 +192,19 @@ export class InternalizationIntegrityRemediation {
       const philosopherParentIds = new Set<string>();
       for (const pt of philosopherTasks) {
         const meta = extractPIMetadata(pt.diagnostic_json);
-        if (meta.dependencyTaskIds) {
-          for (const depId of meta.dependencyTaskIds) {
-            philosopherParentIds.add(depId);
+        if (meta.status === 'parsed') {
+          if (meta.dependencyTaskIds) {
+            for (const depId of meta.dependencyTaskIds) {
+              philosopherParentIds.add(depId);
+            }
           }
-        }
-        if (meta.parentTaskId) {
-          philosopherParentIds.add(meta.parentTaskId);
+          if (meta.parentTaskId) {
+            philosopherParentIds.add(meta.parentTaskId);
+          }
+        } else if (meta.status === 'malformed') {
+          for (const id of meta.bestEffortParentIds) {
+            philosopherParentIds.add(id);
+          }
         }
       }
 
@@ -255,8 +261,14 @@ export class InternalizationIntegrityRemediation {
 
       for (const pt of philosopherTasks) {
         const meta = extractPIMetadata(pt.diagnostic_json);
-        if (meta.dependencyTaskIds?.includes(dreamerTaskId) || meta.parentTaskId === dreamerTaskId) {
-          return pt.task_id;
+        if (meta.status === 'parsed') {
+          if (meta.dependencyTaskIds?.includes(dreamerTaskId) || meta.parentTaskId === dreamerTaskId) {
+            return pt.task_id;
+          }
+        } else if (meta.status === 'malformed') {
+          if (meta.bestEffortParentIds.includes(dreamerTaskId)) {
+            return pt.task_id;
+          }
         }
       }
 

@@ -173,7 +173,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` array type casts on untrusted JSON arrays without validating element types first. Always apply element-wise type guards when preserving data from invalid payloads.
 - **Source**: PRI-191
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Fixed by replacing `as Record` with `readOwnProperty` helper and `Array.from().filter()` for element-wise validation.
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Fixed by replacing `as Record` with `readOwnProperty` helper and `Array.from().filter()` for element-wise validation. Also 2026-05-23 PRI-225 (PR #693): `result.dependencyTaskIds = depIds as string[]` on already-validated array bypassed type system. Fixed by constructing `validatedDependencyTaskIds: string[]` with element-wise `typeof` check and push, no `as` assertion.
 
 ---
 
@@ -209,7 +209,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For any agent contract that processes trace data, add explicit lineage field validation: `sourceTaskId`, `sourcePainId`, `sourceRunIds` must match the deterministic trace.
 - **Source**: PRI-192 / PR #638 (Codex review)
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `result_ref` points to an artifact whose `task_id` differs from the owning task, but the read model only checked artifact kind-level existence instead of per-dependency lineage. This caused dependency B's missing artifact to be misclassified as `lineage_mismatch` when dependency A had a matching artifact. Fixed by implementing true `lineage_mismatch` detection (query `SELECT task_id FROM artifacts WHERE artifact_id = ?` and compare with owning task's `task_id`) and distinguishing from `missing_dreamer_pi_artifact` (no artifact found at all) and `result_ref_missing_artifact` (result_ref points to nonexistent artifact).
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `result_ref` points to an artifact whose `task_id` differs from the owning task, but the read model only checked artifact kind-level existence instead of per-dependency lineage. This caused dependency B's missing artifact to be misclassified as `lineage_mismatch` when dependency A had a matching artifact. Fixed by implementing true `lineage_mismatch` detection (query `SELECT task_id FROM artifacts WHERE artifact_id = ?` and compare with owning task's `task_id`) and distinguishing from `missing_dreamer_pi_artifact` (no artifact found at all) and `result_ref_missing_artifact` (result_ref points to nonexistent artifact). Also 2026-05-23 PRI-225 (PR #693): Malformed metadata was re-interpreted as topology failure — philosopher with `dependencyTaskIds: ['dreamer-1', 42]` and existing dreamer-1 got `philosopher_dependency_unverifiable` because the dependency check only accepted `status === 'parsed'`. Fixed by using `bestEffortParentIds` for topology verification when metadata is malformed, while still emitting `metadata_malformed`.
 
 ---
 
@@ -409,7 +409,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For every PR that adds defensive logic, verify that at least one test exercises the production path that would invoke the defense. If no production path calls the new code, the PR must not claim to provide defense. Review trigger: any PR where the diff adds a new module but does not modify any existing production code to call it.
 - **Source**: PRI-209 / PR #689
 - **Date**: 2026-05-23
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): Healthy baseline test used `expect(['ok', 'degraded']).toContain(overallStatus)`, allowing `degraded` to pass. This meant a regression that introduced new warning-level broken links in the healthy path would not be caught. The test proved the code didn't crash, but not that the healthy path remained healthy. Fixed by tightening to `expect(overallStatus).toBe('ok')`.
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): Healthy baseline test used `expect(['ok', 'degraded']).toContain(overallStatus)`, allowing `degraded` to pass. This meant a regression that introduced new warning-level broken links in the healthy path would not be caught. The test proved the code didn't crash, but not that the healthy path remained healthy. Fixed by tightening to `expect(overallStatus).toBe('ok')`. Also 2026-05-23 PRI-225 (PR #693): `bestEffortParentIds` was added to `PIMetadataParseResult.malformed` but not wired into the philosopher dependency check. The dependency check only accepted `status === 'parsed'`, so malformed metadata with extractable parent IDs still produced `philosopher_dependency_unverifiable`. Test proved `bestEffortParentIds` was populated correctly, but not that the production path used it for topology verification. Fixed by adding `else if (philMeta.status === 'malformed')` branch in the dependency check.
 
 ---
 
