@@ -1,9 +1,11 @@
 # PD 架构总览（PD Architecture Overview）
 
 > **状态**: Active / SSoT-ENTRY-POINT
-> **最后更新**: 2026-05-15
+> **最后更新**: 2026-05-23
 > **定位**: 整个 PD 项目的**唯一架构入口文档**。任何架构相关的疑问，先来这里。
 > **一致性约束**: 本文档是 SSoT（Single Source of Truth）。其他架构文档必须与本文一致；冲突时以本文为准，并通过 PR 同步修订。
+
+> **Runtime V2-only 修订（ADR-0012）**: Runtime V2 是唯一 forward execution path。OpenClaw plugin 不再承担 idle/night scheduler 或 Nocturnal business pipeline；它只可作为事件/宿主 adapter。文中仍出现的 `IdleTrigger`、sleep/nocturnal 调度描述属于待清理的历史设计，不得作为新实现依据。PD 调度与 workspace/runtime 配置将通过 PD-owned config/SDK/operator boundary 提供。
 
 本文档回答四个问题：
 1. PD 是什么？
@@ -67,7 +69,7 @@ PD 是一个 monorepo，由四个独立可交付的包构成。每个包有清�
 | 包 | 角色 | 主要受众 | 进程模型 | 拥有 | 不拥有 |
 |----|------|---------|---------|------|--------|
 | `@principles/core` | Domain & Runtime SDK | 其他包 | Library | 业务领域、状态机、Runner、Store、Read Model、Schema、**BALM（代理生命周期管理）**、**LRAS（长程会话）**、**GAP（目标驱动信号）**、**MissionScheduler** | 任何宿主 API、UI、CLI |
-| `openclaw-plugin` | Host Adapter | OpenClaw Gateway | Plugin in-proc | Hook 桥接、PainSignal 捕获、Runtime Adapter 注册、IdleTrigger 宿主调度适配、**新 CLI Adapter（Claude Code/Codex/Gemini 等）** | 业务规则、原则生命周期、Runner 实现 |
+| `openclaw-plugin` | Host Adapter | OpenClaw Gateway | Plugin in-proc | Hook 桥接、PainSignal 捕获、Runtime Adapter 注册 | 业务规则、原则生命周期、Runner 实现、PD 调度、workspace/config ownership |
 | `@principles/pd-cli` | Agent Operator | AI 代理 (OpenClaw / Codex / Gemini) | Stdout-driven CLI | 结构化 JSON 接口、读侧查询、低风险写操作、**PD 元工具（pd_validate_output / pd_fetch_recent_logs 等）** | 高风险审批、长连接 UI |
 | `@principles/pd-console` | Human Operator | 开发者 / 运维 / 研究员 | Local Web Server | 可视化 UI、人工审批工作流、长任务流式输出、**Mission/Objective 视图**、**Agent 健康面板** | 业务规则 |
 
@@ -114,7 +116,7 @@ PD 采用**四层架构**。从上到下：
 │  ┌────────────────────────────────────────────────┐                │
 │  │ openclaw-plugin                                 │                │
 │  │  - Hooks (pain/gate/prompt/llm/lifecycle)      │ ← 平台桥接     │
-│  │  - IdleTrigger 宿主调度适配（核心策略在 core/idle-trigger/）│
+│  │  - OpenClaw event / runtime adapter（不拥有调度）         │
 │  │  - RuntimeAdapter (OpenClaw / Claude Code /    │                │
 │  │    Codex / Gemini / opencode / Hermes 等)      │                │
 │  └────────────────────────────────────────────────┘                │
@@ -511,7 +513,7 @@ PD 在做架构决策时，按以下优先级判断：
 | 子系统 | 状态 | 主要 gap |
 |-------|------|---------|
 | Pain Pipeline | ✅ 完整 | 无 |
-| Internalization Pipeline | ⚠️ 90% | `IntakeToInternalizationBridge` 已落地；仍需生产链路持续验证与 legacy nocturnal 清理 |
+| Internalization Pipeline | ⚠️ 90% | Runtime V2 已通过 baseline/live/chaos 验证；仍需生产反馈闭环与 legacy/nocturnal/idle 执行退役 |
 | Activation Pipeline | ⚠️ 75% | `ActivationDispatcher`、低风险 writers、`ApprovalQueue` 已落地；`RuleHostWriter` / `SkillFileWriter` / `TrainingExporter` 待建 |
 | Operations Pipeline | ⚠️ 80% | pd-console approvals 基础 UI/API 已落地；仍需 RejectionFeedback、二次确认、审批历史与更强审计 |
 | Pruning Pipeline | ⚠️ 50% | PruningAction 未实现 |

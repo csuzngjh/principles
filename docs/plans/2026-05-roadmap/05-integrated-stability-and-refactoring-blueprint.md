@@ -1,4 +1,4 @@
-# Principles Disciple — 核心稳定性与架构瘦身集成规划蓝图 (v5.0 Final Re-aligned)
+# Principles Disciple — 核心稳定性与架构瘦身集成规划蓝图 (v6.0 Runtime V2-only Retirement)
 
 **文档编号:** PLAN-05  
 **归属目录:** `docs/plans/2026-05-roadmap/`  
@@ -6,17 +6,18 @@
 **作者:** Antigravity (Advanced Agentic Coding Agent)  
 **联合评审人:** Wesley (`@RULE[user_global]`) & 交叉把关 AI 助手  
 **发布时间:** 2026-05-21  
+**修订日期:** 2026-05-23（ADR-0012）
 
 ---
 
 > [!IMPORTANT]
-> **版本修订备忘 (Aligned with Peer AI Review & Architecture Guardrails)**:
-> 本蓝图已根据 wesley 的要求及交叉把关 AI 的极高价值意见进行了**全面校准与防御性降级**，彻底消除了潜在的架构与流程冲突。本篇为最新唯一权威执行路线图，后续 AI 助手必须严格遵循：
+> **ADR-0012 修订**:
+> PRI-206 至 PRI-225 已使 Runtime V2 具备 baseline、live validation、repair、integrity 与安全防御证据。旧版蓝图中的 “Frozen Legacy 不得物理删除” 仅适用于替代链路尚未证明的过渡阶段，现已失效。后续 AI 助手必须严格遵循：
 > 1.  **捍卫 Core 的无 I/O 边界**: 严格禁止 `file-lock`、`io`、`node-vm-polyfill` 等包含物理 fs、进程与系统绑定的 utils 迁入 core，迁移仅限纯函数（P0-P13 过滤）。
-> 2.  **敬畏 ADR-0005 冻结历史**: 停止任何对 `nocturnal-trinity`、`nocturnal-arbiter` 和 `nocturnal-service` 等老代码的即时物理删除或逻辑抽取，确立为只读 inventory，绝对不作任何物理破坏。
+> 2.  **退役而非扩建 Legacy**: 禁止向 `nocturnal-trinity`、`nocturnal-arbiter`、`nocturnal-service`、OpenClaw idle/night scheduling 增加功能；按照 ADR-0012 的 caller cutover -> historical read isolation -> deletion -> test contraction 顺序删除重复执行链。
 > 3.  **遵循现有数据架构**: 抛弃在物理磁盘新增 `.pd/evidence/` 目录的提案。将 LLM 损坏的 raw 输出和错误信息，以内联 metadata 形式直接记录到现有的 SQLite 数据库 `runs/runs.metadata` 体系中。
 > 4.  **避免过度设计 (YAGNI)**：不新增 Dead Letter Queue schema 变更。优先依靠 UAT 仿真（PRI-209）评估现有的 `recovery sweep` 容错极限。
-> 5.  **仿真基线先行 (PRI-206 第一生命线)**：将“场景 A-D 混沌仿真爆破”置于合成工作负载基线（Synthetic PD workload baseline）建立之后。必须先立“正常良性基线”，再搞“分层异常爆破”。
+> 5.  **已完成稳定性基线**：PRI-206、207、208、209、210、216-220、224、225 已完成；新工作不得重复建设这些能力，应以其测试作为退役改造的保护网。
 
 ---
 
@@ -34,8 +35,8 @@ Principles Disciple (PD) 目前最致命的泥潭在于**“数据链路太长�
 
 *   **红线 1：Core 纯净性（无 I/O）**
     `@principles/core` 包内必须保持纯逻辑、纯算法、无副作用。严禁引入任何带 fs、I/O 锁（如 `file-lock.ts`）、虚拟沙箱（如 `node-vm-polyfill.ts`）或网络调用的工具。这类工具必须保留在 `@openclaw-plugin` 或 I/O 边界。
-*   **红线 2：Frozen Legacy 冻结（ADR-0005）**
-    `nocturnal-trinity.ts`、`nocturnal-arbiter.ts` 和 `nocturnal-service.ts` 属于 Frozen Legacy，其生命周期与老管线绑定，受 ADR-0005 绝对保护。在本轮迭代中，**严禁对它们进行任何物理删除、重命名、文件修改或逻辑抽取**。所有的瘦身仅针对 plugin core 中可解耦的纯辅助类 utils。
+*   **红线 2：Legacy 只能退役，不能生长（ADR-0012）**
+    `nocturnal-trinity.ts`、`nocturnal-arbiter.ts`、`nocturnal-service.ts` 与 idle/night 调度属于待删除的重复执行面。严禁新增能力、修补新特性或建立新的 caller；允许在专门的退役 PR 中先切换 caller，再删除文件与 obsolete tests。
 *   **红线 3：不随意新增物理存储目录**
     拒绝在磁盘上新增类似 `.pd/evidence/` 这种脱离现有体系的临时存储文件夹。格式修复回路中的 invalid payload 统一落入现有的 runs/artifact 元数据字典，确保数据架构单一规整。
 *   **红线 4：不先建 DLQ Schema**
@@ -99,7 +100,7 @@ Principles Disciple (PD) 目前最致命的泥潭在于**“数据链路太长�
 *   **盘点任务**：对 `openclaw-plugin/src/core/` 目录下的 122 个文件进行静态清点，梳理出一份精确的白名单清单，划分出：
     1.  **纯领域逻辑**（无任何 fs, node-vm, OpenClaw API 绑定的纯算法/NLP函数） —— 具备迁移 core 资格。
     2.  **I/O 工具与框架绑定** —— 严禁迁移，扣留在 plugin。
-    3.  **Nocturnal 遗留代码 (ADR-0005)** —— 确立为只读 inventory，不得做任何结构破坏。
+    3.  **Nocturnal 遗留代码 (ADR-0012)** —— 作为 deletion inventory，用于确认 caller、历史读取和待删除测试，不作为长期资产保护。
 
 ### 4.2 PRI-212：反反生长架构防线测试 (Anti-growth Guard)
 *   **执行策略**：在 PRI-211 盘点报告输出后执行，在 `@principles/core` 回归测试中引入层级 Invariants。
@@ -115,6 +116,8 @@ Principles Disciple (PD) 目前最致命的泥潭在于**“数据链路太长�
 ---
 
 ## 5. Issue 启动规则与依赖表 (Issue Activation Rules & Dependency Matrix)
+
+> **交付状态更新 (2026-05-23)**: PRI-200、205-213、215-220、224-225 已完成。下表保留历史执行关系作为审计记录；新的 active backlog 以 `02-roadmap.md` 和 `03-linear-sync-plan.md` 的 Runtime V2-only retirement sequence 为准。
 
 | Issue 编号 | 任务标题与性质 | 启动条件 / 依赖项 | 执行方式推荐 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -151,4 +154,4 @@ Principles Disciple (PD) 目前最致命的泥潭在于**“数据链路太长�
 1.  **第一阶段 (文档与盘点)**：`PRI-205` 及 `PRI-211` 顺利产出且无一冲突。Plugin 核心的 122 个文件资产图谱梳理完毕，物理与逻辑分类精确到行，`ADR-0005` 完整受护。
 2.  **第二阶段 (基线与修复)**：`PRI-206` 合成基线在 CI 中可以 100% 重复跑通并输出标准内化样本；`PRI-200` 结构化修复能在 2 次重试内安全挽回受损的 LLM 输出，失败时 evidence 完美归入 `runs.metadata` 数据库。
 3.  **第三阶段 (混沌与防线)**：分层混沌测试用例（A-D）能精准触发异常并全部被安全机制（幂等、去重、沙箱、现有的恢复机制）拦截；CI 回归测试中引入 `LAYER-1`/`LAYER-2` 反肥胖架构哨兵，强力断言插件不会反向依赖 Core。
-4.  **第四阶段 (精细瘦身)**：1-3 个符合白名单条件的纯算法工具安全迁移至 Core，老文件 `re-export` 别名引用完好，回归测试 100% 绿灯。
+4.  **第四阶段 (精细瘦身，已开始)**：PRI-213 已完成首批纯算法迁移；下一阶段以删除重复 Nocturnal 执行链、取消 OpenClaw idle/night 依赖并收缩对应测试为成功标准。

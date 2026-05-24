@@ -3,6 +3,8 @@
 > **状态**: Active
 > **最后更新**: 2026-05-15
 > **关联 ADR**: ADR-0001（服务边界）, ADR-0003（Peer Agent 状态机）, ADR-0005（Nocturnal 合并）, ADR-0006（混合激活）
+
+> **2026-05-23 架构修订（ADR-0012）**: 本文涉及 `IdleTrigger`、sleep-cycle、OpenClaw idle/night 唤起和 `idle-trigger.yaml` 的段落已被取代。Runtime V2 后续只接受 PD-owned config/SDK/operator command 或未来 host-agnostic scheduler 的显式调度；OpenClaw plugin 只提供 event/runtime adapter，不再拥有调度职责。旧段落保留为迁移历史，在完成退役文档清理前不得作为新开发依据。
 > **关联文档**: `PD_ARCHITECTURE_OVERVIEW.md`, `ACTIVATION_CHANNELS.md`, `AGENT_SOFTWARE_CONTRACT.md`, `GLOSSARY.md`
 
 本文档定义 PD 系统从**痛苦信号**到**已激活实现**的**完整端到端流水线**。它是 ADR-0003 / ADR-0005 / ADR-0006 决议在工程层的具象化。
@@ -34,7 +36,7 @@ PD 的内化流水线是一条**单向**、**事件驱动**、**状态可追溯*
 - **单向**：数据流从左到右单向传递，每阶段产出**不可变工件**
 - **事件驱动**：每阶段完成后通过 SQLite TaskStore 入队下一阶段，不直接调用
 - **状态可追溯**：每个 painId 都可通过 `PainChainReadModel` 查询完整证据链
-- **可中断恢复**：任意阶段崩溃后，下次唤起 IdleTrigger 自动从断点继续
+- **可中断恢复**：任意阶段崩溃后，下次 PD-owned operator/SDK/scheduler dispatch 从断点继续
 
 本文档**重点**讨论 Stage 1（痛苦诊断）和 Stage 2（内化蒸馏）。Stage 3（激活）详见 [`ACTIVATION_CHANNELS.md`](./ACTIVATION_CHANNELS.md)。
 
@@ -87,7 +89,7 @@ PD 的痛苦信号按重要性分为三层。**只有 Layer 1 和 Layer 2 独立
    │  status=pending          │
    └──────────┬───────────────┘
               │
-              │  IdleTrigger 唤起 / 立即调度
+              │  PD-owned operator/SDK/scheduler 显式调度
               ▼
    DiagnosticianRunner.run(taskId)
    ├─ acquireLease
@@ -189,7 +191,7 @@ nocturnal-service.runReflection()    InternalizationOrchestrator.wakeOnce()
 ```
 
 **新链路**：触发与执行分离。
-- **触发**：`@principles/core/runtime-v2/idle-trigger/`（核心策略）决定何时唤起；宿主层调用 wakeOnce
+- **触发**：PD-owned config/SDK/operator 或未来 host-agnostic scheduler 显式调用 `wakeOnce`；不得依赖 OpenClaw idle/night
 - **执行**：`@principles/core` 的 InternalizationOrchestrator + 7 个 Runner
 
 ### 3.3 流水线启动条件（断点 ① 解决方案）
@@ -364,7 +366,7 @@ interface PeerRunner<TOutput> {
 - Runner 直接调用其他 Runner（必须通过 TaskStore 入队）
 - Runner 直接读 ledger / 写 ledger（除非通过 ChannelWriter）
 - Runner 直接调用 LLM SDK（必须通过 PDRuntimeAdapter）
-- Runner 内部使用 setInterval / cron（属于 IdleTrigger 职责）
+- Runner 内部使用 setInterval / cron（属于 PD-owned scheduler 职责，且不在 runner 内实现）
 
 ### 3.6 数据契约：Runner 之间通过 PIArtifact 传递
 
@@ -409,7 +411,7 @@ interface PIArtifact {
         ▼ IntakeToInternalizationBridge
 [dreamer task: pending]
         │
-        ▼ IdleTrigger.wakeOnce → acquireLease
+        ▼ Explicit Runtime V2 dispatch → acquireLease
 [dreamer task: leased]
         │
         ▼ DreamerRunner 执行
@@ -431,15 +433,15 @@ interface PIArtifact {
 
 ---
 
-## 4. 触发器与编排（IdleTrigger + Orchestrator）
+## 4. 调度入口与编排（Explicit Scheduling + Orchestrator）
 
-### 4.1 IdleTrigger（core 层策略 + plugin 层宿主适配）
+### 4.1 历史设计：IdleTrigger（已由 ADR-0012 废止）
 
-位置：核心策略模块 `@principles/core/runtime-v2/idle-trigger/`；宿主调度适配仍由 plugin 负责（未来）
+位置：核心策略模块 `@principles/core/runtime-v2/idle-trigger/`。该模块及任何 plugin 宿主适配均为退役对象；以下接口只保留用于识别待删除代码，不是实施目标。
 
 职责：
-- 监听 OpenClaw 的 heartbeat / 工作区空闲信号
-- 决定何时调用 `InternalizationOrchestrator.wakeOnce()`
+- 历史上监听 OpenClaw 的 heartbeat / 工作区空闲信号
+- 历史上决定何时调用 `InternalizationOrchestrator.wakeOnce()`；新实现不得复用此责任
 - 暴露状态查询给 pd-console
 
 **严格不允许**：
@@ -468,7 +470,7 @@ interface IdleTriggerStatus {
 
 ### 4.2 触发策略
 
-可配置的触发条件（在 `{workspace}/.pd/config/idle-trigger.yaml`）：
+历史配置样例（`{workspace}/.pd/config/idle-trigger.yaml`，已废止；新配置使用 PD-owned scheduling contract）：
 
 ```yaml
 idle_trigger:
@@ -622,7 +624,7 @@ ApprovalRecord（可选） → 实际激活
 
 | 错误类别 | 重试策略 | 降级策略 |
 |---------|---------|---------|
-| `runtime_unavailable` | 指数退避 | 等待下次 IdleTrigger |
+| `runtime_unavailable` | 指数退避 | 等待下一次 explicit Runtime V2 dispatch |
 | `output_invalid` | 最多 3 次重试，注入修复提示 | 失败后 mark failed，等人审 |
 | `lease_conflict` | 不重试（其他 Runner 在执行） | 跳过此次 |
 | `timeout` | 重试 1 次（超时翻倍） | 失败后 mark failed |
@@ -633,7 +635,7 @@ ApprovalRecord（可选） → 实际激活
 
 **场景 A**：Diagnostician 成功但 CandidateIntake 失败
 - 候选保持 `pending`
-- 下次 IdleTrigger 重新尝试 intake
+- 下次 explicit Runtime V2 dispatch 重新尝试 intake
 
 **场景 B**：Dreamer 成功但 Philosopher 失败
 - Philosopher task 进入 `retry_wait`
@@ -724,7 +726,7 @@ internalization:
   default_runner_timeout_ms: 300000
   default_max_attempts: 3
 
-  # IdleTrigger（参见 §4.2）
+  # Legacy IdleTrigger example (retired by ADR-0012; do not implement)
   idle_trigger:
     enabled: true
 
@@ -817,7 +819,7 @@ routing_policy:
 | RolloutReviewerRunner | ✅ | 增加 ActivationDispatcher 调用 |
 | TrainerRunner | ✅ | 仅 model_training 通道 |
 | **触发** | | |
-| IdleTrigger | ✅ | core 纯策略模块已落地（idle-trigger-policy/decision/types）；plugin 宿主适配层待后续 issue |
+| IdleTrigger | ⚠️ Deprecated | 现存 core 策略为退役对象；不得建立 plugin 宿主适配，改由 PD-owned explicit scheduling |
 | **Stage 3 (Activation)** | | |
 | ActivationDispatcher + low-risk ChannelWriters | ✅ | prompt / defer_archive 已落地 |
 | ApprovalQueue + SQLite store | ✅ | 基础 pending / approve / reject / cancel 状态已落地；二次确认 / 过期策略待扩展 |
@@ -833,7 +835,7 @@ routing_policy:
 
 ### 优先级 P0（解锁端到端流水线）
 - [x] `IntakeToInternalizationBridge` 实现 → 解决断点 ①
-- [x] `IdleTrigger` 实现 → 替代 nocturnal-service 触发部分
+- [ ] 退役现存 `IdleTrigger` / nocturnal-service idle 触发，并建立 PD-owned explicit scheduling boundary
 - [x] `ActivationDispatcher` 框架 + prompt/archive 两个 ChannelWriter → 解决断点 ②（最低风险通道）
 - [ ] **L1 容量硬上限（Hard Cap）** → 防止 System Prompt 膨胀导致 LLM 失效（见 §9.1）
 - [ ] **三振出局机制** → `rejection_count` 字段 + UNRESOLVABLE 状态（见 §7.4）
@@ -977,7 +979,7 @@ db.pragma('busy_timeout = 5000');   // 等待 5s 而非立即失败
 db.pragma('synchronous = NORMAL');  // WAL 模式下 NORMAL 足够安全
 ```
 
-**2. IdleTrigger Jitter（必须）**：
+**2. 历史：IdleTrigger Jitter（已废止，不再作为不变量）**：
 
 ```typescript
 // 核心策略：packages/principles-core/src/runtime-v2/idle-trigger/idle-trigger-types.ts
@@ -1000,7 +1002,7 @@ idle_trigger:
 
 **不变量**：
 - 任何 SQLite 连接建立时必须设置 `journal_mode = WAL`（架构守护测试覆盖）
-- `IdleTrigger` 必须有 jitter，不允许固定间隔触发（架构守护测试覆盖）
+- PD-owned scheduler 如实现轮询，必须定义可测的并发/退避策略；不得重新引入 OpenClaw idle/night trigger
 
 ---
 

@@ -5,6 +5,8 @@
 > **取代**: 2026-05-09 版（已归档到 `archive/`）
 > **关联**: 本文档是 [`PD_ARCHITECTURE_OVERVIEW.md`](./PD_ARCHITECTURE_OVERVIEW.md) 的**结构补充**，专注于物理结构、依赖关系、部署形态。
 
+> **2026-05-23 修订**: [ADR-0012](../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) 将 Runtime V2 定为唯一 forward execution path。本文后续提到的 `IdleTrigger`、OpenClaw idle/night scheduling、`sleep-cycle` 或 Nocturnal execution 均是待删除 legacy 状态，不是待实现能力。OpenClaw 仅保留 hook/runtime adapter 职责；PD 配置与调度属于 PD-owned SDK/operator 边界。
+
 > **阅读顺序建议**：先读 `PD_ARCHITECTURE_OVERVIEW.md` 了解全局视图；再读本文档了解物理结构；最后读 `COMPONENTS.md` 查具体组件。
 
 ---
@@ -76,7 +78,7 @@ principles/                         （工作区根目录）
    │(Host Adapter)  │ │ (for Agent)  │ │ (for Human)    │
    │                │ │              │ │                │
    │ - Hooks        │ │ - Commands   │ │ - Web Server   │
-   │ - IdleTrigger 宿主适配 │ │ - JSON IO    │ │ - React UI     │
+   │ - Hook adapter  │ │ - JSON IO    │ │ - React UI     │
    │ - OpenClaw API │ │              │ │ - Approval UI  │
    └────────────────┘ └──────────────┘ └────────────────┘
 ```
@@ -265,8 +267,8 @@ packages/openclaw-plugin/src/
 │   ├── message-sanitize.ts          ← 设计建议删除
 │   └── gate-block-helper.ts
 ├── service/                         ← 长生命周期服务
-│   ├── idle-trigger.ts              ← 核心策略模块在 core/runtime-v2/idle-trigger/；此处为宿主调度适配（未来）
-│   ├── evolution-worker.ts          ← 进化队列调度
+│   ├── idle-trigger.ts              ← legacy retirement target；不新增宿主调度适配
+│   ├── evolution-worker.ts          ← legacy cutover/delete target
 │   ├── trajectory-service.ts
 │   ├── central-sync-service.ts
 │   ├── monitoring-query-service.ts
@@ -278,7 +280,7 @@ packages/openclaw-plugin/src/
 │   ├── failure-classifier.ts
 │   ├── cooldown-strategy.ts
 │   ├── nocturnal-*.ts               ← 计划删除（ADR-0005）
-│   ├── sleep-cycle.ts               ← 计划简化
+│   ├── sleep-cycle.ts               ← 删除 idle/night 调度职责
 │   └── subagent-workflow/
 ├── core/                            ← Plugin 内部业务（迁移中）
 │   ├── pain.ts / pain-signal.ts     ← 部分迁入 core
@@ -441,7 +443,7 @@ PD 系统在运行时分为以下进程：
 - 责任：
   - 接收用户/代理交互
   - 触发 PD hooks
-  - 运行 IdleTrigger（决定何时调用 wakeOnce）
+  - 不运行 PD 调度；仅转发 hook/runtime adapter 需要的宿主事件
 - **不**直接运行 Internalization Pipeline 的 LLM 调用（通过 Adapter 异步分派）
 
 ### 4.2 pd-cli 进程（短暂进程）
@@ -524,7 +526,7 @@ PD 系统在运行时分为以下进程：
 └── 共享：~/.openclaw/extensions/principles-disciple/
 ```
 
-每个工作区独立维护自己的 state.db / ledger / artifacts。Plugin 通过 OpenClaw 的 `workspaceDir` API 区分。
+每个工作区独立维护自己的 state.db / ledger / artifacts。目标边界是由 PD 专属配置/SDK 明确提供 workspace；不得为执行 Runtime V2 继续扩建依赖 OpenClaw 当前上下文的发现逻辑。
 
 ### 5.3 CI/CD 模式
 
@@ -611,7 +613,7 @@ correction_audit_events           ★ ADR-0004
 ├── config/
 │   ├── activation.yaml
 │   ├── internalization.yaml
-│   └── idle-trigger.yaml
+│   └── runtime-scheduling.yaml       ← PD-owned explicit scheduling (replaces legacy idle trigger)
 ├── training-exports/               ← model_training 通道激活后写入
 │   └── {batchId}/
 │       ├── dataset.jsonl
@@ -653,7 +655,7 @@ PD 的配置遵循以下层级（从低优先级到高优先级，详见待建�
 |------|------|
 | `activation.yaml` | 通道激活策略（详见 ADR-0006）|
 | `internalization.yaml` | 内化流水线参数 |
-| `idle-trigger.yaml` | IdleTrigger 触发策略 |
+| `runtime-scheduling.yaml` | PD-owned 显式调度/执行策略；不依赖 OpenClaw idle 状态 |
 | `runtime.yaml` | RuntimeAdapter 选择 |
 | `gfi.yaml` | GFI 策略 |
 
@@ -684,7 +686,7 @@ PD 的配置遵循以下层级（从低优先级到高优先级，详见待建�
         ▼
 [6] state.db: tasks (taskKind=diagnostician, status=pending)
         │
-        │ IdleTrigger 唤起 → InternalizationOrchestrator.wakeOnce()
+        │ PD-owned operator/SDK/scheduler → InternalizationOrchestrator.wakeOnce()
         ▼
 [7] DiagnosticianRunner.run (core/runtime-v2/runner/diagnostician-runner.ts)
     ├─ acquireLease
@@ -712,7 +714,7 @@ PD 的配置遵循以下层级（从低优先级到高优先级，详见待建�
         ▼
 [12] state.db: tasks (taskKind=dreamer, channel=prompt, status=pending)
         │
-        │ IdleTrigger.wakeOnce → InternalizationOrchestrator.wakeOnce(taskKind='dreamer')
+        │ PD-owned operator/SDK/scheduler → InternalizationOrchestrator.wakeOnce(taskKind='dreamer')
         ▼
 [13] DreamerRunner.run
         │
@@ -753,7 +755,7 @@ PD 的配置遵循以下层级（从低优先级到高优先级，详见待建�
 |-------|-------|-----------|
 | 旧 `PD_SYSTEM_ARCHITECTURE.md`（2026-05-09）| 3 层 | 4 层（Layer 1-4），更精确 |
 | `2026-04-21-pd-runtime-agnostic-architecture-v2.md` | 4 层 | 与本文档大体一致，本文档是其更新版 |
-| `pd-task-manager.md` | PDTask 概念 | 已被 TaskRecord + IdleTrigger 取代 |
+| `pd-task-manager.md` | PDTask 概念 | 已被 TaskRecord + Runtime V2 explicit scheduling 取代 |
 
 ---
 
@@ -762,8 +764,8 @@ PD 的配置遵循以下层级（从低优先级到高优先级，详见待建�
 | 部分 | 实施进度 |
 |------|---------|
 | Layer 1（Foundation） | ✅ 95% |
-| Layer 2（Domain Services & Runners） | ⚠️ 90% — IntakeToInternalizationBridge / ActivationDispatcher / IdleTrigger 已落地；SkillFileWriter / RuleHostWriter 待建 |
-| Layer 3（Host Integration） | ⚠️ 75% — Nocturnal 合并清理中；IdleTrigger 核心策略已在 core 落地 |
+| Layer 2（Domain Services & Runners） | ⚠️ 90% — Runtime V2 core path 已落地；legacy idle 策略待删除 |
+| Layer 3（Host Integration） | ⚠️ 75% — OpenClaw hook adapter 待收薄；Nocturnal/idle 调度入口待退役 |
 | Layer 4（Surface） | ⚠️ 75% — pd-console approval UI 未建 |
 
 详见 `COMPONENTS.md` 状态列。
