@@ -14,21 +14,23 @@ import { PiAiRuntimeAdapter } from '../adapter/pi-ai-runtime-adapter.js';
 import { StoreEventEmitter } from '../store/event-emitter.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
-import { getMiniMaxConfig, runWithRetry } from './fixtures/index.js';
-import type { MiniMaxTestConfig } from './fixtures/index.js';
+import { getLlmE2eConfig, runWithRetry } from './fixtures/index.js';
+import type { LlmE2eTestConfig } from './fixtures/index.js';
 
 const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-scribe-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
 
-const config = getMiniMaxConfig();
+const config = getLlmE2eConfig();
 
-describe.skipIf(!config)('ScribeRunner Real LLM E2E (MiniMax)', () => {
-  const cfg = config as MiniMaxTestConfig;
+describe.skipIf(!config)('ScribeRunner Real LLM E2E', () => {
+  const cfg = config as LlmE2eTestConfig;
   const adapterConfig = {
     provider: cfg.provider,
     model: cfg.model,
     apiKeyEnv: cfg.apiKeyEnv,
     maxRetries: cfg.maxRetries,
     timeoutMs: cfg.timeoutMs,
+    baseUrl: cfg.baseUrl,
+    reasoning: cfg.reasoning,
   };
 
   let testDir = '';
