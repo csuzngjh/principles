@@ -97,6 +97,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-029 | CLI unknown input silently dropped instead of failing loud | PRI-240 |
 | ERR-030 | Path prefix `startsWith` matches sibling directories as production workspace | PRI-240 |
 | ERR-031 | Config resolver hard-fails on valid runtime when optional mode flags are absent | PRI-162 |
+| ERR-032 | Documentation labels legacy dispatch as MVP-Core, contradicting ADR-0014 | PRI-227 |
 
 ---
 
@@ -450,7 +451,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For every new validation/security function, the PR must include: (1) a test proving the production path calls the function, (2) a test proving the production path rejects/defends when the function returns invalid. If neither exists, the validator is not actually defending anything. Review trigger: any PR that adds a validation function without modifying the code that handles the untrusted input.
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
-- **Recurrence**: None
+- **Recurrence**: Yes - 2026-05-24 PRI-227 (PR #698): Nocturnal entrypoint guard had `if (isFrozenImport) continue;` that allowed non-frozen callers to import frozen modules without allowlist entry. The guard existed but the `continue` bypass made it fail-open — any file importing a frozen module would pass because the check was skipped for frozen module references. Fixed by removing the bypass entirely; non-frozen callers must now appear in ALLOWED_NOCTURNAL_IMPORTS.
 
 ---
 
@@ -490,9 +491,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-032]** | Documentation labels legacy dispatch as MVP-Core, contradicting ADR-0014
+
+- **What happened**: `LEGACY_ENTRYPOINT_CENSUS.md` and test comments described evolution-worker heartbeat, sleep-cycle orchestrator, and queue-io sleep_reflection enqueue as `mvp_core_dependency` / "ADR-0014 core". But ADR-0014 defines MVP-Core as only three activation paths: `prompt`, `code_tool_hook / RuleHost`, `defer_archive`. The idle/night/sleep-reflection/nocturnal dispatch paths are retirement targets, not core.
+- **Why it's wrong**: Labeling legacy dispatch as MVP-Core creates confusion about what can be deleted vs what must be preserved. It also references invalid issue numbers (PRI-232/233/234) that have been superseded or semantically drifted. This is the same class as ERR-027 (executable docs continue dispatching superseded work) — documentation contradicts the active strategy.
+- **Correct approach**: MVP-Core labels must strictly follow ADR-0014: only `prompt`, `code_tool_hook / RuleHost`, `defer_archive`. All idle/night/sleep-reflection/nocturnal dispatch must be labeled as `retirement / live cutover / delete blocker`. Retirement issue references must use current valid numbers (PRI-228, PRI-229, PRI-119, PRI-230, PRI-231), not canceled or reused numbers.
+- **How to prevent**: When a strategy ADR defines a precise scope (like MVP-Core), all documentation and test comments must be audited to align with that scope. Any label that claims something is "core" must trace directly to the ADR's definition. Review trigger: any PR that introduces or modifies `mvp_core_dependency` labels must cross-reference ADR-0014's explicit MVP-Core list.
+- **Source**: PRI-227 / PR #698
+- **Date**: 2026-05-24
+- **Recurrence**: Yes - same class as ERR-027
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 31 |
+| Total lessons | 32 |
 | Last updated | 2026-05-24 |
 | Top category | Schema & Type |
-| Recurring errors | 13 |
+| Recurring errors | 14 |
