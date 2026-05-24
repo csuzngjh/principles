@@ -20,7 +20,6 @@ import {
   OpenClawCliRuntimeAdapter,
   PiAiRuntimeAdapter,
   PDRuntimeError,
-  resolveRuntimeConfig,
   CandidateIntakeService,
   run as diagnoseRun,
   status as diagnoseStatus,
@@ -28,7 +27,9 @@ import {
 import type { PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { loadAndResolvePDConfig } from '../pd-config-loader.js';
 import * as path from 'path';
+
 
 interface DiagnoseStatusOptions {
   taskId: string;
@@ -104,22 +105,25 @@ export async function handleDiagnoseStatus(opts: DiagnoseStatusOptions): Promise
  * Executes the diagnostician runner for a task.
  */
 export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir(opts.workspace);
-
-  // Validate mutually exclusive flags (HG-03)
-  if (opts.openclawLocal && opts.openclawGateway) {
-    console.error('error: --openclaw-local and --openclaw-gateway are mutually exclusive');
+  const configResult = await loadAndResolvePDConfig(opts, opts.workspace);
+  if (!configResult.success) {
+    if (opts.json) {
+      console.log(JSON.stringify({
+        status: 'failed',
+        errorCategory: 'config_failed',
+        message: configResult.failure.error,
+        nextAction: configResult.failure.nextAction,
+      }, null, 2));
+    } else {
+      console.error(`error: ${configResult.failure.error}`);
+      console.error(`Next Action: ${configResult.failure.nextAction}`);
+    }
     process.exit(1);
+    return;
   }
 
-  // Require explicit runtime mode for openclaw-cli (HG-03, DPB-09)
-  const runtimeKind = opts.runtime ?? 'test-double';
-  if (runtimeKind === 'openclaw-cli' && !opts.openclawLocal && !opts.openclawGateway) {
-    console.error('error: --openclaw-local or --openclaw-gateway is required when using --runtime openclaw-cli');
-    process.exit(1);
-  }
-
-  const stateManager = new RuntimeStateManager({ workspaceDir });
+  const { config } = configResult;
+  const stateManager = new RuntimeStateManager({ workspaceDir: config.workspaceDir });
 
   try {
     await stateManager.initialize();
@@ -133,17 +137,16 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const sourceTraceLocator = new SqliteSourceTraceLocator(taskStore, trajectoryLocator);
     const contextAssembler = new SqliteContextAssembler(taskStore, historyQuery, runStore, { sourceTraceLocator });
 
-    // Select runtime adapter based on --runtime flag (CLI-02)
-    // eslint-disable-next-line @typescript-eslint/init-declarations
-    let runtimeAdapter: PDRuntimeAdapter;
-    if (runtimeKind === 'openclaw-cli') {
+    // Select runtime adapter based on resolved config runtimeKind
+    let runtimeAdapter: PDRuntimeAdapter | undefined = undefined;
+    if (config.runtimeKind === 'openclaw-cli') {
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
-        runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
-        workspaceDir,
-        agentId: opts.agent ?? 'main',
+        runtimeMode: config.openclawLocal ? 'local' : 'gateway',
+        workspaceDir: config.workspaceDir,
+        agentId: config.agent ?? 'main',
       });
 
-      // TELE-01: runtime_adapter_selected — user explicitly chose openclaw-cli runtime
+      // TELE-01: runtime_adapter_selected
       storeEmitter.emitTelemetry({
         eventType: 'runtime_adapter_selected',
         traceId: opts.taskId,
@@ -152,10 +155,10 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         agentId: 'openclaw-cli-adapter',
         payload: {
           runtimeKind: 'openclaw-cli',
-          runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
+          runtimeMode: config.openclawLocal ? 'local' : 'gateway',
         },
       });
-    } else if (runtimeKind === 'test-double') {
+    } else if (config.runtimeKind === 'test-double') {
       runtimeAdapter = new TestDoubleRuntimeAdapter({
         onPollRun: (_runId: string) => ({
           runId: _runId,
@@ -181,66 +184,18 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           },
         }),
       });
-    } else if (runtimeKind === 'pi-ai') {
-      // D-06: flags + policy fallback
-      // D-01: have flag → use flag, no flag → read from policy
-      const stateDir = `${workspaceDir}/.state`;
-      let policyConfig: ReturnType<typeof resolveRuntimeConfig> | null = null;
-      try {
-        policyConfig = resolveRuntimeConfig(stateDir);
-      } catch (err: unknown) {
-        // workflows.yaml missing or malformed — warn and fall through to flag-based config
-        const detail = err instanceof Error ? err.message : String(err);
-        console.warn(`[pd diagnose] workflows.yaml policy load failed: ${detail}. Using CLI flags if provided.`);
-      }
-
-      const provider = opts.provider ?? policyConfig?.provider;
-      const model = opts.model ?? policyConfig?.model;
-      const apiKeyEnv = opts.apiKeyEnv ?? policyConfig?.apiKeyEnv;
-      const baseUrl = opts.baseUrl ?? policyConfig?.baseUrl;
-      const maxRetries = opts.maxRetries ?? policyConfig?.maxRetries;
-      const effectiveTimeoutMs = opts.timeoutMs ?? policyConfig?.timeoutMs;
-
-      // D-11: validate config — missing fields + fix suggestion
-      const missing: string[] = [];
-      if (!provider) missing.push('provider');
-      if (!model) missing.push('model');
-      if (!apiKeyEnv) missing.push('apiKeyEnv');
-      if (missing.length > 0) {
-        console.error(
-          `error: missing required pi-ai config: ${missing.join(', ')}.\n` +
-          `Pass via --flag or add to workflows.yaml pd-runtime-v2-diagnosis funnel policy.\n` +
-          `Example:\n` +
-          `  pd diagnose run --runtime pi-ai --provider openrouter --model anthropic/claude-sonnet-4 --apiKeyEnv OPENROUTER_API_KEY\n` +
-          `  Or add to workflows.yaml:\n` +
-          `    policy:\n` +
-          `      runtimeKind: pi-ai\n` +
-          `      provider: openrouter\n` +
-          `      model: anthropic/claude-sonnet-4\n` +
-          `      apiKeyEnv: OPENROUTER_API_KEY`,
-        );
-        process.exit(1);
-      }
-
-      // After validation: all fields are confirmed non-null
-      const validProvider: string = provider as string;
-      const validModel: string = model as string;
-      const validApiKeyEnv: string = apiKeyEnv as string;
-
-      // D-09: validate env var exists
-      if (!process.env[validApiKeyEnv]) {
-        console.error(`error: environment variable '${validApiKeyEnv}' is not set`);
-        process.exit(1);
-      }
-
+    } else if (config.runtimeKind === 'pi-ai') {
+      const provider = config.provider ?? '';
+      const model = config.model ?? '';
+      const apiKeyEnv = config.apiKeyEnv ?? '';
       runtimeAdapter = new PiAiRuntimeAdapter({
-        provider: validProvider,
-        model: validModel,
-        apiKeyEnv: validApiKeyEnv,
-        baseUrl,
-        maxRetries,
-        timeoutMs: effectiveTimeoutMs,
-        workspace: workspaceDir,
+        provider,
+        model,
+        apiKeyEnv,
+        baseUrl: config.baseUrl,
+        maxRetries: config.maxRetries,
+        timeoutMs: config.timeoutMs,
+        workspace: config.workspaceDir,
       });
 
       // TELE: runtime_adapter_selected telemetry
@@ -250,11 +205,14 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         timestamp: new Date().toISOString(),
         sessionId: 'pd-cli-diagnose',
         agentId: 'pi-ai-adapter',
-        payload: { runtimeKind: 'pi-ai', provider: validProvider, model: validModel, baseUrlPresent: !!baseUrl },
+        payload: { runtimeKind: 'pi-ai', provider, model, baseUrlPresent: !!config.baseUrl },
       });
-    } else {
-      console.error(`error: unknown runtime kind '${runtimeKind}' (supported: openclaw-cli, test-double, pi-ai)`);
+    }
+
+    if (!runtimeAdapter) {
+      console.error(`error: unknown runtime kind '${config.runtimeKind}'`);
       process.exit(1);
+      return;
     }
 
     const eventEmitter = new StoreEventEmitter();
@@ -270,16 +228,16 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       },
       {
         owner: 'pd-cli-diagnose',
-        runtimeKind,
+        runtimeKind: config.runtimeKind,
         pollIntervalMs: 100,
-        timeoutMs: 300_000, // 5 min — same as probe timeout for real LLM calls
-        agentId: opts.agent,
+        timeoutMs: config.timeoutMs ?? 300_000,
+        agentId: config.agent,
       },
     );
 
     if (!opts.json) {
       console.log(`\nRunning diagnostician for task: ${opts.taskId}`);
-      console.log(`Workspace: ${workspaceDir}\n`);
+      console.log(`Workspace: ${config.workspaceDir}\n`);
     }
 
     const result = await diagnoseRun({
@@ -312,7 +270,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     const intakeResults: { candidateId: string; ledgerEntryId?: string; status: string; error?: string; nextAction?: string }[] = [];
     let intakeFailed = false;
 
-    if (opts.intake === false) {
+    if (config.intake === false) {
       for (const candidate of candidates) {
         intakeResults.push({
           candidateId: candidate.candidateId,
@@ -320,7 +278,8 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         });
       }
     } else {
-      const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
+      const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(config.workspaceDir, '.state') });
+
       const intakeService = new CandidateIntakeService({ stateManager, ledgerAdapter });
 
       for (const candidate of candidates) {
@@ -341,7 +300,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
             candidateId: candidate.candidateId,
             status: 'intake_failed',
             error: intakeErrorMessage,
-            nextAction: `pd candidate intake --candidate-id ${candidate.candidateId} --workspace "${workspaceDir}"`,
+            nextAction: `pd candidate intake --candidate-id ${candidate.candidateId} --workspace "${config.workspaceDir}"`,
           });
         }
       }
@@ -389,16 +348,16 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           console.log(`    ${ir.candidateId}: skipped (--no-intake)`);
         } else if (ir.status === 'intake_failed') {
           console.log(`    ${ir.candidateId}: INTAKE FAILED — ${ir.error}`);
-          console.log(`      Next action: pd candidate intake --candidate-id ${ir.candidateId} --workspace "${workspaceDir}"`);
+          console.log(`      Next action: pd candidate intake --candidate-id ${ir.candidateId} --workspace "${config.workspaceDir}"`);
         }
       }
     }
 
-    if (opts.intake === false && candidates.length > 0) {
+    if (config.intake === false && candidates.length > 0) {
       console.log(`\n  Note: --no-intake was set. Candidates remain at 'pending'.`);
       console.log(`  To intake manually:`);
       for (const c of candidates) {
-        console.log(`    pd candidate intake --candidate-id ${c.candidateId} --workspace "${workspaceDir}"`);
+        console.log(`    pd candidate intake --candidate-id ${c.candidateId} --workspace "${config.workspaceDir}"`);
       }
     }
 
@@ -418,7 +377,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         status: 'failed',
         errorCategory,
         message,
-        runtimeKind,
+        runtimeKind: config.runtimeKind,
       }, null, 2));
     } else {
       console.error(`error: ${message} (${errorCategory})`);
@@ -428,3 +387,4 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     await stateManager.close();
   }
 }
+

@@ -1320,3 +1320,8 @@ export {
   isEmpathyRollbackEventEntry,
 } from './types/event-payload.js';
 
+// PD-owned configuration and explicit dispatch boundary
+export { resolvePDConfig } from './cli/pd-config-boundary.js';
+export type { PDConfig, PDConfigResolverInputs, PDConfigFailure, PDConfigResult, PDOperatorAction } from './cli/pd-config-boundary.js';
+
+

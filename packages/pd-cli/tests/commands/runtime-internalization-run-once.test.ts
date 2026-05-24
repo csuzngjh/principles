@@ -121,9 +121,28 @@ vi.mock('@principles/core/runtime-v2', () => ({
     apiKeyEnv: 'TEST_API_KEY',
   }),
   validateRuntimeConfig: vi.fn(),
+  resolvePDConfig: vi.fn().mockImplementation((inputs) => {
+    let runtimeKind = inputs.cliOptions.runtime || 'pi-ai';
+    if (runtimeKind === 'config') {
+      runtimeKind = inputs.fileConfig?.runtimeKind ?? 'pi-ai';
+    }
+    return {
+      success: true,
+      config: {
+        workspaceDir: inputs.workspaceDir || '/fake/workspace',
+        runtimeKind,
+        openclawLocal: inputs.cliOptions.openclawLocal || false,
+        openclawGateway: inputs.cliOptions.openclawGateway || false,
+        agent: inputs.cliOptions.agent,
+        timeoutMs: inputs.cliOptions.timeoutMs ?? inputs.fileConfig?.timeoutMs ?? 300000,
+        intake: inputs.cliOptions.intake !== false,
+      }
+    };
+  }),
 }));
 
 import { handleRuntimeInternalizationRunOnce } from '../../src/commands/runtime-internalization-run-once.js';
+import * as pdConfigLoader from '../../src/pd-config-loader.js';
 
 const WS = '/fake/workspace';
 
@@ -133,6 +152,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(pdConfigLoader, 'loadAndResolvePDConfig');
     process.exitCode = 0;
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -416,10 +436,10 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'config', json: true });
 
-    const ResolveConfigMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.resolveRuntimeConfig),
+    expect(pdConfigLoader.loadAndResolvePDConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ runtime: 'config' }),
+      WS,
     );
-    expect(ResolveConfigMock).toHaveBeenCalled();
   });
 
   it('--runtime config reads from workspaceDir/.state (not .pd)', async () => {
@@ -441,12 +461,10 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     const customWs = '/tmp/test-workspace';
     await handleRuntimeInternalizationRunOnce({ workspace: customWs, runtime: 'config', json: true });
 
-    const ResolveConfigMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.resolveRuntimeConfig),
+    expect(pdConfigLoader.loadAndResolvePDConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ runtime: 'config' }),
+      customWs,
     );
-    const resolvedWorkspace = path.resolve(customWs);
-    const expectedStateDir = path.join(resolvedWorkspace, '.state');
-    expect(ResolveConfigMock).toHaveBeenCalledWith(expectedStateDir);
   });
 
   it('--runner philosopher dispatches PhilosopherRunner', async () => {

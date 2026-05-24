@@ -6,11 +6,14 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 
+import * as path from 'node:path';
+
 function runPdHelp(args: string[]): string {
   try {
+    const monorepoRoot = path.resolve(process.cwd(), '../..');
     return execFileSync('node', ['packages/pd-cli/dist/index.js', ...args], {
       encoding: 'utf8',
-      cwd: 'D:/Code/principles',
+      cwd: monorepoRoot,
     });
   } catch (err: unknown) {
     if (err && typeof err === 'object' && 'stdout' in err) {

@@ -85,6 +85,52 @@ vi.mock('@principles/core/runtime-v2', () => {
       },
     }),
     status: vi.fn(),
+    resolvePDConfig: vi.fn().mockImplementation((inputs) => {
+      const runtime = inputs.cliOptions.runtime || 'test-double';
+      if (runtime === 'openclaw-cli') {
+        const local = inputs.cliOptions.openclawLocal;
+        const gateway = inputs.cliOptions.openclawGateway;
+        if (!local && !gateway) {
+          return {
+            success: false,
+            failure: {
+              error: '--openclaw-local or --openclaw-gateway is required when using --runtime openclaw-cli',
+              nextAction: 'Provide a mode flag',
+            },
+          };
+        }
+        if (local && gateway) {
+          return {
+            success: false,
+            failure: {
+              error: '--openclaw-local and --openclaw-gateway are mutually exclusive',
+              nextAction: 'Provide exactly one mode flag',
+            },
+          };
+        }
+      }
+      if (runtime !== 'test-double' && runtime !== 'openclaw-cli' && runtime !== 'pi-ai') {
+        return {
+          success: false,
+          failure: {
+            error: `unknown runtime kind '${runtime}' (supported: openclaw-cli, test-double, pi-ai)`,
+            nextAction: 'Provide a valid runtime',
+          },
+        };
+      }
+      return {
+        success: true,
+        config: {
+          workspaceDir: inputs.workspaceDir || '/tmp/fake-workspace',
+          runtimeKind: runtime,
+          openclawLocal: inputs.cliOptions.openclawLocal || false,
+          openclawGateway: inputs.cliOptions.openclawGateway || false,
+          agent: inputs.cliOptions.agent,
+          timeoutMs: inputs.cliOptions.timeoutMs ?? 30000,
+          intake: inputs.cliOptions.intake !== false,
+        }
+      };
+    }),
   };
 });
 
@@ -191,7 +237,7 @@ describe('pd diagnose run --runtime routing', () => {
       taskId: 'test-task-1',
       workspace: '/tmp/fake-workspace',
       runtime: 'invalid-runtime',
-      json: true,
+      json: false,
     } as DiagnoseRunOptions);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith("error: unknown runtime kind 'invalid-runtime' (supported: openclaw-cli, test-double, pi-ai)");

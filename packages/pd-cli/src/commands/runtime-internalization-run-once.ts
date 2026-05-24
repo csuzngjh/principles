@@ -1,4 +1,3 @@
-import * as path from 'path';
 import {
   RuntimeStateManager,
   InternalizationOrchestrator,
@@ -20,11 +19,9 @@ import {
   TestDoubleRuntimeAdapter,
   PiAiRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
-  resolveRuntimeConfig,
-  validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
-import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, TrainerRunnerResult, PDRuntimeAdapter, PeerRunnerKind } from '@principles/core/runtime-v2';
-import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, TrainerRunnerResult, PDRuntimeAdapter, PeerRunnerKind, PDConfig } from '@principles/core/runtime-v2';
+import { loadAndResolvePDConfig } from '../pd-config-loader.js';
 
 interface RunOnceOptions {
   workspace?: string;
@@ -175,15 +172,14 @@ function formatTextOutput(output: RunOnceOutput): string {
 }
 
 interface ResolveAdapterOptions {
-  runtimeKind: string;
+  config: PDConfig;
   taskId: string;
-  workspaceDir: string;
   runnerKind: string;
   timeoutMs?: number;
 }
 
 function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
-  if (opts.runtimeKind === 'test-double') {
+  if (opts.config.runtimeKind === 'test-double') {
     if (opts.runnerKind === 'philosopher') {
       return new TestDoubleRuntimeAdapter({
         onPollRun: (_runId: string) => ({
@@ -443,37 +439,48 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
     });
   }
 
-  const stateDir = path.join(opts.workspaceDir, '.state');
-  const config = resolveRuntimeConfig(stateDir);
-
-  if (opts.runtimeKind === 'pi-ai' || (opts.runtimeKind === 'config' && config.runtimeKind === 'pi-ai')) {
-    validateRuntimeConfig(config);
-    // CLI --timeout-ms overrides workflows.yaml timeoutMs
-    const adapterTimeoutMs = opts.timeoutMs ?? config.timeoutMs;
+  if (opts.config.runtimeKind === 'pi-ai') {
+    const adapterTimeoutMs = opts.timeoutMs ?? opts.config.timeoutMs;
     return new PiAiRuntimeAdapter({
-      provider: String(config.provider),
-      model: String(config.model),
-      apiKeyEnv: String(config.apiKeyEnv),
-      maxRetries: config.maxRetries,
+      provider: String(opts.config.provider),
+      model: String(opts.config.model),
+      apiKeyEnv: String(opts.config.apiKeyEnv),
+      maxRetries: opts.config.maxRetries,
       timeoutMs: adapterTimeoutMs,
-      baseUrl: config.baseUrl,
-      workspace: opts.workspaceDir,
+      baseUrl: opts.config.baseUrl,
+      workspace: opts.config.workspaceDir,
     });
   }
 
-  if (opts.runtimeKind === 'openclaw-cli' || (opts.runtimeKind === 'config' && config.runtimeKind === 'openclaw-cli')) {
+  if (opts.config.runtimeKind === 'openclaw-cli') {
     return new OpenClawCliRuntimeAdapter({
       runtimeMode: 'local',
-      workspaceDir: opts.workspaceDir,
+      workspaceDir: opts.config.workspaceDir,
     });
   }
 
-  throw new Error(`Unsupported runtime kind: ${opts.runtimeKind}. Supported: test-double, pi-ai, openclaw-cli, config`);
+  throw new Error(`Unsupported runtime kind: ${opts.config.runtimeKind}. Supported: test-double, pi-ai, openclaw-cli`);
 }
 
 export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions): Promise<void> {
-  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
-  const runtimeKind = opts.runtime ?? 'config';
+  const configResult = await loadAndResolvePDConfig(opts, opts.workspace);
+  if (!configResult.success) {
+    if (opts.json) {
+      console.log(JSON.stringify({
+        status: 'failed',
+        errorCategory: 'config_failed',
+        message: configResult.failure.error,
+        nextAction: configResult.failure.nextAction,
+      }, null, 2));
+    } else {
+      console.error(`Error: ${configResult.failure.error}`);
+      console.error(`Next Action: ${configResult.failure.nextAction}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  const { config } = configResult;
   const runnerKind = opts.runner ?? 'dreamer';
 
   // Resolve effective timeout: CLI flag > runner default (300_000)
@@ -486,7 +493,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   const defaultRunnerTimeoutMs = 300_000;
   const effectiveTimeoutMs = cliTimeoutMs ?? defaultRunnerTimeoutMs;
 
-  if (runtimeKind === 'test-double' && !opts.allowTestDouble) {
+  if (config.runtimeKind === 'test-double' && !opts.allowTestDouble) {
     console.error('Error: test-double runtime mutates real queue state (leases tasks, marks them succeeded with empty output).');
     console.error('Use --runtime test-double --allow-test-double to acknowledge this risk.');
     console.error('For production use, use --runtime config (reads from workflows.yaml) or --runtime pi-ai / openclaw-cli.');
@@ -500,7 +507,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     return;
   }
 
-  const stateManager = new RuntimeStateManager({ workspaceDir });
+  const stateManager = new RuntimeStateManager({ workspaceDir: config.workspaceDir });
   await stateManager.initialize();
 
   try {
@@ -529,7 +536,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
 
       const eventEmitter = new StoreEventEmitter();
       const artifactStore = stateManager.piArtifactStore;
-      const runtimeAdapter = resolveRuntimeAdapter({ runtimeKind, taskId: wakeResult.taskId, workspaceDir, runnerKind, timeoutMs: cliTimeoutMs });
+      const runtimeAdapter = resolveRuntimeAdapter({ config, taskId: wakeResult.taskId, runnerKind, timeoutMs: cliTimeoutMs });
 
       if (runnerKind === 'dreamer') {
         const validator = new DefaultDreamerValidator();
