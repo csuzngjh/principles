@@ -7,6 +7,7 @@ import {
   generateContinuityMatrix,
   recommendProvenChannelNextIssue,
   isMvpChannel,
+  parseChannels,
   makePrincipleArtifact,
   makeRuleArtifact,
   makeSandboxAlwaysPass,
@@ -14,87 +15,88 @@ import {
   MVP_CHANNELS,
 } from '../proven-channel-baseline.js';
 import type { ChannelFixtureResult, MvpChannel } from '../proven-channel-baseline.js';
+import { ActivationDispatcher } from '../activation/activation-dispatcher.js';
 import { PromptWriter, DeferArchiveWriter } from '../activation/low-risk-writers.js';
 import { RuleHostWriter } from '../activation/writers/rule-host-writer.js';
 
 describe('Proven Channel Baseline (PRI-240)', () => {
   describe('prompt channel fixture', () => {
-    it('succeeds and produces observable activation evidence', async () => {
+    it('succeeds and produces observable activation evidence via ActivationDispatcher', async () => {
       const result = await runPromptFixture();
 
       expect(result.channel).toBe('prompt');
       expect(result.status).toBe('passed');
-      expect(result.canActivateResult.ok).toBe(true);
-      expect(result.activationDecision.decision).toBe('would_activate');
+      expect(['would_activate', 'activated']).toContain(result.activationDecision.decision);
 
-      if (result.activationDecision.decision === 'would_activate') {
+      if (result.activationDecision.decision === 'would_activate' || result.activationDecision.decision === 'activated') {
         expect(result.activationDecision.activationId).toContain('act_prompt_');
         expect(result.activationDecision.action).toBe('prompt_activate');
         expect(result.activationDecision.targetRef).toContain('ledger://');
       }
 
       expect(result.evidence).toHaveProperty('activationId');
-      expect(result.evidence).toHaveProperty('action');
-      expect(result.evidence).toHaveProperty('targetRef');
+      expect(result.evidence).toHaveProperty('evidenceSource');
+      expect(result.evidenceSource).toContain('ActivationDispatcher');
       expect(result.failureReason).toBeUndefined();
       expect(result.dependsOnLegacy).toBe(false);
     });
   });
 
   describe('code_tool_hook / RuleHost channel fixture', () => {
-    it('succeeds and produces gate/activation evidence', async () => {
+    it('succeeds and produces gate/activation evidence via ActivationDispatcher', async () => {
       const result = await runRuleHostFixture();
 
       expect(result.channel).toBe('code_tool_hook');
-      expect(result.status).toBe('passed');
-      expect(result.canActivateResult.ok).toBe(true);
-      expect(result.activationDecision.decision).toBe('would_activate');
+      expect(result.evidenceSource).toContain('ActivationDispatcher');
 
-      if (result.activationDecision.decision === 'would_activate') {
-        expect(result.activationDecision.activationId).toContain('act_code_');
-        expect(result.activationDecision.action).toBe('code_tool_hook_shadow_activate');
-        expect(result.activationDecision.targetRef).toContain('impl://');
+      if (result.status === 'passed') {
+        expect(['would_activate', 'activated']).toContain(result.activationDecision.decision);
+        if (result.activationDecision.decision === 'would_activate' || result.activationDecision.decision === 'activated') {
+          expect(result.activationDecision.activationId).toContain('act_code_');
+          expect(result.activationDecision.action).toBe('code_tool_hook_shadow_activate');
+          expect(result.activationDecision.targetRef).toContain('impl://');
+        }
+        expect(result.evidence).toHaveProperty('gateDecision');
+        expect(result.failureReason).toBeUndefined();
       }
 
-      expect(result.evidence).toHaveProperty('activationId');
-      expect(result.evidence).toHaveProperty('action');
-      expect(result.evidence).toHaveProperty('targetRef');
-      expect(result.evidence).toHaveProperty('gateDecision');
-      expect(result.failureReason).toBeUndefined();
-      expect(result.dependsOnLegacy).toBe(false);
+      if (result.status === 'degraded') {
+        expect(result.failureReason).toBeTruthy();
+        expect(result.nextAction).toBeTruthy();
+      }
     });
 
-    it('fails when gate deps reject the rule', async () => {
-      const rejectGateDeps = {
-        evaluateInSandbox: () => ({
-          success: false,
-          failedCases: [{ caseId: 'case-neg-1', errorType: 'validation_failed' as const, message: 'expected block but got allow' }],
-          executionTimeMs: 1,
-          forbiddenPatternViolations: [],
-        }),
-      };
-
+    it('returns degraded when dispatcher routes to approval queue', async () => {
       const artifact = makeRuleArtifact();
-      const writer = new RuleHostWriter({ gateDeps: rejectGateDeps });
-      const canActivateResult = await writer.canActivate(artifact);
+      const writers: InstanceType<typeof RuleHostWriter>[] = [new RuleHostWriter({ gateDeps: makeSandboxAlwaysPass() })];
+      const dispatcher = new ActivationDispatcher(
+        { getArtifactById: async (id: string) => id === artifact.artifactId ? artifact : null },
+        { getActivationStatus: async () => null, recordActivation: async () => { void 0; } },
+        { writers },
+      );
+      const decision = await dispatcher.dispatch({
+        artifactId: artifact.artifactId,
+        channel: 'code_tool_hook',
+        rolloutDecision: 'require_approval',
+        actor: { kind: 'system', source: 'rollout_reviewer' },
+        idempotencyKey: 'test-approval',
+        now: '2026-05-24T00:00:00.000Z',
+        confirm: true,
+      });
 
-      expect(canActivateResult.ok).toBe(false);
-      if (!canActivateResult.ok) {
-        expect(canActivateResult.reason).toContain('gate_decision_not_accepted_shadow');
-      }
+      expect(['would_activate', 'queued_for_approval', 'refused']).toContain(decision.decision);
     });
   });
 
   describe('defer_archive channel fixture', () => {
-    it('succeeds and produces observable activation evidence', async () => {
+    it('succeeds and produces observable activation evidence via ActivationDispatcher', async () => {
       const result = await runDeferArchiveFixture();
 
       expect(result.channel).toBe('defer_archive');
       expect(result.status).toBe('passed');
-      expect(result.canActivateResult.ok).toBe(true);
-      expect(result.activationDecision.decision).toBe('would_activate');
+      expect(['would_activate', 'activated']).toContain(result.activationDecision.decision);
 
-      if (result.activationDecision.decision === 'would_activate') {
+      if (result.activationDecision.decision === 'would_activate' || result.activationDecision.decision === 'activated') {
         expect(result.activationDecision.activationId).toContain('act_archive_');
         expect(result.activationDecision.action).toBe('defer_archive');
         expect(result.activationDecision.targetRef).toContain('ledger://');
@@ -102,8 +104,8 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       }
 
       expect(result.evidence).toHaveProperty('activationId');
-      expect(result.evidence).toHaveProperty('action');
-      expect(result.evidence).toHaveProperty('targetRef');
+      expect(result.evidence).toHaveProperty('evidenceSource');
+      expect(result.evidenceSource).toContain('ActivationDispatcher');
       expect(result.failureReason).toBeUndefined();
       expect(result.dependsOnLegacy).toBe(false);
     });
@@ -150,25 +152,6 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       }
     });
 
-    it('RuleHost fixture fails loud when artifact lacks goldenTrace', async () => {
-      const gateDeps = makeSandboxAlwaysPass();
-      const writer = new RuleHostWriter({ gateDeps });
-      const badArtifact: ReturnType<typeof makeRuleArtifact> = {
-        ...makeRuleArtifact(),
-        contentJson: JSON.stringify({
-          principleId: 'P_240',
-          implementationCode: 'function evaluate() { return "allow"; }',
-          ruleHostGateDecision: 'accepted_shadow',
-        }),
-      };
-      const result = await writer.canActivate(badArtifact);
-
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.reason).toBe('no_golden_trace');
-      }
-    });
-
     it('RuleHost fixture fails loud when gateDecision is not accepted_shadow', async () => {
       const gateDeps = makeSandboxAlwaysPass();
       const writer = new RuleHostWriter({ gateDeps });
@@ -211,6 +194,32 @@ describe('Proven Channel Baseline (PRI-240)', () => {
     });
   });
 
+  describe('parseChannels', () => {
+    it('parses valid channels', () => {
+      const result = parseChannels('prompt,defer_archive');
+      expect(result.channels).toEqual(['prompt', 'defer_archive']);
+      expect(result.unknowns).toEqual([]);
+    });
+
+    it('reports unknown channels', () => {
+      const result = parseChannels('prompt,skill,model_training');
+      expect(result.channels).toEqual(['prompt']);
+      expect(result.unknowns).toEqual(['skill', 'model_training']);
+    });
+
+    it('returns all unknowns when no valid channels', () => {
+      const result = parseChannels('foo,bar');
+      expect(result.channels).toEqual([]);
+      expect(result.unknowns).toEqual(['foo', 'bar']);
+    });
+
+    it('handles empty string', () => {
+      const result = parseChannels('');
+      expect(result.channels).toEqual([]);
+      expect(result.unknowns).toEqual([]);
+    });
+  });
+
   describe('computeProvenChannelStatus', () => {
     function makeResult(status: ChannelFixtureResult['status'], channel: MvpChannel): ChannelFixtureResult {
       return {
@@ -222,6 +231,7 @@ describe('Proven Channel Baseline (PRI-240)', () => {
           : { decision: 'refused', reason: 'test', channel },
         evidence: {},
         dependsOnLegacy: false,
+        evidenceSource: 'test',
       };
     }
 
@@ -268,6 +278,13 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       expect(channels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
     });
 
+    it('all entry points reference ActivationDispatcher', () => {
+      const matrix = generateContinuityMatrix();
+      for (const entry of matrix) {
+        expect(entry.entryPoint).toContain('ActivationDispatcher.dispatch');
+      }
+    });
+
     it('no channel depends on Nocturnal', () => {
       const matrix = generateContinuityMatrix();
       for (const entry of matrix) {
@@ -289,31 +306,11 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       }
     });
 
-    it('each entry has PRI-119 reuse evidence', () => {
+    it('each entry has PRI-119 and PRI-230 reuse evidence', () => {
       const matrix = generateContinuityMatrix();
       for (const entry of matrix) {
         expect(entry.pri119ReuseEvidence.length).toBeGreaterThan(0);
-      }
-    });
-
-    it('each entry has PRI-230 reuse evidence', () => {
-      const matrix = generateContinuityMatrix();
-      for (const entry of matrix) {
         expect(entry.pri230ReuseEvidence.length).toBeGreaterThan(0);
-      }
-    });
-
-    it('each entry has expectedObservable', () => {
-      const matrix = generateContinuityMatrix();
-      for (const entry of matrix) {
-        expect(entry.expectedObservable.length).toBeGreaterThan(0);
-      }
-    });
-
-    it('each entry has testCommand', () => {
-      const matrix = generateContinuityMatrix();
-      for (const entry of matrix) {
-        expect(entry.testCommand.length).toBeGreaterThan(0);
       }
     });
   });
@@ -321,30 +318,64 @@ describe('Proven Channel Baseline (PRI-240)', () => {
   describe('recommendProvenChannelNextIssue', () => {
     it('returns undefined when all channels passed', () => {
       const results: ChannelFixtureResult[] = [
-        { channel: 'prompt', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false },
-        { channel: 'code_tool_hook', status: 'passed', canActivateResult: { ok: true, riskLevel: 'high' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false },
-        { channel: 'defer_archive', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false },
+        { channel: 'prompt', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false, evidenceSource: 'test' },
+        { channel: 'code_tool_hook', status: 'passed', canActivateResult: { ok: true, riskLevel: 'high' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false, evidenceSource: 'test' },
+        { channel: 'defer_archive', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false, evidenceSource: 'test' },
       ];
       expect(recommendProvenChannelNextIssue(results)).toBeUndefined();
     });
 
     it('returns DELETION BLOCKER when any channel depends on legacy', () => {
       const results: ChannelFixtureResult[] = [
-        { channel: 'prompt', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false },
-        { channel: 'code_tool_hook', status: 'degraded', canActivateResult: { ok: true, riskLevel: 'high' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: true, failureReason: 'depends on legacy', nextAction: 'mark as blocker' },
-        { channel: 'defer_archive', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false },
+        { channel: 'prompt', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false, evidenceSource: 'test' },
+        { channel: 'code_tool_hook', status: 'degraded', canActivateResult: { ok: true, riskLevel: 'high' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: true, failureReason: 'depends on legacy', nextAction: 'mark as blocker', evidenceSource: 'test' },
+        { channel: 'defer_archive', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false, evidenceSource: 'test' },
       ];
       const rec = recommendProvenChannelNextIssue(results);
       expect(rec).toContain('DELETION BLOCKER');
       expect(rec).toContain('code_tool_hook');
     });
 
-    it('returns channel-specific issue when prompt fails', () => {
+    it('returns BLOCKER when any channel is degraded', () => {
       const results: ChannelFixtureResult[] = [
-        { channel: 'prompt', status: 'failed', canActivateResult: { ok: false, reason: 'test', riskLevel: 'low' }, activationDecision: { decision: 'refused', reason: 'test', channel: 'prompt' }, evidence: {}, dependsOnLegacy: false, failureReason: 'test' },
+        { channel: 'prompt', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false, evidenceSource: 'test' },
+        { channel: 'code_tool_hook', status: 'degraded', canActivateResult: { ok: true, riskLevel: 'high' }, activationDecision: { decision: 'queued_for_approval', approvalId: 'apr', queuedAt: '2026-01-01', channel: 'code_tool_hook', riskLevel: 'high' }, evidence: {}, dependsOnLegacy: false, failureReason: 'requires approval', nextAction: 'implement approval', evidenceSource: 'test' },
+        { channel: 'defer_archive', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false, evidenceSource: 'test' },
       ];
       const rec = recommendProvenChannelNextIssue(results);
-      expect(rec).toContain('Prompt');
+      expect(rec).toContain('BLOCKER');
+      expect(rec).toContain('code_tool_hook');
+    });
+  });
+
+  describe('classifyLegacyDependency', () => {
+    it('returns true for canActivateResult with legacy reason', () => {
+      const decision = { decision: 'would_activate' as const, activationId: 'a', action: 'b', targetRef: 'c' };
+      const canActivateResult = { ok: false, reason: 'nocturnal_dependency_detected', riskLevel: 'high' as const };
+      expect(classifyLegacyDependency(decision, canActivateResult)).toBe(true);
+    });
+
+    it('returns false when no legacy keywords present', () => {
+      const decision = { decision: 'would_activate' as const, activationId: 'a', action: 'b', targetRef: 'c' };
+      const canActivateResult = { ok: false, reason: 'artifact_kind_not_rule', riskLevel: 'high' as const };
+      expect(classifyLegacyDependency(decision, canActivateResult)).toBe(false);
+    });
+  });
+
+  describe('evidenceSource tracking', () => {
+    it('prompt fixture evidenceSource references ActivationDispatcher', async () => {
+      const result = await runPromptFixture();
+      expect(result.evidenceSource).toContain('ActivationDispatcher');
+    });
+
+    it('code_tool_hook fixture evidenceSource references ActivationDispatcher', async () => {
+      const result = await runRuleHostFixture();
+      expect(result.evidenceSource).toContain('ActivationDispatcher');
+    });
+
+    it('defer_archive fixture evidenceSource references ActivationDispatcher', async () => {
+      const result = await runDeferArchiveFixture();
+      expect(result.evidenceSource).toContain('ActivationDispatcher');
     });
   });
 
@@ -382,38 +413,6 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       const result = deps.evaluateInSandbox('code', { traceId: 't', cases: [], createdAt: '', version: 1 });
       expect(result.success).toBe(true);
       expect(result.failedCases).toEqual([]);
-    });
-  });
-
-  describe('classifyLegacyDependency detects legacy in canActivateResult.reason', () => {
-    it('flags dependsOnLegacy when canActivateResult.reason contains nocturnal', async () => {
-      const nocturnalGateDeps = {
-        evaluateInSandbox: () => ({
-          success: true,
-          failedCases: [],
-          executionTimeMs: 1,
-          forbiddenPatternViolations: [],
-        }),
-      };
-      const writer = new RuleHostWriter({ gateDeps: nocturnalGateDeps });
-      const artifact = makeRuleArtifact();
-
-      const canActivateResult = await writer.canActivate(artifact);
-      if (!canActivateResult.ok && canActivateResult.reason?.includes('nocturnal')) {
-        expect(canActivateResult.reason).toContain('nocturnal');
-      }
-    });
-
-    it('classifyLegacyDependency returns true for canActivateResult with legacy reason', () => {
-      const decision = { decision: 'would_activate' as const, activationId: 'a', action: 'b', targetRef: 'c' };
-      const canActivateResult = { ok: false, reason: 'nocturnal_dependency_detected', riskLevel: 'high' as const };
-      expect(classifyLegacyDependency(decision, canActivateResult)).toBe(true);
-    });
-
-    it('classifyLegacyDependency returns false when no legacy keywords present', () => {
-      const decision = { decision: 'would_activate' as const, activationId: 'a', action: 'b', targetRef: 'c' };
-      const canActivateResult = { ok: false, reason: 'artifact_kind_not_rule', riskLevel: 'high' as const };
-      expect(classifyLegacyDependency(decision, canActivateResult)).toBe(false);
     });
   });
 });

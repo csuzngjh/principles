@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { runProvenChannelBaseline } from '../services/proven-channel-baseline-runner.js';
 import type { ProvenChannelBaselineSummary, MvpChannel } from '@principles/core/runtime-v2';
-import { isMvpChannel } from '@principles/core/runtime-v2';
+import { parseChannels } from '@principles/core/runtime-v2';
 
 interface ProvenChannelBaselineCliOptions {
   workspace?: string;
@@ -58,31 +58,22 @@ function formatTextOutput(summary: ProvenChannelBaselineSummary): string {
   return lines.join('\n');
 }
 
-function parseChannels(raw: string | undefined): MvpChannel[] | undefined {
-  if (!raw) return undefined;
-  const parts = raw.split(',').map(p => p.trim()).filter(p => p.length > 0);
-  const valid: MvpChannel[] = [];
-  for (const part of parts) {
-    if (isMvpChannel(part)) {
-      valid.push(part);
-    }
-  }
-  if (valid.length === 0) return undefined;
-  return valid;
-}
-
 export async function handleProvenChannelBaseline(opts: ProvenChannelBaselineCliOptions): Promise<void> {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
     : fs.mkdtempSync(path.join(os.tmpdir(), 'pd-proven-channel-'));
   const workspaceMode: 'temp' | 'explicit_workspace' = opts.workspace ? 'explicit_workspace' : 'temp';
-  const channels = parseChannels(opts.channels);
+
+  const parsed = opts.channels ? parseChannels(opts.channels) : null;
+  const channels: MvpChannel[] | undefined = parsed && parsed.channels.length > 0 ? parsed.channels : undefined;
+  const unknownChannels: string[] = parsed ? parsed.unknowns : [];
 
   try {
     const summary = await runProvenChannelBaseline({
       workspaceDir,
       workspaceMode,
       channels,
+      unknownChannels,
     });
 
     if (opts.json) {

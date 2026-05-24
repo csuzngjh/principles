@@ -20,18 +20,18 @@ export interface ProvenChannelBaselineRunnerOptions {
   workspaceDir: string;
   workspaceMode: 'temp' | 'explicit_workspace';
   channels?: MvpChannel[];
+  unknownChannels?: string[];
 }
-
-const PRODUCTION_WORKSPACE_PREFIXES = [
-  'D:\\.openclaw\\workspace',
-  'C:\\Users\\Administrator\\.openclaw\\workspace',
-  path.join(os.homedir(), '.openclaw', 'workspace'),
-];
 
 function isProductionWorkspace(workspaceDir: string): boolean {
   const normalized = path.resolve(workspaceDir).toLowerCase();
-  for (const prefix of PRODUCTION_WORKSPACE_PREFIXES) {
-    if (normalized.startsWith(prefix.toLowerCase())) {
+  const productionPrefixes = [
+    path.resolve('D:\\.openclaw\\workspace').toLowerCase(),
+    path.resolve('C:\\Users\\Administrator\\.openclaw\\workspace').toLowerCase(),
+    path.resolve(path.join(os.homedir(), '.openclaw', 'workspace')).toLowerCase(),
+  ];
+  for (const prefix of productionPrefixes) {
+    if (normalized === prefix || normalized.startsWith(prefix + path.sep)) {
       return true;
     }
   }
@@ -43,7 +43,30 @@ export async function runProvenChannelBaseline(
 ): Promise<ProvenChannelBaselineSummary> {
   const { workspaceDir, workspaceMode } = opts;
   const channels = opts.channels ?? [...MVP_CHANNELS];
+  const unknownChannels = opts.unknownChannels ?? [];
   const generatedAt = new Date().toISOString();
+
+  if (unknownChannels.length > 0) {
+    const unknownResult: ChannelFixtureResult = {
+      channel: 'prompt',
+      status: 'failed',
+      canActivateResult: { ok: false, reason: 'unknown_channels', riskLevel: 'low' },
+      activationDecision: { decision: 'refused', reason: 'unknown_channels', channel: 'prompt' },
+      evidence: { unknownChannels },
+      failureReason: `Unknown channels: ${unknownChannels.join(', ')}. Valid channels: prompt, code_tool_hook, defer_archive`,
+      nextAction: 'Use only valid MVP channels: prompt, code_tool_hook, defer_archive',
+      dependsOnLegacy: false,
+      evidenceSource: 'input_validation',
+    };
+    return {
+      status: 'failed',
+      generatedAt,
+      workspaceMode,
+      channels: [unknownResult],
+      continuityMatrix: generateContinuityMatrix(),
+      recommendedNextIssue: `PRI-240: Unknown channels provided: ${unknownChannels.join(', ')}`,
+    };
+  }
 
   if (isProductionWorkspace(workspaceDir)) {
     const blockedChannel: ChannelFixtureResult = {
@@ -55,6 +78,7 @@ export async function runProvenChannelBaseline(
       failureReason: 'Baseline must not write to production workspace',
       nextAction: 'Use a temp workspace or explicit non-production directory',
       dependsOnLegacy: false,
+      evidenceSource: 'workspace_guard',
     };
     return {
       status: 'failed',
@@ -82,6 +106,7 @@ export async function runProvenChannelBaseline(
       failureReason: `Channel ${channel} is not an MVP channel`,
       nextAction: 'Use one of: prompt, code_tool_hook, defer_archive',
       dependsOnLegacy: false,
+      evidenceSource: 'channel_validation',
     };
 
     switch (channel) {
@@ -114,3 +139,5 @@ export async function runProvenChannelBaseline(
     recommendedNextIssue: recommendProvenChannelNextIssue(results),
   };
 }
+
+export { isProductionWorkspace };

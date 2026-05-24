@@ -1,9 +1,14 @@
+import type { InternalizationChannel } from './internalization/peer-runner-contracts.js';
 import type {
   PIArtifactSnapshot,
   ActivationDecision,
   CanActivateResult,
-  WriterInput,
+  DispatchInput,
+  ActivationArtifactReadModel,
+  ActivationStateReadModel,
+  ChannelWriter,
 } from './activation/activation-types.js';
+import { ActivationDispatcher } from './activation/activation-dispatcher.js';
 import { PromptWriter, DeferArchiveWriter } from './activation/low-risk-writers.js';
 import { RuleHostWriter } from './activation/writers/rule-host-writer.js';
 import type { RefinerRuleHostGateDeps } from './internalization/refiner-rulehost-gate.js';
@@ -23,6 +28,7 @@ export interface ChannelFixtureResult {
   failureReason?: string;
   nextAction?: string;
   dependsOnLegacy: boolean;
+  evidenceSource: string;
 }
 
 export interface ProvenChannelBaselineSummary {
@@ -123,16 +129,6 @@ function makeSandboxAlwaysPass(): RefinerRuleHostGateDeps {
   };
 }
 
-function makeWriterInput(channel: MvpChannel): WriterInput {
-  return {
-    artifactId: channel === 'code_tool_hook' ? 'art-synth-rule-240' : 'art-synth-principle-240',
-    channel,
-    principleId: SYNTH_PRINCIPLE_ID,
-    idempotencyKey: `synth-240::${channel}`,
-    now: '2026-05-24T00:00:00.000Z',
-  };
-}
-
 const LEGACY_KEYWORDS = ['nocturnal', 'idle_trigger', 'plugin_discovery'];
 
 function hasLegacyKeyword(text: string): boolean {
@@ -156,47 +152,104 @@ function classifyLegacyDependency(decision: ActivationDecision, canActivateResul
   return false;
 }
 
+function makeInMemoryArtifactReadModel(artifacts: Map<string, PIArtifactSnapshot>): ActivationArtifactReadModel {
+  return {
+    getArtifactById: async (id: string) => artifacts.get(id) ?? null,
+  };
+}
+
+function makeInMemoryStateReadModel(): ActivationStateReadModel {
+  return {
+    getActivationStatus: async () => null,
+    recordActivation: async () => { void 0; },
+  };
+}
+
+function makeDispatcher(
+  channel: MvpChannel,
+  artifact: PIArtifactSnapshot,
+  gateDeps?: RefinerRuleHostGateDeps,
+): ActivationDispatcher {
+  const artifacts = new Map<string, PIArtifactSnapshot>();
+  artifacts.set(artifact.artifactId, artifact);
+
+  const writers: ChannelWriter[] = [];
+
+  if (channel === 'prompt') {
+    writers.push(new PromptWriter());
+  } else if (channel === 'code_tool_hook') {
+    const deps = gateDeps ?? makeSandboxAlwaysPass();
+    writers.push(new RuleHostWriter({ gateDeps: deps }));
+  } else if (channel === 'defer_archive') {
+    writers.push(new DeferArchiveWriter());
+  }
+
+  return new ActivationDispatcher(
+    makeInMemoryArtifactReadModel(artifacts),
+    makeInMemoryStateReadModel(),
+    { writers },
+  );
+}
+
+function makeDispatchInput(channel: MvpChannel, artifact: PIArtifactSnapshot): DispatchInput {
+  return {
+    artifactId: artifact.artifactId,
+    channel: channel as InternalizationChannel,
+    rolloutDecision: channel === 'code_tool_hook' ? 'require_approval' : 'auto_activate',
+    actor: { kind: 'system', source: 'rollout_reviewer' },
+    idempotencyKey: `synth-240::${channel}`,
+    now: '2026-05-24T00:00:00.000Z',
+    confirm: true,
+  };
+}
+
 export async function runPromptFixture(): Promise<ChannelFixtureResult> {
-  const writer = new PromptWriter();
   const artifact = makePrincipleArtifact();
-  const input = makeWriterInput('prompt');
+  const dispatcher = makeDispatcher('prompt', artifact);
+  const input = makeDispatchInput('prompt', artifact);
 
   try {
-    const canActivateResult = await writer.canActivate(artifact);
+    const decision = await dispatcher.dispatch(input);
 
-    if (!canActivateResult.ok) {
+    if (decision.decision === 'would_activate' || decision.decision === 'activated') {
       return {
         channel: 'prompt',
-        status: 'failed',
-        canActivateResult,
-        activationDecision: { decision: 'refused', reason: canActivateResult.reason ?? 'can_activate_refused', channel: 'prompt', riskLevel: canActivateResult.riskLevel },
-        evidence: boundedEvidence({ canActivateResult, artifactKind: artifact.artifactKind, validationStatus: artifact.validationStatus }),
-        failureReason: truncateReason(`PromptWriter.canActivate refused: ${canActivateResult.reason ?? 'unknown'}`),
-        nextAction: 'Check artifact kind is "principle" and validationStatus is "validated"',
-        dependsOnLegacy: false,
+        status: 'passed',
+        canActivateResult: { ok: true, riskLevel: 'low' },
+        activationDecision: decision,
+        evidence: boundedEvidence({
+          activationId: decision.activationId,
+          action: decision.action,
+          targetRef: decision.targetRef,
+          evidenceSource: 'ActivationDispatcher.dispatch',
+        }),
+        dependsOnLegacy: classifyLegacyDependency(decision),
+        evidenceSource: 'ActivationDispatcher.dispatch → PromptWriter',
       };
     }
 
-    const writerResult = await writer.activate(input, artifact);
-    const activationDecision: ActivationDecision = {
-      decision: 'would_activate',
-      activationId: writerResult.activationId,
-      action: writerResult.action,
-      targetRef: writerResult.targetRef,
-    };
+    if (decision.decision === 'already_activated') {
+      return {
+        channel: 'prompt',
+        status: 'passed',
+        canActivateResult: { ok: true, riskLevel: 'low' },
+        activationDecision: decision,
+        evidence: boundedEvidence({ activationId: decision.activationId, evidenceSource: 'ActivationDispatcher.dispatch' }),
+        dependsOnLegacy: false,
+        evidenceSource: 'ActivationDispatcher.dispatch → PromptWriter (idempotent)',
+      };
+    }
 
     return {
       channel: 'prompt',
-      status: 'passed',
-      canActivateResult,
-      activationDecision,
-      evidence: boundedEvidence({
-        activationId: writerResult.activationId,
-        action: writerResult.action,
-        targetRef: writerResult.targetRef,
-        riskLevel: canActivateResult.riskLevel,
-      }),
-      dependsOnLegacy: false,
+      status: 'failed',
+      canActivateResult: { ok: false, reason: 'dispatch_refused', riskLevel: 'low' },
+      activationDecision: decision,
+      evidence: boundedEvidence({ decision, evidenceSource: 'ActivationDispatcher.dispatch' }),
+      failureReason: truncateReason(`Prompt channel dispatch refused: ${decision.decision}`),
+      nextAction: 'Check PromptWriter canActivate and artifact contract',
+      dependsOnLegacy: classifyLegacyDependency(decision),
+      evidenceSource: 'ActivationDispatcher.dispatch',
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -207,8 +260,9 @@ export async function runPromptFixture(): Promise<ChannelFixtureResult> {
       activationDecision: { decision: 'refused', reason: 'prompt_fixture_exception', channel: 'prompt' },
       evidence: boundedEvidence({ error: safeStringify(msg) }),
       failureReason: truncateReason(`Prompt fixture threw: ${msg}`),
-      nextAction: 'Inspect prompt fixture exception; check PromptWriter implementation',
+      nextAction: 'Inspect prompt fixture exception; check ActivationDispatcher and PromptWriter',
       dependsOnLegacy: false,
+      evidenceSource: 'exception',
     };
   }
 }
@@ -216,51 +270,74 @@ export async function runPromptFixture(): Promise<ChannelFixtureResult> {
 export async function runRuleHostFixture(
   gateDeps?: RefinerRuleHostGateDeps,
 ): Promise<ChannelFixtureResult> {
-  const deps = gateDeps ?? makeSandboxAlwaysPass();
-  const writer = new RuleHostWriter({ gateDeps: deps });
   const artifact = makeRuleArtifact();
-  const input = makeWriterInput('code_tool_hook');
+  const dispatcher = makeDispatcher('code_tool_hook', artifact, gateDeps);
+  const input = makeDispatchInput('code_tool_hook', artifact);
 
   try {
-    const canActivateResult = await writer.canActivate(artifact);
+    const decision = await dispatcher.dispatch(input);
 
-    if (!canActivateResult.ok) {
+    if (decision.decision === 'would_activate' || decision.decision === 'activated') {
+      const dependsOnLegacy = classifyLegacyDependency(decision);
       return {
         channel: 'code_tool_hook',
-        status: 'failed',
-        canActivateResult,
-        activationDecision: { decision: 'refused', reason: canActivateResult.reason ?? 'can_activate_refused', channel: 'code_tool_hook', riskLevel: canActivateResult.riskLevel },
-        evidence: boundedEvidence({ canActivateResult, artifactKind: artifact.artifactKind, validationStatus: artifact.validationStatus }),
-        failureReason: truncateReason(`RuleHostWriter.canActivate refused: ${canActivateResult.reason ?? 'unknown'}`),
-        nextAction: 'Check artifact kind is "rule", has implementationCode, goldenTrace, and gateDecision=accepted_shadow',
-        dependsOnLegacy: false,
+        status: dependsOnLegacy ? 'degraded' : 'passed',
+        canActivateResult: { ok: true, riskLevel: 'high' },
+        activationDecision: decision,
+        evidence: boundedEvidence({
+          activationId: decision.activationId,
+          action: decision.action,
+          targetRef: decision.targetRef,
+          gateDecision: 'accepted_shadow',
+          evidenceSource: 'ActivationDispatcher.dispatch',
+        }),
+        ...(dependsOnLegacy ? { failureReason: 'Channel depends on legacy path', nextAction: 'Mark as deletion blocker for PRI-119/PRI-230' } : {}),
+        dependsOnLegacy,
+        evidenceSource: 'ActivationDispatcher.dispatch → RuleHostWriter',
       };
     }
 
-    const writerResult = await writer.activate(input, artifact);
-    const activationDecision: ActivationDecision = {
-      decision: 'would_activate',
-      activationId: writerResult.activationId,
-      action: writerResult.action,
-      targetRef: writerResult.targetRef,
-    };
+    if (decision.decision === 'queued_for_approval') {
+      return {
+        channel: 'code_tool_hook',
+        status: 'degraded',
+        canActivateResult: { ok: true, riskLevel: 'high' },
+        activationDecision: decision,
+        evidence: boundedEvidence({
+          approvalId: decision.approvalId,
+          queuedAt: decision.queuedAt,
+          evidenceSource: 'ActivationDispatcher.dispatch',
+        }),
+        failureReason: 'code_tool_hook requires approval queue — operator path not yet proven for auto-activation',
+        nextAction: 'Implement operator approval flow for code_tool_hook, or mark as known blocker for PRI-119/PRI-230',
+        dependsOnLegacy: false,
+        evidenceSource: 'ActivationDispatcher.dispatch → approval queue',
+      };
+    }
 
-    const dependsOnLegacy = classifyLegacyDependency(activationDecision, canActivateResult);
+    if (decision.decision === 'already_activated') {
+      return {
+        channel: 'code_tool_hook',
+        status: 'passed',
+        canActivateResult: { ok: true, riskLevel: 'high' },
+        activationDecision: decision,
+        evidence: boundedEvidence({ activationId: decision.activationId, evidenceSource: 'ActivationDispatcher.dispatch' }),
+        dependsOnLegacy: false,
+        evidenceSource: 'ActivationDispatcher.dispatch → RuleHostWriter (idempotent)',
+      };
+    }
 
+    const refusedReason = decision.decision === 'refused' ? (decision as { reason: string }).reason : decision.decision;
     return {
       channel: 'code_tool_hook',
-      status: dependsOnLegacy ? 'degraded' : 'passed',
-      canActivateResult,
-      activationDecision,
-      evidence: boundedEvidence({
-        activationId: writerResult.activationId,
-        action: writerResult.action,
-        targetRef: writerResult.targetRef,
-        riskLevel: canActivateResult.riskLevel,
-        gateDecision: 'accepted_shadow',
-      }),
-      ...(dependsOnLegacy ? { failureReason: 'Channel depends on legacy path', nextAction: 'Mark as deletion blocker for PRI-119/PRI-230' } : {}),
-      dependsOnLegacy,
+      status: 'failed',
+      canActivateResult: { ok: false, reason: refusedReason, riskLevel: 'high' },
+      activationDecision: decision,
+      evidence: boundedEvidence({ decision, evidenceSource: 'ActivationDispatcher.dispatch' }),
+      failureReason: truncateReason(`RuleHost channel dispatch refused: ${refusedReason}`),
+      nextAction: 'Check RuleHostWriter canActivate, gate deps, and rule artifact contract',
+      dependsOnLegacy: classifyLegacyDependency(decision),
+      evidenceSource: 'ActivationDispatcher.dispatch',
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -271,53 +348,61 @@ export async function runRuleHostFixture(
       activationDecision: { decision: 'refused', reason: 'rulehost_fixture_exception', channel: 'code_tool_hook' },
       evidence: boundedEvidence({ error: safeStringify(msg) }),
       failureReason: truncateReason(`RuleHost fixture threw: ${msg}`),
-      nextAction: 'Inspect RuleHost fixture exception; check RuleHostWriter and gate deps',
+      nextAction: 'Inspect RuleHost fixture exception; check ActivationDispatcher and RuleHostWriter',
       dependsOnLegacy: false,
+      evidenceSource: 'exception',
     };
   }
 }
 
 export async function runDeferArchiveFixture(): Promise<ChannelFixtureResult> {
-  const writer = new DeferArchiveWriter();
   const artifact = makePrincipleArtifact();
-  const input = makeWriterInput('defer_archive');
+  const dispatcher = makeDispatcher('defer_archive', artifact);
+  const input = makeDispatchInput('defer_archive', artifact);
 
   try {
-    const canActivateResult = await writer.canActivate(artifact);
+    const decision = await dispatcher.dispatch(input);
 
-    if (!canActivateResult.ok) {
+    if (decision.decision === 'would_activate' || decision.decision === 'activated') {
       return {
         channel: 'defer_archive',
-        status: 'failed',
-        canActivateResult,
-        activationDecision: { decision: 'refused', reason: canActivateResult.reason ?? 'can_activate_refused', channel: 'defer_archive', riskLevel: canActivateResult.riskLevel },
-        evidence: boundedEvidence({ canActivateResult, artifactKind: artifact.artifactKind, validationStatus: artifact.validationStatus }),
-        failureReason: truncateReason(`DeferArchiveWriter.canActivate refused: ${canActivateResult.reason ?? 'unknown'}`),
-        nextAction: 'Check artifact kind is "principle" and validationStatus is "validated"',
-        dependsOnLegacy: false,
+        status: 'passed',
+        canActivateResult: { ok: true, riskLevel: 'low' },
+        activationDecision: decision,
+        evidence: boundedEvidence({
+          activationId: decision.activationId,
+          action: decision.action,
+          targetRef: decision.targetRef,
+          evidenceSource: 'ActivationDispatcher.dispatch',
+        }),
+        dependsOnLegacy: classifyLegacyDependency(decision),
+        evidenceSource: 'ActivationDispatcher.dispatch → DeferArchiveWriter',
       };
     }
 
-    const writerResult = await writer.activate(input, artifact);
-    const activationDecision: ActivationDecision = {
-      decision: 'would_activate',
-      activationId: writerResult.activationId,
-      action: writerResult.action,
-      targetRef: writerResult.targetRef,
-    };
+    if (decision.decision === 'already_activated') {
+      return {
+        channel: 'defer_archive',
+        status: 'passed',
+        canActivateResult: { ok: true, riskLevel: 'low' },
+        activationDecision: decision,
+        evidence: boundedEvidence({ activationId: decision.activationId, evidenceSource: 'ActivationDispatcher.dispatch' }),
+        dependsOnLegacy: false,
+        evidenceSource: 'ActivationDispatcher.dispatch → DeferArchiveWriter (idempotent)',
+      };
+    }
 
+    const refusedReason = decision.decision === 'refused' ? (decision as { reason: string }).reason : decision.decision;
     return {
       channel: 'defer_archive',
-      status: 'passed',
-      canActivateResult,
-      activationDecision,
-      evidence: boundedEvidence({
-        activationId: writerResult.activationId,
-        action: writerResult.action,
-        targetRef: writerResult.targetRef,
-        riskLevel: canActivateResult.riskLevel,
-      }),
-      dependsOnLegacy: false,
+      status: 'failed',
+      canActivateResult: { ok: false, reason: refusedReason, riskLevel: 'low' },
+      activationDecision: decision,
+      evidence: boundedEvidence({ decision, evidenceSource: 'ActivationDispatcher.dispatch' }),
+      failureReason: truncateReason(`DeferArchive channel dispatch refused: ${refusedReason}`),
+      nextAction: 'Check DeferArchiveWriter canActivate and artifact contract',
+      dependsOnLegacy: classifyLegacyDependency(decision),
+      evidenceSource: 'ActivationDispatcher.dispatch',
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -328,8 +413,9 @@ export async function runDeferArchiveFixture(): Promise<ChannelFixtureResult> {
       activationDecision: { decision: 'refused', reason: 'defer_archive_fixture_exception', channel: 'defer_archive' },
       evidence: boundedEvidence({ error: safeStringify(msg) }),
       failureReason: truncateReason(`DeferArchive fixture threw: ${msg}`),
-      nextAction: 'Inspect defer_archive fixture exception; check DeferArchiveWriter implementation',
+      nextAction: 'Inspect defer_archive fixture exception; check ActivationDispatcher and DeferArchiveWriter',
       dependsOnLegacy: false,
+      evidenceSource: 'exception',
     };
   }
 }
@@ -347,36 +433,36 @@ export function generateContinuityMatrix(): ContinuityMatrixEntry[] {
   return [
     {
       channel: 'prompt',
-      entryPoint: 'PromptWriter.canActivate → PromptWriter.activate',
-      expectedObservable: 'activationId=act_prompt_{principleId}, action=prompt_activate, targetRef=ledger://{principleId}',
+      entryPoint: 'ActivationDispatcher.dispatch → PromptWriter.canActivate → PromptWriter.activate',
+      expectedObservable: 'decision=would_activate, activationId=act_prompt_{principleId}, action=prompt_activate, targetRef=ledger://{principleId}',
       testCommand: 'npx vitest run packages/principles-core/src/runtime-v2/__tests__/proven-channel-baseline.test.ts',
       dependsOnNocturnal: false,
       dependsOnIdleTrigger: false,
       dependsOnPluginDiscovery: false,
-      pri119ReuseEvidence: 'PromptWriter.canActivate + activate contract; activationId/action/targetRef shape',
-      pri230ReuseEvidence: 'prompt channel risk level (low) and auto-activation path',
+      pri119ReuseEvidence: 'ActivationDispatcher.dispatch → PromptWriter contract; activationId/action/targetRef shape',
+      pri230ReuseEvidence: 'prompt channel risk level (low) and auto-activation path via dispatcher',
     },
     {
       channel: 'code_tool_hook',
-      entryPoint: 'RuleHostWriter.canActivate → evaluateRefinerRuleHostGate → RuleHostWriter.activate',
-      expectedObservable: 'activationId=act_code_{ruleId}, action=code_tool_hook_shadow_activate, targetRef=impl://{ruleId}',
+      entryPoint: 'ActivationDispatcher.dispatch → RuleHostWriter.canActivate → evaluateRefinerRuleHostGate → RuleHostWriter.activate',
+      expectedObservable: 'decision=would_activate|queued_for_approval, activationId=act_code_{ruleId}, action=code_tool_hook_shadow_activate, targetRef=impl://{ruleId}',
       testCommand: 'npx vitest run packages/principles-core/src/runtime-v2/__tests__/proven-channel-baseline.test.ts',
       dependsOnNocturnal: false,
       dependsOnIdleTrigger: false,
       dependsOnPluginDiscovery: false,
-      pri119ReuseEvidence: 'RuleHostWriter.canActivate gate decision contract; goldenTrace validation path',
-      pri230ReuseEvidence: 'code_tool_hook risk level (high) and approval queue path',
+      pri119ReuseEvidence: 'ActivationDispatcher.dispatch → RuleHostWriter gate decision contract; goldenTrace validation path',
+      pri230ReuseEvidence: 'code_tool_hook risk level (high) and approval queue path via dispatcher',
     },
     {
       channel: 'defer_archive',
-      entryPoint: 'DeferArchiveWriter.canActivate → DeferArchiveWriter.activate',
-      expectedObservable: 'activationId=act_archive_{principleId}, action=defer_archive, targetRef=ledger://{principleId}#archived',
+      entryPoint: 'ActivationDispatcher.dispatch → DeferArchiveWriter.canActivate → DeferArchiveWriter.activate',
+      expectedObservable: 'decision=would_activate, activationId=act_archive_{principleId}, action=defer_archive, targetRef=ledger://{principleId}#archived',
       testCommand: 'npx vitest run packages/principles-core/src/runtime-v2/__tests__/proven-channel-baseline.test.ts',
       dependsOnNocturnal: false,
       dependsOnIdleTrigger: false,
       dependsOnPluginDiscovery: false,
-      pri119ReuseEvidence: 'DeferArchiveWriter.canActivate + activate contract; activationId/action/targetRef shape',
-      pri230ReuseEvidence: 'defer_archive channel risk level (low) and auto-activation path',
+      pri119ReuseEvidence: 'ActivationDispatcher.dispatch → DeferArchiveWriter contract; activationId/action/targetRef shape',
+      pri230ReuseEvidence: 'defer_archive channel risk level (low) and auto-activation path via dispatcher',
     },
   ];
 }
@@ -387,15 +473,20 @@ export function recommendProvenChannelNextIssue(results: ChannelFixtureResult[])
     const channels = legacyDeps.map(r => r.channel).join(', ');
     return `DELETION BLOCKER: channels [${channels}] depend on legacy paths. Must resolve before PRI-119/PRI-230 can proceed.`;
   }
+  const degraded = results.filter(r => r.status === 'degraded');
+  if (degraded.length > 0) {
+    const channels = degraded.map(r => r.channel).join(', ');
+    return `BLOCKER: channels [${channels}] are degraded — operator path not fully proven. Resolve before PRI-119/PRI-230.`;
+  }
   const firstFailed = results.find(r => r.status === 'failed');
   if (!firstFailed) return undefined;
   switch (firstFailed.channel) {
     case 'prompt':
-      return 'PRI-240: Prompt channel fixture failed — check PromptWriter and principle artifact contract';
+      return 'PRI-240: Prompt channel fixture failed — check ActivationDispatcher and PromptWriter contract';
     case 'code_tool_hook':
-      return 'PRI-240: RuleHost channel fixture failed — check RuleHostWriter, gate deps, and rule artifact contract';
+      return 'PRI-240: RuleHost channel fixture failed — check ActivationDispatcher, RuleHostWriter, and gate deps';
     case 'defer_archive':
-      return 'PRI-240: DeferArchive channel fixture failed — check DeferArchiveWriter and principle artifact contract';
+      return 'PRI-240: DeferArchive channel fixture failed — check ActivationDispatcher and DeferArchiveWriter contract';
     default:
       return undefined;
   }
@@ -405,4 +496,18 @@ export function isMvpChannel(channel: string): channel is MvpChannel {
   return MVP_CHANNELS.includes(channel as MvpChannel);
 }
 
-export { makePrincipleArtifact, makeRuleArtifact, makeSandboxAlwaysPass, makeWriterInput, classifyLegacyDependency };
+export function parseChannels(raw: string): { channels: MvpChannel[]; unknowns: string[] } {
+  const parts = raw.split(',').map(p => p.trim()).filter(p => p.length > 0);
+  const channels: MvpChannel[] = [];
+  const unknowns: string[] = [];
+  for (const part of parts) {
+    if (isMvpChannel(part)) {
+      channels.push(part);
+    } else {
+      unknowns.push(part);
+    }
+  }
+  return { channels, unknowns };
+}
+
+export { makePrincipleArtifact, makeRuleArtifact, makeSandboxAlwaysPass, classifyLegacyDependency };

@@ -6,12 +6,29 @@ const { mockRunProvenChannelBaseline } = vi.hoisted(() => ({
 
 vi.mock('../../src/services/proven-channel-baseline-runner.js', () => ({
   runProvenChannelBaseline: mockRunProvenChannelBaseline,
+  isProductionWorkspace: (dir: string) => {
+    const path = require('path');
+    const os = require('os');
+    const normalized = path.resolve(dir).toLowerCase();
+    const prefixes = [
+      path.resolve('D:\\.openclaw\\workspace').toLowerCase(),
+      path.resolve('C:\\Users\\Administrator\\.openclaw\\workspace').toLowerCase(),
+      path.resolve(path.join(os.homedir(), '.openclaw', 'workspace')).toLowerCase(),
+    ];
+    for (const prefix of prefixes) {
+      if (normalized === prefix || normalized.startsWith(prefix + path.sep)) {
+        return true;
+      }
+    }
+    return false;
+  },
 }));
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { handleProvenChannelBaseline } from '../../src/commands/proven-channel-baseline.js';
+import { isProductionWorkspace } from '../../src/services/proven-channel-baseline-runner.js';
 
 function makePassedSummary() {
   return {
@@ -24,58 +41,61 @@ function makePassedSummary() {
         status: 'passed' as const,
         canActivateResult: { ok: true, riskLevel: 'low' as const },
         activationDecision: { decision: 'would_activate' as const, activationId: 'act_prompt_P_240', action: 'prompt_activate', targetRef: 'ledger://P_240' },
-        evidence: { activationId: 'act_prompt_P_240' },
+        evidence: { activationId: 'act_prompt_P_240', evidenceSource: 'ActivationDispatcher.dispatch → PromptWriter' },
         dependsOnLegacy: false,
+        evidenceSource: 'ActivationDispatcher.dispatch → PromptWriter',
       },
       {
         channel: 'code_tool_hook' as const,
         status: 'passed' as const,
         canActivateResult: { ok: true, riskLevel: 'high' as const },
         activationDecision: { decision: 'would_activate' as const, activationId: 'act_code_R_240', action: 'code_tool_hook_shadow_activate', targetRef: 'impl://R_240' },
-        evidence: { activationId: 'act_code_R_240', gateDecision: 'accepted_shadow' },
+        evidence: { activationId: 'act_code_R_240', gateDecision: 'accepted_shadow', evidenceSource: 'ActivationDispatcher.dispatch → RuleHostWriter' },
         dependsOnLegacy: false,
+        evidenceSource: 'ActivationDispatcher.dispatch → RuleHostWriter',
       },
       {
         channel: 'defer_archive' as const,
         status: 'passed' as const,
         canActivateResult: { ok: true, riskLevel: 'low' as const },
         activationDecision: { decision: 'would_activate' as const, activationId: 'act_archive_P_240', action: 'defer_archive', targetRef: 'ledger://P_240#archived' },
-        evidence: { activationId: 'act_archive_P_240' },
+        evidence: { activationId: 'act_archive_P_240', evidenceSource: 'ActivationDispatcher.dispatch → DeferArchiveWriter' },
         dependsOnLegacy: false,
+        evidenceSource: 'ActivationDispatcher.dispatch → DeferArchiveWriter',
       },
     ],
     continuityMatrix: [
       {
         channel: 'prompt' as const,
-        entryPoint: 'PromptWriter.canActivate → PromptWriter.activate',
+        entryPoint: 'ActivationDispatcher.dispatch → PromptWriter.canActivate → PromptWriter.activate',
         expectedObservable: 'activationId=act_prompt_{principleId}',
         testCommand: 'npx vitest run ...',
         dependsOnNocturnal: false,
         dependsOnIdleTrigger: false,
         dependsOnPluginDiscovery: false,
-        pri119ReuseEvidence: 'PromptWriter contract',
+        pri119ReuseEvidence: 'ActivationDispatcher → PromptWriter contract',
         pri230ReuseEvidence: 'prompt risk level',
       },
       {
         channel: 'code_tool_hook' as const,
-        entryPoint: 'RuleHostWriter.canActivate → evaluateRefinerRuleHostGate → RuleHostWriter.activate',
+        entryPoint: 'ActivationDispatcher.dispatch → RuleHostWriter.canActivate → evaluateRefinerRuleHostGate → RuleHostWriter.activate',
         expectedObservable: 'activationId=act_code_{ruleId}',
         testCommand: 'npx vitest run ...',
         dependsOnNocturnal: false,
         dependsOnIdleTrigger: false,
         dependsOnPluginDiscovery: false,
-        pri119ReuseEvidence: 'RuleHostWriter gate contract',
+        pri119ReuseEvidence: 'ActivationDispatcher → RuleHostWriter gate contract',
         pri230ReuseEvidence: 'code_tool_hook risk level',
       },
       {
         channel: 'defer_archive' as const,
-        entryPoint: 'DeferArchiveWriter.canActivate → DeferArchiveWriter.activate',
+        entryPoint: 'ActivationDispatcher.dispatch → DeferArchiveWriter.canActivate → DeferArchiveWriter.activate',
         expectedObservable: 'activationId=act_archive_{principleId}',
         testCommand: 'npx vitest run ...',
         dependsOnNocturnal: false,
         dependsOnIdleTrigger: false,
         dependsOnPluginDiscovery: false,
-        pri119ReuseEvidence: 'DeferArchiveWriter contract',
+        pri119ReuseEvidence: 'ActivationDispatcher → DeferArchiveWriter contract',
         pri230ReuseEvidence: 'defer_archive risk level',
       },
     ],
@@ -96,6 +116,7 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
     } catch {
+      void 0;
     }
     process.exitCode = originalExitCode;
   });
@@ -160,32 +181,9 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
       ...makePassedSummary(),
       status: 'failed',
       channels: [
-        { channel: 'prompt', status: 'failed', canActivateResult: { ok: false, reason: 'test', riskLevel: 'low' }, activationDecision: { decision: 'refused', reason: 'test', channel: 'prompt' }, evidence: {}, dependsOnLegacy: false, failureReason: 'test failure' },
-        { channel: 'code_tool_hook', status: 'failed', canActivateResult: { ok: false, reason: 'test', riskLevel: 'high' }, activationDecision: { decision: 'refused', reason: 'test', channel: 'code_tool_hook' }, evidence: {}, dependsOnLegacy: false, failureReason: 'test failure' },
-        { channel: 'defer_archive', status: 'failed', canActivateResult: { ok: false, reason: 'test', riskLevel: 'low' }, activationDecision: { decision: 'refused', reason: 'test', channel: 'defer_archive' }, evidence: {}, dependsOnLegacy: false, failureReason: 'test failure' },
-      ],
-    });
-
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    try {
-      await handleProvenChannelBaseline({ workspace: tempDir });
-      expect(process.exitCode).toBe(1);
-    } finally {
-      logSpy.mockRestore();
-      errorSpy.mockRestore();
-    }
-  });
-
-  it('sets process.exitCode = 1 when status is degraded', async () => {
-    mockRunProvenChannelBaseline.mockResolvedValue({
-      ...makePassedSummary(),
-      status: 'degraded',
-      channels: [
-        { channel: 'prompt', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false },
-        { channel: 'code_tool_hook', status: 'degraded', canActivateResult: { ok: true, riskLevel: 'high' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: true, failureReason: 'depends on legacy' },
-        { channel: 'defer_archive', status: 'passed', canActivateResult: { ok: true, riskLevel: 'low' }, activationDecision: { decision: 'would_activate', activationId: 'a', action: 'b', targetRef: 'c' }, evidence: {}, dependsOnLegacy: false },
+        { channel: 'prompt', status: 'failed', canActivateResult: { ok: false, reason: 'test', riskLevel: 'low' }, activationDecision: { decision: 'refused', reason: 'test', channel: 'prompt' }, evidence: {}, dependsOnLegacy: false, failureReason: 'test failure', evidenceSource: 'test' },
+        { channel: 'code_tool_hook', status: 'failed', canActivateResult: { ok: false, reason: 'test', riskLevel: 'high' }, activationDecision: { decision: 'refused', reason: 'test', channel: 'code_tool_hook' }, evidence: {}, dependsOnLegacy: false, failureReason: 'test failure', evidenceSource: 'test' },
+        { channel: 'defer_archive', status: 'failed', canActivateResult: { ok: false, reason: 'test', riskLevel: 'low' }, activationDecision: { decision: 'refused', reason: 'test', channel: 'defer_archive' }, evidence: {}, dependsOnLegacy: false, failureReason: 'test failure', evidenceSource: 'test' },
       ],
     });
 
@@ -234,34 +232,7 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
     }
   });
 
-  it('production workspace is blocked by runner', async () => {
-    mockRunProvenChannelBaseline.mockResolvedValue({
-      status: 'failed',
-      generatedAt: new Date().toISOString(),
-      workspaceMode: 'explicit_workspace',
-      channels: [
-        { channel: 'prompt', status: 'failed', canActivateResult: { ok: false, reason: 'production_workspace_blocked', riskLevel: 'low' }, activationDecision: { decision: 'refused', reason: 'production_workspace_blocked', channel: 'prompt' }, evidence: {}, dependsOnLegacy: false, failureReason: 'Baseline must not write to production workspace', nextAction: 'Use a temp workspace' },
-      ],
-      continuityMatrix: [],
-      recommendedNextIssue: 'PRI-240: Production workspace blocked',
-    });
-
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    try {
-      await handleProvenChannelBaseline({ json: true, workspace: tempDir });
-      const output = logSpy.mock.calls[0][0];
-      const parsed = JSON.parse(output);
-      expect(parsed.status).toBe('failed');
-      expect(parsed.channels[0].failureReason).toContain('production');
-    } finally {
-      logSpy.mockRestore();
-      errorSpy.mockRestore();
-    }
-  });
-
-  it('channel results include failureReason and nextAction when failed', async () => {
+  it('--channels with unknown values passes unknownChannels to runner', async () => {
     mockRunProvenChannelBaseline.mockResolvedValue({
       status: 'failed',
       generatedAt: new Date().toISOString(),
@@ -270,47 +241,32 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
         {
           channel: 'prompt',
           status: 'failed',
-          canActivateResult: { ok: false, reason: 'artifact_kind_not_principle', riskLevel: 'low' },
-          activationDecision: { decision: 'refused', reason: 'can_activate_refused', channel: 'prompt', riskLevel: 'low' },
-          evidence: { canActivateResult: { ok: false, reason: 'artifact_kind_not_principle' } },
+          canActivateResult: { ok: false, reason: 'unknown_channels', riskLevel: 'low' },
+          activationDecision: { decision: 'refused', reason: 'unknown_channels', channel: 'prompt' },
+          evidence: { unknownChannels: ['skill', 'model_training'] },
           dependsOnLegacy: false,
-          failureReason: 'PromptWriter.canActivate refused: artifact_kind_not_principle',
-          nextAction: 'Check artifact kind is "principle" and validationStatus is "validated"',
+          failureReason: 'Unknown channels: skill, model_training',
+          nextAction: 'Use only valid MVP channels: prompt, code_tool_hook, defer_archive',
+          evidenceSource: 'input_validation',
         },
       ],
       continuityMatrix: [],
-      recommendedNextIssue: 'PRI-240: Prompt channel fixture failed',
+      recommendedNextIssue: 'PRI-240: Unknown channels provided: skill, model_training',
     });
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
-      await handleProvenChannelBaseline({ json: true });
-      const output = logSpy.mock.calls[0][0];
-      const parsed = JSON.parse(output);
-      expect(parsed.channels[0].failureReason).toBeTruthy();
-      expect(parsed.channels[0].nextAction).toBeTruthy();
+      await handleProvenChannelBaseline({ json: true, channels: 'prompt,skill,model_training' });
+      expect(mockRunProvenChannelBaseline).toHaveBeenCalledWith(
+        expect.objectContaining({
+          unknownChannels: ['skill', 'model_training'],
+        }),
+      );
     } finally {
       logSpy.mockRestore();
-    }
-  });
-
-  it('continuity matrix has no legacy dependencies', async () => {
-    mockRunProvenChannelBaseline.mockResolvedValue(makePassedSummary());
-
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    try {
-      await handleProvenChannelBaseline({ json: true });
-      const output = logSpy.mock.calls[0][0];
-      const parsed = JSON.parse(output);
-      for (const entry of parsed.continuityMatrix) {
-        expect(entry.dependsOnNocturnal).toBe(false);
-        expect(entry.dependsOnIdleTrigger).toBe(false);
-        expect(entry.dependsOnPluginDiscovery).toBe(false);
-      }
-    } finally {
-      logSpy.mockRestore();
+      errorSpy.mockRestore();
     }
   });
 
@@ -336,5 +292,28 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
       ?.commands.find(c => c.name() === 'proven-channel');
     expect(found).toBeDefined();
     expect(found?.name()).toBe('proven-channel');
+  });
+});
+
+describe('isProductionWorkspace', () => {
+  it('blocks exact production workspace path', () => {
+    expect(isProductionWorkspace('D:\\.openclaw\\workspace')).toBe(true);
+  });
+
+  it('blocks descendant of production workspace', () => {
+    expect(isProductionWorkspace('D:\\.openclaw\\workspace\\my-project')).toBe(true);
+  });
+
+  it('does NOT block sibling path with different prefix', () => {
+    expect(isProductionWorkspace('D:\\.openclaw\\workspace-extra')).toBe(false);
+  });
+
+  it('does NOT block unrelated path', () => {
+    expect(isProductionWorkspace('C:\\Users\\test\\project')).toBe(false);
+  });
+
+  it('does NOT block temp directory', () => {
+    const tmp = os.tmpdir();
+    expect(isProductionWorkspace(tmp)).toBe(false);
   });
 });

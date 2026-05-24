@@ -301,10 +301,11 @@ export {
   generateContinuityMatrix,
   recommendProvenChannelNextIssue,
   isMvpChannel,
+  parseChannels,
   makePrincipleArtifact,
   makeRuleArtifact,
   makeSandboxAlwaysPass,
-  makeWriterInput,
+  classifyLegacyDependency,
   MVP_CHANNELS,
 } from './proven-channel-baseline.js';
 export type { MvpChannel, ChannelFixtureResult, ProvenChannelBaselineSummary, ContinuityMatrixEntry } from './proven-channel-baseline.js';
