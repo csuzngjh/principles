@@ -21,6 +21,7 @@ export interface ProvenChannelBaselineRunnerOptions {
   workspaceMode: 'temp' | 'explicit_workspace';
   channels?: MvpChannel[];
   unknownChannels?: string[];
+  emptyChannelInput?: boolean;
 }
 
 function isProductionWorkspace(workspaceDir: string): boolean {
@@ -44,47 +45,53 @@ export async function runProvenChannelBaseline(
   const { workspaceDir, workspaceMode } = opts;
   const channels = opts.channels ?? [...MVP_CHANNELS];
   const unknownChannels = opts.unknownChannels ?? [];
+  const emptyChannelInput = opts.emptyChannelInput ?? false;
   const generatedAt = new Date().toISOString();
 
-  if (unknownChannels.length > 0) {
-    const unknownResult: ChannelFixtureResult = {
-      channel: 'prompt',
-      status: 'failed',
-      canActivateResult: { ok: false, reason: 'unknown_channels', riskLevel: 'low' },
-      activationDecision: { decision: 'refused', reason: 'unknown_channels', channel: 'prompt' },
-      evidence: { unknownChannels },
-      failureReason: `Unknown channels: ${unknownChannels.join(', ')}. Valid channels: prompt, code_tool_hook, defer_archive`,
-      nextAction: 'Use only valid MVP channels: prompt, code_tool_hook, defer_archive',
-      dependsOnLegacy: false,
-      evidenceSource: 'input_validation',
-    };
+  if (emptyChannelInput) {
     return {
       status: 'failed',
       generatedAt,
       workspaceMode,
-      channels: [unknownResult],
+      channels: [],
+      inputValidationFailure: {
+        reason: 'empty_channel_input',
+        message: '--channels was provided but contained no valid channel names',
+        nextAction: 'Provide at least one valid MVP channel: prompt, code_tool_hook, defer_archive',
+      },
+      continuityMatrix: generateContinuityMatrix(),
+      recommendedNextIssue: 'PRI-240: --channels input was empty — no fixtures were executed',
+    };
+  }
+
+  if (unknownChannels.length > 0) {
+    return {
+      status: 'failed',
+      generatedAt,
+      workspaceMode,
+      channels: [],
+      inputValidationFailure: {
+        reason: 'unknown_channels',
+        message: `Unknown channels: ${unknownChannels.join(', ')}. Valid channels: prompt, code_tool_hook, defer_archive`,
+        nextAction: 'Use only valid MVP channels: prompt, code_tool_hook, defer_archive',
+        unknownChannels,
+      },
       continuityMatrix: generateContinuityMatrix(),
       recommendedNextIssue: `PRI-240: Unknown channels provided: ${unknownChannels.join(', ')}`,
     };
   }
 
   if (isProductionWorkspace(workspaceDir)) {
-    const blockedChannel: ChannelFixtureResult = {
-      channel: 'prompt',
-      status: 'failed',
-      canActivateResult: { ok: false, reason: 'production_workspace_blocked', riskLevel: 'low' },
-      activationDecision: { decision: 'refused', reason: 'production_workspace_blocked', channel: 'prompt' },
-      evidence: { workspaceDir: path.basename(workspaceDir) },
-      failureReason: 'Baseline must not write to production workspace',
-      nextAction: 'Use a temp workspace or explicit non-production directory',
-      dependsOnLegacy: false,
-      evidenceSource: 'workspace_guard',
-    };
     return {
       status: 'failed',
       generatedAt,
       workspaceMode,
-      channels: channels.map(ch => ({ ...blockedChannel, channel: ch })),
+      channels: [],
+      inputValidationFailure: {
+        reason: 'production_workspace_blocked',
+        message: 'Baseline must not write to production workspace',
+        nextAction: 'Use a temp workspace or explicit non-production directory',
+      },
       continuityMatrix: generateContinuityMatrix(),
       recommendedNextIssue: 'PRI-240: Production workspace blocked — use temp workspace',
     };

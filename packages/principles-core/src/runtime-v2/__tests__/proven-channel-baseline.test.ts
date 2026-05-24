@@ -268,6 +268,10 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       ];
       expect(computeProvenChannelStatus(results)).toBe('degraded');
     });
+
+    it('returns failed when results array is empty', () => {
+      expect(computeProvenChannelStatus([])).toBe('failed');
+    });
   });
 
   describe('continuity matrix', () => {

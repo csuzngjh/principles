@@ -27,7 +27,7 @@ vi.mock('../../src/services/proven-channel-baseline-runner.js', () => ({
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { handleProvenChannelBaseline } from '../../src/commands/proven-channel-baseline.js';
+import { handleProvenChannelBaseline, cleanupTempWorkspace } from '../../src/commands/proven-channel-baseline.js';
 import { isProductionWorkspace } from '../../src/services/proven-channel-baseline-runner.js';
 
 function makePassedSummary() {
@@ -237,19 +237,13 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
       status: 'failed',
       generatedAt: new Date().toISOString(),
       workspaceMode: 'temp',
-      channels: [
-        {
-          channel: 'prompt',
-          status: 'failed',
-          canActivateResult: { ok: false, reason: 'unknown_channels', riskLevel: 'low' },
-          activationDecision: { decision: 'refused', reason: 'unknown_channels', channel: 'prompt' },
-          evidence: { unknownChannels: ['skill', 'model_training'] },
-          dependsOnLegacy: false,
-          failureReason: 'Unknown channels: skill, model_training',
-          nextAction: 'Use only valid MVP channels: prompt, code_tool_hook, defer_archive',
-          evidenceSource: 'input_validation',
-        },
-      ],
+      channels: [],
+      inputValidationFailure: {
+        reason: 'unknown_channels',
+        message: 'Unknown channels: skill, model_training. Valid channels: prompt, code_tool_hook, defer_archive',
+        nextAction: 'Use only valid MVP channels: prompt, code_tool_hook, defer_archive',
+        unknownChannels: ['skill', 'model_training'],
+      },
       continuityMatrix: [],
       recommendedNextIssue: 'PRI-240: Unknown channels provided: skill, model_training',
     });
@@ -268,6 +262,143 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
       logSpy.mockRestore();
       errorSpy.mockRestore();
     }
+  });
+
+  it('--channels "" returns failed with inputValidationFailure, no fixtures executed', async () => {
+    mockRunProvenChannelBaseline.mockResolvedValue({
+      status: 'failed',
+      generatedAt: new Date().toISOString(),
+      workspaceMode: 'temp',
+      channels: [],
+      inputValidationFailure: {
+        reason: 'empty_channel_input',
+        message: '--channels was provided but contained no valid channel names',
+        nextAction: 'Provide at least one valid MVP channel: prompt, code_tool_hook, defer_archive',
+      },
+      continuityMatrix: [],
+      recommendedNextIssue: 'PRI-240: --channels input was empty — no fixtures were executed',
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await handleProvenChannelBaseline({ json: true, channels: '' });
+      expect(mockRunProvenChannelBaseline).toHaveBeenCalledWith(
+        expect.objectContaining({
+          emptyChannelInput: true,
+          channels: undefined,
+          unknownChannels: [],
+        }),
+      );
+      const output = logSpy.mock.calls[0]?.[0];
+      if (output) {
+        const parsed = JSON.parse(output);
+        expect(parsed.status).toBe('failed');
+        expect(parsed.inputValidationFailure).toBeDefined();
+        expect(parsed.inputValidationFailure.reason).toBe('empty_channel_input');
+        expect(parsed.channels).toHaveLength(0);
+      }
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('--channels "," returns failed with inputValidationFailure, no fixtures executed', async () => {
+    mockRunProvenChannelBaseline.mockResolvedValue({
+      status: 'failed',
+      generatedAt: new Date().toISOString(),
+      workspaceMode: 'temp',
+      channels: [],
+      inputValidationFailure: {
+        reason: 'empty_channel_input',
+        message: '--channels was provided but contained no valid channel names',
+        nextAction: 'Provide at least one valid MVP channel: prompt, code_tool_hook, defer_archive',
+      },
+      continuityMatrix: [],
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await handleProvenChannelBaseline({ json: true, channels: ',' });
+      expect(mockRunProvenChannelBaseline).toHaveBeenCalledWith(
+        expect.objectContaining({
+          emptyChannelInput: true,
+        }),
+      );
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('--channels bogus returns failed with unknown channels, no fixtures executed', async () => {
+    mockRunProvenChannelBaseline.mockResolvedValue({
+      status: 'failed',
+      generatedAt: new Date().toISOString(),
+      workspaceMode: 'temp',
+      channels: [],
+      inputValidationFailure: {
+        reason: 'unknown_channels',
+        message: 'Unknown channels: bogus. Valid channels: prompt, code_tool_hook, defer_archive',
+        nextAction: 'Use only valid MVP channels: prompt, code_tool_hook, defer_archive',
+        unknownChannels: ['bogus'],
+      },
+      continuityMatrix: [],
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await handleProvenChannelBaseline({ json: true, channels: 'bogus' });
+      expect(mockRunProvenChannelBaseline).toHaveBeenCalledWith(
+        expect.objectContaining({
+          unknownChannels: ['bogus'],
+        }),
+      );
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('without --channels runs all default MVP channels', async () => {
+    mockRunProvenChannelBaseline.mockResolvedValue(makePassedSummary());
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await handleProvenChannelBaseline({ json: true });
+      expect(mockRunProvenChannelBaseline).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channels: undefined,
+          unknownChannels: [],
+          emptyChannelInput: false,
+        }),
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('cleanup failure outputs to stderr without polluting JSON stdout', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const failingRmSync = () => { throw new Error('permission denied'); };
+    cleanupTempWorkspace('/tmp/fake-dir', failingRmSync);
+
+    const errorCalls = errorSpy.mock.calls.map(c => c[0]);
+    const cleanupWarningSeen = errorCalls.some(c => typeof c === 'string' && c.includes('[pd-cli] cleanup warning'));
+    expect(cleanupWarningSeen).toBe(true);
+    expect(logSpy).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it('command is registered in CLI entrypoint as runtime synthetic proven-channel', async () => {

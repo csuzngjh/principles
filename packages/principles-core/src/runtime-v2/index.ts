@@ -308,7 +308,7 @@ export {
   classifyLegacyDependency,
   MVP_CHANNELS,
 } from './proven-channel-baseline.js';
-export type { MvpChannel, ChannelFixtureResult, ProvenChannelBaselineSummary, ContinuityMatrixEntry } from './proven-channel-baseline.js';
+export type { MvpChannel, ChannelFixtureResult, ProvenChannelBaselineSummary, ContinuityMatrixEntry, InputValidationFailure } from './proven-channel-baseline.js';
 
 // Pain flood simulation (PRI-208) — pure contract/helpers only; I/O runner lives in pd-cli
 export {

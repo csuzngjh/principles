@@ -31,11 +31,19 @@ export interface ChannelFixtureResult {
   evidenceSource: string;
 }
 
+export interface InputValidationFailure {
+  reason: string;
+  message: string;
+  nextAction: string;
+  unknownChannels?: string[];
+}
+
 export interface ProvenChannelBaselineSummary {
   status: 'passed' | 'failed' | 'degraded';
   generatedAt: string;
   workspaceMode: 'temp' | 'explicit_workspace';
   channels: ChannelFixtureResult[];
+  inputValidationFailure?: InputValidationFailure;
   continuityMatrix: ContinuityMatrixEntry[];
   recommendedNextIssue?: string;
 }
@@ -421,6 +429,7 @@ export async function runDeferArchiveFixture(): Promise<ChannelFixtureResult> {
 }
 
 export function computeProvenChannelStatus(results: ChannelFixtureResult[]): 'passed' | 'failed' | 'degraded' {
+  if (results.length === 0) return 'failed';
   const hasFailed = results.some(r => r.status === 'failed');
   const hasDegraded = results.some(r => r.status === 'degraded');
   const hasPassed = results.some(r => r.status === 'passed');

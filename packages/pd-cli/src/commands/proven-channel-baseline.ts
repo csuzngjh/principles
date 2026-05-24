@@ -2,8 +2,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { runProvenChannelBaseline } from '../services/proven-channel-baseline-runner.js';
-import type { ProvenChannelBaselineSummary, MvpChannel } from '@principles/core/runtime-v2';
-import { parseChannels } from '@principles/core/runtime-v2';
+import { parseChannels, type ProvenChannelBaselineSummary, type MvpChannel } from '@principles/core/runtime-v2';
 
 interface ProvenChannelBaselineCliOptions {
   workspace?: string;
@@ -58,6 +57,15 @@ function formatTextOutput(summary: ProvenChannelBaselineSummary): string {
   return lines.join('\n');
 }
 
+export function cleanupTempWorkspace(workspaceDir: string, rmSyncImpl: (dir: string, opts: { recursive: boolean; force: boolean }) => void = fs.rmSync.bind(fs)): void {
+  try {
+    rmSyncImpl(workspaceDir, { recursive: true, force: true });
+  } catch (cleanupErr) {
+    const cleanupMsg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+    console.error(`[pd-cli] cleanup warning: failed to remove temp workspace ${workspaceDir}: ${cleanupMsg}`);
+  }
+}
+
 export async function handleProvenChannelBaseline(opts: ProvenChannelBaselineCliOptions): Promise<void> {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
@@ -65,8 +73,10 @@ export async function handleProvenChannelBaseline(opts: ProvenChannelBaselineCli
   const workspaceMode: 'temp' | 'explicit_workspace' = opts.workspace ? 'explicit_workspace' : 'temp';
 
   const parsed = opts.channels ? parseChannels(opts.channels) : null;
+  const userSpecifiedChannels = opts.channels !== undefined;
   const channels: MvpChannel[] | undefined = parsed && parsed.channels.length > 0 ? parsed.channels : undefined;
   const unknownChannels: string[] = parsed ? parsed.unknowns : [];
+  const emptyChannelInput = userSpecifiedChannels && channels === undefined && unknownChannels.length === 0;
 
   try {
     const summary = await runProvenChannelBaseline({
@@ -74,6 +84,7 @@ export async function handleProvenChannelBaseline(opts: ProvenChannelBaselineCli
       workspaceMode,
       channels,
       unknownChannels,
+      emptyChannelInput,
     });
 
     if (opts.json) {
@@ -89,11 +100,7 @@ export async function handleProvenChannelBaseline(opts: ProvenChannelBaselineCli
     }
   } finally {
     if (workspaceMode === 'temp') {
-      try {
-        fs.rmSync(workspaceDir, { recursive: true, force: true });
-      } catch {
-        void 0;
-      }
+      cleanupTempWorkspace(workspaceDir);
     }
   }
 }
