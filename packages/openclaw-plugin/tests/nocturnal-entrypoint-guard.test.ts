@@ -404,10 +404,14 @@ function findImportLines(content: string): string[] {
     lines.push(match[0]);
   }
 
-  // Also catch dynamic imports
-  const dynamicImportRegex = /import\s*\(['"][^'"]+nocturnal[^'"]*['"]\)/gi;
-  while ((match = dynamicImportRegex.exec(content)) !== null) {
-    lines.push(match[0]);
+  // Also catch dynamic imports of any frozen module
+  for (const mod of FROZEN_NOCTURNAL_MODULES) {
+    const basename = path.basename(mod, '.ts');
+    const dynRegex = new RegExp('import\\\\s*\\\\([\'\"]' + '[^\'\"]+' + basename + '[^\'\"]*' + '[\'\"]\\\\)', 'gi');
+    let dynMatch;
+    while ((dynMatch = dynRegex.exec(content)) !== null) {
+      lines.push(dynMatch[0]);
+    }
   }
 
   return lines;
