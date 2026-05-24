@@ -48,6 +48,7 @@ const DEFAULT_TIMEOUT_MS = 300_000;
 /** Resolved runtime configuration from funnel policy. */
 export interface RuntimeConfig {
   runtimeKind: RuntimeKind;
+  openclawMode?: 'local' | 'gateway';
   timeoutMs: number;
   agentId: string;
   provider?: string;
@@ -58,17 +59,80 @@ export interface RuntimeConfig {
   baseUrl?: string;
 }
 
+export interface RuntimeConfigError {
+  ok: false;
+  reason: string;
+  message: string;
+  nextAction: string;
+}
+
+export type RuntimeConfigResult = RuntimeConfig | RuntimeConfigError;
+
+export function isRuntimeConfigError(result: RuntimeConfigResult): result is RuntimeConfigError {
+  return 'ok' in result && result.ok === false;
+}
+
+export interface ResolveRuntimeConfigOptions {
+  openclawLocal?: boolean;
+  openclawGateway?: boolean;
+  requestedRuntimeKind?: string;
+}
+
 /**
  * Resolve runtime configuration from the pd-runtime-v2-diagnosis funnel policy.
  * Falls back to defaults if no funnel is found.
- * Silently ignores missing files and schema errors (factory should not crash
- * if workflows.yaml is absent or malformed).
+ *
+ * When `requestedRuntimeKind === 'openclaw-cli'` or policy `runtimeKind === 'openclaw-cli'`:
+ *   - CLI flag or file config must provide exactly one mode (local or gateway).
+ *   - Both provided: fail loud (conflicting mode).
+ *   - Neither provided: fail loud (missing mode).
+ *
+ * When `requestedRuntimeKind === 'config'` (explicit config):
+ *   - Config load failure, missing config, or schema error must fail loud.
+ *   - Only non-explicit config compatibility paths allow fallback.
  */
-export function resolveRuntimeConfig(stateDir: string): RuntimeConfig {
+export function resolveRuntimeConfig(stateDir: string, explicitConfig?: ResolveRuntimeConfigOptions): RuntimeConfigResult {
+  const requestedRuntimeKind = explicitConfig?.requestedRuntimeKind;
+
   try {
     const loader = new WorkflowFunnelLoader(stateDir);
     const funnel = loader.getFunnel(DIAGNOSTIC_FUNNEL_ID);
     if (!funnel || !funnel.policy) {
+      if (requestedRuntimeKind === 'config') {
+        return {
+          ok: false,
+          reason: 'explicit_config_missing',
+          message: 'runtime=config requested but no workflows.yaml funnel policy found',
+          nextAction: 'Create a pd-runtime-v2-diagnosis funnel policy in workflows.yaml, or use --runtime pi-ai / openclaw-cli with explicit flags',
+        };
+      }
+
+      if (requestedRuntimeKind === 'openclaw-cli') {
+        if (explicitConfig?.openclawLocal && explicitConfig?.openclawGateway) {
+          return {
+            ok: false,
+            reason: 'conflicting_openclaw_mode',
+            message: 'Both --openclaw-local and --openclaw-gateway specified — provide exactly one',
+            nextAction: 'Use only one of --openclaw-local or --openclaw-gateway',
+          };
+        }
+        const flagMode = explicitConfig?.openclawLocal ? 'local' as const : explicitConfig?.openclawGateway ? 'gateway' as const : undefined;
+        if (!flagMode) {
+          return {
+            ok: false,
+            reason: 'missing_openclaw_mode',
+            message: 'runtimeKind is openclaw-cli but no mode specified — need --openclaw-local or --openclaw-gateway, or openclawMode in workflows.yaml',
+            nextAction: 'Provide exactly one mode: --openclaw-local, --openclaw-gateway, or openclawMode: local|gateway in workflows.yaml',
+          };
+        }
+        return {
+          runtimeKind: 'openclaw-cli',
+          openclawMode: flagMode,
+          timeoutMs: DEFAULT_TIMEOUT_MS,
+          agentId: 'main',
+        };
+      }
+
       return {
         runtimeKind: 'pi-ai',
         timeoutMs: DEFAULT_TIMEOUT_MS,
@@ -76,8 +140,9 @@ export function resolveRuntimeConfig(stateDir: string): RuntimeConfig {
       };
     }
     const {policy} = funnel;
-    return {
+    const config: RuntimeConfig = {
       runtimeKind: policy.runtimeKind ?? 'pi-ai',
+      openclawMode: policy.openclawMode,
       timeoutMs: policy.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       agentId: 'main',
       provider: policy.provider,
@@ -86,7 +151,52 @@ export function resolveRuntimeConfig(stateDir: string): RuntimeConfig {
       maxRetries: policy.maxRetries,
       baseUrl: policy.baseUrl,
     };
+
+    if (config.runtimeKind === 'openclaw-cli') {
+      const fileMode = config.openclawMode;
+      if (explicitConfig?.openclawLocal && explicitConfig?.openclawGateway) {
+        return {
+          ok: false,
+          reason: 'conflicting_openclaw_mode',
+          message: 'Both --openclaw-local and --openclaw-gateway specified — provide exactly one',
+          nextAction: 'Use only one of --openclaw-local or --openclaw-gateway',
+        };
+      }
+      const flagMode = explicitConfig?.openclawLocal ? 'local' as const : explicitConfig?.openclawGateway ? 'gateway' as const : undefined;
+
+      if (flagMode && fileMode && flagMode !== fileMode) {
+        return {
+          ok: false,
+          reason: 'conflicting_openclaw_mode',
+          message: `CLI flag specifies --openclaw-${flagMode} but workflows.yaml specifies openclawMode: ${fileMode}`,
+          nextAction: 'Remove one of the conflicting mode specifications, or align them',
+        };
+      }
+
+      const effectiveMode = flagMode ?? fileMode;
+      if (!effectiveMode) {
+        return {
+          ok: false,
+          reason: 'missing_openclaw_mode',
+          message: 'runtimeKind is openclaw-cli but no mode specified — need --openclaw-local or --openclaw-gateway, or openclawMode in workflows.yaml',
+          nextAction: 'Provide exactly one mode: --openclaw-local, --openclaw-gateway, or openclawMode: local|gateway in workflows.yaml',
+        };
+      }
+
+      config.openclawMode = effectiveMode;
+    }
+
+    return config;
   } catch (err) {
+    if (requestedRuntimeKind === 'config') {
+      return {
+        ok: false,
+        reason: 'explicit_config_load_failed',
+        message: `runtime=config requested but config load failed: ${err instanceof Error ? err.message : String(err)}`,
+        nextAction: 'Fix the workflows.yaml funnel policy, or use --runtime pi-ai / openclaw-cli with explicit flags',
+      };
+    }
+
     console.warn(`[PainSignalRuntimeFactory] Funnel loading failed for ${DIAGNOSTIC_FUNNEL_ID}, using defaults: ${String(err)}`);
     return {
       runtimeKind: 'pi-ai',
@@ -102,6 +212,16 @@ export function resolveRuntimeConfig(stateDir: string): RuntimeConfig {
  * Includes migration guidance for D-05 breaking change.
  */
 export function validateRuntimeConfig(config: RuntimeConfig): void {
+  if (config.runtimeKind === 'openclaw-cli') {
+    if (!config.openclawMode) {
+      throw new Error(
+        `[PainSignalRuntimeFactory] runtimeKind 'openclaw-cli' requires openclawMode. ` +
+        `Provide --openclaw-local or --openclaw-gateway, or set openclawMode in workflows.yaml. ` +
+        `nextAction: Add openclawMode: local|gateway to your funnel policy or use CLI flags.`,
+      );
+    }
+  }
+
   if (config.runtimeKind === 'pi-ai') {
     const missing: string[] = [];
     if (!config.provider) missing.push('provider');
@@ -133,8 +253,8 @@ export function validateRuntimeConfig(config: RuntimeConfig): void {
   }
 }
 
-// Per-workspace+runtime bridge cache — same lifetime as process
-// Key format: `${workspaceDir}:${runtimeKind}` (D-03)
+// Per-workspace+runtime+mode bridge cache — same lifetime as process
+// Key format: `${workspaceDir}:${runtimeKind}:${openclawMode ?? ''}` (D-03)
 const bridgeCache = new Map<string, PainSignalBridge>();
 
 /**
@@ -149,8 +269,14 @@ export async function createPainSignalBridge(
   opts: PainSignalRuntimeFactoryOptions,
 ): Promise<PainSignalBridge> {
   const runtimeConfig = resolveRuntimeConfig(opts.stateDir);
+  if (isRuntimeConfigError(runtimeConfig)) {
+    throw new Error(
+      `[PainSignalRuntimeFactory] Config resolution failed: ${runtimeConfig.reason}. ` +
+      `${runtimeConfig.message}. nextAction: ${runtimeConfig.nextAction}`,
+    );
+  }
   validateRuntimeConfig(runtimeConfig);
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}`;
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
@@ -182,7 +308,7 @@ export async function createPainSignalBridge(
         workspace: opts.workspaceDir,
       })
     : new OpenClawCliRuntimeAdapter({
-        runtimeMode: 'local',
+        runtimeMode: runtimeConfig.openclawMode ?? 'local',
         workspaceDir: opts.workspaceDir,
       });
 
@@ -226,5 +352,7 @@ export async function createPainSignalBridge(
  */
 export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: string): void {
   const effectiveKind = runtimeKind ?? 'pi-ai';
-  bridgeCache.delete(`${workspaceDir}:${effectiveKind}`);
+  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:local`);
+  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:gateway`);
+  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:`);
 }

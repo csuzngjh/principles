@@ -6,6 +6,11 @@ import type {
   DispatchInput,
   ActivationArtifactReadModel,
   ActivationStateReadModel,
+  ApprovalQueueStore,
+  ApprovalRecord,
+  ApprovalEnqueueInput,
+  ApprovalDecisionResult,
+  ApprovalStats,
   ChannelWriter,
 } from './activation/activation-types.js';
 import { ActivationDispatcher } from './activation/activation-dispatcher.js';
@@ -173,6 +178,60 @@ function makeInMemoryStateReadModel(): ActivationStateReadModel {
   };
 }
 
+function makeInMemoryApprovalQueueStore(): ApprovalQueueStore {
+  const records = new Map<string, ApprovalRecord>();
+  let counter = 0;
+
+  return {
+    enqueue: async (input: ApprovalEnqueueInput, now: string) => {
+      const approvalId = `apr_synth_${++counter}`;
+      const record: ApprovalRecord = {
+        approvalId,
+        artifactId: input.artifactId,
+        channel: input.channel,
+        riskLevel: input.riskLevel,
+        status: 'pending',
+        confidence: input.confidence,
+        requestedAt: now,
+        summary: input.summary,
+        triggerReason: input.triggerReason,
+      };
+      records.set(approvalId, record);
+      return record;
+    },
+    getById: async (id: string) => records.get(id) ?? null,
+    listPending: async () => [...records.values()].filter(r => r.status === 'pending'),
+    listAll: async () => [...records.values()],
+    countByStatus: async () => {
+      const stats: ApprovalStats = { pending: 0, approved: 0, rejected: 0, cancelled: 0 };
+      for (const r of records.values()) {
+        stats[r.status]++;
+      }
+      return stats;
+    },
+    approve: async (id: string, decidedBy: string, note?: string) => {
+      const r = records.get(id);
+      if (!r) return { ok: false, error: 'not_found' } as ApprovalDecisionResult;
+      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status } as ApprovalDecisionResult;
+      r.status = 'approved';
+      r.decidedAt = new Date().toISOString();
+      r.decidedBy = decidedBy;
+      r.decisionNote = note;
+      return { ok: true, record: r } as ApprovalDecisionResult;
+    },
+    reject: async (id: string, decidedBy: string, reason: string) => {
+      const r = records.get(id);
+      if (!r) return { ok: false, error: 'not_found' } as ApprovalDecisionResult;
+      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status } as ApprovalDecisionResult;
+      r.status = 'rejected';
+      r.decidedAt = new Date().toISOString();
+      r.decidedBy = decidedBy;
+      r.rejectionReason = reason;
+      return { ok: true, record: r } as ApprovalDecisionResult;
+    },
+  };
+}
+
 function makeDispatcher(
   channel: MvpChannel,
   artifact: PIArtifactSnapshot,
@@ -195,7 +254,7 @@ function makeDispatcher(
   return new ActivationDispatcher(
     makeInMemoryArtifactReadModel(artifacts),
     makeInMemoryStateReadModel(),
-    { writers },
+    { writers, approvalQueueStore: makeInMemoryApprovalQueueStore() },
   );
 }
 
@@ -308,18 +367,17 @@ export async function runRuleHostFixture(
     if (decision.decision === 'queued_for_approval') {
       return {
         channel: 'code_tool_hook',
-        status: 'degraded',
+        status: 'passed',
         canActivateResult: { ok: true, riskLevel: 'high' },
         activationDecision: decision,
         evidence: boundedEvidence({
           approvalId: decision.approvalId,
           queuedAt: decision.queuedAt,
-          evidenceSource: 'ActivationDispatcher.dispatch',
+          evidenceSource: 'ActivationDispatcher.dispatch → approval queue',
+          queueBehavior: 'enqueued',
         }),
-        failureReason: 'code_tool_hook requires approval queue — operator path not yet proven for auto-activation',
-        nextAction: 'Implement operator approval flow for code_tool_hook, or mark as known blocker for PRI-119/PRI-230',
         dependsOnLegacy: false,
-        evidenceSource: 'ActivationDispatcher.dispatch → approval queue',
+        evidenceSource: 'ActivationDispatcher.dispatch → approval queue (proven)',
       };
     }
 

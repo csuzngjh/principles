@@ -25,13 +25,13 @@ import type { LedgerAdapter, LedgerPrincipleEntry } from '../../candidate-intake
 vi.mock('@mariozechner/pi-ai', () => ({
   getModel: vi.fn(),
   getProviders: vi.fn(() => ['openrouter', 'anthropic', 'openai']),
-  complete: vi.fn(),
+  completeSimple: vi.fn(),
 }));
 
-import { getModel, complete } from '@mariozechner/pi-ai';
+import { getModel, completeSimple } from '@mariozechner/pi-ai';
 import { PiAiRuntimeAdapter } from '../../adapter/pi-ai-runtime-adapter.js';
 
-const mockComplete = complete as ReturnType<typeof vi.fn>;
+const mockComplete = completeSimple as ReturnType<typeof vi.fn>;
 const mockGetModel = getModel as ReturnType<typeof vi.fn>;
 
 // ── In-memory ledger adapter ──────────────────────────────────────────────────
