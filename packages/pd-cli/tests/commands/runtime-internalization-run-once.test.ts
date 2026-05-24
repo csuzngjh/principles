@@ -120,6 +120,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     model: 'test-model',
     apiKeyEnv: 'TEST_API_KEY',
   }),
+  isRuntimeConfigError: vi.fn().mockReturnValue(false),
   validateRuntimeConfig: vi.fn(),
 }));
 
@@ -375,6 +376,14 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('--runtime openclaw-cli resolves OpenClawCliRuntimeAdapter', async () => {
+    const { resolveRuntimeConfig } = await import('@principles/core/runtime-v2');
+    vi.mocked(resolveRuntimeConfig).mockReturnValue({
+      runtimeKind: 'openclaw-cli',
+      openclawMode: 'local',
+      timeoutMs: 300_000,
+      agentId: 'main',
+    });
+
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-dreamer-007',
@@ -446,7 +455,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     );
     const resolvedWorkspace = path.resolve(customWs);
     const expectedStateDir = path.join(resolvedWorkspace, '.state');
-    expect(ResolveConfigMock).toHaveBeenCalledWith(expectedStateDir);
+    expect(ResolveConfigMock).toHaveBeenCalledWith(expectedStateDir, { requestedRuntimeKind: 'config' });
   });
 
   it('--runner philosopher dispatches PhilosopherRunner', async () => {
@@ -1241,5 +1250,69 @@ describe('handleRuntimeInternalizationRunOnce', () => {
 
     const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(output.enqueueDecision).toBe('no_successor');
+  });
+
+  it('--runtime config with missing config outputs structured JSON error', async () => {
+    const { resolveRuntimeConfig, isRuntimeConfigError } = await import('@principles/core/runtime-v2');
+    vi.mocked(resolveRuntimeConfig).mockReturnValue({
+      ok: false,
+      reason: 'explicit_config_missing',
+      message: 'runtime=config requested but no workflows.yaml funnel policy found',
+      nextAction: 'Create a pd-runtime-v2-diagnosis funnel policy in workflows.yaml',
+    });
+    vi.mocked(isRuntimeConfigError).mockReturnValue(true);
+
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-cfg-err',
+      taskKind: 'dreamer',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'config', json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.decision).toBe('config_error');
+    expect(output.reason).toContain('explicit_config_missing');
+    expect(output.nextAction).toBeTruthy();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('--runtime config with missing config outputs text error', async () => {
+    const { resolveRuntimeConfig, isRuntimeConfigError } = await import('@principles/core/runtime-v2');
+    vi.mocked(resolveRuntimeConfig).mockReturnValue({
+      ok: false,
+      reason: 'explicit_config_missing',
+      message: 'runtime=config requested but no workflows.yaml funnel policy found',
+      nextAction: 'Create a pd-runtime-v2-diagnosis funnel policy in workflows.yaml',
+    });
+    vi.mocked(isRuntimeConfigError).mockReturnValue(true);
+
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-cfg-err2',
+      taskKind: 'dreamer',
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'config', json: false });
+
+    expect(consoleErrorSpy.mock.calls.some((c: string[]) => c[0].includes('explicit_config_missing'))).toBe(true);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('runtime execution error outputs runtime_error in JSON mode', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-rt-err',
+      taskKind: 'dreamer',
+    });
+    mockRun.mockRejectedValueOnce(new Error('artifact write failed: disk full'));
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.decision).toBe('runtime_error');
+    expect(output.reason).toContain('artifact write failed');
+    expect(output.nextAction).toBeTruthy();
+    expect(process.exitCode).toBe(1);
   });
 });

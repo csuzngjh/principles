@@ -10,21 +10,23 @@ import { PiAiRuntimeAdapter } from '../adapter/pi-ai-runtime-adapter.js';
 import { StoreEventEmitter } from '../store/event-emitter.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
-import { getMiniMaxConfig, runWithRetry } from './fixtures/index.js';
-import type { MiniMaxTestConfig } from './fixtures/index.js';
+import { getLlmE2eConfig, runWithRetry } from './fixtures/index.js';
 
 const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-dreamer-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
 
-const config = getMiniMaxConfig();
+const config = getLlmE2eConfig();
 
-describe.skipIf(!config)('DreamerRunner Real LLM E2E (MiniMax)', () => {
-  const cfg = config as MiniMaxTestConfig;
+describe.skipIf(!config)('DreamerRunner Real LLM E2E', () => {
+  const cfg = config;
+  if (!cfg) return;
   const adapterConfig = {
     provider: cfg.provider,
     model: cfg.model,
     apiKeyEnv: cfg.apiKeyEnv,
     maxRetries: cfg.maxRetries,
     timeoutMs: cfg.timeoutMs,
+    baseUrl: cfg.baseUrl,
+    reasoning: cfg.reasoning,
   };
 
   let testDir = '';
@@ -87,7 +89,7 @@ describe.skipIf(!config)('DreamerRunner Real LLM E2E (MiniMax)', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [],
         channel: 'prompt',
-        timeoutMs: cfg.timeoutMs,
+        timeoutMs: adapterConfig.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -120,7 +122,7 @@ describe.skipIf(!config)('DreamerRunner Real LLM E2E (MiniMax)', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [],
         channel: 'prompt',
-        timeoutMs: cfg.timeoutMs,
+        timeoutMs: adapterConfig.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -157,7 +159,7 @@ describe.skipIf(!config)('DreamerRunner Real LLM E2E (MiniMax)', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [],
         channel: 'prompt',
-        timeoutMs: cfg.timeoutMs,
+        timeoutMs: adapterConfig.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),

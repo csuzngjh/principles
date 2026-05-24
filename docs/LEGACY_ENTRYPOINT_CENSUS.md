@@ -13,7 +13,7 @@
 
 | Category | Tag | Meaning |
 |---|---|---|
-| **MVP-Core Dependency** | `mvp_core_dependency` | ADR-0014 MVP-Core activation paths (`prompt`, `code_tool_hook / RuleHost`, `defer_archive`). These are the "good" entrypoints: the evolution-worker loop and sleep-cycle orchestrator that the Runtime V2 Peer Runners will replace. |
+| **MVP-Core Dependency** | `mvp_core_dependency` | ADR-0014 MVP-Core activation paths (`prompt`, `code_tool_hook / RuleHost`, `defer_archive`). These are the three proven channels that the seed customer demo depends on. |
 | **Live Cutover** | `live_cutover` | Still has live callers in the current codebase that need to be migrated to Runtime V2 before the legacy module can be deleted. |
 | **Compatibility Alias** | `compat_alias` | Re-export or thin alias that exists only for backwards compatibility. Can be removed when all consumers migrate. |
 | **Historical Read Export** | `historical_read_export` | Read-only export path (type re-export, barrel export). Does not call into Nocturnal logic at runtime. |
@@ -81,7 +81,7 @@ legacy code that must not be modified. Runtime V2 equivalents live in
 | `src/service/nocturnal-target-selector.ts` | `live_cutover` | Principle + session selection for reflection. Called by `nocturnal-service.ts` (via `executeNocturnalReflection`). |
 | `src/service/nocturnal-config.ts` | `live_cutover` | Configuration loader. Called by `evolution-worker.ts` and `sleep-cycle.ts`. |
 | `src/service/sleep-cycle.ts` | `live_cutover` | Sleep cycle orchestrator extracted from evolution-worker. Uses nocturnal-runtime + queue-io. **Still wired into the heartbeat loop in evolution-worker.ts** (approximately lines 1449-1494). |
-| `src/service/queue-io.ts` | `mvp_core_dependency` | Queue I/O including `enqueueSleepReflectionTask`. This is ADR-0014 evolution queue code, not pure nocturnal -- but it contains the sleep_reflection task enqueue path. |
+| `src/service/queue-io.ts` | `live_cutover` | Queue I/O including `enqueueSleepReflectionTask`. Contains sleep_reflection task enqueue path — retirement target per ADR-0014 §2.6 (EvolutionWorker / sleep cycle = MVP-Gone). |
 
 ### startup-reconciler.ts
 
@@ -110,7 +110,7 @@ The file `src/service/evolution-worker.ts` has multiple nocturnal entrypoint pat
 | Line 23 | Re-export `enqueueSleepReflectionTask` | `compat_alias` | Re-export from queue-io.ts |
 | Line 28 | Import `checkWorkspaceIdle`, `checkCooldown`, `recordCooldown` from `nocturnal-runtime.ts` | `live_cutover` | Sleep cycle uses these. |
 | Line 51 | Import `OpenClawTrinityRuntimeAdapter` from `../core/nocturnal-trinity.js` | `live_cutover` | Used in NocturnalWorkflowManager construction for sleep_reflection task processing and workflow sweeping. |
-| Lines 640-975 | `sleep_reflection` task processing path | `mvp_core_dependency` | The evolution queue processing loop (ADR-0014) processes sleep_reflection tasks. This is the core evolution machinery. |
+| Lines 640-975 | `sleep_reflection` task processing path | `live_cutover` | The evolution queue processing loop processes sleep_reflection tasks via NocturnalWorkflowManager. Retirement target per ADR-0014 §2.6. |
 | Lines 1449-1494 | Idle check and sleep_reflection enqueue in heartbeat cycle | `live_cutover` | The heartbeat cycle triggers both idle-based and periodic sleep reflection. Runtime V2 Peer Runners will replace this. |
 
 ---
@@ -186,8 +186,8 @@ pipeline chain:
 
 | Hook | Location | Category | Notes |
 |---|---|---|---|
-| `before_prompt_build` (EvolutionWorker start) | index.ts:120-129 | `mvp_core_dependency` | This is the ADR-0014 entry point. The EvolutionWorker service registration is core infrastructure, not nocturnal-specific. |
-| `api.registerService(EvolutionWorkerService)` | index.ts:360-362 | `mvp_core_dependency` | Service registration is core infrastructure. |
+| `before_prompt_build` (EvolutionWorker start) | index.ts:120-129 | `live_cutover` | EvolutionWorker service registration. Per ADR-0014 §2.6, EvolutionWorker is MVP-Gone (retirement target). The three MVP-Core activation paths (prompt, code_tool_hook, defer_archive) do not depend on this hook. |
+| `api.registerService(EvolutionWorkerService)` | index.ts:360-362 | `live_cutover` | Service registration. Retirement target per ADR-0014 §2.6. |
 
 ---
 
@@ -238,9 +238,9 @@ they verify existing behavior but must be retired with the production code.
 
 | Hook | File | Description | Category |
 |---|---|---|---|
-| `before_prompt_build` | index.ts:120-129 | Starts EvolutionWorkerService per workspace | `mvp_core_dependency` |
-| EvolutionWorker heartbeat | evolution-worker.ts:1412 | Periodic cycle that checks idle, enqueues sleep_reflection | `mvp_core_dependency` |
-| EvolutionWorker sleep_reflection processing | evolution-worker.ts:640-975 | Processes sleep_reflection queue items via NocturnalWorkflowManager | `mvp_core_dependency` |
+| `before_prompt_build` | index.ts:120-129 | Starts EvolutionWorkerService per workspace | `live_cutover` |
+| EvolutionWorker heartbeat | evolution-worker.ts:1412 | Periodic cycle that checks idle, enqueues sleep_reflection | `live_cutover` |
+| EvolutionWorker sleep_reflection processing | evolution-worker.ts:640-975 | Processes sleep_reflection queue items via NocturnalWorkflowManager | `live_cutover` |
 | runCycle (sleep-cycle.ts) | sleep-cycle.ts:72 | Extracted sleep-cycle orchestrator | `live_cutover` |
 
 ---
@@ -267,12 +267,14 @@ for legacy nocturnal modules. They are NOT legacy entrypoints.
 
 | Category | Count | Description |
 |---|---|---|
-| `mvp_core_dependency` | 4 | EvolutionWorker service registration (1), before_prompt_build hook trigger (1), evolution queue processing loop (1), queue-io sleep_reflection enqueue (1). ADR-0014 core. |
-| `live_cutover` | 22 | Nocturnal commands (3), command handlers (3), sleep_reflection trigger (1: pd-reflect.ts), service modules still called (4), evolution-worker import sites (3), NocturnalWorkflowManager references (3), cross-module imports (3: merge-gate-audit, cooldown-strategy, filesystem-lifecycle-datasource), startup-reconciler (1), pain context (1: evolution-pain-context.ts). |
+| `mvp_core_dependency` | 0 | ADR-0014 MVP-Core activation paths are `prompt`, `code_tool_hook / RuleHost`, `defer_archive` only. No legacy nocturnal entrypoints qualify. Previous `mvp_core_dependency` entries have been reclassified as `live_cutover` (retirement targets per ADR-0014 §2.6). |
+| `live_cutover` | 27 | Nocturnal commands (3), command handlers (3), sleep_reflection trigger (1: pd-reflect.ts), service modules still called (4), evolution-worker import sites (3), NocturnalWorkflowManager references (3), cross-module imports (3: merge-gate-audit, cooldown-strategy, filesystem-lifecycle-datasource), startup-reconciler (1), pain context (1: evolution-pain-context.ts), EvolutionWorker hook/service registrations (2), queue-io sleep_reflection enqueue (1), evolution-worker sleep_reflection processing (1), heartbeat idle/enqueue (1). |
 | `compat_alias` | 1 | Re-export of enqueueSleepReflectionTask from evolution-worker.ts. |
 | `historical_read_export` | 29 | Test files (24 regular + 4 architecture regression), type-only imports (1: workflow-store.ts). |
 | `delete_candidate` | 16 | Frozen core modules (14 nocturnal-*.ts + 1 adaptive-thresholds.ts), service orchestrator (1: nocturnal-service.ts). |
 
-**Total unique entrypoints classified: 72**
+**Total unique entrypoints classified: 73**
 
 > **Counting rule**: Each entrypoint is counted once in its highest-priority category. Priority order: `mvp_core_dependency` > `live_cutover` > `compat_alias` > `historical_read_export` > `delete_candidate`. A single file with multiple import sites (e.g. evolution-worker.ts) counts as multiple entrypoints, one per distinct import/reference site listed in the detailed sections above. Sub-item sums in the Description column must equal the Count column value.
+
+> **MVP-Core clarification (PRI-227 convergence)**: ADR-0014 §2.4 defines MVP-Core as only three activation paths: `prompt`, `code_tool_hook / RuleHost`, `defer_archive`. The EvolutionWorker heartbeat, sleep_reflection enqueue, and idle/night dispatch paths are NOT MVP-Core — they are retirement targets (ADR-0014 §2.6: MVP-Gone). The previous classification incorrectly labeled these as `mvp_core_dependency`.
