@@ -132,11 +132,17 @@ vi.mock('@principles/core/runtime-v2', () => {
             };
           }
           return {
-            success: false,
-            failure: {
-              error: 'No openclaw mode specified. Provide --openclaw-local or --openclaw-gateway CLI flag, or set openclawMode in workflows.yaml.',
-              nextAction: "Specify either '--openclaw-local' or '--openclaw-gateway' CLI flag, or add openclawMode: 'local' | 'gateway' to workflows.yaml.",
-            },
+            success: true,
+            config: {
+              workspaceDir: inputs.workspaceDir || '/tmp/fake-workspace',
+              runtimeKind: runtime,
+              openclawLocal: false,
+              openclawGateway: false,
+              openclawMode: undefined,
+              agent: inputs.cliOptions.agent,
+              timeoutMs: inputs.cliOptions.timeoutMs ?? 30000,
+              intake: inputs.cliOptions.intake !== false,
+            }
           };
         }
       }
@@ -244,8 +250,8 @@ describe('pd diagnose run --runtime routing', () => {
     exitSpy.mockRestore();
   });
 
-  it('HG-03: --runtime openclaw-cli without mode flag exits with error', async () => {
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('HG-03: --runtime openclaw-cli without mode flag succeeds (mode deferred to consumer)', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleDiagnoseRun({
@@ -255,12 +261,9 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'error: No openclaw mode specified. Provide --openclaw-local or --openclaw-gateway CLI flag, or set openclawMode in workflows.yaml.'
-    );
-    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
 
-    consoleErrorSpy.mockRestore();
+    consoleSpy.mockRestore();
     exitSpy.mockRestore();
   });
 

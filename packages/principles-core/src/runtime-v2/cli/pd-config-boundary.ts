@@ -139,16 +139,16 @@ export function resolvePDConfig(inputs: PDConfigResolverInputs): PDConfigResult 
       };
     }
 
-    if (typeof apiKeyEnv !== 'string') {
+    if (!apiKeyEnv) {
       return {
         success: false,
         failure: {
-          error: 'apiKeyEnv must be a string.',
-          nextAction: 'Ensure apiKeyEnv is a valid environment variable name string via CLI flag or workflows.yaml config.',
+          error: 'apiKeyEnv is required for pi-ai runtime but was not resolved.',
+          nextAction: 'Pass via CLI flags (--apiKeyEnv) or add to workflows.yaml config.',
         },
       };
     }
-    const apiKeyEnvName = apiKeyEnv;
+    const apiKeyEnvName: string = apiKeyEnv;
     if (!inputs.envVars[apiKeyEnvName]) {
       return {
         success: false,
@@ -176,22 +176,20 @@ export function resolvePDConfig(inputs: PDConfigResolverInputs): PDConfigResult 
       };
     }
 
-    if (!cliOpenclawLocal && !cliOpenclawGateway) {
-      if (fileOpenclawMode === 'local') {
-        resolvedOpenclawLocal = true;
-        resolvedOpenclawMode = 'local';
-      } else if (fileOpenclawMode === 'gateway') {
-        resolvedOpenclawGateway = true;
-        resolvedOpenclawMode = 'gateway';
-      } else {
-        return {
-          success: false,
-          failure: {
-            error: 'No openclaw mode specified. Provide --openclaw-local or --openclaw-gateway CLI flag, or set openclawMode in workflows.yaml.',
-            nextAction: "Specify either '--openclaw-local' or '--openclaw-gateway' CLI flag, or add openclawMode: 'local' | 'gateway' to workflows.yaml.",
-          },
-        };
-      }
+    if (cliOpenclawLocal) {
+      resolvedOpenclawLocal = true;
+      resolvedOpenclawMode = 'local';
+    } else if (cliOpenclawGateway) {
+      resolvedOpenclawGateway = true;
+      resolvedOpenclawMode = 'gateway';
+    } else if (fileOpenclawMode === 'local') {
+      resolvedOpenclawLocal = true;
+      resolvedOpenclawMode = 'local';
+    } else if (fileOpenclawMode === 'gateway') {
+      resolvedOpenclawGateway = true;
+      resolvedOpenclawMode = 'gateway';
+    } else {
+      resolvedOpenclawMode = undefined;
     }
   }
 

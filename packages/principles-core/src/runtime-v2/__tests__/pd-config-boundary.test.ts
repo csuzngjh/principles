@@ -138,15 +138,17 @@ describe('resolvePDConfig pure prioritization and validation', () => {
   });
 
   it('validates openclaw-cli local and gateway exclusivity and requirements', () => {
-    // 1. Neither set, no file config
+    // 1. Neither set, no file config — succeeds with openclawMode=undefined (deferred to consumer)
     const res1 = resolvePDConfig({
       workspaceDir: '/test/workspace',
       cliOptions: { runtime: 'openclaw-cli' },
       envVars: defaultEnv,
     });
-    expect(res1.success).toBe(false);
-    if (!res1.success) {
-      expect(res1.failure.error).toContain('No openclaw mode specified');
+    expect(res1.success).toBe(true);
+    if (res1.success) {
+      expect(res1.config.openclawMode).toBeUndefined();
+      expect(res1.config.openclawLocal).toBeFalsy();
+      expect(res1.config.openclawGateway).toBeFalsy();
     }
 
     // 2. Both set
@@ -293,6 +295,63 @@ describe('resolvePDConfig pure prioritization and validation', () => {
     expect(res.success).toBe(true);
     if (res.success) {
       expect(res.config.openclawMode).toBe('local');
+    }
+  });
+
+  it('openclaw-cli without mode flags succeeds with openclawMode=undefined (deferred to consumer)', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: { runtime: 'openclaw-cli' },
+      envVars: defaultEnv,
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.config.runtimeKind).toBe('openclaw-cli');
+      expect(res.config.openclawMode).toBeUndefined();
+      expect(res.config.openclawLocal).toBeFalsy();
+      expect(res.config.openclawGateway).toBeFalsy();
+    }
+  });
+
+  it('openclaw-cli with both --openclaw-local and --openclaw-gateway fails (mutually exclusive)', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: {
+        runtime: 'openclaw-cli',
+        openclawLocal: true,
+        openclawGateway: true,
+      },
+      envVars: defaultEnv,
+    });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.failure.error).toContain('mutually exclusive');
+    }
+  });
+
+  it('openclaw-cli --openclaw-local sets openclawMode=local', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: { runtime: 'openclaw-cli', openclawLocal: true },
+      envVars: defaultEnv,
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.config.openclawMode).toBe('local');
+      expect(res.config.openclawLocal).toBe(true);
+    }
+  });
+
+  it('openclaw-cli --openclaw-gateway sets openclawMode=gateway', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: { runtime: 'openclaw-cli', openclawGateway: true },
+      envVars: defaultEnv,
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.config.openclawMode).toBe('gateway');
+      expect(res.config.openclawGateway).toBe(true);
     }
   });
 });
