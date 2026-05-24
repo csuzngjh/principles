@@ -21,7 +21,9 @@
 > Agent-first cognitive governance for OpenClaw coding agents.
 > Human-supervised. Locally stored. Pain-driven.
 
-Principles Disciple is an OpenClaw plugin that helps coding agents protect their workspace, remember failures, and turn repeated mistakes into reusable principles.
+Principles Disciple is an OpenClaw plugin that helps coding agents capture repeated behavior problems and turn reviewed lessons into reusable principles.
+
+> **MVP status (2026-05-24):** the validation path focuses on pain capture, diagnosis, internalization, and three reviewed activation outcomes: prompt guidance, RuleHost enforcement, and defer/archive. Broader learning and agent-lifecycle expansions are deferred until seed-customer evidence exists.
 
 It is built for agents first.
 Agents are the daily users.
@@ -102,17 +104,9 @@ Pain is evidence.
 
 The agent uses these signals to understand where its behavior needs to improve.
 
-### 3. Thinking OS injection
+### 3. Reviewed behavior activation
 
-Principles Disciple can inject thinking models into the agent’s prompt, including:
-
-- Map Before Territory
-- Evidence Over Intuition
-- Reversibility Governs Speed
-- Minimum Viable Change
-- Pain as Signal
-
-These models are designed to shape how the agent reasons before it acts.
+Reviewed principles can currently result in prompt guidance, RuleHost enforcement, or a deliberate defer/archive outcome. Operators remain responsible for reviewing and enabling behavior changes.
 
 ### 4. Principle internalization
 
@@ -176,7 +170,7 @@ Already useful:
 
 - workspace guardrails;
 - agent-first installation flow;
-- Thinking OS injection;
+- reviewed prompt / RuleHost / defer-archive activation paths;
 - pain and friction tracking;
 - evolution status commands;
 - local console;
