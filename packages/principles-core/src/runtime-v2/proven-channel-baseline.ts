@@ -133,10 +133,23 @@ function makeWriterInput(channel: MvpChannel): WriterInput {
   };
 }
 
-function classifyLegacyDependency(decision: ActivationDecision): boolean {
+const LEGACY_KEYWORDS = ['nocturnal', 'idle_trigger', 'plugin_discovery'];
+
+function hasLegacyKeyword(text: string): boolean {
+  const lower = text.toLowerCase();
+  return LEGACY_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+function classifyLegacyDependency(decision: ActivationDecision, canActivateResult?: CanActivateResult): boolean {
   if (decision.decision === 'refused') {
     const reason = decision.reason ?? '';
-    if (reason.includes('nocturnal') || reason.includes('idle_trigger') || reason.includes('plugin_discovery')) {
+    if (hasLegacyKeyword(reason)) {
+      return true;
+    }
+  }
+  if (canActivateResult && !canActivateResult.ok) {
+    const reason = canActivateResult.reason ?? '';
+    if (hasLegacyKeyword(reason)) {
       return true;
     }
   }
@@ -232,7 +245,7 @@ export async function runRuleHostFixture(
       targetRef: writerResult.targetRef,
     };
 
-    const dependsOnLegacy = classifyLegacyDependency(activationDecision);
+    const dependsOnLegacy = classifyLegacyDependency(activationDecision, canActivateResult);
 
     return {
       channel: 'code_tool_hook',

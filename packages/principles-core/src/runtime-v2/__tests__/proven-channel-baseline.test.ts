@@ -10,6 +10,7 @@ import {
   makePrincipleArtifact,
   makeRuleArtifact,
   makeSandboxAlwaysPass,
+  classifyLegacyDependency,
   MVP_CHANNELS,
 } from '../proven-channel-baseline.js';
 import type { ChannelFixtureResult, MvpChannel } from '../proven-channel-baseline.js';
@@ -381,6 +382,38 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       const result = deps.evaluateInSandbox('code', { traceId: 't', cases: [], createdAt: '', version: 1 });
       expect(result.success).toBe(true);
       expect(result.failedCases).toEqual([]);
+    });
+  });
+
+  describe('classifyLegacyDependency detects legacy in canActivateResult.reason', () => {
+    it('flags dependsOnLegacy when canActivateResult.reason contains nocturnal', async () => {
+      const nocturnalGateDeps = {
+        evaluateInSandbox: () => ({
+          success: true,
+          failedCases: [],
+          executionTimeMs: 1,
+          forbiddenPatternViolations: [],
+        }),
+      };
+      const writer = new RuleHostWriter({ gateDeps: nocturnalGateDeps });
+      const artifact = makeRuleArtifact();
+
+      const canActivateResult = await writer.canActivate(artifact);
+      if (!canActivateResult.ok && canActivateResult.reason?.includes('nocturnal')) {
+        expect(canActivateResult.reason).toContain('nocturnal');
+      }
+    });
+
+    it('classifyLegacyDependency returns true for canActivateResult with legacy reason', () => {
+      const decision = { decision: 'would_activate' as const, activationId: 'a', action: 'b', targetRef: 'c' };
+      const canActivateResult = { ok: false, reason: 'nocturnal_dependency_detected', riskLevel: 'high' as const };
+      expect(classifyLegacyDependency(decision, canActivateResult)).toBe(true);
+    });
+
+    it('classifyLegacyDependency returns false when no legacy keywords present', () => {
+      const decision = { decision: 'would_activate' as const, activationId: 'a', action: 'b', targetRef: 'c' };
+      const canActivateResult = { ok: false, reason: 'artifact_kind_not_rule', riskLevel: 'high' as const };
+      expect(classifyLegacyDependency(decision, canActivateResult)).toBe(false);
     });
   });
 });

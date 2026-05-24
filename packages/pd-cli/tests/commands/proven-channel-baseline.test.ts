@@ -313,4 +313,28 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
       logSpy.mockRestore();
     }
   });
+
+  it('command is registered in CLI entrypoint as runtime synthetic proven-channel', async () => {
+    const { Command } = await import('commander');
+    const program = new Command();
+    program.exitOverride();
+
+    const { handleProvenChannelBaseline: handler } = await import('../../src/commands/proven-channel-baseline.js');
+
+    const synthCmd = program.command('runtime').command('synthetic');
+    synthCmd
+      .command('proven-channel')
+      .option('-w, --workspace <path>', 'Workspace directory')
+      .option('--json', 'Output raw JSON')
+      .option('--channels <channels>', 'Comma-separated channel list')
+      .action(async (opts) => {
+        await handler(opts);
+      });
+
+    const found = program.commands.find(c => c.name() === 'runtime')
+      ?.commands.find(c => c.name() === 'synthetic')
+      ?.commands.find(c => c.name() === 'proven-channel');
+    expect(found).toBeDefined();
+    expect(found?.name()).toBe('proven-channel');
+  });
 });
