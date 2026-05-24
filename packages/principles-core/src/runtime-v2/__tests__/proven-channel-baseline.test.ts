@@ -43,11 +43,12 @@ describe('Proven Channel Baseline (PRI-240)', () => {
   });
 
   describe('code_tool_hook / RuleHost channel fixture', () => {
-    it('succeeds and produces gate/activation evidence via ActivationDispatcher', async () => {
+    it('produces gate/activation evidence via ActivationDispatcher with valid status', async () => {
       const result = await runRuleHostFixture();
 
       expect(result.channel).toBe('code_tool_hook');
       expect(result.evidenceSource).toContain('ActivationDispatcher');
+      expect(['passed', 'degraded', 'failed']).toContain(result.status);
 
       if (result.status === 'passed') {
         expect(['would_activate', 'activated']).toContain(result.activationDecision.decision);
@@ -60,7 +61,7 @@ describe('Proven Channel Baseline (PRI-240)', () => {
         expect(result.failureReason).toBeUndefined();
       }
 
-      if (result.status === 'degraded') {
+      if (result.status === 'degraded' || result.status === 'failed') {
         expect(result.failureReason).toBeTruthy();
         expect(result.nextAction).toBeTruthy();
       }
@@ -397,19 +398,23 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       expect(art.validationStatus).toBe('validated');
       expect(art.sourceRuleId).toBe('synth-rule-PRI240');
 
-      const parsed = JSON.parse(art.contentJson) as Record<string, unknown>;
-      expect(typeof parsed.implementationCode).toBe('string');
-      expect(parsed.implementationCode).toBeTruthy();
+      const raw = JSON.parse(art.contentJson);
+      expect(typeof raw === 'object' && raw !== null).toBe(true);
+      expect(Object.hasOwn(raw, 'implementationCode')).toBe(true);
+      expect(typeof raw.implementationCode).toBe('string');
+      expect(raw.implementationCode).toBeTruthy();
 
-      const trace = parsed.goldenTrace as Record<string, unknown> | null;
+      expect(Object.hasOwn(raw, 'goldenTrace')).toBe(true);
+      const trace = raw.goldenTrace;
       expect(trace).not.toBeNull();
-      if (trace) {
+      if (typeof trace === 'object' && trace !== null) {
         expect(Array.isArray(trace.cases)).toBe(true);
-        expect((trace.cases as unknown[]).length).toBeGreaterThan(0);
+        expect(trace.cases.length).toBeGreaterThan(0);
         expect(typeof trace.traceId).toBe('string');
       }
 
-      expect(parsed.ruleHostGateDecision).toBe('accepted_shadow');
+      expect(Object.hasOwn(raw, 'ruleHostGateDecision')).toBe(true);
+      expect(raw.ruleHostGateDecision).toBe('accepted_shadow');
     });
 
     it('makeSandboxAlwaysPass produces passing sandbox result', () => {

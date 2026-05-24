@@ -109,7 +109,7 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cli-proven-test-'));
     mockRunProvenChannelBaseline.mockReset();
-    process.exitCode = undefined as unknown as number;
+    process.exitCode = undefined;
   });
 
   afterEach(() => {
