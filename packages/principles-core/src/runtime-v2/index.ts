@@ -256,7 +256,7 @@ export type {
 export { recordPainSignalObservability } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
 /** @deprecated Internal factory — use PainToPrincipleService constructor instead */
-export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult } from './pain-signal-runtime-factory.js';
+export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
 
 // Pain-to-Principle service facade (PRI-12)
 export { PainToPrincipleService } from './pain-to-principle-service.js';

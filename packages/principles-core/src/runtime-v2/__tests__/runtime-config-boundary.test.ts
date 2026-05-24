@@ -1,10 +1,14 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   validateRuntimeConfig,
   isRuntimeConfigError,
   invalidatePainSignalBridge,
+  resolveRuntimeConfig,
 } from '../pain-signal-runtime-factory.js';
 import type { RuntimeConfig } from '../pain-signal-runtime-factory.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 describe('Runtime Config Boundary (PRI-162)', () => {
   describe('validateRuntimeConfig', () => {
@@ -192,6 +196,62 @@ describe('Runtime Config Boundary (PRI-162)', () => {
       expect(localKey).not.toBe(gatewayKey);
       expect(localKey).not.toBe(emptyKey);
       expect(gatewayKey).not.toBe(emptyKey);
+    });
+  });
+
+  describe('resolveRuntimeConfig with requestedRuntimeKind', () => {
+    let tmpDir = '';
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rt-cfg-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('requestedRuntimeKind=openclaw-cli without flags returns missing_openclaw_mode error', () => {
+      const result = resolveRuntimeConfig(tmpDir, { requestedRuntimeKind: 'openclaw-cli' });
+      expect(isRuntimeConfigError(result)).toBe(true);
+      if (isRuntimeConfigError(result)) {
+        expect(result.reason).toBe('missing_openclaw_mode');
+        expect(result.nextAction).toBeTruthy();
+      }
+    });
+
+    it('requestedRuntimeKind=openclaw-cli with openclawGateway returns gateway mode', () => {
+      const result = resolveRuntimeConfig(tmpDir, { requestedRuntimeKind: 'openclaw-cli', openclawGateway: true });
+      expect(isRuntimeConfigError(result)).toBe(false);
+      if (!isRuntimeConfigError(result)) {
+        expect(result.runtimeKind).toBe('openclaw-cli');
+        expect(result.openclawMode).toBe('gateway');
+      }
+    });
+
+    it('requestedRuntimeKind=openclaw-cli with openclawLocal returns local mode', () => {
+      const result = resolveRuntimeConfig(tmpDir, { requestedRuntimeKind: 'openclaw-cli', openclawLocal: true });
+      expect(isRuntimeConfigError(result)).toBe(false);
+      if (!isRuntimeConfigError(result)) {
+        expect(result.runtimeKind).toBe('openclaw-cli');
+        expect(result.openclawMode).toBe('local');
+      }
+    });
+
+    it('requestedRuntimeKind=config without policy returns explicit_config_missing error', () => {
+      const result = resolveRuntimeConfig(tmpDir, { requestedRuntimeKind: 'config' });
+      expect(isRuntimeConfigError(result)).toBe(true);
+      if (isRuntimeConfigError(result)) {
+        expect(result.reason).toBe('explicit_config_missing');
+        expect(result.nextAction).toBeTruthy();
+      }
+    });
+
+    it('no requestedRuntimeKind without policy returns pi-ai default', () => {
+      const result = resolveRuntimeConfig(tmpDir);
+      expect(isRuntimeConfigError(result)).toBe(false);
+      if (!isRuntimeConfigError(result)) {
+        expect(result.runtimeKind).toBe('pi-ai');
+      }
     });
   });
 });

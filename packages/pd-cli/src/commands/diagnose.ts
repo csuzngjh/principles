@@ -134,7 +134,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     let runtimeAdapter: PDRuntimeAdapter;
     if (runtimeKind === 'openclaw-cli') {
       const stateDir = `${workspaceDir}/.state`;
-      const configResult = resolveRuntimeConfig(stateDir, { openclawLocal: opts.openclawLocal, openclawGateway: opts.openclawGateway });
+      const configResult = resolveRuntimeConfig(stateDir, { openclawLocal: opts.openclawLocal, openclawGateway: opts.openclawGateway, requestedRuntimeKind: 'openclaw-cli' });
       if (isRuntimeConfigError(configResult)) {
         if (opts.json) {
           console.log(JSON.stringify({ ok: false, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction }));
@@ -145,7 +145,17 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         process.exit(1);
         return;
       }
-      const openclawMode = configResult.openclawMode ?? 'local';
+      const { openclawMode } = configResult;
+      if (!openclawMode) {
+        if (opts.json) {
+          console.log(JSON.stringify({ ok: false, reason: 'missing_openclaw_mode', message: 'runtimeKind is openclaw-cli but no mode resolved', nextAction: 'Provide --openclaw-local or --openclaw-gateway, or set openclawMode in workflows.yaml' }));
+        } else {
+          console.error('error: runtimeKind is openclaw-cli but no mode resolved');
+          console.error('nextAction: Provide --openclaw-local or --openclaw-gateway, or set openclawMode in workflows.yaml');
+        }
+        process.exit(1);
+        return;
+      }
 
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
         runtimeMode: openclawMode,

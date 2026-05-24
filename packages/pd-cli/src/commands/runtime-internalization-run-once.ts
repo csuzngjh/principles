@@ -445,7 +445,7 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
   }
 
   const stateDir = path.join(opts.workspaceDir, '.state');
-  const configResult = resolveRuntimeConfig(stateDir);
+  const configResult = resolveRuntimeConfig(stateDir, { requestedRuntimeKind: opts.runtimeKind });
 
   if (isRuntimeConfigError(configResult)) {
     throw new Error(
@@ -630,6 +630,18 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     if (wakeResult.decision === 'no_ready_tasks' || wakeResult.decision === 'lease_conflict') {
       process.exitCode = 1;
     }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (opts.json) {
+      console.log(JSON.stringify({
+        decision: 'config_error',
+        reason: message,
+        nextAction: 'Fix the workflows.yaml funnel policy, or use --runtime pi-ai / openclaw-cli with explicit flags',
+      }, null, 2));
+    } else {
+      console.error(`Error: ${message}`);
+    }
+    process.exitCode = 1;
   } finally {
     await stateManager.close();
   }

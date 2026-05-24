@@ -300,6 +300,70 @@ describe('pd diagnose run --runtime routing', () => {
     consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
   });
+
+  it('DPB-09: openclaw-cli --openclaw-gateway constructs adapter with runtimeMode=gateway', async () => {
+    mockResolveRuntimeConfig.mockReturnValueOnce({
+      runtimeKind: 'openclaw-cli',
+      openclawMode: 'gateway',
+      timeoutMs: 300000,
+      agentId: 'main',
+    });
+    mockIsRuntimeConfigError.mockReturnValueOnce(false);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'openclaw-cli',
+      openclawGateway: true,
+      json: false,
+    } as DiagnoseRunOptions);
+
+    const OpenClawCliMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
+    );
+    expect(OpenClawCliMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeMode: 'gateway' }),
+    );
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DPB-09: openclaw-cli --openclaw-local constructs adapter with runtimeMode=local', async () => {
+    mockResolveRuntimeConfig.mockReturnValueOnce({
+      runtimeKind: 'openclaw-cli',
+      openclawMode: 'local',
+      timeoutMs: 300000,
+      agentId: 'main',
+    });
+    mockIsRuntimeConfigError.mockReturnValueOnce(false);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'openclaw-cli',
+      openclawLocal: true,
+      json: false,
+    } as DiagnoseRunOptions);
+
+    const OpenClawCliMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
+    );
+    expect(OpenClawCliMock).toHaveBeenCalledWith(
+      expect.objectContaining({ runtimeMode: 'local' }),
+    );
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
 });
 
 describe('pd diagnose run — auto-intake after success', () => {

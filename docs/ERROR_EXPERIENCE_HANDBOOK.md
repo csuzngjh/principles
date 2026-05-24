@@ -526,7 +526,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When a canonical config resolver exists, callers must not duplicate its validation logic. After calling the resolver, consume its result directly — no fallback guessing. Cache keys must include all fields that change behavior. Test: file-config-only path, flag-override path, cache isolation between modes.
 - **Source**: PRI-162 / PR #701
 - **Date**: 2026-05-24
-- **Recurrence**: Same class as ERR-031, ERR-004
+- **Recurrence**: Same class as ERR-031, ERR-004. Recurred 2026-05-24 PR #701: first fix removed pre-check and changed `?? (opts.openclawLocal ? 'local' : 'gateway')` to `?? 'local'`, but (1) `resolveRuntimeConfig()` still did not accept `requestedRuntimeKind`, so `--runtime openclaw-cli --openclaw-gateway` without a workflow policy returned default pi-ai config and the `?? 'local'` fallback silently overrode the user's gateway intent; (2) `runtime=config` still fell through to compatibility fallback instead of failing loud. Fixed by adding `requestedRuntimeKind` to resolver input and removing all `??` fallbacks. Also recurred 2026-05-24 PR #701: `runtime-internalization-run-once.ts` `resolveRuntimeAdapter()` threw on `RuntimeConfigError` but the command had no catch block, so `--json` mode produced no structured output and the process crashed with an unhandled rejection. Fixed by adding a catch block that outputs `{ decision: 'config_error', reason, nextAction }` in JSON mode.
 
 ---
 
@@ -538,7 +538,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When writing a guard that prevents new callers of a subsystem, ensure the detection covers all naming patterns used by that subsystem, not just a specific subset. Test: add a test case for a dynamic import of a non-frozen-basename legacy module and verify it's detected.
 - **Source**: PRI-227 / PR #701
 - **Date**: 2026-05-24
-- **Recurrence**: Same class as ERR-024, ERR-025
+- **Recurrence**: Same class as ERR-024, ERR-025. Recurred 2026-05-24 PR #701: first fix added `idle` to the dynamic import extractor (`findImportLines`), but the actual enforcement logic (the `isNocturnalKeyword` check that decides whether to validate against the allowlist) still only checked `nocturnal`, `sleep_reflection`, and `sleep-cycle` — not `idle`. The new extractor tests proved extraction worked, but not that the real scan would reject an unallowed idle caller. Fixed by adding `idle` to the `isNocturnalKeyword` check and adding an enforcement test. Also recurred 2026-05-24 PR #701: adding `lowerLine.includes('idle')` to `isNocturnalKeyword` caused false positives on `HybridLedgerStore` (hybr**idle**dgerstore contains the substring `idle`). The `legacyPathPatterns` `/idle/` regex had the same issue. Fixed by using word-boundary regex `/(?:^|[-_/.])idle(?:[-_/.]|$)/i` that matches `idle` only at path/identifier segment boundaries, not as a substring within `hybrid`.
 
 ---
 

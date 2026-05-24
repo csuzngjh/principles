@@ -228,7 +228,7 @@ describe('Nocturnal entrypoint guard', () => {
         const isFrozenModuleRef = frozenModuleBasenames.some(
           (basename) => lowerLine.includes(basename)
         );
-        const isNocturnalKeyword = lowerLine.includes('nocturnal') || lowerLine.includes('sleep_reflection') || lowerLine.includes('sleep-cycle');
+        const isNocturnalKeyword = /(?:^|[-_/.])idle(?:[-_/.]|$)|nocturnal|sleep_reflection|sleep-cycle/i.test(importLine);
         if (!isFrozenModuleRef && !isNocturnalKeyword) {
           continue;
         }
@@ -486,6 +486,37 @@ describe('Nocturnal entrypoint guard', () => {
     expect(lines.length).toBeGreaterThan(0);
     expect(lines[0]).toContain('idle-detector');
   });
+
+  it('idle import not in allowlist is flagged by enforcement logic', () => {
+    const importLine = "import('../service/idle-detector.js')";
+    const lowerLine = importLine.toLowerCase();
+    const frozenModuleBasenames = [...FROZEN_NOCTURNAL_MODULES].map(
+      (mod) => path.basename(mod, '.ts')
+    );
+    const isFrozenModuleRef = frozenModuleBasenames.some(
+      (basename) => lowerLine.includes(basename)
+    );
+    const isNocturnalKeyword = /(?:^|[-_/.])idle(?:[-_/.]|$)|nocturnal|sleep_reflection|sleep-cycle/i.test(importLine);
+    expect(isFrozenModuleRef || isNocturnalKeyword).toBe(true);
+
+    const fakeRelPath = 'commands/new-command.ts';
+    const allowedEntries = ALLOWED_NOCTURNAL_IMPORTS[fakeRelPath] ?? [];
+    const allowedPatterns = allowedEntries.map((e) => e.toLowerCase());
+    const isAllowed = allowedPatterns.some((pattern) => lowerLine.includes(pattern));
+    expect(isAllowed).toBe(false);
+  });
+
+  it('HybridLedgerStore does not trigger idle keyword (word boundary)', () => {
+    const importLine = "import type { HybridLedgerStore } from './principle-tree-ledger.js'";
+    const isNocturnalKeyword = /(?:^|[-_/.])idle(?:[-_/.]|$)|nocturnal|sleep_reflection|sleep-cycle/i.test(importLine);
+    expect(isNocturnalKeyword).toBe(false);
+  });
+
+  it('idle in path segment triggers keyword (word boundary)', () => {
+    const importLine = "import('../service/idle-detector.js')";
+    const isNocturnalKeyword = /(?:^|[-_/.])idle(?:[-_/.]|$)|nocturnal|sleep_reflection|sleep-cycle/i.test(importLine);
+    expect(isNocturnalKeyword).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -560,7 +591,7 @@ function findImportLines(content: string): string[] {
     /nocturnal-/,
     /sleep-cycle/,
     /sleep_reflection/,
-    /idle/,
+    /(?:^|[-_/.])idle(?:[-_/.]|$)/i,
   ];
   const genericDynImportRegex = /import\s*\(\s*['"][^'"]+['"]\s*\)/gi;
   let genericMatch;
