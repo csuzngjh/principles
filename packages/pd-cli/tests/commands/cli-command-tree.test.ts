@@ -64,4 +64,10 @@ describe('CLI command tree structure', () => {
     const output = runPdHelp(['runtime', '--help']);
     expect(output).toMatch(/health\s/);
   });
+
+  it('run-once command exposes --openclaw-local and --openclaw-gateway flags', () => {
+    const output = runPdHelp(['runtime', 'internalization', 'run-once', '--help']);
+    expect(output).toContain('--openclaw-local');
+    expect(output).toContain('--openclaw-gateway');
+  });
 });

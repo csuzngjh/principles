@@ -418,6 +418,58 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(OpenClawMock).toHaveBeenCalled();
   });
 
+  it('--runtime openclaw-cli --openclaw-local passes local runtimeMode to OpenClawCliRuntimeAdapter', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-007b',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-007b',
+      runId: 'run-007b',
+      artifactId: 'pi-art-task-dreamer-007b-run-007b',
+      resultRef: 'dreamer://run-007b',
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'openclaw-cli', openclawLocal: true, json: true });
+
+    const OpenClawMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
+    );
+    expect(OpenClawMock).toHaveBeenCalled();
+    const lastCallArgs = OpenClawMock.mock.calls[OpenClawMock.mock.calls.length - 1];
+    expect(lastCallArgs[0]).toMatchObject({ runtimeMode: 'local' });
+  });
+
+  it('--runtime openclaw-cli --openclaw-gateway passes gateway runtimeMode to OpenClawCliRuntimeAdapter', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-007c',
+      taskKind: 'dreamer',
+    });
+
+    mockRun.mockResolvedValue({
+      status: 'succeeded',
+      taskId: 'task-dreamer-007c',
+      runId: 'run-007c',
+      artifactId: 'pi-art-task-dreamer-007c-run-007c',
+      resultRef: 'dreamer://run-007c',
+      attemptCount: 1,
+    });
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'openclaw-cli', openclawGateway: true, json: true });
+
+    const OpenClawMock = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
+    );
+    expect(OpenClawMock).toHaveBeenCalled();
+    const lastCallArgs = OpenClawMock.mock.calls[OpenClawMock.mock.calls.length - 1];
+    expect(lastCallArgs[0]).toMatchObject({ runtimeMode: 'gateway' });
+  });
+
   it('--runtime config resolves adapter from workflows.yaml', async () => {
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',

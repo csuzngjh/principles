@@ -31,6 +31,8 @@ interface RunOnceOptions {
   allowTestDouble?: boolean;
   enqueueNext?: boolean;
   timeoutMs?: number;
+  openclawLocal?: boolean;
+  openclawGateway?: boolean;
 }
 
 const OWNER = 'pd-cli-internalization-run-once';
@@ -453,8 +455,10 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
   }
 
   if (opts.config.runtimeKind === 'openclaw-cli') {
+    // Determine runtimeMode from config flags (validated by resolvePDConfig before this point)
+    const runtimeMode = opts.config.openclawGateway ? 'gateway' : 'local';
     return new OpenClawCliRuntimeAdapter({
-      runtimeMode: 'local',
+      runtimeMode,
       workspaceDir: opts.config.workspaceDir,
     });
   }
@@ -463,7 +467,12 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
 }
 
 export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions): Promise<void> {
-  const configResult = await loadAndResolvePDConfig(opts, opts.workspace);
+  const configResult = await loadAndResolvePDConfig({
+    runtime: opts.runtime,
+    openclawLocal: opts.openclawLocal,
+    openclawGateway: opts.openclawGateway,
+    timeoutMs: opts.timeoutMs,
+  }, opts.workspace);
   if (!configResult.success) {
     if (opts.json) {
       console.log(JSON.stringify({
