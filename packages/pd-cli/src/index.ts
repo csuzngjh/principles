@@ -44,6 +44,7 @@ import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-e
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeIdleTriggerEvaluate } from './commands/runtime-idle-trigger.js';
 import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
+import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 
 const program = new Command();
 
@@ -332,6 +333,20 @@ synthCmd
       identicalCount: opts.identicalCount,
       similarCount: opts.similarCount,
       stressCount: opts.stressCount,
+    });
+  });
+
+synthCmd
+  .command('proven-channel')
+  .description('Run MVP activation continuity baseline (PRI-240) — deterministic, no LLM required')
+  .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
+  .option('--json', 'Output raw JSON')
+  .option('--channels <channels>', 'Comma-separated channel list (prompt,code_tool_hook,defer_archive)')
+  .action(async (opts) => {
+    await handleProvenChannelBaseline({
+      workspace: opts.workspace,
+      json: opts.json,
+      channels: opts.channels,
     });
   });
 
