@@ -72,6 +72,8 @@ export interface FunnelPolicy {
   maxRetries?: number;
   /** Custom base URL for OpenAI-compatible providers not in pi-ai's built-in registry. */
   baseUrl?: string;
+  /** OpenClaw mode for openclaw-cli runtime: 'local' or 'gateway'. Used when no CLI flag is set. */
+  openclawMode?: 'local' | 'gateway';
 }
 
 /**

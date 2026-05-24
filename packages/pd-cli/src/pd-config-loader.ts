@@ -38,6 +38,7 @@ export async function loadAndResolvePDConfig(
     baseUrl?: string;
     maxRetries?: number;
     timeoutMs?: number;
+    openclawMode?: 'local' | 'gateway';
   } | undefined = undefined;
 
   try {
@@ -52,6 +53,7 @@ export async function loadAndResolvePDConfig(
         baseUrl: funnel.policy.baseUrl,
         maxRetries: funnel.policy.maxRetries,
         timeoutMs: funnel.policy.timeoutMs,
+        openclawMode: funnel.policy.openclawMode,
       };
     }
   } catch {

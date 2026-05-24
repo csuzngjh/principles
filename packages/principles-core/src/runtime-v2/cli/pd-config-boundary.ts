@@ -24,6 +24,7 @@ export interface PDConfig {
   readonly timeoutMs?: number;
   readonly openclawLocal?: boolean;
   readonly openclawGateway?: boolean;
+  readonly openclawMode?: 'local' | 'gateway';
   readonly agent?: string;
   readonly intake?: boolean;
 }
@@ -52,6 +53,7 @@ export interface PDConfigResolverInputs {
     readonly baseUrl?: string;
     readonly maxRetries?: number;
     readonly timeoutMs?: number;
+    readonly openclawMode?: 'local' | 'gateway';
   };
 }
 
@@ -83,7 +85,16 @@ export function resolvePDConfig(inputs: PDConfigResolverInputs): PDConfigResult 
   // 1. Resolve runtime kind: CLI > file config > default ('test-double')
   let resolvedRuntimeStr = inputs.cliOptions.runtime ?? inputs.fileConfig?.runtimeKind ?? 'test-double';
   if (resolvedRuntimeStr === 'config') {
-    resolvedRuntimeStr = inputs.fileConfig?.runtimeKind ?? 'pi-ai';
+    if (!inputs.fileConfig?.runtimeKind) {
+      return {
+        success: false,
+        failure: {
+          error: 'Runtime set to "config" but no runtimeKind found in file config.',
+          nextAction: 'Add runtimeKind to workflows.yaml or use an explicit --runtime flag.',
+        },
+      };
+    }
+    resolvedRuntimeStr = inputs.fileConfig.runtimeKind;
   }
 
   
@@ -106,23 +117,10 @@ export function resolvePDConfig(inputs: PDConfigResolverInputs): PDConfigResult 
   const baseUrl = inputs.cliOptions.baseUrl ?? inputs.fileConfig?.baseUrl;
   const maxRetries = inputs.cliOptions.maxRetries ?? inputs.fileConfig?.maxRetries;
   const timeoutMs = inputs.cliOptions.timeoutMs ?? inputs.fileConfig?.timeoutMs;
-  const { openclawLocal, openclawGateway, agent } = inputs.cliOptions;
+  const { openclawLocal: cliOpenclawLocal, openclawGateway: cliOpenclawGateway, agent } = inputs.cliOptions;
   const intake = inputs.cliOptions.intake !== false;
 
-  const config: PDConfig = {
-    workspaceDir: inputs.workspaceDir,
-    runtimeKind,
-    provider,
-    model,
-    apiKeyEnv,
-    baseUrl,
-    maxRetries,
-    timeoutMs,
-    openclawLocal,
-    openclawGateway,
-    agent,
-    intake,
-  };
+  const fileOpenclawMode = inputs.fileConfig?.openclawMode;
 
   // 3. Fail-loud validation for runtime kinds
   if (runtimeKind === 'pi-ai') {
@@ -141,8 +139,16 @@ export function resolvePDConfig(inputs: PDConfigResolverInputs): PDConfigResult 
       };
     }
 
-    // After validation: all fields are confirmed non-null
-    const apiKeyEnvName = apiKeyEnv as string;
+    if (typeof apiKeyEnv !== 'string') {
+      return {
+        success: false,
+        failure: {
+          error: 'apiKeyEnv must be a string.',
+          nextAction: 'Ensure apiKeyEnv is a valid environment variable name string via CLI flag or workflows.yaml config.',
+        },
+      };
+    }
+    const apiKeyEnvName = apiKeyEnv;
     if (!inputs.envVars[apiKeyEnvName]) {
       return {
         success: false,
@@ -154,8 +160,13 @@ export function resolvePDConfig(inputs: PDConfigResolverInputs): PDConfigResult 
     }
   }
 
+  // Resolve openclaw mode: CLI flags > file config openclawMode
+  let resolvedOpenclawLocal = cliOpenclawLocal;
+  let resolvedOpenclawGateway = cliOpenclawGateway;
+  let resolvedOpenclawMode: 'local' | 'gateway' | undefined = fileOpenclawMode;
+
   if (runtimeKind === 'openclaw-cli') {
-    if (openclawLocal && openclawGateway) {
+    if (cliOpenclawLocal && cliOpenclawGateway) {
       return {
         success: false,
         failure: {
@@ -165,16 +176,40 @@ export function resolvePDConfig(inputs: PDConfigResolverInputs): PDConfigResult 
       };
     }
 
-    if (!openclawLocal && !openclawGateway) {
-      return {
-        success: false,
-        failure: {
-          error: '--openclaw-local or --openclaw-gateway is required when using --runtime openclaw-cli.',
-          nextAction: "Specify either '--openclaw-local' or '--openclaw-gateway' CLI flag.",
-        },
-      };
+    if (!cliOpenclawLocal && !cliOpenclawGateway) {
+      if (fileOpenclawMode === 'local') {
+        resolvedOpenclawLocal = true;
+        resolvedOpenclawMode = 'local';
+      } else if (fileOpenclawMode === 'gateway') {
+        resolvedOpenclawGateway = true;
+        resolvedOpenclawMode = 'gateway';
+      } else {
+        return {
+          success: false,
+          failure: {
+            error: 'No openclaw mode specified. Provide --openclaw-local or --openclaw-gateway CLI flag, or set openclawMode in workflows.yaml.',
+            nextAction: "Specify either '--openclaw-local' or '--openclaw-gateway' CLI flag, or add openclawMode: 'local' | 'gateway' to workflows.yaml.",
+          },
+        };
+      }
     }
   }
+
+  const config: PDConfig = {
+    workspaceDir: inputs.workspaceDir,
+    runtimeKind,
+    provider,
+    model,
+    apiKeyEnv,
+    baseUrl,
+    maxRetries,
+    timeoutMs,
+    openclawLocal: resolvedOpenclawLocal,
+    openclawGateway: resolvedOpenclawGateway,
+    openclawMode: resolvedOpenclawMode,
+    agent,
+    intake,
+  };
 
   return {
     success: true,

@@ -90,21 +90,63 @@ vi.mock('@principles/core/runtime-v2', () => {
       if (runtime === 'openclaw-cli') {
         const local = inputs.cliOptions.openclawLocal;
         const gateway = inputs.cliOptions.openclawGateway;
-        if (!local && !gateway) {
-          return {
-            success: false,
-            failure: {
-              error: '--openclaw-local or --openclaw-gateway is required when using --runtime openclaw-cli',
-              nextAction: 'Provide a mode flag',
-            },
-          };
-        }
+        const fileMode = inputs.fileConfig?.openclawMode;
         if (local && gateway) {
           return {
             success: false,
             failure: {
               error: '--openclaw-local and --openclaw-gateway are mutually exclusive',
               nextAction: 'Provide exactly one mode flag',
+            },
+          };
+        }
+        if (!local && !gateway) {
+          if (fileMode === 'local') {
+            return {
+              success: true,
+              config: {
+                workspaceDir: inputs.workspaceDir || '/tmp/fake-workspace',
+                runtimeKind: runtime,
+                openclawLocal: true,
+                openclawGateway: false,
+                openclawMode: 'local',
+                agent: inputs.cliOptions.agent,
+                timeoutMs: inputs.cliOptions.timeoutMs ?? 30000,
+                intake: inputs.cliOptions.intake !== false,
+              }
+            };
+          }
+          if (fileMode === 'gateway') {
+            return {
+              success: true,
+              config: {
+                workspaceDir: inputs.workspaceDir || '/tmp/fake-workspace',
+                runtimeKind: runtime,
+                openclawLocal: false,
+                openclawGateway: true,
+                openclawMode: 'gateway',
+                agent: inputs.cliOptions.agent,
+                timeoutMs: inputs.cliOptions.timeoutMs ?? 30000,
+                intake: inputs.cliOptions.intake !== false,
+              }
+            };
+          }
+          return {
+            success: false,
+            failure: {
+              error: 'No openclaw mode specified. Provide --openclaw-local or --openclaw-gateway CLI flag, or set openclawMode in workflows.yaml.',
+              nextAction: "Specify either '--openclaw-local' or '--openclaw-gateway' CLI flag, or add openclawMode: 'local' | 'gateway' to workflows.yaml.",
+            },
+          };
+        }
+      }
+      if (runtime === 'config') {
+        if (!inputs.fileConfig?.runtimeKind) {
+          return {
+            success: false,
+            failure: {
+              error: 'Runtime set to "config" but no runtimeKind found in file config.',
+              nextAction: 'Add runtimeKind to workflows.yaml or use an explicit --runtime flag.',
             },
           };
         }
@@ -125,6 +167,7 @@ vi.mock('@principles/core/runtime-v2', () => {
           runtimeKind: runtime,
           openclawLocal: inputs.cliOptions.openclawLocal || false,
           openclawGateway: inputs.cliOptions.openclawGateway || false,
+          openclawMode: inputs.fileConfig?.openclawMode,
           agent: inputs.cliOptions.agent,
           timeoutMs: inputs.cliOptions.timeoutMs ?? 30000,
           intake: inputs.cliOptions.intake !== false,
@@ -137,6 +180,20 @@ vi.mock('@principles/core/runtime-v2', () => {
 vi.mock('../../src/principle-tree-ledger-adapter.js', () => ({
   PrincipleTreeLedgerAdapter: MockPrincipleTreeLedgerAdapter,
 }));
+
+vi.mock('../../src/pd-config-loader.js', () => {
+  return {
+    loadAndResolvePDConfig: vi.fn().mockImplementation(async (cliOptions: Record<string, unknown>, _workspaceArg?: string) => {
+      const { resolvePDConfig } = await import('@principles/core/runtime-v2');
+      return resolvePDConfig({
+        workspaceDir: '/tmp/fake-workspace',
+        cliOptions,
+        envVars: { OPENAI_API_KEY: 'sk-test' },
+        fileConfig: cliOptions._fileConfig as Record<string, unknown> | undefined,
+      });
+    }),
+  };
+});
 
 import { handleDiagnoseRun, type DiagnoseRunOptions } from '../../src/commands/diagnose.js';
 
@@ -199,7 +256,7 @@ describe('pd diagnose run --runtime routing', () => {
     } as DiagnoseRunOptions);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'error: --openclaw-local or --openclaw-gateway is required when using --runtime openclaw-cli'
+      'error: No openclaw mode specified. Provide --openclaw-local or --openclaw-gateway CLI flag, or set openclawMode in workflows.yaml.'
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -244,6 +301,29 @@ describe('pd diagnose run --runtime routing', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleErrorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DPB-01: --runtime config with no file config fails loud with structured error', async () => {
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'config',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    const rawOutput = consoleSpy.mock.calls[0][0] as string;
+    const parsed = JSON.parse(rawOutput);
+    expect(parsed.status).toBe('failed');
+    expect(parsed.errorCategory).toBe('config_failed');
+    expect(parsed.message).toContain('no runtimeKind found in file config');
+    expect(parsed.nextAction).toContain('workflows.yaml');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
     exitSpy.mockRestore();
   });
 });

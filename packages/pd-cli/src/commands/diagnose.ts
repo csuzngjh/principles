@@ -140,13 +140,13 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // Select runtime adapter based on resolved config runtimeKind
     let runtimeAdapter: PDRuntimeAdapter | undefined = undefined;
     if (config.runtimeKind === 'openclaw-cli') {
+      const resolvedMode = config.openclawMode ?? (config.openclawLocal ? 'local' : 'gateway');
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
-        runtimeMode: config.openclawLocal ? 'local' : 'gateway',
+        runtimeMode: resolvedMode,
         workspaceDir: config.workspaceDir,
         agentId: config.agent ?? 'main',
       });
 
-      // TELE-01: runtime_adapter_selected
       storeEmitter.emitTelemetry({
         eventType: 'runtime_adapter_selected',
         traceId: opts.taskId,
@@ -155,7 +155,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         agentId: 'openclaw-cli-adapter',
         payload: {
           runtimeKind: 'openclaw-cli',
-          runtimeMode: config.openclawLocal ? 'local' : 'gateway',
+          runtimeMode: resolvedMode,
         },
       });
     } else if (config.runtimeKind === 'test-double') {
@@ -310,7 +310,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       const jsonOutput = {
         ...result,
         intake: {
-          enabled: opts.intake !== false,
+          enabled: config.intake !== false,
           candidates: intakeResults,
         },
       };

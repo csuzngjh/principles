@@ -138,7 +138,7 @@ describe('resolvePDConfig pure prioritization and validation', () => {
   });
 
   it('validates openclaw-cli local and gateway exclusivity and requirements', () => {
-    // 1. Neither set
+    // 1. Neither set, no file config
     const res1 = resolvePDConfig({
       workspaceDir: '/test/workspace',
       cliOptions: { runtime: 'openclaw-cli' },
@@ -146,7 +146,7 @@ describe('resolvePDConfig pure prioritization and validation', () => {
     });
     expect(res1.success).toBe(false);
     if (!res1.success) {
-      expect(res1.failure.error).toContain('--openclaw-local or --openclaw-gateway is required');
+      expect(res1.failure.error).toContain('No openclaw mode specified');
     }
 
     // 2. Both set
@@ -178,6 +178,121 @@ describe('resolvePDConfig pure prioritization and validation', () => {
       expect(res3.config.runtimeKind).toBe('openclaw-cli');
       expect(res3.config.openclawLocal).toBe(true);
       expect(res3.config.openclawGateway).toBeFalsy();
+    }
+  });
+
+  it('openclaw-cli with fileConfig.openclawMode=local succeeds without CLI mode flag', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: { runtime: 'openclaw-cli' },
+      envVars: defaultEnv,
+      fileConfig: {
+        openclawMode: 'local',
+      },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.config.runtimeKind).toBe('openclaw-cli');
+      expect(res.config.openclawLocal).toBe(true);
+      expect(res.config.openclawGateway).toBeFalsy();
+      expect(res.config.openclawMode).toBe('local');
+    }
+  });
+
+  it('openclaw-cli with fileConfig.openclawMode=gateway succeeds without CLI mode flag', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: { runtime: 'openclaw-cli' },
+      envVars: defaultEnv,
+      fileConfig: {
+        openclawMode: 'gateway',
+      },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.config.runtimeKind).toBe('openclaw-cli');
+      expect(res.config.openclawLocal).toBeFalsy();
+      expect(res.config.openclawGateway).toBe(true);
+      expect(res.config.openclawMode).toBe('gateway');
+    }
+  });
+
+  it('openclaw-cli CLI flags override fileConfig.openclawMode', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: { runtime: 'openclaw-cli', openclawGateway: true },
+      envVars: defaultEnv,
+      fileConfig: {
+        openclawMode: 'local',
+      },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.config.openclawGateway).toBe(true);
+      expect(res.config.openclawLocal).toBeFalsy();
+    }
+  });
+
+  it('--runtime config with no file config fails loud with structured error', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: { runtime: 'config' },
+      envVars: defaultEnv,
+    });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.failure.error).toContain('no runtimeKind found in file config');
+      expect(res.failure.nextAction).toContain('workflows.yaml');
+    }
+  });
+
+  it('--runtime config with file config runtimeKind resolves correctly', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: { runtime: 'config' },
+      envVars: defaultEnv,
+      fileConfig: {
+        runtimeKind: 'pi-ai',
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4',
+        apiKeyEnv: 'OPENAI_API_KEY',
+      },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.config.runtimeKind).toBe('pi-ai');
+    }
+  });
+
+  it('apiKeyEnv type narrowing rejects non-string values', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: {
+        runtime: 'pi-ai',
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4',
+        apiKeyEnv: undefined,
+      },
+      envVars: defaultEnv,
+    });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.failure.error).toContain('Missing required pi-ai config');
+    }
+  });
+
+  it('PDConfig includes openclawMode field when provided via file config', () => {
+    const res = resolvePDConfig({
+      workspaceDir: '/test/workspace',
+      cliOptions: { runtime: 'openclaw-cli', openclawLocal: true },
+      envVars: defaultEnv,
+      fileConfig: {
+        openclawMode: 'local',
+      },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.config.openclawMode).toBe('local');
     }
   });
 });
