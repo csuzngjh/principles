@@ -1,6 +1,7 @@
 # 重构硅基生命：基于系统动力学视角的 Principles Disciple (PD) 项目解构与建模
 
 **文档状态**: Active / 战略级思考资产（v2.0 Attribution / PRRR 概念已 deferred）
+> **执行限制（ADR-0014）**: 本文中的 Attribution、WorkspaceLearningSummary、Provenance、Probation 与 PRRR 内容是条件重启后的分析模型，不是当前派工计划。PRI-232~236 已取消；当前 MVP 只验证已实现的 `prompt`、RuleHost、`defer_archive` 三个通道。执行工作请只读取 [`07-mvp-first-pivot.md`](../plans/2026-05-roadmap/07-mvp-first-pivot.md) 与 [`03-linear-sync-plan.md`](../plans/2026-05-roadmap/03-linear-sync-plan.md)。
 **初版日期**: 2026-04-29
 **v2.0 修订日期**: 2026-05-24（v2.0 即日 deferred — 见下）
 **核心视角**: 系统动力学 (System Dynamics) & 架构工程
@@ -185,12 +186,12 @@ PRRR (root, lagging)
 
 | 杠杆 | 影响 | ROI | 当前状态 |
 |------|------|-----|---------|
-| **L1: Attribution Pipeline (R4)** | 让 R3 真正闭合，自动剪枝无效原则；让 PRRR 可计算 | ⭐⭐⭐⭐⭐ | ❌ 未建（PRI-232 待建）|
-| **L2: WorkspaceLearningSummary (元经验存量)** | 跨会话记忆；避免 Diagnostician 反复发明同类原则 | ⭐⭐⭐⭐ | ❌ 未建（PRI-233 待建）|
+| **L1: Attribution Pipeline (R4)** | 让 R3 真正闭合，自动剪枝无效原则；让 PRRR 可计算 | 条件重启后再评估 | Deferred；PRI-232 已 canceled |
+| **L2: WorkspaceLearningSummary (元经验存量)** | 跨会话记忆；避免 Diagnostician 反复发明同类原则 | 条件重启后再评估 | Deferred；PRI-233 已 canceled |
 | **L3: RuleHost 通道闭环 (L2 内化主路径)** | 把 ROI 最高的内化层做透；承接绝大部分高价值原则 | ⭐⭐⭐⭐ | ⚠️ RuleHostWriter 已有；shadow replay 有；缺真实工作区高频投放与 PRRR 数据 |
 | **L4: RejectionFeedback (人工拒绝闭环)** | 关闭"显式拒绝 → 重新学习"最后一公里 | ⭐⭐⭐⭐ | ❌ 未建（PRI-148 待建）|
-| **L5: Bundled vs Evolved 资产分离** | 让 attribution 干净；避免预装件污染 PRRR | ⭐⭐⭐ | ❌ 未建（PRI-234 待建）|
-| **L6: Activation Probation Window** | 让 approve 不直接成 active；attribution 决定 promote | ⭐⭐⭐ | ❌ 未建（PRI-235 待建）|
+| **L5: Bundled vs Evolved 资产分离** | 让 attribution 干净；避免预装件污染 PRRR | 条件重启后再评估 | Deferred；PRI-234 已 canceled |
+| **L6: Activation Probation Window** | 让 approve 不直接成 active；attribution 决定 promote | 条件重启后再评估 | Deferred；PRI-235 已 canceled |
 | **L7: Nocturnal/idle 退役（PRI-227~231）** | 删除 ~5000 行 dead code，CI 收敛 | ⭐⭐⭐ | 进行中 |
 | **L8: BALM Diagnostician + Dreamer 最小骨架** | 让 Agent manifest 化；只做最小两个，避免过度抽象 | ⭐⭐ | ❌ 未建；建议推迟到 Phase 2 |
 

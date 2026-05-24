@@ -1,10 +1,10 @@
 # ADR-0008: Built-in Agent Lifecycle Manager (BALM)
 
-> **状态**: Accepted (实施延后至 Phase 2 — 见 v2.0 修订)
+> **状态**: Deferred by ADR-0014 (不得作为当前实施依据)
 > **日期**: 2026-05-16
 > **相关**: COMPONENTS.md, INTERNALIZATION_PIPELINE.md
 
-> **2026-05-24 v2.0 修订**: 本 ADR 的 `Accepted` 状态保持不变，但**实施被显式延后**到 Phase 2，准入门槛由 [docs/plans/2026-05-roadmap/02-roadmap.md §7](../plans/2026-05-roadmap/02-roadmap.md) 强制：必须先完成 Phase 1C/1D（特别是 Attribution Pipeline 在生产 workspace 累计 ≥ 50 个 verdict 且校准通过 false positive < 5%）。在该门槛达成前，禁止启动本 ADR 涉及的实施工作；如有 Linear 工单引用本 ADR 要求即时实施，先与维护者确认门槛状态。本修订理由见 [ADR-0013](./0013-attribution-pipeline-and-decision-observability.md) 与 [06-ahe-informed-architecture-review.md](../plans/2026-05-roadmap/06-ahe-informed-architecture-review.md) §2.2。
+> **2026-05-24 ADR-0014 修订**: BALM 是 post-MVP conditional design。Phase 1C/1D 及 Attribution issue 已取消，不能作为本 ADR 的前置实施链。只有 [post-mvp-conditional-roadmap.md](../plans/post-mvp-conditional-roadmap.md) 的外部反馈重启条件满足，并经维护者重新批准后，才能创建实施 issue。
 
 
 ## 1. 背景与痛点 (Context)

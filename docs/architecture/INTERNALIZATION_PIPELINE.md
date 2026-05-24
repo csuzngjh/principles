@@ -5,6 +5,7 @@
 > **关联 ADR**: ADR-0001（服务边界）, ADR-0003（Peer Agent 状态机）, ADR-0005（Nocturnal 合并）, ADR-0006（混合激活）
 
 > **2026-05-23 架构修订（ADR-0012）**: 本文涉及 `IdleTrigger`、sleep-cycle、OpenClaw idle/night 唤起和 `idle-trigger.yaml` 的段落已被取代。Runtime V2 后续只接受 PD-owned config/SDK/operator command 或未来 host-agnostic scheduler 的显式调度；OpenClaw plugin 只提供 event/runtime adapter，不再拥有调度职责。旧段落保留为迁移历史，在完成退役文档清理前不得作为新开发依据。
+> **2026-05-24 MVP-First 修订（ADR-0014）**: MVP 只要求已落地的 prompt / RuleHost / defer_archive 激活路径。`SkillFileWriter`、Trainer、BALM、LRAS、GAP、MissionScheduler 均不在当前派工范围。
 > **关联文档**: `PD_ARCHITECTURE_OVERVIEW.md`, `ACTIVATION_CHANNELS.md`, `AGENT_SOFTWARE_CONTRACT.md`, `GLOSSARY.md`
 
 本文档定义 PD 系统从**痛苦信号**到**已激活实现**的**完整端到端流水线**。它是 ADR-0003 / ADR-0005 / ADR-0006 决议在工程层的具象化。
@@ -823,7 +824,8 @@ routing_policy:
 | **Stage 3 (Activation)** | | |
 | ActivationDispatcher + low-risk ChannelWriters | ✅ | prompt / defer_archive 已落地 |
 | ApprovalQueue + SQLite store | ✅ | 基础 pending / approve / reject / cancel 状态已落地；二次确认 / 过期策略待扩展 |
-| RuleHostWriter / SkillFileWriter / TrainingExporter | ❌ | 高风险 / 中风险 / L3 writer 待建 |
+| RuleHostWriter | ✅ | code_tool_hook shadow/live safety slices 已落地 |
+| SkillFileWriter / TrainingExporter | Deferred | skill 为 stretch；training 不在 MVP |
 | **数据迁移** | | |
 | Nocturnal → PIArtifact 迁移 | ❌ | 见 ADR-0005 |
 
@@ -839,13 +841,11 @@ routing_policy:
 - [x] `ActivationDispatcher` 框架 + prompt/archive 两个 ChannelWriter → 解决断点 ②（最低风险通道）
 - [ ] **L1 容量硬上限（Hard Cap）** → 防止 System Prompt 膨胀导致 LLM 失效（见 §9.1）
 - [ ] **三振出局机制** → `rejection_count` 字段 + UNRESOLVABLE 状态（见 §7.4）
-- [ ] **BALM 骨架** → AgentRegistry + AgentManifest schema + 改 Diagnostician 用 BALM（ADR-0008）
-- [ ] **LRAS 基础** → Session checkpoint + self-validation tools + log backflow（ADR-0009）
-- [ ] **GAP 信号源** → Mission/Objective 数据模型 + GAPSignalGenerator + GFI 简化（ADR-0010）
+- [ ] **禁止当前实施 BALM / LRAS / GAP / MissionScheduler** → 仅满足 post-MVP restart conditions 后重新评审（ADR-0014）
 
 ### 优先级 P1（高风险通道）
-- [ ] `SkillFileWriter`
-- [ ] `RuleHostWriter` + shadow mode（Offline Replay 模式，见 §9.2）
+- [ ] `SkillFileWriter`（stretch；没有客户需求证据不得实施）
+- [x] `RuleHostWriter` + shadow/live safety gate（PRI-146 / 174 / 185）
 - [x] `ApprovalQueue` 基础队列 + SQLite store
 - [x] pd-console 审批 UI/API 基础版
 - [x] **基于置信度的自动晋升**（Auto-Promotion by Confidence，见 §9.3）基础策略

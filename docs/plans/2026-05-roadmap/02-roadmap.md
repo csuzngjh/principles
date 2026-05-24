@@ -1,7 +1,7 @@
 # 02 - 路线图：MVP-First Track（Runtime V2 收敛 + 种子客户验证）
 
 > **更新日期**: 2026-05-24（v3.0 — MVP-First Pivot）
-> **基准**: `origin/main` = `6d8fa62e`
+> **基准**: `origin/main` = `b4444507`（PR #696 合并后；PRI-252 纠偏中）
 > **主决策**:
 > - [ADR-0014](../../adr/0014-mvp-first-strategy-and-product-pivot.md) **★ MVP-First Strategy（当前主决策）**
 > - [ADR-0012](../../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md)（Runtime V2-only，仍生效）
@@ -31,35 +31,33 @@
 详见 [07-mvp-first-pivot.md §5](./07-mvp-first-pivot.md)。摘要：
 
 ```
-Week 1-2 减法 + 4 通道闭环
-  PRI-MVP-1  scope decision (docs)
-  PRI-MVP-2  cancel/defer 旧 issues (Linear)
-  PRI-MVP-3  feature flags 系统 + MVP-Quiet 关闭
-  PRI-MVP-4  4 通道 synthetic 冒烟
-  PRI-MVP-5  AGENTS.md "MVP 三问"
-  PRI-MVP-6  Nocturnal 退役继续（PRI-227 + PRI-230）
+Week 1-2 减法 + proven-channel 闭环
+  PRI-252  MVP-First 文档/Linear 控制面纠偏
+  PRI-239  feature flags contract + MVP-Quiet 关闭
+  PRI-240  prompt / RuleHost / defer_archive synthetic 冒烟
+  PRI-242  Nocturnal 退役继续（PRI-227 + PRI-230）
 
-Week 3-4 用户旅程 + 4 通道演示
-  PRI-MVP-7  SkillFileWriter 实施
-  PRI-MVP-8  pd-console 4 通道审批 UI
-  PRI-MVP-9  pd-console 三页化（Pain / Principle / Approval）
-  PRI-MVP-10 Demo workspace + 故事 A' 4 通道演示
+Week 3-4 用户旅程 + proven-channel 演示
+  PRI-244  pd-console proven-channel 审批 UI
+  PRI-245  pd-console 三页化（Pain / Principle / Approval）
+  PRI-246  Demo workspace + 故事 A' proven-channel 场景
+  PRI-243  SkillFileWriter 仅作为需求触发后的 stretch，不预排实现
 
 Week 5-6 安装 + 邀请
-  PRI-MVP-11 pd-cli 一键安装
-  PRI-MVP-12 GETTING-STARTED 用户视角重写
-  PRI-MVP-13 故事 A' 录屏
-  PRI-MVP-14 多环境冒烟（Win/Mac/Linux）
-  PRI-MVP-15 邀请第一个种子客户
+  PRI-247  pd-cli 一键安装
+  PRI-248  GETTING-STARTED 用户视角重写
+  PRI-249  故事 A' 录屏
+  PRI-250  多环境冒烟（Win/Mac/Linux）
+  PRI-251  邀请第一个种子客户
 ```
 
 ## 3. MVP-Core / MVP-Quiet / MVP-Gone 清单
 
 详见 [ADR-0014 §2.4 / §2.5 / §2.6](../../adr/0014-mvp-first-strategy-and-product-pivot.md)。摘要：
 
-**MVP-Core**: Pain capture / Diagnostician / CandidateIntake / Dreamer + Scribe + Artificer / 4 个激活通道（含待建 SkillFileWriter）/ Approval Queue / pd-console 三页 / pd-cli 核心命令。
+**MVP-Core**: Pain capture / Diagnostician / CandidateIntake / Dreamer + Scribe + Artificer / 三个已实现激活通道（prompt / RuleHost / defer_archive）/ Approval Queue / pd-console 三页 / pd-cli 核心命令。
 
-**MVP-Quiet（关闭，留代码）**: Philosopher / Evaluator / RolloutReviewer / GFI / Focus History / Thinking OS / Empathy keyword / empathy_inferred / Shadow Observation / Local Worker Routing / Central Sync / message-sanitize / Trajectory Collector（评估）。
+**MVP-Quiet（关闭，留代码）**: SkillFileWriter（未实施，不进入邀请门槛）/ Philosopher / Evaluator / RolloutReviewer / GFI / Focus History / Thinking OS / Empathy keyword / empathy_inferred / Shadow Observation / Local Worker Routing / Central Sync / message-sanitize / Trajectory Collector（评估）。
 
 **MVP-Gone（删除/归档）**: Nocturnal 全套 / IdleTrigger / sleep cycle / EvolutionWorker / Trainer / model_training。
 
@@ -67,8 +65,8 @@ Week 5-6 安装 + 邀请
 
 详见 07-mvp-first-pivot.md §6。要点：
 
-- 风险 1：4 通道演示比单通道难 3-5 倍 → 优先砍 skill 通道，3 → 2 通道是最低底线
-- 风险 2：RuleHost / Skill 概念门槛高 → MVP-13 录屏视频不能省，用客户真实规则演示
+- 风险 1：未实现通道重新进入关键路径 → skill 不进入当前调度，真实需求出现后再立项
+- 风险 2：RuleHost 概念门槛高 → PRI-249 录屏视频不能省，用客户真实规则演示
 - 风险 5：MVP-Quiet 关闭可能 break 现有功能 → 关闭后立即跑完整测试套件
 
 ## 5. 旧路线图段落处置
@@ -105,7 +103,7 @@ Week 5-6 安装 + 邀请
 
 | 不做的事 | 理由 |
 |---------|------|
-| 完整实施 ADR-0006 全 5 通道 | model_training 通道不在 MVP；其他 4 个通道已 MVP-Core |
+| 完整实施 ADR-0006 全 5 通道 | model_training 不在 MVP；skill 未被需求验证；MVP 只依赖三个已实现通道 |
 | BALM / LRAS / GAP / MissionScheduler 任何实施 | 等外部反馈触发；见 post-mvp §7-§10 |
 | Attribution / WorkspaceLearningSummary / Provenance / Probation Window | 同上；见 post-mvp §1-§5 |
 | 完整 7-Runner 链路投资 | Philosopher / Evaluator / RolloutReviewer 在 MVP-Quiet；等外部反馈 |
@@ -125,7 +123,7 @@ Week 5-6 安装 + 邀请
 7. ✅ 02-roadmap.md 修订（本文件）
 8. ⏳ README.md 修订
 9. ⏳ AGENTS.md 修订（MVP 三问 + 三档分类）
-10. ⏳ Linear: cancel PRI-233 / PRI-235 / PRI-236
-11. ⏳ Linear: PRI-232 改 staleness-only
-12. ⏳ Linear: PRI-234 改 hold
-13. ⏳ Linear: 创建 PRI-MVP-1 至 MVP-15
+10. ✅ Linear: PRI-232~236 已 canceled，等待 post-MVP 重启条件
+11. ⏳ PRI-252: 纠正文档和实际 issue 范围，删除旧派工入口
+12. ⏳ PRI-239: 仅在 loader/test 可证实时启用 feature flag 强制规则
+13. ⏳ PRI-240 / 242 / 244~251: 依 proven-channel 与 legacy retirement 顺序执行

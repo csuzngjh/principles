@@ -1,11 +1,13 @@
 # PD 架构总览（PD Architecture Overview）
 
 > **状态**: Active / SSoT-ENTRY-POINT
-> **最后更新**: 2026-05-23
+> **最后更新**: 2026-05-24（ADR-0014 / PRI-252 MVP-First 对齐）
 > **定位**: 整个 PD 项目的**唯一架构入口文档**。任何架构相关的疑问，先来这里。
 > **一致性约束**: 本文档是 SSoT（Single Source of Truth）。其他架构文档必须与本文一致；冲突时以本文为准，并通过 PR 同步修订。
 
 > **Runtime V2-only 修订（ADR-0012）**: Runtime V2 是唯一 forward execution path。OpenClaw plugin 不再承担 idle/night scheduler 或 Nocturnal business pipeline；它只可作为事件/宿主 adapter。文中仍出现的 `IdleTrigger`、sleep/nocturnal 调度描述属于待清理的历史设计，不得作为新实现依据。PD 调度与 workspace/runtime 配置将通过 PD-owned config/SDK/operator boundary 提供。
+>
+> **MVP-First 修订（ADR-0014）**: 首次种子客户验证只依赖 `prompt`、`code_tool_hook` / RuleHost、`defer_archive` 三个已实现通道。`SkillFileWriter`、Attribution、BALM、LRAS、GAP、MissionScheduler 均不得从本文件派工；重启只看 MVP 路线和 post-MVP 条件。
 
 本文档回答四个问题：
 1. PD 是什么？
@@ -285,7 +287,7 @@ ActivationDispatcher（按 channel 路由）
 | 阶段 | 组件 | 包 | 详见 |
 |------|------|-----|------|
 | 调度 | `ActivationDispatcher`（基础版已落地） | core | `ACTIVATION_CHANNELS.md` |
-| 通道实现 | `PromptWriter` / `DeferArchiveWriter` 已落地；`SkillFileWriter` / `RuleHostWriter` / `TrainingExporter` 待建 | core | `ACTIVATION_CHANNELS.md` |
+| 通道实现 | `PromptWriter` / `DeferArchiveWriter` / `RuleHostWriter` 已落地；`SkillFileWriter` 为 stretch；`TrainingExporter` 不在 MVP | core | `ACTIVATION_CHANNELS.md` |
 | 审批队列 | `ApprovalQueue` + `pd-console` Approvals 基础 UI/API | core + console | ADR-0006 |
 | 拒绝反馈 | `RejectionFeedbackLoop` | core | ADR-0006 |
 
@@ -514,15 +516,15 @@ PD 在做架构决策时，按以下优先级判断：
 |-------|------|---------|
 | Pain Pipeline | ✅ 完整 | 无 |
 | Internalization Pipeline | ⚠️ 90% | Runtime V2 已通过 baseline/live/chaos 验证；仍需生产反馈闭环与 legacy/nocturnal/idle 执行退役 |
-| Activation Pipeline | ⚠️ 75% | `ActivationDispatcher`、低风险 writers、`ApprovalQueue` 已落地；`RuleHostWriter` / `SkillFileWriter` / `TrainingExporter` 待建 |
+| Activation Pipeline | ⚠️ MVP proven-channel 已具备 | `ActivationDispatcher`、`PromptWriter`、`DeferArchiveWriter`、`RuleHostWriter`、`ApprovalQueue` 已落地；skill/training 不阻塞 MVP |
 | Operations Pipeline | ⚠️ 80% | pd-console approvals 基础 UI/API 已落地；仍需 RejectionFeedback、二次确认、审批历史与更强审计 |
 | Pruning Pipeline | ⚠️ 50% | PruningAction 未实现 |
 | 横切约束 | ⚠️ 70% | 核心横切文档已建立；仍需文档-代码漂移守护与 invariant 编号覆盖 |
 | 守护测试 | ⚠️ 70% | architecture-regression.test 已覆盖多条 Runtime V2/Activation 边界；仍需 AC-* / BALM-* / GAP-* / SCHED-* 编号化覆盖 |
-| **BALM（代理生命周期）** | ❌ 0% | 全部待建（ADR-0008）|
-| **LRAS（长程代理会话）** | ❌ 0% | 全部待建（ADR-0009）|
-| **GAP（目标驱动信号）** | ❌ 0% | Mission/Objective/GAP Generator 全部待建（ADR-0010）|
-| **MissionScheduler（三层任务）** | ❌ 0% | 全部待建（ADR-0011）|
+| **BALM（代理生命周期）** | Deferred | ADR-0014 post-MVP conditional；不派工 |
+| **LRAS（长程代理会话）** | Deferred | ADR-0014 post-MVP conditional；不派工 |
+| **GAP（目标驱动信号）** | Partial / Deferred | 已有 pain capture 继续；Mission/Objective/GAP expansion 不派工 |
+| **MissionScheduler（三层任务）** | Deferred | 仅 PD-owned explicit scheduling boundary 可继续 |
 
 ---
 

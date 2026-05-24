@@ -1,9 +1,11 @@
 # Activation Channels 设计（5 通道激活规范）
 
 > **状态**: Active
-> **最后更新**: 2026-05-15
+> **最后更新**: 2026-05-24（ADR-0014 MVP-First 对齐）
 > **关联 ADR**: ADR-0006（混合激活机制）, ADR-0004（L2 自动校正）, ADR-0005（Nocturnal 合并）
 > **关联文档**: `PD_ARCHITECTURE_OVERVIEW.md`, `INTERNALIZATION_PIPELINE.md`
+>
+> **MVP 范围**: ADR-0006 的 5 通道设计保留为长期 contract；首次客户验证只派工并展示已落地的 `prompt`、`code_tool_hook` / RuleHost、`defer_archive`。`skill` 是未验证 stretch，`model_training` 不在 MVP。
 
 本文档是 ADR-0006 的工程化展开，详细定义 PD 系统的 5 个内化通道如何**实际作用于代理行为**。
 
@@ -1022,9 +1024,9 @@ activation:
 | ActivationDispatcher | ✅ 基础版已落地 |
 | `PromptWriter`（设计稿名 `LedgerPromptWriter`）| ✅ 基础版已落地 |
 | `DeferArchiveWriter`（设计稿名 `LedgerArchiveWriter`）| ✅ 基础版已落地 |
-| SkillFileWriter | ❌ 待建 |
-| RuleHostWriter | ❌ 待建 |
-| TrainingExporter | ❌ 待建 |
+| SkillFileWriter | Deferred / stretch（不阻塞 MVP） |
+| RuleHostWriter | ✅ 基础版已落地（PRI-146 / 174 / 185） |
+| TrainingExporter | Deferred / MVP-Gone |
 | ApprovalQueue + SQLite schema | ✅ 基础版已落地（4 状态；二次确认/过期待扩展） |
 | RejectionFeedback | ❌ 待建 |
 | pd-console /approvals 路由 | ✅ 基础版已落地 |
