@@ -69,6 +69,15 @@ vi.mock('@principles/core/runtime-v2', () => {
       }
     },
     CandidateIntakeService: MockCandidateIntakeService,
+    resolveRuntimeConfig: vi.fn().mockReturnValue({
+      runtimeKind: 'pi-ai',
+      provider: 'test-provider',
+      model: 'test-model',
+      apiKeyEnv: 'TEST_KEY',
+      timeoutMs: 300000,
+      agentId: 'main',
+    }),
+    isRuntimeConfigError: vi.fn().mockReturnValue(false),
     run: vi.fn().mockResolvedValue({
       status: 'succeeded',
       taskId: 'test-task-1',
@@ -114,9 +123,15 @@ const SUCCEEDED_RESULT = {
 };
 
 describe('pd diagnose run --runtime routing', () => {
+  let mockResolveRuntimeConfig: ReturnType<typeof vi.fn>;
+  let mockIsRuntimeConfigError: ReturnType<typeof vi.fn>;
+
   beforeEach(async () => {
     vi.clearAllMocks();
-    const { run } = await import('@principles/core/runtime-v2');
+    const runtimeV2 = await import('@principles/core/runtime-v2');
+    mockResolveRuntimeConfig = vi.mocked(runtimeV2.resolveRuntimeConfig);
+    mockIsRuntimeConfigError = vi.mocked(runtimeV2.isRuntimeConfigError);
+    const { run } = runtimeV2;
     vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
@@ -141,7 +156,15 @@ describe('pd diagnose run --runtime routing', () => {
     exitSpy.mockRestore();
   });
 
-  it('HG-03: --runtime openclaw-cli without mode flag exits with error', async () => {
+  it('HG-03: --runtime openclaw-cli without mode (no file config) fails via resolveRuntimeConfig', async () => {
+    mockResolveRuntimeConfig.mockReturnValueOnce({
+      ok: false,
+      reason: 'missing_openclaw_mode',
+      message: 'runtimeKind is openclaw-cli but no mode specified',
+      nextAction: 'Provide exactly one mode',
+    });
+    mockIsRuntimeConfigError.mockReturnValueOnce(true);
+
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
@@ -152,9 +175,7 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'error: --openclaw-local or --openclaw-gateway is required when using --runtime openclaw-cli'
-    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('no mode specified'));
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleErrorSpy.mockRestore();
@@ -180,6 +201,85 @@ describe('pd diagnose run --runtime routing', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleErrorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DPB-09: openclaw-cli with file config openclawMode succeeds without CLI flag', async () => {
+    mockResolveRuntimeConfig.mockReturnValueOnce({
+      runtimeKind: 'openclaw-cli',
+      openclawMode: 'local',
+      timeoutMs: 300000,
+      agentId: 'main',
+    });
+    mockIsRuntimeConfigError.mockReturnValueOnce(false);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'openclaw-cli',
+      json: false,
+    } as DiagnoseRunOptions);
+
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DPB-09: openclaw-cli flag overrides file config mode', async () => {
+    mockResolveRuntimeConfig.mockReturnValueOnce({
+      runtimeKind: 'openclaw-cli',
+      openclawMode: 'gateway',
+      timeoutMs: 300000,
+      agentId: 'main',
+    });
+    mockIsRuntimeConfigError.mockReturnValueOnce(false);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'openclaw-cli',
+      openclawLocal: true,
+      json: false,
+    } as DiagnoseRunOptions);
+
+    expect(exitSpy).not.toHaveBeenCalledWith(1);
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it('DPB-09: openclaw-cli missing mode (--json) outputs JSON error', async () => {
+    mockResolveRuntimeConfig.mockReturnValueOnce({
+      ok: false,
+      reason: 'missing_openclaw_mode',
+      message: 'runtimeKind is openclaw-cli but no mode specified',
+      nextAction: 'Provide exactly one mode',
+    });
+    mockIsRuntimeConfigError.mockReturnValueOnce(true);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
+
+    await handleDiagnoseRun({
+      taskId: 'test-task-1',
+      workspace: '/tmp/fake-workspace',
+      runtime: 'openclaw-cli',
+      json: true,
+    } as DiagnoseRunOptions);
+
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.ok).toBe(false);
+    expect(jsonOutput.reason).toBe('missing_openclaw_mode');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 

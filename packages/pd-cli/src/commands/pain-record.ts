@@ -63,9 +63,25 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   if (result.failureCategory === 'config_missing') {
     const configResult = resolveRuntimeConfig(stateDir);
     if (isRuntimeConfigError(configResult)) {
-      console.error(`  Config resolution failed: ${configResult.reason}`);
-      console.error(`  ${configResult.message}`);
-      console.error(`  nextAction: ${configResult.nextAction}`);
+      if (opts.json) {
+        console.log(JSON.stringify({
+          status: 'failed',
+          painId: result.painId,
+          taskId: result.taskId,
+          failureCategory: result.failureCategory,
+          message: result.message,
+          configError: {
+            reason: configResult.reason,
+            message: configResult.message,
+            nextAction: configResult.nextAction,
+          },
+        }, null, 2));
+      } else {
+        console.error(`  Config resolution failed: ${configResult.reason}`);
+        console.error(`  ${configResult.message}`);
+        console.error(`  nextAction: ${configResult.nextAction}`);
+      }
+      process.exit(1);
       return;
     }
     const config = configResult;

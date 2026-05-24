@@ -268,12 +268,12 @@ for legacy nocturnal modules. They are NOT legacy entrypoints.
 | Category | Count | Description |
 |---|---|---|
 | `mvp_core_dependency` | 0 | ADR-0014 MVP-Core activation paths are `prompt`, `code_tool_hook / RuleHost`, `defer_archive` only. No legacy nocturnal entrypoints qualify. Previous `mvp_core_dependency` entries have been reclassified as `live_cutover` (retirement targets per ADR-0014 §2.6). |
-| `live_cutover` | 26 | Nocturnal commands (3), command handlers (3), sleep_reflection trigger (1: pd-reflect.ts), service modules still called (4), evolution-worker import sites (3), NocturnalWorkflowManager references (3), cross-module imports (3: merge-gate-audit, cooldown-strategy, filesystem-lifecycle-datasource), startup-reconciler (1), pain context (1: evolution-pain-context.ts), EvolutionWorker hook/service registrations (2), queue-io sleep_reflection enqueue (1), evolution-worker sleep_reflection processing (1), heartbeat idle/enqueue (1). |
+| `live_cutover` | 27 | Nocturnal commands (3), command handlers (3), sleep_reflection trigger (1: pd-reflect.ts), service modules still called (4), evolution-worker import sites (3), NocturnalWorkflowManager references (3), cross-module imports (3: merge-gate-audit, cooldown-strategy, filesystem-lifecycle-datasource), startup-reconciler (1), pain context (1: evolution-pain-context.ts), EvolutionWorker hook/service registrations (2), queue-io sleep_reflection enqueue (1), evolution-worker sleep_reflection processing (1), heartbeat idle/enqueue (1). |
 | `compat_alias` | 1 | Re-export of enqueueSleepReflectionTask from evolution-worker.ts. |
 | `historical_read_export` | 29 | Test files (24 regular + 4 architecture regression), type-only imports (1: workflow-store.ts). |
 | `delete_candidate` | 16 | Frozen core modules (14 nocturnal-*.ts + 1 adaptive-thresholds.ts), service orchestrator (1: nocturnal-service.ts). |
 
-**Total unique entrypoints classified: 72**
+**Total unique entrypoints classified: 73**
 
 > **Counting rule**: Each entrypoint is counted once in its highest-priority category. Priority order: `mvp_core_dependency` > `live_cutover` > `compat_alias` > `historical_read_export` > `delete_candidate`. A single file with multiple import sites (e.g. evolution-worker.ts) counts as multiple entrypoints, one per distinct import/reference site listed in the detailed sections above. Sub-item sums in the Description column must equal the Count column value.
 

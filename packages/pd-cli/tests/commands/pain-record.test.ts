@@ -213,6 +213,62 @@ describe('pd pain record', () => {
     exitSpy.mockRestore();
   });
 
+  // 7a. config_missing with RuntimeConfigError exits non-zero (text)
+  it('exits 1 on config_missing with RuntimeConfigError (text)', async () => {
+    mockRecordPainResult = makeFailedResult({
+      failureCategory: 'config_missing' as FailureCategory,
+      message: 'API key not found in env',
+    });
+    const { isRuntimeConfigError, resolveRuntimeConfig } = await import('@principles/core/runtime-v2');
+    vi.mocked(isRuntimeConfigError).mockReturnValueOnce(true);
+    vi.mocked(resolveRuntimeConfig).mockReturnValueOnce({
+      ok: false,
+      reason: 'missing_openclaw_mode',
+      message: 'runtimeKind is openclaw-cli but no mode specified',
+      nextAction: 'Provide exactly one mode',
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain' });
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    errorSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  // 7b. config_missing with RuntimeConfigError outputs JSON (--json)
+  it('outputs JSON with configError on config_missing + RuntimeConfigError (--json)', async () => {
+    mockRecordPainResult = makeFailedResult({
+      failureCategory: 'config_missing' as FailureCategory,
+      message: 'API key not found in env',
+    });
+    const { isRuntimeConfigError, resolveRuntimeConfig } = await import('@principles/core/runtime-v2');
+    vi.mocked(isRuntimeConfigError).mockReturnValueOnce(true);
+    vi.mocked(resolveRuntimeConfig).mockReturnValueOnce({
+      ok: false,
+      reason: 'missing_openclaw_mode',
+      message: 'runtimeKind is openclaw-cli but no mode specified',
+      nextAction: 'Provide exactly one mode',
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = mockProcessExit();
+
+    await handlePainRecord({ reason: 'test pain', json: true });
+
+    const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
+    expect(jsonOutput.status).toBe('failed');
+    expect(jsonOutput.failureCategory).toBe('config_missing');
+    expect(jsonOutput.configError).toBeDefined();
+    expect(jsonOutput.configError.reason).toBe('missing_openclaw_mode');
+    expect(jsonOutput.configError.nextAction).toBe('Provide exactly one mode');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
   // 8. skipped status outputs [SKIP] and does not exit 1
   it('outputs [SKIP] on skipped status (text)', async () => {
     mockRecordPainResult = makeSkippedResult();

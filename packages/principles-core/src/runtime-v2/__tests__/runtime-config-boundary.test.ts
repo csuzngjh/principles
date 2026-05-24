@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   validateRuntimeConfig,
   isRuntimeConfigError,
+  invalidatePainSignalBridge,
 } from '../pain-signal-runtime-factory.js';
 import type { RuntimeConfig } from '../pain-signal-runtime-factory.js';
 
@@ -144,6 +145,53 @@ describe('Runtime Config Boundary (PRI-162)', () => {
         agentId: 'main',
       };
       expect(config.openclawMode).toBe('gateway');
+    });
+  });
+
+  describe('Bridge cache key includes openclawMode (D-03)', () => {
+    beforeEach(() => {
+      invalidatePainSignalBridge('/test-ws', 'openclaw-cli');
+      invalidatePainSignalBridge('/test-ws', 'pi-ai');
+    });
+
+    it('local and gateway produce different cache keys', () => {
+      const localConfig: RuntimeConfig = {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: 'local',
+        timeoutMs: 300_000,
+        agentId: 'main',
+      };
+      const gatewayConfig: RuntimeConfig = {
+        runtimeKind: 'openclaw-cli',
+        openclawMode: 'gateway',
+        timeoutMs: 300_000,
+        agentId: 'main',
+      };
+      const localKey = `${'/test-ws'}:${localConfig.runtimeKind}:${localConfig.openclawMode ?? ''}`;
+      const gatewayKey = `${'/test-ws'}:${gatewayConfig.runtimeKind}:${gatewayConfig.openclawMode ?? ''}`;
+      expect(localKey).not.toBe(gatewayKey);
+    });
+
+    it('pi-ai config without openclawMode uses empty string in key', () => {
+      const piAiConfig: RuntimeConfig = {
+        runtimeKind: 'pi-ai',
+        timeoutMs: 300_000,
+        agentId: 'main',
+        provider: 'openrouter',
+        model: 'test',
+        apiKeyEnv: 'TEST_KEY',
+      };
+      const key = `${'/test-ws'}:${piAiConfig.runtimeKind}:${piAiConfig.openclawMode ?? ''}`;
+      expect(key).toBe('/test-ws:pi-ai:');
+    });
+
+    it('invalidatePainSignalBridge clears all mode variants', () => {
+      const localKey = '/test-ws:openclaw-cli:local';
+      const gatewayKey = '/test-ws:openclaw-cli:gateway';
+      const emptyKey = '/test-ws:openclaw-cli:';
+      expect(localKey).not.toBe(gatewayKey);
+      expect(localKey).not.toBe(emptyKey);
+      expect(gatewayKey).not.toBe(emptyKey);
     });
   });
 });

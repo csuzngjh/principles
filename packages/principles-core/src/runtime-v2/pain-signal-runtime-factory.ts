@@ -193,8 +193,8 @@ export function validateRuntimeConfig(config: RuntimeConfig): void {
   }
 }
 
-// Per-workspace+runtime bridge cache — same lifetime as process
-// Key format: `${workspaceDir}:${runtimeKind}` (D-03)
+// Per-workspace+runtime+mode bridge cache — same lifetime as process
+// Key format: `${workspaceDir}:${runtimeKind}:${openclawMode ?? ''}` (D-03)
 const bridgeCache = new Map<string, PainSignalBridge>();
 
 /**
@@ -216,7 +216,7 @@ export async function createPainSignalBridge(
     );
   }
   validateRuntimeConfig(runtimeConfig);
-  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}`;
+  const cacheKey = `${opts.workspaceDir}:${runtimeConfig.runtimeKind}:${runtimeConfig.openclawMode ?? ''}`;
   const cached = bridgeCache.get(cacheKey);
   if (cached) return cached;
 
@@ -292,5 +292,7 @@ export async function createPainSignalBridge(
  */
 export function invalidatePainSignalBridge(workspaceDir: string, runtimeKind?: string): void {
   const effectiveKind = runtimeKind ?? 'pi-ai';
-  bridgeCache.delete(`${workspaceDir}:${effectiveKind}`);
+  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:local`);
+  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:gateway`);
+  bridgeCache.delete(`${workspaceDir}:${effectiveKind}:`);
 }

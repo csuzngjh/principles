@@ -113,12 +113,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     process.exit(1);
   }
 
-  // Require explicit runtime mode for openclaw-cli (HG-03, DPB-09)
   const runtimeKind = opts.runtime ?? 'test-double';
-  if (runtimeKind === 'openclaw-cli' && !opts.openclawLocal && !opts.openclawGateway) {
-    console.error('error: --openclaw-local or --openclaw-gateway is required when using --runtime openclaw-cli');
-    process.exit(1);
-  }
 
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
@@ -150,7 +145,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         process.exit(1);
         return;
       }
-      const openclawMode = configResult.openclawMode ?? (opts.openclawLocal ? 'local' : 'gateway');
+      const openclawMode = configResult.openclawMode ?? 'local';
 
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
         runtimeMode: openclawMode,

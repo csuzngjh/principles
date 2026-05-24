@@ -465,6 +465,27 @@ describe('Nocturnal entrypoint guard', () => {
     expect(lines.length).toBeGreaterThan(0);
     expect(lines[0]).toContain('nocturnal-trinity');
   });
+
+  it('findImportLines detects dynamic import of non-frozen-basename legacy module', () => {
+    const content = "const mod = import('../service/sleep-cycle.js')";
+    const lines = findImportLines(content);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toContain('sleep-cycle');
+  });
+
+  it('findImportLines detects dynamic import with nocturnal- path not in FROZEN set', () => {
+    const content = "await import('../service/nocturnal-new-module.js')";
+    const lines = findImportLines(content);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toContain('nocturnal-new-module');
+  });
+
+  it('findImportLines detects dynamic import with idle path', () => {
+    const content = "await import('../service/idle-detector.js')";
+    const lines = findImportLines(content);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toContain('idle-detector');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -532,6 +553,22 @@ function findImportLines(content: string): string[] {
     let dynMatch;
     while ((dynMatch = dynRegex.exec(content)) !== null) {
       lines.push(dynMatch[0]);
+    }
+  }
+
+  const legacyPathPatterns = [
+    /nocturnal-/,
+    /sleep-cycle/,
+    /sleep_reflection/,
+    /idle/,
+  ];
+  const genericDynImportRegex = /import\s*\(\s*['"][^'"]+['"]\s*\)/gi;
+  let genericMatch;
+  while ((genericMatch = genericDynImportRegex.exec(content)) !== null) {
+    const importPath = genericMatch[0];
+    const already = lines.some(l => l === importPath);
+    if (!already && legacyPathPatterns.some(p => p.test(importPath))) {
+      lines.push(importPath);
     }
   }
 
