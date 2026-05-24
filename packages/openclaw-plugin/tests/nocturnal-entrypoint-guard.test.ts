@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Nocturnal Entrypoint Guard — Architecture Regression Test
  * =========================================================
  *
@@ -35,14 +35,15 @@ const PLUGIN_SRC = path.resolve(__dirname, '..', 'src');
 // with a list of the specific nocturnal imports or references it makes.
 //
 // RUNNING COUNT: matches Object.keys(ALLOWED_NOCTURNAL_IMPORTS).length at runtime.
-// Follow-up issues for each:
+// PRI-227 only does census + no-new-caller guard. It does NOT authorize deletion.
+// MVP-Core (ADR-0014): prompt, code_tool_hook / RuleHost, defer_archive only.
+// All idle/night/sleep-reflection/nocturnal dispatch = retirement / live cutover / delete blocker.
+// Retirement chain (current valid issues):
 //   - PRI-228: Cutover pd-nocturnal-review, nocturnal-train, nocturnal-rollout commands
 //   - PRI-229: Replace OpenClawTrinityRuntimeAdapter usage in evolution-worker + merge-gate-audit
-//   - PRI-230: Replace sleep-cycle.ts with Runtime V2 Peer Runner
-//   - PRI-231: Replace NocturnalWorkflowManager with Runtime V2 equivalent
-//   - PRI-232: Retire nocturnal-service.ts, nocturnal-runtime.ts, nocturnal-target-selector.ts, nocturnal-config.ts
-//   - PRI-233: Remove core nocturnal-*.ts modules
-//   - PRI-234: Delete fenced nocturnal test files (historical_read_export)
+//   - PRI-119: Replace sleep-cycle.ts with Runtime V2 Peer Runner
+//   - PRI-230: Replace NocturnalWorkflowManager with Runtime V2 equivalent
+//   - PRI-231: Retire nocturnal-service.ts, nocturnal-runtime.ts, nocturnal-target-selector.ts, nocturnal-config.ts
 
 const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
   // === index.ts: Command registrations ===
@@ -66,8 +67,11 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
   // === commands/pd-reflect.ts: Manual sleep_reflection trigger ===
   'commands/pd-reflect.ts': ['sleep_reflection'],
 
+  // === commands/export.ts: Export command (live_cutover) ===
+  'commands/export.ts': ['nocturnal-export'],
+
   // === service/evolution-worker.ts: EvolutionWorker heartbeat ===
-  // Contains both mvp_core_dependency (queue processing) and live_cutover (OpenClawTrinityRuntimeAdapter)
+  // Contains live_cutover (queue processing + OpenClawTrinityRuntimeAdapter). Not MVP-Core per ADR-0014.
   'service/evolution-worker.ts': [
     'enqueueSleepReflectionTask',
     'checkWorkspaceIdle',
@@ -77,6 +81,7 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
     'sleep_reflection',
     'nocturnal-workflow-manager',
     'nocturnal-config',
+    'nocturnal-snapshot-contract',
   ],
 
   // === service/sleep-cycle.ts: Sleep cycle orchestrator ===
@@ -113,7 +118,7 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
   // === core/merge-gate-audit.ts: Uses OpenClawTrinityRuntimeAdapter ===
   'core/merge-gate-audit.ts': ['nocturnal-trinity', 'nocturnal-dataset', 'nocturnal-artifact-lineage', 'nocturnal-export'],
 
-  // === service/queue-io.ts: enqueueSleepReflectionTask (mvp_core_dependency) ===
+  // === service/queue-io.ts: enqueueSleepReflectionTask (live_cutover) ===
   'service/queue-io.ts': ['sleep_reflection', 'nocturnal'],
 
   // === service/evolution-pain-context.ts: Pain context for sleep_reflection ===
@@ -127,6 +132,9 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
 
   // === core/principle-internalization/filesystem-lifecycle-datasource.ts ===
   'core/principle-internalization/filesystem-lifecycle-datasource.ts': ['nocturnal-artifact-lineage'],
+
+  // === core/correction-cue-learner.ts: Keyword opt cooldown (live_cutover) ===
+  'core/correction-cue-learner.ts': ['nocturnal-runtime'],
 };
 
 // ---------------------------------------------------------------------------
@@ -214,11 +222,6 @@ describe('Nocturnal entrypoint guard', () => {
 
         const isAllowed = allowedPatterns.some((pattern) => lowerLine.includes(pattern));
         if (!isAllowed) {
-          const isFrozenImport = [...FROZEN_NOCTURNAL_MODULES].some(
-            (mod) => lowerLine.includes(mod.replace('.ts', '')) || lowerLine.includes(path.basename(mod, '.ts'))
-          );
-          if (isFrozenImport) continue;
-
           expect(unexpectedImportMessage(relPath, importLine)).toBe('');
         }
       }
@@ -292,11 +295,11 @@ describe('Nocturnal entrypoint guard', () => {
     // commands/pd-reflect.ts, service/evolution-worker.ts, service/sleep-cycle.ts,
     // service/queue-io.ts, service/evolution-pain-context.ts, core/merge-gate-audit.ts,
     // service/subagent-workflow/workflow-store.ts (type-only)
-    expect(nonFrozen.length).toBeLessThanOrEqual(13);
+    expect(nonFrozen.length).toBeLessThanOrEqual(15);
   });
 
-  it('catches a non-frozen caller importing a frozen module outside the allowlist', () => {
-    const simulatedImport = "import { something } from '../core/nocturnal-arbiter.js'";
+  it('non-allowlisted caller importing nocturnal-trinity must fail', () => {
+    const simulatedImport = "import { something } from '../core/nocturnal-trinity.js'";
     const simulatedRelPath = 'hooks/hypothetical-new-hook.ts';
 
     const isFrozenModule = FROZEN_NOCTURNAL_MODULES.has(simulatedRelPath);
@@ -306,37 +309,61 @@ describe('Nocturnal entrypoint guard', () => {
     const allowedPatterns = allowedEntries.map((e) => e.toLowerCase());
     const lowerLine = simulatedImport.toLowerCase();
 
-    const isNocturnalKeyword = lowerLine.includes('nocturnal') || lowerLine.includes('sleep_reflection') || lowerLine.includes('sleep-cycle');
+    const isNocturnalKeyword = lowerLine.includes('nocturnal');
     const isFrozenModuleRef = [...FROZEN_NOCTURNAL_MODULES].some(
-      (mod) => lowerLine.includes(mod.replace('.ts', ''))
+      (mod) => lowerLine.includes(path.basename(mod, '.ts'))
     );
     expect(isNocturnalKeyword || isFrozenModuleRef).toBe(true);
 
     const isAllowed = allowedPatterns.some((pattern) => lowerLine.includes(pattern));
-    const isFrozenSelfImport = [...FROZEN_NOCTURNAL_MODULES].some(
-      (mod) => lowerLine.includes(mod.replace('.ts', '')) || lowerLine.includes(mod.replace('src/', ''))
-    );
-
     expect(isAllowed).toBe(false);
-    expect(isFrozenSelfImport).toBe(true);
 
-    const wouldPassGuard = isAllowed || isFrozenSelfImport;
-    expect(wouldPassGuard).toBe(true);
+    const guardWouldFail = !isAllowed;
+    expect(guardWouldFail).toBe(true);
+  });
 
-    const hypotheticalRelPath = 'core/some-new-module.ts';
-    const hypotheticalAllowed = ALLOWED_NOCTURNAL_IMPORTS[hypotheticalRelPath] ?? [];
-    const hypotheticalPatterns = hypotheticalAllowed.map((e) => e.toLowerCase());
-    const hypotheticalIsAllowed = hypotheticalPatterns.some((pattern) => lowerLine.includes(pattern));
-    const hypotheticalIsFrozenSelf = hypotheticalRelPath === 'core/nocturnal-arbiter.ts' ||
-      [...FROZEN_NOCTURNAL_MODULES].some(
-        (mod) => hypotheticalRelPath === mod
-      );
+  it('non-allowlisted caller importing adaptive-thresholds must fail', () => {
+    const simulatedImport = "import { getThreshold } from '../core/adaptive-thresholds.js'";
+    const simulatedRelPath = 'core/some-new-module.ts';
 
-    expect(hypotheticalIsAllowed).toBe(false);
-    expect(hypotheticalIsFrozenSelf).toBe(false);
+    const isFrozenModule = FROZEN_NOCTURNAL_MODULES.has(simulatedRelPath);
+    expect(isFrozenModule).toBe(false);
 
-    const wouldBeCaught = !hypotheticalIsAllowed && !hypotheticalIsFrozenSelf;
-    expect(wouldBeCaught).toBe(true);
+    const allowedEntries = ALLOWED_NOCTURNAL_IMPORTS[simulatedRelPath] ?? [];
+    const allowedPatterns = allowedEntries.map((e) => e.toLowerCase());
+    const lowerLine = simulatedImport.toLowerCase();
+
+    const isFrozenModuleRef = [...FROZEN_NOCTURNAL_MODULES].some(
+      (mod) => lowerLine.includes(path.basename(mod, '.ts'))
+    );
+    expect(isFrozenModuleRef).toBe(true);
+
+    const isAllowed = allowedPatterns.some((pattern) => lowerLine.includes(pattern));
+    expect(isAllowed).toBe(false);
+
+    const guardWouldFail = !isAllowed;
+    expect(guardWouldFail).toBe(true);
+  });
+
+  it('allowlisted existing caller import must pass', () => {
+    const simulatedImport = "import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js'";
+    const simulatedRelPath = 'service/evolution-worker.ts';
+
+    const isFrozenModule = FROZEN_NOCTURNAL_MODULES.has(simulatedRelPath);
+    expect(isFrozenModule).toBe(false);
+
+    const allowedEntries = ALLOWED_NOCTURNAL_IMPORTS[simulatedRelPath] ?? [];
+    const allowedPatterns = allowedEntries.map((e) => e.toLowerCase());
+    const lowerLine = simulatedImport.toLowerCase();
+
+    const isAllowed = allowedPatterns.some((pattern) => lowerLine.includes(pattern));
+    expect(isAllowed).toBe(true);
+  });
+
+  it('frozen module internal import remains allowed', () => {
+    const simulatedRelPath = 'core/nocturnal-executability.ts';
+    const isFrozenModule = FROZEN_NOCTURNAL_MODULES.has(simulatedRelPath);
+    expect(isFrozenModule).toBe(true);
   });
 });
 

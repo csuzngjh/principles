@@ -1,4 +1,4 @@
-﻿# Legacy Entrypoint Census
+# Legacy Entrypoint Census
 
 > **PRI-227**: Static inventory of every legacy Nocturnal entrypoint in the
 > `packages/openclaw-plugin/` source tree, including imports, hook registrations,
