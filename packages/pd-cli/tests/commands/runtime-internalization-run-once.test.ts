@@ -120,6 +120,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     model: 'test-model',
     apiKeyEnv: 'TEST_API_KEY',
   }),
+  isRuntimeConfigError: vi.fn().mockReturnValue(false),
   validateRuntimeConfig: vi.fn(),
 }));
 
@@ -375,6 +376,14 @@ describe('handleRuntimeInternalizationRunOnce', () => {
   });
 
   it('--runtime openclaw-cli resolves OpenClawCliRuntimeAdapter', async () => {
+    const { resolveRuntimeConfig } = await import('@principles/core/runtime-v2');
+    vi.mocked(resolveRuntimeConfig).mockReturnValue({
+      runtimeKind: 'openclaw-cli',
+      openclawMode: 'local',
+      timeoutMs: 300_000,
+      agentId: 'main',
+    });
+
     mockWakeOnce.mockResolvedValue({
       decision: 'would_lease',
       taskId: 'task-dreamer-007',

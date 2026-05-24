@@ -21,11 +21,12 @@ import {
   PiAiRuntimeAdapter,
   PDRuntimeError,
   resolveRuntimeConfig,
+  isRuntimeConfigError,
   CandidateIntakeService,
   run as diagnoseRun,
   status as diagnoseStatus,
 } from '@principles/core/runtime-v2';
-import type { PDRuntimeAdapter } from '@principles/core/runtime-v2';
+import type { PDRuntimeAdapter, RuntimeConfig } from '@principles/core/runtime-v2';
 import { PrincipleTreeLedgerAdapter } from '../principle-tree-ledger-adapter.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import * as path from 'path';
@@ -137,8 +138,22 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // eslint-disable-next-line @typescript-eslint/init-declarations
     let runtimeAdapter: PDRuntimeAdapter;
     if (runtimeKind === 'openclaw-cli') {
+      const stateDir = `${workspaceDir}/.state`;
+      const configResult = resolveRuntimeConfig(stateDir, { openclawLocal: opts.openclawLocal, openclawGateway: opts.openclawGateway });
+      if (isRuntimeConfigError(configResult)) {
+        if (opts.json) {
+          console.log(JSON.stringify({ ok: false, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction }));
+        } else {
+          console.error(`error: ${configResult.message}`);
+          console.error(`nextAction: ${configResult.nextAction}`);
+        }
+        process.exit(1);
+        return;
+      }
+      const openclawMode = configResult.openclawMode ?? (opts.openclawLocal ? 'local' : 'gateway');
+
       runtimeAdapter = new OpenClawCliRuntimeAdapter({
-        runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
+        runtimeMode: openclawMode,
         workspaceDir,
         agentId: opts.agent ?? 'main',
       });
@@ -152,7 +167,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         agentId: 'openclaw-cli-adapter',
         payload: {
           runtimeKind: 'openclaw-cli',
-          runtimeMode: opts.openclawLocal ? 'local' : 'gateway',
+          runtimeMode: openclawMode,
         },
       });
     } else if (runtimeKind === 'test-double') {
@@ -182,14 +197,16 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         }),
       });
     } else if (runtimeKind === 'pi-ai') {
-      // D-06: flags + policy fallback
-      // D-01: have flag → use flag, no flag → read from policy
       const stateDir = `${workspaceDir}/.state`;
-      let policyConfig: ReturnType<typeof resolveRuntimeConfig> | null = null;
+      let policyConfig: RuntimeConfig | null = null;
       try {
-        policyConfig = resolveRuntimeConfig(stateDir);
+        const configResult = resolveRuntimeConfig(stateDir);
+        if (!isRuntimeConfigError(configResult)) {
+          policyConfig = configResult;
+        } else {
+          console.warn(`[pd diagnose] workflows.yaml policy load failed: ${configResult.message}. Using CLI flags if provided.`);
+        }
       } catch (err: unknown) {
-        // workflows.yaml missing or malformed — warn and fall through to flag-based config
         const detail = err instanceof Error ? err.message : String(err);
         console.warn(`[pd diagnose] workflows.yaml policy load failed: ${detail}. Using CLI flags if provided.`);
       }

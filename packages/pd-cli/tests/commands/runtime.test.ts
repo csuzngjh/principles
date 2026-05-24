@@ -23,6 +23,15 @@ vi.mock('@principles/core/runtime-v2', () => ({
       supportsStreaming: false,
     },
   }),
+  resolveRuntimeConfig: vi.fn().mockReturnValue({
+    runtimeKind: 'pi-ai',
+    provider: 'test-provider',
+    model: 'test-model',
+    apiKeyEnv: 'TEST_KEY',
+    timeoutMs: 300000,
+    agentId: 'main',
+  }),
+  isRuntimeConfigError: vi.fn().mockReturnValue(false),
   PDRuntimeError: class PDRuntimeError extends Error {
     constructor(public category: string, message: string) {
       super(message);

@@ -33,6 +33,7 @@ vi.mock('@principles/core/runtime-v2', () => ({
     timeoutMs: 300000,
     agentId: 'main',
   }),
+  isRuntimeConfigError: vi.fn().mockReturnValue(false),
 }));
 
 import { handlePainRecord } from '../../src/commands/pain-record.js';

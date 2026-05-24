@@ -33,6 +33,15 @@ function formatTextOutput(summary: ProvenChannelBaselineSummary): string {
   lines.push(`OVERALL: ${icon} ${summary.status.toUpperCase()}`);
   lines.push('');
 
+  if (summary.inputValidationFailure) {
+    const ivf = summary.inputValidationFailure;
+    lines.push('Input Validation Failure:');
+    lines.push(`  reason: ${ivf.reason}`);
+    lines.push(`  message: ${ivf.message}`);
+    lines.push(`  nextAction: ${ivf.nextAction}`);
+    lines.push('');
+  }
+
   lines.push('Channel Results:');
   for (const ch of summary.channels) {
     lines.push(formatChannelResult(ch));

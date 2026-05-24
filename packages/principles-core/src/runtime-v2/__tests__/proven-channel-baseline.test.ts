@@ -18,6 +18,52 @@ import type { ChannelFixtureResult, MvpChannel } from '../proven-channel-baselin
 import { ActivationDispatcher } from '../activation/activation-dispatcher.js';
 import { PromptWriter, DeferArchiveWriter } from '../activation/low-risk-writers.js';
 import { RuleHostWriter } from '../activation/writers/rule-host-writer.js';
+import type { ApprovalQueueStore, ApprovalRecord, ApprovalEnqueueInput, ApprovalDecisionResult, ApprovalStats } from '../activation/activation-types.js';
+
+function makeInMemoryApprovalQueueStoreForTest(): ApprovalQueueStore {
+  const records = new Map<string, ApprovalRecord>();
+  let counter = 0;
+  return {
+    enqueue: async (input: ApprovalEnqueueInput, now: string) => {
+      const approvalId = `apr_test_${++counter}`;
+      const record: ApprovalRecord = {
+        approvalId,
+        artifactId: input.artifactId,
+        channel: input.channel,
+        riskLevel: input.riskLevel,
+        status: 'pending',
+        confidence: input.confidence,
+        requestedAt: now,
+        summary: input.summary,
+        triggerReason: input.triggerReason,
+      };
+      records.set(approvalId, record);
+      return record;
+    },
+    getById: async (id: string) => records.get(id) ?? null,
+    listPending: async () => [...records.values()].filter(r => r.status === 'pending'),
+    listAll: async () => [...records.values()],
+    countByStatus: async () => {
+      const stats: ApprovalStats = { pending: 0, approved: 0, rejected: 0, cancelled: 0 };
+      for (const r of records.values()) { stats[r.status]++; }
+      return stats;
+    },
+    approve: async (id: string, decidedBy: string, note?: string) => {
+      const r = records.get(id);
+      if (!r) return { ok: false, error: 'not_found' } as ApprovalDecisionResult;
+      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status } as ApprovalDecisionResult;
+      r.status = 'approved'; r.decidedAt = new Date().toISOString(); r.decidedBy = decidedBy; r.decisionNote = note;
+      return { ok: true, record: r } as ApprovalDecisionResult;
+    },
+    reject: async (id: string, decidedBy: string, reason: string) => {
+      const r = records.get(id);
+      if (!r) return { ok: false, error: 'not_found' } as ApprovalDecisionResult;
+      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status } as ApprovalDecisionResult;
+      r.status = 'rejected'; r.decidedAt = new Date().toISOString(); r.decidedBy = decidedBy; r.rejectionReason = reason;
+      return { ok: true, record: r } as ApprovalDecisionResult;
+    },
+  };
+}
 
 describe('Proven Channel Baseline (PRI-240)', () => {
   describe('prompt channel fixture', () => {
@@ -48,44 +94,53 @@ describe('Proven Channel Baseline (PRI-240)', () => {
 
       expect(result.channel).toBe('code_tool_hook');
       expect(result.evidenceSource).toContain('ActivationDispatcher');
-      expect(['passed', 'degraded', 'failed']).toContain(result.status);
+      expect(result.status).not.toBe('failed');
 
       if (result.status === 'passed') {
-        expect(['would_activate', 'activated']).toContain(result.activationDecision.decision);
         if (result.activationDecision.decision === 'would_activate' || result.activationDecision.decision === 'activated') {
           expect(result.activationDecision.activationId).toContain('act_code_');
           expect(result.activationDecision.action).toBe('code_tool_hook_shadow_activate');
           expect(result.activationDecision.targetRef).toContain('impl://');
         }
-        expect(result.evidence).toHaveProperty('gateDecision');
+
+        if (result.activationDecision.decision === 'queued_for_approval') {
+          expect(result.evidence).toHaveProperty('queueBehavior');
+          expect((result.evidence).queueBehavior).toBe('enqueued');
+        }
+
         expect(result.failureReason).toBeUndefined();
       }
 
-      if (result.status === 'degraded' || result.status === 'failed') {
+      if (result.status === 'degraded') {
         expect(result.failureReason).toBeTruthy();
         expect(result.nextAction).toBeTruthy();
       }
     });
 
-    it('returns degraded when dispatcher routes to approval queue', async () => {
+    it('returns queued_for_approval with proven evidence when dispatcher routes to approval queue', async () => {
       const artifact = makeRuleArtifact();
       const writers: InstanceType<typeof RuleHostWriter>[] = [new RuleHostWriter({ gateDeps: makeSandboxAlwaysPass() })];
+      const approvalStore = makeInMemoryApprovalQueueStoreForTest();
       const dispatcher = new ActivationDispatcher(
         { getArtifactById: async (id: string) => id === artifact.artifactId ? artifact : null },
         { getActivationStatus: async () => null, recordActivation: async () => { void 0; } },
-        { writers },
+        { writers, approvalQueueStore: approvalStore },
       );
       const decision = await dispatcher.dispatch({
         artifactId: artifact.artifactId,
         channel: 'code_tool_hook',
         rolloutDecision: 'require_approval',
         actor: { kind: 'system', source: 'rollout_reviewer' },
-        idempotencyKey: 'test-approval',
+        idempotencyKey: 'test-approval-proven',
         now: '2026-05-24T00:00:00.000Z',
         confirm: true,
       });
 
-      expect(['would_activate', 'queued_for_approval', 'refused']).toContain(decision.decision);
+      expect(decision.decision).toBe('queued_for_approval');
+      if (decision.decision === 'queued_for_approval') {
+        expect(decision.approvalId).toBeTruthy();
+        expect(decision.queuedAt).toBeTruthy();
+      }
     });
   });
 
@@ -214,10 +269,39 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       expect(result.unknowns).toEqual(['foo', 'bar']);
     });
 
-    it('handles empty string', () => {
+    it('handles empty string as no channels', () => {
       const result = parseChannels('');
       expect(result.channels).toEqual([]);
       expect(result.unknowns).toEqual([]);
+    });
+
+    it('handles comma-only string as no channels', () => {
+      const result = parseChannels(',');
+      expect(result.channels).toEqual([]);
+      expect(result.unknowns).toEqual([]);
+    });
+  });
+
+  describe('empty/invalid channel input must fail', () => {
+    it('computeProvenChannelStatus returns failed for empty results', () => {
+      expect(computeProvenChannelStatus([])).toBe('failed');
+    });
+
+    it('parseChannels with empty string produces no channels', () => {
+      const result = parseChannels('');
+      expect(result.channels).toHaveLength(0);
+    });
+
+    it('parseChannels with comma-only produces no channels', () => {
+      const result = parseChannels(',');
+      expect(result.channels).toHaveLength(0);
+    });
+
+    it('unknown channel must not be confused with prompt channel failure', () => {
+      const result = parseChannels('unknown_channel');
+      expect(result.channels).toEqual([]);
+      expect(result.unknowns).toEqual(['unknown_channel']);
+      expect(result.unknowns).not.toContain('prompt');
     });
   });
 

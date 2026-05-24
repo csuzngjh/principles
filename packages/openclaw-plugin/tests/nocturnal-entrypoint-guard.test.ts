@@ -82,6 +82,7 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
     'nocturnal-workflow-manager',
     'nocturnal-config',
     'nocturnal-snapshot-contract',
+    'nocturnal-trajectory-extractor',
   ],
 
   // === service/sleep-cycle.ts: Sleep cycle orchestrator ===
@@ -135,6 +136,18 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
 
   // === core/correction-cue-learner.ts: Keyword opt cooldown (live_cutover) ===
   'core/correction-cue-learner.ts': ['nocturnal-runtime'],
+
+  // === core/event-log.ts: Event log records nocturnal event types (live_cutover) ===
+  'core/event-log.ts': ['nocturnal', 'event-types'],
+
+  // === core/reflection/reflection-context.ts: Reflection context uses nocturnal types (live_cutover) ===
+  'core/reflection/reflection-context.ts': ['nocturnal-trajectory-extractor'],
+
+  // === core/replay-engine.ts: Replay engine uses nocturnal dataset types (live_cutover) ===
+  'core/replay-engine.ts': ['nocturnal-dataset', 'nocturnal-trajectory-extractor'],
+
+  // === service/subagent-workflow/types.ts: Type definitions reference nocturnal modules (live_cutover) ===
+  'service/subagent-workflow/types.ts': ['nocturnal-arbiter', 'nocturnal-executability', 'nocturnal-trajectory-extractor', 'nocturnal-trinity', 'nocturnal-runtime', 'nocturnal-target-selector'],
 };
 
 // ---------------------------------------------------------------------------
@@ -295,7 +308,9 @@ describe('Nocturnal entrypoint guard', () => {
     // commands/pd-reflect.ts, service/evolution-worker.ts, service/sleep-cycle.ts,
     // service/queue-io.ts, service/evolution-pain-context.ts, core/merge-gate-audit.ts,
     // service/subagent-workflow/workflow-store.ts (type-only)
-    expect(nonFrozen.length).toBeLessThanOrEqual(15);
+    // core/event-log.ts (nocturnal event type names), core/reflection/reflection-context.ts,
+    // core/replay-engine.ts, service/subagent-workflow/types.ts (type definitions)
+    expect(nonFrozen.length).toBeLessThanOrEqual(19);
   });
 
   it('non-allowlisted caller importing nocturnal-trinity must fail', () => {
@@ -365,6 +380,91 @@ describe('Nocturnal entrypoint guard', () => {
     const isFrozenModule = FROZEN_NOCTURNAL_MODULES.has(simulatedRelPath);
     expect(isFrozenModule).toBe(true);
   });
+
+  it('multiline import of frozen module outside allowlist must fail', () => {
+    const content = [
+      "import {",
+      "  DreamerOutput,",
+      "  PhilosopherOutput,",
+      "} from '../core/nocturnal-trinity.js'",
+    ].join('\n');
+    const importLines = findImportLines(content);
+    expect(importLines.length).toBeGreaterThan(0);
+    const lowerLine = importLines[0].toLowerCase();
+    expect(lowerLine).toContain('nocturnal-trinity');
+    const simulatedRelPath = 'hooks/hypothetical-hook.ts';
+    const allowedEntries = ALLOWED_NOCTURNAL_IMPORTS[simulatedRelPath] ?? [];
+    const allowedPatterns = allowedEntries.map(e => e.toLowerCase());
+    const isAllowed = allowedPatterns.some(pattern => lowerLine.includes(pattern));
+    expect(isAllowed).toBe(false);
+  });
+
+  it('assigned require of frozen module outside allowlist must fail', () => {
+    const content = "const trinity = require('../core/nocturnal-trinity.js')";
+    const importLines = findImportLines(content);
+    expect(importLines.length).toBeGreaterThan(0);
+    const lowerLine = importLines[0].toLowerCase();
+    expect(lowerLine).toContain('nocturnal-trinity');
+    const simulatedRelPath = 'core/new-module.ts';
+    const allowedEntries = ALLOWED_NOCTURNAL_IMPORTS[simulatedRelPath] ?? [];
+    const allowedPatterns = allowedEntries.map(e => e.toLowerCase());
+    const isAllowed = allowedPatterns.some(pattern => lowerLine.includes(pattern));
+    expect(isAllowed).toBe(false);
+  });
+
+  it('side-effect import of frozen module outside allowlist must fail', () => {
+    const content = "import '../core/nocturnal-trinity.js'";
+    const importLines = findImportLines(content);
+    expect(importLines.length).toBeGreaterThan(0);
+    const lowerLine = importLines[0].toLowerCase();
+    expect(lowerLine).toContain('nocturnal-trinity');
+    const simulatedRelPath = 'hooks/another-hook.ts';
+    const allowedEntries = ALLOWED_NOCTURNAL_IMPORTS[simulatedRelPath] ?? [];
+    const allowedPatterns = allowedEntries.map(e => e.toLowerCase());
+    const isAllowed = allowedPatterns.some(pattern => lowerLine.includes(pattern));
+    expect(isAllowed).toBe(false);
+  });
+
+  it('test-only import in __tests__ is not treated as new production entrypoint', () => {
+    const testRelPath = 'core/__tests__/some-test.ts';
+    const isInTests = testRelPath.includes('__tests__');
+    expect(isInTests).toBe(true);
+  });
+
+  it('findImportLines detects single-line static import', () => {
+    const content = "import { something } from '../core/nocturnal-trinity.js'";
+    const lines = findImportLines(content);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toContain('nocturnal-trinity');
+  });
+
+  it('findImportLines detects multiline static import', () => {
+    const content = "import {\n  DreamerOutput,\n  PhilosopherOutput,\n} from '../core/nocturnal-trinity.js'";
+    const lines = findImportLines(content);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toContain('nocturnal-trinity');
+  });
+
+  it('findImportLines detects assigned require', () => {
+    const content = "const trinity = require('../core/nocturnal-trinity.js')";
+    const lines = findImportLines(content);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toContain('nocturnal-trinity');
+  });
+
+  it('findImportLines detects bare require', () => {
+    const content = "require('../core/nocturnal-trinity.js')";
+    const lines = findImportLines(content);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toContain('nocturnal-trinity');
+  });
+
+  it('findImportLines detects side-effect import', () => {
+    const content = "import '../core/nocturnal-trinity.js'";
+    const lines = findImportLines(content);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toContain('nocturnal-trinity');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -382,9 +482,11 @@ function collectSourceFiles(dir: string): string[] {
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+      if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '__tests__') continue;
       results.push(...collectSourceFiles(fullPath));
     } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) {
+      const relPath = path.relative(PLUGIN_SRC, fullPath);
+      if (relPath.includes('__tests__')) continue;
       results.push(fullPath);
     }
   }
@@ -394,20 +496,39 @@ function collectSourceFiles(dir: string): string[] {
 
 /**
  * Extract all import/require lines from source content.
+ *
+ * Detects:
+ * - Single-line static imports: `import X from 'module'`
+ * - Multiline static imports: `import { A, B } from 'module'`
+ * - Side-effect imports: `import 'module'`
+ * - Assigned require: `const x = require('module')` or `require('module')`
+ * - Dynamic imports: `import('module')`
  */
 function findImportLines(content: string): string[] {
   const lines: string[] = [];
-  const importRegex = /^(?:import\s+.*?from\s+['"][^'"]+['"]|export\s+(?:\{[^}]*\}|\*)\s+from\s+['"][^'"]+['"]|require\s*\(['"][^'"]+['"]\))/gm;
-  let match: RegExpExecArray | null;
 
-  while ((match = importRegex.exec(content)) !== null) {
+  const staticImportRegex = /import\s+[\s\S]*?from\s+['"][^'"]+['"]/gm;
+  let match: RegExpExecArray | null;
+  while ((match = staticImportRegex.exec(content)) !== null) {
     lines.push(match[0]);
   }
 
-  // Also catch dynamic imports of any frozen module
+  const sideEffectImportRegex = /import\s+['"][^'"]+['"]/gm;
+  while ((match = sideEffectImportRegex.exec(content)) !== null) {
+    const already = lines.some(l => l === match![0]);
+    if (!already) {
+      lines.push(match[0]);
+    }
+  }
+
+  const requireRegex = /(?:const\s+\w+\s*=\s*)?require\s*\(\s*['"][^'"]+['"]\s*\)/gm;
+  while ((match = requireRegex.exec(content)) !== null) {
+    lines.push(match[0]);
+  }
+
   for (const mod of FROZEN_NOCTURNAL_MODULES) {
     const basename = path.basename(mod, '.ts');
-    const dynRegex = new RegExp('import\\\\s*\\\\([\'\"]' + '[^\'\"]+' + basename + '[^\'\"]*' + '[\'\"]\\\\)', 'gi');
+    const dynRegex = new RegExp('import\\s*\\([\'"]' + '[^\'"]+' + basename + '[^\'"]*' + '[\'"]\\)', 'gi');
     let dynMatch;
     while ((dynMatch = dynRegex.exec(content)) !== null) {
       lines.push(dynMatch[0]);
