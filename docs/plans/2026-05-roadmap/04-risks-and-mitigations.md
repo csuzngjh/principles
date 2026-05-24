@@ -222,3 +222,21 @@
 2. **P2 风险**：本登记册 + 团队 sync 提及
 3. **P1 风险**：本登记册 + 团队 sync 提及 + 在 issue 中明确标注
 4. **P0 风险**：触发后立即停止当前阶段，专门 issue 处理
+
+
+---
+
+## Phase 1C/1D 新增风险（v2.0 — 2026-05-24）
+
+源自 ADR-0013 与 06-ahe-informed-architecture-review.md。
+
+| ID | 风险 | 评级 | 应对 |
+|----|------|------|------|
+| R-16 | Attribution verdict 不可靠（窗口太短 / pain category 映射错） | P1 | MVP 只做 auto-archive 不做 auto-promote；至少 50 个 verdict 与人工 sample 一致再扩张 |
+| R-17 | LearningSummary 注入让 Diagnostician 偏向"上次说过的"，缺乏多样性 | P2 | summary 是 evidence 而非命令；prompt 强制要求"如果与历史一致请引用，如果不一致请说明" |
+| R-18 | Bundled vs Evolved 分离时，存量 ledger 缺 provenance 字段 | P2 | 默认 evolved（最严格）；提供 backfill CLI 一次性纠正；缺失字段不会自动归档 |
+| R-19 | Activation Probation Window 让用户感觉"approve 了但没生效" | P2 | UI 明确显示"已批准 - 试运行中（剩余 N 次工具调用）"；提供"立即提升"快捷入口（高风险通道仍需二次审批）|
+| R-20 | Phase 1C 抢先 Phase 1B P2 (Nocturnal 删除)，导致返工 | P2 | Phase 1B P2 (PRI-227~231) 与 Phase 1C 可并行：前者由 Symphony / 静态 inventory；后者由强 AI |
+| R-21 | Attribution Pipeline 增加 SQLite 写入压力 | P3 | append-only + 周期归档；监控 db 大小；超出阈值时压缩老 attribution 为 monthly summary |
+| R-22 | "PRRR 是唯一结果指标"被误读为忽视其他维度（如 token 节省） | P3 | KPI 树明确把 token / context / adherence 作为 leading indicator；PRRR 是 lagging |
+| R-23 | Phase 2 BALM/LRAS/GAP/MissionScheduler 同期立项已存在 ADR | P2 | ADR-0008/0009/0010/0011 不撤销，但路线图明确 Phase 2 准入门槛（PRRR 数据 + 50 verdict + Phase 1B P2 完成）|

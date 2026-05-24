@@ -1,65 +1,67 @@
 # PD 项目路线图：2026-05 版
 
-> **状态**: Active / realigned for Phase 1B retirement
-> **更新日期**: 2026-05-23
-> **基准代码**: `origin/main` = `6d8fa62e`（PRI-225 / PR #693 已合并）
-> **决策修订**: [ADR-0012](../../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md)
+> **状态**: Active / **MVP-First Track**
+> **更新日期**: 2026-05-24（v3.0 — MVP-First Pivot）
+> **基准代码**: `origin/main` = `6d8fa62e`
+> **主决策**:
+> - **[ADR-0014](../../adr/0014-mvp-first-strategy-and-product-pivot.md)（MVP-First Strategy）★ 当前主决策**
+> - [ADR-0012](../../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md)（Runtime V2-only，仍生效）
+> - [ADR-0013](../../adr/0013-attribution-pipeline-and-decision-observability.md)（已 Superseded by ADR-0014, deferred）
+> **执行文档**: [`07-mvp-first-pivot.md`](./07-mvp-first-pivot.md)
+> **被推迟工作的重启条件**: [`../post-mvp-conditional-roadmap.md`](../post-mvp-conditional-roadmap.md)
 
 ## 当前结论
 
-PD 已不再处于“先证明 Runtime V2 是否可行”的阶段。已经完成的 baseline、live validation、repair、integrity 和 RuleHost 安全工作，足以把 Runtime V2 定为唯一前进路径。
+PD 进入 **MVP-First 阶段**。所有架构演进暂停，目标是在 **4-6 周内邀请第一个真实种子客户**。
 
-本路线图现在聚焦两项目标：
+**产品定位重新校准**：PD 不治理工具级错误（这是 OpenClaw / Claude Code 的职责），PD 治理的是 **AI agent 的"行为品格"**——跨会话、跨任务的稳定性格性偏差。
 
-1. **闭合真实价值循环**：补齐人工 rejection feedback，并持续用真实 workspace/UAT 验证 pain -> internalization -> activation/feedback。
-2. **快速减少维护面**：停止保留重复的 OpenClaw Nocturnal/idle/night 执行链，先切断生产入口，再删除 legacy 实现和只保护该路径的测试。
-
-## 决策变化：为什么现在要删除 legacy
-
-旧策略将 `nocturnal-trinity.ts`、`nocturnal-arbiter.ts`、`nocturnal-service.ts` 标记为冻结，是为了在 Runtime V2 未证明前避免破坏唯一可能的运行路径。
-
-现在证据改变了：
-
-- Runtime V2 的核心 pipeline、synthetic baseline、live intake、repair/recovery 和安全守卫已落地。
-- legacy 主执行文件仍约 4,800 行，并且 `EvolutionWorkerService` 与 Nocturnal 命令仍会造成第二控制平面。
-- 双轨代码增加 CI 时间、评审范围和故障定位歧义。
-- PD 没有需要长期兼容的外部用户；继续保留重复执行链的收益低于成本。
-- OpenClaw 空闲/夜间触发不再是产品需求。PD 内置代理应由 PD 的配置、SDK、operator command 或未来 scheduler 驱动，而不是与 gateway idle 状态绑定。
-
-因此，“冻结”现在只表示**不再向 legacy 增加功能**，不表示永久保留。退役工作本身是 Phase 1B 的主线。
+**MVP 故事 A'**：把零散教训沉淀成稳定品格。演示链路覆盖 4 个激活通道（prompt / skill / RuleHost / defer_archive），保住 PD 与"prompt 模板管理器"的本质区别。
 
 ## 文档导航
 
 | 文档 | 用途 |
 |------|------|
 | [01-current-state.md](./01-current-state.md) | 当前已合并能力与残留负债 |
-| [02-roadmap.md](./02-roadmap.md) | 新 Phase 顺序、依赖与退出标准 |
-| [03-linear-sync-plan.md](./03-linear-sync-plan.md) | Linear 更新/新建/取消清单 |
-| [04-risks-and-mitigations.md](./04-risks-and-mitigations.md) | 风险登记，部分 IdleTrigger 条目待按 ADR-0012 清理 |
-| [05-integrated-stability-and-refactoring-blueprint.md](./05-integrated-stability-and-refactoring-blueprint.md) | 已完成稳定性基线及新退役策略 |
+| [02-roadmap.md](./02-roadmap.md) | MVP Track 总图 + Phase 状态 |
+| [03-linear-sync-plan.md](./03-linear-sync-plan.md) | Linear 工单同步（部分被 07 取代）|
+| [04-risks-and-mitigations.md](./04-risks-and-mitigations.md) | 风险登记（含 MVP Track 风险）|
+| [05-integrated-stability-and-refactoring-blueprint.md](./05-integrated-stability-and-refactoring-blueprint.md) | 稳定性基线参考 |
+| ~~[06-ahe-informed-architecture-review.md](./06-ahe-informed-architecture-review.md)~~ | **Superseded by 07**；保留作历史档案 |
+| **[07-mvp-first-pivot.md](./07-mvp-first-pivot.md) ★** | **MVP-First 当前执行文档** |
+| [`../post-mvp-conditional-roadmap.md`](../post-mvp-conditional-roadmap.md) ★ | 被推迟工作的重启条件清单 |
 
 ## 阶段状态
 
 | 阶段 | 状态 | 说明 |
 |------|------|------|
-| Phase 0: low-risk pipeline | Done | Pain -> activation 的基础路径已验证 |
-| Phase 1A: L2 / RuleHost safety | Functionally done | RuleHostWriter、sandbox/gate、approval UI/context、full trace/refiner 已落地 |
-| Phase 1B: stability + runtime consolidation | In progress | 206-225 稳定性主线已完成；下一主线是 legacy/idle/plugin 退役 |
-| Phase 1C: feedback loop | Partial | Approval UI 已完成；`PRI-148` RejectionFeedback 仍需实施 |
-| Phase 2+ | Hold | 仅允许整理定义；在 Phase 1 价值闭环和退役完成前不扩建 |
+| Phase 0: low-risk pipeline | Done | Pain → Activation 基础路径已验证 |
+| Phase 1A: L2 / RuleHost safety | Done | RuleHostWriter / sandbox / approval 已落地 |
+| Phase 1B P1: stability baseline | Done | PRI-200~225 完成 |
+| Phase 1B P2: Nocturnal retirement | In progress | PRI-227~231 作为 MVP 期减法继续 |
+| ~~Phase 1C: value loop closure~~ | Cancelled / Deferred | ADR-0014 取消；重启条件见 post-mvp §1 |
+| ~~Phase 1D: lean foundations~~ | Cancelled / Deferred | 同上 |
+| **MVP Track (Week 1-6)** | **Active** | **4 通道演示 + 种子客户邀请** |
+| Phase 2+ (BALM/LRAS/GAP/MissionScheduler) | Hold | 准入门槛改为外部反馈驱动 |
 
 ## 立即执行顺序
 
-1. `PRI-226`：路线图/ADR/Linear 对齐（本次文档工作）。
-2. `PRI-148`：RejectionFeedback 闭环，确保人工拒绝能进入新一轮学习。
-3. Runtime V2-only retirement sequence：显式调度/config boundary -> EvolutionWorker/Nocturnal cutover -> 历史读取隔离 -> 删除执行代码 -> 测试收缩。
-4. `PRI-118`：更新为 trajectory evidence I/O boundary，支持唯一 Runtime V2 路径的可观测性。
-5. `PRI-154`：更新为 Runtime V2 pipeline event logging，不再补 legacy evolution pipeline。
+1. ✅ ADR-0014 + post-mvp-conditional-roadmap + 07-mvp-first-pivot 已写
+2. ✅ ADR-0013 / 06-评审 / SD-v2.0 顶部 Superseded 注记
+3. ✅ 02-roadmap.md 修订（删除 Phase 1C/1D 主线）
+4. ⏳ README.md（本文件）
+5. ⏳ AGENTS.md 修订（MVP 三问 + 三档分类）
+6. ⏳ Linear: cancel PRI-233 / PRI-235 / PRI-236
+7. ⏳ Linear: PRI-232 改 staleness-only 极小版
+8. ⏳ Linear: PRI-234 改 hold + 加注重启条件
+9. ⏳ Linear: 创建 PRI-MVP-1 至 MVP-15
 
-## AI 执行纪律
+## AI 执行纪律（v3.0 强化）
 
-- 开工前读取 `AGENTS.md`、`CLAUDE.md`、`docs/ERROR_EXPERIENCE_HANDBOOK.md` 和 ADR-0012。
-- 若 issue 提到新增 Nocturnal 执行、OpenClaw idle/night scheduling 或保留双轨，必须停止并要求修订 issue。
-- legacy retirement PR 只能按“切 caller -> 验证 -> 删除”顺序，不得先删除仍有生产引用的文件。
+- 开工前读取 `AGENTS.md`、`CLAUDE.md`、`docs/ERROR_EXPERIENCE_HANDBOOK.md`、`ADR-0014`、`07-mvp-first-pivot.md`、`post-mvp-conditional-roadmap.md`。
+- 任何 issue 引用 ADR-0013 / 06-评审 / SD-v2.0 / Phase 1C/1D 要求"现在实施"，必须停止并核对 ADR-0014 与 post-mvp-conditional-roadmap.md 的重启条件。
+- 每个新 issue 必须答 **MVP 三问**：不做会怎样 / 怎么观察 / 怎么关闭。答不出 issue 拒收。
+- 每个新功能 commit 前必须先在 `feature-flags.yaml` 注册，无 flag 注册的 PR 拒收。
+- 任何"为未来 Phase 铺路"的抽象、"为完整性"添加的组件、"为优雅"做的重构，全部要求维护者本人确认。
+- legacy retirement PR 只能按"切 caller → 验证 → 删除"顺序，不得先删除仍有生产引用的文件。
 - 删除代码的 PR 必须同时删除无价值的重复测试，并说明保留哪些迁移/E2E/chaos tests。
-- 不将新的 host/workspace 发现逻辑塞入 plugin；配置/调度应向 PD-owned SDK/config boundary 收敛。
