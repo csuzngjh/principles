@@ -1,100 +1,131 @@
-# 02 - 路线图：Runtime V2 收敛与价值闭环
+# 02 - 路线图：MVP-First Track（Runtime V2 收敛 + 种子客户验证）
 
-> **更新日期**: 2026-05-23
+> **更新日期**: 2026-05-24（v3.0 — MVP-First Pivot）
 > **基准**: `origin/main` = `6d8fa62e`
-> **主决策**: [ADR-0012](../../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md)
+> **主决策**:
+> - [ADR-0014](../../adr/0014-mvp-first-strategy-and-product-pivot.md) **★ MVP-First Strategy（当前主决策）**
+> - [ADR-0012](../../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md)（Runtime V2-only，仍生效）
+> - [ADR-0013](../../adr/0013-attribution-pipeline-and-decision-observability.md)（已 Superseded by ADR-0014, deferred）
+> **执行文档**: [`07-mvp-first-pivot.md`](./07-mvp-first-pivot.md)
+> **被推迟工作的重启条件**: [`post-mvp-conditional-roadmap.md`](../post-mvp-conditional-roadmap.md)
 
-## 1. Phase 状态
+## 0. 一句话状态
 
-| Phase | 状态 | 当前结论 |
-|-------|------|----------|
-| Phase 0: low-risk E2E | Done | 已打通并有真实/合成验证 |
-| Phase 1A: L2 / RuleHost safety | Done for implementation | 保留运行验证，不继续扩展基础设施 |
-| Phase 1B: stability and consolidation | In progress | 稳定性/chaos 交付完成大部；转入 legacy/idle/plugin 退役 |
-| Phase 1C: human feedback | Partial | UI 已有；RejectionFeedback 未闭环 |
-| Phase 2+ | Paused | 待 Phase 1 的单一路径与真实价值闭环成立 |
+> **PD 进入 MVP 阶段。所有架构演进暂停。4-6 周内邀请第一个真实种子客户。**
 
-## 2. Phase 1B 新主线：删除重复执行系统
+## 1. Phase 状态总表
 
-目标不是“把 legacy 优雅保养好”，而是**尽快只剩一条可诊断的 Runtime V2 路径**。
+| Phase | 状态 | 说明 |
+|-------|------|------|
+| Phase 0: low-risk E2E | Done | Pain → Activation 基础路径已验证 |
+| Phase 1A: L2 / RuleHost safety | Done | RuleHostWriter / sandbox / approval 已落地 |
+| Phase 1B P1: stability baseline | Done | PRI-200~225 完成 |
+| Phase 1B P2: Nocturnal retirement | In progress | PRI-227~231，作为 MVP 期减法继续 |
+| ~~Phase 1C: value loop closure (Attribution)~~ | **Cancelled / Deferred** | ADR-0014 取消；重启条件见 post-mvp §1 |
+| ~~Phase 1D: lean foundations~~ | **Cancelled / Deferred** | 同上；重启条件见 post-mvp §2-§5 |
+| **MVP Track** | **Active** | **Week 1-6，故事 A' 验证** |
+| Phase 2+ (BALM/LRAS/GAP/MissionScheduler) | Hold | 准入门槛改为外部反馈驱动；见 post-mvp §7-§10 |
 
-```text
-ADR / backlog alignment (PRI-226)
-        |
-        +--> PD config + SDK/operator scheduling boundary
-        |           |
-        |           v
-        +--> EvolutionWorker / NocturnalWorkflow cutover
-                    |
-          +---------+---------+
-          v                   v
- historical read/export   commands and execution retirement
- isolation                     |
-                               v
-                       test/CI contraction
+## 2. MVP Track 6 周路线图
+
+详见 [07-mvp-first-pivot.md §5](./07-mvp-first-pivot.md)。摘要：
+
+```
+Week 1-2 减法 + 4 通道闭环
+  PRI-MVP-1  scope decision (docs)
+  PRI-MVP-2  cancel/defer 旧 issues (Linear)
+  PRI-MVP-3  feature flags 系统 + MVP-Quiet 关闭
+  PRI-MVP-4  4 通道 synthetic 冒烟
+  PRI-MVP-5  AGENTS.md "MVP 三问"
+  PRI-MVP-6  Nocturnal 退役继续（PRI-227 + PRI-230）
+
+Week 3-4 用户旅程 + 4 通道演示
+  PRI-MVP-7  SkillFileWriter 实施
+  PRI-MVP-8  pd-console 4 通道审批 UI
+  PRI-MVP-9  pd-console 三页化（Pain / Principle / Approval）
+  PRI-MVP-10 Demo workspace + 故事 A' 4 通道演示
+
+Week 5-6 安装 + 邀请
+  PRI-MVP-11 pd-cli 一键安装
+  PRI-MVP-12 GETTING-STARTED 用户视角重写
+  PRI-MVP-13 故事 A' 录屏
+  PRI-MVP-14 多环境冒烟（Win/Mac/Linux）
+  PRI-MVP-15 邀请第一个种子客户
 ```
 
-### 2.1 必须执行的退役切片
+## 3. MVP-Core / MVP-Quiet / MVP-Gone 清单
 
-| 顺序 | 工作 | 目的 | 执行风险 |
-|------|------|------|----------|
-| 1 | PRI-226 roadmap/ADR/Linear alignment | 防止代理按旧设计继续造 idle/nocturnal 功能 | Docs only |
-| 2 | PD-owned config/SDK scheduling boundary | 允许显式调度，不依赖 OpenClaw idle | High |
-| 3 | EvolutionWorker/Nocturnal workflow cutover | 删除 live legacy caller | High |
-| 4 | Historical Nocturnal read/export isolation | 保留确有数据价值的只读能力 | Medium |
-| 5 | Delete legacy execution and commands | 删除 Trinity/Arbiter/Service/Artificer 重复执行路径 | High |
-| 6 | Contract/test/CI contraction | 删除只保护已退役路径的测试并量化 CI 改善 | Medium |
+详见 [ADR-0014 §2.4 / §2.5 / §2.6](../../adr/0014-mvp-first-strategy-and-product-pivot.md)。摘要：
 
-### 2.2 退出标准
+**MVP-Core**: Pain capture / Diagnostician / CandidateIntake / Dreamer + Scribe + Artificer / 4 个激活通道（含待建 SkillFileWriter）/ Approval Queue / pd-console 三页 / pd-cli 核心命令。
 
-- OpenClaw plugin 不再启动 Nocturnal business execution 或 idle/night scheduler。
-- Runtime V2 可通过 PD-owned config/SDK/operator entrypoint 启动、排队、恢复和观察。
-- `nocturnal-trinity.ts`、`nocturnal-arbiter.ts`、`nocturnal-artificer.ts`、`nocturnal-service.ts` 的重复执行逻辑已删除。
-- 历史读取如保留，模块为 read-only、有限、独立且有数据存在证据。
-- 删除对应 obsolete tests 后，保留的 Runtime V2 E2E/chaos/migration tests 全部通过，并记录 CI 时间变化。
+**MVP-Quiet（关闭，留代码）**: Philosopher / Evaluator / RolloutReviewer / GFI / Focus History / Thinking OS / Empathy keyword / empathy_inferred / Shadow Observation / Local Worker Routing / Central Sync / message-sanitize / Trajectory Collector（评估）。
 
-## 3. Phase 1C：必须并行推进的价值闭环
+**MVP-Gone（删除/归档）**: Nocturnal 全套 / IdleTrigger / sleep cycle / EvolutionWorker / Trainer / model_training。
 
-`PRI-148` 不因 legacy retirement 而失去优先级。没有 rejection feedback，系统即使成功生成规则，也无法从用户否决中学习。
+## 4. MVP Track 风险
 
-| 工作 | 依赖 | 结果 |
-|------|------|------|
-| PRI-148 RejectionFeedback Service | 已有 ApprovalQueue/UI 与 RuleHost 基础 | reject -> structured feedback -> new Dreamer task / unresolvable outcome |
-| Production feedback-loop UAT（待创建） | PRI-148 | 在真实 workspace 证明 rejection 反馈链 |
+详见 07-mvp-first-pivot.md §6。要点：
 
-## 4. 保留但必须重写范围的旧 issues
+- 风险 1：4 通道演示比单通道难 3-5 倍 → 优先砍 skill 通道，3 → 2 通道是最低底线
+- 风险 2：RuleHost / Skill 概念门槛高 → MVP-13 录屏视频不能省，用客户真实规则演示
+- 风险 5：MVP-Quiet 关闭可能 break 现有功能 → 关闭后立即跑完整测试套件
 
-| Issue | 处理 |
-|-------|------|
-| PRI-118 | 保留；对齐 SourceTrace/FullTrace 已完成事实，只负责 plugin trajectory I/O facade / evidence boundary |
-| PRI-119 | 改为执行 cutover，不再仅 inventory 或“保持用户行为不变”地长期保留双轨 |
-| PRI-120 | 后置；FocusHistory 不阻塞 legacy execution 退役 |
-| PRI-150 | 拆分为 schema inventory + 小规模迁移，不做 bulk move |
-| PRI-154 | 改为 Runtime V2 pipeline event visibility，不再补充 legacy evolution 事件 |
-| PRI-162 | 改为 pure config contract + adapter loading；禁止 core 读 YAML/env/filesystem |
-| PRI-184 | 改为退役和关键 contract 的 missing guard audit；不增加无意义占位测试 |
+## 5. 旧路线图段落处置
 
-## 5. 明确取消/取代
+以下段落已被本文件取代，保留作历史档案查阅：
 
-| 项目 | 理由 |
-|------|------|
-| OpenClaw IdleTrigger/night-mode 继续开发 | 产品不再需要，且增加插件耦合与复杂状态 |
-| PRI-149 旧标题所表达的“已完成删除” | 交付内容实际为 CLI boundary migration，删除仍需新的 cutover 序列 |
-| PRI-175 至 PRI-181 原样实施 | 大多围绕即将退役的 legacy workflow；需取消或重定义 |
-| Phase 2 MissionScheduler 基于 IdleTrigger 的描述 | 调度器应 PD-owned 且 host-agnostic，不能以 idle trigger 为入口 |
+- ~~§3 Phase 1C: 必须并行推进的价值闭环~~ → 全部 cancelled / deferred（PRI-148 进 Phase 2 待外部反馈）
+- ~~§4 Phase 1D: 精简底座~~ → 全部 cancelled / deferred
+- ~~§5 保留但必须重写范围的旧 issues~~ → 部分仍生效（PRI-118 / PRI-120 / PRI-121），见 §6
+- ~~§6 明确取消/取代~~ → 仍生效，转入 ADR-0014 Anti-pattern 列表
+- ~~§7 Phase 准入门槛~~ → 已被 ADR-0014 §3 / 07 §9 取代
+- ~~§8 Issue 分配建议~~ → 已被 07 §5 取代
 
-## 6. Issue 分配建议
+## 6. 仍生效的非 MVP issues
 
-手工强 AI：
+以下 issues 不属于 MVP Track 但**仍可作为减法 / 守护工作**继续：
 
-- PRI-148。
-- 配置/SDK 调度 boundary。
-- EvolutionWorker/Nocturnal workflow cutover。
-- legacy execution 删除与真实 workspace smoke。
+| Issue | 状态 | 处置 |
+|-------|------|------|
+| PRI-227 | Todo | MVP 期继续，作为 PRI-MVP-6 的一部分 |
+| PRI-228 | Backlog | MVP 后再评估 |
+| PRI-229 | Backlog | MVP 后再评估 |
+| PRI-230 | Backlog | MVP 期继续，作为 PRI-MVP-6 的一部分 |
+| PRI-231 | Backlog | MVP 后再评估（CI 收缩）|
+| PRI-118 | Todo | 降级为 backlog；不在 MVP 路径，但 trajectory facade 仍有 long-term 价值 |
+| PRI-119 | Todo | MVP 期可执行（Nocturnal cutover 的关键步骤）|
+| PRI-148 | Todo | 降级为 backlog；MVP 用 Approval reject 简单路径，RejectionFeedback 待外部需求 |
+| PRI-150 | Backlog | MVP 后再评估 |
+| PRI-154 | Backlog | MVP 后再评估 |
+| PRI-162 | Todo | MVP 期可执行（PD-owned scheduling 是减法）|
+| PRI-183 | Todo | docs only，MVP 期完成 |
 
-Symphony 可处理：
+## 7. 不再分配 / 不再优先
 
-- Docs/ADR 对齐后续检查。
-- 静态 forbidden-import guards。
-- 退役后 CI/test inventory 与删除候选报告。
-- PRI-183 文档修订（先更新其描述）。
+| 不做的事 | 理由 |
+|---------|------|
+| 完整实施 ADR-0006 全 5 通道 | model_training 通道不在 MVP；其他 4 个通道已 MVP-Core |
+| BALM / LRAS / GAP / MissionScheduler 任何实施 | 等外部反馈触发；见 post-mvp §7-§10 |
+| Attribution / WorkspaceLearningSummary / Provenance / Probation Window | 同上；见 post-mvp §1-§5 |
+| 完整 7-Runner 链路投资 | Philosopher / Evaluator / RolloutReviewer 在 MVP-Quiet；等外部反馈 |
+| 跨 workspace 任何功能 | MVP 单 workspace |
+| 任何"为下个 Phase 铺路"的抽象 | AGENTS.md "MVP 三问" 拦截 |
+
+## 8. 立即执行（按顺序）
+
+详见 [07-mvp-first-pivot.md §10](./07-mvp-first-pivot.md)。当前进度：
+
+1. ✅ ADR-0014 已写
+2. ✅ post-mvp-conditional-roadmap.md 已写
+3. ✅ 07-mvp-first-pivot.md 已写
+4. ✅ ADR-0013 顶部 Superseded 注记
+5. ✅ 06-评审 顶部 Superseded 注记
+6. ✅ PD_System_Dynamics_Model.md v2.0 deferred 注记
+7. ✅ 02-roadmap.md 修订（本文件）
+8. ⏳ README.md 修订
+9. ⏳ AGENTS.md 修订（MVP 三问 + 三档分类）
+10. ⏳ Linear: cancel PRI-233 / PRI-235 / PRI-236
+11. ⏳ Linear: PRI-232 改 staleness-only
+12. ⏳ Linear: PRI-234 改 hold
+13. ⏳ Linear: 创建 PRI-MVP-1 至 MVP-15

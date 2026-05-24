@@ -1,5 +1,57 @@
 # AGENTS.md — OpenAI Codex CLI Instructions
 
+## ⚠️ MVP-First Stage — Read First (2026-05-24)
+
+**PD is in MVP-First stage** (ADR-0014). Goal: invite the first real seed customer within 4-6 weeks. **All architectural expansion is paused.** Before starting ANY work:
+
+1. Read [`docs/adr/0014-mvp-first-strategy-and-product-pivot.md`](docs/adr/0014-mvp-first-strategy-and-product-pivot.md) (MVP-First Strategy)
+2. Read [`docs/plans/2026-05-roadmap/07-mvp-first-pivot.md`](docs/plans/2026-05-roadmap/07-mvp-first-pivot.md) (execution doc)
+3. Read [`docs/plans/post-mvp-conditional-roadmap.md`](docs/plans/post-mvp-conditional-roadmap.md) (deferred work restart conditions)
+
+If a Linear issue or earlier doc instructs you to implement **Attribution Pipeline / WorkspaceLearningSummary / Probation Window / BALM / LRAS / GAP / MissionScheduler / Trainer / model_training channel / pre-existing Phase 1C or Phase 1D work**, **STOP** and verify against post-mvp-conditional-roadmap.md whether the restart conditions are met. They almost certainly are not.
+
+### MVP Three Questions (mandatory for every new issue)
+
+Before opening a new Linear issue or starting a non-MVP-listed PR, answer all three:
+
+1. **What happens if we DON'T do this?** Will anyone bring it up again 30 days from now? If you cannot answer, the issue is rejected.
+2. **How is it observed?** After implementation, how does the user verify it works? UI? CLI command? Log? If there is no observable path, the issue is rejected.
+3. **How is it disabled?** If after deployment we discover it's wrong, what's the disable path? Feature flag? PR revert? **Anything that requires PR revert MUST ship with a feature flag from day one.**
+
+### MVP-Core / MVP-Quiet / MVP-Gone Triage
+
+Every PD subsystem falls into one of three buckets (see ADR-0014 §2.4-§2.6):
+
+- **MVP-Core**: required for story A' (4-channel demo). Touch with care.
+- **MVP-Quiet**: code remains, but feature flag is **default off** and not surfaced in UI / docs. After 6 months of no activation, becomes MVP-Gone.
+- **MVP-Gone**: deleted or archived to reduce code volume.
+
+**Adding a new feature to MVP-Core REQUIRES maintainer's explicit approval.** Default for unsolicited new code is MVP-Quiet (off + flag-registered).
+
+### Feature Flag Registration
+
+Every new subsystem / hook / writer / reader must be registered in `{workspace}/.pd/feature-flags.yaml` with:
+- `category: core | quiet | gone | legacy_retire`
+- `enabled: true | false` (Quiet = false by default)
+- `since: <YYYY-MM-DD>` (when added)
+
+PRs that introduce new functional code without flag registration are rejected.
+
+### Anti-pattern Triggers
+
+The following phrases in an issue or PR description are **automatic stop signals**. Verify with maintainer before proceeding:
+
+- "为未来铺路" / "for future extensibility"
+- "为完整性" / "for completeness"
+- "AHE 论文又出了新进展" / "based on new research"
+- "这个 ADR 当时是 Accepted" / "this ADR was Accepted"
+- "review 时觉得这块缺失" / "during review I noticed X is missing"
+- "为下个 Phase 准备" / "prep for next Phase"
+
+These are **maintainer-driven completeness anxiety**, not external user signal. PD does not act on them during MVP stage.
+
+---
+
 ## Mandatory Pre-Task Reading
 
 Before starting ANY coding task on this project, you MUST read `docs/ERROR_EXPERIENCE_HANDBOOK.md`. This file records real errors caught in code reviews. Reading it prevents you from repeating mistakes.
