@@ -292,6 +292,23 @@ export type { OperatorHealthSnapshot, OperatorHealthReadModelOptions, OverallHea
 export { computeOverallStatus, boundedEvidence, safeStringify, truncateReason, makeDeterministicDiagnosticianOutput, recommendNextIssue } from './synthetic-baseline.js';
 export type { SyntheticBaselineSummary, SyntheticBaselineStage, SyntheticBaselineStageName, SyntheticBaselineFailStage, SyntheticBaselineOptions } from './synthetic-baseline.js';
 
+// Proven channel baseline (PRI-240) — MVP activation continuity fixtures
+export {
+  runPromptFixture,
+  runRuleHostFixture,
+  runDeferArchiveFixture,
+  computeProvenChannelStatus,
+  generateContinuityMatrix,
+  recommendProvenChannelNextIssue,
+  isMvpChannel,
+  makePrincipleArtifact,
+  makeRuleArtifact,
+  makeSandboxAlwaysPass,
+  makeWriterInput,
+  MVP_CHANNELS,
+} from './proven-channel-baseline.js';
+export type { MvpChannel, ChannelFixtureResult, ProvenChannelBaselineSummary, ContinuityMatrixEntry } from './proven-channel-baseline.js';
+
 // Pain flood simulation (PRI-208) — pure contract/helpers only; I/O runner lives in pd-cli
 export {
   computeFloodStatus, computeFloodTotals, formatContextBudgetSummary, recommendFloodNextIssue,
