@@ -274,14 +274,14 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
           unknownChannels: [],
         }),
       );
-      const output = logSpy.mock.calls[0]?.[0];
-      if (output) {
-        const parsed = JSON.parse(output);
-        expect(parsed.status).toBe('failed');
-        expect(parsed.inputValidationFailure).toBeDefined();
-        expect(parsed.inputValidationFailure.reason).toBe('empty_channel_input');
-        expect(parsed.channels).toHaveLength(0);
-      }
+      expect(logSpy.mock.calls[0]?.[0]).toBeDefined();
+      const output = logSpy.mock.calls[0][0];
+      expect(typeof output).toBe('string');
+      const parsed = JSON.parse(output);
+      expect(parsed.status).toBe('failed');
+      expect(parsed.inputValidationFailure).toBeDefined();
+      expect(parsed.inputValidationFailure.reason).toBe('empty_channel_input');
+      expect(parsed.channels).toHaveLength(0);
     } finally {
       logSpy.mockRestore();
       errorSpy.mockRestore();
@@ -343,12 +343,12 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
           unknownChannels: ['bogus'],
         }),
       );
-      const output = logSpy.mock.calls[0]?.[0];
-      if (output) {
-        const parsed = JSON.parse(output);
-        expect(parsed.inputValidationFailure.reason).toBe('unknown_channels');
-        expect(parsed.inputValidationFailure.unknownChannels).not.toContain('prompt');
-      }
+      expect(logSpy.mock.calls[0]?.[0]).toBeDefined();
+      const output = logSpy.mock.calls[0][0];
+      expect(typeof output).toBe('string');
+      const parsed = JSON.parse(output);
+      expect(parsed.inputValidationFailure.reason).toBe('unknown_channels');
+      expect(parsed.inputValidationFailure.unknownChannels).not.toContain('prompt');
     } finally {
       logSpy.mockRestore();
       errorSpy.mockRestore();

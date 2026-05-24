@@ -11,14 +11,14 @@ import { StoreEventEmitter } from '../store/event-emitter.js';
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import { getLlmE2eConfig, runWithRetry } from './fixtures/index.js';
-import type { LlmE2eTestConfig } from './fixtures/index.js';
 
 const TMP_ROOT = path.join(os.tmpdir(), `pd-e2e-dreamer-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
 
 const config = getLlmE2eConfig();
 
 describe.skipIf(!config)('DreamerRunner Real LLM E2E', () => {
-  const cfg = config as LlmE2eTestConfig;
+  const cfg = config;
+  if (!cfg) return;
   const adapterConfig = {
     provider: cfg.provider,
     model: cfg.model,
@@ -89,7 +89,7 @@ describe.skipIf(!config)('DreamerRunner Real LLM E2E', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [],
         channel: 'prompt',
-        timeoutMs: cfg.timeoutMs,
+        timeoutMs: adapterConfig.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -122,7 +122,7 @@ describe.skipIf(!config)('DreamerRunner Real LLM E2E', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [],
         channel: 'prompt',
-        timeoutMs: cfg.timeoutMs,
+        timeoutMs: adapterConfig.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),
@@ -159,7 +159,7 @@ describe.skipIf(!config)('DreamerRunner Real LLM E2E', () => {
       diagnosticJson: createPITaskDiagnosticJson({
         dependencyTaskIds: [],
         channel: 'prompt',
-        timeoutMs: cfg.timeoutMs,
+        timeoutMs: adapterConfig.timeoutMs,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
       }),

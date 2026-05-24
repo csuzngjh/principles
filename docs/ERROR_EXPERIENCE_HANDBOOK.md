@@ -101,6 +101,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-033 | Operator failure path returns success exit code and breaks JSON contract | PRI-162 |
 | ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162 |
 | ERR-035 | Static guard only covers frozen-basename dynamic imports, misses other legacy paths | PRI-227 |
+| ERR-036 | Provider-endpoint configuration source mismatch sends real calls to wrong target | PRI-162 |
 
 ---
 
@@ -278,7 +279,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When writing validators for untrusted data, never use `if (hasCorrectType) { validate }` — always use `if (!hasCorrectType) { error } else { validate }`. The "skip on wrong type" pattern is always wrong for required fields.
 - **Source**: PRI-192 / PR #638 (reviewer feedback)
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007. Recurred 2026-05-23 in PRI-207 (PR #680): `extractJsonObject` fenced-code path parsed valid non-object JSON (array/null/string/number/boolean) but fell through to brace scan instead of returning null, allowing array payloads to be treated as objects. Same root cause: validator (fenced parse) silently skips invalid type instead of failing loud.
+- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007. Recurred 2026-05-23 in PRI-207 (PR #680): `extractJsonObject` fenced-code path parsed valid non-object JSON (array/null/string/number/boolean) but fell through to brace scan instead of returning null, allowing array payloads to be treated as objects. Same root cause: validator (fenced parse) silently skips invalid type instead of failing loud. Recurred 2026-05-24 PR #701: `proven-channel-baseline.test.ts` used `if (output) { assert }` pattern for JSON stdout assertions — when `output` was undefined/empty, the test silently passed instead of failing. Fixed by replacing with `expect(output).toBeDefined()` + `expect(typeof output).toBe('string')` before `JSON.parse`.
 
 **[ERR-010]** | Falsy evaluator return silently passes validation instead of recording failure
 
@@ -514,7 +515,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: After writing any CLI failure path, check: does it call `process.exit(1)`? Does `--json` mode output a parseable JSON result? Does the JSON include a `nextAction`? Add a test for each failure path in both text and JSON modes.
 - **Source**: PRI-162 / PR #701
 - **Date**: 2026-05-24
-- **Recurrence**: Same class as ERR-022, ERR-009
+- **Recurrence**: Same class as ERR-022, ERR-009. Recurred 2026-05-24 PR #701: `runtime-internalization-run-once.ts` catch block classified all errors as `config_error`, including runner/orchestrator/artifact failures that are not configuration errors. The `ConfigResolutionError` class was introduced so the catch block can distinguish config resolution failures (decision: `config_error`) from runtime execution failures (decision: `runtime_error`) via `instanceof`, without message substring guessing.
 
 ---
 
@@ -526,7 +527,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When a canonical config resolver exists, callers must not duplicate its validation logic. After calling the resolver, consume its result directly — no fallback guessing. Cache keys must include all fields that change behavior. Test: file-config-only path, flag-override path, cache isolation between modes.
 - **Source**: PRI-162 / PR #701
 - **Date**: 2026-05-24
-- **Recurrence**: Same class as ERR-031, ERR-004. Recurred 2026-05-24 PR #701: first fix removed pre-check and changed `?? (opts.openclawLocal ? 'local' : 'gateway')` to `?? 'local'`, but (1) `resolveRuntimeConfig()` still did not accept `requestedRuntimeKind`, so `--runtime openclaw-cli --openclaw-gateway` without a workflow policy returned default pi-ai config and the `?? 'local'` fallback silently overrode the user's gateway intent; (2) `runtime=config` still fell through to compatibility fallback instead of failing loud. Fixed by adding `requestedRuntimeKind` to resolver input and removing all `??` fallbacks. Also recurred 2026-05-24 PR #701: `runtime-internalization-run-once.ts` `resolveRuntimeAdapter()` threw on `RuntimeConfigError` but the command had no catch block, so `--json` mode produced no structured output and the process crashed with an unhandled rejection. Fixed by adding a catch block that outputs `{ decision: 'config_error', reason, nextAction }` in JSON mode.
+- **Recurrence**: Same class as ERR-031, ERR-004. Recurred 2026-05-24 PR #701: first fix removed pre-check and changed `?? (opts.openclawLocal ? 'local' : 'gateway')` to `?? 'local'`, but (1) `resolveRuntimeConfig()` still did not accept `requestedRuntimeKind`, so `--runtime openclaw-cli --openclaw-gateway` without a workflow policy returned default pi-ai config and the `?? 'local'` fallback silently overrode the user's gateway intent; (2) `runtime=config` still fell through to compatibility fallback instead of failing loud. Fixed by adding `requestedRuntimeKind` to resolver input and removing all `??` fallbacks. Also recurred 2026-05-24 PR #701: `resolveRuntimeConfig()` silently preferred `openclawLocal` when both `openclawLocal` and `openclawGateway` were true, instead of failing loud with `conflicting_openclaw_mode`. The resolver must itself guard mutually-exclusive inputs; callers cannot be expected to pre-validate flag combinations before calling the canonical resolver. Fixed by adding an explicit conflict check at both the no-policy and has-policy code paths.
 
 ---
 
@@ -542,9 +543,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-036]** | Provider-endpoint configuration source mismatch sends real calls to wrong target
+
+- **What happened**: In `llm-e2e-config.ts`, the `baseUrl` default was `'https://token.sensenova.cn/v1'` regardless of the `provider` value. When `LLM_E2E_PROVIDER` was overridden to `openrouter` or `minimax-cn`, the config still defaulted to the sensenova endpoint, causing real LLM calls to be sent to the wrong API target.
+- **Why it's wrong**: Default endpoint URLs must be scoped to the provider they belong to. A provider-specific default that ignores the provider field is a configuration source mismatch — the same class as ERR-034 (canonical config not consumed by caller) where one config field overrides another's semantics. When the provider changes, all provider-specific defaults must change with it.
+- **Correct approach**: Extract the provider variable before computing defaults. Only apply provider-specific defaults (like `baseUrl`) when the provider matches. For non-matching providers, leave the field undefined unless explicitly provided via environment variable.
+- **How to prevent**: When a config has a provider-specific default, always guard it with a provider check. Test: override the provider and verify the default does not carry over from a different provider.
+- **Source**: PRI-162 / PR #701
+- **Date**: 2026-05-24
+- **Recurrence**: Same class as ERR-034
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 35 |
+| Total lessons | 36 |
 | Last updated | 2026-05-24 |
 | Top category | Schema & Type |
 | Recurring errors | 15 |

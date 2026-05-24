@@ -108,6 +108,14 @@ export function resolveRuntimeConfig(stateDir: string, explicitConfig?: ResolveR
       }
 
       if (requestedRuntimeKind === 'openclaw-cli') {
+        if (explicitConfig?.openclawLocal && explicitConfig?.openclawGateway) {
+          return {
+            ok: false,
+            reason: 'conflicting_openclaw_mode',
+            message: 'Both --openclaw-local and --openclaw-gateway specified — provide exactly one',
+            nextAction: 'Use only one of --openclaw-local or --openclaw-gateway',
+          };
+        }
         const flagMode = explicitConfig?.openclawLocal ? 'local' as const : explicitConfig?.openclawGateway ? 'gateway' as const : undefined;
         if (!flagMode) {
           return {
@@ -146,6 +154,14 @@ export function resolveRuntimeConfig(stateDir: string, explicitConfig?: ResolveR
 
     if (config.runtimeKind === 'openclaw-cli') {
       const fileMode = config.openclawMode;
+      if (explicitConfig?.openclawLocal && explicitConfig?.openclawGateway) {
+        return {
+          ok: false,
+          reason: 'conflicting_openclaw_mode',
+          message: 'Both --openclaw-local and --openclaw-gateway specified — provide exactly one',
+          nextAction: 'Use only one of --openclaw-local or --openclaw-gateway',
+        };
+      }
       const flagMode = explicitConfig?.openclawLocal ? 'local' as const : explicitConfig?.openclawGateway ? 'gateway' as const : undefined;
 
       if (flagMode && fileMode && flagMode !== fileMode) {

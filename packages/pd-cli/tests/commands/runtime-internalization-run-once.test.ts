@@ -1298,4 +1298,21 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(consoleErrorSpy.mock.calls.some((c: string[]) => c[0].includes('explicit_config_missing'))).toBe(true);
     expect(process.exitCode).toBe(1);
   });
+
+  it('runtime execution error outputs runtime_error in JSON mode', async () => {
+    mockWakeOnce.mockResolvedValue({
+      decision: 'would_lease',
+      taskId: 'task-dreamer-rt-err',
+      taskKind: 'dreamer',
+    });
+    mockRun.mockRejectedValueOnce(new Error('artifact write failed: disk full'));
+
+    await handleRuntimeInternalizationRunOnce({ workspace: WS, runner: 'dreamer', runtime: 'test-double', allowTestDouble: true, json: true });
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(output.decision).toBe('runtime_error');
+    expect(output.reason).toContain('artifact write failed');
+    expect(output.nextAction).toBeTruthy();
+    expect(process.exitCode).toBe(1);
+  });
 });

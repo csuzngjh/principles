@@ -40,6 +40,13 @@ interface RunOnceOptions {
 const OWNER = 'pd-cli-internalization-run-once';
 const RUNTIME_KIND = 'local-worker';
 
+class ConfigResolutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigResolutionError';
+  }
+}
+
 const SUPPORTED_RUNNERS = new Set(['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer', 'trainer']);
 
 interface RunOnceOutput {
@@ -448,7 +455,7 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
   const configResult = resolveRuntimeConfig(stateDir, { requestedRuntimeKind: opts.runtimeKind });
 
   if (isRuntimeConfigError(configResult)) {
-    throw new Error(
+    throw new ConfigResolutionError(
       `Config resolution failed: ${configResult.reason}. ` +
       `${configResult.message}. nextAction: ${configResult.nextAction}`,
     );
@@ -472,7 +479,7 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
   if (opts.runtimeKind === 'openclaw-cli' || (opts.runtimeKind === 'config' && configResult.runtimeKind === 'openclaw-cli')) {
     const { openclawMode } = configResult;
     if (!openclawMode) {
-      throw new Error(
+      throw new ConfigResolutionError(
         `runtimeKind 'openclaw-cli' requires openclawMode. ` +
         `Provide --openclaw-local or --openclaw-gateway, or set openclawMode in workflows.yaml. ` +
         `nextAction: Add openclawMode: local|gateway to your funnel policy or use CLI flags.`,
@@ -632,11 +639,14 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    const isConfigError = err instanceof ConfigResolutionError;
     if (opts.json) {
       console.log(JSON.stringify({
-        decision: 'config_error',
+        decision: isConfigError ? 'config_error' : 'runtime_error',
         reason: message,
-        nextAction: 'Fix the workflows.yaml funnel policy, or use --runtime pi-ai / openclaw-cli with explicit flags',
+        nextAction: isConfigError
+          ? 'Fix the workflows.yaml funnel policy, or use --runtime pi-ai / openclaw-cli with explicit flags'
+          : 'Check runner logs and workspace state; re-run with --runtime test-double to isolate',
       }, null, 2));
     } else {
       console.error(`Error: ${message}`);

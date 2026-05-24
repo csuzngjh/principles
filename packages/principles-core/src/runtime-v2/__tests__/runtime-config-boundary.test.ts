@@ -253,5 +253,35 @@ describe('Runtime Config Boundary (PRI-162)', () => {
         expect(result.runtimeKind).toBe('pi-ai');
       }
     });
+
+    it('openclawLocal && openclawGateway both true returns conflicting_openclaw_mode error', () => {
+      const result = resolveRuntimeConfig(tmpDir, { requestedRuntimeKind: 'openclaw-cli', openclawLocal: true, openclawGateway: true });
+      expect(isRuntimeConfigError(result)).toBe(true);
+      if (isRuntimeConfigError(result)) {
+        expect(result.reason).toBe('conflicting_openclaw_mode');
+        expect(result.nextAction).toBeTruthy();
+      }
+    });
+
+    it('openclawLocal && openclawGateway both true without requestedRuntimeKind still returns conflicting_openclaw_mode', () => {
+      const wsDir = path.join(tmpDir, 'conflict-ws');
+      fs.mkdirSync(wsDir, { recursive: true });
+      const stateDir = path.join(wsDir, '.state');
+      fs.mkdirSync(stateDir, { recursive: true });
+      const workflowsYaml = `version: '1'
+funnels:
+  - workflowId: pd-runtime-v2-diagnosis
+    stages: []
+    policy:
+      runtimeKind: openclaw-cli
+      openclawMode: local
+`;
+      fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), workflowsYaml);
+      const result = resolveRuntimeConfig(stateDir, { openclawLocal: true, openclawGateway: true });
+      expect(isRuntimeConfigError(result)).toBe(true);
+      if (isRuntimeConfigError(result)) {
+        expect(result.reason).toBe('conflicting_openclaw_mode');
+      }
+    });
   });
 });
