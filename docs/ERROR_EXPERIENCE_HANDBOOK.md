@@ -143,7 +143,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Every catch-and-degrade pattern must expose the failure reason via `ambiguityNotes` / telemetry / logging. Review all catch blocks that return fallback values and verify they communicate why the fallback was triggered.
 - **Source**: PRI-171
 - **Date**: 2026-05-19
-- **Recurrence**: None
+- **Recurrence**: Yes - 2026-05-24 PRI-240 (PR #699): `cleanupTempWorkspace` had `catch { void 0; }` that silently swallowed cleanup failures with no observability. Fixed by outputting structured `[pd-cli] cleanup warning:` to stderr.
 
 ---
 
@@ -463,7 +463,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For every PR that adds defensive logic, verify that at least one test exercises the production path that would invoke the defense. If no production path calls the new code, the PR must not claim to provide defense. Review trigger: any PR where the diff adds a new module but does not modify any existing production code to call it.
 - **Source**: PRI-209 / PR #689
 - **Date**: 2026-05-23
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): Healthy baseline test used `expect(['ok', 'degraded']).toContain(overallStatus)`, allowing `degraded` to pass. This meant a regression that introduced new warning-level broken links in the healthy path would not be caught. The test proved the code didn't crash, but not that the healthy path remained healthy. Fixed by tightening to `expect(overallStatus).toBe('ok')`. Also 2026-05-23 PRI-225 (PR #693): `bestEffortParentIds` was added to `PIMetadataParseResult.malformed` but not wired into the philosopher dependency check. The dependency check only accepted `status === 'parsed'`, so malformed metadata with extractable parent IDs still produced `philosopher_dependency_unverifiable`. Test proved `bestEffortParentIds` was populated correctly, but not that the production path used it for topology verification. Fixed by adding `else if (philMeta.status === 'malformed')` branch in the dependency check.
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): Healthy baseline test used `expect(['ok', 'degraded']).toContain(overallStatus)`, allowing `degraded` to pass. This meant a regression that introduced new warning-level broken links in the healthy path would not be caught. The test proved the code didn't crash, but not that the healthy path remained healthy. Fixed by tightening to `expect(overallStatus).toBe('ok')`. Also 2026-05-23 PRI-225 (PR #693): `bestEffortParentIds` was added to `PIMetadataParseResult.malformed` but not wired into the philosopher dependency check. The dependency check only accepted `status === 'parsed'`, so malformed metadata with extractable parent IDs still produced `philosopher_dependency_unverifiable`. Test proved `bestEffortParentIds` was populated correctly, but not that the production path used it for topology verification. Fixed by adding `else if (philMeta.status === 'malformed')` branch in the dependency check. Also 2026-05-24 PRI-240 (PR #699): RuleHost fixture test only asserted inside `if (result.status === 'passed')` conditional branches, so if the fixture returned `failed`, all assertions were skipped and the test passed vacuously. Fixed by adding unconditional `expect(['passed', 'degraded', 'failed']).toContain(result.status)` before the conditional branches.
 
 ---
 
@@ -508,4 +508,4 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 32 |
 | Last updated | 2026-05-24 |
 | Top category | Schema & Type |
-| Recurring errors | 14 |
+| Recurring errors | 15 |
