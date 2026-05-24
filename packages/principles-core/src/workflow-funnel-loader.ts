@@ -62,6 +62,8 @@ export interface FunnelPolicy {
   // ── M9: Runtime configuration (D-01) ──────────────────────────────────
   /** Runtime adapter kind. Default: 'pi-ai' (D-04). */
   runtimeKind?: RuntimeKind;
+  /** OpenClaw CLI mode — required when runtimeKind is 'openclaw-cli'. */
+  openclawMode?: 'local' | 'gateway';
   /** LLM provider name (e.g., 'openrouter', 'anthropic'). Required for pi-ai. */
   provider?: string;
   /** Model ID (e.g., 'anthropic/claude-sonnet-4'). Required for pi-ai. */

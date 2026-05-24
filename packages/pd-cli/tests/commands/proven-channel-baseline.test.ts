@@ -6,29 +6,12 @@ const { mockRunProvenChannelBaseline } = vi.hoisted(() => ({
 
 vi.mock('../../src/services/proven-channel-baseline-runner.js', () => ({
   runProvenChannelBaseline: mockRunProvenChannelBaseline,
-  isProductionWorkspace: (dir: string) => {
-    const path = require('path');
-    const os = require('os');
-    const normalized = path.resolve(dir).toLowerCase();
-    const prefixes = [
-      path.resolve('D:\\.openclaw\\workspace').toLowerCase(),
-      path.resolve('C:\\Users\\Administrator\\.openclaw\\workspace').toLowerCase(),
-      path.resolve(path.join(os.homedir(), '.openclaw', 'workspace')).toLowerCase(),
-    ];
-    for (const prefix of prefixes) {
-      if (normalized === prefix || normalized.startsWith(prefix + path.sep)) {
-        return true;
-      }
-    }
-    return false;
-  },
 }));
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { handleProvenChannelBaseline, cleanupTempWorkspace } from '../../src/commands/proven-channel-baseline.js';
-import { isProductionWorkspace } from '../../src/services/proven-channel-baseline-runner.js';
 
 function makePassedSummary() {
   return {
@@ -291,14 +274,14 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
           unknownChannels: [],
         }),
       );
-      const output = logSpy.mock.calls[0]?.[0];
-      if (output) {
-        const parsed = JSON.parse(output);
-        expect(parsed.status).toBe('failed');
-        expect(parsed.inputValidationFailure).toBeDefined();
-        expect(parsed.inputValidationFailure.reason).toBe('empty_channel_input');
-        expect(parsed.channels).toHaveLength(0);
-      }
+      expect(logSpy.mock.calls[0]?.[0]).toBeDefined();
+      const output = logSpy.mock.calls[0][0];
+      expect(typeof output).toBe('string');
+      const parsed = JSON.parse(output);
+      expect(parsed.status).toBe('failed');
+      expect(parsed.inputValidationFailure).toBeDefined();
+      expect(parsed.inputValidationFailure.reason).toBe('empty_channel_input');
+      expect(parsed.channels).toHaveLength(0);
     } finally {
       logSpy.mockRestore();
       errorSpy.mockRestore();
@@ -360,6 +343,43 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
           unknownChannels: ['bogus'],
         }),
       );
+      expect(logSpy.mock.calls[0]?.[0]).toBeDefined();
+      const output = logSpy.mock.calls[0][0];
+      expect(typeof output).toBe('string');
+      const parsed = JSON.parse(output);
+      expect(parsed.inputValidationFailure.reason).toBe('unknown_channels');
+      expect(parsed.inputValidationFailure.unknownChannels).not.toContain('prompt');
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('text mode output shows inputValidationFailure reason, message, nextAction', async () => {
+    mockRunProvenChannelBaseline.mockResolvedValue({
+      status: 'failed',
+      generatedAt: new Date().toISOString(),
+      workspaceMode: 'temp',
+      channels: [],
+      inputValidationFailure: {
+        reason: 'unknown_channels',
+        message: 'Unknown channels: bogus. Valid channels: prompt, code_tool_hook, defer_archive',
+        nextAction: 'Use only valid MVP channels: prompt, code_tool_hook, defer_archive',
+        unknownChannels: ['bogus'],
+      },
+      continuityMatrix: [],
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await handleProvenChannelBaseline({ channels: 'bogus' });
+      const output = logSpy.mock.calls[0]?.[0] ?? '';
+      expect(output).toContain('Input Validation Failure:');
+      expect(output).toContain('reason: unknown_channels');
+      expect(output).toContain('message:');
+      expect(output).toContain('nextAction:');
     } finally {
       logSpy.mockRestore();
       errorSpy.mockRestore();
@@ -423,28 +443,5 @@ describe('handleProvenChannelBaseline (CLI handler)', () => {
       ?.commands.find(c => c.name() === 'proven-channel');
     expect(found).toBeDefined();
     expect(found?.name()).toBe('proven-channel');
-  });
-});
-
-describe('isProductionWorkspace', () => {
-  it('blocks exact production workspace path', () => {
-    expect(isProductionWorkspace('D:\\.openclaw\\workspace')).toBe(true);
-  });
-
-  it('blocks descendant of production workspace', () => {
-    expect(isProductionWorkspace('D:\\.openclaw\\workspace\\my-project')).toBe(true);
-  });
-
-  it('does NOT block sibling path with different prefix', () => {
-    expect(isProductionWorkspace('D:\\.openclaw\\workspace-extra')).toBe(false);
-  });
-
-  it('does NOT block unrelated path', () => {
-    expect(isProductionWorkspace('C:\\Users\\test\\project')).toBe(false);
-  });
-
-  it('does NOT block temp directory', () => {
-    const tmp = os.tmpdir();
-    expect(isProductionWorkspace(tmp)).toBe(false);
   });
 });

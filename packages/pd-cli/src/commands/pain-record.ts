@@ -10,6 +10,7 @@ import {
   PainToPrincipleService,
   PrincipleTreeLedgerAdapter,
   resolveRuntimeConfig,
+  isRuntimeConfigError,
 } from '@principles/core/runtime-v2';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -60,7 +61,30 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
 
   // Show diagnostic info for config failures
   if (result.failureCategory === 'config_missing') {
-    const config = resolveRuntimeConfig(stateDir);
+    const configResult = resolveRuntimeConfig(stateDir);
+    if (isRuntimeConfigError(configResult)) {
+      if (opts.json) {
+        console.log(JSON.stringify({
+          status: 'failed',
+          painId: result.painId,
+          taskId: result.taskId,
+          failureCategory: result.failureCategory,
+          message: result.message,
+          configError: {
+            reason: configResult.reason,
+            message: configResult.message,
+            nextAction: configResult.nextAction,
+          },
+        }, null, 2));
+      } else {
+        console.error(`  Config resolution failed: ${configResult.reason}`);
+        console.error(`  ${configResult.message}`);
+        console.error(`  nextAction: ${configResult.nextAction}`);
+      }
+      process.exit(1);
+      return;
+    }
+    const config = configResult;
     const missing: string[] = [];
     if (!config.provider) missing.push('provider');
     if (!config.model) missing.push('model');

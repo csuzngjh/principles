@@ -112,6 +112,19 @@ function resolveModel(provider: string, modelId: string, baseUrl?: string) {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
     maxTokens: 32000,
+    compat: {
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      supportsUsageInStreaming: true,
+      maxTokensField: 'max_tokens',
+      requiresToolResultName: false,
+      requiresAssistantAfterToolResult: false,
+      requiresThinkingAsText: false,
+      requiresReasoningContentOnAssistantMessages: false,
+      thinkingFormat: 'deepseek',
+      supportsStrictMode: false,
+    },
   };
   return model;
 }

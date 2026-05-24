@@ -98,6 +98,10 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-030 | Path prefix `startsWith` matches sibling directories as production workspace | PRI-240 |
 | ERR-031 | Config resolver hard-fails on valid runtime when optional mode flags are absent | PRI-162 |
 | ERR-032 | Documentation labels legacy dispatch as MVP-Core, contradicting ADR-0014 | PRI-227 |
+| ERR-033 | Operator failure path returns success exit code and breaks JSON contract | PRI-162 |
+| ERR-034 | Canonical runtime config not consumed by caller or cache key | PRI-162 |
+| ERR-035 | Static guard only covers frozen-basename dynamic imports, misses other legacy paths | PRI-227 |
+| ERR-036 | Provider-endpoint configuration source mismatch sends real calls to wrong target | PRI-162 |
 
 ---
 
@@ -275,7 +279,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When writing validators for untrusted data, never use `if (hasCorrectType) { validate }` — always use `if (!hasCorrectType) { error } else { validate }`. The "skip on wrong type" pattern is always wrong for required fields.
 - **Source**: PRI-192 / PR #638 (reviewer feedback)
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007. Recurred 2026-05-23 in PRI-207 (PR #680): `extractJsonObject` fenced-code path parsed valid non-object JSON (array/null/string/number/boolean) but fell through to brace scan instead of returning null, allowing array payloads to be treated as objects. Same root cause: validator (fenced parse) silently skips invalid type instead of failing loud.
+- **Recurrence**: Yes - same pattern as ERR-001, ERR-005, ERR-007. Recurred 2026-05-23 in PRI-207 (PR #680): `extractJsonObject` fenced-code path parsed valid non-object JSON (array/null/string/number/boolean) but fell through to brace scan instead of returning null, allowing array payloads to be treated as objects. Same root cause: validator (fenced parse) silently skips invalid type instead of failing loud. Recurred 2026-05-24 PR #701: `proven-channel-baseline.test.ts` used `if (output) { assert }` pattern for JSON stdout assertions — when `output` was undefined/empty, the test silently passed instead of failing. Fixed by replacing with `expect(output).toBeDefined()` + `expect(typeof output).toBe('string')` before `JSON.parse`.
 
 **[ERR-010]** | Falsy evaluator return silently passes validation instead of recording failure
 
@@ -503,9 +507,57 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-033]** | Operator failure path returns success exit code and breaks JSON contract
+
+- **What happened**: In `pain-record.ts`, when `result.failureCategory === 'config_missing'` and `resolveRuntimeConfig()` returns a `RuntimeConfigError`, the code only printed diagnostic text to stderr and returned — without calling `process.exit(1)` and without outputting JSON in `--json` mode. Automation treated the failure as success, and JSON CLI contract was broken.
+- **Why it's wrong**: CLI commands that fail must exit non-zero (CLI Command Gate rule 5: failure paths must not mutate state or appear to succeed). `--json` mode must always output exactly one parseable JSON object (CLI Command Gate rule 1). A `return` without `process.exit(1)` lets the caller continue as if the operation succeeded. This is the same class as ERR-022 (process.exit without return) and ERR-009 (silently skip invalid instead of failing loud).
+- **Correct approach**: Every failure path in a CLI command must: (1) call `process.exit(1)`, (2) in `--json` mode output a structured JSON result with `status: 'failed'`, `failureCategory`, `message`, and `configError` (if applicable), (3) include `nextAction` per CLI Command Gate rule 6.
+- **How to prevent**: After writing any CLI failure path, check: does it call `process.exit(1)`? Does `--json` mode output a parseable JSON result? Does the JSON include a `nextAction`? Add a test for each failure path in both text and JSON modes.
+- **Source**: PRI-162 / PR #701
+- **Date**: 2026-05-24
+- **Recurrence**: Same class as ERR-022, ERR-009. Recurred 2026-05-24 PR #701: `runtime-internalization-run-once.ts` catch block classified all errors as `config_error`, including runner/orchestrator/artifact failures that are not configuration errors. The `ConfigResolutionError` class was introduced so the catch block can distinguish config resolution failures (decision: `config_error`) from runtime execution failures (decision: `runtime_error`) via `instanceof`, without message substring guessing.
+
+---
+
+**[ERR-034]** | Canonical runtime config not consumed by caller or cache key
+
+- **What happened**: Two related issues: (1) `diagnose.ts` forced a pre-check requiring `--openclaw-local` or `--openclaw-gateway` CLI flags before calling `resolveRuntimeConfig()`, preventing file-config-only paths from working. After `resolveRuntimeConfig()` succeeded, the code still used `configResult.openclawMode ?? (opts.openclawLocal ? 'local' : 'gateway')` — guessing the mode instead of consuming the canonical validated result. (2) `pain-signal-runtime-factory.ts` bridge cache key was `${workspaceDir}:${runtimeKind}` without `openclawMode`, causing the same workspace switching from local to gateway to reuse the wrong bridge/adapter.
+- **Why it's wrong**: The whole point of `resolveRuntimeConfig()` is to be the single source of truth for runtime configuration. When callers second-guess the result or bypass it with pre-checks, the canonical config is undermined. Cache keys that omit discriminating fields cause stale data reuse. This is the same class as ERR-031 (config resolver hard-fails on valid runtime) and ERR-004 (lineage fields from wrong source).
+- **Correct approach**: (1) Remove pre-checks that duplicate what `resolveRuntimeConfig()` already validates. (2) After calling `resolveRuntimeConfig()`, use only `configResult.openclawMode` — never fall back to CLI flag guessing. (3) Include all discriminating fields in cache keys. (4) `invalidatePainSignalBridge()` must clear all mode variants.
+- **How to prevent**: When a canonical config resolver exists, callers must not duplicate its validation logic. After calling the resolver, consume its result directly — no fallback guessing. Cache keys must include all fields that change behavior. Test: file-config-only path, flag-override path, cache isolation between modes.
+- **Source**: PRI-162 / PR #701
+- **Date**: 2026-05-24
+- **Recurrence**: Same class as ERR-031, ERR-004. Recurred 2026-05-24 PR #701: first fix removed pre-check and changed `?? (opts.openclawLocal ? 'local' : 'gateway')` to `?? 'local'`, but (1) `resolveRuntimeConfig()` still did not accept `requestedRuntimeKind`, so `--runtime openclaw-cli --openclaw-gateway` without a workflow policy returned default pi-ai config and the `?? 'local'` fallback silently overrode the user's gateway intent; (2) `runtime=config` still fell through to compatibility fallback instead of failing loud. Fixed by adding `requestedRuntimeKind` to resolver input and removing all `??` fallbacks. Also recurred 2026-05-24 PR #701: `resolveRuntimeConfig()` silently preferred `openclawLocal` when both `openclawLocal` and `openclawGateway` were true, instead of failing loud with `conflicting_openclaw_mode`. The resolver must itself guard mutually-exclusive inputs; callers cannot be expected to pre-validate flag combinations before calling the canonical resolver. Fixed by adding an explicit conflict check at both the no-policy and has-policy code paths.
+
+---
+
+**[ERR-035]** | Static guard only covers frozen-basename dynamic imports, misses other legacy paths
+
+- **What happened**: `nocturnal-entrypoint-guard.test.ts` `findImportLines()` only checked dynamic imports against `FROZEN_NOCTURNAL_MODULES` basenames. A dynamic import like `import('../service/sleep-cycle.js')` or `import('../service/idle-detector.js')` would not be detected because `sleep-cycle` and `idle-detector` are not in the frozen set. PRI-227's goal is to prevent new legacy nocturnal callers, not just frozen module callers.
+- **Why it's wrong**: The guard's purpose is to catch any new entrypoint into the legacy nocturnal/sleep/idle subsystem, regardless of whether the specific file is in the frozen set. Limiting dynamic import detection to frozen basenames creates a blind spot where new callers of non-frozen legacy modules pass the guard undetected. This is the same class as ERR-024/ERR-025 (validator exists but doesn't cover the real attack surface).
+- **Correct approach**: Dynamic import detection must use path-pattern matching (e.g., `nocturnal-`, `sleep-cycle`, `sleep_reflection`, `idle`) rather than exact basename matching against a frozen set. The frozen set check remains for static imports; dynamic imports need broader pattern coverage.
+- **How to prevent**: When writing a guard that prevents new callers of a subsystem, ensure the detection covers all naming patterns used by that subsystem, not just a specific subset. Test: add a test case for a dynamic import of a non-frozen-basename legacy module and verify it's detected.
+- **Source**: PRI-227 / PR #701
+- **Date**: 2026-05-24
+- **Recurrence**: Same class as ERR-024, ERR-025. Recurred 2026-05-24 PR #701: first fix added `idle` to the dynamic import extractor (`findImportLines`), but the actual enforcement logic (the `isNocturnalKeyword` check that decides whether to validate against the allowlist) still only checked `nocturnal`, `sleep_reflection`, and `sleep-cycle` — not `idle`. The new extractor tests proved extraction worked, but not that the real scan would reject an unallowed idle caller. Fixed by adding `idle` to the `isNocturnalKeyword` check and adding an enforcement test. Also recurred 2026-05-24 PR #701: adding `lowerLine.includes('idle')` to `isNocturnalKeyword` caused false positives on `HybridLedgerStore` (hybr**idle**dgerstore contains the substring `idle`). The `legacyPathPatterns` `/idle/` regex had the same issue. Fixed by using word-boundary regex `/(?:^|[-_/.])idle(?:[-_/.]|$)/i` that matches `idle` only at path/identifier segment boundaries, not as a substring within `hybrid`.
+
+---
+
+**[ERR-036]** | Provider-endpoint configuration source mismatch sends real calls to wrong target
+
+- **What happened**: In `llm-e2e-config.ts`, the `baseUrl` default was `'https://token.sensenova.cn/v1'` regardless of the `provider` value. When `LLM_E2E_PROVIDER` was overridden to `openrouter` or `minimax-cn`, the config still defaulted to the sensenova endpoint, causing real LLM calls to be sent to the wrong API target.
+- **Why it's wrong**: Default endpoint URLs must be scoped to the provider they belong to. A provider-specific default that ignores the provider field is a configuration source mismatch — the same class as ERR-034 (canonical config not consumed by caller) where one config field overrides another's semantics. When the provider changes, all provider-specific defaults must change with it.
+- **Correct approach**: Extract the provider variable before computing defaults. Only apply provider-specific defaults (like `baseUrl`) when the provider matches. For non-matching providers, leave the field undefined unless explicitly provided via environment variable.
+- **How to prevent**: When a config has a provider-specific default, always guard it with a provider check. Test: override the provider and verify the default does not carry over from a different provider.
+- **Source**: PRI-162 / PR #701
+- **Date**: 2026-05-24
+- **Recurrence**: Same class as ERR-034
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 32 |
+| Total lessons | 36 |
 | Last updated | 2026-05-24 |
 | Top category | Schema & Type |
 | Recurring errors | 15 |

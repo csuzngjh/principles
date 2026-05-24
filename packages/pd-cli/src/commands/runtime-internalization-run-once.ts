@@ -21,6 +21,7 @@ import {
   PiAiRuntimeAdapter,
   OpenClawCliRuntimeAdapter,
   resolveRuntimeConfig,
+  isRuntimeConfigError,
   validateRuntimeConfig,
 } from '@principles/core/runtime-v2';
 import type { WakeOnceResult, DreamerRunnerResult, PhilosopherRunnerResult, ScribeRunnerResult, ArtificerRunnerResult, EvaluatorRunnerResult, RolloutReviewerRunnerResult, TrainerRunnerResult, PDRuntimeAdapter, PeerRunnerKind } from '@principles/core/runtime-v2';
@@ -38,6 +39,13 @@ interface RunOnceOptions {
 
 const OWNER = 'pd-cli-internalization-run-once';
 const RUNTIME_KIND = 'local-worker';
+
+class ConfigResolutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigResolutionError';
+  }
+}
 
 const SUPPORTED_RUNNERS = new Set(['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer', 'trainer']);
 
@@ -444,26 +452,41 @@ function resolveRuntimeAdapter(opts: ResolveAdapterOptions): PDRuntimeAdapter {
   }
 
   const stateDir = path.join(opts.workspaceDir, '.state');
-  const config = resolveRuntimeConfig(stateDir);
+  const configResult = resolveRuntimeConfig(stateDir, { requestedRuntimeKind: opts.runtimeKind });
 
-  if (opts.runtimeKind === 'pi-ai' || (opts.runtimeKind === 'config' && config.runtimeKind === 'pi-ai')) {
-    validateRuntimeConfig(config);
+  if (isRuntimeConfigError(configResult)) {
+    throw new ConfigResolutionError(
+      `Config resolution failed: ${configResult.reason}. ` +
+      `${configResult.message}. nextAction: ${configResult.nextAction}`,
+    );
+  }
+
+  if (opts.runtimeKind === 'pi-ai' || (opts.runtimeKind === 'config' && configResult.runtimeKind === 'pi-ai')) {
+    validateRuntimeConfig(configResult);
     // CLI --timeout-ms overrides workflows.yaml timeoutMs
-    const adapterTimeoutMs = opts.timeoutMs ?? config.timeoutMs;
+    const adapterTimeoutMs = opts.timeoutMs ?? configResult.timeoutMs;
     return new PiAiRuntimeAdapter({
-      provider: String(config.provider),
-      model: String(config.model),
-      apiKeyEnv: String(config.apiKeyEnv),
-      maxRetries: config.maxRetries,
+      provider: String(configResult.provider),
+      model: String(configResult.model),
+      apiKeyEnv: String(configResult.apiKeyEnv),
+      maxRetries: configResult.maxRetries,
       timeoutMs: adapterTimeoutMs,
-      baseUrl: config.baseUrl,
+      baseUrl: configResult.baseUrl,
       workspace: opts.workspaceDir,
     });
   }
 
-  if (opts.runtimeKind === 'openclaw-cli' || (opts.runtimeKind === 'config' && config.runtimeKind === 'openclaw-cli')) {
+  if (opts.runtimeKind === 'openclaw-cli' || (opts.runtimeKind === 'config' && configResult.runtimeKind === 'openclaw-cli')) {
+    const { openclawMode } = configResult;
+    if (!openclawMode) {
+      throw new ConfigResolutionError(
+        `runtimeKind 'openclaw-cli' requires openclawMode. ` +
+        `Provide --openclaw-local or --openclaw-gateway, or set openclawMode in workflows.yaml. ` +
+        `nextAction: Add openclawMode: local|gateway to your funnel policy or use CLI flags.`,
+      );
+    }
     return new OpenClawCliRuntimeAdapter({
-      runtimeMode: 'local',
+      runtimeMode: openclawMode,
       workspaceDir: opts.workspaceDir,
     });
   }
@@ -614,6 +637,21 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     if (wakeResult.decision === 'no_ready_tasks' || wakeResult.decision === 'lease_conflict') {
       process.exitCode = 1;
     }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const isConfigError = err instanceof ConfigResolutionError;
+    if (opts.json) {
+      console.log(JSON.stringify({
+        decision: isConfigError ? 'config_error' : 'runtime_error',
+        reason: message,
+        nextAction: isConfigError
+          ? 'Fix the workflows.yaml funnel policy, or use --runtime pi-ai / openclaw-cli with explicit flags'
+          : 'Check runner logs and workspace state; re-run with --runtime test-double to isolate',
+      }, null, 2));
+    } else {
+      console.error(`Error: ${message}`);
+    }
+    process.exitCode = 1;
   } finally {
     await stateManager.close();
   }
