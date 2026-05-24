@@ -1,10 +1,10 @@
 # ADR-0009: Long-Running Agent Session (LRAS)
 
-> **状态**: Accepted (实施延后至 Phase 2 — 见 v2.0 修订)
+> **状态**: Deferred by ADR-0014 (不得作为当前实施依据)
 > **日期**: 2026-05-16
 > **相关**: COMPONENTS.md, DATA_ARCHITECTURE.md
 
-> **2026-05-24 v2.0 修订**: 本 ADR 的 `Accepted` 状态保持不变，但**实施被显式延后**到 Phase 2，准入门槛见 [docs/plans/2026-05-roadmap/02-roadmap.md §7](../plans/2026-05-roadmap/02-roadmap.md)。在 Phase 1C/1D 完成（特别是 Attribution Pipeline 校准通过）前禁止启动实施。理由见 [ADR-0013](./0013-attribution-pipeline-and-decision-observability.md) 与 [06-ahe-informed-architecture-review.md](../plans/2026-05-roadmap/06-ahe-informed-architecture-review.md) §2.2。
+> **2026-05-24 ADR-0014 修订**: LRAS 是 post-MVP conditional design。不得以 Phase 1C/1D、Attribution 或“完整代理生命周期”为理由在 MVP 阶段派工。重启必须满足 [post-mvp-conditional-roadmap.md](../plans/post-mvp-conditional-roadmap.md) 的外部反馈条件并经维护者批准。
 
 
 ## 1. 背景与痛点 (Context)

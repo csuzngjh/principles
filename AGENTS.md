@@ -22,7 +22,7 @@ Before opening a new Linear issue or starting a non-MVP-listed PR, answer all th
 
 Every PD subsystem falls into one of three buckets (see ADR-0014 §2.4-§2.6):
 
-- **MVP-Core**: required for story A' (4-channel demo). Touch with care.
+- **MVP-Core**: required for story A' using the three already implemented activation paths (`prompt`, `defer_archive`, and `code_tool_hook` / RuleHost). Touch with care.
 - **MVP-Quiet**: code remains, but feature flag is **default off** and not surfaced in UI / docs. After 6 months of no activation, becomes MVP-Gone.
 - **MVP-Gone**: deleted or archived to reduce code volume.
 
@@ -30,12 +30,18 @@ Every PD subsystem falls into one of three buckets (see ADR-0014 §2.4-§2.6):
 
 ### Feature Flag Registration
 
-Every new subsystem / hook / writer / reader must be registered in `{workspace}/.pd/feature-flags.yaml` with:
+`PRI-239` owns the feature flag registry and production loader contract. Until that issue is merged and its loading path is covered by tests:
+
+- Do not introduce a new subsystem / hook / writer / reader or expand MVP-Core without explicit maintainer approval.
+- Bug fixes, evidence collection, documentation alignment, synthetic validation, and ADR-0012 legacy retirement/cutover may proceed without inventing an unused flag file.
+- If a proposed new behavior needs runtime disabling before the registry exists, stop and implement the registry first.
+
+After `PRI-239` merges, every new or newly surfaced functional subsystem / hook / writer / reader must be registered in `{workspace}/.pd/feature-flags.yaml` with:
 - `category: core | quiet | gone | legacy_retire`
 - `enabled: true | false` (Quiet = false by default)
 - `since: <YYYY-MM-DD>` (when added)
 
-PRs that introduce new functional code without flag registration are rejected.
+Registration counts only when the production loader and a test exercise the flag. After that point, PRs introducing functional behavior without registration are rejected.
 
 ### Anti-pattern Triggers
 

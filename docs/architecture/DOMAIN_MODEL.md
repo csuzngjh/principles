@@ -375,7 +375,7 @@ disabled（自动 deactivate）
 | **IdleTrigger** | `packages/principles-core/src/runtime-v2/idle-trigger/` | - | ⚠️ 退役目标（ADR-0012：不建立 host 调度适配）|
 | **ActivationDispatcher** | `packages/principles-core/src/runtime-v2/activation/activation-dispatcher.ts` | - | ✅ Done（ADR-0006 基础版）|
 | **ApprovalQueue** | `packages/principles-core/src/runtime-v2/activation/approval-queue.ts` | - | ✅ Done（基础 4 状态；二次确认/过期待扩展）|
-| **ChannelWriter（5 个）** | `PromptWriter` / `DeferArchiveWriter` 已在 `activation/low-risk-writers.ts` | `SkillFileWriter` / `RuleHostWriter` / `TrainingExporter` | ⏳ 部分完成 |
+| **ChannelWriter（5 个设计通道）** | `PromptWriter` / `DeferArchiveWriter` 已在 `activation/low-risk-writers.ts`；`RuleHostWriter` 已落地 | `SkillFileWriter` 为 MVP stretch；`TrainingExporter` deferred | ⏳ MVP proven-channel 已具备 |
 | **Nocturnal-Trinity** | `packages/openclaw-plugin/src/core/nocturnal-trinity.ts` | 删除 | ⏳ 删除中（ADR-0005）|
 | **NocturnalArtifact** | plugin | 替换为 PIArtifact | ⏳ 迁移中（ADR-0005）|
 | **BuiltInAgentRegistry（BALM）** | TBD | `packages/principles-core/src/runtime-v2/agents/` | ❌ 待建（ADR-0008）|
@@ -425,7 +425,7 @@ UI 文案可使用同义词；**代码、Schema、ADR、issue title 必须使用
 2. ⏳ **架构守护测试**：保护本文档存在，禁止新增非标准术语
 3. ⏳ **类型迁移到 core**：Principle / Rule / Implementation 的 canonical type 完整迁入 `@principles/core`（ADR-0002 PRI-45）
 4. ⏳ **完成 Nocturnal 合并**：删除冗余实现，对齐 PIArtifact 模型（ADR-0005）
-5. ⏳ **激活流水线落地**：ActivationDispatcher + prompt/defer_archive 已完成；SkillFileWriter / RuleHostWriter / TrainingExporter 待建（ADR-0006）
+5. ⏳ **激活流水线收敛**：ActivationDispatcher + prompt/defer_archive + RuleHostWriter 已完成；SkillFileWriter 仅在需求验证后评估，TrainingExporter 不在 MVP（ADR-0014）
 6. ⏳ **审批 UI**：pd-console `/approvals` 基础版已完成；RejectionFeedback、二次确认、审批历史待建（ADR-0006 + ADR-0007）
 7. ❌ **Pruning Action**：从 ReadModel 推进到真正的 mutation（独立 issue）
 8. ❌ **BALM**：内置代理生命周期管理，声明式 AgentManifest（ADR-0008）

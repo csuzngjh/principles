@@ -92,6 +92,7 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
 | ERR-023 | CLI dry-run command opens writable database connection instead of readonly | PRI-218 |
+| ERR-027 | Strategic pivot lands but executable docs and issue templates continue dispatching superseded work | PRI-252 |
 
 ---
 
@@ -425,9 +426,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-027]** | Strategic pivot lands but executable docs and issue templates continue dispatching superseded work
+
+- **What happened**: PR #696 introduced ADR-0014 and an MVP-First execution document that paused Attribution / Phase 1C / Phase 1D expansion, but the same merged documentation set still contained a Linear sync template directing agents to create PRI-232~236, a risk register allowing Phase 1C work in parallel, active architecture status tables marking already-delivered RuleHost work as pending, and a mandatory feature-flag gate before any registry/loader existed.
+- **Why it's wrong**: For an AI-driven project, route documents and issue templates are an executable control plane. Contradictory instructions are not cosmetic drift: they dispatch canceled work, make nonexistent enforcement mechanisms mandatory, and push the project away from its declared product objective.
+- **Correct approach**: When a strategy ADR changes active scope, update the executable control plane in the same convergence change: agent instructions, current roadmap, Linear sync plan, risk register, active architecture status, user-facing scope statements, and live Linear issue states. Historical analysis may remain only with a prominent `DO NOT DISPATCH` marker and restart condition.
+- **How to prevent**: Before merging a strategy pivot, search for the superseded issue IDs, phase names, component names, and gate requirements across active docs and Linear. Require one explicit table of active, deferred/canceled, and stretch issues. Do not state a governance gate is mandatory until a production enforcement path and test exist.
+- **Source**: PRI-252 / follow-up to PR #696
+- **Date**: 2026-05-24
+- **Recurrence**: None
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 26 |
-| Last updated | 2026-05-23 |
+| Total lessons | 27 |
+| Last updated | 2026-05-24 |
 | Top category | Schema & Type |
 | Recurring errors | 13 |

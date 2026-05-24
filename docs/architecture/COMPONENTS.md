@@ -190,9 +190,9 @@ PD 系统有 5 类组件：
 | `ApprovalQueue` | 🔵 Service | core | `runtime-v2/activation/approval-queue.ts` | enqueue/approve/reject | ApprovalRecord | ✅ 基础版（4 状态） |
 | `PromptWriter` | 🟤 Writer | core | `runtime-v2/activation/low-risk-writers.ts` | PIArtifact | ActivationOutcome | ✅ 基础版 |
 | `DeferArchiveWriter` | 🟤 Writer | core | `runtime-v2/activation/low-risk-writers.ts` | PIArtifact | ActivationOutcome | ✅ 基础版 |
-| `SkillFileWriter` | 🟤 Writer | core | `runtime-v2/activation/writers/skill-file-writer.ts` | PIArtifact | ActivationOutcome | ❌ 待建 |
-| `RuleHostWriter` | 🟤 Writer | core | `runtime-v2/activation/writers/rule-host-writer.ts` | PIArtifact | ActivationOutcome | ❌ 待建 |
-| `TrainingExporter` | 🟤 Writer | core | `runtime-v2/activation/writers/training-exporter.ts` | PIArtifact | ActivationOutcome | ❌ 待建 |
+| `SkillFileWriter` | 🟤 Writer | core | `runtime-v2/activation/writers/skill-file-writer.ts` | PIArtifact | ActivationOutcome | Deferred / MVP stretch |
+| `RuleHostWriter` | 🟤 Writer | core | `runtime-v2/activation/writers/rule-host-writer.ts` | PIArtifact | ActivationOutcome | ✅ 基础版（PRI-146 / 174 / 185） |
+| `TrainingExporter` | 🟤 Writer | core | `runtime-v2/activation/writers/training-exporter.ts` | PIArtifact | ActivationOutcome | Deferred / MVP-Gone |
 | `RejectionFeedbackService` | 🔵 Service | core | `runtime-v2/activation/rejection-feedback-service.ts` | reject input | feedbackId | ❌ 待建 |
 
 ### 3.4 Pruning Pipeline 组件
@@ -580,12 +580,12 @@ Owner 标记规则：
 `PruningReadModel` §3.4 ✅
 `RecoverySweep` §2.2 ✅
 `RolloutReviewerRunner` §3.2.2 ✅
-`RuleHostWriter` §3.3 ❌
+`RuleHostWriter` §3.3 ✅
 `RuntimeStateManager` §2.2 ✅
 `ScribeRunner` §3.2.2 ✅
-`SkillFileWriter` §3.3 ❌
+`SkillFileWriter` §3.3 Deferred / stretch
 `TrainerRunner` §3.2.2 ✅
-`TrainingExporter` §3.3 ❌
+`TrainingExporter` §3.3 Deferred / MVP-Gone
 
 ### 按状态
 

@@ -57,17 +57,17 @@ PD 的真正治理对象是 AI agent 的 **行为品格**——跨会话、跨�
                          ↓
        人工在 pd-console 审核 → 决定走哪个通道
                          ↓
-        ┌─────────────┬─────────────┬─────────────┐
-        ▼             ▼             ▼             ▼
-     Prompt      Skill         RuleHost      defer_archive
-   (软提示)    (主动工作流)   (硬拦截)        (优雅退场)
+        ┌─────────────┬─────────────┐
+        ▼             ▼             ▼
+     Prompt       RuleHost      defer_archive
+   (软提示)      (硬拦截)        (优雅退场)
         │             │             │
         └─────────────┴─────────────┘
                       ↓
           代理在下一轮真实任务中表现出新品格
 ```
 
-**4 个通道全部进 MVP-Core**——这是 PD 与"prompt 模板管理器"的本质区别。
+**首次种子客户验证只依赖三个已经实现、可以观测和回滚的通道**：`prompt`、`code_tool_hook` / RuleHost、`defer_archive`。`skill` / `SkillFileWriter` 是受控 stretch goal，不是邀请客户的前置条件；只有客户需求或维护者明确决策才能把它移入当前路线。
 
 ### 2.3 三档分类法（取代之前的"留/砍"二元）
 
@@ -89,7 +89,6 @@ PD 的真正治理对象是 AI agent 的 **行为品格**——跨会话、跨�
 | **Dreamer + Scribe + Artificer** Runner | 已落地。Artificer 是 skill / RuleHost 的产出源 |
 | **prompt 通道** + LedgerPromptWriter | 已落地 |
 | **defer_archive 通道** + LedgerArchiveWriter | 已落地 |
-| **skill 通道** + SkillFileWriter | **待建**（MVP 必交付） |
 | **code_tool_hook 通道** + RuleHostWriter | 已落地 (PRI-146) |
 | Approval Queue + pd-console approvals 页 | 部分落地 |
 | pd-console 三页（Pain / Principle / Approval）| 待精简 |
@@ -110,6 +109,7 @@ PD 的真正治理对象是 AI agent 的 **行为品格**——跨会话、跨�
 | Central Sync Service | 跨工作区，MVP 单 workspace |
 | message-sanitize hook | COMPONENTS.md 自标"建议删除" |
 | Trajectory Collector（默认开关）| 评估后决定；如果 PainChain 不依赖则关闭 |
+| **skill 通道** + SkillFileWriter | 尚未实施且没有客户验证；仅在需求被观察后重新评估 |
 
 ### 2.6 MVP-Gone 清单（删除/归档）
 
@@ -125,26 +125,24 @@ PD 的真正治理对象是 AI agent 的 **行为品格**——跨会话、跨�
 按 docs/plans/2026-05-roadmap/07-mvp-first-pivot.md §5 执行：15 个 issue / docs，4-6 周。
 
 ```
-Week 1-2: 减法 + 4 通道闭环验证
-  MVP-1  scope decision doc
-  MVP-2  cancel/defer 旧 issues
-  MVP-3  feature flags + MVP-Quiet 关闭
-  MVP-4  4 通道 synthetic 冒烟
-  MVP-5  AGENTS.md "MVP 三问"
-  MVP-6  Nocturnal 退役（PRI-227 + PRI-230 继续）
+Week 1-2: 减法 + 三个已实现通道闭环验证
+  PRI-252  control-plane convergence（修正文档与 Linear 路由）
+  PRI-239  可加载 feature flags + MVP-Quiet 关闭
+  PRI-240  proven-channel synthetic 冒烟
+  PRI-242  Nocturnal / idle-trigger 退役协调
 
-Week 3-4: 用户旅程 + 4 通道演示
-  MVP-7  SkillFileWriter 实施
-  MVP-8  pd-console 4 通道审批 UI
-  MVP-9  pd-console 三页化
-  MVP-10 Demo workspace + 故事 A' 4 通道
+Week 3-4: 用户旅程 + proven-channel 演示
+  PRI-243  stretch checkpoint：仅在真实需求存在时提出 SkillFileWriter
+  PRI-244  pd-console proven-channel 审批 UI
+  PRI-245  pd-console 三页化
+  PRI-246  Demo workspace + 故事 A' proven-channel 场景
 
 Week 5-6: 安装 + 邀请
-  MVP-11 pd-cli 一键安装
-  MVP-12 GETTING-STARTED 用户视角重写
-  MVP-13 故事 A' 录屏 + 文字
-  MVP-14 多环境冒烟
-  MVP-15 邀请第一个种子客户
+  PRI-247 pd-cli 一键安装
+  PRI-248 GETTING-STARTED 用户视角重写
+  PRI-249 故事 A' 录屏 + 文字
+  PRI-250 多环境冒烟
+  PRI-251 邀请第一个种子客户
 ```
 
 ## 4. ADR-0006 (5-channel activation) 关系澄清
@@ -155,7 +153,7 @@ ADR-0006 的 5 通道设计**不变**。本 ADR 仅调整 MVP 优先级：
 |------|--------------|---------|
 | prompt | Active | MVP-Core |
 | defer_archive | Active | MVP-Core |
-| skill | 待建 | **MVP-Core**（必交付）|
+| skill | 待建 | **MVP-Quiet / Stretch**（不阻塞首次客户邀请）|
 | code_tool_hook (RuleHost) | Active (基础)| MVP-Core |
 | model_training | 待建 | **MVP-Gone**（不在 MVP）|
 
@@ -169,7 +167,7 @@ ADR-0006 的不变量（所有人工审批、二次确认、shadow mode）全部
 2. **怎么观察？** 实施后用户怎么验证它在工作？UI 看？CLI 命令？日志？无可观察方式拒收。
 3. **怎么关闭？** 实施后如果发现不好用，关闭路径？feature flag 还是 PR revert？只能 revert 的必须带 flag 一起来。
 
-每个新功能在 commit 前必须**先在 feature-flags.yaml 注册**。无 flag 注册的 PR 拒收。
+`PRI-239` 落地生产可读取、可测试的 feature flag registry 之前，不新增功能面；bugfix、验证、文档和 legacy retirement 不要求虚构 flag 文件。`PRI-239` 合并后，每个新功能在 commit 前必须在 `feature-flags.yaml` 注册，且 loader/test 必须证明 flag 实际生效。
 
 ## 6. ADR-0013 (Attribution Pipeline) 处置
 
@@ -190,14 +188,14 @@ v2.0 引入的 R4 Attribution Loop / R5 Conflict Detection / PRRR 北极星指�
 
 - 复杂度立即停止增长
 - MVP-Quiet 关闭后用户/维护者认知负担降低
-- 4-6 周内具备真实外部反馈能力
+- 4-6 周内具备真实外部反馈能力，不以新通道开发阻塞邀请
 - "下线机制"从隐性变显性
 - 故事 A'（行为品格内化）保留 PD 的差异化定位
 
 ### Negative / Cost
 
 - 已落地的 Philosopher / Evaluator / RolloutReviewer 维护成本短期不消失（只是 flag 关闭）
-- SkillFileWriter 仍需新写代码（MVP 必交付）
+- 暂不实现 SkillFileWriter 可能让首次演示少一个主动工作流出口；客户需求出现后再投资
 - pd-console 三页化需要回退 / 隐藏现有页面，可能临时影响维护者本人体验
 - 需要严格执行"MVP 三问"，否则会被新提案绕过
 
@@ -214,7 +212,7 @@ v2.0 引入的 R4 Attribution Loop / R5 Conflict Detection / PRRR 北极星指�
 2. **"为未来铺路"的抽象超前** — MVP 三问中的"不做会怎样"压制
 3. **AI 助手快速产出导致的复杂度膨胀** — 三档分类强制 PR scope
 4. **后端无 UI 验证盲飞** — Demo workspace + pd-console 三页化解决
-5. **下线机制缺失** — feature-flags.yaml 注册 + AGENTS.md 三问
+5. **下线机制缺失** — PRI-239 落地后由 feature-flags.yaml loader/test + AGENTS.md 三问约束
 
 ## 10. References
 

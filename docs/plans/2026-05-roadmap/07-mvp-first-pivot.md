@@ -15,9 +15,9 @@
 |------|------------------------|---------------------|
 | 心智模型 | "成熟产品的精益化" | "未验证产品的 PMF 寻找" |
 | 优先级 | Attribution Pipeline 是最高杠杆 | 种子客户是最高杠杆 |
-| 新增组件 | 9 个（Attribution / LearningSummary / Probation / 等）| 0 个（除 SkillFileWriter）|
+| 新增组件 | 9 个（Attribution / LearningSummary / Probation / 等）| 0 个（SkillFileWriter 为非阻塞 stretch，不预先实施）|
 | 新增不变量 | 12 个（ATTRIBUTION-* / STATE-* / 等）| 0 个 |
-| 新增 issue | PRI-232~236（5 个）| MVP-1 至 MVP-15（15 个，多为减法或 docs）|
+| 新增 issue | PRI-232~236（5 个，已 canceled）| PRI-239~252 的 MVP 收敛/验证/邀请路径 |
 | 新增 ADR | ADR-0013（Attribution）| ADR-0014（MVP-First）|
 | 时间预期 | Phase 1C/1D ≈ 2-3 个月 | MVP Track 4-6 周 |
 
@@ -48,17 +48,17 @@
                          ↓
        人工在 pd-console 审核 → 决定走哪个通道
                          ↓
-        ┌─────────────┬─────────────┬─────────────┐
-        ▼             ▼             ▼             ▼
-     Prompt      Skill         RuleHost      defer_archive
-   (软提示)    (主动工作流)   (硬拦截)        (优雅退场)
+        ┌─────────────┬─────────────┐
+        ▼             ▼             ▼
+     Prompt       RuleHost      defer_archive
+   (软提示)      (硬拦截)        (优雅退场)
         │             │             │
         └─────────────┴─────────────┘
                       ↓
           代理在下一轮真实任务中表现出新品格
 ```
 
-**4 个通道全部进 MVP-Core**——这是 PD 与"prompt 模板管理器"的本质区别。
+**首次 MVP 只交付三个已有、可观测通道**。`skill` 是 stretch goal，不得因为一个未验证的新 writer 推迟真实用户验证。
 
 ## 4. MVP-Core / MVP-Quiet / MVP-Gone 完整清单
 
@@ -67,7 +67,7 @@
 **MVP-Core**:
 - Pain capture / Diagnostician / CandidateIntake / Ledger
 - Dreamer + Scribe + Artificer Runner
-- 4 个激活通道（含待建 SkillFileWriter）
+- 3 个已实现激活通道（prompt / RuleHost / defer_archive）
 - Approval Queue + pd-console 三页
 
 **MVP-Quiet（关闭，留代码）**:
@@ -77,6 +77,7 @@
 - Shadow Observation / Local Worker Routing
 - Central Sync / message-sanitize
 - Trajectory Collector（评估后决定）
+- SkillFileWriter（尚未实现；没有观察到客户需求前保持关闭）
 
 **MVP-Gone（删除/归档）**:
 - Nocturnal 全套（PRI-227~231 继续）
@@ -85,49 +86,45 @@
 
 ## 5. MVP Track 路线图
 
-### Week 1-2: 减法 + 4 通道闭环验证
+### Week 1-2: 减法 + proven-channel 闭环验证
 
 | Issue | 内容 | 估时 | 形式 |
 |-------|------|------|------|
-| **PRI-MVP-1** | MVP scope 决议文档（三档清单 + 故事 A'）| 1 天 | docs only |
-| **PRI-MVP-2** | Cancel/defer 旧 issues（PRI-232/233/235/236 cancel；PRI-234 hold；PRI-118 降级）| 0.5 天 | Linear API |
-| **PRI-MVP-3** | Feature flags 系统 + MVP-Quiet 默认关闭 | 5-7 天 | 1 PR |
-| **PRI-MVP-4** | 4 通道 synthetic 冒烟（每通道 1 fixture）| 5-7 天 | 1 PR |
-| **PRI-MVP-5** | AGENTS.md "MVP 三问" + 三档分类 | 0.5 天 | docs only |
-| **PRI-MVP-6** | Nocturnal 退役继续（PRI-227 + PRI-230）| 5-7 天 | 与上面并行 |
+| **PRI-252** | 控制面纠偏：文档 / Linear / agent gate 一致 | 1 天 | docs + Linear |
+| **PRI-239** | 可加载 feature flags contract + MVP-Quiet 默认关闭 | 5-7 天 | 1 PR |
+| **PRI-240** | proven-channel synthetic 冒烟（prompt / RuleHost / defer_archive）| 5-7 天 | 1 PR |
+| **PRI-242** | Nocturnal / idle-trigger 退役协调（含 PRI-227 / PRI-230）| 5-7 天 | bounded slices |
 
-### Week 3-4: 用户旅程 + 4 通道演示
+### Week 3-4: 用户旅程 + proven-channel 演示
 
 | Issue | 内容 | 估时 | 形式 |
 |-------|------|------|------|
-| **PRI-MVP-7** | SkillFileWriter 实施（channel=skill）| 5-7 天 | 1 PR |
-| **PRI-MVP-8** | pd-console 4 通道审批 UI 完整化 | 5-7 天 | 1 PR |
-| **PRI-MVP-9** | pd-console 三页化（Pain / Principle / Approval）| 3-5 天 | 1 PR |
-| **PRI-MVP-10** | Demo workspace + 故事 A' 4 通道演示 | 7-10 天 | 1 PR |
+| **PRI-243** | SkillFileWriter stretch checkpoint：仅在需求已记录时立项，否则关闭 | decision only | parked |
+| **PRI-244** | pd-console proven-channel 审批 UI 完整化 | 5-7 天 | 1 PR |
+| **PRI-245** | pd-console 三页化（Pain / Principle / Approval）| 3-5 天 | 1 PR |
+| **PRI-246** | Demo workspace + 故事 A' proven-channel 演示 | 7-10 天 | 1 PR |
 
 ### Week 5-6: 安装 + 邀请
 
 | Issue | 内容 | 估时 | 形式 |
 |-------|------|------|------|
-| **PRI-MVP-11** | pd-cli 一键安装（`npx create-principles-disciple` 兼容 AI 助手安装路径）| 3-5 天 | 1 PR |
-| **PRI-MVP-12** | GETTING-STARTED 用户视角重写 | 3-5 天 | docs |
-| **PRI-MVP-13** | 故事 A' 录屏 + 文字解释（5-8 分钟）| 2-3 天 | 内容产出 |
-| **PRI-MVP-14** | 多环境冒烟（Win/Mac/Linux）| 3-5 天 | 多个小 PR |
-| **PRI-MVP-15** | 邀请第一个种子客户（A + C 画像各 1 个）| 0.5 天 | 沟通 |
+| **PRI-247** | pd-cli 一键安装（`npx create-principles-disciple` 兼容 AI 助手安装路径）| 3-5 天 | 1 PR |
+| **PRI-248** | GETTING-STARTED 用户视角重写 | 3-5 天 | docs |
+| **PRI-249** | 故事 A' 录屏 + 文字解释（5-8 分钟）| 2-3 天 | 内容产出 |
+| **PRI-250** | 多环境冒烟（Win/Mac/Linux）| 3-5 天 | 多个小 PR |
+| **PRI-251** | 邀请第一个种子客户（A + C 画像各 1 个）| 0.5 天 | 沟通 |
 
 ## 6. 风险与缓解
 
-### 风险 1：4 通道演示比单通道难 3-5 倍
+### 风险 1：把未验证的新通道放进 MVP 会再次拖慢验证
 
-每个通道有独立审批 UI、独立 demo 场景、独立回滚路径。skill 通道还需要新写 SkillFileWriter。如果 Week 3-4 进度落后：
-
-**优先砍 skill 通道**（按"已完成度"和"演示直观度"）：
+当前演示基线固定为三个已经实现的通道。`skill` 仅在真实客户需求被记录或维护者明确批准后进入范围。若已实现通道仍需缩减，按可观测性和回滚能力排序：
 ```
 prompt > defer_archive > RuleHost > skill
 （保留度从高到低）
 ```
 
-如果只能演示 3 个通道，砍 skill；如果只能演示 2 个，砍 skill + RuleHost；prompt + defer_archive 是绝对底线。
+如果只能演示 2 个，砍 RuleHost；prompt + defer_archive 是绝对底线。
 
 ### 风险 2：RuleHost / Skill 概念门槛高于 prompt 注入
 
@@ -137,9 +134,9 @@ prompt > defer_archive > RuleHost > skill
 
 抽象说服力低。**缓解：演示时不讲哲学，先让客户给 PD 注入一个具体的 "我团队的工作风格规则"，然后展示 AI 在没注入和注入后的行为差别。**
 
-### 风险 4：Week 3-4 SkillFileWriter 实施风险
+### 风险 4：历史文档把 SkillFileWriter 重新带回关键路径
 
-skill 通道是唯一一个还需要新写代码的 MVP-Core 工作。如果实施超时，必须果断砍掉 skill 通道并接受"3 通道演示"，而不是延期发布。
+`skill` 已被明确移出首次客户邀请门槛。任何重新引入它的 issue 必须回答 MVP 三问并引用真实需求证据，否则直接拒绝。
 
 ### 风险 5：MVP-Quiet 关闭可能 break 现有功能
 
@@ -157,7 +154,7 @@ GFI / Focus History 等已被现有代码依赖。**缓解：feature flag 默认
 2. **怎么观察？** UI / CLI / 日志 哪个能看到它在工作？
 3. **怎么关闭？** feature flag 还是 PR revert？
 
-每个新功能在 commit 前必须**先在 feature-flags.yaml 注册**。无 flag 注册的 PR 拒收。
+`PRI-239` 合并前，禁止未经批准的新功能扩张，但 bugfix、验证、文档和删除工作可继续。`PRI-239` 合并并证明 loader/test 生效后，新增或重新暴露的功能必须注册 `feature-flags.yaml`，否则 PR 拒收。
 
 ## 8. 与已有文档的关系
 
@@ -206,9 +203,9 @@ MVP Track 完成 (Week 6 末)
 7. 修订 02-roadmap.md（删除 Phase 1C/1D，改为 MVP Track）
 8. 修订 README.md（改入口）
 9. 修订 AGENTS.md（加 MVP 三问 + 三档分类）
-10. Linear: cancel PRI-233 / PRI-235 / PRI-236
-11. Linear: 改 PRI-232 描述为 staleness-only 极小版
-12. Linear: 改 PRI-234 为 hold + 加注重启条件
-13. Linear: 创建 PRI-MVP-1 至 MVP-15
+10. ✅ Linear: PRI-232~236 已 canceled；保持 post-MVP deferred
+11. ⏳ Linear: 由 PRI-252 纠正文档和现行 MVP issue 范围
+12. ⏳ Linear: 以 PRI-239 建立真实 feature flag contract 后再强制注册
+13. ⏳ Linear: 只调度 proven-channel 验证、legacy retirement 和客户邀请所需工作
 
 文档完成后才动 Linear，避免重复修订。

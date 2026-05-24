@@ -1,11 +1,11 @@
 # ADR-0011: Three-Tier Task Model and MissionScheduler
 
-> **状态**: Accepted (实施延后至 Phase 2/3 — 见 v2.0 修订)
+> **状态**: Deferred by ADR-0014 (PD-owned explicit scheduling boundary only)
 > **日期**: 2026-05-16
 > **相关**: COMPONENTS.md, DATA_ARCHITECTURE.md
 
 > **2026-05-23 修订**: [ADR-0012](./0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) 规定 `MissionScheduler` 如继续实施，必须是 PD-owned、host-agnostic 的显式调度边界。本文提及 `IdleTrigger` 作为唤醒来源的部分已废止；不得建设 OpenClaw idle/night 触发适配器。
-> **2026-05-24 v2.0 修订**: 本 ADR 的三层任务模型实施被进一步延后至 Phase 2/3。当前 PRI-162 的 PD-owned explicit scheduling boundary 已经满足 Runtime V2 的执行需求，不需要 MissionScheduler 即可推进 Phase 1C/1D。准入门槛见 [docs/plans/2026-05-roadmap/02-roadmap.md §7](../plans/2026-05-roadmap/02-roadmap.md)。理由见 [06-ahe-informed-architecture-review.md](../plans/2026-05-roadmap/06-ahe-informed-architecture-review.md) §2.3。
+> **2026-05-24 ADR-0014 修订**: 当前只允许推进 PRI-162 的 PD-owned explicit scheduling boundary，作为移除 OpenClaw idle/night 绑定的减法工作。`MissionScheduler` 和三层任务模型不得在 MVP 阶段实施；Phase 1C/1D 已取消。重启条件见 [post-mvp-conditional-roadmap.md](../plans/post-mvp-conditional-roadmap.md)。
 
 
 ## 1. 背景与痛点 (Context)
