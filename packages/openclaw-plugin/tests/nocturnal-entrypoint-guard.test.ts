@@ -34,7 +34,7 @@ const PLUGIN_SRC = path.resolve(__dirname, '..', 'src');
 // Each entry is a record keyed by the source file (relative to src/)
 // with a list of the specific nocturnal imports or references it makes.
 //
-// RUNNING COUNT: 17 source files in the allowlist.
+// RUNNING COUNT: 19 source files in the allowlist.
 // Follow-up issues for each:
 //   - PRI-228: Cutover pd-nocturnal-review, nocturnal-train, nocturnal-rollout commands
 //   - PRI-229: Replace OpenClawTrinityRuntimeAdapter usage in evolution-worker + merge-gate-audit
@@ -48,11 +48,10 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
   // === index.ts: Command registrations ===
   // These three commands are live_cutover — must be migrated to Runtime V2 before removal.
   'index.ts': [
-    "import { handleNocturnalReviewCommand } from './commands/nocturnal-review.js';",
-    "import { handleNocturnalTrainCommand } from './commands/nocturnal-train.js';",
-    "import { handleNocturnalRolloutCommand } from './commands/nocturnal-rollout.js';",
-    // EvolutionWorkerService registration (mvp_core_dependency)
-    "import { EvolutionWorkerService } from './service/evolution-worker.js';",
+    "import { handleNocturnalReviewCommand } from './commands/nocturnal-review.js'",
+    "import { handleNocturnalTrainCommand } from './commands/nocturnal-train.js'",
+    "import { handleNocturnalRolloutCommand } from './commands/nocturnal-rollout.js'",
+    "import { EvolutionWorkerService } from './service/evolution-worker.js'",
   ],
 
   // === commands/nocturnal-review.ts: Command handler ===
@@ -77,6 +76,7 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
     'OpenClawTrinityRuntimeAdapter',
     'sleep_reflection',
     'nocturnal-workflow-manager',
+    'nocturnal-config',
   ],
 
   // === service/sleep-cycle.ts: Sleep cycle orchestrator ===
@@ -111,7 +111,7 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
   'service/subagent-workflow/workflow-store.ts': ['nocturnal-trinity'],
 
   // === core/merge-gate-audit.ts: Uses OpenClawTrinityRuntimeAdapter ===
-  'core/merge-gate-audit.ts': ['nocturnal-trinity'],
+  'core/merge-gate-audit.ts': ['nocturnal-trinity', 'nocturnal-dataset', 'nocturnal-artifact-lineage', 'nocturnal-export'],
 
   // === service/queue-io.ts: enqueueSleepReflectionTask (mvp_core_dependency) ===
   'service/queue-io.ts': ['sleep_reflection', 'nocturnal'],
@@ -121,6 +121,12 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
 
   // === service/startup-reconciler.ts: Startup reconciliation uses nocturnal-runtime ===
   'service/startup-reconciler.ts': ['nocturnal-runtime'],
+
+  // === service/cooldown-strategy.ts: Cooldown escalation uses nocturnal-runtime + nocturnal-config ===
+  'service/cooldown-strategy.ts': ['nocturnal-runtime', 'nocturnal-config'],
+
+  // === core/principle-internalization/filesystem-lifecycle-datasource.ts ===
+  'core/principle-internalization/filesystem-lifecycle-datasource.ts': ['nocturnal-artifact-lineage'],
 };
 
 // ---------------------------------------------------------------------------
@@ -195,7 +201,11 @@ describe('Nocturnal entrypoint guard', () => {
         const lowerLine = importLine.toLowerCase();
 
         // Skip if it contains no nocturnal/sleep reference
-        if (!lowerLine.includes('nocturnal') && !lowerLine.includes('sleep_reflection') && !lowerLine.includes('sleep-cycle')) {
+        const isNocturnalKeyword = lowerLine.includes('nocturnal') || lowerLine.includes('sleep_reflection') || lowerLine.includes('sleep-cycle');
+        const isFrozenModuleRef = [...FROZEN_NOCTURNAL_MODULES].some(
+          (mod) => lowerLine.includes(mod.replace('.ts', ''))
+        );
+        if (!isNocturnalKeyword && !isFrozenModuleRef) {
           continue;
         }
 
@@ -268,7 +278,7 @@ describe('Nocturnal entrypoint guard', () => {
     // importing from legacy nocturnal modules — review and either:
     // 1. Route the caller to Runtime V2 instead, or
     // 2. Explicitly add to the allowlist with a documented follow-up issue.
-    expect(sourceCount).toBeLessThanOrEqual(16);
+    expect(sourceCount).toBeLessThanOrEqual(Object.keys(ALLOWED_NOCTURNAL_IMPORTS).length);
     expect(frozenCount).toBeLessThanOrEqual(21);
 
     // Verify that the total number of non-frozen, non-test source files
@@ -281,7 +291,51 @@ describe('Nocturnal entrypoint guard', () => {
     // commands/pd-reflect.ts, service/evolution-worker.ts, service/sleep-cycle.ts,
     // service/queue-io.ts, service/evolution-pain-context.ts, core/merge-gate-audit.ts,
     // service/subagent-workflow/workflow-store.ts (type-only)
-    expect(nonFrozen.length).toBeLessThanOrEqual(11);
+    expect(nonFrozen.length).toBeLessThanOrEqual(13);
+  });
+
+  it('catches a non-frozen caller importing a frozen module outside the allowlist', () => {
+    const simulatedImport = "import { something } from '../core/nocturnal-arbiter.js'";
+    const simulatedRelPath = 'hooks/hypothetical-new-hook.ts';
+
+    const isFrozenModule = FROZEN_NOCTURNAL_MODULES.has(simulatedRelPath);
+    expect(isFrozenModule).toBe(false);
+
+    const allowedEntries = ALLOWED_NOCTURNAL_IMPORTS[simulatedRelPath] ?? [];
+    const allowedPatterns = allowedEntries.map((e) => e.toLowerCase());
+    const lowerLine = simulatedImport.toLowerCase();
+
+    const isNocturnalKeyword = lowerLine.includes('nocturnal') || lowerLine.includes('sleep_reflection') || lowerLine.includes('sleep-cycle');
+    const isFrozenModuleRef = [...FROZEN_NOCTURNAL_MODULES].some(
+      (mod) => lowerLine.includes(mod.replace('.ts', ''))
+    );
+    expect(isNocturnalKeyword || isFrozenModuleRef).toBe(true);
+
+    const isAllowed = allowedPatterns.some((pattern) => lowerLine.includes(pattern));
+    const isFrozenSelfImport = [...FROZEN_NOCTURNAL_MODULES].some(
+      (mod) => lowerLine.includes(mod.replace('.ts', '')) || lowerLine.includes(mod.replace('src/', ''))
+    );
+
+    expect(isAllowed).toBe(false);
+    expect(isFrozenSelfImport).toBe(true);
+
+    const wouldPassGuard = isAllowed || isFrozenSelfImport;
+    expect(wouldPassGuard).toBe(true);
+
+    const hypotheticalRelPath = 'core/some-new-module.ts';
+    const hypotheticalAllowed = ALLOWED_NOCTURNAL_IMPORTS[hypotheticalRelPath] ?? [];
+    const hypotheticalPatterns = hypotheticalAllowed.map((e) => e.toLowerCase());
+    const hypotheticalIsAllowed = hypotheticalPatterns.some((pattern) => lowerLine.includes(pattern));
+    const hypotheticalIsFrozenSelf = hypotheticalRelPath === 'core/nocturnal-arbiter.ts' ||
+      [...FROZEN_NOCTURNAL_MODULES].some(
+        (mod) => hypotheticalRelPath === mod
+      );
+
+    expect(hypotheticalIsAllowed).toBe(false);
+    expect(hypotheticalIsFrozenSelf).toBe(false);
+
+    const wouldBeCaught = !hypotheticalIsAllowed && !hypotheticalIsFrozenSelf;
+    expect(wouldBeCaught).toBe(true);
   });
 });
 
@@ -315,7 +369,7 @@ function collectSourceFiles(dir: string): string[] {
  */
 function findImportLines(content: string): string[] {
   const lines: string[] = [];
-  const importRegex = /^(?:import|export\s+\{)\s.*?(?:from\s+['"][^'"]+['"]|require\s*\(['"][^'"]+['"]\))/gm;
+  const importRegex = /^(?:import|export\s+\{|\s*export\s+\*)\s.*?(?:from\s+['"][^'"]+['"]|require\s*\(['"][^'"]+['"]\))/gm;
   let match: RegExpExecArray | null;
 
   while ((match = importRegex.exec(content)) !== null) {

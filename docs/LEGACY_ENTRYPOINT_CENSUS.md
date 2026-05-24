@@ -13,7 +13,7 @@
 
 | Category | Tag | Meaning |
 |---|---|---|
-| **MVP-Core Dependency** | `mvp_core_dependency` | ADR-0014 MVP-Core activation paths (prompt, RuleHost / code_tool_hook, defer_archive). These are the "good" entrypoints: the evolution-worker loop and sleep-cycle orchestrator that the Runtime V2 Peer Runners will replace. |
+| **MVP-Core Dependency** | `mvp_core_dependency` | ADR-0014 MVP-Core activation paths (`prompt`, `code_tool_hook / RuleHost`, `defer_archive`). These are the "good" entrypoints: the evolution-worker loop and sleep-cycle orchestrator that the Runtime V2 Peer Runners will replace. |
 | **Live Cutover** | `live_cutover` | Still has live callers in the current codebase that need to be migrated to Runtime V2 before the legacy module can be deleted. |
 | **Compatibility Alias** | `compat_alias` | Re-export or thin alias that exists only for backwards compatibility. Can be removed when all consumers migrate. |
 | **Historical Read Export** | `historical_read_export` | Read-only export path (type re-export, barrel export). Does not call into Nocturnal logic at runtime. |
@@ -232,9 +232,9 @@ for legacy nocturnal modules. They are NOT legacy entrypoints.
 | Category | Count | Description |
 |---|---|---|
 | `mvp_core_dependency` | 4 | EvolutionWorker service registration, before_prompt_build hook trigger, evolution queue processing loop, queue-io sleep_reflection enqueue. These are ADR-0014 core. |
-| `live_cutover` | 15 | Commands (3), service modules still called (4), import sites in evolution-worker / workflow-manager (5), sleep-cycle (1), merge-gate-audit (1), startup-reconciler (1). |
+| `live_cutover` | 18 | Commands (3), command handler source files (3), service modules still called (4), import sites in evolution-worker / workflow-manager (5), sleep-cycle (1), merge-gate-audit (1), startup-reconciler (1). |
 | `compat_alias` | 1 | Re-export of enqueueSleepReflectionTask from evolution-worker.ts. |
 | `historical_read_export` | 28 | Test files (24 + 4 integration/architecture tests) and type-only imports (2). |
-| `delete_candidate` | 16 | Frozen core modules (14). Service orchestrator (1). Command handler source files (3, counting as sub-items of live_cutover). |
+| `delete_candidate` | 16 | Frozen core modules (14), service orchestrator (1), adaptive-thresholds (1). |
 
 **Total unique entrypoints classified: 63**
