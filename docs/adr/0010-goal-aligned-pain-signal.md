@@ -1,10 +1,10 @@
 # ADR-0010: Goal-Aligned Pain Signal (GAP)
 
-> **状态**: Accepted (Layer 3 三层信号架构已生效；Layer 1/2 GAP Generator 实施延后至 Phase 2)
+> **状态**: Partially retained; GAP expansion deferred by ADR-0014
 > **日期**: 2026-05-16
 > **相关**: INTERNALIZATION_PIPELINE.md, DOMAIN_MODEL.md, DATA_ARCHITECTURE.md
 
-> **2026-05-24 v2.0 修订**: 本 ADR 的三层信号架构（Layer 1/2/3）原则保持不变，但 **Layer 1 GAPSignalGenerator + Mission/Objective/KeyResult 数据模型实施被延后**到 Phase 2，准入门槛见 [docs/plans/2026-05-roadmap/02-roadmap.md §7](../plans/2026-05-roadmap/02-roadmap.md)。Phase 1C/1D 期间，pain category 仍只来自 Layer 3 (tool_failure/empathy_inferred) + Layer 2 (user_correction)；attribution 不依赖 Layer 1。理由见 [06-ahe-informed-architecture-review.md](../plans/2026-05-roadmap/06-ahe-informed-architecture-review.md) §2.3（无 mission 数据时强行实现会变 mock）。
+> **2026-05-24 ADR-0014 修订**: 已存在的 pain capture 可继续用于 MVP 验证；`GAPSignalGenerator` 与 Mission/Objective/KeyResult 扩张为 post-MVP conditional work。Phase 1C/1D 与 Attribution 已取消，不能作为实施理由。重启条件见 [post-mvp-conditional-roadmap.md](../plans/post-mvp-conditional-roadmap.md)。
 
 
 ## 1. 背景与痛点 (Context)

@@ -5,6 +5,7 @@
 > **被取代原因**: 本评审建议引入 Attribution Pipeline + Phase 1C/1D 等 5 个新 issue，违反了项目的实际阶段（零外部用户、维护者认知负担已饱和）。重新对齐 MVP-First 后，本文档的"诊断"部分仍有价值（特别是 §1 三支柱框架、§2 缺陷识别、§3 系统动力学补强），但**所有"实施建议"全部 deferred**。
 > **替代文档**: [`07-mvp-first-pivot.md`](./07-mvp-first-pivot.md)、[`docs/adr/0014-mvp-first-strategy-and-product-pivot.md`](../../adr/0014-mvp-first-strategy-and-product-pivot.md)
 > **保留理由**: 本文中的"PD 缺失第三支柱（Decision Observability）"诊断仍然成立。当 MVP 验证完成后，post-mvp-conditional-roadmap.md §1 的触发条件满足时，本文是重启 Attribution Pipeline 的关键输入。
+> **DO NOT DISPATCH**: 下方任何“必须新增”“立即执行”或 PRI-232~236 内容均为历史提案，不是现行指令。Linear 中 PRI-232~236 已取消。当前执行入口仅为 [`07-mvp-first-pivot.md`](./07-mvp-first-pivot.md) 与 [`03-linear-sync-plan.md`](./03-linear-sync-plan.md)。
 
 ---
 
@@ -356,7 +357,7 @@ Phase 1C+1D 完成、Attribution 出过至少 50 个 verdict 后，才允许启�
 | R-17 | WorkspaceLearningSummary 注入让 Diagnostician 偏向"上次说过的"，缺乏多样性 | P2 | summary 是 evidence 而非命令；Diagnostician prompt 强制要求"如果与历史一致请引用，如果不一致请说明" |
 | R-18 | Bundled 与 Evolved 分离实施时，存量 ledger 缺少 provenance，需要 backfill | P2 | provenance 缺失默认按 evolved 处理（最严格）；提供 `pd ledger backfill-provenance` CLI 一次性纠正 |
 | R-19 | Activation Probation Window 让用户感觉"approve 了但没生效" | P2 | UI 明确显示"已批准 - 试运行中（剩余 N 次工具调用）"；console 提供"立即提升"快捷入口（高风险通道仍需二次审批）|
-| R-20 | Phase 1C 抢先 Phase 1B Nocturnal 删除会导致返工 | P2 | Phase 1B P2 (PRI-227~231) 与 Phase 1C 可并行：前者由 Symphony / 静态 inventory 完成；后者由强 AI 完成 |
+| R-20 | Phase 1C 抢先 Phase 1B Nocturnal 删除会导致返工 | P2 | **Historical only**：ADR-0014 已取消 Phase 1C 当前派工；只继续 Runtime V2 / Nocturnal 减法，重启条件见 post-MVP roadmap |
 
 ---
 
