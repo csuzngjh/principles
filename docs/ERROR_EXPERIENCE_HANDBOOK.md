@@ -93,6 +93,11 @@ Errors where AI assistants wrote code contradicting architecture docs or ADRs.
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
 | ERR-023 | CLI dry-run command opens writable database connection instead of readonly | PRI-218 |
 | ERR-027 | Strategic pivot lands but executable docs and issue templates continue dispatching superseded work | PRI-252 |
+| ERR-028 | Baseline fixture directly constructs writer instead of routing through production dispatcher | PRI-240 |
+| ERR-029 | CLI unknown input silently dropped instead of failing loud | PRI-240 |
+| ERR-030 | Path prefix `startsWith` matches sibling directories as production workspace | PRI-240 |
+| ERR-031 | Config resolver hard-fails on valid runtime when optional mode flags are absent | PRI-162 |
+| ERR-032 | Documentation labels legacy dispatch as MVP-Core, contradicting ADR-0014 | PRI-227 |
 
 ---
 
@@ -138,6 +143,54 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Every catch-and-degrade pattern must expose the failure reason via `ambiguityNotes` / telemetry / logging. Review all catch blocks that return fallback values and verify they communicate why the fallback was triggered.
 - **Source**: PRI-171
 - **Date**: 2026-05-19
+- **Recurrence**: Yes - 2026-05-24 PRI-240 (PR #699): `cleanupTempWorkspace` had `catch { void 0; }` that silently swallowed cleanup failures with no observability. Fixed by outputting structured `[pd-cli] cleanup warning:` to stderr.
+
+---
+
+**[ERR-028]** | Baseline fixture directly constructs writer instead of routing through production dispatcher
+
+- **What happened**: `proven-channel-baseline.ts` directly constructed `PromptWriter`, `RuleHostWriter`, and `DeferArchiveWriter` instances and called `canActivate()`/`activate()` on them, then claimed the results proved production continuity. But the real production path routes through `ActivationDispatcher.dispatch()`, which performs writer selection, gate evaluation, approval queue routing, and idempotency checks.
+- **Why it's wrong**: A baseline that bypasses the production dispatcher proves the writer works in isolation, not that the production activation path works. This is the same class as ERR-024/ERR-025 (validator/helper tested in isolation but not wired into production path). The baseline would pass even if the dispatcher was broken.
+- **Correct approach**: Baseline fixtures must route through the same `ActivationDispatcher.dispatch()` path used by production, with in-memory read models. The fixture's `evidenceSource` must reference `ActivationDispatcher.dispatch` to prove the real path was exercised.
+- **How to prevent**: For any baseline/continuity fixture, the test must exercise the same entry point as production code. If production uses a dispatcher/facade/mediator, the fixture must use it too. Never test the leaf component and claim the tree is healthy.
+- **Source**: PRI-240 / PR #699
+- **Date**: 2026-05-24
+- **Recurrence**: Yes - same class as ERR-024, ERR-025
+
+---
+
+**[ERR-029]** | CLI unknown input silently dropped instead of failing loud
+
+- **What happened**: `parseChannels()` in the CLI handler silently dropped unrecognized channel names from `--channels` input. When all tokens were invalid, it returned `undefined`, causing the runner to fall back to all MVP channels. A typo like `--channels code-hook` would yield a successful full-baseline run instead of an input error.
+- **Why it's wrong**: Silent fallback on invalid input violates the CLI Command Gate (rule 1: JSON mode strict, rule 6: degraded/refused result must include reason + nextAction). Operators get misleading continuity results for a channel set they did not actually request. This is the same class as ERR-009 (silently skip invalid instead of failing loud).
+- **Correct approach**: `parseChannels()` must return both valid channels and unknown tokens. The CLI handler must pass unknowns to the runner, which must fail loud with a structured error containing `failureReason` and `nextAction`.
+- **How to prevent**: For any CLI input parser, never silently drop invalid tokens. Return them separately and fail loud. Add parser-level tests that verify unknown inputs produce structured failures.
+- **Source**: PRI-240 / PR #699
+- **Date**: 2026-05-24
+- **Recurrence**: Yes - same class as ERR-009, ERR-010
+
+---
+
+**[ERR-030]** | Path prefix `startsWith` matches sibling directories as production workspace
+
+- **What happened**: `isProductionWorkspace()` used `normalized.startsWith(prefix.toLowerCase())` to check if a workspace directory is a production path. This matched sibling directories like `~/.openclaw/workspace-backup` or `D:\.openclaw\workspace-extra`, incorrectly blocking safe non-production directories.
+- **Why it's wrong**: `startsWith` on paths does not respect segment boundaries. A path that shares a prefix but is not a descendant should not match. This is the same class as ERR-003 (substring matching causing false positives) and ERR-013 (`in` operator matching inherited properties).
+- **Correct approach**: Use `normalized === prefix || normalized.startsWith(prefix + path.sep)` to match either the exact path or a descendant (path separator after prefix). This respects filesystem segment boundaries.
+- **How to prevent**: When matching filesystem paths by prefix, always include the path separator in the prefix check. Add tests for sibling paths (same prefix + suffix without separator) and descendant paths (prefix + separator + more).
+- **Source**: PRI-240 / PR #699
+- **Date**: 2026-05-24
+- **Recurrence**: Yes - same class as ERR-003, ERR-013
+
+---
+
+**[ERR-031]** | Config resolver hard-fails on valid runtime when optional mode flags are absent
+
+- **What happened**: `resolvePDConfig()` required `--openclaw-local` or `--openclaw-gateway` when `runtimeKind === 'openclaw-cli'`, but the `run-once` command and `--runtime config` path don't always expose these flags. This made previously supported `openclaw-cli` runtime paths unreachable.
+- **Why it's wrong**: Making optional mode flags mandatory breaks backward compatibility and violates the principle that config resolution should succeed when the runtime kind is valid. The mode can be resolved later by the consumer. This is the same class as ERR-009 (required field check that's too strict for the actual use case).
+- **Correct approach**: When `runtimeKind === 'openclaw-cli'` and neither mode flag is set, set `openclawMode = undefined` instead of failing. The mode is optional metadata that the consumer can resolve. Only fail when both flags are set (mutually exclusive).
+- **How to prevent**: When adding validation to a config resolver, distinguish between "required for the resolver to produce a valid config" and "required for the consumer to operate". The resolver should produce the config; the consumer should validate its own requirements. Add tests for each runtime kind without optional flags.
+- **Source**: PRI-162 / PR #700
+- **Date**: 2026-05-24
 - **Recurrence**: None
 
 ---
@@ -398,7 +451,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For every new validation/security function, the PR must include: (1) a test proving the production path calls the function, (2) a test proving the production path rejects/defends when the function returns invalid. If neither exists, the validator is not actually defending anything. Review trigger: any PR that adds a validation function without modifying the code that handles the untrusted input.
 - **Source**: PRI-210 / PR #690
 - **Date**: 2026-05-23
-- **Recurrence**: None
+- **Recurrence**: Yes - 2026-05-24 PRI-227 (PR #698): Nocturnal entrypoint guard had `if (isFrozenImport) continue;` that allowed non-frozen callers to import frozen modules without allowlist entry. The guard existed but the `continue` bypass made it fail-open — any file importing a frozen module would pass because the check was skipped for frozen module references. Fixed by removing the bypass entirely; non-frozen callers must now appear in ALLOWED_NOCTURNAL_IMPORTS.
 
 ---
 
@@ -410,7 +463,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For every PR that adds defensive logic, verify that at least one test exercises the production path that would invoke the defense. If no production path calls the new code, the PR must not claim to provide defense. Review trigger: any PR where the diff adds a new module but does not modify any existing production code to call it.
 - **Source**: PRI-209 / PR #689
 - **Date**: 2026-05-23
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): Healthy baseline test used `expect(['ok', 'degraded']).toContain(overallStatus)`, allowing `degraded` to pass. This meant a regression that introduced new warning-level broken links in the healthy path would not be caught. The test proved the code didn't crash, but not that the healthy path remained healthy. Fixed by tightening to `expect(overallStatus).toBe('ok')`. Also 2026-05-23 PRI-225 (PR #693): `bestEffortParentIds` was added to `PIMetadataParseResult.malformed` but not wired into the philosopher dependency check. The dependency check only accepted `status === 'parsed'`, so malformed metadata with extractable parent IDs still produced `philosopher_dependency_unverifiable`. Test proved `bestEffortParentIds` was populated correctly, but not that the production path used it for topology verification. Fixed by adding `else if (philMeta.status === 'malformed')` branch in the dependency check.
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): Healthy baseline test used `expect(['ok', 'degraded']).toContain(overallStatus)`, allowing `degraded` to pass. This meant a regression that introduced new warning-level broken links in the healthy path would not be caught. The test proved the code didn't crash, but not that the healthy path remained healthy. Fixed by tightening to `expect(overallStatus).toBe('ok')`. Also 2026-05-23 PRI-225 (PR #693): `bestEffortParentIds` was added to `PIMetadataParseResult.malformed` but not wired into the philosopher dependency check. The dependency check only accepted `status === 'parsed'`, so malformed metadata with extractable parent IDs still produced `philosopher_dependency_unverifiable`. Test proved `bestEffortParentIds` was populated correctly, but not that the production path used it for topology verification. Fixed by adding `else if (philMeta.status === 'malformed')` branch in the dependency check. Also 2026-05-24 PRI-240 (PR #699): RuleHost fixture test only asserted inside `if (result.status === 'passed')` conditional branches, so if the fixture returned `failed`, all assertions were skipped and the test passed vacuously. Fixed by adding unconditional `expect(['passed', 'degraded', 'failed']).toContain(result.status)` before the conditional branches.
 
 ---
 
@@ -438,9 +491,21 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-032]** | Documentation labels legacy dispatch as MVP-Core, contradicting ADR-0014
+
+- **What happened**: `LEGACY_ENTRYPOINT_CENSUS.md` and test comments described evolution-worker heartbeat, sleep-cycle orchestrator, and queue-io sleep_reflection enqueue as `mvp_core_dependency` / "ADR-0014 core". But ADR-0014 defines MVP-Core as only three activation paths: `prompt`, `code_tool_hook / RuleHost`, `defer_archive`. The idle/night/sleep-reflection/nocturnal dispatch paths are retirement targets, not core.
+- **Why it's wrong**: Labeling legacy dispatch as MVP-Core creates confusion about what can be deleted vs what must be preserved. It also references invalid issue numbers (PRI-232/233/234) that have been superseded or semantically drifted. This is the same class as ERR-027 (executable docs continue dispatching superseded work) — documentation contradicts the active strategy.
+- **Correct approach**: MVP-Core labels must strictly follow ADR-0014: only `prompt`, `code_tool_hook / RuleHost`, `defer_archive`. All idle/night/sleep-reflection/nocturnal dispatch must be labeled as `retirement / live cutover / delete blocker`. Retirement issue references must use current valid numbers (PRI-228, PRI-229, PRI-119, PRI-230, PRI-231), not canceled or reused numbers.
+- **How to prevent**: When a strategy ADR defines a precise scope (like MVP-Core), all documentation and test comments must be audited to align with that scope. Any label that claims something is "core" must trace directly to the ADR's definition. Review trigger: any PR that introduces or modifies `mvp_core_dependency` labels must cross-reference ADR-0014's explicit MVP-Core list.
+- **Source**: PRI-227 / PR #698
+- **Date**: 2026-05-24
+- **Recurrence**: Yes - same class as ERR-027
+
+---
+
 | Metric | Value |
 |--------|-------|
-| Total lessons | 27 |
+| Total lessons | 32 |
 | Last updated | 2026-05-24 |
 | Top category | Schema & Type |
-| Recurring errors | 13 |
+| Recurring errors | 15 |
