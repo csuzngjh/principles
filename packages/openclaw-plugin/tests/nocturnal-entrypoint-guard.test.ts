@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Nocturnal Entrypoint Guard — Architecture Regression Test
  * =========================================================
  *
@@ -34,7 +34,7 @@ const PLUGIN_SRC = path.resolve(__dirname, '..', 'src');
 // Each entry is a record keyed by the source file (relative to src/)
 // with a list of the specific nocturnal imports or references it makes.
 //
-// RUNNING COUNT: 19 source files in the allowlist.
+// RUNNING COUNT: matches Object.keys(ALLOWED_NOCTURNAL_IMPORTS).length at runtime.
 // Follow-up issues for each:
 //   - PRI-228: Cutover pd-nocturnal-review, nocturnal-train, nocturnal-rollout commands
 //   - PRI-229: Replace OpenClawTrinityRuntimeAdapter usage in evolution-worker + merge-gate-audit
@@ -196,29 +196,30 @@ describe('Nocturnal entrypoint guard', () => {
       const allowedEntries = ALLOWED_NOCTURNAL_IMPORTS[relPath] ?? [];
       const allowedPatterns = allowedEntries.map((e) => e.toLowerCase());
 
-      // Check each import line for nocturnal references
+
+      const frozenModuleBasenames = [...FROZEN_NOCTURNAL_MODULES].map(
+        (mod) => path.basename(mod, '.ts')
+      );
+
       for (const importLine of importLines) {
         const lowerLine = importLine.toLowerCase();
 
-        // Skip if it contains no nocturnal/sleep reference
-        const isNocturnalKeyword = lowerLine.includes('nocturnal') || lowerLine.includes('sleep_reflection') || lowerLine.includes('sleep-cycle');
-        const isFrozenModuleRef = [...FROZEN_NOCTURNAL_MODULES].some(
-          (mod) => lowerLine.includes(mod.replace('.ts', ''))
+        const isFrozenModuleRef = frozenModuleBasenames.some(
+          (basename) => lowerLine.includes(basename)
         );
-        if (!isNocturnalKeyword && !isFrozenModuleRef) {
+        const isNocturnalKeyword = lowerLine.includes('nocturnal') || lowerLine.includes('sleep_reflection') || lowerLine.includes('sleep-cycle');
+        if (!isFrozenModuleRef && !isNocturnalKeyword) {
           continue;
         }
 
-        // Check if this specific import is in the allowlist
         const isAllowed = allowedPatterns.some((pattern) => lowerLine.includes(pattern));
         if (!isAllowed) {
-          // Also check if the import is to a frozen nocturnal module (self-import)
           const isFrozenImport = [...FROZEN_NOCTURNAL_MODULES].some(
-            (mod) => lowerLine.includes(mod.replace('.ts', '')) || lowerLine.includes(mod.replace('src/', ''))
+            (mod) => lowerLine.includes(mod.replace('.ts', '')) || lowerLine.includes(path.basename(mod, '.ts'))
           );
-          if (isFrozenImport) continue; // frozen modules importing each other is expected
+          if (isFrozenImport) continue;
 
-          expect(unexpectedImportMessage(relPath, importLine)).toBe(''); // will fail
+          expect(unexpectedImportMessage(relPath, importLine)).toBe('');
         }
       }
     });
@@ -278,7 +279,7 @@ describe('Nocturnal entrypoint guard', () => {
     // importing from legacy nocturnal modules — review and either:
     // 1. Route the caller to Runtime V2 instead, or
     // 2. Explicitly add to the allowlist with a documented follow-up issue.
-    expect(sourceCount).toBeLessThanOrEqual(Object.keys(ALLOWED_NOCTURNAL_IMPORTS).length);
+    expect(sourceCount).toBe(Object.keys(ALLOWED_NOCTURNAL_IMPORTS).length);
     expect(frozenCount).toBeLessThanOrEqual(21);
 
     // Verify that the total number of non-frozen, non-test source files
@@ -369,7 +370,7 @@ function collectSourceFiles(dir: string): string[] {
  */
 function findImportLines(content: string): string[] {
   const lines: string[] = [];
-  const importRegex = /^(?:import|export\s+\{|\s*export\s+\*)\s.*?(?:from\s+['"][^'"]+['"]|require\s*\(['"][^'"]+['"]\))/gm;
+  const importRegex = /^(?:import\s+.*?from\s+['"][^'"]+['"]|export\s+(?:\{[^}]*\}|\*)\s+from\s+['"][^'"]+['"]|require\s*\(['"][^'"]+['"]\))/gm;
   let match: RegExpExecArray | null;
 
   while ((match = importRegex.exec(content)) !== null) {

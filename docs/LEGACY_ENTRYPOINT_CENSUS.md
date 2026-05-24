@@ -1,4 +1,4 @@
-# Legacy Entrypoint Census
+﻿# Legacy Entrypoint Census
 
 > **PRI-227**: Static inventory of every legacy Nocturnal entrypoint in the
 > `packages/openclaw-plugin/` source tree, including imports, hook registrations,
@@ -35,10 +35,15 @@ All three nocturnal commands are registered in `packages/openclaw-plugin/src/ind
 
 | File | Category | Notes |
 |---|---|---|
-| `src/commands/nocturnal-review.ts` | `delete_candidate` | Depends on nocturnal-dataset, nocturnal-arbiter types. |
-| `src/commands/nocturnal-train.ts` | `delete_candidate` | Training experiment lifecycle. |
-| `src/commands/nocturnal-rollout.ts` | `delete_candidate` | Checkpoint promotion/routing. |
+| `src/commands/nocturnal-review.ts` | `live_cutover` | Depends on nocturnal-dataset, nocturnal-arbiter types. Still wired in index.ts. |
+| `src/commands/nocturnal-train.ts` | `live_cutover` | Training experiment lifecycle. Still wired in index.ts. |
+| `src/commands/nocturnal-rollout.ts` | `live_cutover` | Checkpoint promotion/routing. Still wired in index.ts. |
 
+### Sleep Reflection Trigger Command
+
+| File | Category | Notes |
+|---|---|---|
+| `src/commands/pd-reflect.ts` | `live_cutover` | Manual sleep_reflection trigger. Creates sleep_reflection task via queue-io, bypassing idle check. |
 ---
 
 ## 2. Core Nocturnal Modules (Frozen per ADR-0005)
@@ -83,6 +88,18 @@ legacy code that must not be modified. Runtime V2 equivalents live in
 | File | Import | Category | Notes |
 |---|---|---|---|
 | `src/service/startup-reconciler.ts` | `writeState`, `readStateSync` from `./nocturnal-runtime.js` (line 16) | `live_cutover` | Startup reconciliation validates and resets nocturnal-runtime.json state. Called from EvolutionWorker heartbeat initial delay (evolution-worker.ts line 1594). |
+
+### cooldown-strategy.ts
+
+| File | Import | Category | Notes |
+|---|---|---|---|
+| `src/service/cooldown-strategy.ts` | `readState`, `readStateSync`, `writeState` from `./nocturnal-runtime.js`; `CooldownEscalationConfig`, `loadCooldownEscalationConfig` from `./nocturnal-config.js` | `live_cutover` | Cooldown escalation reads/writes nocturnal-runtime state and loads config from nocturnal-config. |
+
+### evolution-pain-context.ts
+
+| File | Reference | Category | Notes |
+|---|---|---|---|
+| `src/service/evolution-pain-context.ts` | `sleep_reflection` task kind (string literal) | `live_cutover` | Builds pain context metadata for sleep_reflection tasks. References sleep_reflection as a task kind filter. |
 
 ### Evolution Worker Nocturnal References
 
@@ -134,6 +151,24 @@ These are the actual import sites that keep legacy nocturnal modules alive.
 | `src/core/nocturnal-executability.ts` | `parseAndValidateArtifact` | `delete_candidate` | Both are delete candidates. |
 | `src/core/nocturnal-dataset.ts` | `NocturnalArtifact` type | `delete_candidate` | Type-only import. |
 
+
+### Imports of `nocturnal-runtime.ts`
+
+| Source File | Import | Category | Notes |
+|---|---|---|---|
+| `src/service/cooldown-strategy.ts` | `readState`, `readStateSync`, `writeState` | `live_cutover` | Cooldown state read/write. |
+
+### Imports of `nocturnal-config.ts`
+
+| Source File | Import | Category | Notes |
+|---|---|---|---|
+| `src/service/cooldown-strategy.ts` | `CooldownEscalationConfig`, `loadCooldownEscalationConfig` | `live_cutover` | Cooldown escalation config. |
+
+### Imports of `nocturnal-artifact-lineage.ts`
+
+| Source File | Import | Category | Notes |
+|---|---|---|---|
+| `src/core/principle-internalization/filesystem-lifecycle-datasource.ts` | `listArtifactLineageRecords` | `live_cutover` | Reads artifact lineage records for filesystem lifecycle tracking. |
 ---
 
 ## 6. Hook Trigger Paths (index.ts)
@@ -205,7 +240,7 @@ they verify existing behavior but must be retired with the production code.
 |---|---|---|---|
 | `before_prompt_build` | index.ts:120-129 | Starts EvolutionWorkerService per workspace | `mvp_core_dependency` |
 | EvolutionWorker heartbeat | evolution-worker.ts:1412 | Periodic cycle that checks idle, enqueues sleep_reflection | `mvp_core_dependency` |
-| EvolutionWorker sleep_reflection processing | evolution-worker.ts:640-975 | Processes sleep_reflection queue items via NocturnalWorkflowManager | `live_cutover` |
+| EvolutionWorker sleep_reflection processing | evolution-worker.ts:640-975 | Processes sleep_reflection queue items via NocturnalWorkflowManager | `mvp_core_dependency` |
 | runCycle (sleep-cycle.ts) | sleep-cycle.ts:72 | Extracted sleep-cycle orchestrator | `live_cutover` |
 
 ---
@@ -229,12 +264,15 @@ for legacy nocturnal modules. They are NOT legacy entrypoints.
 
 ## Summary
 
+
 | Category | Count | Description |
 |---|---|---|
-| `mvp_core_dependency` | 4 | EvolutionWorker service registration, before_prompt_build hook trigger, evolution queue processing loop, queue-io sleep_reflection enqueue. These are ADR-0014 core. |
-| `live_cutover` | 18 | Commands (3), command handler source files (3), service modules still called (4), import sites in evolution-worker / workflow-manager (5), sleep-cycle (1), merge-gate-audit (1), startup-reconciler (1). |
+| `mvp_core_dependency` | 4 | EvolutionWorker service registration (1), before_prompt_build hook trigger (1), evolution queue processing loop (1), queue-io sleep_reflection enqueue (1). ADR-0014 core. |
+| `live_cutover` | 22 | Nocturnal commands (3), command handlers (3), sleep_reflection trigger (1: pd-reflect.ts), service modules still called (4), evolution-worker import sites (3), NocturnalWorkflowManager references (3), cross-module imports (3: merge-gate-audit, cooldown-strategy, filesystem-lifecycle-datasource), startup-reconciler (1), pain context (1: evolution-pain-context.ts). |
 | `compat_alias` | 1 | Re-export of enqueueSleepReflectionTask from evolution-worker.ts. |
-| `historical_read_export` | 28 | Test files (24 + 4 integration/architecture tests) and type-only imports (2). |
-| `delete_candidate` | 16 | Frozen core modules (14), service orchestrator (1), adaptive-thresholds (1). |
+| `historical_read_export` | 29 | Test files (24 regular + 4 architecture regression), type-only imports (1: workflow-store.ts). |
+| `delete_candidate` | 16 | Frozen core modules (14 nocturnal-*.ts + 1 adaptive-thresholds.ts), service orchestrator (1: nocturnal-service.ts). |
 
-**Total unique entrypoints classified: 63**
+**Total unique entrypoints classified: 72**
+
+> **Counting rule**: Each entrypoint is counted once in its highest-priority category. Priority order: `mvp_core_dependency` > `live_cutover` > `compat_alias` > `historical_read_export` > `delete_candidate`. A single file with multiple import sites (e.g. evolution-worker.ts) counts as multiple entrypoints, one per distinct import/reference site listed in the detailed sections above. Sub-item sums in the Description column must equal the Count column value.
