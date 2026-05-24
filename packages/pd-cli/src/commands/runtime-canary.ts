@@ -2,6 +2,7 @@ import * as path from 'path';
 import { OperatorHealthReadModel, SchemaConformanceReadModel, PruningReadModel, createInternalizationQueueReadModel, auditCandidateLedgerConsistency, buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from '@principles/core/runtime-v2';
 import type { OperatorHealthSnapshot, SchemaConformanceResult, OrphanDetectionResult, InternalizationQueueSnapshot, GfiWorkspaceSnapshot, CandidateAuditResult } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
 
 export interface CanaryCheck {
   name: string;
@@ -130,6 +131,15 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
     })(),
     (async (): Promise<CanaryCheck> => {
       try {
+        const featureFlags = loadEffectiveFeatureFlags(workspaceDir);
+        const gfiFlag = featureFlags.flags.gfi;
+        if (!gfiFlag || !gfiFlag.enabled) {
+          return {
+            name: 'gfi_snapshot',
+            status: 'healthy',
+            summary: 'GFI feature flag disabled — skipping snapshot.',
+          };
+        }
         const sessionDir = path.join(workspaceDir, '.state', 'sessions');
         const fs = await import('fs');
         const sessions: { sessionId: string; currentGfi: number; lastActivityAt: number; consecutiveErrors: number }[] = [];

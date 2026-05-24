@@ -45,6 +45,17 @@ vi.mock('@principles/core/runtime-v2', () => ({
   classifyGfiWorkspaceHealth: mockClassifyGfiHealth,
 }));
 
+vi.mock('../../src/services/feature-flag-loader.js', () => ({
+  loadEffectiveFeatureFlags: vi.fn().mockReturnValue({
+    source: 'defaults',
+    configPath: '/fake/workspace/.pd/feature-flags.yaml',
+    flags: {
+      gfi: { id: 'gfi', category: 'quiet', enabled: true, since: '2026-05-24' },
+    },
+    warnings: [],
+  }),
+}));
+
 import { runCanaryChecks } from '../../src/commands/runtime-canary.js';
 
 const WS = '/fake/workspace';
