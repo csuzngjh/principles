@@ -43,25 +43,30 @@ export function validateFeatureFlagRaw(raw: unknown, source: string): Validation
     return { ok: false, errors: ['input must be a non-null object'], source };
   }
 
-  const obj = raw as Record<string, unknown>;
+  const obj = raw;
 
-  if (typeof obj.id !== 'string' || obj.id.length === 0) {
+  const id = Object.hasOwn(obj, 'id') ? (obj as Record<string, unknown>).id : undefined;
+  if (typeof id !== 'string' || id.length === 0) {
     errors.push('id must be a non-empty string');
   }
 
-  if (!VALID_CATEGORIES.includes(obj.category as FeatureFlagCategory)) {
+  const category = Object.hasOwn(obj, 'category') ? (obj as Record<string, unknown>).category : undefined;
+  if (typeof category !== 'string' || !VALID_CATEGORIES.includes(category as FeatureFlagCategory)) {
     errors.push(`category must be one of: ${VALID_CATEGORIES.join(', ')}`);
   }
 
-  if (typeof obj.enabled !== 'boolean') {
+  const enabled = Object.hasOwn(obj, 'enabled') ? (obj as Record<string, unknown>).enabled : undefined;
+  if (typeof enabled !== 'boolean') {
     errors.push('enabled must be a boolean');
   }
 
-  if (typeof obj.since !== 'string' || obj.since.length === 0) {
+  const since = Object.hasOwn(obj, 'since') ? (obj as Record<string, unknown>).since : undefined;
+  if (typeof since !== 'string' || since.length === 0) {
     errors.push('since must be a non-empty string');
   }
 
-  if (obj.description !== undefined && typeof obj.description !== 'string') {
+  const description = Object.hasOwn(obj, 'description') ? (obj as Record<string, unknown>).description : undefined;
+  if (description !== undefined && typeof description !== 'string') {
     errors.push('description must be a string when present');
   }
 
@@ -70,14 +75,14 @@ export function validateFeatureFlagRaw(raw: unknown, source: string): Validation
   }
 
   const value: FeatureFlagDefinition = {
-    id: obj.id as string,
-    category: obj.category as FeatureFlagCategory,
-    enabled: obj.enabled as boolean,
-    since: obj.since as string,
+    id: id as string,
+    category: category as FeatureFlagCategory,
+    enabled: enabled as boolean,
+    since: since as string,
   };
 
-  if (obj.description !== undefined) {
-    value.description = obj.description as string;
+  if (description !== undefined) {
+    value.description = description as string;
   }
 
   return { ok: true, value };
@@ -130,9 +135,10 @@ export function computeEffectiveFlags(
     }
 
     // Validate user override — user config provides {enabled, since}, not full definition
-    const override = userEntry as Record<string, unknown> | null | undefined;
-    const enabledValue = override && typeof override === 'object' && !Array.isArray(override)
-      ? (override).enabled
+    const override = userEntry;
+    const isPlainObj = override !== null && override !== undefined && typeof override === 'object' && !Array.isArray(override);
+    const enabledValue = isPlainObj && Object.hasOwn(override, 'enabled')
+      ? (override as Record<string, unknown>).enabled
       : undefined;
 
     if (typeof enabledValue !== 'boolean') {
@@ -168,7 +174,7 @@ export function computeEffectiveFlags(
 
   // Warn about unknown flags
   for (const key of Object.keys(userFlags)) {
-    if (!flags[key]) {
+    if (!Object.hasOwn(flags, key)) {
       warnings.push(`flag '${key}': unknown flag ignored`);
     }
   }

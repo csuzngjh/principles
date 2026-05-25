@@ -134,10 +134,13 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
         const featureFlags = loadEffectiveFeatureFlags(workspaceDir);
         const gfiFlag = featureFlags.flags.gfi;
         if (!gfiFlag || !gfiFlag.enabled) {
+          const warningSuffix = featureFlags.warnings.length > 0
+            ? ` (warnings: ${featureFlags.warnings.join('; ')})`
+            : '';
           return {
             name: 'gfi_snapshot',
             status: 'healthy',
-            summary: 'GFI feature flag disabled — skipping snapshot.',
+            summary: `GFI feature flag disabled — skipping snapshot.${warningSuffix}`,
           };
         }
         const sessionDir = path.join(workspaceDir, '.state', 'sessions');

@@ -41,8 +41,15 @@ export function loadEffectiveFeatureFlags(workspaceDir: string): EffectiveFeatur
     };
   }
 
+  const parsedRecord: Record<string, unknown> = {};
+  for (const key of Object.keys(parsed)) {
+    if (Object.hasOwn(parsed, key)) {
+      parsedRecord[key] = (parsed as Record<string, unknown>)[key];
+    }
+  }
+
   return computeEffectiveFlags(
-    parsed as Record<string, unknown>,
+    parsedRecord,
     DEFAULT_FEATURE_FLAGS,
     configPath,
   );
