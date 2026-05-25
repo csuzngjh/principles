@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Principles Disciple** is an owner-governed behavior internalization system built as an OpenClaw plugin (Node.js/TypeScript). It captures repeated, owner-relevant behavior evidence ("pain signals"), distills reviewed principles, and applies approved, reversible behavior changes.
 
-Read [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) before interpreting product scope. PD does not own general task execution, general memory, tool-call repair, or autonomous value decisions.
+Product boundary: PD does not own general task execution, general memory, tool-call repair, or autonomous value decisions. Read [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) when creating or planning issues, or when changing product scope, architecture, roadmaps, user journeys, surfaced functionality, activation channels, or public product copy. A narrow implementation, bug, test, or CI fix inside an approved issue may rely on this summary unless it changes those boundaries.
 
 **Main package:** `packages/openclaw-plugin/`
 **Package manager:** pnpm (monorepo with workspaces)
@@ -78,7 +78,7 @@ docs/                    # Architecture docs, design documents, maps
 
 **Before starting ANY coding task**, you MUST read `docs/ERROR_EXPERIENCE_HANDBOOK.md`. This file records real errors caught in code reviews. Reading it prevents you from repeating mistakes that other AI assistants made on this project.
 
-Before starting product or architecture work, also read `PRODUCT_IDENTITY.md` and reject work that expands PD into task execution, general memory, generic tool repair, or untriggered post-MVP learning infrastructure.
+For work subject to the product-boundary gate above, read `PRODUCT_IDENTITY.md` and reject work that expands PD into task execution, general memory, generic tool repair, or untriggered post-MVP learning infrastructure.
 
 ### Error Handbook Gate
 
