@@ -4,6 +4,7 @@ import type {
   ApprovalListFilter,
   ApprovalListResult,
   ApprovalDecisionResult,
+  ApprovalRecord,
 } from '@principles/core/runtime-v2';
 import {
   SqliteConnection,
@@ -17,6 +18,11 @@ import type { ApprovalWithContext } from '@principles/core/runtime-v2';
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
 const EMPTY_STATS = { pending: 0, approved: 0, rejected: 0, cancelled: 0 } as const;
+
+function isMissingTableError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.message.includes('no such table');
+}
 
 type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; channel: string };
 type ChannelGuardedDecisionResult = ApprovalDecisionResult | UnsupportedChannelResult;
@@ -58,8 +64,10 @@ export class ApprovalsConsoleModel {
     if (!stateDbExists(this.workspaceDir)) {
       return { items: [], total: 0, stats: { ...EMPTY_STATS } };
     }
-    const queue = this.getReadQueue();
-    const allItems = await queue.listAll({ status: filter?.status, channel: filter?.channel });
+    const allItems = await this.readSafeList(filter);
+    if (!allItems) {
+      return { items: [], total: 0, stats: { ...EMPTY_STATS } };
+    }
     const mvpItems = allItems.filter((record) => MVP_PROVEN_CHANNELS.has(record.channel));
     const total = mvpItems.length;
     const page = filter?.page ?? 1;
@@ -87,8 +95,7 @@ export class ApprovalsConsoleModel {
     if (!stateDbExists(this.workspaceDir)) {
       return null;
     }
-    const queue = this.getReadQueue();
-    const record = await queue.getById(approvalId);
+    const record = await this.readSafeGetById(approvalId);
     if (!record) return null;
     return {
       ...record,
@@ -101,8 +108,7 @@ export class ApprovalsConsoleModel {
     if (!stateDbExists(this.workspaceDir)) {
       return { ok: false, error: 'not_found' };
     }
-    const readQueue = this.getReadQueue();
-    const existing = await readQueue.getById(approvalId);
+    const existing = await this.readSafeGetById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
@@ -114,13 +120,34 @@ export class ApprovalsConsoleModel {
     if (!stateDbExists(this.workspaceDir)) {
       return { ok: false, error: 'not_found' };
     }
-    const readQueue = this.getReadQueue();
-    const existing = await readQueue.getById(approvalId);
+    const existing = await this.readSafeGetById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
     }
     return this.getWriteQueue().reject(approvalId, decidedBy, reason);
+  }
+
+  /** Returns null when the approvals table does not exist. */
+  private async readSafeGetById(approvalId: string): Promise<ApprovalRecord | null> {
+    const queue = this.getReadQueue();
+    try {
+      return await queue.getById(approvalId);
+    } catch (err) {
+      if (isMissingTableError(err)) return null;
+      throw err;
+    }
+  }
+
+  /** Returns null when the approvals table does not exist. */
+  private async readSafeList(filter?: ApprovalListFilter): Promise<ApprovalRecord[] | null> {
+    const queue = this.getReadQueue();
+    try {
+      return await queue.listAll({ status: filter?.status, channel: filter?.channel });
+    } catch (err) {
+      if (isMissingTableError(err)) return null;
+      throw err;
+    }
   }
 
   dispose(): void {

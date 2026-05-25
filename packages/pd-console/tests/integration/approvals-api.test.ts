@@ -493,4 +493,90 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       expect(fs.existsSync(pdDir)).toBe(false);
     });
   });
+
+  // ── 11. Pre-approvals-schema workspace — DB exists but no approvals table ──
+
+  describe('Pre-approvals-schema workspace', () => {
+    let preTmp: string;
+    let prePort: number;
+    let preServer: http.Server;
+
+    beforeAll(async () => {
+      // Create a workspace with .pd/state.db containing only the tasks table
+      // (simulating a DB created before the approvals schema was added)
+      preTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pre-schema-test-'));
+      const pdDir = path.join(preTmp, '.pd');
+      fs.mkdirSync(pdDir, { recursive: true });
+
+      // Use SqliteConnection in writable mode to create the DB with core tables only,
+      // then manually drop the approvals table to simulate a pre-approvals-era DB.
+      const conn = new SqliteConnection({ workspaceDir: preTmp });
+      const db = conn.getDb();
+      // initSchema() already ran and created all tables including approvals.
+      // Drop approvals to simulate pre-approvals state.
+      db.exec('DROP TABLE IF EXISTS approvals');
+      conn.close();
+
+      preServer = http.createServer((req, res) => {
+        const urlPath = req.url?.split('?')[0] ?? '/';
+        if (!urlPath.startsWith('/api/v1/approvals')) {
+          sendNotFound(res, 'Not found');
+          return;
+        }
+        const subPath = urlPath.slice('/api/v1/approvals'.length);
+        (async () => handleApprovalsRoute(req, res, preTmp, subPath))().catch((err: unknown) => {
+          if (!res.headersSent) {
+            sendJson(res, 500, { success: false, error: err instanceof Error ? err.message : 'Internal error' });
+          }
+        });
+      });
+
+      await new Promise<void>((resolve) => {
+        preServer.listen(0, () => {
+          const addr = preServer.address();
+          prePort = addr && typeof addr === 'object' ? addr.port : 0;
+          resolve();
+        });
+      });
+      expect(prePort).toBeGreaterThan(0);
+    });
+
+    afterAll(async () => {
+      disposeApprovalsModels();
+      await new Promise<void>((resolve) => preServer.close(() => resolve()));
+      try { fs.rmSync(preTmp, { recursive: true, force: true }); } catch { /* ignore */ }
+    });
+
+    it('GET list returns 200 with empty items when approvals table missing', async () => {
+      const res = await fetch(`http://127.0.0.1:${prePort}/api/v1/approvals`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      expect(data?.total).toBe(0);
+      const items = getItemsArray(body);
+      expect(items).toEqual([]);
+    });
+
+    it('GET detail returns 404 when approvals table missing', async () => {
+      const res = await fetch(`http://127.0.0.1:${prePort}/api/v1/approvals/any-id`);
+      expect(res.status).toBe(404);
+    });
+
+    it('GET does not recreate the approvals table', async () => {
+      // Hit the list endpoint first
+      const res = await fetch(`http://127.0.0.1:${prePort}/api/v1/approvals`);
+      expect(res.status).toBe(200);
+
+      // Use a raw readonly connection to check — writable SqliteConnection
+      // would run initSchema() and recreate the table.
+      const dbPath = path.join(preTmp, '.pd', 'state.db');
+      expect(fs.existsSync(dbPath)).toBe(true);
+      const Database = (await import('better-sqlite3')).default;
+      const db = new Database(dbPath, { readonly: true });
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='approvals'").get();
+      db.close();
+      expect(table).toBeUndefined();
+    });
+  });
 });
