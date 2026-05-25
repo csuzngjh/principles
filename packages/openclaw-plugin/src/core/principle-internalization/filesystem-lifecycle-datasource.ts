@@ -1,7 +1,6 @@
 import type { LifecycleDatasource } from '@principles/core/runtime-v2';
 import type { LedgerTreeStore, ReplayReport, ArtifactLineageRecord } from '@principles/core/runtime-v2';
 import { loadLedger } from '../principle-tree-ledger.js';
-import { listArtifactLineageRecords } from '../nocturnal-artifact-lineage.js';
 import { ReplayEngine } from '../replay-engine.js';
 
 export class FilesystemLifecycleDatasource implements LifecycleDatasource {
@@ -25,7 +24,7 @@ export class FilesystemLifecycleDatasource implements LifecycleDatasource {
     return this.engine.listReports(implementationId);
   }
 
-  listLineageRecords(kind: 'behavioral-sample' | 'rule-implementation-candidate'): ArtifactLineageRecord[] {
-    return listArtifactLineageRecords(this.workspaceDir, kind);
+  listLineageRecords(_kind: 'behavioral-sample' | 'rule-implementation-candidate'): ArtifactLineageRecord[] {
+    return [];
   }
 }

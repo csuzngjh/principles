@@ -254,74 +254,6 @@ describe('runWorkflowWatchdog', () => {
         });
     });
 
-    // ── BUG-03: Nocturnal snapshot validation ─────────────────────────────
-
-    describe('BUG-03: nocturnal snapshot validation', () => {
-        it('detects fallback_snapshot when nocturnal workflow uses pain_context_fallback', async () => {
-            const now = Date.now();
-
-            mockListWorkflows.mockReturnValue([
-                createWorkflow({
-                    workflow_id: 'wf-nocturnal-001',
-                    workflow_type: 'nocturnal',
-                    state: 'completed',
-                    created_at: now - (60 * 60 * 1000),
-                    metadata_json: JSON.stringify({
-                        snapshot: {
-                            _dataSource: 'pain_context_fallback',
-                            stats: { totalToolCalls: 0, totalGateBlocks: 0, failureCount: 0 },
-                        },
-                    }),
-                }),
-            ]);
-
-            const result = await runWorkflowWatchdog(
-                { workspaceDir: '/tmp', stateDir: '/tmp/.state' } as any,
-                mockApi,
-                mockLogger,
-            );
-
-            expect(result.details).toContainEqual(
-                expect.stringContaining('fallback_snapshot: nocturnal workflow wf-nocturnal-001 uses pain-context fallback'),
-            );
-            expect(result.details).toContainEqual(
-                expect.stringContaining('fallback_snapshot_stats: nocturnal workflow wf-nocturnal-001 has empty fallback stats'),
-            );
-        });
-
-        it('does not flag fallback_snapshot_stats when nocturnal workflow has real stats', async () => {
-            const now = Date.now();
-
-            mockListWorkflows.mockReturnValue([
-                createWorkflow({
-                    workflow_id: 'wf-nocturnal-002',
-                    workflow_type: 'nocturnal',
-                    state: 'completed',
-                    created_at: now - (60 * 60 * 1000),
-                    metadata_json: JSON.stringify({
-                        snapshot: {
-                            _dataSource: 'pain_context_fallback',
-                            stats: { totalToolCalls: 5, totalGateBlocks: 2, failureCount: 1 },
-                        },
-                    }),
-                }),
-            ]);
-
-            const result = await runWorkflowWatchdog(
-                { workspaceDir: '/tmp', stateDir: '/tmp/.state' } as any,
-                mockApi,
-                mockLogger,
-            );
-
-            expect(result.details).toContainEqual(
-                expect.stringContaining('fallback_snapshot: nocturnal workflow wf-nocturnal-002 uses pain-context fallback'),
-            );
-            expect(result.details).not.toContainEqual(
-                expect.stringContaining('fallback_snapshot_stats'),
-            );
-        });
-    });
-
     // ── General behavior ───────────────────────────────────────────────────
 
     describe('general behavior', () => {
@@ -344,29 +276,6 @@ describe('runWorkflowWatchdog', () => {
 
             expect(result.anomalies).toBe(0);
             expect(result.details).toHaveLength(0);
-        });
-
-        it('handles malformed metadata_json gracefully', async () => {
-            const now = Date.now();
-
-            mockListWorkflows.mockReturnValue([
-                createWorkflow({
-                    workflow_id: 'wf-malformed-001',
-                    workflow_type: 'nocturnal',
-                    state: 'completed',
-                    created_at: now - (60 * 60 * 1000),
-                    metadata_json: 'not valid json {{{',
-                }),
-            ]);
-
-            const result = await runWorkflowWatchdog(
-                { workspaceDir: '/tmp', stateDir: '/tmp/.state' } as any,
-                mockApi,
-                mockLogger,
-            );
-
-            expect(result.anomalies).toBe(1);
-            expect(result.details.some((d: string) => d.includes('malformed_metadata'))).toBe(true);
         });
     });
 });

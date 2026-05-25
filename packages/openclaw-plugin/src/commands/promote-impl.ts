@@ -100,35 +100,6 @@ function _handleShowReport(
   return { text: formatReplayReport(report) };
 }
 
-interface RunReplayOptions {
-  workspaceDir: string;
-  stateDir: string;
-  implId: string;
-  isZh: boolean;
-}
-
-function _handleRunReplay(options: RunReplayOptions): PluginCommandResult {
-  const { workspaceDir, stateDir, implId, isZh } = options;
-  const engine = new ReplayEngine(workspaceDir, stateDir);
-
-  try {
-    const report = engine.runReplayForImplementation(implId);
-    let text = formatReplayReport(report);
-    if (report.sampleFingerprints.length === 0) {
-      text += isZh
-        ? '\n⚠️ 未找到已分类的 replay 样本。报告已生成，但当前结果只反映空样本集。\n'
-        : '\n⚠️ No classified replay samples were found. The report was generated, but it only reflects an empty sample set.\n';
-    }
-    return { text };
-  } catch (error: unknown) {
-    return {
-      text: isZh
-        ? `❌ 回放评估失败: ${String(error)}`
-        : `❌ Replay evaluation failed: ${String(error)}`,
-    };
-  }
-}
-
 interface PromoteImplOptions {
   workspaceDir: string;
   stateDir: string;
@@ -274,17 +245,6 @@ export function handlePromoteImplCommand(ctx: PluginCommandContext): PluginComma
       };
     }
     return _handleShowReport(stateDir, implId, isZh);
-  }
-
-  if (subcommand === 'eval') {
-    if (!implId) {
-      return {
-        text: isZh
-          ? '请指定要评估的实现ID: /pd-promote-impl eval <implId>'
-          : 'Please specify an implementation ID: /pd-promote-impl eval <implId>',
-      };
-    }
-    return _handleRunReplay({ workspaceDir, stateDir, implId, isZh });
   }
 
   return _handlePromoteImpl({ workspaceDir, stateDir, implId: subcommand, isZh });

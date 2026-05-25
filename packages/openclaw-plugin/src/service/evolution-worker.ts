@@ -12,7 +12,6 @@ import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
-import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import type { PrincipleEvaluability } from '../types/principle-tree-schema.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
@@ -21,35 +20,13 @@ import { atomicWriteFileSync } from '../utils/io.js';
 // Re-export queue I/O (extracted to queue-io.ts)
 export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock, requireQueueLock } from './queue-io.js';
 export { EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './queue-io.js';
-import { saveEvolutionQueue, requireQueueLock, hasPendingTask } from './queue-io.js';
-import type { RecentPainContext } from './queue-io.js';
-export type { RecentPainContext } from './queue-io.js';
+import { saveEvolutionQueue, requireQueueLock } from './queue-io.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
-// PRI-119: Below imports are retained for dead code blocks (sleep_reflection/keyword_optimization
-// processing paths that are no longer reached). Full removal tracked in PRI-230.
-import { loadCooldownEscalationConfig } from './nocturnal-config.js';
-import { KeywordOptimizationService } from './keyword-optimization-service.js';
-import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
-import {
-    createNocturnalTrajectoryExtractor,
-    type NocturnalPainEvent,
-    type NocturnalSessionSnapshot,
-} from '../core/nocturnal-trajectory-extractor.js';
-import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
-import { recordCooldown } from './nocturnal-runtime.js';
-import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
-import { enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
+
 import { PrincipleCompiler } from '../core/principle-compiler/index.js';
 import { loadLedger, updatePrinciple } from '../core/principle-tree-ledger.js';
-import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
-import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
 import { findRecentDuplicateTask } from './evolution-dedup.js';
-import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
-import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
-import { classifyFailure, type ClassifiableTaskKind } from './failure-classifier.js';
-import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from './cooldown-strategy.js';
-import { reconcileStartup } from './startup-reconciler.js';
 import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 
 // ── Queue Event Payload Validation ─────────────────────────────────────────
@@ -98,10 +75,6 @@ let timeoutId: NodeJS.Timeout | null = null;
 /**
  * Queue V2 Schema - Supports background evolution task kinds.
  *
- * taskKind semantics:
- * - sleep_reflection: Background-only, never injects into user prompts, no HEARTBEAT
- * - keyword_optimization: Background-only, updates empathy keyword rules
- *
  * Pain diagnosis is Runtime v2 only: after_tool_call / pd pain record ->
  * PainSignalBridge -> DiagnosticianRunner. EvolutionWorker does not read
  * .pain_flag or process pain_diagnosis queue items.
@@ -141,12 +114,6 @@ export interface EvolutionQueueItem {
     // V2 result reference
     resultRef?: string;         // V2: reference to result artifact
 
-    // V2: Recent pain context for sleep_reflection tasks
-    // Attaches explicit recent pain signal without merging task kinds.
-    // Used by target selector for ranking bias and context enrichment.
-    recentPainContext?: RecentPainContext;
-
-    /** Trajectory pain_events row ID — set when pain flag includes pain_event_id */
     painEventId?: number;
 }
 
@@ -155,90 +122,7 @@ import { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueI
 export { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES };
 export type { RawQueueItem };
 
-function isSessionAtOrBeforeTriggerTime(
-    session: { startedAt: string; updatedAt: string },
-    triggerTimeMs: number,
-): boolean {
-    const startedAtMs = new Date(session.startedAt).getTime();
-    const updatedAtMs = new Date(session.updatedAt).getTime();
-    if (!Number.isFinite(triggerTimeMs)) {
-        return true;
-    }
-    if (Number.isFinite(startedAtMs) && startedAtMs > triggerTimeMs) {
-        return false;
-    }
-    if (Number.isFinite(updatedAtMs) && updatedAtMs > triggerTimeMs) {
-        return false;
-    }
-    return true;
-}
 
- 
-function buildFallbackNocturnalSnapshot(
-    sleepTask: EvolutionQueueItem,
-    extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null,
-    logger?: { warn?: (message: string) => void }
-): NocturnalSessionSnapshot | null {
-    const painContext = sleepTask.recentPainContext;
-    if (!painContext) {
-        return null;
-    }
-
-    const fallbackPainEvents: NocturnalPainEvent[] = painContext.mostRecent ? [{
-        source: painContext.mostRecent.source,
-        score: painContext.mostRecent.score,
-        severity: null,
-        reason: painContext.mostRecent.reason,
-        createdAt: painContext.mostRecent.timestamp,
-    }] : [];
-
-    // #246: Try to extract real session stats from trajectory DB for the pain session.
-    // The main path tries getNocturnalSessionSnapshot which returns null when no session
-    // exists. Here we attempt a lighter query via listRecentNocturnalCandidateSessions
-    // to at least get summary counts for the pain-triggering session.
-    let realStats: { totalAssistantTurns: number; totalToolCalls: number; failureCount: number; totalGateBlocks: number } | null = null;
-    if (extractor && painContext.mostRecent?.sessionId) {
-        try {
-            // #246-fix: Use minToolCalls=0 to avoid filtering out sessions with 0 tool calls.
-            // The pain-triggering session may have no tool calls but still be worth tracking.
-            const summaries = extractor.listRecentNocturnalCandidateSessions({ limit: 300, minToolCalls: 0 });
-            const match = summaries.find(s => s.sessionId === painContext.mostRecent?.sessionId);
-            if (match) {
-                realStats = {
-                    totalAssistantTurns: match.assistantTurnCount,
-                    totalToolCalls: match.toolCallCount,
-                    failureCount: match.failureCount,
-                    totalGateBlocks: match.gateBlockCount,
-                };
-            }
-        } catch (err) {
-            // #260: Log extraction failures — silent swallowing makes debugging impossible
-            // and can mask systemic trajectory DB issues.
-            logger?.warn?.(`[PD:EvolutionWorker] Failed to extract real stats for session ${painContext.mostRecent?.sessionId} (falling back to zeros): ${String(err)}`);
-        }
-    }
-
-    return {
-        sessionId: painContext.mostRecent?.sessionId || sleepTask.id,
-        startedAt: sleepTask.timestamp,
-        updatedAt: sleepTask.timestamp,
-        assistantTurns: [],
-        userTurns: [],
-        toolCalls: [],
-        painEvents: fallbackPainEvents,
-        gateBlocks: [],
-        // #268: Empty corrections in fallback path (no trajectory data available)
-        userCorrections: [],
-        stats: {
-            totalAssistantTurns: realStats?.totalAssistantTurns ?? 0,
-            totalToolCalls: realStats?.totalToolCalls ?? 0,
-            failureCount: realStats?.failureCount ?? 0,
-            totalPainEvents: painContext.recentPainCount,
-            totalGateBlocks: realStats?.totalGateBlocks ?? 0,
-        },
-        _dataSource: 'pain_context_fallback',
-    };
-}
 
 // Queue lock constants and requireQueueLock are imported from queue-io.ts
 
@@ -469,7 +353,7 @@ function tryUpdatePrinciple(
     }
 }
 
-async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
+async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, _eventLog?: EventLog, _api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
         logger?.debug?.('[PD:EvolutionWorker] No evolution queue file — nothing to process');
@@ -477,7 +361,6 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
     }
 
     const releaseLock = await requireQueueLock(queuePath, logger, 'processEvolutionQueue');
-    const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
     let lockReleased = false;
 
     try {
@@ -523,7 +406,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             if (!item.status || typeof item.status !== 'string') errors.push('missing/invalid status');
             if (!item.taskKind || typeof item.taskKind !== 'string') errors.push('missing/invalid taskKind');
             else {
-                const validTaskKinds = ['sleep_reflection', 'model_eval', 'keyword_optimization'];
+                const validTaskKinds = ['model_eval'];
                 if (!validTaskKinds.includes(item.taskKind)) {
                     errors.push(`invalid taskKind value '${item.taskKind}' (expected one of: ${validTaskKinds.join(', ')})`);
                 }
@@ -542,110 +425,6 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         let queueChanged = rawQueue.some(isLegacyQueueItem) || queue.length < beforeLegacyPainDrop || queue.length < beforeValidation;
-
-        // Guard: Skip keyword_optimization if one is already pending/in-progress (CORR-08)
-        if (hasPendingTask(queue, 'keyword_optimization')) {
-            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization task already pending/in-progress, skipping enqueue');
-        }
-
-        const {config} = wctx;
-        const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
-
-        // ── PRI-119: Terminalize retired sleep_reflection/keyword_optimization tasks ──
-        // These task kinds are retired per ADR-0012. Run BEFORE stuck-task recovery
-        // so retirement catches all pending/in_progress tasks before the timeout
-        // mechanism reclassifies them as failed_max_retries.
-        const retiredKinds = ['sleep_reflection', 'keyword_optimization'];
-        let terminalizedCount = 0;
-        for (const task of queue) {
-            if (retiredKinds.includes(task.taskKind) && (task.status === 'pending' || task.status === 'in_progress')) {
-                task.status = 'failed';
-                task.completed_at = task.completed_at || new Date().toISOString();
-                task.resolution = 'retired';
-                task.lastError = 'retired per ADR-0012 / PRI-119 — Nocturnal execution has been cut over to Runtime V2';
-                queueChanged = true;
-                terminalizedCount++;
-                logger?.info?.(`[PD:EvolutionWorker] Terminalized retired ${task.taskKind} task ${task.id} (was ${task.status}) per ADR-0012`);
-            }
-        }
-        if (terminalizedCount > 0) {
-            saveEvolutionQueue(queuePath, queue);
-        }
-
-        // V2: Recover stuck in_progress sleep_reflection tasks.
-        // If the worker crashes or the result write-back fails after Phase 1 claimed
-        // the task, it stays in_progress indefinitely. Detect via timeout and mark
-        // as failed so a fresh task can be enqueued on the next idle cycle.
-        // #214: Also expire the underlying nocturnal workflow to prevent resource leaks.
-        for (const task of queue.filter(t => t.status === 'in_progress' && t.taskKind === 'sleep_reflection')) {
-            const startedAt = new Date(task.started_at || task.timestamp);
-            const age = Date.now() - startedAt.getTime();
-            if (age > timeout) {
-                task.status = 'failed';
-                task.completed_at = new Date().toISOString();
-                task.resolution = 'failed_max_retries';
-                task.retryCount = (task.retryCount ?? 0) + 1;
-                queueChanged = true;
-
-                // #219: Fetch real failure reason from workflow events for better diagnostics
-                let detailedError = `sleep_reflection timed out after ${Math.round(timeout / 60000)} minutes`;
-                if (task.resultRef && !task.resultRef.startsWith('trinity-draft')) {
-                    try {
-                        const wfStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
-                        const events = wfStore.getEvents(task.resultRef);
-                        // Find the most recent failure event
-                        const failureEvent = events.filter(e => 
-                            e.event_type.includes('failed') || e.event_type.includes('error')
-                        ).pop();
-                        if (failureEvent) {
-                            const payload = validateQueueEventPayload(failureEvent.payload_json);
-                            detailedError = `sleep_reflection failed: ${failureEvent.reason}`;
-                            if (payload.skipReason) {
-                                detailedError += ` (skipReason: ${payload.skipReason})`;
-                            }
-                            if (payload.failures && Array.isArray(payload.failures) && payload.failures.length > 0) {
-                                detailedError += ` | failures: ${(payload.failures as string[]).slice(0, 3).join(', ')}`;
-                            }
-                        }
-                    } catch (fetchErr) {
-                        logger?.debug?.(`[PD:EvolutionWorker] Could not fetch workflow events for ${task.resultRef}: ${String(fetchErr)}`);
-                    }
-                }
-                task.lastError = detailedError;
-                
-                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${task.id} timed out after ${Math.round(age / 60000)} minutes, marking as failed. Reason: ${detailedError}`);
-                evoLogger.logCompleted({
-                    traceId: task.traceId || task.id,
-                    taskId: task.id,
-                    resolution: 'manual',
-                    durationMs: age,
-                });
-
-                // PRI-119: NocturnalWorkflowManager retired. Mark stuck workflow as expired via WorkflowStore.
-                if (task.resultRef && !task.resultRef.startsWith('trinity-draft')) {
-                    const wfStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
-                    try {
-                        wfStore.updateWorkflowState(task.resultRef, 'expired');
-                        wfStore.recordEvent(task.resultRef, 'expired', null, 'expired',
-                            `Sleep reflection task ${task.id} timed out after ${Math.round(age / 60000)} min`, {});
-                        logger?.info?.(`[PD:EvolutionWorker] Marked stuck workflow ${task.resultRef} as expired for timed-out sleep task ${task.id}`);
-                    } catch (expireErr) {
-                        logger?.warn?.(`[PD:EvolutionWorker] Could not mark stuck workflow ${task.resultRef} as expired: ${String(expireErr)}`);
-                    } finally {
-                        wfStore.dispose();
-                    }
-                }
-            }
-        }
-
-        // ── sleep_reflection processing RETIRED per ADR-0012 (PRI-119) ──
-        // Any existing pending/in_progress tasks were terminalized above.
-        // No Nocturnal execution is started. The remaining dead code blocks
-        // (sleep_reflection processing at ~line 660, keyword_optimization at ~line 1000)
-        // are never reached because the filter arrays are empty.
-        // Full removal tracked in PRI-230.
-        // ── sleep_reflection dead code removed (retired per ADR-0012 / PRI-119) ──
-        // Full removal tracked in PRI-230.
 
         if (queueChanged) {
             saveEvolutionQueue(queuePath, queue);
@@ -919,13 +698,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     logger?.error?.(`[PD:EvolutionWorker] CompilationBackfill threw: ${String(err)}`);
                 });
 
-                // PRI-119: Nocturnal execution retired per ADR-0012.
-                // sleep_reflection idle/periodic trigger, keyword_optimization periodic trigger,
-                // and NocturnalWorkflowManager sweep have been removed.
-                // The heartbeat continues for non-Nocturnal work:
-                // compilation backfill, queue processing, detection queue, watchdog, flush.
-
-                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} nocturnal=retired_per_ADR-0012`);
+                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()}`);
 
                 const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
                 cycleResult.queue = queueResult.queue;
@@ -937,10 +710,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // processPromotion removed (D-06) — promotion via PAIN_CANDIDATES no longer needed
 
                 try {
-                    // PRI-119: NocturnalWorkflowManager retired per ADR-0012.
-                    // Cleanup-only: delete expired session resources via Runtime API when available.
-                    // When runtime unavailable, log structured failure (not silent per ERR-002).
-                    // No Nocturnal business execution is started.
                     const subagentRuntime = api?.runtime?.subagent;
                     const workflowStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
                     try {
@@ -1015,19 +784,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
         timeoutId = setTimeout(() => {
             void (async () => {
-                // Phase 41: Startup reconciliation — validate state, clear stale cooldowns, clean orphans
-                try {
-                    const reconResult = await reconcileStartup(wctx.stateDir);
-                    if (reconResult.cooldownsCleared > 0 || reconResult.orphansRemoved.length > 0 || reconResult.stateReset) {
-                        logger?.info?.(`[PD:EvolutionWorker] Startup reconciliation: ${reconResult.cooldownsCleared} stale cooldowns cleared, ${reconResult.orphansRemoved.length} orphan files removed, stateReset=${reconResult.stateReset}`);
-                    } else {
-                        logger?.debug?.('[PD:EvolutionWorker] Startup reconciliation: clean state, no action needed');
-                    }
-                } catch (reconErr) {
-                    logger?.warn?.(`[PD:EvolutionWorker] Startup reconciliation failed (non-blocking): ${String(reconErr)}`);
-                }
-
-                // Use the same pipeline as regular cycles (includes purge + observability)
                 const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
                 if (queueResult.errors.length > 0) {
                     queueResult.errors.forEach((e) => logger?.error?.(`[PD:EvolutionWorker] Startup cycle error: ${e}`));

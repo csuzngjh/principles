@@ -139,8 +139,6 @@ describe('ReflectionContextCollector', () => {
       expect(result!.principle.id).toBe('P_001');
       expect(result!.painEvents).toEqual([]);
       expect(result!.sessionSnapshot).toBeNull();
-      expect(result!.lineage.sourcePainIds).toEqual(['pain_no_exist']);
-      expect(result!.lineage.sessionId).toBeNull();
     });
 
     it('returns context with pain events and null snapshot when painIds match events but not a specific session', () => {
@@ -159,9 +157,6 @@ describe('ReflectionContextCollector', () => {
 
       expect(result).not.toBeNull();
       expect(result!.principle.id).toBe('P_002');
-      expect(result!.lineage.sourcePainIds).toEqual(['pain_001']);
-      // painId -> sessionId resolution is a known gap, so painEvents may be empty
-      // and sessionSnapshot may be null
     });
 
     it('resolves pain events from a known session', () => {
@@ -181,9 +176,6 @@ describe('ReflectionContextCollector', () => {
 
       expect(result).not.toBeNull();
       expect(result!.principle.id).toBe('P_003');
-      // painId -> sessionId gap: we attempt to find sessions containing pain events
-      // The lineage sessionId should be populated if we can resolve it
-      expect(result!.lineage.sourcePainIds).toEqual(['pain_from_sess_with_pain']);
     });
   });
 
@@ -258,8 +250,6 @@ describe('ReflectionContextCollector', () => {
       expect(results).toHaveLength(1);
 
       const ctx = results[0];
-      expect(ctx.lineage.sourcePainIds).toEqual(['p1', 'p2', 'p3']);
-      expect(ctx.lineage.sessionId).toBeNull();
       expect(ctx.sessionSnapshot).toBeNull();
     });
   });
@@ -297,7 +287,6 @@ describe('ReflectionContextCollector', () => {
       // Exact match: only ONE pain event should match
       expect(result!.painEvents).toHaveLength(1);
       expect(result!.painEvents[0].reason).toBe('exact_match_target');
-      expect(result!.lineage.sessionId).toBe(sessionId);
     });
 
     it('falls back to substring heuristic when no exact ID match', () => {
@@ -340,17 +329,14 @@ describe('ReflectionContextCollector', () => {
       expect(results).toHaveLength(1);
 
       const ctx: ReflectionContext = results[0];
-      // Verify all fields exist
       expect(ctx).toHaveProperty('principle');
       expect(ctx).toHaveProperty('painEvents');
       expect(ctx).toHaveProperty('sessionSnapshot');
-      expect(ctx).toHaveProperty('lineage');
 
       expect(ctx.principle.id).toBe('P_SHAPE');
       expect(ctx.principle.text).toBe('Shape test principle');
       expect(ctx.principle.action).toBe('Do the thing');
       expect(Array.isArray(ctx.painEvents)).toBe(true);
-      expect(ctx.lineage.sourcePainIds).toEqual(['pain_shape']);
     });
   });
 });

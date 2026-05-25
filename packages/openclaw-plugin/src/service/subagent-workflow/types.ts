@@ -9,27 +9,6 @@
  * @module subagent-workflow/types
  */
 
-import type {
-    NocturnalArtifact,
-    ArbiterResult,
-} from '../../core/nocturnal-arbiter.js';
-import type {
-    BoundedAction,
-} from '../../core/nocturnal-executability.js';
-import type {
-    NocturnalSessionSnapshot,
-} from '../../core/nocturnal-trajectory-extractor.js';
-import type {
-    TrinityResult,
-} from '../../core/nocturnal-trinity.js';
-import type {
-    IdleCheckResult,
-    PreflightCheckResult,
-} from '../nocturnal-runtime.js';
-import type {
-    NocturnalSelectionResult,
-} from '../nocturnal-target-selector.js';
-
 // ── Workflow Transport ────────────────────────────────────────────────────────
 
 /**
@@ -59,14 +38,14 @@ export type WorkflowTransport = 'runtime_direct';
  * States marked with (*) are terminal states.
  */
 export type WorkflowState =
-    | 'pending'           // Workflow created, not yet started
-    | 'active'           // Subagent spawned, running
-    | 'wait_result'      // Waiting for result (runtime_direct path)
-    | 'finalizing'       // Reading and parsing result
-    | 'completed'        // Successfully finalized and cleaned up (*)
-    | 'terminal_error'   // Finalized with error (*)
-    | 'cleanup_pending'  // Cleanup failed, pending retry (*)
-    | 'expired';        // TTL expired, cleaned up (*)
+    | 'pending'
+    | 'active'
+    | 'wait_result'
+    | 'finalizing'
+    | 'completed'
+    | 'terminal_error'
+    | 'cleanup_pending'
+    | 'expired';
 
 // ── Workflow Metadata ────────────────────────────────────────────────────────
 
@@ -150,7 +129,6 @@ export interface WorkflowHandle {
  * ```
  */
 export interface SubagentWorkflowSpec<TResult> {
-     
     /** Unique identifier for this workflow type */
     workflowType: string;
     /** Which transport mechanism to use */
@@ -177,7 +155,6 @@ export interface SubagentWorkflowSpec<TResult> {
      * For runtime_direct: typically finalize only on 'ok', skip on 'timeout'/'error'.
      */
     shouldFinalizeOnWaitStatus: (status: 'ok' | 'error' | 'timeout') => boolean;
-     
 }
 
 // ── Empathy Observer Specific Types ──────────────────────────────────────────
@@ -212,7 +189,7 @@ export interface EmpathyObserverWorkflowSpec extends SubagentWorkflowSpec<Empath
     workflowType: 'empathy-observer';
     transport: 'runtime_direct';
     timeoutMs: 30_000;
-    ttlMs: 300_000; // 5 minutes
+    ttlMs: 300_000;
     shouldDeleteSessionAfterFinalize: true;
 }
 
@@ -223,7 +200,6 @@ export interface EmpathyObserverWorkflowSpec extends SubagentWorkflowSpec<Empath
  * This is what the helper exposes to business modules.
  */
 export interface WorkflowManager {
-     
     /**
      * Start a new workflow.
      * Creates workflow state, spawns subagent, and returns handle.
@@ -283,7 +259,6 @@ export interface WorkflowManager {
      * Release resources (DB connections, timers).
      */
     dispose: () => void;
-     
 }
 
 // ── Workflow Store (for SQLite persistence) ──────────────────────────────────
@@ -339,13 +314,6 @@ export interface WorkflowDebugSummary {
         createdAt: number;
         payload: Record<string, unknown>;
     }[];
-    // NOC-16: Trinity stage states
-    trinityStageStates?: {
-        stage: 'dreamer' | 'philosopher' | 'scribe';
-        status: 'pending' | 'running' | 'completed' | 'failed';
-        reason?: string;
-        completedAt?: number;
-    }[];
 }
 
 // ── Convenience Re-exports ────────────────────────────────────────────────────
@@ -357,82 +325,3 @@ export type {
 } from '../../openclaw-sdk.js';
 
 export type { PluginLogger } from '../../openclaw-sdk.js';
-
-// ── Nocturnal Workflow Types ───────────────────────────────────────────────────
-
-/**
- * Recent pain context for sleep_reflection tasks.
- * Used by target selector for ranking bias and context enrichment.
- * Originally from evolution-worker.ts, moved here to break circular dependency.
- */
-export interface RecentPainContext {
-    /** Most recent unresolved pain event */
-    mostRecent: {
-        score: number;
-        source: string;
-        reason: string;
-        timestamp: string;
-        /** Session ID where the pain occurred */
-        sessionId: string;
-    } | null;
-    /** Count of pain events in the recent window (for signal strength) */
-    recentPainCount: number;
-    /** Highest pain score in the recent window */
-    recentMaxPainScore: number;
-}
-
-/**
- * Nocturnal workflow result type.
- * Mirrors NocturnalRunResult from nocturnal-service.ts (per D-02).
- */
-export type NocturnalResult = {
-    success: boolean;
-    artifact?: NocturnalArtifact & { boundedAction?: BoundedAction };
-    skipReason?: string;
-    noTargetSelected: boolean;
-    validationFailed: boolean;
-    validationFailures: string[];
-    snapshot?: NocturnalSessionSnapshot;
-    diagnostics: NocturnalRunDiagnostics;
-    trinityTelemetry?: TrinityResult['telemetry'];
-};
-
-/**
- * Diagnostics from each pipeline stage.
- * Duplicated from nocturnal-service.ts to break circular dependency.
- */
-export interface NocturnalRunDiagnostics {
-    /** Pre-flight check result */
-    preflight: PreflightCheckResult | null;
-    /** Selection result */
-    selection: NocturnalSelectionResult | null;
-    /** Idle check result */
-    idle: IdleCheckResult | null;
-    /** Whether Trinity chain was attempted */
-    trinityAttempted: boolean;
-    /** Trinity result (if trinityAttempted === true) */
-    trinityResult: TrinityResult | null;
-    /** Which chain mode was used */
-    chainModeUsed: 'trinity' | 'single-reflector' | null;
-    /** Arbiter validation result */
-    arbiterResult: ArbiterResult | null;
-    /** Executability validation result (if arbiter passed) */
-    executabilityResult: { executable: boolean; failures: string[] } | null;
-    /** Whether artifact was persisted */
-    persisted: boolean;
-    /** Persistence path (if persisted) */
-    persistedPath?: string;
-    /** Code-candidate sidecar diagnostics */
-    artificer: NocturnalArtificerDiagnostics;
-}
-
-export interface NocturnalArtificerDiagnostics {
-    status: 'skipped' | 'validation_failed' | 'persisted_candidate';
-    reason?:
-        | 'behavioral_artifact_unavailable'
-        | 'no_deterministic_rule'
-        | 'persistence_failed'
-        | 'cancelled';
-    validationErrors?: string[];
-    persistedPath?: string;
-}
