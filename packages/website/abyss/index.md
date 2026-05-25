@@ -14,6 +14,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #003 · 2026-05-25</div>
+  <a class="abyss-title" href="/abyss/03-biological-forward-pass">03 | Pain is the Signal: The Hardcore Biological Epiphany of Forward Evolution</a>
+  <p class="abyss-desc">Breaking the myth of backpropagation, revealing how to build a forward evolution loop of "Pain — Brake — Debrief — Precipitate" for silicon lifeforms.</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #002 · 2026-05-22</div>
   <a class="abyss-title" href="/abyss/02-poisonous-chicken-soup">02 | Why "Silicon Chicken Soup" is Destined to Become Cyber Noise?</a>
   <p class="abyss-desc">An analysis of how the underlying objective functions of large models have suppressed the AI's instinct for reflection, and why we need to build a macro-goal engine outside the model.</p>

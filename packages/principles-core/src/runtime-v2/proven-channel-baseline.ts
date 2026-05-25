@@ -1,4 +1,3 @@
-import type { InternalizationChannel } from './internalization/peer-runner-contracts.js';
 import type {
   PIArtifactSnapshot,
   ActivationDecision,
@@ -9,7 +8,6 @@ import type {
   ApprovalQueueStore,
   ApprovalRecord,
   ApprovalEnqueueInput,
-  ApprovalDecisionResult,
   ApprovalStats,
   ChannelWriter,
 } from './activation/activation-types.js';
@@ -211,23 +209,23 @@ function makeInMemoryApprovalQueueStore(): ApprovalQueueStore {
     },
     approve: async (id: string, decidedBy: string, note?: string) => {
       const r = records.get(id);
-      if (!r) return { ok: false, error: 'not_found' } as ApprovalDecisionResult;
-      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status } as ApprovalDecisionResult;
+      if (!r) return { ok: false, error: 'not_found' };
+      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status };
       r.status = 'approved';
       r.decidedAt = new Date().toISOString();
       r.decidedBy = decidedBy;
       r.decisionNote = note;
-      return { ok: true, record: r } as ApprovalDecisionResult;
+      return { ok: true, record: r };
     },
     reject: async (id: string, decidedBy: string, reason: string) => {
       const r = records.get(id);
-      if (!r) return { ok: false, error: 'not_found' } as ApprovalDecisionResult;
-      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status } as ApprovalDecisionResult;
+      if (!r) return { ok: false, error: 'not_found' };
+      if (r.status !== 'pending') return { ok: false, error: 'already_decided', status: r.status };
       r.status = 'rejected';
       r.decidedAt = new Date().toISOString();
       r.decidedBy = decidedBy;
       r.rejectionReason = reason;
-      return { ok: true, record: r } as ApprovalDecisionResult;
+      return { ok: true, record: r };
     },
   };
 }
@@ -261,7 +259,7 @@ function makeDispatcher(
 function makeDispatchInput(channel: MvpChannel, artifact: PIArtifactSnapshot): DispatchInput {
   return {
     artifactId: artifact.artifactId,
-    channel: channel as InternalizationChannel,
+    channel: channel,
     rolloutDecision: channel === 'code_tool_hook' ? 'require_approval' : 'auto_activate',
     actor: { kind: 'system', source: 'rollout_reviewer' },
     idempotencyKey: `synth-240::${channel}`,
