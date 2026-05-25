@@ -15,42 +15,6 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   listSessions: vi.fn(() => []),
 }));
 
-const { mockStartWorkflow, mockGetWorkflowDebugSummary } = vi.hoisted(() => ({
-  mockStartWorkflow: vi.fn(),
-  mockGetWorkflowDebugSummary: vi.fn(),
-}));
-
-vi.mock('../../src/service/subagent-workflow/nocturnal-workflow-manager.js', () => ({
-  NocturnalWorkflowManager: class {
-    startWorkflow = mockStartWorkflow;
-    getWorkflowDebugSummary = mockGetWorkflowDebugSummary;
-  },
-  nocturnalWorkflowSpec: {
-    workflowType: 'nocturnal',
-    transport: 'runtime_direct',
-    timeoutMs: 15 * 60 * 1000,
-    ttlMs: 30 * 60 * 1000,
-  },
-}));
-
-const { mockGetNocturnalSessionSnapshot, mockListRecentNocturnalCandidateSessions } = vi.hoisted(() => ({
-  mockGetNocturnalSessionSnapshot: vi.fn(),
-  mockListRecentNocturnalCandidateSessions: vi.fn(() => []),
-}));
-
-vi.mock('../../src/core/nocturnal-trajectory-extractor.js', async () => {
-  const actual = await vi.importActual<typeof import('../../src/core/nocturnal-trajectory-extractor.js')>(
-    '../../src/core/nocturnal-trajectory-extractor.js'
-  );
-  return {
-    ...actual,
-    createNocturnalTrajectoryExtractor: vi.fn(() => ({
-      getNocturnalSessionSnapshot: mockGetNocturnalSessionSnapshot,
-      listRecentNocturnalCandidateSessions: mockListRecentNocturnalCandidateSessions,
-    })),
-  };
-});
-
 import { EvolutionWorkerService } from '../../src/service/evolution-worker.js';
 import { safeRmDir } from '../test-utils.js';
 
@@ -195,83 +159,6 @@ describe('EvolutionWorkerService timeout mechanisms', () => {
       const task = queue.find((t: any) => t.id === 'no-timeout-10min');
 
       expect(task).toBeUndefined();
-    } finally {
-      EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
-      safeRmDir(workspaceDir);
-    }
-  });
-
-  // ── Sleep reflection timeout (60 min default) ──
-
-  it('times out sleep_reflection task after 60 minutes → resolution = failed_max_retries', async () => {
-    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-timeout-sleep-'));
-    const stateDir = path.join(workspaceDir, '.state');
-    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
-    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
-
-    // Create an in_progress sleep_reflection task that started 61 minutes ago
-    const startedAt = new Date(Date.now() - 61 * 60 * 1000).toISOString();
-    fs.writeFileSync(
-      path.join(stateDir, 'evolution_queue.json'),
-      JSON.stringify([
-        {
-          id: 'sleep-timeout-60min',
-          taskKind: 'sleep_reflection',
-          priority: 'medium',
-          score: 50,
-          source: 'nocturnal',
-          reason: 'Test sleep reflection timeout',
-          timestamp: startedAt,
-          enqueued_at: startedAt,
-          status: 'in_progress',
-          session_id: 'test',
-          agent_id: 'main',
-          started_at: startedAt,
-          resultRef: 'wf-sleep-timeout',
-          retryCount: 0,
-          maxRetries: 1,
-          recentPainContext: {
-            mostRecent: null,
-            recentPainCount: 0,
-            recentMaxPainScore: 0,
-          },
-        },
-      ], null, 2),
-      'utf8'
-    );
-
-    mockStartWorkflow.mockResolvedValue({
-      workflowId: 'wf-sleep-timeout',
-      childSessionKey: 'child-sleep',
-      state: 'terminal_error',
-    });
-    mockGetWorkflowDebugSummary.mockResolvedValue({
-      state: 'terminal_error',
-      metadata: {},
-      recentEvents: [{ reason: 'Test: simulating stuck sleep reflection', payload: {} }],
-    });
-
-    const mockApi = createMockApi();
-    EvolutionWorkerService.api = mockApi;
-
-    try {
-      EvolutionWorkerService.start({
-        workspaceDir,
-        stateDir,
-        logger: mockApi.logger,
-        config: fastPollConfig,
-        api: mockApi,
-      } as any);
-
-      await vi.advanceTimersByTimeAsync(5000);
-
-      const queue = readQueue(stateDir);
-      const task = queue.find((t: any) => t.id === 'sleep-timeout-60min');
-
-      expect(task.status).toBe('failed');
-      expect(task.resolution).toBe('retired');
-      expect(task.completed_at).toBeDefined();
-      expect(task.lastError).toContain('retired per ADR-0012');
     } finally {
       EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);

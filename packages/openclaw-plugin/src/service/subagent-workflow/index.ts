@@ -21,13 +21,6 @@ export {
     type EmpathyObserverWorkflowOptions,
 } from './empathy-observer-workflow-manager.js';
 
-export {
-    NocturnalWorkflowManager,
-    nocturnalWorkflowSpec,
-    type NocturnalWorkflowOptions,
-    type NocturnalResult,
-} from './nocturnal-workflow-manager.js';
-
 export type {
     WorkflowState,
     WorkflowTransport,

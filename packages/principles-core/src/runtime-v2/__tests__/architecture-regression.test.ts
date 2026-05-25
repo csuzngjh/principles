@@ -171,7 +171,6 @@ const REQUIRED_SOURCE_FILES = [
 //
 // New pure domain logic → @principles/core
 // New I/O adapters → must be classified as plugin-specific
-// ADR-0005 frozen files → must NOT be modified as part of cleanup
 // ERR-011 reference: never bypass architecture boundary facades
 // ERR-012 reference: stale-main PR rollback must not delete baseline entries
 //
@@ -180,24 +179,16 @@ const REQUIRED_SOURCE_FILES = [
 // set below with a comment explaining why it is plugin-specific.
 
 const KNOWN_PLUGIN_CORE_FILES = new Set([
-  // ── Frozen Legacy (ADR-0005) — must NOT be modified ──────────────────────
-  'nocturnal-trinity.ts',
-  'nocturnal-arbiter.ts',
-
   // ── Pure Domain Logic Candidates — exist today but new pure logic belongs in @principles/core ──
-  'nocturnal-compliance.ts',
   'trajectory-types.ts',
   'profile.ts',
   'pain-signal.ts',
   'pd-task-types.ts',
   'evolution-types.ts',
   'telemetry-event.ts',
-  'nocturnal-trinity-types.ts',
-  'nocturnal-candidate-scoring.ts',
   'empathy-types.ts',
   'correction-types.ts',
   'principle-injection.ts',
-  'nocturnal-snapshot-contract.ts',
   'principle-compiler/template-generator.ts',
 
   // ── Thin Adapter Candidates — plugin I/O boundary wrappers ──────────────
@@ -252,31 +243,22 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'evolution-reducer.ts',
   'promotion-gate.ts',
   'model-training-registry.ts',
-  'nocturnal-dataset.ts',
   'focus-history.ts',
   'model-deployment-registry.ts',
   'training-program.ts',
   'replay-engine.ts',
   'external-training-contract.ts',
-  'nocturnal-trajectory-extractor.ts',
   'merge-gate-audit.ts',
   'shadow-observation-registry.ts',
-  'nocturnal-export.ts',
-  'adaptive-thresholds.ts',
   'control-ui-db.ts',
-  'nocturnal-executability.ts',
   'thinking-models.ts',
-  'nocturnal-artificer.ts',
   'pd-task-reconciler.ts',
   'correction-cue-learner.ts',
-  'nocturnal-reasoning-deriver.ts',
   'principle-compiler/compiler.ts',
   'pain.ts',
   'pain-context-extractor.ts',
   'config.ts',
-  'nocturnal-rule-implementation-validator.ts',
   'code-implementation-storage.ts',
-  'nocturnal-paths.ts',
   'observability.ts',
   'file-storage-adapter.ts',
   'workflow-funnel-loader.ts',
@@ -285,7 +267,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'system-logger.ts',
   'detection-funnel.ts',
   'risk-calculator.ts',
-  'nocturnal-artifact-lineage.ts',
   'migration.ts',
   'file-store.ts',
   'pd-task-store.ts',
@@ -337,8 +318,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
         '  1. New pure domain logic → packages/principles-core (zero I/O, testable with no mocks)',
         '  2. New plugin I/O adapter → add to KNOWN_PLUGIN_CORE_FILES with classification comment',
         '  3. See docs/reviews/plugin-core-inventory-2026-05.md for the PRI-211 baseline',
-        '  4. ADR-0005 frozen files (nocturnal-trinity.ts, nocturnal-arbiter.ts) must NOT be modified',
-        '',
         'ERR-011: never bypass architecture boundary facades',
         'ERR-012: baseline entries must survive rebase — check diff for unintended deletions',
       ].join('\n');
@@ -350,7 +329,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(109);
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
   });
 });
 
@@ -654,20 +633,6 @@ describe('PRI-42 internalization boundary', () => {
     expect(src).not.toContain("from './rule-host-helpers.js'");
   });
 
-  it('plugin nocturnal-rule-implementation-validator.ts imports contracts from core barrel', async () => {
-    const { existsSync, readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const validatorPath = resolve(
-      __dirname,
-      '../../../../openclaw-plugin/src/core/nocturnal-rule-implementation-validator.ts',
-    );
-    expect(existsSync(validatorPath)).toBe(true);
-    const src = readFileSync(validatorPath, 'utf-8');
-
-    expect(src).toContain('@principles/core/runtime-v2');
-    expect(src).not.toContain("from './rule-host-types.js'");
-    expect(src).not.toContain("from './rule-host-helpers.js'");
-  });
 });
 
 // ── PRI-44: Principle-compiler core boundary ──────────────────────────────────
@@ -2592,23 +2557,6 @@ describe('PRI-117 Nocturnal god-class freeze', () => {
     expect(src).toContain('ScribeRunner');
     expect(src).toContain('ArtificerRunner');
   });
-
-  it('PLUGIN_NOCTURNAL_SERVICE_ACTOR: nocturnal-service.ts must not import from runtime-v2 peer runners', async () => {
-    const { existsSync, readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const nocturnalServicePath = resolve(
-      __dirname,
-      '../../../../openclaw-plugin/src/service/nocturnal-service.ts',
-    );
-    if (existsSync(nocturnalServicePath)) {
-      const src = readFileSync(nocturnalServicePath, 'utf-8');
-      expect(src).not.toContain('DreamerRunner');
-      expect(src).not.toContain('PhilosopherRunner');
-      expect(src).not.toContain('ScribeRunner');
-      expect(src).not.toContain("from '../runtime-v2'");
-      expect(src).not.toContain('from "@principles/core/runtime-v2"');
-    }
-  });
 });
 
 // ── Phase 2 Migration: Evolution Types ────────────────────────────────────────
@@ -2771,28 +2719,6 @@ describe('Phase 2.3 nocturnal trinity types migration', () => {
     const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
     expect(src).toContain('validateNocturnalSnapshotIngress');
     expect(src).toContain('NocturnalSessionSnapshot');
-  });
-
-  it('plugin nocturnal-trinity-types.ts re-exports from core with backward-compatible aliases', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/core/nocturnal-trinity-types.ts'
-    ), 'utf-8');
-    expect(src).toContain("from '@principles/core/runtime-v2'");
-    expect(src).toContain('TrinityDreamerCandidate');
-    expect(src).toContain('type DreamerCandidate = TrinityDreamerCandidate');
-    expect(src).toContain('type DreamerOutput = TrinityDreamerOutput');
-  });
-
-  it('plugin nocturnal-trinity-types.ts does NOT define TrinityResult or DreamerCandidate locally', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(
-      __dirname, '../../../../openclaw-plugin/src/core/nocturnal-trinity-types.ts'
-    ), 'utf-8');
-    expect(src).not.toMatch(/^export interface TrinityResult/m);
-    expect(src).not.toMatch(/^export interface DreamerCandidate/m);
   });
 });
 

@@ -1,4 +1,4 @@
- 
+
 import * as fs from 'fs';
 import * as path from 'path';
 import type {
@@ -17,17 +17,11 @@ import type {
   PlanApprovalEventData,
   EvolutionTaskEventData,
   EmpathyRollbackEventData,
-  // C: New event data types
   DiagnosisTaskEventData,
   HeartbeatDiagnosisEventData,
   DiagnosticianReportEventData,
   PrincipleCandidateEventData,
   RuleEnforcedEventData,
-  // C: Nocturnal funnel events (PD-FUNNEL-2.3)
-  NocturnalDreamerCompletedEventData,
-  NocturnalArtifactPersistedEventData,
-  NocturnalCodeCandidateCreatedEventData,
-  // C: RuleHost funnel events (PD-FUNNEL-2.4)
   RuleHostEvaluatedEventData,
   RuleHostBlockedEventData,
   RuleHostRequireApprovalEventData,
@@ -38,17 +32,6 @@ import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
 
-/**
- * EventLog - Structured event logging with daily statistics aggregation.
- *
- * Log files are date-stamped: events_YYYY-MM-DD.jsonl
- * Old event files are automatically cleaned up based on retention policy.
- */
-
-/**
- * Event log retention in days.
- * Files older than this are deleted on cleanup.
- */
 const EVENT_LOG_RETENTION_DAYS = 7;
 
 export class EventLog {
@@ -62,11 +45,9 @@ export class EventLog {
   private readonly flushIntervalMs = 30000;
   private flushTimer?: ReturnType<typeof setInterval>;
 
-  // Cached event file path for current date
   private currentEventsFile: string | undefined;
   private currentDate: string | undefined;
 
-  // Pain score sum per date (for avgScore calculation)
   private readonly painScoreSums: Map<string, number> = new Map();
 
   constructor(stateDir: string, logger?: PluginLogger) {
@@ -82,37 +63,24 @@ export class EventLog {
     this.startFlushTimer();
   }
 
-  /**
-   * Get the event file path for a given date.
-   */
   private getEventsFile(date: string): string {
     return path.join(this.logsDir, `events_${date}.jsonl`);
   }
 
-  /**
-   * Get today's date string (YYYY-MM-DD).
-   */
   private getTodayStr(): string {
     return new Date().toISOString().split('T')[0];
   }
 
-  /**
-   * Ensure we have the correct events file for today's date.
-   */
   private ensureEventsFile(): string {
     const today = this.getTodayStr();
     if (this.currentDate !== today || !this.currentEventsFile) {
       this.currentDate = today;
       this.currentEventsFile = this.getEventsFile(today);
-      // Run cleanup if date changed
       this.cleanupOldEventFiles(today);
     }
     return this.currentEventsFile;
   }
 
-  /**
-   * Clean up event files older than EVENT_LOG_RETENTION_DAYS.
-   */
   private cleanupOldEventFiles(_today: string): void {
     if (EVENT_LOG_RETENTION_DAYS <= 0) return;
 
@@ -135,7 +103,6 @@ export class EventLog {
   }
   
   recordToolCall(sessionId: string | undefined, data: ToolCallEventData): void {
-    // PRI-79: non-zero exitCode is also a failure, even without an error message
     const category = data.error || (data.exitCode !== undefined && data.exitCode !== 0) ? 'failure' : 'success';
     this.record('tool_call', category, sessionId, data);
   }
@@ -192,7 +159,6 @@ export class EventLog {
     this.record('warn', 'failure', sessionId, { message, ...context });
   }
 
-  // C: Diagnostician heartbeat chain event recorders
   recordDiagnosisTask(data: DiagnosisTaskEventData): void {
     this.record('diagnosis_task', 'written', undefined, data);
   }
@@ -202,8 +168,6 @@ export class EventLog {
   }
 
   recordDiagnosticianReport(data: DiagnosticianReportEventData): void {
-    // Map three-state category to EventCategory
-    // Both missing_json and incomplete_fields map to 'failure' in EventCategory
     const categoryMap: Record<DiagnosticianReportEventData['category'], EventCategory> = {
       success: 'completed',
       missing_json: 'failure',
@@ -220,20 +184,6 @@ export class EventLog {
     this.record('rule_enforced', 'matched', undefined, data);
   }
 
-  // C: Nocturnal funnel event recorders (PD-FUNNEL-2.3)
-  recordNocturnalDreamerCompleted(data: NocturnalDreamerCompletedEventData): void {
-    this.record('nocturnal_dreamer_completed', 'completed', undefined, data);
-  }
-
-  recordNocturnalArtifactPersisted(data: NocturnalArtifactPersistedEventData): void {
-    this.record('nocturnal_artifact_persisted', 'completed', undefined, data);
-  }
-
-  recordNocturnalCodeCandidateCreated(data: NocturnalCodeCandidateCreatedEventData): void {
-    this.record('nocturnal_code_candidate_created', 'created', undefined, data);
-  }
-
-  // C: RuleHost funnel event recorders (PD-FUNNEL-2.4)
   recordRuleHostEvaluated(data: RuleHostEvaluatedEventData): void {
     this.record('rulehost_evaluated', 'evaluated', undefined, data);
   }
@@ -280,8 +230,6 @@ export class EventLog {
     }
   }
 
-   
-   
   private formatDate(date: Date): string {
     return date.toISOString().split('T')[0];
   }
@@ -299,7 +247,6 @@ export class EventLog {
     }
   }
 
-   
   private updateStats(entry: EventLogEntry): void {
     let stats = this.statsCache.get(entry.date);
     if (!stats) {
@@ -312,7 +259,6 @@ export class EventLog {
       if (entry.category === 'success') stats.tools.success++;
       else stats.tools.failure++;
 
-      // PRI-79/PRI-82: Update GFI stats — use gfiAfter if present, else legacy gfi field
       const tcData = entry.data as unknown as ToolCallEventData;
       const observedGfi = tcData.gfiAfter ?? tcData.gfi;
       if (observedGfi !== undefined) {
@@ -325,19 +271,16 @@ export class EventLog {
       stats.pain.signalsDetected++;
       stats.pain.maxScore = Math.max(stats.pain.maxScore, data.score);
 
-      // Track signals by source
       if (data.source) {
         stats.pain.signalsBySource[data.source] = (stats.pain.signalsBySource[data.source] || 0) + 1;
       }
 
-      // Accumulate score for avg calculation
       const currentSum = this.painScoreSums.get(entry.date) ?? 0;
       this.painScoreSums.set(entry.date, currentSum + (data.score || 0));
       stats.pain.avgScore = stats.pain.signalsDetected > 0
         ? Math.round((currentSum + (data.score || 0)) / stats.pain.signalsDetected)
         : 0;
 
-      // Update empathy stats for user_empathy source
       if (data.source === 'user_empathy') {
         if (data.deduped) {
           stats.empathy.dedupedCount++;
@@ -345,23 +288,19 @@ export class EventLog {
           stats.empathy.totalEvents++;
           stats.empathy.totalPenaltyScore += data.score || 0;
 
-          // By severity
           if (data.severity) {
             stats.empathy.bySeverity[data.severity]++;
             stats.empathy.scoreBySeverity[data.severity] += data.score || 0;
           }
 
-          // By detection mode
           if (data.detection_mode) {
             stats.empathy.byDetectionMode[data.detection_mode]++;
           }
 
-          // By origin
           if (data.origin) {
             stats.empathy.byOrigin[data.origin]++;
           }
 
-          // Confidence distribution
           const conf = data.confidence ?? 1;
           if (conf >= 0.8) stats.empathy.confidenceDistribution.high++;
           else if (conf >= 0.5) stats.empathy.confidenceDistribution.medium++;
@@ -377,7 +316,6 @@ export class EventLog {
       if (entry.category === 'success') stats.hooks.success++;
       else stats.hooks.failure++;
 
-      // Track by type
       if (data.hook) {
         if (!stats.hooks.byType[data.hook]) {
           stats.hooks.byType[data.hook] = { total: 0, success: 0, failure: 0 };
@@ -405,19 +343,13 @@ export class EventLog {
         stats.evolution.tasksEnqueued++;
       }
     }
-    // C: Diagnostician heartbeat chain event counters
     else if (entry.type === 'diagnosis_task') {
       stats.evolution.diagnosisTasksWritten++;
     } else if (entry.type === 'heartbeat_diagnosis') {
       stats.evolution.heartbeatsInjected++;
     } else if (entry.type === 'diagnostician_report') {
-      // Backward compat: handle old events with success:boolean and new events with category:string
-      // Widen to Record<string, unknown> because DiagnosticianReportEventData requires
-      // category (new format) but legacy persisted events have { success: boolean }.
       const raw = entry.data as unknown as Record<string, unknown>;
       if (Object.prototype.hasOwnProperty.call(raw, 'category')) {
-        // New format: category is 'success' | 'missing_json' | 'incomplete_fields'
-        // All three categories mean diagnosis completed and attempted to produce a report
         const cat = raw['category'] as string;
         if (cat === 'success' || cat === 'missing_json' || cat === 'incomplete_fields') {
           stats.evolution.diagnosticianReportsWritten++;
@@ -429,10 +361,6 @@ export class EventLog {
           stats.evolution.reportsIncompleteFields++;
         }
       } else if (Object.prototype.hasOwnProperty.call(raw, 'success')) {
-        // Legacy format: { success: boolean }
-        // Agreed fix: count ALL legacy events in diagnosticianReportsWritten (+1 for both true and false).
-        // Sub-counters (reportsMissingJson/reportsIncompleteFields) stay untouched because
-        // legacy events lack enough information to distinguish sub-category — preserve total, don't fake breakdown.
         stats.evolution.diagnosticianReportsWritten++;
       }
     } else if (entry.type === 'principle_candidate') {
@@ -440,19 +368,6 @@ export class EventLog {
     } else if (entry.type === 'rule_enforced') {
       stats.evolution.rulesEnforced++;
     }
-    // C: Nocturnal funnel event counters (PD-FUNNEL-2.3)
-    else if (entry.type === 'nocturnal_dreamer_completed') {
-      const data = entry.data as unknown as NocturnalDreamerCompletedEventData;
-      stats.evolution.nocturnalDreamerCompleted++;
-      if (data.chainMode === 'trinity') {
-        stats.evolution.nocturnalTrinityCompleted++;
-      }
-    } else if (entry.type === 'nocturnal_artifact_persisted') {
-      stats.evolution.nocturnalArtifactPersisted++;
-    } else if (entry.type === 'nocturnal_code_candidate_created') {
-      stats.evolution.nocturnalCodeCandidateCreated++;
-    }
-    // C: RuleHost funnel event counters (PD-FUNNEL-2.4)
     else if (entry.type === 'rulehost_evaluated') {
       stats.evolution.rulehostEvaluated++;
     } else if (entry.type === 'rulehost_blocked') {
@@ -468,8 +383,6 @@ export class EventLog {
 
   private startFlushTimer(): void {
     this.flushTimer = setInterval(() => this.flush(), this.flushIntervalMs);
-    // Don't keep the process alive just for this timer
-    // This allows tests and CLI to exit without waiting for flush
     this.flushTimer.unref();
   }
 
@@ -478,16 +391,10 @@ export class EventLog {
     this.flushStats();
   }
 
-  /**
-   * Return in-memory buffered events that have not been flushed yet.
-   * Intended for live runtime summaries that should not lag behind disk snapshots.
-   */
   getBufferedEvents(): EventLogEntry[] {
     return this.eventBuffer.map((entry) => ({ ...entry, data: { ...entry.data } }));
   }
 
-   
-     
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof (entry.data as { eventId?: unknown } | undefined)?.eventId === 'string'
       ? String((entry.data as { eventId?: string }).eventId)
@@ -569,10 +476,6 @@ export class EventLog {
     }
   }
 
-  /**
-   * Get daily statistics for a specific date.
-   * Returns empty stats if no events recorded for that date.
-   */
   getDailyStats(date: string): DailyStats {
     let stats = this.statsCache.get(date);
     if (!stats) {
@@ -582,17 +485,10 @@ export class EventLog {
     return stats;
   }
 
-  /**
-   * Get aggregated empathy statistics for multiple time ranges.
-   * @param range 'today' | 'week' | 'session'
-   * @param sessionId Optional session ID for session-scoped stats
-   */
-     
   getEmpathyStats(range: 'today' | 'week' | 'session', sessionId?: string): EmpathyEventStats {
     const now = new Date();
     const today = this.formatDate(now);
 
-    // Aggregate stats based on range
     const result: EmpathyEventStats = {
       totalEvents: 0,
       dedupedCount: 0,
@@ -609,10 +505,8 @@ export class EventLog {
     };
 
     if (range === 'session' && sessionId) {
-      // For session range, scan event buffer and events file
       this.aggregateSessionEmpathy(sessionId, result);
     } else if (range === 'week') {
-      // For week range, aggregate last 7 days
       for (let i = 0; i < 7; i++) {
         const date = new Date(now);
         date.setDate(date.getDate() - i);
@@ -650,7 +544,6 @@ export class EventLog {
         }
       }
     } else {
-      // Today only
       const stats = this.getDailyStats(today);
       Object.assign(result, stats.empathy);
       if (stats.empathy.totalEvents > 0 || stats.empathy.dedupedCount > 0) {
@@ -662,17 +555,12 @@ export class EventLog {
       }
     }
 
-    // Calculate dedupe hit rate
     const total = result.totalEvents + result.dedupedCount;
     result.dedupeHitRate = total > 0 ? result.dedupedCount / total : 0;
 
     return result;
   }
 
-  /**
-   * Aggregate empathy stats for a specific session.
-   */
-   
   private aggregateSessionEmpathy(sessionId: string, result: EmpathyEventStats): void {
     for (const entry of this.getMergedEvents()) {
       if (entry.sessionId === sessionId && entry.type === 'pain_signal') {
@@ -701,15 +589,8 @@ export class EventLog {
         result.rolledBackScore += data.originalScore || 0;
       }
     }
-
   }
 
-  /**
-   * Rollback an empathy event by ID.
-   * Returns the rolled back score, or 0 if event not found.
-   */
-   
-   
   rollbackEmpathyEvent(eventId: string, sessionId: string | undefined, reason: string, triggeredBy: 'user_command' | 'natural_language' | 'system'): number {
     const allEvents = this.getMergedEvents();
     let foundEvent: { entry: EventLogEntry; data: PainSignalEventData } | null = null;
@@ -730,7 +611,6 @@ export class EventLog {
 
     const originalScore = foundEvent.data.score || 0;
 
-    // Record the rollback event
     this.recordEmpathyRollback(sessionId, {
       eventId,
       originalScore,
@@ -742,9 +622,6 @@ export class EventLog {
     return originalScore;
   }
 
-  /**
-   * Get the last empathy event ID for a session (for rollback).
-   */
   getLastEmpathyEventId(sessionId: string): string | null {
     const allEvents = this.getMergedEvents();
     for (let i = allEvents.length - 1; i >= 0; i--) {
@@ -760,9 +637,6 @@ export class EventLog {
     return null;
   }
 
-  /**
-   * Find the latest pain signal for a given session.
-   */
   findLatestPainSignal(sessionId: string | undefined): PainSignalEventData | null {
     const allEvents = this.getMergedEvents();
     for (let i = allEvents.length - 1; i >= 0; i--) {
@@ -774,9 +648,6 @@ export class EventLog {
     return null;
   }
 
-  /**
-   * Dispose of the EventLog, flushing pending data and clearing timer.
-   */
   dispose(): void {
     if (this.flushTimer) {
       clearInterval(this.flushTimer);
@@ -786,9 +657,6 @@ export class EventLog {
   }
 }
 
-/**
- * Service to manage multiple EventLog instances by stateDir.
- */
 export class EventLogService {
   private static readonly instances: Map<string, EventLog> = new Map();
   

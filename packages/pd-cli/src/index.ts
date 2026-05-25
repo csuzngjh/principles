@@ -45,6 +45,7 @@ import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeIdleTriggerEvaluate } from './commands/runtime-idle-trigger.js';
 import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
+import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
 
 const program = new Command();
@@ -360,6 +361,24 @@ runtimeCmd
     await handleRuntimeFeaturesStatus({
       workspace: opts.workspace,
       json: opts.json,
+    });
+  });
+
+const demoCmd = program
+  .command('demo')
+  .description('Demo scenarios for MVP validation');
+
+demoCmd
+  .command('story-a')
+  .description('Run Story A\' proven-channel demo (PRI-246) — full evidence→proposal→approval→activation→observation chain')
+  .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
+  .option('--json', 'Output raw JSON')
+  .option('--channels <channels>', 'Comma-separated channel list (prompt,code_tool_hook,defer_archive)')
+  .action(async (opts) => {
+    await handleDemoStoryA({
+      workspace: opts.workspace,
+      json: opts.json,
+      channels: opts.channels,
     });
   });
 

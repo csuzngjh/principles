@@ -8,7 +8,7 @@ import type {
   RuleLifecycleEvidence,
 } from '../../../src/core/principle-internalization/lifecycle-read-model.js';
 import type { ReplayReport } from '../../../src/core/replay-engine.js';
-import type { ArtifactLineageRecord } from '../../../src/core/nocturnal-artifact-lineage.js';
+import type { ArtifactLineageRecord } from '@principles/core/runtime-v2';
 
 function createReplayReport(
   implementationId: string,
