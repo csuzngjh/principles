@@ -7,7 +7,7 @@ import { Card, CardContent } from "../components/ui/card.js";
 import { Button } from "../components/ui/button.js";
 import { Badge } from "../components/ui/badge.js";
 import { Skeleton } from "../components/ui/skeleton.js";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, AlertTriangle } from "lucide-react";
 import { ApprovalCard } from "../components/approval-card.js";
 import { ApprovalDetailDialog } from "../components/approval-detail-dialog.js";
 import { RejectionReasonDialog } from "../components/rejection-reason-dialog.js";
@@ -136,6 +136,18 @@ export function ApprovalsPage() {
         onRefresh={loadApprovals}
         lastUpdated={lastUpdated ?? undefined}
       />
+
+      {error && approvals.length > 0 && (
+        <Card className="mb-4 border-amber-500/50 bg-amber-500/5">
+          <CardContent className="p-3 flex items-center gap-3">
+            <AlertTriangle className="h-4 w-4 text-amber-500 flex-shrink-0" />
+            <span className="text-sm text-amber-600 flex-1">{error}</span>
+            <Button variant="outline" size="sm" onClick={loadApprovals}>
+              {t("common:refresh")}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex items-center gap-3 mb-4">
         <Badge variant="outline">{t("components:approvalCard.stats.pending")}: {approvalStats.pending}</Badge>

@@ -66,6 +66,17 @@ describe('MVP Three-Page Navigation — PRI-245', () => {
       expect(isNavActive('/principles', '/pain')).toBe(false);
       expect(isNavActive('/overview', '/pain')).toBe(false);
     });
+
+    it('alsoActive makes / activate /pain nav item', () => {
+      expect(isNavActive('/pain', '/', ['/'])).toBe(true);
+      expect(isNavActive('/pain', '/pain', ['/'])).toBe(true);
+    });
+
+    it('alsoActive does not cause false positives for other routes', () => {
+      expect(isNavActive('/approvals', '/', undefined)).toBe(false);
+      expect(isNavActive('/principles', '/', undefined)).toBe(false);
+      expect(isNavActive('/principles', '/', ['/'])).toBe(true);
+    });
   });
 
   describe('Sidebar primary navigation', () => {
@@ -129,6 +140,16 @@ describe('MVP Three-Page Navigation — PRI-245', () => {
     it('sidebar uses isNavActive from extracted utility', () => {
       expect(sidebarSrc).toContain('isNavActive');
       expect(sidebarSrc).toContain('from "../utils/navigation.js"');
+    });
+
+    it('Pain nav item has alsoActive: ["/"] so root route activates it', () => {
+      const painLine = sidebarSrc.match(/id:\s*"pain"[\s\S]*?alsoActive:\s*\[[^\]]*\]/);
+      expect(painLine).not.toBeNull();
+      expect(painLine![0]).toContain('alsoActive: ["/"]');
+    });
+
+    it('sidebar passes alsoActive to isActive for MVP items', () => {
+      expect(sidebarSrc).toMatch(/isActive\(item\.href,\s*item\.alsoActive\)/);
     });
   });
 
@@ -305,6 +326,15 @@ describe('MVP Three-Page Navigation — PRI-245', () => {
     it('does not import or reference skill/model_training channels', () => {
       expect(approvalsSrc).not.toContain('skill');
       expect(approvalsSrc).not.toContain('model_training');
+    });
+
+    it('shows degraded warning when error and approvals exist simultaneously', () => {
+      expect(approvalsSrc).toMatch(/error\s+&&\s+approvals\.length\s*>\s*0/);
+      expect(approvalsSrc).toContain('AlertTriangle');
+    });
+
+    it('shows full error page when error and no approvals', () => {
+      expect(approvalsSrc).toMatch(/error\s+&&\s+approvals\.length\s*===\s*0/);
     });
   });
 

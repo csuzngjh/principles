@@ -16,14 +16,14 @@ import {
   Wrench,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
-import { isNavActive } from "../utils/navigation.js";
+import { isNavActive, type NavItem } from "../utils/navigation.js";
 import { Button } from "./ui/button.js";
 import { Badge } from "./ui/badge.js";
 import { fetchSystemHealth } from "../api.js";
 import type { SystemHealthStatus } from "../api.js";
 
-const mvpNavItems = [
-  { id: "pain", label: "Pain", icon: Flame, href: "/pain" },
+const mvpNavItems: NavItem[] = [
+  { id: "pain", label: "Pain", icon: Flame, href: "/pain", alsoActive: ["/"] },
   { id: "principles", label: "Principle", icon: ScrollText, href: "/principles" },
   { id: "approvals", label: "Approval", icon: ShieldCheck, href: "/approvals" },
 ];
@@ -48,7 +48,7 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
   const [healthError, setHealthError] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
-  const isActive = (href: string) => isNavActive(href, location.pathname);
+  const isActive = (href: string, alsoActive?: string[]) => isNavActive(href, location.pathname, alsoActive);
 
   useEffect(() => {
     const fetchHealth = async () => {
@@ -148,7 +148,7 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
                 className={cn(
                   "flex items-center gap-3 px-4 py-3 text-sm transition-all duration-200",
                   "hover:bg-accent hover:text-accent-foreground",
-                  isActive(item.href)
+                  isActive(item.href, item.alsoActive)
                     ? "bg-primary/10 text-primary border-r-2 border-primary"
                     : "text-muted-foreground",
                   collapsed && "justify-center"
