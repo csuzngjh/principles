@@ -57,9 +57,15 @@ function buildRecommendedActions(checks: CanaryCheck[]): string[] {
       case 'candidate_audit':
         actions.push('Run `pd candidate audit --workspace <path> --json` for details.');
         break;
-      case 'gfi_snapshot':
-        actions.push('Investigate GFI sessions — consider cleanup or session lifecycle review.');
+      case 'gfi_snapshot': {
+        const gfiDetails = check.details as { warnings?: string[]; configPath?: string } | undefined;
+        if (gfiDetails && gfiDetails.warnings && gfiDetails.warnings.length > 0) {
+          actions.push(`Review .pd/feature-flags.yaml and rerun \`pd runtime features --workspace <path> --json\`.`);
+        } else {
+          actions.push('Investigate GFI sessions — consider cleanup or session lifecycle review.');
+        }
         break;
+      }
       case 'pruning_orphans':
         actions.push('Run `pd runtime pruning orphans --workspace <path> --dry-run` to inspect orphan candidates.');
         break;

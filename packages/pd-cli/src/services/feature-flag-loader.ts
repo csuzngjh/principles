@@ -12,6 +12,10 @@ export const FEATURE_FLAGS_CONFIG_DIR = '.pd';
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 export function getFeatureFlagsConfigPath(workspaceDir: string): string {
   return path.join(workspaceDir, FEATURE_FLAGS_CONFIG_DIR, FEATURE_FLAGS_CONFIG_FILENAME);
 }
@@ -50,8 +54,8 @@ export function loadEffectiveFeatureFlags(workspaceDir: string): EffectiveFeatur
       warnings.push(`feature-flags.yaml: dangerous key '${key}' rejected`);
       continue;
     }
-    if (Object.hasOwn(parsed, key)) {
-      parsedRecord[key] = (parsed as Record<string, unknown>)[key];
+    if (Object.hasOwn(parsed, key) && isRecord(parsed)) {
+      parsedRecord[key] = parsed[key];
     }
   }
 

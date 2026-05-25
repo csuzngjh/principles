@@ -301,6 +301,7 @@ describe('runCanaryChecks', () => {
       expect(gfiCheck?.status).toBe('degraded');
       expect(gfiCheck?.summary).toContain('warnings');
       expect(gfiCheck?.details).toBeDefined();
+      expect(result.recommendedNextActions.some(a => a.includes('feature-flags.yaml'))).toBe(true);
     });
 
     it('returns degraded when GFI disabled but config has malformed override warning', async () => {
@@ -317,6 +318,7 @@ describe('runCanaryChecks', () => {
       const gfiCheck = result.checks.find(c => c.name === 'gfi_snapshot');
 
       expect(gfiCheck?.status).toBe('degraded');
+      expect(result.recommendedNextActions.some(a => a.includes('feature-flags.yaml') || a.includes('pd runtime features'))).toBe(true);
     });
 
     it('runs GFI snapshot when flag enabled with no warnings', async () => {
@@ -335,6 +337,28 @@ describe('runCanaryChecks', () => {
       expect(gfiCheck?.status).toBe('healthy');
       expect(gfiCheck?.summary).toContain('OK');
       expect(mockBuildGfiSnapshot).toHaveBeenCalled();
+    });
+
+    it('recommends session lifecycle review for GFI session issues (not config)', async () => {
+      vi.mocked(loadEffectiveFeatureFlags).mockReturnValue({
+        source: 'defaults',
+        configPath: `${WS}/.pd/feature-flags.yaml`,
+        flags: {
+          gfi: { id: 'gfi', category: 'quiet', enabled: true, since: '2026-05-24' },
+        },
+        warnings: [],
+      });
+      mockClassifyGfiHealth.mockReturnValue({
+        status: 'degraded',
+        reason: '5 stale sessions found',
+        staleGfiDegradedThreshold: 40,
+      });
+
+      const result = await runCanaryChecks(WS);
+      const gfiCheck = result.checks.find(c => c.name === 'gfi_snapshot');
+
+      expect(gfiCheck?.status).toBe('degraded');
+      expect(result.recommendedNextActions.some(a => a.includes('GFI sessions') || a.includes('session lifecycle'))).toBe(true);
     });
   });
 });
