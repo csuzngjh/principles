@@ -57,9 +57,7 @@ vi.mock('../../src/core/nocturnal-trajectory-extractor.js', async () => {
 import { EvolutionWorkerService } from '../../src/service/evolution-worker.js';
 import { readRecentPainContext } from '../../src/service/evolution-pain-context.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
-import { handlePdReflect } from '../../src/commands/pd-reflect.js';
 import { safeRmDir } from '../test-utils.js';
-import * as diagnosticianStore from '../../src/core/diagnostician-task-store.js';
 
 // Helper to create a mock API for E2E tests
 function createMockApi() {
@@ -193,83 +191,30 @@ session_id: pain-session-abc
     expect(simulatedTask.recentPainContext.mostRecent!.sessionId).toBe('pain-session-abc');
   });
 
-  it('e2e: /pd-reflect command writes to workspace/.state, never to HOME/.state', async () => {
-    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-e2e-command-writes-'));
-    const stateDir = path.join(workspaceDir, '.state');
-    fs.mkdirSync(stateDir, { recursive: true });
-    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+  // === PRI-119: Retirement Behavior Tests (replaces former Nocturnal E2E skips) ===
 
-    // Ensure HOME/.state does NOT have the queue file
-    const homeState = path.join(os.homedir(), '.state');
-    const homeQueue = path.join(homeState, 'evolution_queue.json');
-    const homeExistedBefore = fs.existsSync(homeQueue);
-
-    try {
-      // Execute the command with explicit workspaceDir
-      const result = await handlePdReflect.handler({
-        workspaceDir,
-        channel: 'test',
-        isAuthorizedSender: true,
-        commandBody: '',
-        config: {},
-        api: { logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } } as any,
-      } as any);
-
-      // Command should succeed
-      expect(result.isError).toBeFalsy();
-      expect(result.text).toContain('enqueued');
-
-      // Queue file should exist in workspace
-      const workspaceQueue = path.join(stateDir, 'evolution_queue.json');
-      expect(fs.existsSync(workspaceQueue)).toBe(true);
-
-      // Verify the task is in the workspace queue
-      const queue = readQueue(stateDir);
-      const manualTasks = queue.filter((t: any) => t.id.startsWith('manual_'));
-      expect(manualTasks.length).toBe(1);
-      expect(manualTasks[0].taskKind).toBe('sleep_reflection');
-
-      // HOME/.state/evolution_queue.json should NOT have been created/modified by this command
-      if (!homeExistedBefore) {
-        expect(fs.existsSync(homeQueue)).toBe(false);
-      }
-    } finally {
-      safeRmDir(workspaceDir);
-    }
-  });
-
-  // === Nocturnal E2E Pipeline Tests (from PR #243) ===
-
-  it('does not start a nocturnal workflow when only an empty fallback snapshot is available', async () => {
-    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-empty-'));
+  it('terminalizes pending sleep_reflection task to failed with retired resolution', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-retire-pending-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
     fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
 
-    mockGetNocturnalSessionSnapshot.mockReturnValue(null);
-
     fs.writeFileSync(
       path.join(stateDir, 'evolution_queue.json'),
-      JSON.stringify([
-        {
-          id: 'sleep-empty',
-          taskKind: 'sleep_reflection',
-          priority: 'medium',
-          score: 50,
-          source: 'nocturnal',
-          reason: 'Sleep reflection',
-          timestamp: '2026-04-10T00:00:00.000Z',
-          enqueued_at: '2026-04-10T00:00:00.000Z',
-          status: 'pending',
-          retryCount: 0,
-          maxRetries: 1,
-          recentPainContext: {
-            mostRecent: null,
-            recentPainCount: 0,
-            recentMaxPainScore: 0,
-          },
-        },
-      ], null, 2),
+      JSON.stringify([{
+        id: 'retire-pending-sleep',
+        taskKind: 'sleep_reflection',
+        priority: 'medium',
+        score: 50,
+        source: 'test',
+        reason: 'Retired task',
+        timestamp: new Date(Date.now() - 600000).toISOString(),
+        enqueued_at: new Date(Date.now() - 600000).toISOString(),
+        status: 'pending',
+        retryCount: 0,
+        maxRetries: 1,
+        recentPainContext: { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 },
+      }], null, 2),
       'utf8'
     );
 
@@ -278,20 +223,17 @@ session_id: pain-session-abc
 
     try {
       EvolutionWorkerService.start({
-        workspaceDir,
-        stateDir,
-        logger: mockApi.logger,
-        config: fastPollConfig,
-        api: mockApi,
+        workspaceDir, stateDir, logger: mockApi.logger, config: fastPollConfig, api: mockApi,
       } as any);
 
       await vi.advanceTimersByTimeAsync(6000);
 
       const queue = readQueue(stateDir);
-      expect(queue[0].status).toBe('failed');
-      expect(queue[0].lastError).toContain('invalid_snapshot_ingress');
-      expect(queue[0].lastError).toContain('fallback snapshot must contain at least one pain signal');
-      expect(queue[0].resultRef).toBeFalsy();
+      const task = queue[0];
+      expect(task.status).toBe('failed');
+      expect(task.resolution).toBe('retired');
+      expect(task.lastError).toContain('retired per ADR-0012');
+      // Verify no Nocturnal workflow was started
       expect(mockStartWorkflow).not.toHaveBeenCalled();
     } finally {
       EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
@@ -299,52 +241,29 @@ session_id: pain-session-abc
     }
   });
 
-  it('uses stub_fallback for expected gateway-only background unavailability', async () => {
-    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-gateway-'));
+  it('terminalizes in_progress sleep_reflection task to failed with retired resolution', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-retire-inprogress-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
     fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
 
-    mockGetNocturnalSessionSnapshot.mockReturnValue({
-      sessionId: 'sleep-gateway',
-      startedAt: '2026-04-10T00:00:00.000Z',
-      updatedAt: '2026-04-10T00:01:00.000Z',
-      assistantTurns: [],
-      userTurns: [],
-      toolCalls: [],
-      painEvents: [],
-      gateBlocks: [],
-      stats: { totalAssistantTurns: 1, totalToolCalls: 1, totalPainEvents: 0, totalGateBlocks: 0, failureCount: 0 },
-    });
-    mockStartWorkflow.mockResolvedValue({ workflowId: 'wf-1', childSessionKey: 'child-1', state: 'active' });
-    mockGetWorkflowDebugSummary.mockResolvedValue({
-      state: 'terminal_error',
-      metadata: {},
-      recentEvents: [{ reason: 'Error: Plugin runtime subagent methods are only available during a gateway request.', payload: {} }],
-    });
-
     fs.writeFileSync(
       path.join(stateDir, 'evolution_queue.json'),
-      JSON.stringify([
-        {
-          id: 'sleep-gateway',
-          taskKind: 'sleep_reflection',
-          priority: 'medium',
-          score: 50,
-          source: 'nocturnal',
-          reason: 'Sleep reflection',
-          timestamp: '2026-04-10T00:00:00.000Z',
-          enqueued_at: '2026-04-10T00:00:00.000Z',
-          status: 'pending',
-          retryCount: 0,
-          maxRetries: 1,
-          recentPainContext: {
-            mostRecent: { source: 'test', score: 50, reason: 'test', timestamp: '2026-04-10T00:00:00.000Z', sessionId: 'sleep-gateway' },
-            recentPainCount: 1,
-            recentMaxPainScore: 50,
-          },
-        },
-      ], null, 2),
+      JSON.stringify([{
+        id: 'retire-inprogress-sleep',
+        taskKind: 'sleep_reflection',
+        priority: 'medium',
+        score: 50,
+        source: 'test',
+        reason: 'Stuck retired task',
+        timestamp: new Date(Date.now() - 600000).toISOString(),
+        enqueued_at: new Date(Date.now() - 600000).toISOString(),
+        started_at: new Date(Date.now() - 300000).toISOString(),
+        status: 'in_progress',
+        retryCount: 0,
+        maxRetries: 1,
+        recentPainContext: { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 },
+      }], null, 2),
       'utf8'
     );
 
@@ -353,65 +272,45 @@ session_id: pain-session-abc
 
     try {
       EvolutionWorkerService.start({
-        workspaceDir,
-        stateDir,
-        logger: mockApi.logger,
-        config: fastPollConfig,
-        api: mockApi,
+        workspaceDir, stateDir, logger: mockApi.logger, config: fastPollConfig, api: mockApi,
       } as any);
 
       await vi.advanceTimersByTimeAsync(6000);
 
       const queue = readQueue(stateDir);
-      expect(queue[0].status).toBe('completed');
-      expect(queue[0].resolution).toBe('stub_fallback');
+      const task = queue[0];
+      expect(task.status).toBe('failed');
+      expect(task.resolution).toBe('retired');
+      expect(task.lastError).toContain('retired per ADR-0012');
+      expect(mockStartWorkflow).not.toHaveBeenCalled();
     } finally {
       EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
     }
   });
 
-  it('uses stub_fallback for expected subagent runtime unavailability', async () => {
-    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-subagent-'));
+  it('terminalizes pending keyword_optimization task', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-retire-kwopt-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
     fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
 
-    mockGetNocturnalSessionSnapshot.mockReturnValue({
-      sessionId: 'sleep-subagent',
-      startedAt: '2026-04-10T00:00:00.000Z',
-      updatedAt: '2026-04-10T00:01:00.000Z',
-      assistantTurns: [],
-      userTurns: [],
-      toolCalls: [],
-      painEvents: [],
-      gateBlocks: [],
-      stats: { totalAssistantTurns: 1, totalToolCalls: 1, totalPainEvents: 0, totalGateBlocks: 0, failureCount: 0 },
-    });
-    mockStartWorkflow.mockRejectedValue(new Error('NocturnalWorkflowManager: subagent runtime unavailable'));
-
     fs.writeFileSync(
       path.join(stateDir, 'evolution_queue.json'),
-      JSON.stringify([
-        {
-          id: 'sleep-subagent',
-          taskKind: 'sleep_reflection',
-          priority: 'medium',
-          score: 50,
-          source: 'nocturnal',
-          reason: 'Sleep reflection',
-          timestamp: '2026-04-10T00:00:00.000Z',
-          enqueued_at: '2026-04-10T00:00:00.000Z',
-          status: 'pending',
-          retryCount: 0,
-          maxRetries: 1,
-          recentPainContext: {
-            mostRecent: { source: 'test', score: 50, reason: 'test', timestamp: '2026-04-10T00:00:00.000Z', sessionId: 'sleep-subagent' },
-            recentPainCount: 1,
-            recentMaxPainScore: 50,
-          },
-        },
-      ], null, 2),
+      JSON.stringify([{
+        id: 'retire-pending-kwopt',
+        taskKind: 'keyword_optimization',
+        priority: 'medium',
+        score: 50,
+        source: 'test',
+        reason: 'Retired kw opt task',
+        timestamp: new Date(Date.now() - 600000).toISOString(),
+        enqueued_at: new Date(Date.now() - 600000).toISOString(),
+        status: 'pending',
+        retryCount: 0,
+        maxRetries: 1,
+        recentPainContext: { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 },
+      }], null, 2),
       'utf8'
     );
 
@@ -420,70 +319,101 @@ session_id: pain-session-abc
 
     try {
       EvolutionWorkerService.start({
-        workspaceDir,
-        stateDir,
-        logger: mockApi.logger,
-        config: fastPollConfig,
-        api: mockApi,
+        workspaceDir, stateDir, logger: mockApi.logger, config: fastPollConfig, api: mockApi,
       } as any);
 
       await vi.advanceTimersByTimeAsync(6000);
 
       const queue = readQueue(stateDir);
-      expect(queue[0].status).toBe('completed');
-      expect(queue[0].resolution).toBe('stub_fallback');
+      const task = queue[0];
+      expect(task.status).toBe('failed');
+      expect(task.resolution).toBe('retired');
+      expect(task.lastError).toContain('retired per ADR-0012');
     } finally {
       EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
     }
   });
 
-  it('prioritizes pain signal session ID for snapshot extraction', async () => {
-    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-pain-session-'));
+  it('repeated cycle is idempotent — already terminalized task stays retired', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-retire-idempotent-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
     fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
 
-    const painSessionId = 'pain-signal-session-123';
+    const fixtureCompletedAt = new Date(Date.now() - 120000).toISOString();
 
-    mockGetNocturnalSessionSnapshot.mockImplementation((sessionId: string) => {
-      if (sessionId === painSessionId) {
-        return {
-          sessionId: painSessionId,
-          startedAt: '2026-04-09T23:00:00.000Z',
-          updatedAt: '2026-04-09T23:01:00.000Z',
-          assistantTurns: [],
-          userTurns: [],
-          toolCalls: [],
-          painEvents: [{ source: 'tool_failure', score: 70, severity: null, reason: 'test', createdAt: '2026-04-09T23:00:00.000Z' }],
-          gateBlocks: [],
-          stats: { totalAssistantTurns: 1, totalToolCalls: 1, failureCount: 1, totalPainEvents: 1, totalGateBlocks: 0 },
-        };
-      }
-      return null;
-    });
-    mockStartWorkflow.mockResolvedValue({ workflowId: 'wf-pain', childSessionKey: 'child-pain', state: 'active' });
+    fs.writeFileSync(
+      path.join(stateDir, 'evolution_queue.json'),
+      JSON.stringify([{
+        id: 'retire-already-done',
+        taskKind: 'sleep_reflection',
+        priority: 'medium',
+        score: 50,
+        source: 'test',
+        reason: 'Already terminalized',
+        timestamp: new Date(Date.now() - 600000).toISOString(),
+        enqueued_at: new Date(Date.now() - 600000).toISOString(),
+        status: 'failed',
+        resolution: 'retired',
+        completed_at: fixtureCompletedAt,
+        lastError: 'retired per ADR-0012 / PRI-119',
+        retryCount: 0,
+        maxRetries: 1,
+        recentPainContext: { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 },
+      }], null, 2),
+      'utf8'
+    );
+
+    const mockApi = createMockApi();
+    EvolutionWorkerService.api = mockApi;
+
+    try {
+      EvolutionWorkerService.start({
+        workspaceDir, stateDir, logger: mockApi.logger, config: fastPollConfig, api: mockApi,
+      } as any);
+
+      // Run two heartbeat cycles
+      await vi.advanceTimersByTimeAsync(12000);
+
+      const queue = readQueue(stateDir);
+      const task = queue[0];
+      // Task should still be failed with retired — unchanged
+      expect(task.status).toBe('failed');
+      expect(task.resolution).toBe('retired');
+      // completed_at should NOT be overwritten (was set in fixture)
+      expect(task.completed_at).toBe(fixtureCompletedAt);
+      expect(task.lastError).toContain('retired per ADR-0012');
+    } finally {
+      EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('does not start any Nocturnal workflow during terminalization', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-retire-no-nocturnal-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
 
     fs.writeFileSync(
       path.join(stateDir, 'evolution_queue.json'),
       JSON.stringify([
         {
-          id: 'sleep-pain-priority',
+          id: 'retire-sleep-1',
           taskKind: 'sleep_reflection',
-          priority: 'medium',
-          score: 50,
-          source: 'nocturnal',
-          reason: 'Sleep reflection',
-          timestamp: '2026-04-10T00:00:00.000Z',
-          enqueued_at: '2026-04-10T00:00:00.000Z',
-          status: 'pending',
-          retryCount: 0,
-          maxRetries: 1,
-          recentPainContext: {
-            mostRecent: { source: 'tool_failure', score: 70, reason: 'test', timestamp: '2026-04-10T00:00:00.000Z', sessionId: painSessionId },
-            recentPainCount: 1,
-            recentMaxPainScore: 70,
-          },
+          priority: 'medium', score: 60, source: 'test', reason: 'test',
+          timestamp: new Date(Date.now() - 600000).toISOString(), enqueued_at: new Date(Date.now() - 600000).toISOString(),
+          status: 'pending', retryCount: 0, maxRetries: 1,
+          recentPainContext: { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 },
+        },
+        {
+          id: 'retire-kwopt-1',
+          taskKind: 'keyword_optimization',
+          priority: 'medium', score: 40, source: 'test', reason: 'test',
+          timestamp: new Date(Date.now() - 600000).toISOString(), enqueued_at: new Date(Date.now() - 600000).toISOString(),
+          status: 'in_progress', retryCount: 0, maxRetries: 1,
+          recentPainContext: { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 },
         },
       ], null, 2),
       'utf8'
@@ -494,76 +424,51 @@ session_id: pain-session-abc
 
     try {
       EvolutionWorkerService.start({
-        workspaceDir,
-        stateDir,
-        logger: mockApi.logger,
-        config: fastPollConfig,
-        api: mockApi,
+        workspaceDir, stateDir, logger: mockApi.logger, config: fastPollConfig, api: mockApi,
       } as any);
 
       await vi.advanceTimersByTimeAsync(6000);
 
-      expect(mockStartWorkflow).toHaveBeenCalledTimes(1);
-      const metadata = mockStartWorkflow.mock.calls[0][1].metadata;
-      expect(metadata.snapshot.sessionId).toBe(painSessionId);
+      // Both tasks should be terminalized without EVER starting a Nocturnal workflow
+      expect(mockStartWorkflow).not.toHaveBeenCalled();
+
+      const queue = readQueue(stateDir);
+      const sleepTask = queue.find((t: any) => t.taskKind === 'sleep_reflection');
+      const kwOptTask = queue.find((t: any) => t.taskKind === 'keyword_optimization');
+      expect(sleepTask.status).toBe('failed');
+      expect(sleepTask.resolution).toBe('retired');
+      expect(kwOptTask.status).toBe('failed');
+      expect(kwOptTask.resolution).toBe('retired');
     } finally {
       EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
     }
   });
 
-  it('e2e: bounded session selection — never picks a session newer than the triggering task', async () => {
-    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-e2e-bounded-'));
+  it('terminalization preserves active tasks (model_eval) in mixed queue', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-retire-mixed-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
     fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
-
-    const taskTimestamp = '2026-04-10T00:00:00.000Z';
-    const validSessionTimestamp = '2026-04-09T23:00:00.000Z';
-    const invalidSessionTimestamp = '2026-04-10T01:00:00.000Z';
-
-    mockGetNocturnalSessionSnapshot.mockImplementation((sessionId: string) => {
-      if (sessionId === 'valid-session') {
-        return {
-          sessionId: 'valid-session',
-          startedAt: validSessionTimestamp,
-          updatedAt: validSessionTimestamp,
-          assistantTurns: [],
-          userTurns: [],
-          toolCalls: [],
-          painEvents: [{ source: 'tool_failure', score: 50, severity: null, reason: 'test', createdAt: validSessionTimestamp }],
-          gateBlocks: [],
-          stats: { totalAssistantTurns: 1, totalToolCalls: 1, failureCount: 1, totalPainEvents: 1, totalGateBlocks: 0 },
-        };
-      }
-      return null;
-    });
-    mockListRecentNocturnalCandidateSessions.mockReturnValue([
-      { sessionId: 'valid-session', startedAt: validSessionTimestamp, failureCount: 1, painEventCount: 1, gateBlockCount: 0 },
-      { sessionId: 'invalid-session', startedAt: invalidSessionTimestamp, failureCount: 1, painEventCount: 0, gateBlockCount: 0 },
-    ]);
-    mockStartWorkflow.mockResolvedValue({ workflowId: 'wf-bounded', childSessionKey: 'child-bounded', state: 'active' });
 
     fs.writeFileSync(
       path.join(stateDir, 'evolution_queue.json'),
       JSON.stringify([
         {
-          id: 'sleep-e2e-bounded',
+          id: 'retire-sleep-mixed',
           taskKind: 'sleep_reflection',
-          priority: 'medium',
-          score: 50,
-          source: 'nocturnal',
-          reason: 'Sleep reflection',
-          timestamp: taskTimestamp,
-          enqueued_at: taskTimestamp,
-          status: 'pending',
-          retryCount: 0,
-          maxRetries: 1,
-          recentPainContext: {
-            mostRecent: { source: 'test', score: 50, reason: 'test', timestamp: taskTimestamp, sessionId: 'pain-session' },
-            recentPainCount: 1,
-            recentMaxPainScore: 50,
-          },
+          priority: 'medium', score: 50, source: 'test', reason: 'test',
+          timestamp: new Date(Date.now() - 600000).toISOString(), enqueued_at: new Date(Date.now() - 600000).toISOString(),
+          status: 'pending', retryCount: 0, maxRetries: 1,
+          recentPainContext: { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 },
+        },
+        {
+          id: 'active-model-eval',
+          taskKind: 'model_eval',
+          priority: 'high', score: 80, source: 'test', reason: 'Active task',
+          timestamp: new Date(Date.now() - 600000).toISOString(), enqueued_at: new Date(Date.now() - 600000).toISOString(),
+          status: 'pending', retryCount: 0, maxRetries: 3,
+          recentPainContext: { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 },
         },
       ], null, 2),
       'utf8'
@@ -574,19 +479,22 @@ session_id: pain-session-abc
 
     try {
       EvolutionWorkerService.start({
-        workspaceDir,
-        stateDir,
-        logger: mockApi.logger,
-        config: fastPollConfig,
-        api: mockApi,
+        workspaceDir, stateDir, logger: mockApi.logger, config: fastPollConfig, api: mockApi,
       } as any);
 
       await vi.advanceTimersByTimeAsync(6000);
 
-      expect(mockStartWorkflow).toHaveBeenCalledTimes(1);
-      const metadata = mockStartWorkflow.mock.calls[0][1].metadata;
-      expect(metadata.snapshot.sessionId).toBe('valid-session');
-      expect(new Date(metadata.snapshot.startedAt).getTime()).toBeLessThanOrEqual(new Date(taskTimestamp).getTime());
+      const queue = readQueue(stateDir);
+      const retiredTask = queue.find((t: any) => t.taskKind === 'sleep_reflection');
+      const activeTask = queue.find((t: any) => t.taskKind === 'model_eval');
+
+      // Retired task must be terminalized
+      expect(retiredTask.status).toBe('failed');
+      expect(retiredTask.resolution).toBe('retired');
+
+      // Active (model_eval) task must NOT be affected by terminalization
+      // (no handler for model_eval in evolution worker, so it stays pending)
+      expect(activeTask.status).toBe('pending');
     } finally {
       EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);

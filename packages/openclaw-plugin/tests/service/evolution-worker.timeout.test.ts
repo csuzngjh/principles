@@ -269,8 +269,9 @@ describe('EvolutionWorkerService timeout mechanisms', () => {
       const task = queue.find((t: any) => t.id === 'sleep-timeout-60min');
 
       expect(task.status).toBe('failed');
-      expect(task.resolution).toBe('failed_max_retries');
+      expect(task.resolution).toBe('retired');
       expect(task.completed_at).toBeDefined();
+      expect(task.lastError).toContain('retired per ADR-0012');
     } finally {
       EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
