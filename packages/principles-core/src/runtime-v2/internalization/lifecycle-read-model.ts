@@ -70,7 +70,7 @@ function createRuleReplayEvidence(reports: { implementationId: string; report: R
   };
 }
 
-function createRuleLineageEvidence(records: ArtifactLineageRecord[]): RuleLineageEvidence {
+function createRuleLineageEvidence(records: ArtifactLineageRecord[], sourceRetired = false): RuleLineageEvidence {
   const painIds = new Set<string>();
   const gateBlockIds = new Set<string>();
 
@@ -96,6 +96,7 @@ function createRuleLineageEvidence(records: ArtifactLineageRecord[]): RuleLineag
     distinctGateBlockCount: gateBlockIds.size,
     repeatedErrorSignal: painIds.size + gateBlockIds.size,
     latestCreatedAt,
+    sourceRetired,
   };
 }
 
@@ -121,7 +122,17 @@ function createRuleLiveEvidence(
 
 export function buildLifecycleReadModel(datasource: LifecycleDatasource): LifecycleReadModel {
   const tree = datasource.loadLedger();
-  const lineageRecords = datasource.listLineageRecords('rule-implementation-candidate');
+  let lineageRecords: ArtifactLineageRecord[] = [];
+  let lineageSourceRetired = false;
+  try {
+    lineageRecords = datasource.listLineageRecords('rule-implementation-candidate');
+  } catch (err) {
+    if (err instanceof Error && err.name === 'LineageSourceRetiredError') {
+      lineageSourceRetired = true;
+    } else {
+      throw err;
+    }
+  }
 
   // Tree entries use ledger types (LedgerPrinciple/LedgerRule) which extend
   // the schema types with extra fields (ruleIds, implementationIds).
@@ -163,7 +174,7 @@ export function buildLifecycleReadModel(datasource: LifecycleDatasource): Lifecy
               })),
           );
           const ruleLineageRecords = lineageRecords.filter((record) => record.ruleId === rule.id);
-          const lineageEvidence = createRuleLineageEvidence(ruleLineageRecords);
+          const lineageEvidence = createRuleLineageEvidence(ruleLineageRecords, lineageSourceRetired);
           const liveEvidence = createRuleLiveEvidence(implementations, replayEvidence);
 
           return {
