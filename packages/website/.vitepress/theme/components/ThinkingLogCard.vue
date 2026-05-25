@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section class="log-section">
     <div class="section-header">
       <div class="section-tag">
@@ -18,36 +18,36 @@
 
     <div class="journal-card pd-card">
       <div class="journal-thumb">
-        <img src="/images/pd_hero_21_9.png" :alt="lang === 'zh-CN' ? '思考日志图' : 'Thinking Log Cover'" />
+        <img src="/images/abyss/03/abyss-03-cover.png" :alt="lang === 'zh-CN' ? '思考日志图' : 'Thinking Log Cover'" />
         <div class="thumb-overlay"></div>
       </div>
       
       <div class="journal-body">
         <div class="journal-meta">
-          <span class="journal-series">LOG #002</span>
+          <span class="journal-series">LOG #003</span>
           <span class="meta-dot">&middot;</span>
-          <span class="journal-date">2026-05-22</span>
+          <span class="journal-date">2026-05-25</span>
         </div>
         
         <h3 class="journal-title">
-          {{ lang === 'zh-CN' ? '为什么“硅基鸡汤”注定沦为赛博噪音？' : 'Why Silicon Chicken Soup is Destined to be Noise' }}
+          {{ lang === 'zh-CN' ? '痛苦即信号：前向进化的生物学硬核启示' : 'Pain is the Signal: Forward Evolution' }}
         </h3>
         
         <p class="journal-excerpt">
           {{ lang === 'zh-CN'
-            ? '扒下提示词工程的底裤。为什么明明大模型的参数空间里包含所有人类智慧，却在干活时表现得像个毫无原则的赛博莽夫？我们需要在模型外部，重新夺回宏观思考的权力。'
-            : 'Stripping the pretense of Prompt Engineering. Why do LLMs behave like unprincipled brutes despite possessing human wisdom? We must reclaim macro-thinking outside the model.'
+            ? '打破反向传播的迷思。大模型没有生物痛觉，但我们可以用工程手段为它建立由“痛觉—刹车—复盘—沉淀”组成的前向进化循环，让原则从文字记忆长成坚硬的行为记忆。'
+            : 'Breaking the myth of backpropagation. LLMs have no biological pain, but we can engineer a forward evolution loop of "Pain — Brake — Debrief — Precipitate" to grow soft principles into defensive behavioral memory.'
           }}
         </p>
 
         <div class="journal-tags">
-          <span class="j-tag">{{ lang === 'zh-CN' ? '数学暴政' : 'Math Bias' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '目标函数' : 'Objective Function' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '宏观引擎' : 'Macro Engine' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '硅基痛觉' : 'Silicon Pain' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '双环反思' : 'Double Reflection' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '突触修剪' : 'Synaptic Pruning' }}</span>
         </div>
 
         <div class="journal-action">
-          <a :href="lang === 'zh-CN' ? '/zh/abyss/02-poisonous-chicken-soup' : '/abyss/02-poisonous-chicken-soup'" class="read-link">
+          <a :href="lang === 'zh-CN' ? '/zh/abyss/03-biological-forward-pass' : '/abyss/03-biological-forward-pass'" class="read-link">
             <span>{{ lang === 'zh-CN' ? '凝视深渊' : 'Gaze into the Abyss' }}</span>
             <span class="arrow">&rarr;</span>
           </a>

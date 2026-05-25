@@ -79,7 +79,7 @@ export class ApprovalsConsoleModel {
     }));
     const mvpStats = { pending: 0, approved: 0, rejected: 0, cancelled: 0 };
     for (const item of mvpItems) {
-      const key = item.status as keyof typeof mvpStats;
+      const key = item.status;
       if (Object.hasOwn(mvpStats, key)) {
         mvpStats[key]++;
       }
