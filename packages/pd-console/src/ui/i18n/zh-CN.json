@@ -475,11 +475,11 @@
       },
       "decidedBy": "决定者：{{by}}",
       "channel": {
-        "skill": "技能激活",
-        "code_tool_hook": "代码工具钩子",
+        "code_tool_hook": "RuleHost",
         "defer_archive": "延迟归档",
-        "model_training": "模型训练",
-        "prompt": "提示注入"
+        "prompt": "提示注入",
+        "skill": "技能激活（已停用）",
+        "model_training": "模型训练（已停用）"
       },
       "riskLevel": "风险级别"
     },

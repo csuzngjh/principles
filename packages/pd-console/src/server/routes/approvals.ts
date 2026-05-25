@@ -1,10 +1,15 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ApprovalStatus, InternalizationChannel } from '@principles/core/runtime-v2';
+import { MVP_CHANNELS } from '@principles/core/runtime-v2';
 import { ApprovalsConsoleModel } from '../models/ApprovalsConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
 import { parseQuery, readBody } from '../utils/request.js';
 
 const models = new Map<string, ApprovalsConsoleModel>();
+
+const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
+
+const MVP_CHANNEL_LIST = MVP_CHANNELS.join(', ');
 
 function getModel(workspaceDir: string): ApprovalsConsoleModel {
   let model = models.get(workspaceDir);
@@ -19,6 +24,31 @@ function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function tryParseJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseJsonBody(body: string, res: ServerResponse): Record<string, unknown> | null {
+  const raw = tryParseJson(body);
+  if (raw === undefined) {
+    sendBadRequest(res, 'Invalid JSON body');
+    return null;
+  }
+  if (!isRecord(raw)) {
+    sendBadRequest(res, 'Request body must be a JSON object');
+    return null;
+  }
+  return raw;
+}
+
 /* eslint-disable @typescript-eslint/max-params */
 export async function handleApprovalsRoute(
   req: IncomingMessage,
@@ -28,7 +58,7 @@ export async function handleApprovalsRoute(
 ): Promise<void> {
   const model = getModel(workspaceDir);
 
-  // GET /api/v1/approvals - list all approvals
+  // GET /api/v1/approvals - list all approvals (MVP proven channels only)
   if (req.method === 'GET' && (subPath === '' || subPath === '/')) {
     try {
       const query = parseQuery(req.url ?? '');
@@ -37,15 +67,14 @@ export async function handleApprovalsRoute(
       const page = Number.isNaN(pageRaw) ? 1 : Math.max(1, pageRaw);
       const pageSize = Number.isNaN(pageSizeRaw) ? 0 : Math.min(Math.max(0, pageSizeRaw), 100);
       const ALLOWED_STATUSES = new Set<string>(['pending', 'approved', 'rejected', 'cancelled']);
-      const ALLOWED_CHANNELS = new Set<string>(['code_tool_hook', 'skill', 'model_training', 'prompt', 'defer_archive']);
-      const {status} = query;
+      const { status } = query;
       if (status !== undefined && !ALLOWED_STATUSES.has(status)) {
         sendBadRequest(res, 'Invalid status value');
         return;
       }
-      const {channel} = query;
-      if (channel !== undefined && !ALLOWED_CHANNELS.has(channel)) {
-        sendBadRequest(res, 'Invalid channel value');
+      const { channel } = query;
+      if (channel !== undefined && !MVP_PROVEN_CHANNELS.has(channel)) {
+        sendBadRequest(res, `Unsupported channel: ${channel}. MVP proven channels are: ${MVP_CHANNEL_LIST}`);
         return;
       }
       const result = await model.listApprovals({
@@ -84,21 +113,20 @@ export async function handleApprovalsRoute(
     const approvalId = decodeURIComponent(approveMatch[1]);
     try {
       const body = await readBody(req);
-      let parsed: { note?: string } = {};
-      try {
-        parsed = JSON.parse(body) as { note?: string };
-      } catch {
-        sendBadRequest(res, 'Invalid JSON body');
-        return;
-      }
-      if (parsed.note !== undefined && typeof parsed.note !== 'string') {
+      const parsed = parseJsonBody(body, res);
+      if (!parsed) return;
+      if (Object.hasOwn(parsed, 'note') && typeof parsed.note !== 'string') {
         sendBadRequest(res, 'note must be a string');
         return;
       }
-      const result = await model.approve(approvalId, 'operator', parsed.note);
+
+      const note = typeof parsed.note === 'string' ? parsed.note : undefined;
+      const result = await model.approve(approvalId, 'operator', note);
       if (!result.ok) {
         if (result.error === 'not_found') {
           sendNotFound(res, 'Approval ' + approvalId + ' not found');
+        } else if (result.error === 'unsupported_channel') {
+          sendError(res, 403, 'unsupported_channel', `Cannot approve unsupported channel. Only MVP proven channels (${MVP_CHANNEL_LIST}) can be approved.`);
         } else {
           sendError(res, 409, 'conflict', 'Approval already decided: ' + (result.status ?? 'unknown'));
         }
@@ -122,21 +150,23 @@ export async function handleApprovalsRoute(
     const approvalId = decodeURIComponent(rejectMatch[1]);
     try {
       const body = await readBody(req);
-      let parsed: { reason?: string } = {};
-      try {
-        parsed = JSON.parse(body) as { reason?: string };
-      } catch {
-        sendBadRequest(res, 'Invalid JSON body');
-        return;
-      }
-      if (!parsed.reason || typeof parsed.reason !== 'string') {
+      const parsed = parseJsonBody(body, res);
+      if (!parsed) return;
+      if (!Object.hasOwn(parsed, 'reason') || typeof parsed.reason !== 'string') {
         sendBadRequest(res, 'reason is required and must be a string');
         return;
       }
+      if (parsed.reason === '') {
+        sendBadRequest(res, 'reason must not be empty');
+        return;
+      }
+
       const result = await model.reject(approvalId, 'operator', parsed.reason);
       if (!result.ok) {
         if (result.error === 'not_found') {
           sendNotFound(res, 'Approval ' + approvalId + ' not found');
+        } else if (result.error === 'unsupported_channel') {
+          sendError(res, 403, 'unsupported_channel', `Cannot reject unsupported channel. Only MVP proven channels (${MVP_CHANNEL_LIST}) can be operated on.`);
         } else {
           sendError(res, 409, 'conflict', 'Approval already decided: ' + (result.status ?? 'unknown'));
         }
