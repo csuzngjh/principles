@@ -46,7 +46,7 @@ import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js
 import { handleExportCommand } from './commands/export.js';
 import { handleSamplesCommand } from './commands/samples.js';
 // PRI-119: Nocturnal command handlers retired per ADR-0012.
-// Imports kept for type compatibility; handlers replaced with structured rejection.
+// Handler imports removed; commands replaced with structured rejection messages.
 // Physical deletion tracked in PRI-230.
 const RETIRED_NOCTURNAL_MSG = (cmd: string) =>
   `This command has been retired. /${cmd} is no longer available — Nocturnal execution has been cut over to Runtime V2 (ADR-0012). ` +
