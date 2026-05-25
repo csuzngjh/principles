@@ -328,6 +328,10 @@ export {
 } from './proven-channel-baseline.js';
 export type { MvpChannel, ChannelFixtureResult, ProvenChannelBaselineSummary, ContinuityMatrixEntry, InputValidationFailure } from './proven-channel-baseline.js';
 
+// Story A' demo scenario (PRI-246) — MVP proven-channel demo with full evidence chain
+export { runStoryADemo, STORY_A_CHANNELS } from './story-a-demo.js';
+export type { StoryADemoResult, StoryADemoStage, StoryADemoStageName, StoryADemoChannelOutcome, StoryADemoInputValidationFailure, StoryADemoOptions } from './story-a-demo.js';
+
 // Pain flood simulation (PRI-208) — pure contract/helpers only; I/O runner lives in pd-cli
 export {
   computeFloodStatus, computeFloodTotals, formatContextBudgetSummary, recommendFloodNextIssue,
