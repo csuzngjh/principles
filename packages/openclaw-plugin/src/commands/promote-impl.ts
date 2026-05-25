@@ -14,6 +14,9 @@
  * VALIDATION:
  *   - Candidate must have at least one replay report with 'pass' decision
  *   - Only candidate -> active is valid for promotion
+ *   - NOTE (PRI-230): The legacy replay generation path has been retired.
+ *     This command is temporarily unavailable for implementations without
+ *     pre-existing replay reports until a Runtime V2 replay entry is wired.
  */
 
 import * as fs from 'fs';
@@ -100,35 +103,6 @@ function _handleShowReport(
   return { text: formatReplayReport(report) };
 }
 
-interface RunReplayOptions {
-  workspaceDir: string;
-  stateDir: string;
-  implId: string;
-  isZh: boolean;
-}
-
-function _handleRunReplay(options: RunReplayOptions): PluginCommandResult {
-  const { workspaceDir, stateDir, implId, isZh } = options;
-  const engine = new ReplayEngine(workspaceDir, stateDir);
-
-  try {
-    const report = engine.runReplayForImplementation(implId);
-    let text = formatReplayReport(report);
-    if (report.sampleFingerprints.length === 0) {
-      text += isZh
-        ? '\n⚠️ 未找到已分类的 replay 样本。报告已生成，但当前结果只反映空样本集。\n'
-        : '\n⚠️ No classified replay samples were found. The report was generated, but it only reflects an empty sample set.\n';
-    }
-    return { text };
-  } catch (error: unknown) {
-    return {
-      text: isZh
-        ? `❌ 回放评估失败: ${String(error)}`
-        : `❌ Replay evaluation failed: ${String(error)}`,
-    };
-  }
-}
-
 interface PromoteImplOptions {
   workspaceDir: string;
   stateDir: string;
@@ -163,8 +137,8 @@ function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
   if (!engine.hasPassingReport(implId)) {
     return {
       text: isZh
-        ? `❌ 实现 ${implId} 没有通过的回放报告，无法晋升。\n\n请先运行回放评估。`
-        : `❌ Implementation ${implId} has no passing replay report. Promotion rejected.\n\nPlease run a replay evaluation first.`,
+        ? `❌ 实现 ${implId} 没有通过的回放报告，晋升被拒绝。\n\nLegacy replay 生成路径已在 PRI-230 退役，当前无可用的 replay 证据生成入口。该命令暂不可用于没有既有 replay 报告的实现。`
+        : `❌ Implementation ${implId} has no passing replay report. Promotion rejected.\n\nThe legacy replay generation path was retired in PRI-230; no replay evidence generation entry is currently available. This command is temporarily unavailable for implementations without pre-existing replay reports.`,
     };
   }
 
@@ -274,17 +248,6 @@ export function handlePromoteImplCommand(ctx: PluginCommandContext): PluginComma
       };
     }
     return _handleShowReport(stateDir, implId, isZh);
-  }
-
-  if (subcommand === 'eval') {
-    if (!implId) {
-      return {
-        text: isZh
-          ? '请指定要评估的实现ID: /pd-promote-impl eval <implId>'
-          : 'Please specify an implementation ID: /pd-promote-impl eval <implId>',
-      };
-    }
-    return _handleRunReplay({ workspaceDir, stateDir, implId, isZh });
   }
 
   return _handlePromoteImpl({ workspaceDir, stateDir, implId: subcommand, isZh });

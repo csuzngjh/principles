@@ -12,8 +12,6 @@
  *         workflows as terminal_error (line 122)
  * BUG-02: Gateway fallback cleans up child sessions via agentSession when
  *         subagentRuntime unavailable (lines 148-156)
- * BUG-03: Nocturnal workflow snapshot validation detects pain_context_fallback
- *         with zero stats (lines 184-198)
  */
 
 import type { WorkspaceContext } from '../core/workspace-context.js';
@@ -26,7 +24,6 @@ import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 export interface WatchdogResult {
   anomalies: number;
   details: string[];
-  /** Set when the watchdog scan itself failed (e.g., store errors). Undefined means scan succeeded. */
   scanError?: string;
 }
 
@@ -46,7 +43,6 @@ export async function runWorkflowWatchdog(
     try {
       const allWorkflows: WorkflowRow[] = store.listWorkflows();
 
-      // Check 1: Stale active workflows (active > 2x TTL)
       const staleThreshold = WORKFLOW_TTL_MS * 2;
       const staleActive = allWorkflows.filter(
         (wf: WorkflowRow) => wf.state === 'active' && (now - wf.created_at) > staleThreshold,
@@ -56,9 +52,6 @@ export async function runWorkflowWatchdog(
           const ageMin = Math.round((now - wf.created_at) / 60000);
           details.push(`stale_active: ${wf.workflow_id} (${wf.workflow_type}, ${ageMin}min old)`);
 
-          // #257: Check if the last recorded event reason indicates expected subagent unavailability.
-          // If so, skip marking as terminal_error — the workflow is stale because the subagent
-          // was expectedly unavailable (daemon mode, process isolation), not due to a hard failure.
           const events = store.getEvents(wf.workflow_id);
           const lastEventReason = events.length > 0 ? events[events.length - 1].reason : 'unknown';
           if (isExpectedSubagentError(lastEventReason)) {
@@ -69,7 +62,6 @@ export async function runWorkflowWatchdog(
           store.updateWorkflowState(wf.workflow_id, 'terminal_error');
           store.recordEvent(wf.workflow_id, 'watchdog_timeout', 'active', 'terminal_error', `Stale active > ${staleThreshold / 60000}s`, { ageMs: now - wf.created_at });
 
-          // Cleanup session if possible (#188: gateway-safe fallback)
           if (wf.child_session_key) {
             try {
               if (subagentRuntime) {
@@ -104,7 +96,6 @@ export async function runWorkflowWatchdog(
         }
       }
 
-      // Check 2: Workflows in terminal_error/expired without cleanup
       const unclearedTerminal = allWorkflows.filter(
         (wf: WorkflowRow) => (wf.state === 'terminal_error' || wf.state === 'expired') && wf.cleanup_state === 'pending',
       );
@@ -112,40 +103,6 @@ export async function runWorkflowWatchdog(
         details.push(`uncleared_terminal: ${unclearedTerminal.length} workflows (will be swept next cycle)`);
       }
 
-      // Check 3: Nocturnal workflow result validation (#181 pattern)
-      const nocturnalCompleted = allWorkflows.filter(
-        (wf: WorkflowRow) => wf.workflow_type === 'nocturnal' && wf.state === 'completed',
-      );
-      for (const wf of nocturnalCompleted) {
-        // Check if the metadata snapshot has all zeros (invalid data)
-        try {
-          const meta = JSON.parse(wf.metadata_json) as Record<string, unknown>;
-          const snapshot = meta.snapshot as Record<string, unknown> | undefined;
-          if (snapshot) {
-            // #219: Check for fallback data source (partial stats from pain context)
-            const dataSource = snapshot._dataSource as string | undefined;
-            if (dataSource === 'pain_context_fallback') {
-              details.push(`fallback_snapshot: nocturnal workflow ${wf.workflow_id} uses pain-context fallback (stats may be incomplete)`);
-            }
-            const stats = snapshot.stats as Record<string, number> | undefined;
-            // #246: Stats are now always number (never null). Detect "empty" fallback:
-            // fallback + all counts zero means no real data was available.
-            // NOTE: totalAssistantTurns may be 0 even for valid sessions because
-            // listRecentNocturnalCandidateSessions (used in fallback path) does not
-            // populate assistantTurnCount (only getNocturnalSessionSnapshot does).
-            // We use totalToolCalls=0 as the primary indicator instead.
-            if (stats && dataSource === 'pain_context_fallback' &&
-                stats.totalToolCalls === 0 && stats.totalGateBlocks === 0 &&
-                stats.failureCount === 0) {
-              details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has empty fallback stats (no trajectory data found)`);
-            }
-          }
-        } catch (err) {
-          details.push(`malformed_metadata: workflow ${wf.workflow_id} has unparseable metadata: ${String(err).slice(0, 100)}`);
-        }
-      }
-
-      // Summary
       const stateCounts: Record<string, number> = {};
       for (const wf of allWorkflows) {
         stateCounts[wf.state] = (stateCounts[wf.state] || 0) + 1;

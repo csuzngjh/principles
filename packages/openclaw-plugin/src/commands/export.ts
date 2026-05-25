@@ -2,7 +2,6 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
-import { exportORPOSamples, listExports } from '../core/nocturnal-export.js';
 
 function isZh(ctx: PluginCommandContext): boolean {
   return String(ctx.config?.language || 'en').startsWith('zh');
@@ -17,71 +16,11 @@ export function handleExportCommand(ctx: PluginCommandContext): PluginCommandRes
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
 
   try {
-    if (subcommand === 'orpo') {
-      // Nocturnal ORPO export
-      // Usage: pd-export orpo [--family=<targetModelFamily>]
-      const familyArg = parts.find((p) => p.startsWith('--family='));
-      const targetModelFamily = familyArg ? familyArg.split('=')[1] : undefined;
-
-      const result = exportORPOSamples(workspaceDir, targetModelFamily);
-
-      if (!result.success) {
-        const reasonMap: Record<string, string> = {
-          no_approved_samples: zh
-            ? '没有已批准的样本'
-            : 'No approved samples',
-          family_mismatch: zh
-            ? '没有找到指定模型家族的已批准样本'
-            : 'No approved samples for the specified target model family',
-          all_samples_missing_artifacts: zh
-            ? '所有样本的 artifact 文件都缺失'
-            : 'All sample artifact files are missing',
-        };
-        return {
-          text: zh
-            ? `ORPO 导出失败: ${reasonMap[result.emptyReason ?? ''] ?? result.error}`
-            : `ORPO export failed: ${reasonMap[result.emptyReason ?? ''] ?? result.error}`,
-        };
-      }
-
-       
-       
-      return {
-        text: zh
-          ? `已导出 ORPO 决策点样本到 ${result.manifest!.exportPath}，` +  
-              `共 ${result.manifest!.sampleCount} 条，模型家族: ${result.manifest!.targetModelFamily}，` +  
-              `数据集指纹: ${result.manifest!.datasetFingerprint.substring(0, 16)}...`  
-          : `Exported ORPO decision-point samples to ${result.manifest!.exportPath}, ` +  
-              `${result.manifest!.sampleCount} samples, target: ${result.manifest!.targetModelFamily}, ` +  
-              `dataset fingerprint: ${result.manifest!.datasetFingerprint.substring(0, 16)}...`,  
-      };
-    }
-
-    if (subcommand === 'orpo-list') {
-      // List previous ORPO exports
-      const exports = listExports(workspaceDir);
-      if (exports.length === 0) {
-        return {
-          text: zh
-            ? '没有找到 ORPO 导出记录。'
-            : 'No ORPO exports found.',
-        };
-      }
-      const lines = exports.slice(0, 10).map((e) =>
-        `- ${e.exportId.substring(0, 8)}... | ${e.sampleCount} samples | ${e.targetModelFamily} | ${new Date(e.createdAt).toLocaleDateString()}`
-      );
-      return {
-        text: zh
-          ? `ORPO 导出记录:\n${lines.join('\n')}`
-          : `ORPO exports:\n${lines.join('\n')}`,
-      };
-    }
-
     if (subcommand !== 'analytics' && subcommand !== 'corrections') {
       return {
         text: zh
-          ? '无效的导出类型。请使用 `analytics`、`corrections [--redacted]` 或 `orpo [--family=<target>]`。'
-          : 'Invalid export target. Use `analytics`, `corrections [--redacted]`, or `orpo [--family=<target>]`',
+          ? '无效的导出类型。请使用 `analytics` 或 `corrections [--redacted]`。'
+          : 'Invalid export target. Use `analytics` or `corrections [--redacted]`',
       };
     }
 
@@ -105,11 +44,16 @@ export function handleExportCommand(ctx: PluginCommandContext): PluginCommandRes
         ? `已导出纠错样本到 ${result.filePath}，模式 ${result.mode}，共 ${result.count} 条。`
         : `Exported correction samples to ${result.filePath} (mode=${result.mode}, count=${result.count}).`,
     };
-  } catch {
+  } catch (err) {
+    console.error('[pd-export] Export failed:', {
+      subcommand,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return {
       text: zh
-        ? '导出失败，请检查日志。'
-        : 'Export failed. Check logs.',
+        ? `导出失败 (${subcommand}): ${err instanceof Error ? err.message : String(err)}`
+        : `Export failed (${subcommand}): ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }
