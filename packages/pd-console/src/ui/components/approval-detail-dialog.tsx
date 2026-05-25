@@ -39,6 +39,7 @@ export function ApprovalDetailDialog({
   if (!approval) return null;
 
   const isPending = approval.status === "pending";
+  const canAct = isPending && approval.isMvpProven !== false;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -101,7 +102,12 @@ export function ApprovalDetailDialog({
           )}
         </div>
 
-        {isPending && (
+        {isPending && approval.isMvpProven === false && (
+          <div className="text-xs text-muted-foreground italic pt-2">
+            {t("components:approvalCard.channel." + approval.channel, approval.channel)} — {t("components:approvalCard.channel.retired", "retired")}
+          </div>
+        )}
+        {canAct && (
           <DialogFooter>
             <Button
               variant="destructive"

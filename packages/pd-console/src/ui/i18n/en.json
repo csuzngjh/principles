@@ -475,12 +475,13 @@
       },
       "decidedBy": "Decided by {{by}}",
       "channel": {
-        "skill": "Skill Activation",
-        "code_tool_hook": "Code Tool Hook",
+        "code_tool_hook": "RuleHost",
         "defer_archive": "Defer Archive",
-        "model_training": "Model Training",
-        "prompt": "Prompt Injection"
+        "prompt": "Prompt",
+        "skill": "Skill (retired)",
+        "model_training": "Model Training (retired)"
       },
+      "retired": "This channel is retired and cannot be actioned",
       "riskLevel": "Risk Level"
     },
     "approvalDetail": {
