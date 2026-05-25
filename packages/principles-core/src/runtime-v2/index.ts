@@ -292,6 +292,24 @@ export type { OperatorHealthSnapshot, OperatorHealthReadModelOptions, OverallHea
 export { computeOverallStatus, boundedEvidence, safeStringify, truncateReason, makeDeterministicDiagnosticianOutput, recommendNextIssue } from './synthetic-baseline.js';
 export type { SyntheticBaselineSummary, SyntheticBaselineStage, SyntheticBaselineStageName, SyntheticBaselineFailStage, SyntheticBaselineOptions } from './synthetic-baseline.js';
 
+// Feature Flag Registry (PRI-239) — MVP-Quiet loadable feature flags
+
+export {
+  VALID_CATEGORIES,
+  validateFeatureFlagRaw,
+  computeEffectiveFlags,
+  DEFAULT_FEATURE_FLAGS,
+} from './feature-flags/index.js';
+
+export type {
+  FeatureFlagCategory,
+  FeatureFlagDefinition,
+  EffectiveFeatureFlags,
+  ValidationResult as FeatureFlagValidationResult,
+  ValidationResultOk as FeatureFlagValidationResultOk,
+  ValidationResultErr as FeatureFlagValidationResultErr,
+} from './feature-flags/index.js';
+
 // Proven channel baseline (PRI-240) — MVP activation continuity fixtures
 export {
   runPromptFixture,

@@ -45,6 +45,7 @@ import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeIdleTriggerEvaluate } from './commands/runtime-idle-trigger.js';
 import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
+import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
 
 const program = new Command();
 
@@ -347,6 +348,18 @@ synthCmd
       workspace: opts.workspace,
       json: opts.json,
       channels: opts.channels,
+    });
+  });
+
+runtimeCmd
+  .command('features')
+  .description('Show feature flag status (PRI-239)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleRuntimeFeaturesStatus({
+      workspace: opts.workspace,
+      json: opts.json,
     });
   });
 
