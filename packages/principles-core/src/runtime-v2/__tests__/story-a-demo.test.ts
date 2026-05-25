@@ -63,12 +63,14 @@ describe('Story A\' Demo Scenario', () => {
     for (const stage of result.stages) {
       expect(stage.status).toMatch(/^(passed|failed|degraded|skipped)$/);
       if (stage.status === 'failed' || stage.status === 'degraded') {
-        expect(stage.reason).toBeDefined();
-        expect(typeof stage.reason).toBe('string');
-        expect(stage.reason.length).toBeGreaterThan(0);
-        expect(stage.nextAction).toBeDefined();
-        expect(typeof stage.nextAction).toBe('string');
-        expect(stage.nextAction.length).toBeGreaterThan(0);
+        const {reason} = stage;
+        const {nextAction} = stage;
+        expect(reason).toBeDefined();
+        expect(typeof reason).toBe('string');
+        expect((reason as string).length).toBeGreaterThan(0);
+        expect(nextAction).toBeDefined();
+        expect(typeof nextAction).toBe('string');
+        expect((nextAction as string).length).toBeGreaterThan(0);
       }
     }
   });
@@ -196,8 +198,9 @@ describe('Story A\' Demo Scenario', () => {
 
     expect(result.status).toBe('failed');
     expect(result.inputValidationFailure).toBeDefined();
-    expect(result.inputValidationFailure.reason).toBeDefined();
-    expect(result.inputValidationFailure.nextAction).toBeDefined();
+    const ivf = result.inputValidationFailure as { reason: string; nextAction: string };
+    expect(ivf.reason).toBeDefined();
+    expect(ivf.nextAction).toBeDefined();
   });
 
   it('fails loud on empty channel list', async () => {
@@ -205,7 +208,8 @@ describe('Story A\' Demo Scenario', () => {
 
     expect(result.status).toBe('failed');
     expect(result.inputValidationFailure).toBeDefined();
-    expect(result.inputValidationFailure.reason).toBe('empty_channels');
+    const ivf = result.inputValidationFailure as { reason: string };
+    expect(ivf.reason).toBe('empty_channels');
   });
 
   // ── 6. Repeatability ────────────────────────────────────────────────────

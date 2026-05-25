@@ -86,6 +86,7 @@ interface ParseChannelResult {
 function parseChannelList(raw: string | undefined): ParseChannelResult {
   if (!raw) return { channels: undefined, unknowns: [] };
   const parts = raw.split(',').map(p => p.trim()).filter(p => p.length > 0);
+  if (parts.length === 0) return { channels: [], unknowns: [] };
   const valid: MvpChannel[] = [];
   const unknowns: string[] = [];
   const mvpSet = new Set<string>(['prompt', 'code_tool_hook', 'defer_archive']);

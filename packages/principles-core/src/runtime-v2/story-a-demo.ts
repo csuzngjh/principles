@@ -290,7 +290,7 @@ async function runChannelOutcome(
   try {
     const decision = await dispatcher.dispatch(dispatchInput);
 
-    if (decision.decision === 'would_activate' || decision.decision === 'activated' || decision.decision === 'queued_for_approval') {
+    if (decision.decision === 'would_activate' || decision.decision === 'activated') {
       return {
         channel,
         status: 'passed',
@@ -298,10 +298,27 @@ async function runChannelOutcome(
         canActivateResult: { ok: true, riskLevel: channel === 'code_tool_hook' ? 'high' : 'low' },
         evidence: boundedEvidence({
           activationId: (decision as { activationId?: string }).activationId ?? (decision as { approvalId?: string }).approvalId,
-          action: (decision as { action?: string }).action ?? 'queued',
+          action: (decision as { action?: string }).action ?? 'activated',
           evidenceSource: 'ActivationDispatcher.dispatch',
         }),
         evidenceSource: `ActivationDispatcher.dispatch → ${channel === 'prompt' ? 'PromptWriter' : channel === 'code_tool_hook' ? 'RuleHostWriter' : 'DeferArchiveWriter'}`,
+        principleId,
+      };
+    }
+
+    if (decision.decision === 'queued_for_approval') {
+      return {
+        channel,
+        status: 'passed',
+        activationDecision: decision,
+        canActivateResult: { ok: true, riskLevel: channel === 'code_tool_hook' ? 'high' : 'low' },
+        evidence: boundedEvidence({
+          approvalId: (decision as { approvalId?: string }).approvalId,
+          action: 'queued_for_approval',
+          note: 'High-risk channel requires explicit approval before activation',
+          evidenceSource: 'ActivationDispatcher.dispatch',
+        }),
+        evidenceSource: `ActivationDispatcher.dispatch → ${channel === 'code_tool_hook' ? 'RuleHostWriter' : channel} (queued for approval)`,
         principleId,
       };
     }
@@ -353,14 +370,15 @@ function buildFollowUpObservation(
   outcome: StoryADemoChannelOutcome,
 ): { status: 'passed' | 'degraded'; evidence: Record<string, unknown> } {
   if (channel === 'code_tool_hook') {
-    // RuleHost: demonstrate enforcement — block dangerous, allow safe
+    const isQueued = outcome.activationDecision.decision === 'queued_for_approval';
     return {
       status: outcome.status === 'passed' ? 'passed' : 'degraded',
       evidence: {
-        enforcementObserved: outcome.status === 'passed',
+        enforcementObserved: !isQueued && outcome.status === 'passed',
         dangerousPathBlocked: '/etc/passwd → block',
         safePathAllowed: '/project/src/config.json → allow',
-        ruleActivated: outcome.activationDecision.decision !== 'refused',
+        ruleQueuedForApproval: isQueued,
+        note: isQueued ? 'Rule queued for owner approval — enforcement active only after approval' : 'Rule activated and enforcement verified',
       },
     };
   }
