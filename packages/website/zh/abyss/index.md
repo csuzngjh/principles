@@ -10,6 +10,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #003 · 2026-05-25</div>
+  <a class="abyss-title" href="/zh/abyss/03-biological-forward-pass">03 | 痛苦即信号：前向进化的生物学硬核启示</a>
+  <p class="abyss-desc">打破反向传播的迷思，揭秘 PD 架构中如何为硅基生命体建立由“痛觉—刹车—复盘—沉淀”组成的前向进化循环。</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #002 · 2026-05-22</div>
   <a class="abyss-title" href="/zh/abyss/02-poisonous-chicken-soup">02 | 为什么“硅基鸡汤”注定沦为赛博噪音？</a>
   <p class="abyss-desc">剖析大模型底层的目标函数如何抹杀了 AI 的反思本能，以及为什么我们需要在模型外部建立宏观目标引擎。</p>
