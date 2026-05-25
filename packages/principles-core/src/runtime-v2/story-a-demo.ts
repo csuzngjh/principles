@@ -251,17 +251,20 @@ export function buildDemoNarrative(input: DemoNarrativeInput): string {
   ).join(', ');
 
   return [
-    `Story A': Owner-Governed Behavior Internalization Demo (run ${runId})`,
+    `Story A': Owner-Governed Behavior Internalization Demo (run ${runId}, principle ${principleId})`,
     ``,
-    `SCENARIO: An AI agent repeatedly writes to /etc/passwd despite owner corrections.`,
-    `This is not a one-off error — it is a recurring behavioral pattern.`,
+    `PROVEN: artifact persistence (SqlitePIArtifactStore), activation dispatch`,
+    `(ActivationDispatcher.dispatch), approval queue (SqliteApprovalQueueStore.approve`,
+    `+ RuleHostWriter.activate + SqliteActivationStateStore.recordActivation),`,
+    `sandbox enforcement (evaluateInRefinerSandbox against golden trace).`,
     ``,
-    `1. EVIDENCE [SIMULATED]: 3 occurrences of writing to /etc/passwd captured as pain signal.`,
-    `2. PROPOSAL [REAL]: PD proposes principle "${principleId}" to prevent this pattern.`,
-    `3. REVIEW [SIMULATED]: Owner reviews and approves the principle.`,
+    `1. EVIDENCE SEED [SIMULATED]: Pain narrative fixture. Artifact persistence is real.`,
+    `2. PROPOSAL [REAL]: Artifacts written to and read from workspace state.db.`,
+    `3. OWNER REVIEW [SIMULATED]: Scripted approval. No real human review.`,
     `4. ACTIVATION [REAL]: ${channels.join(', ')} → ${activationSummary}`,
-    `5. FOLLOW-UP [REAL]: Comparable scenario shows behavior change or enforcement.`,
-    `6. ROLLBACK [SIMULATED]: Each activation has a verified disable/revert path.`,
+    `   code_tool_hook: dispatch→queued_for_approval → approve → direct_activate (no production orchestrator)`,
+    `5. FOLLOW-UP [REAL]: Sandbox evaluates rule code against golden trace cases.`,
+    `6. ROLLBACK [SIMULATED]: Deactivation paths described but not exercised.`,
   ].join('\n');
 }
 

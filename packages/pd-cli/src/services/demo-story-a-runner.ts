@@ -116,9 +116,13 @@ interface ChannelDispatchInput {
 }
 
 // Post-approval direct activation: the dispatcher routes code_tool_hook through the
-// approval queue every time (isLowRiskChannel is false). No re-dispatch mechanism exists
-// for already-approved items, so this completes the activation by calling the writer
-// directly and recording the result. This is the canonical production path.
+// approval queue every time (isLowRiskChannel is false). No re-dispatch mechanism
+// currently exists for approved items. Production will need an approval-completion
+// orchestrator that re-dispatches or directly activates. This demo uses direct
+// writer.activate() + recordActivation() to complete the flow after real approval.
+// What this proves: SqliteApprovalQueueStore.approve() + RuleHostWriter.activate()
+// + SqliteActivationStateStore.recordActivation() all work with real DB I/O.
+// What this does NOT prove: that a production approval-completion orchestrator exists.
 async function completePostApprovalActivation(
   approvalId: string,
   input: ChannelDispatchInput,
@@ -207,9 +211,10 @@ async function runChannelOutcome(
             approvalId,
             approvedBy: 'demo-owner',
             activationId: (postApprovalDecision as { activationId?: string }).activationId,
-            path: 'queued → approved → activated',
+            path: 'dispatch→queued → real_approve → direct_activate→record',
+            note: 'Post-approval uses direct writer.activate() (no production orchestrator yet)',
           },
-          evidenceSource: `ActivationDispatcher.dispatch → approval_queue → post_approval_direct_activation`,
+          evidenceSource: `ActivationDispatcher.dispatch→queued + SqliteApprovalQueueStore.approve + RuleHostWriter.activate + SqliteActivationStateStore.recordActivation`,
           principleId,
         };
       }
@@ -225,7 +230,7 @@ async function runChannelOutcome(
           approvedBy: 'demo-owner',
           activationDecision: postApprovalDecision.decision,
         },
-        evidenceSource: 'ActivationDispatcher.dispatch → approval_queue → post_approval_direct_activation (incomplete)',
+        evidenceSource: 'ActivationDispatcher.dispatch→queued + SqliteApprovalQueueStore.approve + RuleHostWriter.activate (activation incomplete)',
         principleId,
         failureReason: `RuleHost approved but post-activation dispatch returned: ${postApprovalDecision.decision}`,
         nextAction: 'Check RuleHost writer canActivate and artifact contract',
@@ -455,7 +460,7 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
       status,
       generatedAt,
       narrative,
-      storyDescription: 'Demo: Agent repeatedly writes to system directories → owner captures evidence → PD proposes principle → owner approves → activation changes later behavior',
+      storyDescription: 'Demo proves: (1) artifact persistence via SqlitePIArtifactStore, (2) activation dispatch via ActivationDispatcher.dispatch() with real gate logic, (3) approval queue via SqliteApprovalQueueStore.approve() + direct writer activation, (4) sandbox enforcement via evaluateInRefinerSandbox against golden trace. Evidence seed and owner review are narrative fixtures (simulated: true).',
       stages,
       channelOutcomes,
       isRuntimeV2Exclusive: true,
