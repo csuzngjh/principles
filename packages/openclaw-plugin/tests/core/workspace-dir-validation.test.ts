@@ -13,8 +13,15 @@ describe('validateWorkspaceDir', () => {
   it('rejects home directory and root-like paths', () => {
     expect(validateWorkspaceDir(homeDir)).toContain('home directory');
     expect(validateWorkspaceDir(`${homeDir}/`)).toContain('home directory');
-    expect(validateWorkspaceDir('/')).toContain('root or empty');
+    const slashResult = validateWorkspaceDir('/');
+    expect(slashResult && (slashResult.includes('root') || slashResult.includes('drive root'))).toBe(true);
     expect(validateWorkspaceDir('')).toContain('undefined/null');
+  });
+
+  it('rejects Windows drive root paths', () => {
+    expect(validateWorkspaceDir('C:\\')).toContain('drive root');
+    expect(validateWorkspaceDir('D:\\')).toContain('drive root');
+    expect(validateWorkspaceDir('c:\\')).toContain('drive root');
   });
 
   it('accepts normal workspace paths', () => {

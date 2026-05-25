@@ -52,20 +52,25 @@ vi.mock('../../src/core/event-log.js', () => ({
   },
 }));
 
-vi.mock('../../src/core/workspace-context.js', () => ({
-  WorkspaceContext: {
-    fromHookContext: vi.fn().mockReturnValue({
-      stateDir: '/fake/state',
-      resolve: (key: string) => `/fake/${key}`,
-      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
-      config: { get: vi.fn() },
-      evolutionReducer: {
-        getActivePrinciples: vi.fn().mockReturnValue([]),
-        getProbationPrinciples: vi.fn().mockReturnValue([]),
-      },
-    }),
-  },
-}));
+vi.mock('../../src/core/workspace-context.js', () => {
+  const mockWctx = {
+    workspaceDir: '/fake/workspace',
+    stateDir: '/fake/state',
+    resolve: (key: string) => `/fake/${key}`,
+    trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+    config: { get: vi.fn() },
+    evolutionReducer: {
+      getActivePrinciples: vi.fn().mockReturnValue([]),
+      getProbationPrinciples: vi.fn().mockReturnValue([]),
+    },
+  };
+  return {
+    WorkspaceContext: {
+      fromHookContext: vi.fn().mockReturnValue(mockWctx),
+      fromHookContextExplicit: vi.fn().mockReturnValue(mockWctx),
+    },
+  };
+});
 
 // ─── Mutable session mock ────────────────────────────────────────────────────
 // getSession must be configurable per-test, so we use module-level refs.
@@ -190,6 +195,7 @@ describe('Attitude directive — GFI thresholds', () => {
   beforeEach(async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      workspaceDir: '/fake/workspace',
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
@@ -266,6 +272,7 @@ describe('Correction cue detection', () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const recordUserTurn = vi.fn();
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      workspaceDir: '/fake/workspace',
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn },
@@ -296,6 +303,7 @@ describe('Correction cue detection', () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const recordUserTurn = vi.fn();
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      workspaceDir: '/fake/workspace',
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn },
@@ -326,6 +334,7 @@ describe('Correction cue detection', () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const recordUserTurn = vi.fn();
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      workspaceDir: '/fake/workspace',
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn },
@@ -425,6 +434,7 @@ describe('Size guard: never exceeds 9000 chars', () => {
 
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValue({
+      workspaceDir: '/fake/workspace',
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
       trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
