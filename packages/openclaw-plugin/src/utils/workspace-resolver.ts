@@ -93,3 +93,63 @@ export function resolveToolHookWorkspaceDirSafe(
 ): string | undefined {
   return resolveWorkspaceDir(api, ctx, { source });
 }
+
+export class WorkspaceResolutionError extends Error {
+  readonly reason: string;
+  readonly nextAction: string;
+
+  constructor(message: string, reason: string, nextAction: string) {
+    super(message);
+    this.name = 'WorkspaceResolutionError';
+    this.reason = reason;
+    this.nextAction = nextAction;
+  }
+
+  toJSON() {
+    return {
+      ok: false as const,
+      reason: this.reason,
+      message: this.message,
+      nextAction: this.nextAction,
+    };
+  }
+}
+
+export function resolveWorkspaceDirForRuntimeV2(
+  ctx: { workspaceDir?: string },
+  api: any | undefined,
+  source: string,
+): string {
+  const explicit = ctx.workspaceDir;
+  if (explicit && explicit.trim()) {
+    const validation = validateWorkspaceDir(explicit);
+    if (validation) {
+      throw new WorkspaceResolutionError(
+        `workspaceDir validation failed for ${source}: ${validation}`,
+        'workspace_dir_invalid',
+        'Provide a valid workspaceDir that is not the home directory, root, or empty.',
+      );
+    }
+    return explicit.trim();
+  }
+
+  const fromApi = resolveWorkspaceDirFromApi(api);
+  if (fromApi && fromApi.trim()) {
+    const validation = validateWorkspaceDir(fromApi);
+    if (validation) {
+      throw new WorkspaceResolutionError(
+        `workspaceDir from API validation failed for ${source}: ${validation}`,
+        'workspace_dir_invalid',
+        'The workspace directory resolved from the OpenClaw API is invalid. Provide an explicit workspaceDir.',
+      );
+    }
+    return fromApi.trim();
+  }
+
+  throw new WorkspaceResolutionError(
+    `No workspace directory available for Runtime V2 entrypoint (${source}). ` +
+    'Provide workspaceDir in context or set PD_WORKSPACE_DIR env var.',
+    'workspace_dir_missing',
+    'Ensure the OpenClaw hook context includes workspaceDir, or set PD_WORKSPACE_DIR environment variable.',
+  );
+}

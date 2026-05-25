@@ -1,6 +1,7 @@
 import type { PD_FILES } from './paths.js';
 import { resolvePdPath } from './paths.js';
 import { PathResolver } from './path-resolver.js';
+import { validateWorkspaceDir } from './workspace-dir-validation.js';
 import { ConfigService } from './config-service.js';
 import type { PainConfig } from './config.js';
 import type { EventLog } from './event-log.js';
@@ -193,6 +194,14 @@ export class WorkspaceContext {
             }
         }
 
+        const validationIssue = validateWorkspaceDir(workspaceDir);
+        if (validationIssue !== null) {
+            logWarn(
+                `[PD:WorkspaceContext] LEGACY_PATH_RESOLVER_FALLBACK: ${validationIssue}. ` +
+                'This is a legacy discovery path; explicit workspaceDir should be provided in the hook context.',
+            );
+        }
+
         const existing = this.instances.get(workspaceDir);
         if (existing) return existing;
 
@@ -208,6 +217,26 @@ export class WorkspaceContext {
         log(`[PD:WorkspaceContext] Created new context for workspace: ${workspaceDir}`);
         
         return instance;
+    }
+
+    /**
+     * Creates a WorkspaceContext requiring explicit workspaceDir.
+     * For Runtime V2 entrypoints where implicit PathResolver fallback is unacceptable.
+     * @throws Error if workspaceDir is not provided in the context.
+     */
+    static fromHookContextExplicit(ctx: any): WorkspaceContext {
+        const { logger, workspaceDir } = ctx;
+        if (!workspaceDir) {
+            const error = {
+                ok: false as const,
+                reason: 'workspace_dir_missing',
+                message: 'workspaceDir is required for Runtime V2 entrypoints. Provide it explicitly in the hook context.',
+                nextAction: 'Ensure the OpenClaw hook context includes workspaceDir, or use PD_WORKSPACE_DIR env var.',
+            };
+            logger?.error?.(`[PD:WorkspaceContext] ${error.message}`);
+            throw new Error(`[PD:WorkspaceContext] ${error.reason}: ${error.message}`);
+        }
+        return this.fromHookContext(ctx);
     }
 
     /**
