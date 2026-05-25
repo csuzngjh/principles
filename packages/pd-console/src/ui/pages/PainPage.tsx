@@ -5,6 +5,7 @@ import type { FeedbackGfi, EmpathyEvent, GateBlockItem } from "../api.js";
 import { PageHeader } from "../components/page-header.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card.js";
 import { Badge } from "../components/ui/badge.js";
+import { Button } from "../components/ui/button.js";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Separator } from "../components/ui/separator.js";
 import { formatDate } from "../utils/format.js";
@@ -15,8 +16,21 @@ const SEVERITY_VARIANT: Record<string, "default" | "secondary" | "destructive"> 
   high: "destructive",
 };
 
-function GfiGauge({ gfi }: { gfi: FeedbackGfi | null }) {
+function GfiGauge({ gfi, error, onRetry }: { gfi: FeedbackGfi | null; error: string | null; onRetry: () => void }) {
   const { t } = useTranslation();
+
+  if (error && !gfi) {
+    return (
+      <Card className="mb-6">
+        <CardContent className="p-6 text-center">
+          <p className="text-destructive text-sm">{error}</p>
+          <Button variant="outline" className="mt-4" onClick={onRetry}>
+            {t("common:refresh")}
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (!gfi) {
     return (
@@ -106,7 +120,7 @@ export function PainPage() {
         lastUpdated={lastUpdated ? new Date(lastUpdated) : undefined}
       />
 
-      <GfiGauge gfi={gfi.data} />
+      <GfiGauge gfi={gfi.data} error={gfi.error} onRetry={gfi.refresh} />
 
       <Card className="mb-6">
         <CardHeader>

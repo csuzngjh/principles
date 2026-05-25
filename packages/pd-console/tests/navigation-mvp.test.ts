@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { isNavActive } from '../src/ui/utils/navigation.js';
 
 const PKG_ROOT = path.resolve(__dirname, '..');
 const UI_SRC = path.join(PKG_ROOT, 'src', 'ui');
@@ -12,7 +13,61 @@ function readFile(relPath: string): string {
   return fs.readFileSync(relPath, 'utf-8');
 }
 
+function extractNavHrefs(src: string, arrayName: string): string[] {
+  const match = src.match(new RegExp(`${arrayName}\\s*=\\s*\\[([\\s\\S]*?)\\]`));
+  if (!match) return [];
+  const hrefs: string[] = [];
+  const hrefRegex = /href:\s*"([^"]+)"/g;
+  let m;
+  while ((m = hrefRegex.exec(match[1])) !== null) {
+    hrefs.push(m[1]);
+  }
+  return hrefs;
+}
+
+function extractAppRoutes(src: string): Map<string, string> {
+  const routes = new Map<string, string>();
+  const routeRegex = /path="([^"]+)"\s+element=\{<(\w+)/g;
+  let m;
+  while ((m = routeRegex.exec(src)) !== null) {
+    routes.set(m[1], m[2]);
+  }
+  return routes;
+}
+
 describe('MVP Three-Page Navigation — PRI-245', () => {
+  describe('isNavActive (extracted unit)', () => {
+    it('exact match on "/" only when pathname is "/"', () => {
+      expect(isNavActive('/', '/')).toBe(true);
+      expect(isNavActive('/', '/pain')).toBe(false);
+      expect(isNavActive('/', '/principles')).toBe(false);
+      expect(isNavActive('/', '/overview')).toBe(false);
+      expect(isNavActive('/', '/approvals')).toBe(false);
+    });
+
+    it('exact match on non-root path', () => {
+      expect(isNavActive('/pain', '/pain')).toBe(true);
+      expect(isNavActive('/principles', '/principles')).toBe(true);
+      expect(isNavActive('/approvals', '/approvals')).toBe(true);
+    });
+
+    it('sub-path matches parent', () => {
+      expect(isNavActive('/principles', '/principles/123')).toBe(true);
+      expect(isNavActive('/pain', '/pain/detail')).toBe(true);
+    });
+
+    it('does not match partial prefix without slash boundary', () => {
+      expect(isNavActive('/pain', '/paint')).toBe(false);
+      expect(isNavActive('/data-flow', '/data-flow-chart')).toBe(false);
+    });
+
+    it('does not cross-match sibling routes', () => {
+      expect(isNavActive('/pain', '/principles')).toBe(false);
+      expect(isNavActive('/principles', '/pain')).toBe(false);
+      expect(isNavActive('/overview', '/pain')).toBe(false);
+    });
+  });
+
   describe('Sidebar primary navigation', () => {
     let sidebarSrc: string;
 
@@ -53,14 +108,86 @@ describe('MVP Three-Page Navigation — PRI-245', () => {
       expect(sidebarSrc).toContain('Diagnostics');
     });
 
-    it('diagnostics section includes Event Log and Data Flow', () => {
+    it('diagnostics Overview links to /overview (not /)', () => {
+      const diagHrefs = extractNavHrefs(sidebarSrc, 'diagnosticNavItems');
+      const overviewEntry = diagHrefs.find(() => true);
+      expect(overviewEntry).toBe('/overview');
+    });
+
+    it('diagnostics section includes Event Log, Data Flow, Evolution, Overview', () => {
       const diagSection = sidebarSrc.match(/diagnosticNavItems\s*=\s*\[([\s\S]*?)\]/)?.[1] ?? '';
       expect(diagSection).toContain('event-log');
       expect(diagSection).toContain('data-flow');
+      expect(diagSection).toContain('evolution');
+      expect(diagSection).toContain('overview');
     });
 
     it('settings remains accessible', () => {
       expect(sidebarSrc).toContain('/settings');
+    });
+
+    it('sidebar uses isNavActive from extracted utility', () => {
+      expect(sidebarSrc).toContain('isNavActive');
+      expect(sidebarSrc).toContain('from "../utils/navigation.js"');
+    });
+  });
+
+  describe('Nav-to-route mapping (real route contract)', () => {
+    let sidebarSrc: string;
+    let appSrc: string;
+    let mvpHrefs: string[];
+    let diagHrefs: string[];
+    let appRoutes: Map<string, string>;
+
+    beforeAll(() => {
+      sidebarSrc = readFile(SIDEBAR_PATH);
+      appSrc = readFile(APP_PATH);
+      mvpHrefs = extractNavHrefs(sidebarSrc, 'mvpNavItems');
+      diagHrefs = extractNavHrefs(sidebarSrc, 'diagnosticNavItems');
+      appRoutes = extractAppRoutes(appSrc);
+    });
+
+    it('every MVP nav href has a corresponding App route', () => {
+      for (const href of mvpHrefs) {
+        expect(appRoutes.has(href)).toBe(true);
+      }
+    });
+
+    it('every diagnostics nav href has a corresponding App route', () => {
+      for (const href of diagHrefs) {
+        expect(appRoutes.has(href)).toBe(true);
+      }
+    });
+
+    it('settings href has a corresponding App route', () => {
+      expect(appRoutes.has('/settings')).toBe(true);
+    });
+
+    it('default route / renders PainPage', () => {
+      expect(appRoutes.get('/')).toBe('PainPage');
+    });
+
+    it('/pain renders PainPage', () => {
+      expect(appRoutes.get('/pain')).toBe('PainPage');
+    });
+
+    it('/approvals renders ApprovalsPage', () => {
+      expect(appRoutes.get('/approvals')).toBe('ApprovalsPage');
+    });
+
+    it('/overview renders OverviewPage', () => {
+      expect(appRoutes.get('/overview')).toBe('OverviewPage');
+    });
+
+    it('/principles renders PrinciplesPage', () => {
+      expect(appRoutes.get('/principles')).toBe('PrinciplesPage');
+    });
+
+    it('no nav href points to a route that does not exist', () => {
+      const allNavHrefs = [...mvpHrefs, ...diagHrefs, '/settings'];
+      for (const href of allNavHrefs) {
+        expect(appRoutes.has(href)).toBe(true);
+      }
     });
   });
 
@@ -69,26 +196,6 @@ describe('MVP Three-Page Navigation — PRI-245', () => {
 
     beforeAll(() => {
       appSrc = readFile(APP_PATH);
-    });
-
-    it('default route / renders PainPage', () => {
-      expect(appSrc).toMatch(/path="\/"\s+element=\{<PainPage/);
-    });
-
-    it('/pain route renders PainPage', () => {
-      expect(appSrc).toMatch(/path="\/pain"\s+element=\{<PainPage/);
-    });
-
-    it('/approvals route renders ApprovalsPage', () => {
-      expect(appSrc).toMatch(/path="\/approvals"\s+element=\{<ApprovalsPage/);
-    });
-
-    it('/principles route still exists', () => {
-      expect(appSrc).toContain('path="/principles"');
-    });
-
-    it('overview route is accessible at /overview (not /)', () => {
-      expect(appSrc).toMatch(/path="\/overview"\s+element=\{<OverviewPage/);
     });
 
     it('all legacy routes remain accessible', () => {
@@ -124,6 +231,10 @@ describe('MVP Three-Page Navigation — PRI-245', () => {
     it('TasksPage.tsx still exists (not deleted)', () => {
       expect(fs.existsSync(path.join(UI_SRC, 'pages', 'TasksPage.tsx'))).toBe(true);
     });
+
+    it('navigation.ts utility exists', () => {
+      expect(fs.existsSync(path.join(UI_SRC, 'utils', 'navigation.ts'))).toBe(true);
+    });
   });
 
   describe('PainPage content', () => {
@@ -146,6 +257,19 @@ describe('MVP Three-Page Navigation — PRI-245', () => {
       expect(painSrc).toContain('fetchFeedbackGfi');
       expect(painSrc).toContain('fetchEmpathyEvents');
       expect(painSrc).toContain('fetchFeedbackGateBlocks');
+    });
+
+    it('GfiGauge receives error and onRetry props', () => {
+      expect(painSrc).toMatch(/gfi={gfi\.data}\s+error={gfi\.error}\s+onRetry={gfi\.refresh}/);
+    });
+
+    it('GfiGauge shows error state when error is set and gfi is null', () => {
+      const gaugeMatch = painSrc.match(/function GfiGauge[\s\S]*?^}/m);
+      expect(gaugeMatch).not.toBeNull();
+      const gaugeSrc = gaugeMatch![0];
+      expect(gaugeSrc).toMatch(/if\s*\(\s*error\s+&&\s*!gfi\s*\)/);
+      expect(gaugeSrc).toContain('text-destructive');
+      expect(gaugeSrc).toContain('onRetry');
     });
   });
 

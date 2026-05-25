@@ -16,6 +16,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
+import { isNavActive } from "../utils/navigation.js";
 import { Button } from "./ui/button.js";
 import { Badge } from "./ui/badge.js";
 import { fetchSystemHealth } from "../api.js";
@@ -28,7 +29,7 @@ const mvpNavItems = [
 ];
 
 const diagnosticNavItems = [
-  { id: "overview", label: "Overview", icon: Activity, href: "/" },
+  { id: "overview", label: "Overview", icon: Activity, href: "/overview" },
   { id: "data-flow", label: "Data Flow", icon: Activity, href: "/data-flow" },
   { id: "event-log", label: "Event Log", icon: FileText, href: "/event-log" },
   { id: "evolution", label: "Evolution", icon: Dna, href: "/evolution" },
@@ -47,10 +48,7 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
   const [healthError, setHealthError] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
-  const isActive = (href: string) => {
-    if (href === "/" && location.pathname === "/") return true;
-    return location.pathname.startsWith(href);
-  };
+  const isActive = (href: string) => isNavActive(href, location.pathname);
 
   useEffect(() => {
     const fetchHealth = async () => {
