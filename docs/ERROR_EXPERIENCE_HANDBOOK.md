@@ -135,7 +135,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` type assertions on values from untrusted JSON sources (`Record<string, unknown>`). Always validate with `typeof` checks before using the value. When extracting fields from parsed JSON, treat every field as `unknown` and narrow with runtime type guards.
 - **Source**: PRI-189
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-213 (PR #688): `event.data.toolName as string` and `event.data.score as number` in `groupEventsIntoSessions()` bypassed runtime validation on `RawEventEntry.data` fields. `score: NaN` and `score: Infinity` passed `typeof === 'number'` check. `validatePainSignal()` used `as Record<string, unknown>` instead of type guard. Fixed by excluding malformed entries from scoring arrays and adding `isStringRecord()` type guard.
+- **Recurrence**: Yes - 2026-05-23 PRI-213 (PR #688): `event.data.toolName as string` and `event.data.score as number` in `groupEventsIntoSessions()` bypassed runtime validation on `RawEventEntry.data` fields. `score: NaN` and `score: Infinity` passed `typeof === 'number'` check. `validatePainSignal()` used `as Record<string, unknown>` instead of type guard. Fixed by excluding malformed entries from scoring arrays and adding `isStringRecord()` type guard. Also 2026-05-25 PRI-239 (PR #702): `(parsed as Record<string, unknown>)[key]` in `feature-flag-loader.ts` bypassed runtime validation on YAML-parsed input. Fixed by replacing `as Record` with `isRecord()` type guard.
 
 ---
 
@@ -147,7 +147,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Every catch-and-degrade pattern must expose the failure reason via `ambiguityNotes` / telemetry / logging. Review all catch blocks that return fallback values and verify they communicate why the fallback was triggered.
 - **Source**: PRI-171
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-24 PRI-240 (PR #699): `cleanupTempWorkspace` had `catch { void 0; }` that silently swallowed cleanup failures with no observability. Fixed by outputting structured `[pd-cli] cleanup warning:` to stderr.
+- **Recurrence**: Yes - 2026-05-24 PRI-240 (PR #699): `cleanupTempWorkspace` had `catch { void 0; }` that silently swallowed cleanup failures with no observability. Fixed by outputting structured `[pd-cli] cleanup warning:` to stderr. Also 2026-05-25 PRI-239 (PR #702): canary `gfi_snapshot` returned `healthy` when GFI disabled but `featureFlags.warnings.length > 0` (malformed YAML/override). Degraded config was not surfaced. Fixed by returning `degraded` with structured details when warnings present.
 
 ---
 
@@ -231,7 +231,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` array type casts on untrusted JSON arrays without validating element types first. Always apply element-wise type guards when preserving data from invalid payloads.
 - **Source**: PRI-191
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Fixed by replacing `as Record` with `readOwnProperty` helper and `Array.from().filter()` for element-wise validation. Also 2026-05-23 PRI-225 (PR #693): `result.dependencyTaskIds = depIds as string[]` on already-validated array bypassed type system. Fixed by constructing `validatedDependencyTaskIds: string[]` with element-wise `typeof` check and push, no `as` assertion.
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Fixed by replacing `as Record` with `readOwnProperty` helper and `Array.from().filter()` for element-wise validation. Also 2026-05-23 PRI-225 (PR #693): `result.dependencyTaskIds = depIds as string[]` on already-validated array bypassed type system. Fixed by constructing `validatedDependencyTaskIds: string[]` with element-wise `typeof` check and push, no `as` assertion. Also 2026-05-25 PRI-239 (PR #702): `feature-flag-loader.ts` used `(parsed as Record<string, unknown>)[key]` to read YAML-parsed values at input trust boundary. Same class as all prior — `as` bypasses runtime narrowing on untrusted data. Fixed by adding `isRecord()` type guard.
 
 ---
 
@@ -323,7 +323,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When checking key existence in untrusted objects (LLM output, parsed JSON, `Record<string, unknown>`), always use `Object.hasOwn()` or `Object.prototype.hasOwnProperty.call()`, never the `in` operator. Add a test case with an inherited property name (e.g., `toString`) to every validator that checks key existence.
 - **Source**: PRI-201 / PR #663 (Codex review)
 - **Date**: 2026-05-21
-- **Recurrence**: Yes - same class as ERR-001/ERR-005/ERR-007 where runtime semantics bypass validation intent
+- **Recurrence**: Yes - same class as ERR-001/ERR-005/ERR-007 where runtime semantics bypass validation intent. Also 2026-05-25 PRI-239 (PR #702): `computeEffectiveFlags()` used `Object.hasOwn()` for override reads but lacked dangerous-key rejection (`__proto__`, `constructor`, `prototype`). `feature-flag-loader.ts` also lacked dangerous-key guard on parsed YAML keys. Fixed by adding `DANGEROUS_KEYS` set + filtering in both contract and loader, with regression tests.
 
 ---
 
@@ -560,4 +560,4 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 36 |
 | Last updated | 2026-05-24 |
 | Top category | Schema & Type |
-| Recurring errors | 15 |
+| Recurring errors | 19 |
