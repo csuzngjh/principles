@@ -35,12 +35,19 @@ function getDataObject(body: unknown): Record<string, unknown> | undefined {
   return isRecord(data) ? data : undefined;
 }
 
-function getItemsArray(body: unknown): Array<Record<string, unknown>> | undefined {
+function getItemsArray(body: unknown): Array<Record<string, unknown>> {
   const data = getDataObject(body);
-  if (!data) return undefined;
-  const items = data.items;
-  if (!Array.isArray(items)) return undefined;
-  return items.filter(isRecord);
+  expect(data).toBeDefined();
+  const items = data!.items;
+  expect(Array.isArray(items)).toBe(true);
+  const arr = items as unknown[];
+  expect(arr.every(isRecord)).toBe(true);
+  return arr as Record<string, unknown>[];
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  expect(isRecord(value)).withContext(`${label} must be a record`).toBe(true);
+  return value as Record<string, unknown>;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -170,8 +177,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const { status, body } = await fetchJson('/api/v1/approvals');
       expect(status).toBe(200);
       const items = getItemsArray(body);
-      expect(items).toBeDefined();
-      for (const item of items ?? []) {
+      for (const item of items) {
         const ch = getStringField(item, 'channel');
         expect(ch).toBeDefined();
         expect(UNSUPPORTED_CHANNELS).not.toContain(ch);
@@ -185,17 +191,15 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     it('rejects ?channel=skill with bad request', async () => {
       const { status, body } = await fetchJson('/api/v1/approvals?channel=skill');
       expect(status).toBe(400);
-      if (isRecord(body)) {
-        expect(body.success).toBe(false);
-      }
+      const rec = requireRecord(body, 'error response');
+      expect(rec.success).toBe(false);
     });
 
     it('rejects ?channel=model_training with bad request', async () => {
       const { status, body } = await fetchJson('/api/v1/approvals?channel=model_training');
       expect(status).toBe(400);
-      if (isRecord(body)) {
-        expect(body.success).toBe(false);
-      }
+      const rec = requireRecord(body, 'error response');
+      expect(rec.success).toBe(false);
     });
   });
 
@@ -206,7 +210,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const { status, body } = await fetchJson('/api/v1/approvals?channel=prompt');
       expect(status).toBe(200);
       const items = getItemsArray(body);
-      for (const item of items ?? []) {
+      for (const item of items) {
         expect(getStringField(item, 'channel')).toBe('prompt');
       }
     });
@@ -215,7 +219,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const { status, body } = await fetchJson('/api/v1/approvals?channel=code_tool_hook');
       expect(status).toBe(200);
       const items = getItemsArray(body);
-      for (const item of items ?? []) {
+      for (const item of items) {
         expect(getStringField(item, 'channel')).toBe('code_tool_hook');
       }
     });
@@ -224,7 +228,7 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       const { status, body } = await fetchJson('/api/v1/approvals?channel=defer_archive');
       expect(status).toBe(200);
       const items = getItemsArray(body);
-      for (const item of items ?? []) {
+      for (const item of items) {
         expect(getStringField(item, 'channel')).toBe('defer_archive');
       }
     });
@@ -340,9 +344,8 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         body: JSON.stringify({ note: 'test' }),
       });
       expect(status).toBe(403);
-      if (isRecord(body)) {
-        expect(getStringField(body, 'error')).toBe('unsupported_channel');
-      }
+      const rec = requireRecord(body, '403 response');
+      expect(getStringField(rec, 'error')).toBe('unsupported_channel');
     });
 
     it('reject on unsupported channel returns 403 unsupported_channel', async () => {
@@ -352,9 +355,8 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         body: JSON.stringify({ reason: 'test reason for legacy channel rejection' }),
       });
       expect(status).toBe(403);
-      if (isRecord(body)) {
-        expect(getStringField(body, 'error')).toBe('unsupported_channel');
-      }
+      const rec = requireRecord(body, '403 response');
+      expect(getStringField(rec, 'error')).toBe('unsupported_channel');
     });
   });
 
