@@ -158,6 +158,9 @@ const REQUIRED_SOURCE_FILES = [
   'activation/writers/index.ts',
   // PRI-215
   'synthetic-baseline.ts',
+  // PRI-239
+  'feature-flags/feature-flag-contract.ts',
+  'feature-flags/index.ts',
 ] as const;
 
 // ── PRI-212: Plugin core anti-growth guard ────────────────────────────────────
@@ -414,6 +417,8 @@ const REQUIRED_TEST_FILES = [
   '../activation/writers/__tests__/rule-host-writer.test.ts',
   // PRI-215
   'synthetic-baseline.test.ts',
+  // PRI-239
+  '../feature-flags/__tests__/feature-flag-contract.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -473,6 +478,9 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     'mergeDecisions',
     // PRI-149 Tier 2
     'createRecoverySweepService',
+    // PRI-239
+    'validateFeatureFlagRaw',
+    'computeEffectiveFlags',
   ];
 
   for (const name of REQUIRED_EXPORTS) {
@@ -3580,6 +3588,68 @@ describe('PRI-225: No unsafe type assertions on untrusted metadata arrays', () =
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'internalization-chain-integrity-read-model.ts'), 'utf-8');
     expect(src).not.toContain('as string[]');
+  });
+});
+
+// ── PRI-239: Feature flag registry architecture boundary ──────────────────
+//
+// Core: packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts
+// I/O Loader: packages/pd-cli/src/services/feature-flag-loader.ts
+// CLI Command: packages/pd-cli/src/commands/runtime-features.ts
+// Consumption: packages/pd-cli/src/commands/runtime-canary.ts (GFI check)
+
+describe('PRI-239: Feature flag registry architecture boundary', () => {
+  it('CORE_NO_NODE_IO: feature-flag-contract.ts does not import Node I/O modules', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'feature-flags', 'feature-flag-contract.ts'), 'utf-8');
+    expect(src).not.toMatch(/from\s+['"]node:fs['"]/);
+    expect(src).not.toMatch(/from\s+['"]node:path['"]/);
+    expect(src).not.toMatch(/from\s+['"]fs['"]/);
+    expect(src).not.toMatch(/from\s+['"]path['"]/);
+    expect(src).not.toMatch(/from\s+['"]js-yaml['"]/);
+  });
+
+  it('CORE_NO_RUNTIME_CLASSES: feature-flag-contract.ts does not import runtime orchestration classes', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'feature-flags', 'feature-flag-contract.ts'), 'utf-8');
+    expect(src).not.toContain('RuntimeStateManager');
+    expect(src).not.toContain('InternalizationOrchestrator');
+    expect(src).not.toContain('SqliteConnection');
+  });
+
+  it('IO_LOADER_OUTSIDE_CORE: I/O loader exists at pd-cli/src/services/feature-flag-loader.ts', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(
+      resolve(__dirname, '../../../../pd-cli/src/services/feature-flag-loader.ts'),
+    )).toBe(true);
+  });
+
+  it('CLI_COMMAND_OUTSIDE_CORE: CLI command exists at pd-cli/src/commands/runtime-features.ts', async () => {
+    const { existsSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    expect(existsSync(
+      resolve(__dirname, '../../../../pd-cli/src/commands/runtime-features.ts'),
+    )).toBe(true);
+  });
+
+  it('FROZEN_LEGACY_UNTOUCHED: ADR-0005 frozen files are not imported by feature-flag-contract.ts', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'feature-flags', 'feature-flag-contract.ts'), 'utf-8');
+    expect(src).not.toContain('nocturnal-trinity');
+    expect(src).not.toContain('nocturnal-arbiter');
+    expect(src).not.toContain('nocturnal-service');
+  });
+
+  it('CONSUMPTION_WIRED: runtime-canary.ts imports feature flag loader', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../../../../pd-cli/src/commands/runtime-canary.ts'), 'utf-8');
+    expect(src).toContain('feature-flag-loader');
+    expect(src).toContain('loadEffectiveFeatureFlags');
   });
 });
 
