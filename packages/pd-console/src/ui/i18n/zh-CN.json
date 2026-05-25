@@ -113,6 +113,32 @@
         "approvals": "审批"
       }
     },
+    "pain": {
+      "title": "痛苦信号",
+      "description": "驱动原则进化的痛苦信号",
+      "gfiGauge": "GFI 仪表盘",
+      "empathyEvents": "共情事件",
+      "gateBlocks": "门控阻断",
+      "severity": "严重程度",
+      "source": "来源",
+      "timestamp": "时间戳",
+      "count": "计数",
+      "totalGFI": "总 GFI",
+      "gfiFull": "GFI（通用摩擦指数）",
+      "peakToday": "今日峰值：",
+      "origin": "来源：",
+      "gfiAfter": "GFI 之后：",
+      "emptyHint": "暂无痛苦信号。当系统检测到摩擦时，信号将显示在这里。"
+    },
+    "approvals": {
+      "title": "审批",
+      "description": "审查并批准原则激活请求",
+      "loadFailed": "加载审批列表失败",
+      "detailFailed": "加载审批详情失败",
+      "approveFailed": "批准失败",
+      "rejectFailed": "拒绝失败",
+      "emptyHint": "暂无待审批请求。当原则准备好激活时，审批将显示在这里。"
+    },
     "feedback": {
       "title": "反馈",
       "description": "查看系统反馈",
