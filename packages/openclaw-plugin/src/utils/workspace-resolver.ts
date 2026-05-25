@@ -8,6 +8,7 @@ import type { OpenClawPluginApi, PluginCommandContext } from '../openclaw-sdk.js
 import { validateWorkspaceDir, type WorkspaceResolutionContext } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
+import * as path from 'path';
 
 /**
  * Resolve workspace directory for command execution.
@@ -92,4 +93,53 @@ export function resolveToolHookWorkspaceDirSafe(
   source: string,
 ): string | undefined {
   return resolveWorkspaceDir(api, ctx, { source });
+}
+
+export class WorkspaceResolutionError extends Error {
+  readonly reason: string;
+  readonly nextAction: string;
+
+  constructor(message: string, reason: string, nextAction: string) {
+    super(message);
+    this.name = 'WorkspaceResolutionError';
+    this.reason = reason;
+    this.nextAction = nextAction;
+  }
+
+  toJSON() {
+    return {
+      ok: false as const,
+      reason: this.reason,
+      message: this.message,
+      nextAction: this.nextAction,
+    };
+  }
+}
+
+export function resolveWorkspaceDirForRuntimeV2(
+  ctx: { workspaceDir?: string },
+  api: OpenClawPluginApi | undefined,
+  source: string,
+): string {
+  const explicit = ctx.workspaceDir;
+  if (!explicit || !explicit.trim()) {
+    throw new WorkspaceResolutionError(
+      `No explicit workspace directory for Runtime V2 entrypoint (${source}). ` +
+      'Provide workspaceDir in context. Runtime V2 does not use legacy discovery fallback.',
+      'workspace_dir_missing',
+      'Ensure the OpenClaw hook context includes workspaceDir, or set PD_WORKSPACE_DIR environment variable.',
+    );
+  }
+
+  const normalized = path.resolve(explicit.trim());
+  const validation = validateWorkspaceDir(normalized);
+  if (validation) {
+    throw new WorkspaceResolutionError(
+      `workspaceDir validation failed for ${source}: ${validation}`,
+      'workspace_dir_invalid',
+      'Provide a valid workspaceDir that is not the home directory, root, or empty.',
+    );
+  }
+
+  return normalized;
 }

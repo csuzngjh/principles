@@ -41,20 +41,25 @@ vi.mock('../../src/core/event-log.js', () => ({
   },
 }));
 
-vi.mock('../../src/core/workspace-context.js', () => ({
-  WorkspaceContext: {
-    fromHookContext: vi.fn().mockReturnValue({
-      stateDir: '/fake/state',
-      resolve: (key: string) => `/fake/${key}`,
-      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
-      config: { get: vi.fn() },
-      evolutionReducer: {
-        getActivePrinciples: vi.fn().mockReturnValue([]),
-        getProbationPrinciples: vi.fn().mockReturnValue([]),
-      },
-    }),
-  },
-}));
+vi.mock('../../src/core/workspace-context.js', () => {
+  const mockWctx = {
+    workspaceDir: '/fake/workspace',
+    stateDir: '/fake/state',
+    resolve: (key: string) => `/fake/${key}`,
+    trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
+    config: { get: vi.fn() },
+    evolutionReducer: {
+      getActivePrinciples: vi.fn().mockReturnValue([]),
+      getProbationPrinciples: vi.fn().mockReturnValue([]),
+    },
+  };
+  return {
+    WorkspaceContext: {
+      fromHookContext: vi.fn().mockReturnValue(mockWctx),
+      fromHookContextExplicit: vi.fn().mockReturnValue(mockWctx),
+    },
+  };
+});
 
 vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn().mockReturnValue({ currentGfi: 20 }),

@@ -174,7 +174,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     handleAfterToolCall(mockEvent as any, mockCtx as any, mockApi as any);
 
     expect(WorkspaceContext.fromHookContext).not.toHaveBeenCalled();
-    expect(mockApi.runtime.agent.resolveAgentWorkspaceDir).toHaveBeenCalledWith(mockApi.config, 'main');
+    expect(mockEmitSync).not.toHaveBeenCalled();
   });
 
   it('records ordinary write failures as friction only without Runtime V2 diagnosis', () => {
