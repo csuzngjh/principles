@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { PrincipleLifecycleService } from '../../../src/core/principle-internalization/principle-lifecycle-service.js';
-import { appendCandidateArtifactLineageRecord, listArtifactLineageRecords } from '../../../src/core/nocturnal-artifact-lineage.js';
 import { getImplementationAssetRoot } from '../../../src/core/code-implementation-storage.js';
 import { loadLedger, saveLedger, type LedgerPrinciple, type LedgerRule } from '../../../src/core/principle-tree-ledger.js';
 import type { Implementation } from '../../../src/types/principle-tree-schema.js';
@@ -142,19 +141,6 @@ describe('principle-lifecycle-service', () => {
       JSON.stringify(makeReplayReport(), null, 2),
       'utf-8',
     );
-
-    appendCandidateArtifactLineageRecord(workspaceDir, {
-      artifactId: 'artifact-1',
-      principleId: 'P-001',
-      ruleId: 'R-001',
-      sessionId: 'session-1',
-      sourceSnapshotRef: 'snapshot-1',
-      sourcePainIds: ['pain-1'],
-      sourceGateBlockIds: ['gate-1'],
-      storagePath: getImplementationAssetRoot(stateDir, 'IMPL-001'),
-      implementationId: 'IMPL-001',
-      createdAt: '2026-04-08T00:00:00.000Z',
-    });
   }
 
   it('recomputes lifecycle metrics and exposes assessments plus route recommendations through one service', () => {
@@ -185,13 +171,12 @@ describe('principle-lifecycle-service', () => {
     expect(context.getActivePrincipleSubtrees()).toEqual([]);
   });
 
-  it('keeps replay classifications behavioral-only and preserves candidate lineage semantics', () => {
+  it('keeps replay classifications behavioral-only', () => {
     seedWorkspace();
     const service = new PrincipleLifecycleService(workspaceDir, stateDir);
 
     const assessments = service.listAssessments();
     const readModel = service.buildReadModel();
-    const lineage = listArtifactLineageRecords(workspaceDir, 'rule-implementation-candidate');
     const latestReport = readModel.principles[0].rules[0].replayEvidence.latestReports[0];
 
     expect(assessments[0].routeRecommendation.route).toBe('skill');
@@ -200,12 +185,5 @@ describe('principle-lifecycle-service', () => {
       'successPositive',
       'principleAnchor',
     ]);
-    expect(lineage).toHaveLength(1);
-    expect(lineage[0]).toMatchObject({
-      artifactKind: 'rule-implementation-candidate',
-      sourcePainIds: ['pain-1'],
-      sourceGateBlockIds: ['gate-1'],
-      implementationId: 'IMPL-001',
-    });
   });
 });

@@ -22,7 +22,7 @@ import { MonitoringQueryService } from '../../src/service/monitoring-query-servi
 function createWorkflow(overrides: Partial<WorkflowRow> = {}): WorkflowRow {
   return {
     workflow_id: overrides.workflow_id ?? 'wf-1',
-    workflow_type: overrides.workflow_type ?? 'nocturnal',
+    workflow_type: overrides.workflow_type ?? 'rulehost',
     transport: overrides.transport ?? 'runtime_direct',
     parent_session_id: overrides.parent_session_id ?? 'parent-1',
     child_session_key: overrides.child_session_key ?? 'child-1',
@@ -34,23 +34,6 @@ function createWorkflow(overrides: Partial<WorkflowRow> = {}): WorkflowRow {
     last_observed_at: overrides.last_observed_at ?? null,
     duration_ms: overrides.duration_ms ?? 1_000,
     metadata_json: overrides.metadata_json ?? '{}',
-  };
-}
-
-function createEvent(
-  workflowId: string,
-  eventType: string,
-  createdAt: number,
-  reason = ''
-): WorkflowEventRow {
-  return {
-    workflow_id: workflowId,
-    event_type: eventType,
-    from_state: null,
-    to_state: 'completed',
-    reason,
-    payload_json: '{}',
-    created_at: createdAt,
   };
 }
 
@@ -80,34 +63,5 @@ describe('MonitoringQueryService', () => {
       state: 'completed',
       stuckDuration: null,
     });
-  });
-
-  it('computes failure rate per terminal workflow instead of per failed stage', () => {
-    mockListWorkflows.mockReturnValue([
-      createWorkflow({ workflow_id: 'wf-complete', state: 'completed', duration_ms: 500 }),
-      createWorkflow({ workflow_id: 'wf-failed', state: 'terminal_error', duration_ms: 750 }),
-    ]);
-    mockGetEvents.mockImplementation((workflowId: string) => {
-      if (workflowId === 'wf-failed') {
-        return [
-          createEvent(workflowId, 'trinity_dreamer_start', 1),
-          createEvent(workflowId, 'trinity_dreamer_failed', 2, 'dreamer failed'),
-          createEvent(workflowId, 'trinity_philosopher_start', 3),
-          createEvent(workflowId, 'trinity_philosopher_failed', 4, 'philosopher failed'),
-        ];
-      }
-      return [
-        createEvent(workflowId, 'trinity_dreamer_start', 1),
-        createEvent(workflowId, 'trinity_dreamer_complete', 2),
-      ];
-    });
-
-    const service = new MonitoringQueryService('/workspace');
-    const result = service.getTrinityHealth();
-
-    expect(result.totalCalls).toBe(2);
-    expect(result.failureRate).toBe(0.5);
-    expect(result.stageStats.dreamer.failed).toBe(1);
-    expect(result.stageStats.philosopher.failed).toBe(1);
   });
 });

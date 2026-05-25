@@ -25,7 +25,7 @@ export { buildLifecycleReadModel } from '@principles/core/runtime-v2';
 export type { LifecycleDatasource } from '@principles/core/runtime-v2';
 
 // Re-export filesystem implementation (PRI-56)
-export { FilesystemLifecycleDatasource } from './filesystem-lifecycle-datasource.js';
+export { FilesystemLifecycleDatasource, LineageSourceRetiredError } from './filesystem-lifecycle-datasource.js';
 
 import { buildLifecycleReadModel } from '@principles/core/runtime-v2';
 import { FilesystemLifecycleDatasource } from './filesystem-lifecycle-datasource.js';
