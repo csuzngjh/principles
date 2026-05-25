@@ -37,10 +37,6 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     zh: '管理思维模型 [status|propose|audit]',
     en: 'Manage Thinking OS [status|propose|audit]'
   },
-  'pd-reflect': {
-    zh: '手动触发 Nocturnal 睡眠反射（跳过 idle 检测）',
-    en: 'Manually trigger Nocturnal sleep reflection (bypass idle check)'
-  },
   'pd-daily': {
     zh: '配置并发送进化日报',
     en: 'Configure and send daily evolution report'
@@ -78,17 +74,13 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     en: 'Rollback empathy event penalty <event-id>|last'
   },
   'pd-export': {
-    zh: '导出数据 [analytics|corrections --redacted|orpo --family=<model>|orpo-list]',
-    en: 'Export data [analytics|corrections --redacted|orpo --family=<model>|orpo-list]'
+    zh: '导出数据 [analytics|corrections --redacted]',
+    en: 'Export data [analytics|corrections --redacted]'
   },
   'pd-samples': {
     zh: '查看或审核纠错样本 [review approve|reject <sample-id> [note]]',
     en: 'List or review correction samples [review approve|reject <sample-id> [note]]'
   },
-  'pd-nocturnal-review': {
-    zh: '审核 nocturnal 数据集样本 [list|show|approve|reject|set-family|stats]',
-    en: 'Review nocturnal dataset samples [list|show|approve|reject|set-family|stats]'
-  }
 };
 
 /**

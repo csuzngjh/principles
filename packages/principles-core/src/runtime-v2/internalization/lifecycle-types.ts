@@ -43,6 +43,7 @@ export interface RuleLineageEvidence {
   distinctGateBlockCount: number;
   repeatedErrorSignal: number;
   latestCreatedAt?: string;
+  sourceRetired?: boolean;
 }
 
 export interface ImplementationLifecycleEvidence {

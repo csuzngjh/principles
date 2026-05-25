@@ -17,27 +17,21 @@ import * as path from 'path';
 //   3. NEVER add to/from FROZEN_LEGACY (ADR-0005) — those must NOT be modified
 
 describe('PRI-212 plugin core anti-growth guard', () => {
-  // Category 1: Frozen Legacy (ADR-0005) — must NOT be modified
+  // Category 1: Frozen Legacy (ADR-0005) — deleted in PRI-230
   const FROZEN_LEGACY = [
-    'nocturnal-trinity.ts',
-    'nocturnal-arbiter.ts',
   ] as const;
 
   // Category 2: Pure domain logic with zero I/O imports — should migrate to @principles/core
   const ZERO_IMPORT_CANDIDATES = [
-    'nocturnal-compliance.ts',
     'trajectory-types.ts',
     'profile.ts',
     'pain-signal.ts',
     'pd-task-types.ts',
     'evolution-types.ts',
     'telemetry-event.ts',
-    'nocturnal-trinity-types.ts',
-    'nocturnal-candidate-scoring.ts',
     'empathy-types.ts',
     'correction-types.ts',
     'principle-injection.ts',
-    'nocturnal-snapshot-contract.ts',
     'principle-compiler/template-generator.ts',
   ] as const;
 
@@ -93,31 +87,22 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'evolution-reducer.ts',
     'promotion-gate.ts',
     'model-training-registry.ts',
-    'nocturnal-dataset.ts',
     'focus-history.ts',
     'model-deployment-registry.ts',
     'training-program.ts',
     'replay-engine.ts',
     'external-training-contract.ts',
-    'nocturnal-trajectory-extractor.ts',
     'merge-gate-audit.ts',
     'shadow-observation-registry.ts',
-    'nocturnal-export.ts',
-    'adaptive-thresholds.ts',
     'control-ui-db.ts',
-    'nocturnal-executability.ts',
     'thinking-models.ts',
-    'nocturnal-artificer.ts',
     'pd-task-reconciler.ts',
     'correction-cue-learner.ts',
-    'nocturnal-reasoning-deriver.ts',
     'principle-compiler/compiler.ts',
     'pain.ts',
     'pain-context-extractor.ts',
     'config.ts',
-    'nocturnal-rule-implementation-validator.ts',
     'code-implementation-storage.ts',
-    'nocturnal-paths.ts',
     'observability.ts',
     'file-storage-adapter.ts',
     'workflow-funnel-loader.ts',
@@ -126,7 +111,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'system-logger.ts',
     'detection-funnel.ts',
     'risk-calculator.ts',
-    'nocturnal-artifact-lineage.ts',
     'migration.ts',
     'file-store.ts',
     'pd-task-store.ts',

@@ -1,10 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getImplementationAssetRoot } from './code-implementation-storage.js';
-import { listDatasetRecords } from './nocturnal-dataset.js';
-import { listArtifactLineageRecords } from './nocturnal-artifact-lineage.js';
-import { listExports, verifyExportIntegrity } from './nocturnal-export.js';
-import { OpenClawTrinityRuntimeAdapter } from './nocturnal-trinity.js';
 import { resolvePdPath } from './paths.js';
 import type { ReplayReport } from './replay-engine.js';
 
@@ -28,11 +24,6 @@ export interface MergeGateAuditReport {
     block: number;
     defer: number;
   };
-}
-
-function isWithinDir(parentDir: string, candidatePath: string): boolean {
-  const relative = path.relative(path.resolve(parentDir), path.resolve(candidatePath));
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function computeOverallStatus(checks: MergeGateAuditCheck[]): MergeGateAuditStatus {
@@ -109,169 +100,6 @@ function auditQueuePathContract(workspaceDir: string): MergeGateAuditCheck {
   };
 }
 
-function auditRuntimeAdapterContract(): MergeGateAuditCheck {
-  // Check the prototype surface only — do NOT instantiate the adapter.
-  // Instantiation triggers cleanupStaleTempDirs() which scans os.tmpdir()
-  // and could have side effects (removing stale temp dirs of other processes).
-  const hasSurface =
-    typeof OpenClawTrinityRuntimeAdapter.prototype.isRuntimeAvailable === 'function' &&
-    typeof OpenClawTrinityRuntimeAdapter.prototype.getLastFailureReason === 'function';
-
-  if (!hasSurface) {
-    return {
-      id: 'runtime_adapter_contract',
-      status: 'block',
-      summary: 'OpenClaw runtime adapter does not expose the expected contract-check surface.',
-    };
-  }
-
-  return {
-    id: 'runtime_adapter_contract',
-    status: 'pass',
-    summary: 'OpenClaw runtime adapter exposes the expected contract-check surface (isRuntimeAvailable, getLastFailureReason).',
-  };
-}
-
-function auditDatasetArtifactIntegrity(workspaceDir: string): MergeGateAuditCheck {
-  const records = listDatasetRecords(workspaceDir);
-  if (records.length === 0) {
-    return {
-      id: 'dataset_artifact_integrity',
-      status: 'defer',
-      summary: 'No dataset records found. Dataset artifact integrity cannot be verified yet.',
-    };
-  }
-
-  const missingArtifacts: string[] = [];
-  const outOfWorkspaceArtifacts: string[] = [];
-
-  for (const record of records) {
-    if (!fs.existsSync(record.artifactPath)) {
-      missingArtifacts.push(record.sampleFingerprint);
-      continue;
-    }
-    if (!isWithinDir(workspaceDir, record.artifactPath)) {
-      outOfWorkspaceArtifacts.push(record.sampleFingerprint);
-    }
-  }
-
-  if (missingArtifacts.length > 0 || outOfWorkspaceArtifacts.length > 0) {
-    return {
-      id: 'dataset_artifact_integrity',
-      status: 'block',
-      summary: 'Dataset registry points to missing artifacts or paths outside the workspace boundary.',
-      details: {
-        recordCount: records.length,
-        missingArtifacts,
-        outOfWorkspaceArtifacts,
-      },
-    };
-  }
-
-  return {
-    id: 'dataset_artifact_integrity',
-    status: 'pass',
-    summary: 'All dataset artifacts exist and remain inside the workspace boundary.',
-    details: {
-      recordCount: records.length,
-    },
-  };
-}
-
-function auditArtifactLineageIntegrity(workspaceDir: string): MergeGateAuditCheck {
-  const records = listArtifactLineageRecords(workspaceDir);
-  if (records.length === 0) {
-    return {
-      id: 'artifact_lineage_integrity',
-      status: 'defer',
-      summary: 'No artifact lineage records found. Lineage integrity cannot be verified yet.',
-    };
-  }
-
-  const missingStoragePaths: string[] = [];
-  const outOfWorkspaceStoragePaths: string[] = [];
-
-  for (const record of records) {
-    if (!fs.existsSync(record.storagePath)) {
-      missingStoragePaths.push(record.artifactId);
-      continue;
-    }
-    if (!isWithinDir(workspaceDir, record.storagePath)) {
-      outOfWorkspaceStoragePaths.push(record.artifactId);
-    }
-  }
-
-  if (missingStoragePaths.length > 0 || outOfWorkspaceStoragePaths.length > 0) {
-    return {
-      id: 'artifact_lineage_integrity',
-      status: 'block',
-      summary: 'Artifact lineage points to missing files or paths outside the workspace boundary.',
-      details: {
-        recordCount: records.length,
-        missingStoragePaths,
-        outOfWorkspaceStoragePaths,
-      },
-    };
-  }
-
-  return {
-    id: 'artifact_lineage_integrity',
-    status: 'pass',
-    summary: 'All lineage storage paths exist and remain inside the workspace boundary.',
-    details: {
-      recordCount: records.length,
-    },
-  };
-}
-
-function auditOrpoExportIntegrity(workspaceDir: string): MergeGateAuditCheck {
-  const exports = listExports(workspaceDir);
-  if (exports.length === 0) {
-    return {
-      id: 'orpo_export_integrity',
-      status: 'defer',
-      summary: 'No ORPO exports found. Export integrity cannot be verified yet.',
-    };
-  }
-
-  const invalidExportIds: string[] = [];
-  const missingExportFiles: string[] = [];
-
-  for (const manifest of exports) {
-    if (!fs.existsSync(manifest.exportPath)) {
-      missingExportFiles.push(manifest.exportId);
-      continue;
-    }
-
-    const integrity = verifyExportIntegrity(workspaceDir, manifest.exportId);
-    if (!integrity || !integrity.valid) {
-      invalidExportIds.push(manifest.exportId);
-    }
-  }
-
-  if (invalidExportIds.length > 0 || missingExportFiles.length > 0) {
-    return {
-      id: 'orpo_export_integrity',
-      status: 'block',
-      summary: 'ORPO export manifests or payloads failed integrity verification.',
-      details: {
-        exportCount: exports.length,
-        invalidExportIds,
-        missingExportFiles,
-      },
-    };
-  }
-
-  return {
-    id: 'orpo_export_integrity',
-    status: 'pass',
-    summary: 'All ORPO exports pass manifest fingerprint verification.',
-    details: {
-      exportCount: exports.length,
-    },
-  };
-}
-
 function isReplayReportShape(value: unknown): value is ReplayReport {
   if (!value || typeof value !== 'object') {
     return false;
@@ -287,9 +115,6 @@ function isReplayReportShape(value: unknown): value is ReplayReport {
   );
 }
 
-/**
- * Collect all replay report file paths under the implementations directory.
- */
 function collectReplayReportPaths(stateDir: string): string[] {
   const implementationsRoot = path.join(stateDir, 'principles', 'implementations');
   if (!fs.existsSync(implementationsRoot)) return [];
@@ -313,9 +138,6 @@ function collectReplayReportPaths(stateDir: string): string[] {
   return paths;
 }
 
-/**
- * Result of validating a single replay report file.
- */
 type ReplayValidationCategory =
   | 'io_error'
   | 'malformed'
@@ -324,9 +146,6 @@ type ReplayValidationCategory =
   | 'empty_needs_review'
   | 'valid';
 
-/**
- * Check if the parsed replay report has a valid evidenceSummary shape.
- */
 function hasValidEvidenceSummary(parsed: unknown): boolean {
   if (!parsed || typeof parsed !== 'object') return false;
   const report = parsed as Partial<ReplayReport>;
@@ -338,11 +157,7 @@ function hasValidEvidenceSummary(parsed: unknown): boolean {
   return typeof (summary as Partial<ReplayReport['evidenceSummary']>).totalSamples === 'number';
 }
 
-/**
- * Validate a single replay report file and return its category.
- */
 function validateSingleReplayReport(reportPath: string): ReplayValidationCategory {
-   
   let rawContent: string;
   try {
     rawContent = fs.readFileSync(reportPath, 'utf-8');
@@ -350,7 +165,6 @@ function validateSingleReplayReport(reportPath: string): ReplayValidationCategor
     return 'io_error';
   }
 
-   
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawContent);
@@ -366,7 +180,6 @@ function validateSingleReplayReport(reportPath: string): ReplayValidationCategor
     return 'missing_evidence_summary';
   }
 
-   
   const evidenceSummary = parsed.evidenceSummary;
   if (parsed.overallDecision === 'pass' && evidenceSummary.totalSamples === 0) {
     return 'unsupported_pass';
@@ -379,9 +192,6 @@ function validateSingleReplayReport(reportPath: string): ReplayValidationCategor
   return 'valid';
 }
 
-/**
- * Categorize all replay report files by validation outcome.
- */
 interface ReplayValidationResults {
   ioErrorReports: string[];
   malformedReports: string[];
@@ -417,7 +227,6 @@ function categorizeReplayReports(reportPaths: string[]): ReplayValidationResults
       case 'empty_needs_review':
         results.emptyEvidenceNeedsReview.push(reportPath);
         break;
-      // 'valid' — no action needed
     }
   }
 
@@ -473,10 +282,6 @@ export function runMergeGateAudit(workspaceDir: string, stateDir: string): Merge
   const checks: MergeGateAuditCheck[] = [
     auditPainFlagPathContract(workspaceDir),
     auditQueuePathContract(workspaceDir),
-    auditRuntimeAdapterContract(),
-    auditDatasetArtifactIntegrity(workspaceDir),
-    auditArtifactLineageIntegrity(workspaceDir),
-    auditOrpoExportIntegrity(workspaceDir),
     auditReplayEvidenceIntegrity(stateDir),
   ];
 
