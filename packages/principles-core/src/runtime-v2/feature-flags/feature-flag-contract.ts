@@ -8,6 +8,8 @@
 export const VALID_CATEGORIES = ['core', 'quiet', 'gone', 'legacy_retire'] as const;
 export type FeatureFlagCategory = (typeof VALID_CATEGORIES)[number];
 
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 export interface FeatureFlagDefinition {
   id: string;
   category: FeatureFlagCategory;
@@ -95,19 +97,8 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24', description: 'Defer/archive activation writer' },
 
   // MVP-Quiet — default disabled, opt-in via config
+  // Only flags with real consumption paths are registered (PRI-239 constraint)
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
-  { id: 'thinking_os', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Thinking OS injection in prompts' },
-  { id: 'focus_history', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Focus history compression for context' },
-  { id: 'empathy_keyword', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Empathy keyword matching system' },
-  { id: 'philosopher', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Philosopher peer runner for principle extraction' },
-  { id: 'evaluator', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Evaluator peer runner for principle review' },
-  { id: 'rollout_reviewer', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Rollout reviewer peer runner for L2 registration' },
-  { id: 'shadow_observation', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Shadow observation registry for passive learning' },
-  { id: 'local_worker_routing', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Local worker routing for task dispatch' },
-  { id: 'central_sync', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Central sync for cross-workspace coordination' },
-  { id: 'message_sanitize', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Message sanitization for LLM output safety' },
-  { id: 'trajectory_collector', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Trajectory collector for session replay' },
-  { id: 'skill_channel', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Skill channel for internalization pipeline' },
 
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
@@ -123,19 +114,23 @@ export function computeEffectiveFlags(
 ): EffectiveFeatureFlags {
   const warnings: string[] = [];
   const flags: Record<string, FeatureFlagDefinition> = {};
-  const hasUserFlags = Object.keys(userFlags).length > 0;
+
+  const safeKeys = Object.keys(userFlags).filter(key => {
+    if (DANGEROUS_KEYS.has(key)) {
+      warnings.push(`flag '${key}': dangerous key rejected`);
+      return false;
+    }
+    return true;
+  });
+  const hasUserFlags = safeKeys.length > 0;
 
   for (const def of defaults) {
-    const userEntry = userFlags[def.id];
-
-    // No user override → use default as-is
-    if (userEntry === undefined) {
+    if (!Object.hasOwn(userFlags, def.id) || DANGEROUS_KEYS.has(def.id)) {
       flags[def.id] = { ...def };
       continue;
     }
 
-    // Validate user override — user config provides {enabled, since}, not full definition
-    const override = userEntry;
+    const override = userFlags[def.id];
     const isPlainObj = override !== null && override !== undefined && typeof override === 'object' && !Array.isArray(override);
     const enabledValue = isPlainObj && Object.hasOwn(override, 'enabled')
       ? (override as Record<string, unknown>).enabled
@@ -173,7 +168,7 @@ export function computeEffectiveFlags(
   }
 
   // Warn about unknown flags
-  for (const key of Object.keys(userFlags)) {
+  for (const key of safeKeys) {
     if (!Object.hasOwn(flags, key)) {
       warnings.push(`flag '${key}': unknown flag ignored`);
     }

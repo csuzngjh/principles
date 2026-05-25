@@ -3,6 +3,7 @@ import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 export interface FeatureFlagsStatusOutput {
+  status: 'ok' | 'degraded';
   source: string;
   configPath: string;
   flags: {
@@ -16,6 +17,8 @@ export interface FeatureFlagsStatusOutput {
   totalFlags: number;
   enabledCount: number;
   disabledCount: number;
+  reason?: string;
+  nextAction?: string;
 }
 
 interface FeaturesOptions {
@@ -27,8 +30,10 @@ export function buildFeatureFlagsStatus(workspaceDir: string): FeatureFlagsStatu
   const effective = loadEffectiveFeatureFlags(workspaceDir);
   const flags = Object.values(effective.flags);
   const enabledCount = flags.filter(f => f.enabled).length;
+  const hasWarnings = effective.warnings.length > 0;
 
   return {
+    status: hasWarnings ? 'degraded' : 'ok',
     source: effective.source,
     configPath: effective.configPath,
     flags: flags.map(f => ({
@@ -42,6 +47,10 @@ export function buildFeatureFlagsStatus(workspaceDir: string): FeatureFlagsStatu
     totalFlags: flags.length,
     enabledCount,
     disabledCount: flags.length - enabledCount,
+    ...(hasWarnings ? {
+      reason: `Config warnings: ${effective.warnings.join('; ')}`,
+      nextAction: 'Review feature-flags.yaml for malformed overrides or unknown flags',
+    } : {}),
   };
 }
 

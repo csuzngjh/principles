@@ -304,3 +304,45 @@ describe('VALID_CATEGORIES', () => {
     expect(VALID_CATEGORIES).toEqual(['core', 'quiet', 'gone', 'legacy_retire']);
   });
 });
+
+describe('prototype pollution defense', () => {
+  it('rejects constructor key in user flags', () => {
+    const userFlags: Record<string, unknown> = { constructor: { enabled: true } };
+    const result = computeEffectiveFlags(
+      userFlags,
+      DEFAULT_FEATURE_FLAGS,
+      '/test/.pd/feature-flags.yaml',
+    );
+    expect(result.warnings.some(w => w.includes('constructor'))).toBe(true);
+  });
+
+  it('rejects prototype key in user flags', () => {
+    const userFlags: Record<string, unknown> = { prototype: { enabled: true } };
+    const result = computeEffectiveFlags(
+      userFlags,
+      DEFAULT_FEATURE_FLAGS,
+      '/test/.pd/feature-flags.yaml',
+    );
+    expect(result.warnings.some(w => w.includes('prototype'))).toBe(true);
+  });
+
+  it('rejects __proto__ when passed as explicit enumerable key', () => {
+    const userFlags: Record<string, unknown> = {};
+    Object.defineProperty(userFlags, '__proto__', {
+      value: { enabled: true },
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
+    expect(result.warnings.some(w => w.includes('__proto__'))).toBe(true);
+  });
+
+  it('Object.hasOwn used for override reads (not in operator)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'feature-flag-contract.ts'), 'utf-8');
+    const overrideReads = src.match(/Object\.hasOwn\(/g);
+    expect(overrideReads && overrideReads.length).toBeGreaterThanOrEqual(4);
+  });
+});

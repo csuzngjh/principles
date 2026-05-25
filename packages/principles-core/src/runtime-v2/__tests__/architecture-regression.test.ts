@@ -3603,11 +3603,11 @@ describe('PRI-239: Feature flag registry architecture boundary', () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(__dirname, '..', 'feature-flags', 'feature-flag-contract.ts'), 'utf-8');
-    expect(src).not.toContain("from 'node:fs'");
-    expect(src).not.toContain("from 'node:path'");
-    expect(src).not.toContain("from 'fs'");
-    expect(src).not.toContain("from 'path'");
-    expect(src).not.toContain("from 'js-yaml'");
+    expect(src).not.toMatch(/from\s+['"]node:fs['"]/);
+    expect(src).not.toMatch(/from\s+['"]node:path['"]/);
+    expect(src).not.toMatch(/from\s+['"]fs['"]/);
+    expect(src).not.toMatch(/from\s+['"]path['"]/);
+    expect(src).not.toMatch(/from\s+['"]js-yaml['"]/);
   });
 
   it('CORE_NO_RUNTIME_CLASSES: feature-flag-contract.ts does not import runtime orchestration classes', async () => {

@@ -57,6 +57,7 @@ vi.mock('../../src/services/feature-flag-loader.js', () => ({
 }));
 
 import { runCanaryChecks } from '../../src/commands/runtime-canary.js';
+import { loadEffectiveFeatureFlags } from '../../src/services/feature-flag-loader.js';
 
 const WS = '/fake/workspace';
 
@@ -264,5 +265,76 @@ describe('runCanaryChecks', () => {
     expect(result.internalizationQueueSummary?.nextReadyTaskKind).toBeNull();
     expect(result.internalizationQueueSummary?.nextReadyTaskId).toBeNull();
     expect(result.internalizationQueueSummary?.noReadyReason).toBe('all_hydration_failed');
+  });
+
+  describe('GFI config warning degraded status', () => {
+    it('returns healthy when GFI disabled with no warnings', async () => {
+      vi.mocked(loadEffectiveFeatureFlags).mockReturnValue({
+        source: 'defaults',
+        configPath: `${WS}/.pd/feature-flags.yaml`,
+        flags: {
+          gfi: { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24' },
+        },
+        warnings: [],
+      });
+
+      const result = await runCanaryChecks(WS);
+      const gfiCheck = result.checks.find(c => c.name === 'gfi_snapshot');
+
+      expect(gfiCheck?.status).toBe('healthy');
+      expect(gfiCheck?.summary).toContain('disabled');
+    });
+
+    it('returns degraded when GFI disabled but config has warnings (malformed YAML)', async () => {
+      vi.mocked(loadEffectiveFeatureFlags).mockReturnValue({
+        source: 'defaults',
+        configPath: `${WS}/.pd/feature-flags.yaml`,
+        flags: {
+          gfi: { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24' },
+        },
+        warnings: ['feature-flags.yaml: YAML parse error, using defaults'],
+      });
+
+      const result = await runCanaryChecks(WS);
+      const gfiCheck = result.checks.find(c => c.name === 'gfi_snapshot');
+
+      expect(gfiCheck?.status).toBe('degraded');
+      expect(gfiCheck?.summary).toContain('warnings');
+      expect(gfiCheck?.details).toBeDefined();
+    });
+
+    it('returns degraded when GFI disabled but config has malformed override warning', async () => {
+      vi.mocked(loadEffectiveFeatureFlags).mockReturnValue({
+        source: 'workspace_file',
+        configPath: `${WS}/.pd/feature-flags.yaml`,
+        flags: {
+          gfi: { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24' },
+        },
+        warnings: ["flag 'gfi': malformed override kept default (enabled must be boolean)"],
+      });
+
+      const result = await runCanaryChecks(WS);
+      const gfiCheck = result.checks.find(c => c.name === 'gfi_snapshot');
+
+      expect(gfiCheck?.status).toBe('degraded');
+    });
+
+    it('runs GFI snapshot when flag enabled with no warnings', async () => {
+      vi.mocked(loadEffectiveFeatureFlags).mockReturnValue({
+        source: 'workspace_file',
+        configPath: `${WS}/.pd/feature-flags.yaml`,
+        flags: {
+          gfi: { id: 'gfi', category: 'quiet', enabled: true, since: '2026-05-24' },
+        },
+        warnings: [],
+      });
+
+      const result = await runCanaryChecks(WS);
+      const gfiCheck = result.checks.find(c => c.name === 'gfi_snapshot');
+
+      expect(gfiCheck?.status).toBe('healthy');
+      expect(gfiCheck?.summary).toContain('OK');
+      expect(mockBuildGfiSnapshot).toHaveBeenCalled();
+    });
   });
 });

@@ -134,13 +134,18 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
         const featureFlags = loadEffectiveFeatureFlags(workspaceDir);
         const gfiFlag = featureFlags.flags.gfi;
         if (!gfiFlag || !gfiFlag.enabled) {
-          const warningSuffix = featureFlags.warnings.length > 0
-            ? ` (warnings: ${featureFlags.warnings.join('; ')})`
-            : '';
+          if (featureFlags.warnings.length > 0) {
+            return {
+              name: 'gfi_snapshot',
+              status: 'degraded',
+              summary: `GFI disabled but config has warnings: ${featureFlags.warnings.join('; ')}`,
+              details: { warnings: featureFlags.warnings, configPath: featureFlags.configPath },
+            };
+          }
           return {
             name: 'gfi_snapshot',
             status: 'healthy',
-            summary: `GFI feature flag disabled — skipping snapshot.${warningSuffix}`,
+            summary: 'GFI feature flag disabled — skipping snapshot.',
           };
         }
         const sessionDir = path.join(workspaceDir, '.state', 'sessions');

@@ -10,6 +10,8 @@ import type { EffectiveFeatureFlags } from '@principles/core/runtime-v2';
 export const FEATURE_FLAGS_CONFIG_FILENAME = 'feature-flags.yaml';
 export const FEATURE_FLAGS_CONFIG_DIR = '.pd';
 
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 export function getFeatureFlagsConfigPath(workspaceDir: string): string {
   return path.join(workspaceDir, FEATURE_FLAGS_CONFIG_DIR, FEATURE_FLAGS_CONFIG_FILENAME);
 }
@@ -41,16 +43,27 @@ export function loadEffectiveFeatureFlags(workspaceDir: string): EffectiveFeatur
     };
   }
 
-  const parsedRecord: Record<string, unknown> = {};
+  const parsedRecord: Record<string, unknown> = Object.create(null);
+  const warnings: string[] = [];
   for (const key of Object.keys(parsed)) {
+    if (DANGEROUS_KEYS.has(key)) {
+      warnings.push(`feature-flags.yaml: dangerous key '${key}' rejected`);
+      continue;
+    }
     if (Object.hasOwn(parsed, key)) {
       parsedRecord[key] = (parsed as Record<string, unknown>)[key];
     }
   }
 
-  return computeEffectiveFlags(
+  const result = computeEffectiveFlags(
     parsedRecord,
     DEFAULT_FEATURE_FLAGS,
     configPath,
   );
+
+  if (warnings.length > 0) {
+    result.warnings = [...warnings, ...result.warnings];
+  }
+
+  return result;
 }
