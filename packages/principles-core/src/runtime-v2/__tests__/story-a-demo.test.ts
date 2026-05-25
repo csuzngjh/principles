@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
-  runStoryADemo,
   STORY_A_CHANNELS,
+  makeRunId,
+  makePrincipleArtifactRecord,
+  makeRuleArtifactRecord,
+  computeDemoStatus,
+  buildFollowUpObservation,
+  buildDemoNarrative,
+  validateDemoChannels,
 } from '../story-a-demo.js';
 import type {
   StoryADemoStage,
@@ -23,252 +29,175 @@ function hasForbiddenTerm(text: string): string | undefined {
   return undefined;
 }
 
-function requireStage(stages: StoryADemoStage[], name: string): StoryADemoStage {
-  const stage = stages.find(s => s.name === name);
-  expect(stage, `Stage "${name}" must exist`).toBeDefined();
-  return stage as StoryADemoStage;
+function makeOutcome(overrides: Partial<StoryADemoChannelOutcome> = {}): StoryADemoChannelOutcome {
+  return {
+    channel: 'prompt',
+    status: 'passed',
+    activationDecision: { decision: 'activated', activationId: 'act-test', action: 'activate', targetRef: 'test' },
+    canActivateResult: { ok: true, riskLevel: 'low' },
+    evidence: {},
+    evidenceSource: 'test',
+    principleId: 'test-principle',
+    ...overrides,
+  };
 }
 
-function requireOutcome(outcomes: StoryADemoChannelOutcome[], channel: string): StoryADemoChannelOutcome {
-  const outcome = outcomes.find(o => o.channel === channel);
-  expect(outcome, `Channel outcome "${channel}" must exist`).toBeDefined();
-  return outcome as StoryADemoChannelOutcome;
-}
-
-describe('Story A\' Demo Scenario', () => {
-  // ── 1. Single entry point ───────────────────────────────────────────────
-
-  it('returns a structured result with all 6 stages', async () => {
-    const result = await runStoryADemo();
-
-    expect(result.status).toMatch(/^(passed|failed|degraded)$/);
-    expect(result.generatedAt).toBeTruthy();
-    expect(typeof result.generatedAt).toBe('string');
-    expect(result.stages).toHaveLength(6);
-
-    const stageNames = result.stages.map(s => s.name);
-    expect(stageNames).toEqual([
-      'evidence_seed',
-      'principle_proposal',
-      'owner_review',
-      'activation',
-      'follow_up_observation',
-      'rollback_proof',
-    ]);
-  });
-
-  it('every stage has status, and failed stages have reason + nextAction', async () => {
-    const result = await runStoryADemo();
-
-    for (const stage of result.stages) {
-      expect(stage.status).toMatch(/^(passed|failed|degraded|skipped)$/);
-      if (stage.status === 'failed' || stage.status === 'degraded') {
-        const {reason} = stage;
-        const {nextAction} = stage;
-        expect(reason).toBeDefined();
-        expect(typeof reason).toBe('string');
-        expect((reason as string).length).toBeGreaterThan(0);
-        expect(nextAction).toBeDefined();
-        expect(typeof nextAction).toBe('string');
-        expect((nextAction as string).length).toBeGreaterThan(0);
-      }
-    }
-  });
-
-  // ── 2. Three supported outcomes ─────────────────────────────────────────
-
-  it('produces outcomes for all 3 MVP channels', async () => {
-    const result = await runStoryADemo();
-
-    expect(result.channelOutcomes).toHaveLength(3);
-
-    const channels = result.channelOutcomes.map(o => o.channel);
-    expect(channels).toContain('prompt');
-    expect(channels).toContain('code_tool_hook');
-    expect(channels).toContain('defer_archive');
-  });
-
-  it('prompt channel shows activation evidence through real dispatcher', async () => {
-    const result = await runStoryADemo();
-    const prompt = requireOutcome(result.channelOutcomes, 'prompt');
-    expect(prompt.status).toBe('passed');
-    expect(prompt.activationDecision).toBeDefined();
-    expect(prompt.activationDecision.decision).toMatch(/^(would_activate|activated|already_activated)$/);
-    if ('activationId' in prompt.activationDecision) {
-      expect(prompt.activationDecision.activationId).toContain('act_prompt_');
-    }
-    expect(prompt.evidenceSource).toContain('ActivationDispatcher.dispatch');
-  });
-
-  it('code_tool_hook channel routes through real ActivationDispatcher + gate path', async () => {
-    const result = await runStoryADemo();
-    const rh = requireOutcome(result.channelOutcomes, 'code_tool_hook');
-    // Must go through real dispatcher, not direct writer construction (ERR-028)
-    expect(rh.evidenceSource).toContain('ActivationDispatcher.dispatch');
-    expect(rh.activationDecision).toBeDefined();
-    expect(rh.activationDecision.decision).toMatch(/^(would_activate|activated|queued_for_approval|already_activated)$/);
-  });
-
-  it('defer_archive channel shows owner chose not to activate', async () => {
-    const result = await runStoryADemo();
-    const da = requireOutcome(result.channelOutcomes, 'defer_archive');
-    expect(da.status).toBe('passed');
-    expect(da.evidenceSource).toContain('ActivationDispatcher.dispatch');
-    expect(da.activationDecision).toBeDefined();
-    expect(da.activationDecision.decision).toMatch(/^(would_activate|activated|already_activated)$/);
-  });
-
-  // ── 3. Product chain evidence ───────────────────────────────────────────
-
-  it('evidence is created/seeded with a ref', async () => {
-    const result = await runStoryADemo();
-    const evidenceStage = requireStage(result.stages, 'evidence_seed');
-    expect(evidenceStage.status).toBe('passed');
-    expect(evidenceStage.evidenceRef).toBeDefined();
-    expect(typeof evidenceStage.evidenceRef).toBe('string');
-  });
-
-  it('principle proposal is visible', async () => {
-    const result = await runStoryADemo();
-    const proposalStage = requireStage(result.stages, 'principle_proposal');
-    expect(proposalStage.status).toBe('passed');
-    expect(proposalStage.evidenceRef).toBeDefined();
-  });
-
-  it('approval decision is visible', async () => {
-    const result = await runStoryADemo();
-    const reviewStage = requireStage(result.stages, 'owner_review');
-    expect(reviewStage.status).toBe('passed');
-    expect(reviewStage.evidence).toBeDefined();
-    const reviewEvidence = reviewStage.evidence as Record<string, unknown>;
-    expect(reviewEvidence.ownerDecided).toBe(true);
-  });
-
-  it('activation outcome is visible per channel', async () => {
-    const result = await runStoryADemo();
-    const actStage = requireStage(result.stages, 'activation');
-    expect(actStage.status).toBe('passed');
-  });
-
-  it('follow-up observation shows behavior change or refusal', async () => {
-    const result = await runStoryADemo();
-    const followUp = requireStage(result.stages, 'follow_up_observation');
-    expect(followUp.status).toMatch(/^(passed|degraded)$/);
-    expect(followUp.evidence).toBeDefined();
-    const evidence = followUp.evidence as Record<string, unknown>;
-    expect(evidence.observations).toBeDefined();
-  });
-
-  it('all lineage/evidenceRefs are internally consistent', async () => {
-    const result = await runStoryADemo();
-    const refs = result.stages
-      .map(s => s.evidenceRef)
-      .filter((r): r is string => typeof r === 'string' && r.length > 0);
-    expect(new Set(refs).size).toBe(refs.length);
-    const principleIds = result.channelOutcomes.map(o => o.principleId);
-    for (const pid of principleIds) {
-      expect(pid).toBeTruthy();
-    }
-    const uniquePids = new Set(principleIds);
-    expect(uniquePids.size).toBe(1);
-  });
-
-  // ── 4. No Quiet/Gone features exposed ───────────────────────────────────
-
-  it('demo output contains no forbidden Quiet/Gone terms', async () => {
-    const result = await runStoryADemo();
-    const serialized = JSON.stringify(result);
-
-    const forbidden = hasForbiddenTerm(serialized);
-    expect(forbidden, `Demo output contains forbidden term: "${forbidden}"`).toBeUndefined();
-  });
-
-  it('channel outcomes only contain MVP channels', async () => {
-    const result = await runStoryADemo();
-    const mvpChannels = new Set(['prompt', 'code_tool_hook', 'defer_archive']);
-    for (const outcome of result.channelOutcomes) {
-      expect(mvpChannels.has(outcome.channel)).toBe(true);
-    }
-  });
-
-  // ── 5. Failure paths ────────────────────────────────────────────────────
-
-  it('fails loud on malformed/unknown channel input', async () => {
-    const result = await runStoryADemo({ channels: ['invalid_channel'] as unknown as ('prompt' | 'code_tool_hook' | 'defer_archive')[] });
-
-    expect(result.status).toBe('failed');
-    expect(result.inputValidationFailure).toBeDefined();
-    const ivf = result.inputValidationFailure as { reason: string; nextAction: string };
-    expect(ivf.reason).toBeDefined();
-    expect(ivf.nextAction).toBeDefined();
-  });
-
-  it('fails loud on empty channel list', async () => {
-    const result = await runStoryADemo({ channels: [] });
-
-    expect(result.status).toBe('failed');
-    expect(result.inputValidationFailure).toBeDefined();
-    const ivf = result.inputValidationFailure as { reason: string };
-    expect(ivf.reason).toBe('empty_channels');
-  });
-
-  // ── 6. Repeatability ────────────────────────────────────────────────────
-
-  it('produces consistent structure across two runs', async () => {
-    const run1 = await runStoryADemo();
-    const run2 = await runStoryADemo();
-
-    expect(run1.stages.map(s => s.name)).toEqual(run2.stages.map(s => s.name));
-    expect(run1.channelOutcomes.map(o => o.channel).sort())
-      .toEqual(run2.channelOutcomes.map(o => o.channel).sort());
-    expect(run1.status).toBe('passed');
-    expect(run2.status).toBe('passed');
-  });
-
-  it('two runs produce different artifact IDs (no cross-contamination)', async () => {
-    const run1 = await runStoryADemo({ runId: 'run-1' });
-    const run2 = await runStoryADemo({ runId: 'run-2' });
-
-    const ref1 = requireStage(run1.stages, 'evidence_seed').evidenceRef as string;
-    const ref2 = requireStage(run2.stages, 'evidence_seed').evidenceRef as string;
-
-    expect(ref1).not.toBe(ref2);
-  });
-
-  // ── 7. Rollback proof ───────────────────────────────────────────────────
-
-  it('rollback proof stage demonstrates disable/revert path', async () => {
-    const result = await runStoryADemo();
-    const rollback = requireStage(result.stages, 'rollback_proof');
-    expect(rollback.status).toBe('passed');
-    expect(rollback.evidence).toBeDefined();
-    const evidence = rollback.evidence as Record<string, unknown>;
-    expect(evidence.rollbackAvailable).toBe(true);
-  });
-
-  // ── 8. Overall structure ────────────────────────────────────────────────
-
-  it('result has narrative field for human readability', async () => {
-    const result = await runStoryADemo();
-    expect(result.narrative).toBeDefined();
-    expect(typeof result.narrative).toBe('string');
-    expect(result.narrative.length).toBeGreaterThan(50);
-  });
-
-  it('result identifies runtime path as V2-exclusive', async () => {
-    const result = await runStoryADemo();
-    expect(typeof result.isRuntimeV2Exclusive).toBe('boolean');
-  });
-
-  it('includes human-readable story description', async () => {
-    const result = await runStoryADemo();
-    expect(result.storyDescription).toBeDefined();
-    expect(result.storyDescription.length).toBeGreaterThan(20);
-  });
-
-  // ── Export validation ──────────────────────────────────────────────────
-
+describe('Story A\' pure helpers', () => {
   it('STORY_A_CHANNELS contains exactly 3 MVP channels', () => {
     expect(STORY_A_CHANNELS).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
+  });
+
+  it('makeRunId uses provided runId', () => {
+    expect(makeRunId({ runId: 'custom-42' })).toBe('custom-42');
+  });
+
+  it('makeRunId generates unique IDs when no runId provided', () => {
+    const a = makeRunId({});
+    const b = makeRunId({});
+    expect(a).not.toBe(b);
+    expect(a).toContain('story-a-');
+  });
+
+  it('makePrincipleArtifactRecord produces valid principle artifact', () => {
+    const record = makePrincipleArtifactRecord('test-run');
+    expect(record.artifactKind).toBe('principle');
+    expect(record.validationStatus).toBe('validated');
+    expect(record.sourcePrincipleId).toBe('demo-principle-test-run');
+    expect(record.artifactId).toBe('art-demo-principle-test-run');
+    const content = JSON.parse(record.contentJson) as Record<string, unknown>;
+    expect(content.principleId).toBe('demo-principle-test-run');
+    expect(content.text).toContain('system-critical');
+  });
+
+  it('makeRuleArtifactRecord produces valid rule artifact with GoldenTrace', () => {
+    const principle = makePrincipleArtifactRecord('test-run');
+    const rule = makeRuleArtifactRecord('test-run', principle);
+    expect(rule.artifactKind).toBe('rule');
+    expect(rule.sourceRuleId).toBe('demo-rule-test-run');
+    expect(rule.sourcePrincipleId).toBe(principle.sourcePrincipleId);
+    expect(rule.lineageArtifactIds).toContain(principle.artifactId);
+    const content = JSON.parse(rule.contentJson) as Record<string, unknown>;
+    expect(content.implementationCode).toBeTruthy();
+    const trace = content.goldenTrace as { cases: unknown[] };
+    expect(trace.cases).toHaveLength(2);
+  });
+
+  it('two different runIds produce different artifact IDs', () => {
+    const a = makePrincipleArtifactRecord('run-a');
+    const b = makePrincipleArtifactRecord('run-b');
+    expect(a.artifactId).not.toBe(b.artifactId);
+  });
+
+  it('validates empty channel list', () => {
+    const result = validateDemoChannels([]);
+    expect(result).not.toBeNull();
+    expect((result as { reason: string }).reason).toBe('empty_channels');
+  });
+
+  it('validates unknown channels', () => {
+    const result = validateDemoChannels(['invalid'] as unknown as ('prompt' | 'code_tool_hook' | 'defer_archive')[]);
+    expect(result).not.toBeNull();
+    const r = result as { reason: string; unknownChannels: string[] };
+    expect(r.reason).toBe('unknown_channels');
+    expect(r.unknownChannels).toContain('invalid');
+  });
+
+  it('returns null for valid channels', () => {
+    expect(validateDemoChannels(['prompt'])).toBeNull();
+    expect(validateDemoChannels(['prompt', 'code_tool_hook', 'defer_archive'])).toBeNull();
+  });
+
+  it('computeDemoStatus returns passed when all pass', () => {
+    const stages: StoryADemoStage[] = [{ name: 'evidence_seed', status: 'passed' }];
+    const outcomes = [makeOutcome({ status: 'passed' })];
+    expect(computeDemoStatus(stages, outcomes)).toBe('passed');
+  });
+
+  it('computeDemoStatus returns degraded when outcomes degraded', () => {
+    const stages: StoryADemoStage[] = [{ name: 'evidence_seed', status: 'passed' }];
+    const outcomes = [makeOutcome({ status: 'degraded' })];
+    expect(computeDemoStatus(stages, outcomes)).toBe('degraded');
+  });
+
+  it('computeDemoStatus returns degraded when mixed pass/fail', () => {
+    const stages: StoryADemoStage[] = [{ name: 'evidence_seed', status: 'passed' }];
+    const outcomes = [makeOutcome({ status: 'passed' }), makeOutcome({ status: 'failed', channel: 'code_tool_hook' })];
+    expect(computeDemoStatus(stages, outcomes)).toBe('degraded');
+  });
+
+  it('computeDemoStatus returns failed when everything fails', () => {
+    const stages: StoryADemoStage[] = [{ name: 'evidence_seed', status: 'failed' }];
+    const outcomes: StoryADemoChannelOutcome[] = [];
+    expect(computeDemoStatus(stages, outcomes)).toBe('failed');
+  });
+
+  it('code_tool_hook activated shows enforcement observed', () => {
+    const outcome = makeOutcome({
+      channel: 'code_tool_hook',
+      status: 'passed',
+      activationDecision: { decision: 'activated', activationId: 'act-1', action: 'hook', targetRef: 'ref' },
+    });
+    const obs = buildFollowUpObservation('code_tool_hook', outcome);
+    expect(obs.status).toBe('passed');
+    const {evidence} = obs;
+    expect(evidence.enforcementObserved).toBe(true);
+    expect(evidence.ruleActivated).toBe(true);
+  });
+
+  it('code_tool_hook queued_for_approval shows NOT enforcement observed and degraded', () => {
+    const outcome = makeOutcome({
+      channel: 'code_tool_hook',
+      status: 'passed',
+      activationDecision: { decision: 'queued_for_approval', approvalId: 'apr-1', queuedAt: 'now', channel: 'code_tool_hook', riskLevel: 'high' },
+    });
+    const obs = buildFollowUpObservation('code_tool_hook', outcome);
+    expect(obs.status).toBe('degraded');
+    const {evidence} = obs;
+    expect(evidence.enforcementObserved).toBe(false);
+    expect(evidence.ruleActivated).toBe(false);
+  });
+
+  it('prompt activated shows principle activated', () => {
+    const outcome = makeOutcome({
+      channel: 'prompt',
+      status: 'passed',
+      activationDecision: { decision: 'activated', activationId: 'act-1', action: 'inject', targetRef: 'prompt' },
+    });
+    const obs = buildFollowUpObservation('prompt', outcome);
+    expect(obs.status).toBe('passed');
+    expect((obs.evidence).principleActivated).toBe(true);
+  });
+
+  it('defer_archive shows archived', () => {
+    const outcome = makeOutcome({
+      channel: 'defer_archive',
+      status: 'passed',
+      activationDecision: { decision: 'would_activate', activationId: 'act-1', action: 'archive', targetRef: 'archive' },
+    });
+    const obs = buildFollowUpObservation('defer_archive', outcome);
+    expect(obs.status).toBe('passed');
+    expect((obs.evidence).deferred).toBe(true);
+  });
+
+  it('buildDemoNarrative includes run ID and activation info', () => {
+    const narrative = buildDemoNarrative({
+      runId: 'run-42',
+      principleId: 'principle-42',
+      channels: ['prompt'],
+      channelOutcomes: [
+        makeOutcome({ channel: 'prompt', activationDecision: { decision: 'activated', activationId: 'act-1', action: 'inject', targetRef: 'prompt' } }),
+      ],
+    });
+    expect(narrative).toContain('run-42');
+    expect(narrative).toContain('principle-42');
+    expect(narrative).toContain('activated');
+  });
+
+  it('artifact content contains no forbidden terms', () => {
+    const principle = makePrincipleArtifactRecord('test');
+    const rule = makeRuleArtifactRecord('test', principle);
+    const combined = JSON.stringify({ principle, rule });
+    const forbidden = hasForbiddenTerm(combined);
+    expect(forbidden, `Artifact content contains forbidden term: "${forbidden}"`).toBeUndefined();
   });
 });

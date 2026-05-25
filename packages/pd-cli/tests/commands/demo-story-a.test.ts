@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import Database from 'better-sqlite3';
 import { handleDemoStoryA, cleanupTempWorkspace } from '../../src/commands/demo-story-a.js';
 
 describe('pd demo story-a CLI', () => {
@@ -98,6 +99,83 @@ describe('pd demo story-a CLI', () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it('explicit workspace produces readable state.db with artifacts and activations', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-test-state-'));
+
+    try {
+      await handleDemoStoryA({ workspace: tmpDir, json: true });
+
+      const stateDb = path.join(tmpDir, '.pd', 'state.db');
+      expect(fs.existsSync(stateDb)).toBe(true);
+
+      const db = new Database(stateDb, { readonly: true });
+
+      const artifacts = db.prepare('SELECT artifact_id, artifact_kind FROM pi_artifacts').all() as { artifact_id: string; artifact_kind: string }[];
+      expect(artifacts.length).toBeGreaterThanOrEqual(2);
+      const kinds = artifacts.map(a => a.artifact_kind);
+      expect(kinds).toContain('principle');
+      expect(kinds).toContain('rule');
+
+      const activations = db.prepare('SELECT activation_id, channel FROM activations').all() as { activation_id: string; channel: string }[];
+      expect(activations.length).toBeGreaterThanOrEqual(3);
+      const channels = activations.map(a => a.channel);
+      expect(channels).toContain('prompt');
+      expect(channels).toContain('code_tool_hook');
+      expect(channels).toContain('defer_archive');
+
+      db.close();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('default 3-channel run returns overall=passed with code_tool_hook fully activated', async () => {
+    await handleDemoStoryA({ json: true });
+
+    const output = stdoutSpy.mock.calls.map(c => c[0]).join('');
+    const parsed = JSON.parse(output);
+
+    expect(parsed.status).toBe('passed');
+
+    const cthOutcome = (parsed.channelOutcomes as { channel: string; status: string; activationDecision: { decision: string; activationId: string } }[])
+      .find(o => o.channel === 'code_tool_hook');
+    expect(cthOutcome).toBeDefined();
+    expect(cthOutcome!.status).toBe('passed');
+    expect(cthOutcome!.activationDecision.decision).toBe('activated');
+    expect(cthOutcome!.activationDecision.activationId).toMatch(/^act_code_/);
+  });
+
+  it('enforcementObserved is true only after full activation', async () => {
+    await handleDemoStoryA({ json: true });
+
+    const output = stdoutSpy.mock.calls.map(c => c[0]).join('');
+    const parsed = JSON.parse(output);
+
+    const followUpStage = (parsed.stages as { name: string; evidence: Record<string, unknown> }[])
+      .find(s => s.name === 'follow_up_observation');
+    expect(followUpStage).toBeDefined();
+
+    const observations = (followUpStage!.evidence as { observations: Record<string, unknown>[] }).observations;
+    const cthObs = observations.find(o => o.channel === 'code_tool_hook');
+    expect(cthObs).toBeDefined();
+    expect(cthObs!.enforcementObserved).toBe(true);
+    expect(cthObs!.ruleActivated).toBe(true);
+  });
+
+  it('--json output is exactly one parseable JSON object on stdout', async () => {
+    await handleDemoStoryA({ json: true });
+
+    // console.log may be called multiple times; join and verify single JSON parse
+    const raw = stdoutSpy.mock.calls.map(c => c[0]).join('');
+    const parsed = JSON.parse(raw);
+    expect(parsed.status).toBeDefined();
+    expect(typeof parsed.generatedAt).toBe('string');
+
+    // Verify stderr is empty (no mixed output)
+    const stderrOutput = stderrSpy.mock.calls.map(c => c[0]).join('');
+    expect(stderrOutput).toBe('');
   });
 });
 

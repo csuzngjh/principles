@@ -140,6 +140,7 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
   try {
     const result = await runStoryADemo({
       channels: parsed.channels,
+      workspaceDir,
     });
 
     if (opts.json) {

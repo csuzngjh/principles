@@ -328,8 +328,18 @@ export {
 } from './proven-channel-baseline.js';
 export type { MvpChannel, ChannelFixtureResult, ProvenChannelBaselineSummary, ContinuityMatrixEntry, InputValidationFailure } from './proven-channel-baseline.js';
 
-// Story A' demo scenario (PRI-246) — MVP proven-channel demo with full evidence chain
-export { runStoryADemo, STORY_A_CHANNELS } from './story-a-demo.js';
+// Story A' demo scenario (PRI-246) — pure types + helpers; I/O runner lives in pd-cli
+export {
+  STORY_A_CHANNELS,
+  makeRunId,
+  makePrincipleArtifactRecord,
+  makeRuleArtifactRecord,
+  computeDemoStatus,
+  buildFollowUpObservation,
+  buildDemoNarrative,
+  validateDemoChannels,
+  type DemoNarrativeInput,
+} from './story-a-demo.js';
 export type { StoryADemoResult, StoryADemoStage, StoryADemoStageName, StoryADemoChannelOutcome, StoryADemoInputValidationFailure, StoryADemoOptions } from './story-a-demo.js';
 
 // Pain flood simulation (PRI-208) — pure contract/helpers only; I/O runner lives in pd-cli
@@ -910,6 +920,7 @@ export {
   ActivationDispatcher,
   PromptWriter,
   DeferArchiveWriter,
+  RuleHostWriter,
   extractPrincipleId,
   MemoryActivationStateStore,
   MemoryArtifactReadModel,
