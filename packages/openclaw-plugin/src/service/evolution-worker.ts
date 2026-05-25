@@ -20,14 +20,15 @@ import { atomicWriteFileSync } from '../utils/io.js';
 
 // Re-export queue I/O (extracted to queue-io.ts)
 export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock, requireQueueLock } from './queue-io.js';
-export { enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
 export { EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './queue-io.js';
-import { saveEvolutionQueue, requireQueueLock, hasPendingTask, enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
+import { saveEvolutionQueue, requireQueueLock, hasPendingTask } from './queue-io.js';
 import type { RecentPainContext } from './queue-io.js';
 export type { RecentPainContext } from './queue-io.js';
-import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
-import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
+// PRI-119: Below imports are retained for dead code blocks (sleep_reflection/keyword_optimization
+// processing paths that are no longer reached). Full removal tracked in PRI-230.
+import { loadCooldownEscalationConfig } from './nocturnal-config.js';
+import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
 import {
     createNocturnalTrajectoryExtractor,
@@ -35,20 +36,21 @@ import {
     type NocturnalSessionSnapshot,
 } from '../core/nocturnal-trajectory-extractor.js';
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
+import { recordCooldown } from './nocturnal-runtime.js';
+import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
+import { enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
 import { PrincipleCompiler } from '../core/principle-compiler/index.js';
 import { loadLedger, updatePrinciple } from '../core/principle-tree-ledger.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
 import { findRecentDuplicateTask } from './evolution-dedup.js';
 import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
-import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import { classifyFailure, type ClassifiableTaskKind } from './failure-classifier.js';
 import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from './cooldown-strategy.js';
 import { reconcileStartup } from './startup-reconciler.js';
 import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
-import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
 // ── Queue Event Payload Validation ─────────────────────────────────────────
 
@@ -106,7 +108,7 @@ let timeoutId: NodeJS.Timeout | null = null;
  */
 /** @deprecated Use PDTaskStatus from '@principles/core/runtime-v2'. M2 migration will replace this. */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation' | 'noise_classified';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation' | 'noise_classified' | 'retired';
 
 export interface EvolutionQueueItem {
     // Core identity
@@ -549,6 +551,27 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         const {config} = wctx;
         const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
 
+        // ── PRI-119: Terminalize retired sleep_reflection/keyword_optimization tasks ──
+        // These task kinds are retired per ADR-0012. Run BEFORE stuck-task recovery
+        // so retirement catches all pending/in_progress tasks before the timeout
+        // mechanism reclassifies them as failed_max_retries.
+        const retiredKinds = ['sleep_reflection', 'keyword_optimization'];
+        let terminalizedCount = 0;
+        for (const task of queue) {
+            if (retiredKinds.includes(task.taskKind) && (task.status === 'pending' || task.status === 'in_progress')) {
+                task.status = 'failed';
+                task.completed_at = task.completed_at || new Date().toISOString();
+                task.resolution = 'retired';
+                task.lastError = 'retired per ADR-0012 / PRI-119 — Nocturnal execution has been cut over to Runtime V2';
+                queueChanged = true;
+                terminalizedCount++;
+                logger?.info?.(`[PD:EvolutionWorker] Terminalized retired ${task.taskKind} task ${task.id} (was ${task.status}) per ADR-0012`);
+            }
+        }
+        if (terminalizedCount > 0) {
+            saveEvolutionQueue(queuePath, queue);
+        }
+
         // V2: Recover stuck in_progress sleep_reflection tasks.
         // If the worker crashes or the result write-back fails after Phase 1 claimed
         // the task, it stays in_progress indefinitely. Detect via timeout and mark
@@ -598,577 +621,31 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     durationMs: age,
                 });
 
-                // #214: Expire the underlying nocturnal workflow to prevent resource leak.
-                // The task's resultRef holds the workflowId if one was started.
+                // PRI-119: NocturnalWorkflowManager retired. Mark stuck workflow as expired via WorkflowStore.
                 if (task.resultRef && !task.resultRef.startsWith('trinity-draft')) {
+                    const wfStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
                     try {
-                        const nocturnalMgr = new NocturnalWorkflowManager({
-                            workspaceDir: wctx.workspaceDir,
-                            stateDir: wctx.stateDir,
-                            logger: api?.logger || logger,
-                             
-                            runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
-                            subagent: api?.runtime?.subagent,
-                        });
-                        try {
-                            // Force-expire this specific workflow regardless of TTL
-                            nocturnalMgr.expireWorkflow(
-                                task.resultRef,
-                                `Sleep reflection task ${task.id} timed out after ${Math.round(age / 60000)} min`,
-                            );
-                            logger?.info?.(`[PD:EvolutionWorker] Expired nocturnal workflow ${task.resultRef} for timed-out sleep task ${task.id}`);
-                        } finally {
-                            nocturnalMgr.dispose();
-                        }
+                        wfStore.updateWorkflowState(task.resultRef, 'expired');
+                        wfStore.recordEvent(task.resultRef, 'expired', null, 'expired',
+                            `Sleep reflection task ${task.id} timed out after ${Math.round(age / 60000)} min`, {});
+                        logger?.info?.(`[PD:EvolutionWorker] Marked stuck workflow ${task.resultRef} as expired for timed-out sleep task ${task.id}`);
                     } catch (expireErr) {
-                        logger?.warn?.(`[PD:EvolutionWorker] Could not expire nocturnal workflow ${task.resultRef}: ${String(expireErr)}`);
+                        logger?.warn?.(`[PD:EvolutionWorker] Could not mark stuck workflow ${task.resultRef} as expired: ${String(expireErr)}`);
+                    } finally {
+                        wfStore.dispose();
                     }
                 }
             }
         }
 
-
-        // Phase 2.4: Process sleep_reflection tasks.
-        // Claim tasks inside the lock, execute reflection outside the lock,
-        // then re-acquire the lock to write results. This prevents the long-running
-        // nocturnal reflection from blocking all other queue consumers.
-
-        // FIX: Also poll in_progress tasks that were started in a previous cycle.
-        // Previously only 'pending' tasks were filtered, so an in_progress task from
-        // a previous heartbeat cycle would never be re-polled until the 1-hour
-        // stuck task recovery kicked in.
-        const pendingSleepTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection');
-        const pollingSleepTasks = queue.filter(t =>
-            t.status === 'in_progress' && t.taskKind === 'sleep_reflection' && t.resultRef && !t.resultRef.startsWith('trinity-draft')
-        );
-        let sleepReflectionTasks = [...pendingSleepTasks, ...pollingSleepTasks];
-        // Phase 40: Check if sleep_reflection is in cooldown due to persistent failures
-        const sleepCooldown = isTaskKindInCooldown(wctx.stateDir, 'sleep_reflection');
-        if (sleepCooldown.inCooldown) {
-            logger?.info?.(`[PD:EvolutionWorker] sleep_reflection in cooldown (remaining ${Math.round(sleepCooldown.remainingMs / 60000)}min), skipping task processing`);
-            sleepReflectionTasks = [];
-        }
-        if (sleepReflectionTasks.length > 0) {
-            // --- Phase 1: Claim only pending tasks (inside lock) ---
-            // in_progress tasks from previous cycles are already claimed, don't re-claim them
-            for (const sleepTask of pendingSleepTasks) {
-                sleepTask.status = 'in_progress';
-                sleepTask.started_at = new Date().toISOString();
-            }
-            queueChanged = queueChanged || pendingSleepTasks.length > 0;
-
-            // Write claimed state (includes any pain changes from above) and release lock
-            if (queueChanged) {
-                saveEvolutionQueue(queuePath, queue);
-            }
-            releaseLock();
-            // Phase 40: Track outcomes for failure classification after queue write
-            const sleepOutcomes: Array<{ taskKind: ClassifiableTaskKind; succeeded: boolean }> = [];
-            for (const sleepTask of sleepReflectionTasks) {
-                try {
-                    // FIX: For in_progress tasks from a previous cycle, just poll the workflow.
-                    // Don't start a new workflow — that was already done when the task was first claimed.
-                    const isPollingTask = !!sleepTask.resultRef && !sleepTask.resultRef.startsWith('trinity-draft');
-
-                    if (isPollingTask) {
-                        logger?.debug?.(`[PD:EvolutionWorker] Polling existing sleep_reflection task ${sleepTask.id} (workflowId: ${sleepTask.resultRef})`);
-                    } else {
-                        logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
-                    }
-
-                     
-                    let workflowId: string | undefined;
-                     
-                     
-                    let nocturnalManager: NocturnalWorkflowManager;
-                     
-                     
-                    let snapshotData: NocturnalSessionSnapshot | undefined;
-
-                    if (isPollingTask) {
-                         
-                        workflowId = sleepTask.resultRef!;
-                    } else {
-                        // Phase 1: Build trajectory snapshot for Nocturnal pipeline
-                        // Priority: Pain signal sessionId → Task ID → Recent session with violations
-                        let extractor: ReturnType<typeof createNocturnalTrajectoryExtractor> | null = null;
-                        try {
-                            extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
-
-                            // 1. Try exact session ID from pain signal (most accurate)
-                            const painSessionId = sleepTask.recentPainContext?.mostRecent?.sessionId;
-                            let fullSnapshot = painSessionId ? extractor.getNocturnalSessionSnapshot(painSessionId) : undefined;
-                            if (fullSnapshot) {
-                                logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using exact session from pain signal: ${painSessionId}`);
-                            }
-
-                            // 2. Try task ID (legacy compatibility, rarely matches)
-                            if (!fullSnapshot) {
-                                fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
-                            }
-
-                            // 3. If no match, find most recent session WITH violation signals
-                            if (!fullSnapshot) {
-                                const taskTimeMs = new Date(sleepTask.enqueued_at || sleepTask.timestamp).getTime();
-                                const recentSessions = extractor.listRecentNocturnalCandidateSessions({
-                                    limit: 20,
-                                    minToolCalls: 1,
-                                    dateTo: sleepTask.enqueued_at || sleepTask.timestamp,
-                                }).filter((session) => isSessionAtOrBeforeTriggerTime(session, taskTimeMs));
-                                // Filter to sessions with actual violations (pain, failures, or gate blocks)
-                                const sessionsWithViolations = recentSessions.filter(
-                                    s => s.failureCount > 0 || s.painEventCount > 0 || s.gateBlockCount > 0
-                                );
-                                if (sessionsWithViolations.length > 0) {
-                                     
-                                    const targetSession = sessionsWithViolations[0];
-                                    logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using session with violations: ${targetSession.sessionId} (failed=${targetSession.failureCount}, pain=${targetSession.painEventCount}, gates=${targetSession.gateBlockCount})`);
-                                    fullSnapshot = extractor.getNocturnalSessionSnapshot(targetSession.sessionId);
-                                } else if (recentSessions.length > 0) {
-                                    // No sessions with violations, use most recent as last resort
-                                     
-                                    const latestSession = recentSessions[0];
-                                    logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} no sessions with violations found, using most recent: ${latestSession.sessionId} (failed=${latestSession.failureCount}, pain=${latestSession.painEventCount}, gates=${latestSession.gateBlockCount})`);
-                                    fullSnapshot = extractor.getNocturnalSessionSnapshot(latestSession.sessionId);
-                                } else {
-                                    logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} no sessions with tool calls in trajectory DB`);
-                                }
-                            }
-
-                            if (fullSnapshot) {
-                                snapshotData = fullSnapshot;
-                            }
-                        } catch (snapErr) {
-                            logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
-                        }
-
-                        // Phase 2: If no trajectory data, try pain-context fallback
-                        if (!snapshotData && sleepTask.recentPainContext) {
-                            logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory snapshot unavailable, will try session summary from extractor`);
-                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask, extractor, logger) ?? undefined;
-                        }
-
-                        const snapshotValidation = validateNocturnalSnapshotIngress(snapshotData);
-                        if (snapshotValidation.status !== 'valid') {
-                            sleepTask.status = 'failed';
-                            sleepTask.completed_at = new Date().toISOString();
-                            sleepTask.resolution = 'failed_max_retries';
-                            sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
-                            sleepTask.lastError = `sleep_reflection failed: invalid_snapshot_ingress (${snapshotValidation.reasons.join('; ') || 'missing snapshot'})`;
-                            sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                            logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} rejected: ${sleepTask.lastError}`);
-                            continue;
-                        }
-
-                        snapshotData = snapshotValidation.snapshot;
-                    }
-
-                    if (!api?.runtime) {
-                        sleepTask.status = 'failed';
-                        sleepTask.completed_at = new Date().toISOString();
-                        sleepTask.resolution = 'failed_max_retries';
-                        sleepTask.lastError = 'No API runtime available to create NocturnalWorkflowManager';
-                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} skipped: no API runtime`);
-                        continue;
-                    }
-
-                    nocturnalManager = new NocturnalWorkflowManager({
-                        workspaceDir: wctx.workspaceDir,
-                        stateDir: wctx.stateDir,
-                        logger: api.logger,
-                        runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
-                        subagent: api.runtime.subagent,
-                    });
-
-                    if (!isPollingTask) {
-                        const workflowHandle = await nocturnalManager.startWorkflow(nocturnalWorkflowSpec, {
-                            parentSessionId: `sleep_reflection:${sleepTask.id}`,
-                            workspaceDir: wctx.workspaceDir,
-                            taskInput: {},
-                            metadata: {
-                                snapshot: snapshotData,
-                                taskId: sleepTask.id,
-                                painContext: sleepTask.recentPainContext,
-                                triggerSource: sleepTask.source,
-                                // #297: Configure which preflight gates to skip.
-                                // sleep_reflection uses periodic trigger which bypasses idle by design.
-                                skipPreflightGates: ['idle'],
-                            },
-                        });
-                        sleepTask.resultRef = workflowHandle.workflowId;
-                         
-                        workflowId = workflowHandle.workflowId;
-                    }
-
-                    if (!workflowId) {
-                        sleepTask.status = 'failed';
-                        sleepTask.completed_at = new Date().toISOString();
-                        sleepTask.resolution = 'failed_max_retries';
-                        sleepTask.lastError = 'sleep_reflection failed: missing_workflow_id';
-                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} missing workflow id after startup`);
-                        continue;
-                    }
-
-                    // Workflow is running asynchronously. Check if it completed in this cycle
-                    // by polling getWorkflowDebugSummary.
-                    const summary = await nocturnalManager.getWorkflowDebugSummary(workflowId);
-                    if (summary) {
-                        if (summary.state === 'completed') {
-                            sleepTask.status = 'completed';
-                            sleepTask.completed_at = new Date().toISOString();
-                            sleepTask.resolution = 'marker_detected';
-                            sleepTask.resultRef = summary.metadata?.nocturnalResult ? 'trinity-draft' : workflowId;
-                            sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
-                            logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed`);
-                        } else if (summary.state === 'terminal_error') {
-                            // #208/#209: Classify terminal_error reason before hardcoding to failed.
-                            // The async executeNocturnalReflectionAsync catches subagent errors and
-                            // records them as terminal_error. Without this check, expected errors
-                            // (daemon mode, process isolation) would always become failed_max_retries.
-                            const lastEvent = summary.recentEvents[summary.recentEvents.length - 1];
-                            const errorReason = lastEvent?.reason ?? 'unknown';
-                            // #219: Include payload details for better diagnostics
-                            let detailedError = `Workflow terminal_error: ${errorReason}`;
-                             
-                            let payload: unknown = {};
-                             
-                            try {
-                                payload = lastEvent?.payload ?? {};
-                                 
-                                if ((payload as any).skipReason) {
-                                     
-                                    detailedError += ` (skipReason: ${(payload as any).skipReason})`;
-                                 
-                                }
-                                 
-                                if ((payload as any).failures && Array.isArray((payload as any).failures) && (payload as any).failures.length > 0) {
-                                     
-                                    detailedError += ` | failures: ${((payload as any).failures as string[]).slice(0, 3).join(', ')}`;
-                                }
-                            } catch { /* ignore parse errors */ }
-                            sleepTask.lastError = detailedError;
-                            sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-
-                            if (isExpectedSubagentError(errorReason)) {
-                                // #237: Expected unavailability → stub fallback, not hard failure
-                                sleepTask.status = 'completed';
-
-                                sleepTask.completed_at = new Date().toISOString();
-                                sleepTask.resolution = 'stub_fallback';
-                                sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
-
-                                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${errorReason}`);
-                             
-                            } else if ((payload as any).skipReason === 'no_violating_sessions') {
-                                // #244: No meaningful violations found (thin filter) → skip without failure
-                                sleepTask.status = 'completed';
-                                sleepTask.completed_at = new Date().toISOString();
-                                sleepTask.resolution = 'skipped_thin_violation';
-                                sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
-                                logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} completed: no sessions with meaningful violations found`);
-                            } else {
-                                sleepTask.status = 'failed';
-                                sleepTask.completed_at = new Date().toISOString();
-                                sleepTask.resolution = 'failed_max_retries';
-                                sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
-                                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow failed: ${sleepTask.lastError}`);
-                            }
-                        } else {
-                            // Workflow still active, keep task in_progress for next cycle
-                            logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow ${summary.state}, will poll again next cycle`);
-                        }
-                    }
-                } catch (taskErr) {
-                    // #202: Handle expected subagent unavailability (e.g., process isolation in daemon mode)
-                    // When subagent is unavailable due to gateway running in separate process,
-                    // use stub fallback instead of failing the task.
-                    sleepTask.completed_at = new Date().toISOString();
-                    sleepTask.lastError = String(taskErr);
-                    sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-
-                    if (isExpectedSubagentError(taskErr)) {
-                        // #237: Expected unavailability → stub fallback, not hard failure
-                        sleepTask.status = 'completed';
-                        sleepTask.completed_at = new Date().toISOString();
-                        sleepTask.resolution = 'stub_fallback';
-                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${String(taskErr)}`);
-                    } else {
-                        sleepTask.status = 'failed';
-                        sleepTask.completed_at = new Date().toISOString();
-                        sleepTask.resolution = 'failed_max_retries';
-                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
-                        logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
-                    }
-                }
-            }
-
-            // --- Phase 3: Write results back (re-acquire lock) ---
-            try {
-                const resultLock = await requireQueueLock(queuePath, logger, 'sleepReflectionResult');
-                try {
-                    // Re-read queue to merge with any changes made while lock was released
-                    let freshQueue: (RawQueueItem | EvolutionQueueItem)[] = [];
-                    try {
-                        freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-                    } catch { /* empty queue if corrupted */ }
-
-                    // Merge: update tasks by ID
-                    for (const sleepTask of sleepReflectionTasks) {
-                        const idx = freshQueue.findIndex((t) => (t as { id?: string }).id === sleepTask.id);
-                        if (idx >= 0) {
-                            freshQueue[idx] = sleepTask;
-                        }
-                    }
-                    atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
-
-                    // Log completions to EvolutionLogger
-                    for (const sleepTask of sleepReflectionTasks) {
-                        if (sleepTask.status === 'completed' || sleepTask.status === 'failed') {
-                            evoLogger.logCompleted({
-                                traceId: sleepTask.traceId || sleepTask.id,
-                                taskId: sleepTask.id,
-                                resolution: sleepTask.status === 'completed'
-                                    ? (sleepTask.resolution === 'marker_detected' ? 'marker_detected' : 'manual')
-                                    : 'manual',
-                                durationMs: sleepTask.started_at
-                                    ? Date.now() - new Date(sleepTask.started_at).getTime()
-                                    : undefined,
-                            });
-                        }
-                    }
-                } finally {
-                    resultLock();
-                }
-            } catch (resultLockErr) {
-                // If we can't re-acquire lock, results are in memory but not persisted.
-                // Tasks will appear stuck as in_progress and will be retried on next cycle.
-                logger?.warn?.(`[PD:EvolutionWorker] Failed to write sleep_reflection results back: ${String(resultLockErr)}`);
-            }
-
-            // Phase 40: Process failure classification — evaluate once per taskKind,
-            // not per-outcome, to prevent tier escalation from firing N times for N failures.
-            try {
-                const hadAnySuccess = sleepOutcomes.some(o => o.succeeded);
-                const hadAnyFailure = sleepOutcomes.some(o => !o.succeeded);
-                if (hadAnySuccess) {
-                    await resetFailureState(wctx.stateDir, 'sleep_reflection');
-                }
-                if (hadAnyFailure) {
-                    const config = loadCooldownEscalationConfig(wctx.stateDir);
-                    const result = classifyFailure(queue, 'sleep_reflection', config.consecutive_threshold);
-                    if (result.classification === 'persistent') {
-                        await recordPersistentFailure(wctx.stateDir, 'sleep_reflection', config, result.consecutiveFailures);
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection persistent failure (${result.consecutiveFailures} consecutive), escalating cooldown`);
-                    }
-                }
-            } catch { /* classification errors are non-blocking */ }
-
-            // keyword_optimization tasks are deferred to the next heartbeat cycle.
-            // Running both in the same cycle causes stale queue overwrite and
-            // double lock release (lock was released at line ~1703).
-            lockReleased = true;
-            return;
-        }
-
-        // ── keyword_optimization task processing ──────────────────────────────
-        // Process keyword_optimization tasks independently of sleep_reflection.
-        // Uses CorrectionObserverWorkflowManager to dispatch LLM subagent and
-        // KeywordOptimizationService to apply mutations to keyword store (CORR-09).
-        const pendingKeywordOptTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'keyword_optimization');
-        const inProgressKeywordOptTasks = queue.filter(t =>
-            t.status === 'in_progress' &&
-            t.taskKind === 'keyword_optimization' &&
-            t.resultRef &&
-            !t.resultRef.startsWith('trinity-draft')
-        );
-        const keywordOptTasks = [...pendingKeywordOptTasks, ...inProgressKeywordOptTasks];
-        // Phase 40: Check if keyword_optimization is in cooldown due to persistent failures
-        const kwOptCooldown = isTaskKindInCooldown(wctx.stateDir, 'keyword_optimization');
-        if (kwOptCooldown.inCooldown) {
-            logger?.info?.(`[PD:EvolutionWorker] keyword_optimization in cooldown (remaining ${Math.round(kwOptCooldown.remainingMs / 60000)}min), skipping task processing`);
-            if (keywordOptTasks.length > 0) {
-                // Skip all keyword_optimization tasks this cycle; release lock and return
-                if (queueChanged) {
-                    saveEvolutionQueue(queuePath, queue);
-                }
-                releaseLock();
-                lockReleased = true;
-                return;
-            }
-        }
-        if (keywordOptTasks.length > 0) {
-            // Claim pending tasks inside lock
-            for (const koTask of pendingKeywordOptTasks) {
-                koTask.status = 'in_progress';
-                koTask.started_at = new Date().toISOString();
-            }
-            queueChanged = queueChanged || pendingKeywordOptTasks.length > 0;
-
-            // Release lock during LLM dispatch (long-running)
-            saveEvolutionQueue(queuePath, queue);
-            releaseLock();
-            lockReleased = true;
-
-            // Phase 40: Track outcomes for failure classification after queue write
-            const kwOptOutcomes: Array<{ taskKind: ClassifiableTaskKind; succeeded: boolean }> = [];
-            for (const koTask of keywordOptTasks) {
-                const isPolling = !!koTask.resultRef && !koTask.resultRef.startsWith('trinity-draft');
-
-                if (isPolling) {
-                    logger?.debug?.(`[PD:EvolutionWorker] Polling existing keyword_optimization task ${koTask.id}`);
-                } else {
-                    logger?.info?.(`[PD:EvolutionWorker] Processing keyword_optimization task ${koTask.id}`);
-                }
-
-                try {
-                    // Build trajectoryHistory via KeywordOptimizationService
-                    const koService = KeywordOptimizationService.get(wctx.stateDir, wctx.workspaceDir, logger);
-                    const db = TrajectoryRegistry.get(wctx.workspaceDir);
-                    const recentSessionIds = db.listRecentSessions({ limit: 10 }).map(s => s.sessionId);
-                    const trajectoryHistory = await koService.buildTrajectoryHistory(recentSessionIds);
-
-                    // Build full payload (CORR-09, D-40-07, D-40-08)
-                    const learner = CorrectionCueLearner.get(wctx.stateDir);
-                    const store = learner.getStore();
-                    const payload: CorrectionObserverPayload = {
-                        workspaceDir: wctx.workspaceDir,
-                        parentSessionId: `keyword_optimization:${koTask.id}`,
-                        keywordStoreSummary: {
-                            totalKeywords: store.keywords.length,
-                            terms: store.keywords.map(k => ({
-                                term: k.term,
-                                weight: k.weight,
-                                hitCount: k.hitCount ?? 0,
-                                truePositiveCount: k.truePositiveCount ?? 0,
-                                falsePositiveCount: k.falsePositiveCount ?? 0,
-                            })),
-                        },
-                        recentMessages: [],
-                        trajectoryHistory,
-                    };
-
-                    // Dispatch LLM subagent via CorrectionObserverWorkflowManager
-                    const manager = new CorrectionObserverWorkflowManager({
-                        workspaceDir: wctx.workspaceDir,
-                        logger,
-                        subagent: api?.runtime?.subagent!,  
-                        agentSession: api?.runtime?.agent?.session,
-                    });
-
-                    let workflowId: string | undefined;
-                    if (!isPolling) {
-                        const handle = await manager.startWorkflow(correctionObserverWorkflowSpec, {
-                            parentSessionId: `keyword_optimization:${koTask.id}`,
-                            workspaceDir: wctx.workspaceDir,
-                            taskInput: payload,
-                        });
-                        workflowId = handle.workflowId;
-                        koTask.resultRef = workflowId;
-                    } else {
-                        workflowId = koTask.resultRef!;  
-                    }
-
-                    // Poll workflow state
-                    const summary = await manager.getWorkflowDebugSummary(workflowId);
-                    if (summary) {
-                        if (summary.state === 'completed') {
-                            // Get parsed LLM result and apply mutations to keyword store (CORR-09)
-                            const parsedResult = await manager.getWorkflowResult(workflowId);
-
-                            if (parsedResult?.updated) {
-                                koService.applyResult(parsedResult);
-                                await learner.recordOptimizationPerformed();
-                                logger?.info?.(`[PD:EvolutionWorker] keyword_optimization applied mutations: ${parsedResult.summary}`);
-                            } else {
-                                logger?.info?.(`[PD:EvolutionWorker] keyword_optimization completed with no updates`);
-                            }
-
-                            koTask.status = 'completed';
-                            koTask.completed_at = new Date().toISOString();
-                            koTask.resolution = 'marker_detected';
-                            kwOptOutcomes.push({ taskKind: 'keyword_optimization', succeeded: true });
-                            // CORR-08: Record throttle quota (max 4/day)
-                            recordCooldown(wctx.stateDir).catch(err =>
-                                logger?.warn?.(`[PD:EvolutionWorker] recordCooldown failed (non-blocking): ${String(err)}`)
-                            );
-                            logger?.info?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow completed`);
-                        } else if (summary.state === 'terminal_error') {
-                            koTask.status = 'failed';
-                            koTask.completed_at = new Date().toISOString();
-                            koTask.resolution = 'failed_max_retries';
-                            kwOptOutcomes.push({ taskKind: 'keyword_optimization', succeeded: false });
-                            koTask.retryCount = (koTask.retryCount ?? 0) + 1;
-                            const lastEvent = summary.recentEvents[summary.recentEvents.length - 1];
-                            koTask.lastError = `keyword_optimization failed: ${lastEvent?.reason ?? 'unknown'}`;
-                            logger?.warn?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow terminal_error: ${koTask.lastError}`);
-                        } else {
-                            logger?.info?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow ${summary.state}, will poll again next cycle`);
-                        }
-                    }
-                } catch (koErr) {
-                    koTask.status = 'failed';
-                    koTask.completed_at = new Date().toISOString();
-                    koTask.resolution = 'failed_max_retries';
-                    kwOptOutcomes.push({ taskKind: 'keyword_optimization', succeeded: false });
-                    koTask.lastError = String(koErr);
-                    koTask.retryCount = (koTask.retryCount ?? 0) + 1;
-                    logger?.error?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} threw: ${koErr}`);
-                }
-            }
-
-            // Re-acquire lock to write results
-            const koResultLock = await requireQueueLock(queuePath, logger, 'keywordOptResult');
-            try {
-                let freshQueue: (RawQueueItem | EvolutionQueueItem)[] = [];
-                try {
-                    freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-                } catch (readErr) {
-                    // Queue file corrupted — log warning but preserve in-memory task state
-                    logger?.warn?.(`[PD:EvolutionWorker] Queue file corrupted (${String(readErr)}), preserving in-memory state`);
-                    freshQueue = [];
-                }
-
-                // Append or replace keyword_optimization tasks
-                for (const koTask of keywordOptTasks) {
-                    const idx = freshQueue.findIndex((t) => (t as { id?: string }).id === koTask.id);
-                    if (idx >= 0) {
-                        freshQueue[idx] = koTask;
-                    } else {
-                        freshQueue.push(koTask);
-                    }
-                }
-                atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
-            } catch (koResultErr) {
-                logger?.warn?.(`[PD:EvolutionWorker] Failed to write keyword_optimization results: ${String(koResultErr)}`);
-            } finally {
-                koResultLock();
-            }
-
-            // Phase 40: Process failure classification — evaluate once per taskKind
-            try {
-                const hadAnySuccess = kwOptOutcomes.some(o => o.succeeded);
-                const hadAnyFailure = kwOptOutcomes.some(o => !o.succeeded);
-                if (hadAnySuccess) {
-                    await resetFailureState(wctx.stateDir, 'keyword_optimization');
-                }
-                if (hadAnyFailure) {
-                    const config = loadCooldownEscalationConfig(wctx.stateDir);
-                    const freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
-                    const result = classifyFailure(freshQueue, 'keyword_optimization', config.consecutive_threshold);
-                    if (result.classification === 'persistent') {
-                        await recordPersistentFailure(wctx.stateDir, 'keyword_optimization', config, result.consecutiveFailures);
-                        logger?.warn?.(`[PD:EvolutionWorker] keyword_optimization persistent failure (${result.consecutiveFailures} consecutive), escalating cooldown`);
-                    }
-                }
-            } catch { /* classification errors are non-blocking */ }
-
-            return;
-        }
+        // ── sleep_reflection processing RETIRED per ADR-0012 (PRI-119) ──
+        // Any existing pending/in_progress tasks were terminalized above.
+        // No Nocturnal execution is started. The remaining dead code blocks
+        // (sleep_reflection processing at ~line 660, keyword_optimization at ~line 1000)
+        // are never reached because the filter arrays are empty.
+        // Full removal tracked in PRI-230.
+        // ── sleep_reflection dead code removed (retired per ADR-0012 / PRI-119) ──
+        // Full removal tracked in PRI-230.
 
         if (queueChanged) {
             saveEvolutionQueue(queuePath, queue);
@@ -1436,64 +913,19 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             };
 
             try {
-                // Load config on each cycle (supports runtime updates) — single file read
-                const mergedConfig = loadNocturnalConfigMerged(wctx.stateDir);
-                const { sleepReflection: sleepConfig, keywordOptimization: kwOptConfig } = mergedConfig;
-
                 // Compilation backfill: runs on every heartbeat to retry failed compilations.
                 // Fire-and-forget — errors are logged within the function.
                 processCompilationBackfill(wctx, logger).catch((err) => {
                     logger?.error?.(`[PD:EvolutionWorker] CompilationBackfill threw: ${String(err)}`);
                 });
 
-                const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
-                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt} triggerMode=${sleepConfig.trigger_mode}`);
+                // PRI-119: Nocturnal execution retired per ADR-0012.
+                // sleep_reflection idle/periodic trigger, keyword_optimization periodic trigger,
+                // and NocturnalWorkflowManager sweep have been removed.
+                // The heartbeat continues for non-Nocturnal work:
+                // compilation backfill, queue processing, detection queue, watchdog, flush.
 
-                let shouldTrySleepReflection = false;
-
-                // Path 1: Idle-based trigger (default mode)
-                if (idleResult.isIdle && sleepConfig.trigger_mode === 'idle') {
-                    logger?.info?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
-                    shouldTrySleepReflection = true;
-                }
-
-                // keyword_optimization: Independent periodic trigger (CORR-07).
-                // Fires every kwOptConfig.period_heartbeats regardless of trigger_mode.
-                // Has its own dedicated config (default 24 heartbeats = 6 hours).
-                if (kwOptConfig.enabled && heartbeatCounter > 0 && heartbeatCounter % kwOptConfig.period_heartbeats === 0) {
-                    logger?.info?.(`[PD:EvolutionWorker] keyword_optimization trigger at heartbeat ${heartbeatCounter} (trigger_mode=${sleepConfig.trigger_mode})`);
-                    enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
-                        logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
-                    });
-                }
-
-                // Path 2: Periodic trigger for sleep_reflection (fires regardless of idle state)
-                if (sleepConfig.trigger_mode === 'periodic') {
-                    if (heartbeatCounter >= sleepConfig.period_heartbeats) {
-                        logger?.info?.(`[PD:EvolutionWorker] Periodic trigger: heartbeatCounter=${heartbeatCounter} >= period_heartbeats=${sleepConfig.period_heartbeats}`);
-                        shouldTrySleepReflection = true;
-                        heartbeatCounter = 0; // Reset counter
-                    } else {
-                        logger?.info?.(`[PD:EvolutionWorker] Periodic: ${heartbeatCounter}/${sleepConfig.period_heartbeats} heartbeats — waiting`);
-                    }
-                }
-
-                if (shouldTrySleepReflection) {
-                    const cooldown = checkCooldown(wctx.stateDir, undefined, {
-                        globalCooldownMs: sleepConfig.cooldown_ms,
-                        maxRunsPerWindow: sleepConfig.max_runs_per_day,
-                        quotaWindowMs: 24 * 60 * 60 * 1000,
-                    });
-                    logger?.info?.(`[PD:EvolutionWorker] Cooldown check: globalCooldownActive=${cooldown.globalCooldownActive} quotaExhausted=${cooldown.quotaExhausted} runsRemaining=${cooldown.runsRemaining}`);
-                    if (!cooldown.globalCooldownActive && !cooldown.quotaExhausted) {
-                        logger?.info?.('[PD:EvolutionWorker] Attempting to enqueue sleep_reflection task...');
-                        enqueueSleepReflectionTask(wctx, logger).catch((err) => {
-                            logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue sleep_reflection task: ${String(err)}`);
-                        });
-                    } else {
-                        logger?.info?.(`[PD:EvolutionWorker] Skipping sleep_reflection: globalCooldown=${cooldown.globalCooldownActive} quotaExhausted=${cooldown.quotaExhausted}`);
-                    }
-                }
+                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} nocturnal=retired_per_ADR-0012`);
 
                 const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
                 cycleResult.queue = queueResult.queue;
@@ -1505,45 +937,39 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // processPromotion removed (D-06) — promotion via PAIN_CANDIDATES no longer needed
 
                 try {
-                    // Delegate to workflow managers' sweepExpiredWorkflows so that
-                    // session/transcript cleanup runs via driver.deleteSession().
+                    // PRI-119: NocturnalWorkflowManager retired per ADR-0012.
+                    // Cleanup-only: delete expired session resources via Runtime API when available.
+                    // When runtime unavailable, log structured failure (not silent per ERR-002).
+                    // No Nocturnal business execution is started.
                     const subagentRuntime = api?.runtime?.subagent;
-                    const agentSession = api?.runtime?.agent?.session;
-                    if (subagentRuntime) {
-                        let swept = 0;
-
-                        // Sweep Nocturnal workflows (with gateway-safe fallback)
-                        // EmpathyObserverWorkflowManager sweep removed — M8: superseded by Runtime v2
-                        if (api?.runtime) {
-                            try {
-                                const nocturnalMgr = new NocturnalWorkflowManager({
-                                    workspaceDir: wctx.workspaceDir,
-                                    stateDir: wctx.stateDir,
-                                    logger: api.logger,
-                                    runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
-                                    subagent: api.runtime.subagent,
-                                });
-                                swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime, agentSession);
-                                nocturnalMgr.dispose();
-                            } catch (noctSweepErr) {
-                                logger?.warn?.(`[PD:EvolutionWorker] Nocturnal sweep failed: ${String(noctSweepErr)}`);
-                            }
-                        }
-
-                        if (swept > 0) {
-                            logger?.info?.(`[PD:EvolutionWorker] Swept ${swept} expired workflows (with session cleanup)`);
-                        }
-                    } else {
-                        // Fallback: if subagent runtime unavailable, mark as expired
-                        // but log that session cleanup was skipped.
-                        const workflowStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
+                    const workflowStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
+                    try {
                         const expiredWorkflows = workflowStore.getExpiredWorkflows(WORKFLOW_TTL_MS);
                         for (const wf of expiredWorkflows) {
+                            // Attempt session cleanup when runtime is available
+                            if (subagentRuntime && wf.child_session_key) {
+                                try {
+                                    await subagentRuntime.deleteSession({ sessionKey: wf.child_session_key, deleteTranscript: true });
+                                    workflowStore.updateCleanupState(wf.workflow_id, 'completed');
+                                    logger?.info?.(`[PD:EvolutionWorker] Cleaned up session ${wf.child_session_key} for expired workflow ${wf.workflow_id}`);
+                                } catch (cleanupErr) {
+                                    const errMsg = `Session cleanup failed for workflow ${wf.workflow_id} (child_session=${wf.child_session_key}): ${String(cleanupErr)}`;
+                                    workflowStore.updateCleanupState(wf.workflow_id, 'failed');
+                                    cycleResult.errors.push(errMsg);
+                                    logger?.warn?.(`[PD:EvolutionWorker] ${errMsg}`);
+                                }
+                            } else if (wf.child_session_key) {
+                                // Runtime unavailable but session exists — structured failure, not silent
+                                const errMsg = `Session cleanup unavailable for workflow ${wf.workflow_id} (child_session=${wf.child_session_key}): subagentRuntime not in gateway context`;
+                                workflowStore.updateCleanupState(wf.workflow_id, 'failed');
+                                cycleResult.errors.push(errMsg);
+                                logger?.warn?.(`[PD:EvolutionWorker] ${errMsg}`);
+                            }
                             workflowStore.updateWorkflowState(wf.workflow_id, 'expired');
-                            workflowStore.updateCleanupState(wf.workflow_id, 'failed');
-                            workflowStore.recordEvent(wf.workflow_id, 'swept', wf.state, 'expired', 'TTL expired (no runtime for session cleanup)', {});
-                            logger?.warn?.(`[PD:EvolutionWorker] Marked workflow ${wf.workflow_id} as expired but could not cleanup session (subagent runtime unavailable)`);
+                            workflowStore.recordEvent(wf.workflow_id, 'swept', wf.state, 'expired', 'TTL expired', {});
+                            logger?.warn?.(`[PD:EvolutionWorker] Marked workflow ${wf.workflow_id} as expired`);
                         }
+                    } finally {
                         workflowStore.dispose();
                     }
                 } catch (sweepErr) {

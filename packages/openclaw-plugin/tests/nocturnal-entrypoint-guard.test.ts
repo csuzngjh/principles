@@ -39,19 +39,16 @@ const PLUGIN_SRC = path.resolve(__dirname, '..', 'src');
 // MVP-Core (ADR-0014): prompt, code_tool_hook / RuleHost, defer_archive only.
 // All idle/night/sleep-reflection/nocturnal dispatch = retirement / live cutover / delete blocker.
 // Retirement chain (current valid issues):
-//   - PRI-228: Cutover pd-nocturnal-review, nocturnal-train, nocturnal-rollout commands
-//   - PRI-229: Replace OpenClawTrinityRuntimeAdapter usage in evolution-worker + merge-gate-audit
-//   - PRI-119: Replace sleep-cycle.ts with Runtime V2 Peer Runner
-//   - PRI-230: Replace NocturnalWorkflowManager with Runtime V2 equivalent
+//   - PRI-119: DONE — Nocturnal callers cut over; 3 commands RETIRED, heartbeat retired,
+//     sleep_reflection/keyword_optimization filters empty, dead code imports retained for PRI-230
+//   - PRI-229: Replace OpenClawTrinityRuntimeAdapter usage in merge-gate-audit (evolution-worker removed in PRI-119)
+//   - PRI-230: Physical deletion of legacy Nocturnal modules
 //   - PRI-231: Retire nocturnal-service.ts, nocturnal-runtime.ts, nocturnal-target-selector.ts, nocturnal-config.ts
 
 const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
   // === index.ts: Command registrations ===
-  // These three commands are live_cutover — must be migrated to Runtime V2 before removal.
+  // PRI-119: Handler imports removed. Commands registered as RETIRED with inline retirement handlers.
   'index.ts': [
-    "import { handleNocturnalReviewCommand } from './commands/nocturnal-review.js'",
-    "import { handleNocturnalTrainCommand } from './commands/nocturnal-train.js'",
-    "import { handleNocturnalRolloutCommand } from './commands/nocturnal-rollout.js'",
     "import { EvolutionWorkerService } from './service/evolution-worker.js'",
   ],
 
@@ -71,11 +68,9 @@ const ALLOWED_NOCTURNAL_IMPORTS: Record<string, string[]> = {
   'commands/export.ts': ['nocturnal-export'],
 
   // === service/evolution-worker.ts: EvolutionWorker heartbeat ===
-  // Contains live_cutover (queue processing + OpenClawTrinityRuntimeAdapter). Not MVP-Core per ADR-0014.
+  // PRI-119: Active Nocturnal paths retired. Imports below are dead code retained for PRI-230.
   'service/evolution-worker.ts': [
     'enqueueSleepReflectionTask',
-    'checkWorkspaceIdle',
-    'checkCooldown',
     'recordCooldown',
     'OpenClawTrinityRuntimeAdapter',
     'sleep_reflection',
@@ -249,18 +244,24 @@ describe('Nocturnal entrypoint guard', () => {
     const indexPath = path.join(PLUGIN_SRC, 'index.ts');
     const content = fs.readFileSync(indexPath, 'utf-8');
 
-    // Verify all three nocturnal commands are still registered (they should be
-    // until the cutover is complete — this test checks they haven't been silently
-    // removed without updating the census).
+    // PRI-119: Commands still registered but as RETIRED (inline retirement handlers).
+    // The command names must still appear so that /pd-nocturnal-review etc. get a
+    // retirement message instead of "unknown command".
     const hasNocturnalReview = content.includes('pd-nocturnal-review');
     const hasNocturnalTrain = content.includes('nocturnal-train');
     const hasNocturnalRollout = content.includes('nocturnal-rollout');
 
-    // TODO: Once PRI-228 is complete, these should all be false.
-    // Until then, they must all be true (commands exist as live_cutover).
     expect(hasNocturnalReview).toBe(true);
     expect(hasNocturnalTrain).toBe(true);
     expect(hasNocturnalRollout).toBe(true);
+
+    // PRI-119: Verify the retirement helper is present
+    expect(content).toContain('RETIRED_NOCTURNAL_MSG');
+
+    // PRI-119: Handler imports should be gone
+    expect(content).not.toContain('handleNocturnalReviewCommand');
+    expect(content).not.toContain('handleNocturnalTrainCommand');
+    expect(content).not.toContain('handleNocturnalRolloutCommand');
   });
 
   // -----------------------------------------------------------------------
@@ -271,16 +272,19 @@ describe('Nocturnal entrypoint guard', () => {
     const ewPath = path.join(PLUGIN_SRC, 'service', 'evolution-worker.ts');
     const content = fs.readFileSync(ewPath, 'utf-8');
 
-    // Verify the specific allowlisted patterns exist
+    // PRI-119: Only dead code imports remain. Active paths removed.
     const checkPatterns = [
-      'enqueueSleepReflectionTask', // compat_alias re-export
-      'checkWorkspaceIdle',         // live_cutover import
-      'checkCooldown',              // live_cutover import
+      'enqueueSleepReflectionTask', // dead code import (PRI-230 target)
+      'OpenClawTrinityRuntimeAdapter', // dead code import (PRI-230 target)
     ];
 
     for (const pattern of checkPatterns) {
       expect(content).toContain(pattern);
     }
+
+    // PRI-119: Active Nocturnal callers must be gone
+    expect(content).not.toContain('checkWorkspaceIdle');
+    expect(content).not.toContain('checkCooldown');
   });
 
   // -----------------------------------------------------------------------
@@ -305,11 +309,13 @@ describe('Nocturnal entrypoint guard', () => {
     );
     // At the time of writing this guard, the non-frozen allowlist entries are:
     // commands/nocturnal-review.ts, commands/nocturnal-train.ts, commands/nocturnal-rollout.ts,
-    // commands/pd-reflect.ts, service/evolution-worker.ts, service/sleep-cycle.ts,
-    // service/queue-io.ts, service/evolution-pain-context.ts, core/merge-gate-audit.ts,
+    // commands/pd-reflect.ts, commands/export.ts, service/evolution-worker.ts, service/sleep-cycle.ts,
+    // service/queue-io.ts, service/evolution-pain-context.ts, service/startup-reconciler.ts,
+    // service/cooldown-strategy.ts, core/merge-gate-audit.ts,
     // service/subagent-workflow/workflow-store.ts (type-only)
     // core/event-log.ts (nocturnal event type names), core/reflection/reflection-context.ts,
-    // core/replay-engine.ts, service/subagent-workflow/types.ts (type definitions)
+    // core/replay-engine.ts, service/subagent-workflow/types.ts (type definitions),
+    // core/principle-internalization/filesystem-lifecycle-datasource.ts, core/correction-cue-learner.ts
     expect(nonFrozen.length).toBeLessThanOrEqual(19);
   });
 

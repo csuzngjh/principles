@@ -18,10 +18,12 @@
 
 ---
 
-> Agent-first cognitive governance for OpenClaw coding agents.
+> Owner-governed behavior internalization for AI agents.
 > Human-supervised. Locally stored. Pain-driven.
 
-Principles Disciple is an OpenClaw plugin that helps coding agents capture repeated behavior problems and turn reviewed lessons into reusable principles.
+Principles Disciple is an OpenClaw plugin that helps owners turn repeated, meaningful agent behavior evidence into reviewed, reversible principles that can shape future behavior.
+
+**Canonical product definition:** [PRODUCT_IDENTITY.md](PRODUCT_IDENTITY.md)
 
 > **MVP status (2026-05-24):** the validation path focuses on pain capture, diagnosis, internalization, and three reviewed activation outcomes: prompt guidance, RuleHost enforcement, and defer/archive. Broader learning and agent-lifecycle expansions are deferred until seed-customer evidence exists.
 
@@ -60,12 +62,12 @@ After installation, wake up through the workspace memory:
 
 ### 🧑‍💻 I am a human operator
 
-Install Principles Disciple if you want your OpenClaw agent to:
-- Stop repeating the same mistakes.
-- Avoid unsafe edits without a ready plan.
-- Expose its evolution state in a local console.
+Install Principles Disciple if you want to:
+- identify repeated agent behaviors that do not match how you want work done;
+- review and activate durable behavioral guidance or enforcement;
+- observe and roll back changes to agent behavior through a local console.
 
-**Is it safe?** Yes. PD writes rules as local sandbox files and tracks everything via SQLite. All autonomous evolutions can be inspected, rolled back, or disabled by you.
+**Is it safe?** Yes. PD writes rules as local sandbox files and tracks everything via SQLite. All owner-approved behavior changes can be inspected, rolled back, or disabled by you.
 
 👉 **See human guide:** [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md)
 
@@ -96,11 +98,11 @@ It should:
 
 ### 2. Pain signal capture
 
-Tool failures, repeated confusion, user corrections, blocked edits, and stuck loops can be recorded as structured pain signals.
+Tool failures, repeated confusion, user corrections, blocked edits, risky near-misses, and recurring work-style mismatches can be recorded as structured pain signals.
 
 Pain is not punishment.
 
-Pain is evidence.
+Pain is owner-relevant behavior evidence, not a claim that every task failure should become a principle.
 
 The agent uses these signals to understand where its behavior needs to improve.
 
@@ -154,13 +156,16 @@ State is stored locally.
 
 Principles Disciple is not:
 
+- a task execution engine;
+- a general memory system or external brain;
+- a generic tool-call or output-format repair product;
 - a general-purpose agent framework;
 - a LangChain-style app builder;
 - a SaaS product;
 - a chatbot;
 - a magic self-improvement button.
 
-It is a behavior-governance and learning layer for OpenClaw coding agents.
+It is an owner-governed behavior internalization layer for OpenClaw coding agents.
 
 ## Current status
 
@@ -195,10 +200,10 @@ A coding agent should not only complete tasks.
 It should learn from the pain of doing real work.
 
 ```text
-Pain + Reflection + Replay + Human Review = Safer Agent Evolution
+Behavior Evidence + Reflection + Owner Review + Reversible Activation = Better-Aligned Agent Behavior
 ```
 
-Principles Disciple is an attempt to turn that loop into a local, inspectable, agent-first system.
+Principles Disciple is an attempt to turn that loop into a local, inspectable, owner-governed system.
 
 ---
 
@@ -227,7 +232,7 @@ A: Check `{stateDir}/logs/`:
 
 > *"Pain + Reflection = Progress"* — Ray Dalio
 
-This framework encodes evolutionary logic into AI. By transforming errors into principles, we're building digital teammates that learn and grow alongside you.
+By transforming owner-relevant behavior evidence into reviewed principles, PD helps agents align with how you want work done.
 
 **[Report Issues](https://github.com/csuzngjh/principles/issues)** | **[Join Discord](https://discord.gg/)** | **[Documentation](docs/)**
 

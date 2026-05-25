@@ -45,9 +45,12 @@ import { handleEvolutionStatusCommand } from './commands/evolution-status.js';
 import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js';
 import { handleExportCommand } from './commands/export.js';
 import { handleSamplesCommand } from './commands/samples.js';
-import { handleNocturnalReviewCommand } from './commands/nocturnal-review.js';
-import { handleNocturnalTrainCommand } from './commands/nocturnal-train.js';
-import { handleNocturnalRolloutCommand } from './commands/nocturnal-rollout.js';
+// PRI-119: Nocturnal command handlers retired per ADR-0012.
+// Handler imports removed; commands replaced with structured rejection messages.
+// Physical deletion tracked in PRI-230.
+const RETIRED_NOCTURNAL_MSG = (cmd: string) =>
+  `This command has been retired. /${cmd} is no longer available — Nocturnal execution has been cut over to Runtime V2 (ADR-0012). ` +
+  'Next action: Use `pd runtime internalization` CLI commands for internalization workflows.';
 import { handleWorkflowDebugCommand } from './commands/workflow-debug.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { TrajectoryService } from './service/trajectory-service.js';
@@ -618,52 +621,26 @@ const plugin = {
       }
     });
 
+    // PRI-119: Nocturnal commands retired per ADR-0012.
     api.registerCommand({
       name: "pd-nocturnal-review",
-      description: 'Review nocturnal dataset samples [list|show|approve|reject|set-family|stats]',
+      description: '[RETIRED] Nocturnal review retired per ADR-0012',
       acceptsArgs: true,
-      handler: (ctx) => {
-        try {
-          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
-          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleNocturnalReviewCommand(ctx);
-        } catch (err) {
-          api.logger.error(`[PD] Command /pd-nocturnal-review failed: ${String(err)}`);
-          return { text: language === 'zh' ? "Nocturnal review 命令执行失败，请检查日志。" : "Nocturnal review command failed. Check logs." };
-        }
-      }
+      handler: () => ({ text: RETIRED_NOCTURNAL_MSG('pd-nocturnal-review') }),
     });
 
     api.registerCommand({
       name: "nocturnal-train",
-      description: 'Nocturnal training operations [create-experiment|show-experiment|import-result|attach-eval|show-lineage|list-experiments|list-checkpoints|stats]',
+      description: '[RETIRED] Nocturnal training retired per ADR-0012',
       acceptsArgs: true,
-      handler: (ctx) => {
-        try {
-          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
-          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleNocturnalTrainCommand(ctx);
-        } catch (err) {
-          api.logger.error(`[PD] Command /nocturnal-train failed: ${String(err)}`);
-          return { text: language === 'zh' ? "Nocturnal train 命令执行失败，请检查日志。" : "Nocturnal train command failed. Check logs." };
-        }
-      }
+      handler: () => ({ text: RETIRED_NOCTURNAL_MSG('nocturnal-train') }),
     });
 
     api.registerCommand({
       name: "nocturnal-rollout",
-      description: 'Nocturnal rollout and promotion [evaluate-promotion|advance-promotion|bind|enable-routing|disable-routing|rollback|status|show-promotion]',
+      description: '[RETIRED] Nocturnal rollout retired per ADR-0012',
       acceptsArgs: true,
-      handler: (ctx) => {
-        try {
-          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
-          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleNocturnalRolloutCommand(ctx);
-        } catch (err) {
-          api.logger.error(`[PD] Command /nocturnal-rollout failed: ${String(err)}`);
-          return { text: language === 'zh' ? "Nocturnal rollout 命令执行失败，请检查日志。" : "Nocturnal rollout command failed. Check logs." };
-        }
-      }
+      handler: () => ({ text: RETIRED_NOCTURNAL_MSG('nocturnal-rollout') }),
     });
 
     api.registerCommand({
