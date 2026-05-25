@@ -38,19 +38,12 @@ import { handleFocusCommand } from './commands/focus.js';
 import { handleRollbackCommand } from './commands/rollback.js';
 import { handlePromoteImplCommand } from './commands/promote-impl.js';
 import { handleDisableImplCommand } from './commands/disable-impl.js';
-import { handlePdReflect } from './commands/pd-reflect.js';
 import { handleArchiveImplCommand } from './commands/archive-impl.js';
 import { handleRollbackImplCommand } from './commands/rollback-impl.js';
 import { handleEvolutionStatusCommand } from './commands/evolution-status.js';
 import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js';
 import { handleExportCommand } from './commands/export.js';
 import { handleSamplesCommand } from './commands/samples.js';
-// PRI-119: Nocturnal command handlers retired per ADR-0012.
-// Handler imports removed; commands replaced with structured rejection messages.
-// Physical deletion tracked in PRI-230.
-const RETIRED_NOCTURNAL_MSG = (cmd: string) =>
-  `This command has been retired. /${cmd} is no longer available — Nocturnal execution has been cut over to Runtime V2 (ADR-0012). ` +
-  'Next action: Use `pd runtime internalization` CLI commands for internalization workflows.';
 import { handleWorkflowDebugCommand } from './commands/workflow-debug.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { TrajectoryService } from './service/trajectory-service.js';
@@ -60,13 +53,11 @@ import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
-import { extractAgentIdFromSessionKey } from './utils/session-key.js';
 import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe } from './utils/workspace-resolver.js';
 import { computeRuntimeShadowTaskFingerprint, PD_LOCAL_PROFILES } from './utils/shadow-fingerprint.js';
 import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { resolveWorkspaceDirFromApi } from './core/path-resolver.js';
-import { resolveRequiredWorkspaceDir } from './core/workspace-dir-service.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
@@ -400,17 +391,6 @@ const plugin = {
      
     registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
      
-    registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => {
-      try {
-        // Resolve agentId from sessionKey (if available), fallback to 'main'
-        const agentId = extractAgentIdFromSessionKey(ctx.sessionKey) ?? 'main';
-        const workspaceDir = resolveRequiredWorkspaceDir(api, { ...ctx, agentId }, { source: 'pd-reflect', fallbackAgentId: 'main' });
-        return handlePdReflect.handler({ ...ctx, api, workspaceDir });
-      } catch (err) {
-        api.logger.error(`[PD:pd-reflect] Command failed: ${String(err)}`);
-        return { text: language === 'zh' ? '命令执行失败，请查看日志。' : 'Command failed. Check logs.' };
-      }
-    });
     registerCommandWithAlias('pd-daily', 'pdd', getCommandDescription('pd-daily', language), () => ({
       text: language === 'zh'
         ? "请执行 pd-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。"
@@ -438,7 +418,6 @@ const plugin = {
 |--------|--------|------|
 | \`/pdk\` | \`/pd-okr\` | OKR 目标管理 |
 | \`/pdt\` | \`/pd-thinking\` | 思维模型管理 |
-| \`/pdrl\` | \`/pd-reflect\` | 手动触发反思 |
 | \`/pdd\` | \`/pd-daily\` | 进化日报 |
 | \`/pdg\` | \`/pd-grooming\` | 工作区清理 |
 
@@ -450,7 +429,6 @@ const plugin = {
 | \`/pd-focus\` | 焦点文件管理 |
 | \`/pd-export\` | 导出数据 |
 | \`/pd-samples\` | 审核纠错样本 |
-| \`/pd-nocturnal-review\` | 审核 nocturnal 样本 |
 | \`/pd-rollback\` | 回滚情绪事件惩罚 |
 | \`/pd-principle-rollback\` | 回滚原则 |
 | \`/pd-help\` | 显示本帮助 |
@@ -471,7 +449,6 @@ const plugin = {
 |-------|------|---------|
 | \`/pdk\` | \`/pd-okr\` | OKR goal management |
 | \`/pdt\` | \`/pd-thinking\` | Mental model management |
-| \`/pdrl\` | \`/pd-reflect\` | Manual reflection trigger |
 | \`/pdd\` | \`/pd-daily\` | Evolution report |
 | \`/pdg\` | \`/pd-grooming\` | Workspace cleanup |
 
@@ -483,7 +460,6 @@ const plugin = {
 | \`/pd-focus\` | Focus file management |
 | \`/pd-export\` | Export data |
 | \`/pd-samples\` | Review correction samples |
-| \`/pd-nocturnal-review\` | Review nocturnal samples |
 | \`/pd-rollback\` | Rollback empathy penalty |
 | \`/pd-principle-rollback\` | Rollback principle |
 | \`/pd-help\` | Show this help |
@@ -619,28 +595,6 @@ const plugin = {
           return { text: language === 'zh' ? "样本命令执行失败，请检查日志。" : "Samples command failed. Check logs." };
         }
       }
-    });
-
-    // PRI-119: Nocturnal commands retired per ADR-0012.
-    api.registerCommand({
-      name: "pd-nocturnal-review",
-      description: '[RETIRED] Nocturnal review retired per ADR-0012',
-      acceptsArgs: true,
-      handler: () => ({ text: RETIRED_NOCTURNAL_MSG('pd-nocturnal-review') }),
-    });
-
-    api.registerCommand({
-      name: "nocturnal-train",
-      description: '[RETIRED] Nocturnal training retired per ADR-0012',
-      acceptsArgs: true,
-      handler: () => ({ text: RETIRED_NOCTURNAL_MSG('nocturnal-train') }),
-    });
-
-    api.registerCommand({
-      name: "nocturnal-rollout",
-      description: '[RETIRED] Nocturnal rollout retired per ADR-0012',
-      acceptsArgs: true,
-      handler: () => ({ text: RETIRED_NOCTURNAL_MSG('nocturnal-rollout') }),
     });
 
     api.registerCommand({

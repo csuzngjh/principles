@@ -1,8 +1,19 @@
 import type { LifecycleDatasource } from '@principles/core/runtime-v2';
 import type { LedgerTreeStore, ReplayReport, ArtifactLineageRecord } from '@principles/core/runtime-v2';
 import { loadLedger } from '../principle-tree-ledger.js';
-import { listArtifactLineageRecords } from '../nocturnal-artifact-lineage.js';
 import { ReplayEngine } from '../replay-engine.js';
+
+export class LineageSourceRetiredError extends Error {
+  constructor() {
+    super(
+      'Artifact lineage source retired in PRI-230. ' +
+      'The nocturnal-artifact-lineage module has been deleted; ' +
+      'this datasource cannot provide lineage records. ' +
+      'Callers must handle this error explicitly rather than interpreting an empty result as "no lineage".'
+    );
+    this.name = 'LineageSourceRetiredError';
+  }
+}
 
 export class FilesystemLifecycleDatasource implements LifecycleDatasource {
   private _engine?: ReplayEngine;
@@ -25,7 +36,7 @@ export class FilesystemLifecycleDatasource implements LifecycleDatasource {
     return this.engine.listReports(implementationId);
   }
 
-  listLineageRecords(kind: 'behavioral-sample' | 'rule-implementation-candidate'): ArtifactLineageRecord[] {
-    return listArtifactLineageRecords(this.workspaceDir, kind);
+  listLineageRecords(_kind: 'behavioral-sample' | 'rule-implementation-candidate'): ArtifactLineageRecord[] {
+    throw new LineageSourceRetiredError();
   }
 }

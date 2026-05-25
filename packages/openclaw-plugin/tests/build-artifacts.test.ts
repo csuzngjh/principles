@@ -17,7 +17,7 @@ const __dirname = dirname(__filename);
 const packageRoot = join(__dirname, '..');
 
 describe('Build Artifacts', () => {
-  const isProductionBuild = existsSync(join(packageRoot, 'dist'));
+  const isProductionBuild = existsSync(join(packageRoot, 'dist', 'bundle.js'));
 
   describe('Required paths', () => {
     const requiredPaths = [
@@ -36,8 +36,6 @@ describe('Build Artifacts', () => {
   });
 
   // NOTE: agents/ directory was removed in favor of embedded prompts.
-  // All role prompts are now inlined in nocturnal-trinity.ts at build time.
-  // See: nocturnal-trinity.ts NOCTURNAL_DREAMER_PROMPT, etc.
 
   describe('Templates', () => {
     it('should have templates directory with subdirectories', () => {
