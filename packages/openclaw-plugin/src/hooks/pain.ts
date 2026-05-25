@@ -10,8 +10,7 @@ import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
 import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
-import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
-import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
+import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 
@@ -112,14 +111,14 @@ export function handleAfterToolCall(
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> },
   api?: OpenClawPluginApi
 ): void {
-  const effectiveWorkspaceDir = api
-    ? resolveWorkspaceDir(api, ctx, { source: 'after_tool_call' })
-    : validateWorkspaceDir(ctx.workspaceDir) ? undefined : ctx.workspaceDir;
-  if (!effectiveWorkspaceDir) {
+  let effectiveWorkspaceDir: string;
+  try {
+    effectiveWorkspaceDir = resolveWorkspaceDirForRuntimeV2(ctx, api, 'after_tool_call');
+  } catch {
     return;
   }
 
-  const wctx = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir: effectiveWorkspaceDir });
+  const wctx = WorkspaceContext.fromHookContextExplicit({ ...ctx, workspaceDir: effectiveWorkspaceDir });
   const {config} = wctx;
   const {eventLog} = wctx;
   const sessionId = ctx.sessionId || 'unknown';
