@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -87,8 +87,8 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       });
     }
 
-    // Seed an already-approved proven record
-    const approvedId = seedApproval('prompt', 'approved', {
+    // Seed an already-approved proven record (used by stats and filter tests)
+    seedApproval('prompt', 'approved', {
       riskLevel: 'low',
       summary: 'Already approved prompt',
     });
