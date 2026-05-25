@@ -113,6 +113,32 @@
         "approvals": "Approvals"
       }
     },
+    "pain": {
+      "title": "Pain",
+      "description": "Pain signals driving principle evolution",
+      "gfiGauge": "GFI Gauge",
+      "empathyEvents": "Empathy Events",
+      "gateBlocks": "Gate Blocks",
+      "severity": "Severity",
+      "source": "Source",
+      "timestamp": "Timestamp",
+      "count": "Count",
+      "totalGFI": "Total GFI",
+      "gfiFull": "GFI (General Friction Index)",
+      "peakToday": "Peak today:",
+      "origin": "Origin:",
+      "gfiAfter": "GFI after:",
+      "emptyHint": "No pain signals yet. Pain signals will appear here when the system detects friction."
+    },
+    "approvals": {
+      "title": "Approval",
+      "description": "Review and approve principle activation requests",
+      "loadFailed": "Failed to load approvals",
+      "detailFailed": "Failed to load approval details",
+      "approveFailed": "Failed to approve",
+      "rejectFailed": "Failed to reject",
+      "emptyHint": "No approval requests pending. Approvals will appear when principles are ready for activation."
+    },
     "feedback": {
       "title": "Feedback",
       "description": "View System Feedback",
