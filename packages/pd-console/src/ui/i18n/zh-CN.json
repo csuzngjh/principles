@@ -481,6 +481,7 @@
         "skill": "技能激活（已停用）",
         "model_training": "模型训练（已停用）"
       },
+      "retired": "此通道已停用，无法执行审批操作",
       "riskLevel": "风险级别"
     },
     "approvalDetail": {

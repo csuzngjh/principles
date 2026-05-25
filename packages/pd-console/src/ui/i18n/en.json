@@ -481,6 +481,7 @@
         "skill": "Skill (retired)",
         "model_training": "Model Training (retired)"
       },
+      "retired": "This channel is retired and cannot be actioned",
       "riskLevel": "Risk Level"
     },
     "approvalDetail": {

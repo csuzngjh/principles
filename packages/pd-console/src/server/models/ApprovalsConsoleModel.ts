@@ -18,25 +18,36 @@ type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; chann
 type ChannelGuardedDecisionResult = ApprovalDecisionResult | UnsupportedChannelResult;
 
 export class ApprovalsConsoleModel {
-  private connection: SqliteConnection | null = null;
-  private queue: ApprovalQueue | null = null;
+  private readConnection: SqliteConnection | null = null;
+  private readQueue: ApprovalQueue | null = null;
+  private writeConnection: SqliteConnection | null = null;
+  private writeQueue: ApprovalQueue | null = null;
   private readonly workspaceDir: string;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
   }
 
-  private getQueue(): ApprovalQueue {
-    if (!this.queue) {
-      this.connection = new SqliteConnection({ workspaceDir: this.workspaceDir });
-      const store = new SqliteApprovalQueueStore(this.connection);
-      this.queue = new ApprovalQueue(store);
+  private getReadQueue(): ApprovalQueue {
+    if (!this.readQueue) {
+      this.readConnection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
+      const store = new SqliteApprovalQueueStore(this.readConnection);
+      this.readQueue = new ApprovalQueue(store);
     }
-    return this.queue;
+    return this.readQueue;
+  }
+
+  private getWriteQueue(): ApprovalQueue {
+    if (!this.writeQueue) {
+      this.writeConnection = new SqliteConnection({ workspaceDir: this.workspaceDir });
+      const store = new SqliteApprovalQueueStore(this.writeConnection);
+      this.writeQueue = new ApprovalQueue(store);
+    }
+    return this.writeQueue;
   }
 
   async listApprovals(filter?: ApprovalListFilter): Promise<ApprovalListResult> {
-    const queue = this.getQueue();
+    const queue = this.getReadQueue();
     const allItems = await queue.listAll({ status: filter?.status, channel: filter?.channel });
     const mvpItems = allItems.filter((record) => MVP_PROVEN_CHANNELS.has(record.channel));
     const total = mvpItems.length;
@@ -62,7 +73,7 @@ export class ApprovalsConsoleModel {
   }
 
   async getApprovalDetail(approvalId: string): Promise<(ApprovalWithContext & { isMvpProven: boolean }) | null> {
-    const queue = this.getQueue();
+    const queue = this.getReadQueue();
     const record = await queue.getById(approvalId);
     if (!record) return null;
     return {
@@ -73,30 +84,35 @@ export class ApprovalsConsoleModel {
   }
 
   async approve(approvalId: string, decidedBy: string, note?: string): Promise<ChannelGuardedDecisionResult> {
-    const queue = this.getQueue();
-    const existing = await queue.getById(approvalId);
+    const readQueue = this.getReadQueue();
+    const existing = await readQueue.getById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
     }
-    return queue.approve(approvalId, decidedBy, note);
+    return this.getWriteQueue().approve(approvalId, decidedBy, note);
   }
 
   async reject(approvalId: string, decidedBy: string, reason: string): Promise<ChannelGuardedDecisionResult> {
-    const queue = this.getQueue();
-    const existing = await queue.getById(approvalId);
+    const readQueue = this.getReadQueue();
+    const existing = await readQueue.getById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
     }
-    return queue.reject(approvalId, decidedBy, reason);
+    return this.getWriteQueue().reject(approvalId, decidedBy, reason);
   }
 
   dispose(): void {
-    if (this.connection) {
-      try { this.connection.close(); } catch { /* best-effort */ }
-      this.connection = null;
+    if (this.readConnection) {
+      try { this.readConnection.close(); } catch { /* best-effort */ }
+      this.readConnection = null;
     }
-    this.queue = null;
+    this.readQueue = null;
+    if (this.writeConnection) {
+      try { this.writeConnection.close(); } catch { /* best-effort */ }
+      this.writeConnection = null;
+    }
+    this.writeQueue = null;
   }
 }

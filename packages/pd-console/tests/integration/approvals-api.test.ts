@@ -11,6 +11,38 @@ import {
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 import { sendJson, sendNotFound } from '../../src/server/utils/response.js';
 
+// ── Runtime guards (no `as` on untrusted data) ─────────────────────────────
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getStringField(obj: unknown, key: string): string | undefined {
+  if (!isRecord(obj)) return undefined;
+  const val = obj[key];
+  return typeof val === 'string' ? val : undefined;
+}
+
+function getBooleanField(obj: unknown, key: string): boolean | undefined {
+  if (!isRecord(obj)) return undefined;
+  const val = obj[key];
+  return typeof val === 'boolean' ? val : undefined;
+}
+
+function getDataObject(body: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(body)) return undefined;
+  const data = body.data;
+  return isRecord(data) ? data : undefined;
+}
+
+function getItemsArray(body: unknown): Array<Record<string, unknown>> | undefined {
+  const data = getDataObject(body);
+  if (!data) return undefined;
+  const items = data.items;
+  if (!Array.isArray(items)) return undefined;
+  return items.filter(isRecord);
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const PROVEN_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
@@ -58,7 +90,6 @@ function seedApproval(channel: string, status: string = 'pending', extra?: Recor
 
 describe('Approvals API — Proven Channel Restrictions', () => {
   beforeAll(async () => {
-    // Create temp workspace with SqliteConnection for direct seeding
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-approval-test-'));
     const stateDir = path.join(tmpDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -138,11 +169,11 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     it('returns only proven channel records (no skill/model_training)', async () => {
       const { status, body } = await fetchJson('/api/v1/approvals');
       expect(status).toBe(200);
-      const data = (body as Record<string, unknown>).data as Record<string, unknown>;
-      const items = data.items as Array<Record<string, unknown>>;
-      const channels = items.map((i) => i.channel as string);
-      // No unsupported channels should appear in results
-      for (const ch of channels) {
+      const items = getItemsArray(body);
+      expect(items).toBeDefined();
+      for (const item of items ?? []) {
+        const ch = getStringField(item, 'channel');
+        expect(ch).toBeDefined();
         expect(UNSUPPORTED_CHANNELS).not.toContain(ch);
       }
     });
@@ -154,15 +185,17 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     it('rejects ?channel=skill with bad request', async () => {
       const { status, body } = await fetchJson('/api/v1/approvals?channel=skill');
       expect(status).toBe(400);
-      const errBody = body as Record<string, unknown>;
-      expect(errBody.success).toBe(false);
+      if (isRecord(body)) {
+        expect(body.success).toBe(false);
+      }
     });
 
     it('rejects ?channel=model_training with bad request', async () => {
       const { status, body } = await fetchJson('/api/v1/approvals?channel=model_training');
       expect(status).toBe(400);
-      const errBody = body as Record<string, unknown>;
-      expect(errBody.success).toBe(false);
+      if (isRecord(body)) {
+        expect(body.success).toBe(false);
+      }
     });
   });
 
@@ -172,30 +205,27 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     it('filters by prompt', async () => {
       const { status, body } = await fetchJson('/api/v1/approvals?channel=prompt');
       expect(status).toBe(200);
-      const data = (body as Record<string, unknown>).data as Record<string, unknown>;
-      const items = data.items as Array<Record<string, unknown>>;
-      for (const item of items) {
-        expect(item.channel).toBe('prompt');
+      const items = getItemsArray(body);
+      for (const item of items ?? []) {
+        expect(getStringField(item, 'channel')).toBe('prompt');
       }
     });
 
     it('filters by code_tool_hook', async () => {
       const { status, body } = await fetchJson('/api/v1/approvals?channel=code_tool_hook');
       expect(status).toBe(200);
-      const data = (body as Record<string, unknown>).data as Record<string, unknown>;
-      const items = data.items as Array<Record<string, unknown>>;
-      for (const item of items) {
-        expect(item.channel).toBe('code_tool_hook');
+      const items = getItemsArray(body);
+      for (const item of items ?? []) {
+        expect(getStringField(item, 'channel')).toBe('code_tool_hook');
       }
     });
 
     it('filters by defer_archive', async () => {
       const { status, body } = await fetchJson('/api/v1/approvals?channel=defer_archive');
       expect(status).toBe(200);
-      const data = (body as Record<string, unknown>).data as Record<string, unknown>;
-      const items = data.items as Array<Record<string, unknown>>;
-      for (const item of items) {
-        expect(item.channel).toBe('defer_archive');
+      const items = getItemsArray(body);
+      for (const item of items ?? []) {
+        expect(getStringField(item, 'channel')).toBe('defer_archive');
       }
     });
   });
@@ -286,39 +316,45 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     let legacyApprovalId: string;
 
     beforeAll(() => {
-      // Get a skill approval ID from the DB
       const db = sqliteConn.getDb();
       const row = db.prepare("SELECT approval_id FROM approvals WHERE channel = 'skill' LIMIT 1").get() as { approval_id: string } | undefined;
       legacyApprovalId = row?.approval_id ?? '';
       expect(legacyApprovalId).toBeTruthy();
     });
 
-    it('detail returns unsupported_channel status for legacy record', async () => {
+    it('detail returns record with isMvpProven=false for legacy record', async () => {
       const { status, body } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}`);
       expect(status).toBe(200);
-      const data = (body as Record<string, unknown>).data as Record<string, unknown>;
-      // Must indicate this is not an MVP-actionable channel
-      expect(typeof data.channel).toBe('string');
-      expect(UNSUPPORTED_CHANNELS).toContain(data.channel);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      const ch = getStringField(data, 'channel');
+      expect(ch).toBeDefined();
+      expect(UNSUPPORTED_CHANNELS).toContain(ch);
+      expect(getBooleanField(data, 'isMvpProven')).toBe(false);
     });
 
-    it('approve on unsupported channel record returns error', async () => {
-      const { status } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}/approve`, {
+    it('approve on unsupported channel returns 403 unsupported_channel', async () => {
+      const { status, body } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: 'test' }),
       });
-      // Must reject: either 403 or 400, not 200
-      expect(status).not.toBe(200);
+      expect(status).toBe(403);
+      if (isRecord(body)) {
+        expect(getStringField(body, 'error')).toBe('unsupported_channel');
+      }
     });
 
-    it('reject on unsupported channel record returns error', async () => {
-      const { status } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}/reject`, {
+    it('reject on unsupported channel returns 403 unsupported_channel', async () => {
+      const { status, body } = await fetchJson(`/api/v1/approvals/${legacyApprovalId}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'test reason for legacy channel rejection' }),
       });
-      expect(status).not.toBe(200);
+      expect(status).toBe(403);
+      if (isRecord(body)) {
+        expect(getStringField(body, 'error')).toBe('unsupported_channel');
+      }
     });
   });
 
@@ -326,7 +362,6 @@ describe('Approvals API — Proven Channel Restrictions', () => {
 
   describe('Proven channel approve/reject flow', () => {
     it('can approve a pending proven-channel record', async () => {
-      // Seed a fresh pending prompt approval
       const approvalId = seedApproval('prompt', 'pending', {
         summary: 'Approvable prompt record',
       });
@@ -337,8 +372,9 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         body: JSON.stringify({ note: 'Test approval' }),
       });
       expect(status).toBe(200);
-      const data = (body as Record<string, unknown>).data as Record<string, unknown>;
-      expect(data.status).toBe('approved');
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      expect(getStringField(data, 'status')).toBe('approved');
     });
 
     it('can reject a pending proven-channel record', async () => {
@@ -353,8 +389,9 @@ describe('Approvals API — Proven Channel Restrictions', () => {
         body: JSON.stringify({ reason: 'Test rejection reason for proven channel' }),
       });
       expect(status).toBe(200);
-      const data = (body as Record<string, unknown>).data as Record<string, unknown>;
-      expect(data.status).toBe('rejected');
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      expect(getStringField(data, 'status')).toBe('rejected');
     });
   });
 
@@ -364,6 +401,32 @@ describe('Approvals API — Proven Channel Restrictions', () => {
     it('rejects unknown channel name', async () => {
       const { status } = await fetchJson('/api/v1/approvals?channel=nonexistent');
       expect(status).toBe(400);
+    });
+  });
+
+  // ── 9. GET paths use readonly connection (no DB writes) ───────────────────
+
+  describe('GET paths — readonly connection safety', () => {
+    it('GET list does not create new tables via readonly connection', async () => {
+      // Use the existing workspace which already has .pd and schema.
+      // Record the current table list, then GET, then verify no new tables.
+      const db = sqliteConn.getDb();
+      const tablesBefore = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>;
+      const tableNamesBefore = new Set(tablesBefore.map((r) => r.name));
+
+      const { status } = await fetchJson('/api/v1/approvals');
+      expect(status).toBe(200);
+
+      const tablesAfter = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>;
+      const tableNamesAfter = new Set(tablesAfter.map((r) => r.name));
+
+      // No new tables created by the GET request
+      for (const t of tableNamesAfter) {
+        if (!tableNamesBefore.has(t)) {
+          expect.unreachable(`Unexpected table created by GET: ${t}`);
+        }
+      }
+      expect(tableNamesAfter.size).toBe(tableNamesBefore.size);
     });
   });
 });
