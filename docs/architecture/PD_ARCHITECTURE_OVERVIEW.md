@@ -8,6 +8,8 @@
 > **Runtime V2-only 修订（ADR-0012）**: Runtime V2 是唯一 forward execution path。OpenClaw plugin 不再承担 idle/night scheduler 或 Nocturnal business pipeline；它只可作为事件/宿主 adapter。文中仍出现的 `IdleTrigger`、sleep/nocturnal 调度描述属于待清理的历史设计，不得作为新实现依据。PD 调度与 workspace/runtime 配置将通过 PD-owned config/SDK/operator boundary 提供。
 >
 > **MVP-First 修订（ADR-0014）**: 首次种子客户验证只依赖 `prompt`、`code_tool_hook` / RuleHost、`defer_archive` 三个已实现通道。`SkillFileWriter`、Attribution、BALM、LRAS、GAP、MissionScheduler 均不得从本文件派工；重启只看 MVP 路线和 post-MVP 条件。
+>
+> **产品定义锚点**: 产品边界以仓库根目录的 [`PRODUCT_IDENTITY.md`](../../PRODUCT_IDENTITY.md) 为准。本文只解释组件和数据流，不得将 PD 扩展为任务执行引擎、通用记忆层或通用工具修复框架。
 
 本文档回答四个问题：
 1. PD 是什么？
@@ -19,24 +21,23 @@
 
 ## 1. PD 是什么
 
-**Principles Disciple（PD）** 是一个面向 AI 编程代理的**原则演化框架**。它捕获代理执行过程中的失败信号（痛苦），把失败提炼为可复用的原则（Principle），再把原则**内化**为更稳定、更低成本的行为约束（Prompt / Skill / Hook 代码 / 模型参数），最终改变代理的实际行为。
+**Principles Disciple（PD）** 是面向 AI agent 的**由拥有者治理的行为原则内化系统**。它捕获拥有者认为值得改变的重复行为证据（当前代码中称为 Pain），将其提炼为可审查的原则提案，再由拥有者批准并通过可回滚的行为通道影响后续任务。
 
 PD 的核心循环：
 
 ```
-痛苦信号  ──→  诊断  ──→  原则候选  ──→  内化流水线  ──→  激活生效
-   ▲                                                          │
-   └──────────────────  代理行为改变  ←──────────────────────┘
+行为证据  ──→  诊断  ──→  原则候选  ──→  拥有者审批  ──→  激活生效
+   ▲                                                               │
+   └──────────────  后续场景中的可观察行为变化  ←───────────────────┘
 ```
 
 PD 的设计哲学：
 
-- **行动品格优先于单次成功率** —— PD 不追求局部任务最优，追求长期稳定行为
-- **最便宜的内化方式优先** —— `prompt < code < model_training < fine-tune`
-- **代理是日常用户，人是审核员和风险责任人** —— 全自动是目标，人工保留在高风险路径
-- **人在回路最低化但不可缺位** —— L2/L3 高风险通道必须有人工审核
-- **目标对齐优先于局部优化** —— 代理的每个行动应能追溯到 Objective，偏离目标才是真正的痛苦
-- **长程自主优先于短任务轮询** —— 内置代理应持续工作直到完成，而非被超时切碎
+- **行动品格优先于单次成功率** —— PD 不追求局部任务最优，追求拥有者认可的长期行为。
+- **拥有者是价值判断与风险责任人** —— 不是等待自动化成熟后可以移除的过渡角色。
+- **可观察、可回滚优先于自主扩张** —— MVP 只依赖 `prompt`、RuleHost 与 `defer_archive` 三条 proven channel。
+- **宿主能力不重复建设** —— PD 不接管通用任务执行、记忆、工具修复或 agent 调度。
+- **长期量化服从真实证据** —— Attribution / PRRR 仅在 post-MVP 重启条件满足后实施。
 
 ---
 

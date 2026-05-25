@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Principles Disciple** is an evolutionary agent framework built as an OpenClaw plugin (Node.js/TypeScript). It captures failures ("pain signals"), distills them into reusable principles, and applies learned wisdom to avoid repeating mistakes.
+**Principles Disciple** is an owner-governed behavior internalization system built as an OpenClaw plugin (Node.js/TypeScript). It captures repeated, owner-relevant behavior evidence ("pain signals"), distills reviewed principles, and applies approved, reversible behavior changes.
+
+Read [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) before interpreting product scope. PD does not own general task execution, general memory, tool-call repair, or autonomous value decisions.
 
 **Main package:** `packages/openclaw-plugin/`
 **Package manager:** pnpm (monorepo with workspaces)
@@ -75,6 +77,8 @@ docs/                    # Architecture docs, design documents, maps
 ## ⚠️ MANDATORY: Read Error Experience Handbook Before Tasks
 
 **Before starting ANY coding task**, you MUST read `docs/ERROR_EXPERIENCE_HANDBOOK.md`. This file records real errors caught in code reviews. Reading it prevents you from repeating mistakes that other AI assistants made on this project.
+
+Before starting product or architecture work, also read `PRODUCT_IDENTITY.md` and reject work that expands PD into task execution, general memory, generic tool repair, or untriggered post-MVP learning infrastructure.
 
 ### Error Handbook Gate
 

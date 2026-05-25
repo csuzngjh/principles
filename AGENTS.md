@@ -4,6 +4,7 @@
 
 **PD is in MVP-First stage** (ADR-0014). Goal: invite the first real seed customer within 4-6 weeks. **All architectural expansion is paused.** Before starting ANY work:
 
+0. Read [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) (canonical definition of what PD is and is not)
 1. Read [`docs/adr/0014-mvp-first-strategy-and-product-pivot.md`](docs/adr/0014-mvp-first-strategy-and-product-pivot.md) (MVP-First Strategy)
 2. Read [`docs/plans/2026-05-roadmap/07-mvp-first-pivot.md`](docs/plans/2026-05-roadmap/07-mvp-first-pivot.md) (execution doc)
 3. Read [`docs/plans/post-mvp-conditional-roadmap.md`](docs/plans/post-mvp-conditional-roadmap.md) (deferred work restart conditions)
@@ -84,7 +85,7 @@ After code review (if a real bug is found):
 
 ## Project Overview
 
-**Principles Disciple** — evolutionary agent framework (Node.js/TypeScript monorepo, pnpm).
+**Principles Disciple** — an owner-governed behavior internalization system for AI agents (Node.js/TypeScript monorepo, pnpm). PD does not own general task execution, memory, tool retries, or broad autonomous self-evolution. Use [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) as the product definition before interpreting older architecture language.
 
 ## Critical Rules
 
