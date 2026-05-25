@@ -28,7 +28,7 @@ describe('PRI-228: Plugin config resolution cutover', () => {
   });
 
   afterEach(() => {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* already removed */ }
     WorkspaceContext.clearCache();
   });
 

@@ -10,8 +10,6 @@ import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
 import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
-import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
-import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
 import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
