@@ -10,6 +10,8 @@ import { Button } from "./components/ui/button.js";
 import { TasksPage } from "./pages/TasksPage.js";
 import { OverviewPage } from "./pages/OverviewPage.js";
 import { FeedbackPage } from "./pages/FeedbackPage.js";
+import { PainPage } from "./pages/PainPage.js";
+import { ApprovalsPage } from "./pages/ApprovalsPage.js";
 import { GatesPage } from "./pages/GatesPage.js";
 import { SamplesPage } from "./pages/SamplesPage.js";
 import { EvolutionPage } from "./pages/EvolutionPage.js";
@@ -106,7 +108,10 @@ export function App() {
               <main id="main-content" className="flex-1 p-6 overflow-y-auto">
                 <ErrorBoundary>
                   <Routes>
-                    <Route path="/" element={<OverviewPage />} />
+                    <Route path="/" element={<PainPage />} />
+                    <Route path="/pain" element={<PainPage />} />
+                    <Route path="/approvals" element={<ApprovalsPage />} />
+                    <Route path="/overview" element={<OverviewPage />} />
                     <Route path="/central" element={<CentralPage />} />
                     <Route path="/tasks" element={<TasksPage />} />
                     <Route path="/feedback" element={<FeedbackPage />} />
