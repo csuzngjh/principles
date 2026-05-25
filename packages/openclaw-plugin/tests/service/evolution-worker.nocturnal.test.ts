@@ -193,7 +193,9 @@ session_id: pain-session-abc
     expect(simulatedTask.recentPainContext.mostRecent!.sessionId).toBe('pain-session-abc');
   });
 
-  it('e2e: /pd-reflect command writes to workspace/.state, never to HOME/.state', async () => {
+  // PRI-119 SKIP: pd-reflect is now retired per ADR-0012. This test verified that
+  // /pd-reflect enqueued sleep_reflection tasks — it no longer does. Full deletion in PRI-230.
+  it.skip('e2e: /pd-reflect command writes to workspace/.state, never to HOME/.state', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-e2e-command-writes-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -240,7 +242,9 @@ session_id: pain-session-abc
 
   // === Nocturnal E2E Pipeline Tests (from PR #243) ===
 
-  it('does not start a nocturnal workflow when only an empty fallback snapshot is available', async () => {
+  // PRI-119 SKIP: sleep_reflection tasks are no longer processed by the heartbeat.
+  // The filter returns empty arrays. Full deletion in PRI-230.
+  it.skip('does not start a nocturnal workflow when only an empty fallback snapshot is available', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-empty-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
@@ -299,7 +303,8 @@ session_id: pain-session-abc
     }
   });
 
-  it('uses stub_fallback for expected gateway-only background unavailability', async () => {
+  // PRI-119 SKIP: sleep_reflection processing retired per ADR-0012. PRI-230 for deletion.
+  it.skip('uses stub_fallback for expected gateway-only background unavailability', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-gateway-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
@@ -371,7 +376,8 @@ session_id: pain-session-abc
     }
   });
 
-  it('uses stub_fallback for expected subagent runtime unavailability', async () => {
+  // PRI-119 SKIP: sleep_reflection processing retired per ADR-0012. PRI-230 for deletion.
+  it.skip('uses stub_fallback for expected subagent runtime unavailability', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-subagent-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
@@ -438,7 +444,8 @@ session_id: pain-session-abc
     }
   });
 
-  it('prioritizes pain signal session ID for snapshot extraction', async () => {
+  // PRI-119 SKIP: NocturnalWorkflowManager no longer invoked. PRI-230 for deletion.
+  it.skip('prioritizes pain signal session ID for snapshot extraction', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-pain-session-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
@@ -512,7 +519,8 @@ session_id: pain-session-abc
     }
   });
 
-  it('e2e: bounded session selection — never picks a session newer than the triggering task', async () => {
+  // PRI-119 SKIP: NocturnalWorkflowManager no longer invoked. PRI-230 for deletion.
+  it.skip('e2e: bounded session selection — never picks a session newer than the triggering task', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-e2e-bounded-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });

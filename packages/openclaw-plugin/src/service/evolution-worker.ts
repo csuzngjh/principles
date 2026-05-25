@@ -20,14 +20,15 @@ import { atomicWriteFileSync } from '../utils/io.js';
 
 // Re-export queue I/O (extracted to queue-io.ts)
 export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock, requireQueueLock } from './queue-io.js';
-export { enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
 export { EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './queue-io.js';
-import { saveEvolutionQueue, requireQueueLock, hasPendingTask, enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
+import { saveEvolutionQueue, requireQueueLock, hasPendingTask } from './queue-io.js';
 import type { RecentPainContext } from './queue-io.js';
 export type { RecentPainContext } from './queue-io.js';
-import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
-import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
+// PRI-119: Below imports are retained for dead code blocks (sleep_reflection/keyword_optimization
+// processing paths that are no longer reached). Full removal tracked in PRI-230.
+import { loadCooldownEscalationConfig } from './nocturnal-config.js';
+import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
 import {
     createNocturnalTrajectoryExtractor,
@@ -35,20 +36,21 @@ import {
     type NocturnalSessionSnapshot,
 } from '../core/nocturnal-trajectory-extractor.js';
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
+import { recordCooldown } from './nocturnal-runtime.js';
+import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
+import { enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
 import { PrincipleCompiler } from '../core/principle-compiler/index.js';
 import { loadLedger, updatePrinciple } from '../core/principle-tree-ledger.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
 import { findRecentDuplicateTask } from './evolution-dedup.js';
 import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
-import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import { classifyFailure, type ClassifiableTaskKind } from './failure-classifier.js';
 import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from './cooldown-strategy.js';
 import { reconcileStartup } from './startup-reconciler.js';
 import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
-import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
 // ── Queue Event Payload Validation ─────────────────────────────────────────
 
@@ -598,50 +600,30 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     durationMs: age,
                 });
 
-                // #214: Expire the underlying nocturnal workflow to prevent resource leak.
-                // The task's resultRef holds the workflowId if one was started.
+                // PRI-119: NocturnalWorkflowManager retired. Mark stuck workflow as expired via WorkflowStore.
                 if (task.resultRef && !task.resultRef.startsWith('trinity-draft')) {
                     try {
-                        const nocturnalMgr = new NocturnalWorkflowManager({
-                            workspaceDir: wctx.workspaceDir,
-                            stateDir: wctx.stateDir,
-                            logger: api?.logger || logger,
-                             
-                            runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
-                            subagent: api?.runtime?.subagent,
-                        });
-                        try {
-                            // Force-expire this specific workflow regardless of TTL
-                            nocturnalMgr.expireWorkflow(
-                                task.resultRef,
-                                `Sleep reflection task ${task.id} timed out after ${Math.round(age / 60000)} min`,
-                            );
-                            logger?.info?.(`[PD:EvolutionWorker] Expired nocturnal workflow ${task.resultRef} for timed-out sleep task ${task.id}`);
-                        } finally {
-                            nocturnalMgr.dispose();
-                        }
+                        const wfStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
+                        wfStore.updateWorkflowState(task.resultRef, 'expired');
+                        wfStore.recordEvent(task.resultRef, 'expired', null, 'expired',
+                            `Sleep reflection task ${task.id} timed out after ${Math.round(age / 60000)} min`, {});
+                        wfStore.dispose();
+                        logger?.info?.(`[PD:EvolutionWorker] Marked stuck workflow ${task.resultRef} as expired for timed-out sleep task ${task.id}`);
                     } catch (expireErr) {
-                        logger?.warn?.(`[PD:EvolutionWorker] Could not expire nocturnal workflow ${task.resultRef}: ${String(expireErr)}`);
+                        logger?.warn?.(`[PD:EvolutionWorker] Could not mark stuck workflow ${task.resultRef} as expired: ${String(expireErr)}`);
                     }
                 }
             }
         }
 
 
-        // Phase 2.4: Process sleep_reflection tasks.
-        // Claim tasks inside the lock, execute reflection outside the lock,
-        // then re-acquire the lock to write results. This prevents the long-running
-        // nocturnal reflection from blocking all other queue consumers.
-
-        // FIX: Also poll in_progress tasks that were started in a previous cycle.
-        // Previously only 'pending' tasks were filtered, so an in_progress task from
-        // a previous heartbeat cycle would never be re-polled until the 1-hour
-        // stuck task recovery kicked in.
-        const pendingSleepTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection');
-        const pollingSleepTasks = queue.filter(t =>
-            t.status === 'in_progress' && t.taskKind === 'sleep_reflection' && t.resultRef && !t.resultRef.startsWith('trinity-draft')
-        );
-        let sleepReflectionTasks = [...pendingSleepTasks, ...pollingSleepTasks];
+        // Phase 2.4: sleep_reflection task processing RETIRED per ADR-0012 (PRI-119).
+        // Nocturnal execution has been cut over to Runtime V2.
+        // sleep_reflection and keyword_optimization tasks are no longer processed.
+        // Any existing pending/in_progress tasks will remain in queue but never execute.
+        const pendingSleepTasks: typeof queue = [];
+        const pollingSleepTasks: typeof queue = [];
+        let sleepReflectionTasks: typeof queue = [];
         // Phase 40: Check if sleep_reflection is in cooldown due to persistent failures
         const sleepCooldown = isTaskKindInCooldown(wctx.stateDir, 'sleep_reflection');
         if (sleepCooldown.inCooldown) {
@@ -975,17 +957,10 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             return;
         }
 
-        // ── keyword_optimization task processing ──────────────────────────────
-        // Process keyword_optimization tasks independently of sleep_reflection.
-        // Uses CorrectionObserverWorkflowManager to dispatch LLM subagent and
-        // KeywordOptimizationService to apply mutations to keyword store (CORR-09).
-        const pendingKeywordOptTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'keyword_optimization');
-        const inProgressKeywordOptTasks = queue.filter(t =>
-            t.status === 'in_progress' &&
-            t.taskKind === 'keyword_optimization' &&
-            t.resultRef &&
-            !t.resultRef.startsWith('trinity-draft')
-        );
+        // ── keyword_optimization task processing RETIRED per ADR-0012 (PRI-119) ──
+        // keyword_optimization is no longer processed. Any existing tasks remain in queue.
+        const pendingKeywordOptTasks: typeof queue = [];
+        const inProgressKeywordOptTasks: typeof queue = [];
         const keywordOptTasks = [...pendingKeywordOptTasks, ...inProgressKeywordOptTasks];
         // Phase 40: Check if keyword_optimization is in cooldown due to persistent failures
         const kwOptCooldown = isTaskKindInCooldown(wctx.stateDir, 'keyword_optimization');
@@ -1436,64 +1411,19 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             };
 
             try {
-                // Load config on each cycle (supports runtime updates) — single file read
-                const mergedConfig = loadNocturnalConfigMerged(wctx.stateDir);
-                const { sleepReflection: sleepConfig, keywordOptimization: kwOptConfig } = mergedConfig;
-
                 // Compilation backfill: runs on every heartbeat to retry failed compilations.
                 // Fire-and-forget — errors are logged within the function.
                 processCompilationBackfill(wctx, logger).catch((err) => {
                     logger?.error?.(`[PD:EvolutionWorker] CompilationBackfill threw: ${String(err)}`);
                 });
 
-                const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
-                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt} triggerMode=${sleepConfig.trigger_mode}`);
+                // PRI-119: Nocturnal execution retired per ADR-0012.
+                // sleep_reflection idle/periodic trigger, keyword_optimization periodic trigger,
+                // and NocturnalWorkflowManager sweep have been removed.
+                // The heartbeat continues for non-Nocturnal work:
+                // compilation backfill, queue processing, detection queue, watchdog, flush.
 
-                let shouldTrySleepReflection = false;
-
-                // Path 1: Idle-based trigger (default mode)
-                if (idleResult.isIdle && sleepConfig.trigger_mode === 'idle') {
-                    logger?.info?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
-                    shouldTrySleepReflection = true;
-                }
-
-                // keyword_optimization: Independent periodic trigger (CORR-07).
-                // Fires every kwOptConfig.period_heartbeats regardless of trigger_mode.
-                // Has its own dedicated config (default 24 heartbeats = 6 hours).
-                if (kwOptConfig.enabled && heartbeatCounter > 0 && heartbeatCounter % kwOptConfig.period_heartbeats === 0) {
-                    logger?.info?.(`[PD:EvolutionWorker] keyword_optimization trigger at heartbeat ${heartbeatCounter} (trigger_mode=${sleepConfig.trigger_mode})`);
-                    enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
-                        logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
-                    });
-                }
-
-                // Path 2: Periodic trigger for sleep_reflection (fires regardless of idle state)
-                if (sleepConfig.trigger_mode === 'periodic') {
-                    if (heartbeatCounter >= sleepConfig.period_heartbeats) {
-                        logger?.info?.(`[PD:EvolutionWorker] Periodic trigger: heartbeatCounter=${heartbeatCounter} >= period_heartbeats=${sleepConfig.period_heartbeats}`);
-                        shouldTrySleepReflection = true;
-                        heartbeatCounter = 0; // Reset counter
-                    } else {
-                        logger?.info?.(`[PD:EvolutionWorker] Periodic: ${heartbeatCounter}/${sleepConfig.period_heartbeats} heartbeats — waiting`);
-                    }
-                }
-
-                if (shouldTrySleepReflection) {
-                    const cooldown = checkCooldown(wctx.stateDir, undefined, {
-                        globalCooldownMs: sleepConfig.cooldown_ms,
-                        maxRunsPerWindow: sleepConfig.max_runs_per_day,
-                        quotaWindowMs: 24 * 60 * 60 * 1000,
-                    });
-                    logger?.info?.(`[PD:EvolutionWorker] Cooldown check: globalCooldownActive=${cooldown.globalCooldownActive} quotaExhausted=${cooldown.quotaExhausted} runsRemaining=${cooldown.runsRemaining}`);
-                    if (!cooldown.globalCooldownActive && !cooldown.quotaExhausted) {
-                        logger?.info?.('[PD:EvolutionWorker] Attempting to enqueue sleep_reflection task...');
-                        enqueueSleepReflectionTask(wctx, logger).catch((err) => {
-                            logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue sleep_reflection task: ${String(err)}`);
-                        });
-                    } else {
-                        logger?.info?.(`[PD:EvolutionWorker] Skipping sleep_reflection: globalCooldown=${cooldown.globalCooldownActive} quotaExhausted=${cooldown.quotaExhausted}`);
-                    }
-                }
+                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} nocturnal=retired_per_ADR-0012`);
 
                 const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
                 cycleResult.queue = queueResult.queue;
@@ -1505,47 +1435,21 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // processPromotion removed (D-06) — promotion via PAIN_CANDIDATES no longer needed
 
                 try {
-                    // Delegate to workflow managers' sweepExpiredWorkflows so that
-                    // session/transcript cleanup runs via driver.deleteSession().
+                    // PRI-119: NocturnalWorkflowManager sweep retired per ADR-0012.
+                    // Non-Nocturnal workflow sweep still runs via WorkflowStore fallback.
                     const subagentRuntime = api?.runtime?.subagent;
-                    const agentSession = api?.runtime?.agent?.session;
-                    if (subagentRuntime) {
-                        let swept = 0;
-
-                        // Sweep Nocturnal workflows (with gateway-safe fallback)
-                        // EmpathyObserverWorkflowManager sweep removed — M8: superseded by Runtime v2
-                        if (api?.runtime) {
-                            try {
-                                const nocturnalMgr = new NocturnalWorkflowManager({
-                                    workspaceDir: wctx.workspaceDir,
-                                    stateDir: wctx.stateDir,
-                                    logger: api.logger,
-                                    runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api as OpenClawTrinityRuntimeAdapter['api']),
-                                    subagent: api.runtime.subagent,
-                                });
-                                swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime, agentSession);
-                                nocturnalMgr.dispose();
-                            } catch (noctSweepErr) {
-                                logger?.warn?.(`[PD:EvolutionWorker] Nocturnal sweep failed: ${String(noctSweepErr)}`);
-                            }
-                        }
-
-                        if (swept > 0) {
-                            logger?.info?.(`[PD:EvolutionWorker] Swept ${swept} expired workflows (with session cleanup)`);
-                        }
-                    } else {
-                        // Fallback: if subagent runtime unavailable, mark as expired
-                        // but log that session cleanup was skipped.
-                        const workflowStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
-                        const expiredWorkflows = workflowStore.getExpiredWorkflows(WORKFLOW_TTL_MS);
-                        for (const wf of expiredWorkflows) {
-                            workflowStore.updateWorkflowState(wf.workflow_id, 'expired');
-                            workflowStore.updateCleanupState(wf.workflow_id, 'failed');
-                            workflowStore.recordEvent(wf.workflow_id, 'swept', wf.state, 'expired', 'TTL expired (no runtime for session cleanup)', {});
-                            logger?.warn?.(`[PD:EvolutionWorker] Marked workflow ${wf.workflow_id} as expired but could not cleanup session (subagent runtime unavailable)`);
-                        }
-                        workflowStore.dispose();
+                    const _agentSession = api?.runtime?.agent?.session;
+                    void subagentRuntime; void _agentSession;
+                    // Fallback: mark expired workflows using WorkflowStore (no session cleanup).
+                    const workflowStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
+                    const expiredWorkflows = workflowStore.getExpiredWorkflows(WORKFLOW_TTL_MS);
+                    for (const wf of expiredWorkflows) {
+                        workflowStore.updateWorkflowState(wf.workflow_id, 'expired');
+                        workflowStore.updateCleanupState(wf.workflow_id, 'failed');
+                        workflowStore.recordEvent(wf.workflow_id, 'swept', wf.state, 'expired', 'TTL expired', {});
+                        logger?.warn?.(`[PD:EvolutionWorker] Marked workflow ${wf.workflow_id} as expired`);
                     }
+                    workflowStore.dispose();
                 } catch (sweepErr) {
                     const errMsg = `Failed to sweep expired workflows: ${String(sweepErr)}`;
                     cycleResult.errors.push(errMsg);
