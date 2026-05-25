@@ -1,22 +1,19 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard,
-  Building2,
-  ListTodo,
-  MessageSquare,
-  Shield,
-  FlaskConical,
-  Dna,
-  Brain,
+  Flame,
+  ScrollText,
+  ShieldCheck,
   Settings,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   AlertTriangle,
   Activity,
   FileText,
-  ScrollText,
-  Bot,
+  Dna,
+  Wrench,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
 import { Button } from "./ui/button.js";
@@ -24,20 +21,17 @@ import { Badge } from "./ui/badge.js";
 import { fetchSystemHealth } from "../api.js";
 import type { SystemHealthStatus } from "../api.js";
 
-const navItems = [
-  { id: "overview", label: "概览", icon: LayoutDashboard, href: "/" },
-  { id: "central", label: "中央", icon: Building2, href: "/central" },
-  { id: "tasks", label: "任务", icon: ListTodo, href: "/tasks" },
-  { id: "agents", label: "代理", icon: Bot, href: "/agents" },
-  { id: "data-flow", label: "数据流", icon: Activity, href: "/data-flow" },
-  { id: "event-log", label: "事件日志", icon: FileText, href: "/event-log" },
-  { id: "feedback", label: "反馈", icon: MessageSquare, href: "/feedback" },
-  { id: "gates", label: "门控", icon: Shield, href: "/gates" },
-  { id: "samples", label: "样本", icon: FlaskConical, href: "/samples" },
-  { id: "evolution", label: "进化", icon: Dna, href: "/evolution" },
-  { id: "principles", label: "原则", icon: ScrollText, href: "/principles" },
-  { id: "thinking-models", label: "思维模型", icon: Brain, href: "/thinking-models" },
-  { id: "settings", label: "设置", icon: Settings, href: "/settings" },
+const mvpNavItems = [
+  { id: "pain", label: "Pain", icon: Flame, href: "/pain" },
+  { id: "principles", label: "Principle", icon: ScrollText, href: "/principles" },
+  { id: "approvals", label: "Approval", icon: ShieldCheck, href: "/approvals" },
+];
+
+const diagnosticNavItems = [
+  { id: "overview", label: "Overview", icon: Activity, href: "/" },
+  { id: "data-flow", label: "Data Flow", icon: Activity, href: "/data-flow" },
+  { id: "event-log", label: "Event Log", icon: FileText, href: "/event-log" },
+  { id: "evolution", label: "Evolution", icon: Dna, href: "/evolution" },
 ];
 
 interface AppSidebarProps {
@@ -51,6 +45,7 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
   const [healthData, setHealthData] = useState<SystemHealthStatus | null>(null);
   const [alertCount, setAlertCount] = useState(0);
   const [healthError, setHealthError] = useState<string | null>(null);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
   const isActive = (href: string) => {
     if (href === "/" && location.pathname === "/") return true;
@@ -86,6 +81,8 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
     if (healthData.overall === "degraded") return "secondary";
     return "default";
   };
+
+  const isDiagnosticsActive = diagnosticNavItems.some(d => isActive(d.href));
 
   return (
     <aside
@@ -130,33 +127,106 @@ export function AppSidebar({ className, collapsed = false, onCollapsedChange }: 
                   </div>
                 )}
               </div>
-              <span className="text-[10px] text-muted-foreground mt-0.5 tracking-wider">燃烧痛苦，驱动进化</span>
+              <span className="text-[10px] text-muted-foreground mt-0.5 tracking-wider">Burn pain, drive evolution</span>
             </div>
           )}
         </div>
       </div>
 
       <nav className="flex-1 py-4 overflow-y-auto">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.id}
-              to={item.href}
-              className={cn(
-                "flex items-center gap-3 px-4 py-3 text-sm transition-all duration-200",
-                "hover:bg-accent hover:text-accent-foreground",
-                isActive(item.href)
-                  ? "bg-primary/10 text-primary border-r-2 border-primary"
-                  : "text-muted-foreground",
-                collapsed && "justify-center"
-              )}
-            >
-              <Icon className={cn("h-5 w-5 flex-shrink-0", collapsed && "h-5 w-5")} aria-hidden="true" />
-              {!collapsed && <span>{item.label}</span>}
-            </Link>
-          );
-        })}
+        <div className="mb-2">
+          {!collapsed && (
+            <div className="px-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              MVP Journey
+            </div>
+          )}
+          {mvpNavItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.id}
+                to={item.href}
+                data-testid={`nav-${item.id}`}
+                className={cn(
+                  "flex items-center gap-3 px-4 py-3 text-sm transition-all duration-200",
+                  "hover:bg-accent hover:text-accent-foreground",
+                  isActive(item.href)
+                    ? "bg-primary/10 text-primary border-r-2 border-primary"
+                    : "text-muted-foreground",
+                  collapsed && "justify-center"
+                )}
+              >
+                <Icon className="h-5 w-5 flex-shrink-0" aria-hidden="true" />
+                {!collapsed && <span>{item.label}</span>}
+              </Link>
+            );
+          })}
+        </div>
+
+        <div className="border-t border-border pt-2 mt-2">
+          <button
+            type="button"
+            data-testid="diagnostics-toggle"
+            onClick={() => setDiagnosticsOpen(!diagnosticsOpen)}
+            className={cn(
+              "flex items-center gap-3 px-4 py-2 text-xs w-full text-left transition-all duration-200",
+              "hover:bg-accent hover:text-accent-foreground",
+              isDiagnosticsActive ? "text-primary" : "text-muted-foreground",
+              collapsed && "justify-center"
+            )}
+          >
+            <Wrench className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            {!collapsed && (
+              <>
+                <span className="flex-1 uppercase tracking-wider font-semibold">Diagnostics</span>
+                {diagnosticsOpen ? (
+                  <ChevronUp className="h-3 w-3" />
+                ) : (
+                  <ChevronDown className="h-3 w-3" />
+                )}
+              </>
+            )}
+          </button>
+          {(diagnosticsOpen || collapsed) && diagnosticNavItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.id}
+                to={item.href}
+                data-testid={`nav-${item.id}`}
+                className={cn(
+                  "flex items-center gap-3 px-4 py-2 text-xs transition-all duration-200",
+                  "hover:bg-accent hover:text-accent-foreground",
+                  isActive(item.href)
+                    ? "bg-primary/10 text-primary border-r-2 border-primary"
+                    : "text-muted-foreground",
+                  collapsed && "justify-center"
+                )}
+              >
+                <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                {!collapsed && <span>{item.label}</span>}
+              </Link>
+            );
+          })}
+        </div>
+
+        <div className="border-t border-border pt-2 mt-2">
+          <Link
+            to="/settings"
+            data-testid="nav-settings"
+            className={cn(
+              "flex items-center gap-3 px-4 py-2 text-xs transition-all duration-200",
+              "hover:bg-accent hover:text-accent-foreground",
+              isActive("/settings")
+                ? "bg-primary/10 text-primary border-r-2 border-primary"
+                : "text-muted-foreground",
+              collapsed && "justify-center"
+            )}
+          >
+            <Settings className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            {!collapsed && <span>Settings</span>}
+          </Link>
+        </div>
       </nav>
 
       <div className="p-2 border-t border-border">
