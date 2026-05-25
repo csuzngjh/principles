@@ -2,12 +2,16 @@
 
 ## ⚠️ MVP-First Stage — Read First (2026-05-24)
 
-**PD is in MVP-First stage** (ADR-0014). Goal: invite the first real seed customer within 4-6 weeks. **All architectural expansion is paused.** Before starting ANY work:
+**PD is in MVP-First stage** (ADR-0014). Goal: invite the first real seed customer within 4-6 weeks. **All architectural expansion is paused.** Product boundary: **PD owns owner-reviewed, reversible behavior internalization; it does not own general task execution, general memory, generic tool repair, or autonomous value decisions.**
 
-0. Read [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) (canonical definition of what PD is and is not)
-1. Read [`docs/adr/0014-mvp-first-strategy-and-product-pivot.md`](docs/adr/0014-mvp-first-strategy-and-product-pivot.md) (MVP-First Strategy)
-2. Read [`docs/plans/2026-05-roadmap/07-mvp-first-pivot.md`](docs/plans/2026-05-roadmap/07-mvp-first-pivot.md) (execution doc)
-3. Read [`docs/plans/post-mvp-conditional-roadmap.md`](docs/plans/post-mvp-conditional-roadmap.md) (deferred work restart conditions)
+Read the strategic documents below before creating or reprioritizing an issue, or changing product scope, architecture, roadmap, ADRs, user journeys, surfaced functionality, activation channels, or public product copy:
+
+0. [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) (canonical product boundary)
+1. [`docs/adr/0014-mvp-first-strategy-and-product-pivot.md`](docs/adr/0014-mvp-first-strategy-and-product-pivot.md) (MVP-First Strategy)
+2. [`docs/plans/2026-05-roadmap/07-mvp-first-pivot.md`](docs/plans/2026-05-roadmap/07-mvp-first-pivot.md) (execution doc)
+3. [`docs/plans/post-mvp-conditional-roadmap.md`](docs/plans/post-mvp-conditional-roadmap.md) (deferred work restart conditions)
+
+For a narrowly scoped implementation, bug fix, test fix, or CI fix inside an already approved issue, do not reload all strategic documents unless the change crosses one of those boundaries. The product boundary above still applies.
 
 If a Linear issue or earlier doc instructs you to implement **Attribution Pipeline / WorkspaceLearningSummary / Probation Window / BALM / LRAS / GAP / MissionScheduler / Trainer / model_training channel / pre-existing Phase 1C or Phase 1D work**, **STOP** and verify against post-mvp-conditional-roadmap.md whether the restart conditions are met. They almost certainly are not.
 
