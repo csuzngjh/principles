@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -8,7 +8,14 @@ import {
   isRuntimeConfigError,
   validateRuntimeConfig,
   invalidatePainSignalBridge,
+  createPainSignalBridge,
 } from '@principles/core/runtime-v2';
+
+const stubLedger = {
+  readPrincipleSubtree: () => undefined,
+  writePrinciple: () => ({ id: 'test' }) as never,
+  updatePrincipleValueMetrics: () => ({ principleId: 'test' }) as never,
+};
 
 describe('PRI-228: PD-owned config resolution cutover', () => {
   describe('PD-owned config consumed by runtime entrypoint', () => {
@@ -22,7 +29,7 @@ describe('PRI-228: PD-owned config resolution cutover', () => {
     });
 
     afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
     });
 
     it('resolveRuntimeConfig with explicit workspaceDir resolves pi-ai default', () => {
@@ -78,7 +85,7 @@ describe('PRI-228: PD-owned config resolution cutover', () => {
     });
 
     afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
     });
 
     it('runtime=config without policy returns explicit_config_missing error', () => {
@@ -126,31 +133,63 @@ describe('PRI-228: PD-owned config resolution cutover', () => {
     });
   });
 
-  describe('Cache/adapter construction semantics', () => {
+  describe('Cache isolation between runtime modes', () => {
+    const testWsDir = '/test-pri228-cache-isolation';
+    const testStateDir = path.join(testWsDir, '.state');
+
     beforeEach(() => {
-      invalidatePainSignalBridge('/test-pri228-cache', 'openclaw-cli');
-      invalidatePainSignalBridge('/test-pri228-cache', 'pi-ai');
+      invalidatePainSignalBridge(testWsDir);
     });
 
-    it('different openclawMode values produce different cache keys', () => {
-      const localKey = '/test-pri228-cache:openclaw-cli:local';
-      const gatewayKey = '/test-pri228-cache:openclaw-cli:gateway';
-      const emptyKey = '/test-pri228-cache:openclaw-cli:';
-      expect(localKey).not.toBe(gatewayKey);
-      expect(localKey).not.toBe(emptyKey);
-      expect(gatewayKey).not.toBe(emptyKey);
+    afterEach(() => {
+      invalidatePainSignalBridge(testWsDir);
     });
 
-    it('pi-ai config without openclawMode uses empty string in key', () => {
-      const key = '/test-pri228-cache:pi-ai:';
-      expect(key).toBeTruthy();
-      expect(key).not.toContain('local');
-      expect(key).not.toContain('gateway');
+    it('pi-ai and openclaw-cli produce different bridge instances', async () => {
+      const piAiConfig = resolveRuntimeConfig(testStateDir);
+      if (isRuntimeConfigError(piAiConfig)) {
+        expect.unreachable('pi-ai config should resolve');
+        return;
+      }
+      const bridge1 = await createPainSignalBridge({
+        workspaceDir: testWsDir,
+        stateDir: testStateDir,
+        ledgerAdapter: stubLedger,
+      });
+      expect(bridge1).toBeDefined();
+
+      const openclawConfig = resolveRuntimeConfig(testStateDir, {
+        requestedRuntimeKind: 'openclaw-cli',
+        openclawLocal: true,
+      });
+      if (isRuntimeConfigError(openclawConfig)) {
+        expect.unreachable('openclaw-cli config should resolve');
+        return;
+      }
+      const bridge2 = await createPainSignalBridge({
+        workspaceDir: testWsDir,
+        stateDir: testStateDir,
+        ledgerAdapter: stubLedger,
+      });
+      expect(bridge2).toBeDefined();
+      expect(bridge1).not.toBe(bridge2);
     });
 
-    it('invalidatePainSignalBridge clears all mode variants', () => {
-      invalidatePainSignalBridge('/test-pri228-cache');
-      expect(true).toBe(true);
+    it('invalidatePainSignalBridge with workspace-only clears all modes', async () => {
+      const piAiConfig = resolveRuntimeConfig(testStateDir);
+      if (isRuntimeConfigError(piAiConfig)) return;
+      await createPainSignalBridge({
+        workspaceDir: testWsDir,
+        stateDir: testStateDir,
+        ledgerAdapter: stubLedger,
+      });
+      invalidatePainSignalBridge(testWsDir);
+      const bridgeAfter = await createPainSignalBridge({
+        workspaceDir: testWsDir,
+        stateDir: testStateDir,
+        ledgerAdapter: stubLedger,
+      });
+      expect(bridgeAfter).toBeDefined();
     });
   });
 

@@ -1,4 +1,4 @@
-import * as fs from 'fs';
+﻿import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -19,7 +19,7 @@ export async function handleBeforeReset(
     return;
   }
 
-  const wctx = WorkspaceContext.fromHookContext(ctx);
+  const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
 
   // Auto-summarise pain points before the session is cleared
   const painPoints = event.messages.filter((msg) => {
@@ -59,7 +59,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
 
   if (!workspaceDir) return;
 
-  const wctx = WorkspaceContext.fromHookContext(ctx);
+  const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
 
   if (!fs.existsSync(sessionFile)) {
     if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Session file not found: ${sessionFile}`);
@@ -181,7 +181,7 @@ export async function handleBeforeCompaction(
 ): Promise<void> {
   if (!ctx.workspaceDir) return;
 
-  const wctx = WorkspaceContext.fromHookContext(ctx);
+  const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
   const [dateStr] = new Date().toISOString().split('T');
   const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
   const log =

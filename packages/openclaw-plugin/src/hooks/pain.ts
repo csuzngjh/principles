@@ -1,4 +1,4 @@
-import * as fs from 'fs';
+﻿import * as fs from 'fs';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, trackPrincipleValue } from '../core/pain.js';
@@ -119,7 +119,7 @@ export function handleAfterToolCall(
     return;
   }
 
-  const wctx = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir: effectiveWorkspaceDir });
+  const wctx = WorkspaceContext.fromHookContextExplicit({ ...ctx, workspaceDir: effectiveWorkspaceDir });
   const {config} = wctx;
   const {eventLog} = wctx;
   const sessionId = ctx.sessionId || 'unknown';

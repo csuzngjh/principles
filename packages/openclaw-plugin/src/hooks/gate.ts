@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Security Gate Hook - Rule Host Only
  *
  * This is the SINGLE AUTHORITATIVE orchestration path.
@@ -39,7 +39,7 @@ export function handleBeforeToolCall(
     return;
   }
 
-  const wctx = WorkspaceContext.fromHookContext(ctx);
+  const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
 
   // 2. Resolve the target file path
   let filePath = event.params?.file_path || event.params?.path || event.params?.file || event.params?.target;

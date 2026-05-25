@@ -17,6 +17,12 @@ describe('validateWorkspaceDir', () => {
     expect(validateWorkspaceDir('')).toContain('undefined/null');
   });
 
+  it('rejects Windows drive root paths', () => {
+    expect(validateWorkspaceDir('C:\\')).toContain('drive root');
+    expect(validateWorkspaceDir('D:\\')).toContain('drive root');
+    expect(validateWorkspaceDir('c:\\')).toContain('drive root');
+  });
+
   it('accepts normal workspace paths', () => {
     expect(validateWorkspaceDir('/home/user/projects/workspace-main')).toBeNull();
     expect(validateWorkspaceDir('/tmp/test-workspace')).toBeNull();

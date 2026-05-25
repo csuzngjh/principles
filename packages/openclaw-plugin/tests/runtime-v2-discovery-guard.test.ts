@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -14,105 +14,110 @@ const DISALLOWED_RUNTIME_V2_IMPORTS = [
 ];
 
 describe('PRI-228: Runtime V2 discovery guard', () => {
-  it('workspace-resolver does not import nocturnal or idle modules', () => {
-    const filePath = path.join(PLUGIN_SRC, 'utils', 'workspace-resolver.ts');
-    if (!fs.existsSync(filePath)) return;
-    const content = fs.readFileSync(filePath, 'utf-8');
+  const guardedFiles = [
+    { name: 'workspace-resolver.ts', path: path.join(PLUGIN_SRC, 'utils', 'workspace-resolver.ts') },
+    { name: 'workspace-context.ts', path: path.join(PLUGIN_SRC, 'core', 'workspace-context.ts') },
+    { name: 'workspace-dir-service.ts', path: path.join(PLUGIN_SRC, 'core', 'workspace-dir-service.ts') },
+    { name: 'path-resolver.ts', path: path.join(PLUGIN_SRC, 'core', 'path-resolver.ts') },
+  ];
 
-    for (const disallowed of DISALLOWED_RUNTIME_V2_IMPORTS) {
+  for (const file of guardedFiles) {
+    describe(`${file.name} isolation`, () => {
+      it(`does not import nocturnal or idle modules`, () => {
+        if (!fs.existsSync(file.path)) return;
+        const content = fs.readFileSync(file.path, 'utf-8');
+        for (const disallowed of DISALLOWED_RUNTIME_V2_IMPORTS) {
+          expect(
+            content.includes(disallowed),
+            `${file.name} must not import legacy discovery path: ${disallowed}`,
+          ).toBe(false);
+        }
+      });
+    });
+  }
+
+  describe('resolveWorkspaceDirForRuntimeV2 does not use legacy fallback chain', () => {
+    it('does not call resolveWorkspaceDirFromApi', () => {
+      const filePath = path.join(PLUGIN_SRC, 'utils', 'workspace-resolver.ts');
+      if (!fs.existsSync(filePath)) return;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const fnMatch = content.match(/function resolveWorkspaceDirForRuntimeV2[\s\S]*?^}/m);
+      if (!fnMatch) {
+        expect.unreachable('resolveWorkspaceDirForRuntimeV2 function not found');
+        return;
+      }
+      const fnBody = fnMatch[0];
       expect(
-        content.includes(disallowed),
-        'workspace-resolver.ts must not import legacy discovery path: ' + disallowed,
+        fnBody.includes('resolveWorkspaceDirFromApi'),
+        'resolveWorkspaceDirForRuntimeV2 must NOT call resolveWorkspaceDirFromApi (legacy fallback)',
       ).toBe(false);
-    }
-  });
-
-  it('workspace-context does not import nocturnal or idle modules', () => {
-    const filePath = path.join(PLUGIN_SRC, 'core', 'workspace-context.ts');
-    if (!fs.existsSync(filePath)) return;
-    const content = fs.readFileSync(filePath, 'utf-8');
-
-    for (const disallowed of DISALLOWED_RUNTIME_V2_IMPORTS) {
       expect(
-        content.includes(disallowed),
-        'workspace-context.ts must not import legacy discovery path: ' + disallowed,
+        fnBody.includes('PathResolver'),
+        'resolveWorkspaceDirForRuntimeV2 must NOT reference PathResolver (legacy fallback)',
       ).toBe(false);
-    }
+    });
+
+    it('only accepts explicit ctx.workspaceDir', () => {
+      const filePath = path.join(PLUGIN_SRC, 'utils', 'workspace-resolver.ts');
+      if (!fs.existsSync(filePath)) return;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const fnMatch = content.match(/function resolveWorkspaceDirForRuntimeV2[\s\S]*?^}/m);
+      if (!fnMatch) return;
+      const fnBody = fnMatch[0];
+      expect(fnBody.includes('ctx.workspaceDir')).toBe(true);
+      expect(fnBody.includes('validateWorkspaceDir')).toBe(true);
+    });
   });
 
-  it('workspace-dir-service does not import nocturnal or idle modules', () => {
-    const filePath = path.join(PLUGIN_SRC, 'core', 'workspace-dir-service.ts');
-    if (!fs.existsSync(filePath)) return;
-    const content = fs.readFileSync(filePath, 'utf-8');
-
-    for (const disallowed of DISALLOWED_RUNTIME_V2_IMPORTS) {
+  describe('fromHookContextExplicit does not delegate dangerous paths to fromHookContext', () => {
+    it('validates workspaceDir BEFORE calling fromHookContext', () => {
+      const filePath = path.join(PLUGIN_SRC, 'core', 'workspace-context.ts');
+      if (!fs.existsSync(filePath)) return;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const fnMatch = content.match(/static fromHookContextExplicit[\s\S]*?^\s{4}\}/m);
+      if (!fnMatch) {
+        expect.unreachable('fromHookContextExplicit method not found');
+        return;
+      }
+      const fnBody = fnMatch[0];
+      const validatePos = fnBody.indexOf('validateWorkspaceDir');
+      const delegatePos = fnBody.indexOf('this.fromHookContext(');
+      expect(validatePos).toBeGreaterThan(-1);
+      expect(delegatePos).toBeGreaterThan(-1);
       expect(
-        content.includes(disallowed),
-        'workspace-dir-service.ts must not import legacy discovery path: ' + disallowed,
-      ).toBe(false);
-    }
+        validatePos,
+        'validateWorkspaceDir must be called BEFORE delegating to fromHookContext',
+      ).toBeLessThan(delegatePos);
+    });
+
+    it('throws on missing workspaceDir (does not just warn)', () => {
+      const filePath = path.join(PLUGIN_SRC, 'core', 'workspace-context.ts');
+      if (!fs.existsSync(filePath)) return;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const fnMatch = content.match(/static fromHookContextExplicit[\s\S]*?^\s{4}\}/m);
+      if (!fnMatch) return;
+      const fnBody = fnMatch[0];
+      expect(fnBody).toContain('throw');
+      expect(fnBody).toContain('workspace_dir_missing');
+    });
+
+    it('throws on invalid workspaceDir (does not just warn)', () => {
+      const filePath = path.join(PLUGIN_SRC, 'core', 'workspace-context.ts');
+      if (!fs.existsSync(filePath)) return;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const fnMatch = content.match(/static fromHookContextExplicit[\s\S]*?^\s{4}\}/m);
+      if (!fnMatch) return;
+      const fnBody = fnMatch[0];
+      expect(fnBody).toContain('workspace_dir_invalid');
+    });
   });
 
-  it('path-resolver does not import nocturnal or idle modules', () => {
-    const filePath = path.join(PLUGIN_SRC, 'core', 'path-resolver.ts');
-    if (!fs.existsSync(filePath)) return;
-    const content = fs.readFileSync(filePath, 'utf-8');
-
-    for (const disallowed of DISALLOWED_RUNTIME_V2_IMPORTS) {
-      expect(
-        content.includes(disallowed),
-        'path-resolver.ts must not import legacy discovery path: ' + disallowed,
-      ).toBe(false);
-    }
-  });
-
-  it('resolveWorkspaceDirForRuntimeV2 exists in workspace-resolver', () => {
-    const filePath = path.join(PLUGIN_SRC, 'utils', 'workspace-resolver.ts');
-    if (!fs.existsSync(filePath)) return;
-    const content = fs.readFileSync(filePath, 'utf-8');
-    expect(
-      content.includes('resolveWorkspaceDirForRuntimeV2'),
-      'workspace-resolver.ts must export resolveWorkspaceDirForRuntimeV2 for PD-owned config resolution',
-    ).toBe(true);
-  });
-
-  it('WorkspaceResolutionError exists in workspace-resolver', () => {
-    const filePath = path.join(PLUGIN_SRC, 'utils', 'workspace-resolver.ts');
-    if (!fs.existsSync(filePath)) return;
-    const content = fs.readFileSync(filePath, 'utf-8');
-    expect(
-      content.includes('WorkspaceResolutionError'),
-      'workspace-resolver.ts must export WorkspaceResolutionError for fail-loud config resolution',
-    ).toBe(true);
-  });
-
-  it('fromHookContextExplicit exists in workspace-context', () => {
-    const filePath = path.join(PLUGIN_SRC, 'core', 'workspace-context.ts');
-    if (!fs.existsSync(filePath)) return;
-    const content = fs.readFileSync(filePath, 'utf-8');
-    expect(
-      content.includes('fromHookContextExplicit'),
-      'workspace-context.ts must export fromHookContextExplicit for PD-owned config resolution',
-    ).toBe(true);
-  });
-
-  it('LEGACY_PATH_RESOLVER_FALLBACK warning exists in workspace-context', () => {
-    const filePath = path.join(PLUGIN_SRC, 'core', 'workspace-context.ts');
-    if (!fs.existsSync(filePath)) return;
-    const content = fs.readFileSync(filePath, 'utf-8');
-    expect(
-      content.includes('LEGACY_PATH_RESOLVER_FALLBACK'),
-      'workspace-context.ts must log LEGACY_PATH_RESOLVER_FALLBACK when PathResolver fallback is used',
-    ).toBe(true);
-  });
-
-  it('validateWorkspaceDir is called in workspace-context fromHookContext', () => {
-    const filePath = path.join(PLUGIN_SRC, 'core', 'workspace-context.ts');
-    if (!fs.existsSync(filePath)) return;
-    const content = fs.readFileSync(filePath, 'utf-8');
-    expect(
-      content.includes('validateWorkspaceDir'),
-      'workspace-context.ts must call validateWorkspaceDir in fromHookContext',
-    ).toBe(true);
+  describe('LEGACY_PATH_RESOLVER_FALLBACK marker in fromHookContext', () => {
+    it('fromHookContext logs LEGACY_PATH_RESOLVER_FALLBACK on dangerous paths', () => {
+      const filePath = path.join(PLUGIN_SRC, 'core', 'workspace-context.ts');
+      if (!fs.existsSync(filePath)) return;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toContain('LEGACY_PATH_RESOLVER_FALLBACK');
+    });
   });
 });

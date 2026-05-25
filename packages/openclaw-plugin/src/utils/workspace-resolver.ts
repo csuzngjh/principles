@@ -117,39 +117,27 @@ export class WorkspaceResolutionError extends Error {
 
 export function resolveWorkspaceDirForRuntimeV2(
   ctx: { workspaceDir?: string },
-  api: any | undefined,
+  api: OpenClawPluginApi | undefined,
   source: string,
 ): string {
   const explicit = ctx.workspaceDir;
-  if (explicit && explicit.trim()) {
-    const validation = validateWorkspaceDir(explicit);
-    if (validation) {
-      throw new WorkspaceResolutionError(
-        `workspaceDir validation failed for ${source}: ${validation}`,
-        'workspace_dir_invalid',
-        'Provide a valid workspaceDir that is not the home directory, root, or empty.',
-      );
-    }
-    return explicit.trim();
+  if (!explicit || !explicit.trim()) {
+    throw new WorkspaceResolutionError(
+      `No explicit workspace directory for Runtime V2 entrypoint (${source}). ` +
+      'Provide workspaceDir in context. Runtime V2 does not use legacy discovery fallback.',
+      'workspace_dir_missing',
+      'Ensure the OpenClaw hook context includes workspaceDir, or set PD_WORKSPACE_DIR environment variable.',
+    );
   }
 
-  const fromApi = resolveWorkspaceDirFromApi(api);
-  if (fromApi && fromApi.trim()) {
-    const validation = validateWorkspaceDir(fromApi);
-    if (validation) {
-      throw new WorkspaceResolutionError(
-        `workspaceDir from API validation failed for ${source}: ${validation}`,
-        'workspace_dir_invalid',
-        'The workspace directory resolved from the OpenClaw API is invalid. Provide an explicit workspaceDir.',
-      );
-    }
-    return fromApi.trim();
+  const validation = validateWorkspaceDir(explicit);
+  if (validation) {
+    throw new WorkspaceResolutionError(
+      `workspaceDir validation failed for ${source}: ${validation}`,
+      'workspace_dir_invalid',
+      'Provide a valid workspaceDir that is not the home directory, root, or empty.',
+    );
   }
 
-  throw new WorkspaceResolutionError(
-    `No workspace directory available for Runtime V2 entrypoint (${source}). ` +
-    'Provide workspaceDir in context or set PD_WORKSPACE_DIR env var.',
-    'workspace_dir_missing',
-    'Ensure the OpenClaw hook context includes workspaceDir, or set PD_WORKSPACE_DIR environment variable.',
-  );
+  return explicit.trim();
 }

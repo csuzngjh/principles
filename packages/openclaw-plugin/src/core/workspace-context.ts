@@ -224,14 +224,25 @@ export class WorkspaceContext {
      * For Runtime V2 entrypoints where implicit PathResolver fallback is unacceptable.
      * @throws Error if workspaceDir is not provided in the context.
      */
-    static fromHookContextExplicit(ctx: any): WorkspaceContext {
+    static fromHookContextExplicit(ctx: { workspaceDir?: string; logger?: { error?: (...args: unknown[]) => void; warn?: (...args: unknown[]) => void; info?: (...args: unknown[]) => void } }): WorkspaceContext {
         const { logger, workspaceDir } = ctx;
-        if (!workspaceDir) {
+        if (!workspaceDir || !workspaceDir.trim()) {
             const error = {
                 ok: false as const,
                 reason: 'workspace_dir_missing',
                 message: 'workspaceDir is required for Runtime V2 entrypoints. Provide it explicitly in the hook context.',
                 nextAction: 'Ensure the OpenClaw hook context includes workspaceDir, or use PD_WORKSPACE_DIR env var.',
+            };
+            logger?.error?.(`[PD:WorkspaceContext] ${error.message}`);
+            throw new Error(`[PD:WorkspaceContext] ${error.reason}: ${error.message}`);
+        }
+        const validationIssue = validateWorkspaceDir(workspaceDir);
+        if (validationIssue !== null) {
+            const error = {
+                ok: false as const,
+                reason: 'workspace_dir_invalid',
+                message: `workspaceDir validation failed for Runtime V2 entrypoint: ${validationIssue}`,
+                nextAction: 'Provide a valid workspaceDir that is not the home directory, root, or empty.',
             };
             logger?.error?.(`[PD:WorkspaceContext] ${error.message}`);
             throw new Error(`[PD:WorkspaceContext] ${error.reason}: ${error.message}`);

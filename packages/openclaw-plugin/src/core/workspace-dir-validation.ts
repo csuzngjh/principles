@@ -27,6 +27,10 @@ export function validateWorkspaceDir(dir: string | undefined): string | null {
     return `workspaceDir is root or empty: "${dir}"`;
   }
 
+  if (/^[A-Za-z]:\\?$/.test(dir)) {
+    return `workspaceDir is a drive root: "${dir}"`;
+  }
+
   const escapedHome = homeDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const badPatterns = [
     { pattern: new RegExp(`^${escapedHome}$`), desc: 'is home directory itself' },

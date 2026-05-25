@@ -267,11 +267,6 @@ export async function handleBeforePromptBuild(
   const {workspaceDir} = ctx;
   const logger = ctx.api?.logger;
   logger?.info?.(`[PD:Prompt] handleBeforePromptBuild called: workspaceDir=${!!workspaceDir}, trigger=${ctx.trigger}, sessionId=${ctx.sessionId?.substring(0, 20)}`);
-  if (!workspaceDir) {
-    logger?.warn?.(`[PD:Prompt] workspaceDir is missing — skipping empathy processing`);
-    return;
-  }
-
   // ──── DEBUG: Verify subagent availability in this context ────
   const subagent = ctx.api?.runtime?.subagent;
   logger?.info?.(`[PD:DEBUG:SubagentCheck] trigger=${ctx.trigger}, subagent_exists=${!!subagent}, subagent.run_exists=${!!subagent?.run}`);
@@ -279,7 +274,7 @@ export async function handleBeforePromptBuild(
     logger?.info?.('[PD:DEBUG:SubagentCheck] run entrypoint is callable');
   }
 
-  const wctx = WorkspaceContext.fromHookContext(ctx);
+  const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
   const { trigger, sessionId } = ctx as { trigger: string | undefined; sessionId: string | undefined };
   const api = ctx.api;
   if (sessionId) {
@@ -337,7 +332,7 @@ export async function handleBeforePromptBuild(
   }
 
   // Load context injection configuration
-  const contextConfig = loadContextInjectionConfig(workspaceDir);
+  const contextConfig = loadContextInjectionConfig(wctx.workspaceDir);
 
   // Minimal mode: heartbeat and subagents skip most context to reduce tokens
   const isMinimalMode = isMinimalTrigger(trigger as string | undefined, sessionId as string | undefined);
@@ -649,7 +644,7 @@ ${heartbeatChecklist}
     // Pruning mask: exclude principles whose latest review is archive-candidate
     let maskedIds = new Set<string>();
     try {
-      maskedIds = getCachedMaskedPrincipleSet(workspaceDir);
+      maskedIds = getCachedMaskedPrincipleSet(wctx.workspaceDir);
     } catch (err) {
       // Safe degradation: if review log unreadable, inject all principles
       const msg = err instanceof Error ? err.message : String(err);
