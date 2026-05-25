@@ -12,7 +12,9 @@
  *   4. On confirm: transition candidate->active, demote previous active->disabled
  *
  * VALIDATION:
- *   - Candidate must have at least one replay report with 'pass' decision
+ *   - Candidate with a passing replay report: promotion proceeds with evidence
+ *   - Candidate without a passing replay report: promotion proceeds with ⚠️ warning
+ *     (replay evidence generation is not yet wired to Runtime V2; see PRI-230)
  *   - Only candidate -> active is valid for promotion
  */
 
@@ -131,17 +133,16 @@ function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
     };
   }
 
-  if (!engine.hasPassingReport(implId)) {
-    return {
-      text: isZh
-        ? `❌ 实现 ${implId} 没有通过的回放报告，无法晋升。\n\n请先运行回放评估。`
-        : `❌ Implementation ${implId} has no passing replay report. Promotion rejected.\n\nPlease run a replay evaluation first.`,
-    };
-  }
+  const hasPassingReport = engine.hasPassingReport(implId);
 
   const report = engine.getLatestReport(implId);
   let output = '';
-  if (report) {
+
+  if (!hasPassingReport) {
+    output += isZh
+      ? `⚠️ 实现 ${implId} 没有通过的回放报告。晋升将在无 replay 证据的情况下继续。\n\n（Replay 证据生成路径尚未接入 Runtime V2，参见 PRI-230）\n\n`
+      : `⚠️ Implementation ${implId} has no passing replay report. Promoting without replay evidence.\n\n(Replay evidence generation is not yet wired to Runtime V2; see PRI-230)\n\n`;
+  } else if (report) {
     output = `${formatReplayReport(report)}\n`;
   }
 

@@ -44,11 +44,16 @@ export function handleExportCommand(ctx: PluginCommandContext): PluginCommandRes
         ? `已导出纠错样本到 ${result.filePath}，模式 ${result.mode}，共 ${result.count} 条。`
         : `Exported correction samples to ${result.filePath} (mode=${result.mode}, count=${result.count}).`,
     };
-  } catch {
+  } catch (err) {
+    console.error('[pd-export] Export failed:', {
+      subcommand,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return {
       text: zh
-        ? '导出失败，请检查日志。'
-        : 'Export failed. Check logs.',
+        ? `导出失败 (${subcommand}): ${err instanceof Error ? err.message : String(err)}`
+        : `Export failed (${subcommand}): ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }
