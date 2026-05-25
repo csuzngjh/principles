@@ -1,4 +1,4 @@
-/**
+﻿/**
  * WorkspaceDir Validation Utilities
  *
  * This module only validates candidate workspace directories and delegates
@@ -16,6 +16,10 @@ export interface WorkspaceResolutionContext {
 export function validateWorkspaceDir(dir: string | undefined): string | null {
   if (!dir) {
     return 'workspaceDir is undefined/null';
+  }
+
+  if (/^[A-Za-z]:\\?$/.test(dir)) {
+    return `workspaceDir is a drive root: "${dir}"`;
   }
 
   const resolved = path.resolve(dir);
