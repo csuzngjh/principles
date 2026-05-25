@@ -56,6 +56,7 @@ describe('handleTraceShow', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.exitCode = undefined;
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -94,9 +95,49 @@ describe('handleTraceShow', () => {
     expect(allOutput).toContain('Run ID:        run_001');
     expect(allOutput).toContain('Artifact ID:   art_001');
     expect(allOutput).toContain('Candidate IDs:  c1, c2');
+    expect(allOutput).toContain('Ledger Entries: l1');
+    expect(allOutput).toContain('Checked at:    2026-05-03T12:00:00.000Z');
     expect(allOutput).toContain('Latency:');
     expect(allOutput).toContain('pain→task:          100ms');
     expect(allOutput).toContain('task→run:           200ms');
+  });
+
+  it('outputs all latency segments in text mode', async () => {
+    mockTraceByPainId.mockResolvedValue(fullChainTrace());
+
+    await handleTraceShow({ painId: 'pain_001', workspace: WS, json: false });
+
+    const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(allOutput).toContain('run→artifact:       50ms');
+    expect(allOutput).toContain('artifact→candidate: 30ms');
+    expect(allOutput).toContain('candidate→ledger:   20ms');
+  });
+
+  it('outputs failure category in text mode when present', async () => {
+    mockTraceByPainId.mockResolvedValue({
+      ...fullChainTrace(),
+      status: 'failed',
+      failureCategory: 'runtime_timeout',
+    });
+
+    await handleTraceShow({ painId: 'pain_001', workspace: WS, json: false });
+
+    const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(allOutput).toContain('Failure:       runtime_timeout');
+  });
+
+  it('omits candidate/ledger lines when arrays are empty', async () => {
+    mockTraceByPainId.mockResolvedValue({
+      ...fullChainTrace(),
+      candidateIds: [],
+      ledgerEntryIds: [],
+    });
+
+    await handleTraceShow({ painId: 'pain_001', workspace: WS, json: false });
+
+    const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(allOutput).not.toContain('Candidate IDs:');
+    expect(allOutput).not.toContain('Ledger Entries:');
   });
 
   it('handles not_found status with exit code 1', async () => {
@@ -115,7 +156,23 @@ describe('handleTraceShow', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('handles error status with config_missing', async () => {
+  it('handles not_found in text mode with derived taskId and workspace', async () => {
+    mockTraceByPainId.mockResolvedValue({
+      painId: 'pain_001',
+      taskId: 'diagnosis_pain_001',
+      status: 'not_found',
+      failureCategory: 'runtime_unavailable',
+      checkedAt: '2026-05-03T12:00:00.000Z',
+      missingLinks: ['task'],
+    });
+
+    await handleTraceShow({ painId: 'pain_001', workspace: WS, json: false });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('diagnosis_pain_001'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining(WS));
+  });
+
+  it('handles error status with config_missing in JSON mode', async () => {
     mockTraceByPainId.mockResolvedValue({
       painId: 'pain_001',
       taskId: 'diagnosis_pain_001',
@@ -130,6 +187,23 @@ describe('handleTraceShow', () => {
     const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(jsonOutput.status).toBe('error');
     expect(jsonOutput.failureCategory).toBe('config_missing');
+    expect(jsonOutput.message).toContain('Failed to initialize state manager');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('handles error status in text mode', async () => {
+    mockTraceByPainId.mockResolvedValue({
+      painId: 'pain_001',
+      taskId: 'diagnosis_pain_001',
+      status: 'error',
+      failureCategory: 'config_missing',
+      checkedAt: '2026-05-03T12:00:00.000Z',
+      missingLinks: ['state_manager_init'],
+    });
+
+    await handleTraceShow({ painId: 'pain_001', workspace: WS, json: false });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to open workspace'));
     expect(process.exitCode).toBe(1);
   });
 
@@ -147,17 +221,6 @@ describe('handleTraceShow', () => {
     expect(allOutput).toContain('Missing links');
     expect(allOutput).toContain('candidate:c1 consumed but missing from ledger');
     expect(process.exitCode).toBe(1);
-  });
-
-  it('outputs all latency segments', async () => {
-    mockTraceByPainId.mockResolvedValue(fullChainTrace());
-
-    await handleTraceShow({ painId: 'pain_001', workspace: WS, json: false });
-
-    const allOutput = consoleLogSpy.mock.calls.map(c => c.join(' ')).join('\n');
-    expect(allOutput).toContain('run→artifact:       50ms');
-    expect(allOutput).toContain('artifact→candidate: 30ms');
-    expect(allOutput).toContain('candidate→ledger:   20ms');
   });
 
   it('handles missing painId gracefully', async () => {
@@ -200,6 +263,14 @@ describe('handleTraceShow', () => {
     expect(mockPainChainClose).toHaveBeenCalled();
   });
 
+  it('closes PainChainReadModel even when traceByPainId throws', async () => {
+    mockTraceByPainId.mockRejectedValue(new Error('Database connection failed'));
+
+    await handleTraceShow({ painId: 'pain_001', workspace: WS, json: true });
+
+    expect(mockPainChainClose).toHaveBeenCalled();
+  });
+
   it('handles traceByPainId throwing an error', async () => {
     mockTraceByPainId.mockRejectedValue(new Error('Database connection failed'));
 
@@ -208,6 +279,7 @@ describe('handleTraceShow', () => {
     const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
     expect(jsonOutput.status).toBe('error');
     expect(jsonOutput.failureCategory).toBe('runtime_unavailable');
+    expect(jsonOutput.message).toContain('Database connection failed');
     expect(process.exitCode).toBe(1);
   });
 
@@ -230,5 +302,13 @@ describe('handleTraceShow', () => {
     expect(jsonOutput.message).toContain('No task found');
     expect(jsonOutput.workspace).toBe(WS);
     expect(process.exitCode).toBe(1);
+  });
+
+  it('does not set exit code for succeeded status', async () => {
+    mockTraceByPainId.mockResolvedValue(fullChainTrace());
+
+    await handleTraceShow({ painId: 'pain_001', workspace: WS, json: true });
+
+    expect(process.exitCode).toBeUndefined();
   });
 });
