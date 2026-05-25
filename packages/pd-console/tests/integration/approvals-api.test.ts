@@ -429,4 +429,66 @@ describe('Approvals API — Proven Channel Restrictions', () => {
       expect(tableNamesAfter.size).toBe(tableNamesBefore.size);
     });
   });
+
+  // ── 10. Fresh workspace — no state DB ────────────────────────────────────
+
+  describe('Fresh workspace — no state DB', () => {
+    let freshTmp: string;
+    let freshPort: number;
+    let freshServer: http.Server;
+
+    beforeAll(async () => {
+      freshTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-fresh-test-'));
+
+      freshServer = http.createServer((req, res) => {
+        const urlPath = req.url?.split('?')[0] ?? '/';
+        if (!urlPath.startsWith('/api/v1/approvals')) {
+          sendNotFound(res, 'Not found');
+          return;
+        }
+        const subPath = urlPath.slice('/api/v1/approvals'.length);
+        (async () => handleApprovalsRoute(req, res, freshTmp, subPath))().catch((err: unknown) => {
+          if (!res.headersSent) {
+            sendJson(res, 500, { success: false, error: err instanceof Error ? err.message : 'Internal error' });
+          }
+        });
+      });
+
+      await new Promise<void>((resolve) => {
+        freshServer.listen(0, () => {
+          const addr = freshServer.address();
+          freshPort = addr && typeof addr === 'object' ? addr.port : 0;
+          resolve();
+        });
+      });
+      expect(freshPort).toBeGreaterThan(0);
+    });
+
+    afterAll(async () => {
+      disposeApprovalsModels();
+      await new Promise<void>((resolve) => freshServer.close(() => resolve()));
+      try { fs.rmSync(freshTmp, { recursive: true, force: true }); } catch { /* ignore */ }
+    });
+
+    it('GET list returns 200 with empty items on fresh workspace', async () => {
+      const res = await fetch(`http://127.0.0.1:${freshPort}/api/v1/approvals`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      const items = getItemsArray(body);
+      expect(items).toEqual([]);
+      expect(data?.total).toBe(0);
+    });
+
+    it('GET detail returns 404 on fresh workspace', async () => {
+      const res = await fetch(`http://127.0.0.1:${freshPort}/api/v1/approvals/nonexistent-id`);
+      expect(res.status).toBe(404);
+    });
+
+    it('GET list does not create .pd directory', async () => {
+      const pdDir = path.join(freshTmp, '.pd');
+      expect(fs.existsSync(pdDir)).toBe(false);
+    });
+  });
 });

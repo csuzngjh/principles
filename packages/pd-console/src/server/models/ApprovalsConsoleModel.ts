@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type {
   ApprovalListFilter,
   ApprovalListResult,
@@ -14,8 +16,14 @@ import type { ApprovalWithContext } from '@principles/core/runtime-v2';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
+const EMPTY_STATS = { pending: 0, approved: 0, rejected: 0, cancelled: 0 } as const;
+
 type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; channel: string };
 type ChannelGuardedDecisionResult = ApprovalDecisionResult | UnsupportedChannelResult;
+
+function stateDbExists(workspaceDir: string): boolean {
+  return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
+}
 
 export class ApprovalsConsoleModel {
   private readConnection: SqliteConnection | null = null;
@@ -47,6 +55,9 @@ export class ApprovalsConsoleModel {
   }
 
   async listApprovals(filter?: ApprovalListFilter): Promise<ApprovalListResult> {
+    if (!stateDbExists(this.workspaceDir)) {
+      return { items: [], total: 0, stats: { ...EMPTY_STATS } };
+    }
     const queue = this.getReadQueue();
     const allItems = await queue.listAll({ status: filter?.status, channel: filter?.channel });
     const mvpItems = allItems.filter((record) => MVP_PROVEN_CHANNELS.has(record.channel));
@@ -73,6 +84,9 @@ export class ApprovalsConsoleModel {
   }
 
   async getApprovalDetail(approvalId: string): Promise<(ApprovalWithContext & { isMvpProven: boolean }) | null> {
+    if (!stateDbExists(this.workspaceDir)) {
+      return null;
+    }
     const queue = this.getReadQueue();
     const record = await queue.getById(approvalId);
     if (!record) return null;
@@ -84,6 +98,9 @@ export class ApprovalsConsoleModel {
   }
 
   async approve(approvalId: string, decidedBy: string, note?: string): Promise<ChannelGuardedDecisionResult> {
+    if (!stateDbExists(this.workspaceDir)) {
+      return { ok: false, error: 'not_found' };
+    }
     const readQueue = this.getReadQueue();
     const existing = await readQueue.getById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
@@ -94,6 +111,9 @@ export class ApprovalsConsoleModel {
   }
 
   async reject(approvalId: string, decidedBy: string, reason: string): Promise<ChannelGuardedDecisionResult> {
+    if (!stateDbExists(this.workspaceDir)) {
+      return { ok: false, error: 'not_found' };
+    }
     const readQueue = this.getReadQueue();
     const existing = await readQueue.getById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
