@@ -225,7 +225,8 @@ export class WorkspaceContext {
      * @throws Error if workspaceDir is not provided in the context.
      */
     static fromHookContextExplicit(ctx: { workspaceDir?: string; logger?: { error?: (...args: unknown[]) => void; warn?: (...args: unknown[]) => void; info?: (...args: unknown[]) => void } }): WorkspaceContext {
-        const { logger, workspaceDir } = ctx;
+        const { logger } = ctx;
+        let { workspaceDir } = ctx;
         if (!workspaceDir || !workspaceDir.trim()) {
             const error = {
                 ok: false as const,
@@ -235,6 +236,11 @@ export class WorkspaceContext {
             };
             logger?.error?.(`[PD:WorkspaceContext] ${error.message}`);
             throw new Error(`[PD:WorkspaceContext] ${error.reason}: ${error.message}`);
+        }
+        const normalized = this.pathResolver.normalizeWorkspacePath(workspaceDir);
+        if (normalized !== workspaceDir) {
+            logger?.info?.(`[PD:WorkspaceContext] Normalized workspaceDir before validation: ${workspaceDir} -> ${normalized}`);
+            workspaceDir = normalized;
         }
         const validationIssue = validateWorkspaceDir(workspaceDir);
         if (validationIssue !== null) {
@@ -247,7 +253,7 @@ export class WorkspaceContext {
             logger?.error?.(`[PD:WorkspaceContext] ${error.message}`);
             throw new Error(`[PD:WorkspaceContext] ${error.reason}: ${error.message}`);
         }
-        return this.fromHookContext(ctx);
+        return this.fromHookContext({ ...ctx, workspaceDir });
     }
 
     /**

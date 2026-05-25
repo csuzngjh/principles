@@ -6,6 +6,7 @@
  */
 
 import * as os from 'os';
+import * as path from 'path';
 
 export interface WorkspaceResolutionContext {
   workspaceDir?: string;
@@ -17,29 +18,29 @@ export function validateWorkspaceDir(dir: string | undefined): string | null {
     return 'workspaceDir is undefined/null';
   }
 
+  const resolved = path.resolve(dir);
   const homeDir = os.homedir();
 
-  if (dir === homeDir) {
+  if (resolved === homeDir) {
     return `workspaceDir equals home directory (${homeDir}), likely missing context field`;
   }
 
-  if (dir === '/' || dir === '') {
-    return `workspaceDir is root or empty: "${dir}"`;
+  if (resolved === '/' || resolved === '') {
+    return `workspaceDir is root or empty: "${resolved}"`;
   }
 
-  if (/^[A-Za-z]:\\?$/.test(dir)) {
-    return `workspaceDir is a drive root: "${dir}"`;
+  if (/^[A-Za-z]:\\?$/.test(resolved)) {
+    return `workspaceDir is a drive root: "${resolved}"`;
   }
 
   const escapedHome = homeDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const badPatterns = [
-    { pattern: new RegExp(`^${escapedHome}$`), desc: 'is home directory itself' },
-    { pattern: new RegExp(`^${escapedHome}/$`), desc: 'is home directory with trailing slash' },
+    { pattern: new RegExp(`^${escapedHome}[\\\\/]?$`), desc: 'is home directory' },
   ];
 
   for (const { pattern, desc } of badPatterns) {
-    if (pattern.test(dir)) {
-      return `workspaceDir ${desc}: "${dir}"`;
+    if (pattern.test(resolved)) {
+      return `workspaceDir ${desc}: "${resolved}"`;
     }
   }
 

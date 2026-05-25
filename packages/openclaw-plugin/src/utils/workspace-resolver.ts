@@ -8,6 +8,7 @@ import type { OpenClawPluginApi, PluginCommandContext } from '../openclaw-sdk.js
 import { validateWorkspaceDir, type WorkspaceResolutionContext } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
+import * as path from 'path';
 
 /**
  * Resolve workspace directory for command execution.
@@ -130,7 +131,8 @@ export function resolveWorkspaceDirForRuntimeV2(
     );
   }
 
-  const validation = validateWorkspaceDir(explicit);
+  const normalized = path.resolve(explicit.trim());
+  const validation = validateWorkspaceDir(normalized);
   if (validation) {
     throw new WorkspaceResolutionError(
       `workspaceDir validation failed for ${source}: ${validation}`,
@@ -139,5 +141,5 @@ export function resolveWorkspaceDirForRuntimeV2(
     );
   }
 
-  return explicit.trim();
+  return normalized;
 }

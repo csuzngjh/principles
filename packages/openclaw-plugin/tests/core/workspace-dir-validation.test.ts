@@ -13,7 +13,8 @@ describe('validateWorkspaceDir', () => {
   it('rejects home directory and root-like paths', () => {
     expect(validateWorkspaceDir(homeDir)).toContain('home directory');
     expect(validateWorkspaceDir(`${homeDir}/`)).toContain('home directory');
-    expect(validateWorkspaceDir('/')).toContain('root or empty');
+    const slashResult = validateWorkspaceDir('/');
+    expect(slashResult && (slashResult.includes('root') || slashResult.includes('drive root'))).toBe(true);
     expect(validateWorkspaceDir('')).toContain('undefined/null');
   });
 

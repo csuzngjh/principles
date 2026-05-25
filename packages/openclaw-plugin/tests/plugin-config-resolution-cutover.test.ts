@@ -88,6 +88,30 @@ describe('PRI-228: Plugin config resolution cutover', () => {
         WorkspaceContext.fromHookContextExplicit({ workspaceDir: os.homedir() + '/', logger: noopLogger })
       ).toThrow(/workspace_dir_invalid/);
     });
+
+    it('rejects /tmp/.. which normalizes to root "/"', () => {
+      expect(() =>
+        WorkspaceContext.fromHookContextExplicit({ workspaceDir: '/tmp/..', logger: noopLogger })
+      ).toThrow(/workspace_dir_invalid/);
+    });
+
+    it('rejects /tmp/../.. which normalizes to root "/"', () => {
+      expect(() =>
+        WorkspaceContext.fromHookContextExplicit({ workspaceDir: '/tmp/../..', logger: noopLogger })
+      ).toThrow(/workspace_dir_invalid/);
+    });
+
+    it('rejects home subpath traversal that normalizes to home', () => {
+      expect(() =>
+        WorkspaceContext.fromHookContextExplicit({ workspaceDir: os.homedir() + '/subdir/..', logger: noopLogger })
+      ).toThrow(/workspace_dir_invalid/);
+    });
+
+    it('rejects path with repeated separators that normalizes to root', () => {
+      expect(() =>
+        WorkspaceContext.fromHookContextExplicit({ workspaceDir: '/foo/../bar/../..', logger: noopLogger })
+      ).toThrow(/workspace_dir_invalid/);
+    });
   });
 
   describe('fromHookContextExplicit: succeed with valid workspaceDir', () => {
@@ -169,13 +193,25 @@ describe('PRI-228: Plugin config resolution cutover', () => {
       }
     });
 
-    it('returns validated workspaceDir when explicit and valid', () => {
+    it('returns normalized workspaceDir when explicit and valid', () => {
       const result = resolveWorkspaceDirForRuntimeV2(
         { workspaceDir: tmpDir },
         undefined,
         'test-source',
       );
-      expect(result).toBe(tmpDir);
+      expect(path.resolve(tmpDir)).toBe(result);
+    });
+
+    it('rejects /tmp/.. which normalizes to root', () => {
+      expect(() =>
+        resolveWorkspaceDirForRuntimeV2({ workspaceDir: '/tmp/..' }, undefined, 'test-source')
+      ).toThrow(WorkspaceResolutionError);
+    });
+
+    it('rejects home subpath traversal that normalizes to home', () => {
+      expect(() =>
+        resolveWorkspaceDirForRuntimeV2({ workspaceDir: os.homedir() + '/subdir/..' }, undefined, 'test-source')
+      ).toThrow(WorkspaceResolutionError);
     });
 
     it('does NOT fall back to resolveWorkspaceDirFromApi', () => {
