@@ -338,6 +338,8 @@ export {
   buildFollowUpObservation,
   buildDemoNarrative,
   validateDemoChannels,
+  createDemoSandboxEvaluate,
+  evaluateDemoGoldenTrace,
   type DemoNarrativeInput,
 } from './story-a-demo.js';
 export type { StoryADemoResult, StoryADemoStage, StoryADemoStageName, StoryADemoChannelOutcome, StoryADemoInputValidationFailure, StoryADemoOptions } from './story-a-demo.js';

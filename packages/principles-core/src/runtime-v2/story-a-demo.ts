@@ -4,6 +4,10 @@ import type {
 } from './activation/activation-types.js';
 import type { GoldenTrace } from './golden-trace.js';
 import type { PIArtifactRecord } from './internalization/pi-artifact.js';
+import type { RuleHostInput, RuleHostResult } from './internalization/rule-host-contracts.js';
+import type { RuleHostHelpers } from './internalization/rule-host-helpers.js';
+import { evaluateInRefinerSandbox } from './internalization/refiner-sandbox-wrapper.js';
+import type { RefinerSandboxResult } from './internalization/refiner-sandbox-wrapper.js';
 
 export type MvpChannel = 'prompt' | 'code_tool_hook' | 'defer_archive';
 
@@ -152,22 +156,61 @@ export function computeDemoStatus(
   return 'passed';
 }
 
+export function createDemoSandboxEvaluate(
+  implementationCode: string,
+): (input: RuleHostInput, _helpers: RuleHostHelpers) => RuleHostResult {
+  const wrappedCode = `${implementationCode}; return evaluate(toolName, params);`;
+  const rawEvaluate = new Function('toolName', 'params', wrappedCode) as
+    (toolName: string, params: Record<string, unknown>) => string;
+
+  return (input: RuleHostInput, _helpers: RuleHostHelpers): RuleHostResult => {
+    const {toolName} = input.action;
+    const params = input.action.paramsSummary;
+    const result = rawEvaluate(toolName, params);
+    if (result === 'block') {
+      return { decision: 'block', matched: true, reason: 'Demo rule: blocked by sandbox evaluation' };
+    }
+    return { decision: 'allow', matched: true, reason: 'Demo rule: allowed by sandbox evaluation' };
+  };
+}
+
+export function evaluateDemoGoldenTrace(
+  ruleRecord: PIArtifactRecord,
+): RefinerSandboxResult {
+  const content = JSON.parse(ruleRecord.contentJson) as Record<string, unknown>;
+  const implementationCode = content.implementationCode as string;
+  const goldenTrace = content.goldenTrace as GoldenTrace;
+  const evaluateCode = createDemoSandboxEvaluate(implementationCode);
+  return evaluateInRefinerSandbox(implementationCode, goldenTrace, {
+    evaluateCode,
+    softTimeoutMs: 1000,
+  });
+}
+
 export function buildFollowUpObservation(
   channel: MvpChannel,
   outcome: StoryADemoChannelOutcome,
+  sandboxResult?: RefinerSandboxResult,
 ): { status: 'passed' | 'degraded'; evidence: Record<string, unknown> } {
   const isActivated = outcome.activationDecision.decision === 'activated'
     || outcome.activationDecision.decision === 'would_activate'
     || outcome.activationDecision.decision === 'already_activated';
 
   if (channel === 'code_tool_hook') {
+    const enforcementObserved = isActivated && (sandboxResult?.success === true);
     return {
-      status: isActivated ? 'passed' : 'degraded',
+      status: enforcementObserved ? 'passed' : 'degraded',
       evidence: {
-        enforcementObserved: isActivated,
-        dangerousPathBlocked: '/etc/passwd → block',
-        safePathAllowed: '/project/src/config.json → allow',
+        enforcementObserved,
+        dangerousPathBlocked: sandboxResult?.success === true
+          ? '/etc/passwd → block (verified by sandbox)'
+          : '/etc/passwd → block (unverified)',
+        safePathAllowed: sandboxResult?.success === true
+          ? '/project/src/config.json → allow (verified by sandbox)'
+          : '/project/src/config.json → allow (unverified)',
         ruleActivated: isActivated,
+        sandboxVerified: sandboxResult?.success ?? false,
+        ...(sandboxResult?.failedCases.length ? { sandboxFailures: sandboxResult.failedCases.map(c => c.message) } : {}),
       },
     };
   }
@@ -213,12 +256,12 @@ export function buildDemoNarrative(input: DemoNarrativeInput): string {
     `SCENARIO: An AI agent repeatedly writes to /etc/passwd despite owner corrections.`,
     `This is not a one-off error — it is a recurring behavioral pattern.`,
     ``,
-    `1. EVIDENCE: 3 occurrences of writing to /etc/passwd captured as pain signal.`,
-    `2. PROPOSAL: PD proposes principle "${principleId}" to prevent this pattern.`,
-    `3. REVIEW: Owner reviews and approves the principle.`,
-    `4. ACTIVATION: ${channels.join(', ')} → ${activationSummary}`,
-    `5. FOLLOW-UP: Comparable scenario shows behavior change or enforcement.`,
-    `6. ROLLBACK: Each activation has a verified disable/revert path.`,
+    `1. EVIDENCE [SIMULATED]: 3 occurrences of writing to /etc/passwd captured as pain signal.`,
+    `2. PROPOSAL [REAL]: PD proposes principle "${principleId}" to prevent this pattern.`,
+    `3. REVIEW [SIMULATED]: Owner reviews and approves the principle.`,
+    `4. ACTIVATION [REAL]: ${channels.join(', ')} → ${activationSummary}`,
+    `5. FOLLOW-UP [REAL]: Comparable scenario shows behavior change or enforcement.`,
+    `6. ROLLBACK [SIMULATED]: Each activation has a verified disable/revert path.`,
   ].join('\n');
 }
 

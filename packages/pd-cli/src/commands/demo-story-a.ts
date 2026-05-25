@@ -84,7 +84,11 @@ interface ParseChannelResult {
 }
 
 function parseChannelList(raw: string | undefined): ParseChannelResult {
-  if (!raw) return { channels: undefined, unknowns: [] };
+  if (!raw || raw.trim().length === 0) {
+    // Empty string means user explicitly passed --channels "" → treat as empty request
+    if (raw !== undefined) return { channels: [], unknowns: [] };
+    return { channels: undefined, unknowns: [] };
+  }
   const parts = raw.split(',').map(p => p.trim()).filter(p => p.length > 0);
   if (parts.length === 0) return { channels: [], unknowns: [] };
   const valid: MvpChannel[] = [];
@@ -106,6 +110,35 @@ export async function handleDemoStoryA(opts: DemoStoryAOptions): Promise<void> {
     : fs.mkdtempSync(path.join(os.tmpdir(), 'pd-story-a-'));
 
   const parsed = parseChannelList(opts.channels);
+
+  // Fail loud on empty channels before workspace creation (ERR-029)
+  if (parsed.channels?.length === 0) {
+    const errorResult = {
+      status: 'failed' as const,
+      generatedAt: new Date().toISOString(),
+      narrative: 'No channels specified.',
+      storyDescription: 'Input validation failed',
+      stages: [],
+      channelOutcomes: [],
+      isRuntimeV2Exclusive: true,
+      inputValidationFailure: {
+        reason: 'empty_channels',
+        message: 'No channels specified. At least one MVP channel required.',
+        nextAction: 'Provide channels: prompt, code_tool_hook, defer_archive',
+      },
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(errorResult, null, 2));
+    } else {
+      console.error('Error: No channels specified. At least one MVP channel required.');
+      console.error('Valid channels: prompt, code_tool_hook, defer_archive');
+    }
+    process.exitCode = 1;
+    if (!opts.workspace) {
+      cleanupTempWorkspace(workspaceDir);
+    }
+    return;
+  }
 
   // Fail loud on unknown channels (ERR-029)
   if (parsed.unknowns.length > 0) {

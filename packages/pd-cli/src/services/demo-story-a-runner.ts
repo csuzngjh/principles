@@ -14,6 +14,7 @@ import {
   buildFollowUpObservation,
   buildDemoNarrative,
   validateDemoChannels,
+  evaluateDemoGoldenTrace,
 } from '@principles/core/runtime-v2';
 import type {
   MvpChannel,
@@ -114,7 +115,11 @@ interface ChannelDispatchInput {
   ctx: DispatchContext;
 }
 
-async function approveAndReactivate(
+// Post-approval direct activation: the dispatcher routes code_tool_hook through the
+// approval queue every time (isLowRiskChannel is false). No re-dispatch mechanism exists
+// for already-approved items, so this completes the activation by calling the writer
+// directly and recording the result. This is the canonical production path.
+async function completePostApprovalActivation(
   approvalId: string,
   input: ChannelDispatchInput,
 ): Promise<ActivationDecision> {
@@ -188,7 +193,7 @@ async function runChannelOutcome(
     // For code_tool_hook: first dispatch queues for approval.
     // Demo explicitly approves and activates to complete activation.
     if (channel === 'code_tool_hook' && classifyDecision(firstDecision) === 'queued' && approvalId) {
-      const postApprovalDecision = await approveAndReactivate(
+      const postApprovalDecision = await completePostApprovalActivation(
         approvalId, { channel, artifactRecord, ctx },
       );
 
@@ -204,7 +209,7 @@ async function runChannelOutcome(
             activationId: (postApprovalDecision as { activationId?: string }).activationId,
             path: 'queued → approved → activated',
           },
-          evidenceSource: `ActivationDispatcher.dispatch → RuleHostWriter (approved then activated)`,
+          evidenceSource: `ActivationDispatcher.dispatch → approval_queue → post_approval_direct_activation`,
           principleId,
         };
       }
@@ -220,7 +225,7 @@ async function runChannelOutcome(
           approvedBy: 'demo-owner',
           activationDecision: postApprovalDecision.decision,
         },
-        evidenceSource: 'ActivationDispatcher.dispatch → RuleHostWriter (approved but activation incomplete)',
+        evidenceSource: 'ActivationDispatcher.dispatch → approval_queue → post_approval_direct_activation (incomplete)',
         principleId,
         failureReason: `RuleHost approved but post-activation dispatch returned: ${postApprovalDecision.decision}`,
         nextAction: 'Check RuleHost writer canActivate and artifact contract',
@@ -336,6 +341,8 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
         evidenceType: 'repeated_owner_correction',
         artifactPersisted: !!storedPrinciple,
         artifactId: principleRecord.artifactId,
+        simulated: true,
+        simulatedNote: 'Pain evidence is a narrative fixture; artifact persistence is real DB I/O',
       },
       ...(storedPrinciple ? {} : {
         reason: 'Failed to persist principle artifact to workspace DB',
@@ -374,6 +381,8 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
         decision: 'approve',
         availableChannels: ['prompt', 'code_tool_hook', 'defer_archive'],
         note: 'Demo: owner approves the principle for all three MVP channels',
+        simulated: true,
+        simulatedNote: 'Owner decision is a scripted approval; no real human review',
       },
     });
 
@@ -394,6 +403,7 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
           decision: o.activationDecision.decision,
           evidenceSource: o.evidenceSource,
         })),
+        simulated: false,
       },
       ...(activationPassed ? {} : {
         reason: `Some channels did not pass: ${channelOutcomes.filter(o => o.status !== 'passed').map(o => o.channel).join(', ')}`,
@@ -402,16 +412,21 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
     });
 
     // Stage 5: Follow-up observation
-    const followUpEvidences = channelOutcomes.map(o => ({
-      channel: o.channel,
-      ...buildFollowUpObservation(o.channel, o).evidence,
-    }));
+    const followUpEvidences = channelOutcomes.map(o => {
+      const sandboxResult = o.channel === 'code_tool_hook'
+        ? evaluateDemoGoldenTrace(ruleRecord)
+        : undefined;
+      return {
+        channel: o.channel,
+        ...buildFollowUpObservation(o.channel, o, sandboxResult).evidence,
+      };
+    });
     const followUpPassed = channelOutcomes.every(o => o.status === 'passed');
     stages.push({
       name: 'follow_up_observation',
       status: followUpPassed ? 'passed' : 'degraded',
       evidenceRef: `followup-${runId}`,
-      evidence: { observations: followUpEvidences },
+      evidence: { observations: followUpEvidences, simulated: false },
       ...(followUpPassed ? {} : {
         reason: 'Some follow-up observations degraded',
         nextAction: 'Check channel outcomes',

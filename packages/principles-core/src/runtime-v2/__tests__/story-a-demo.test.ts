@@ -8,11 +8,15 @@ import {
   buildFollowUpObservation,
   buildDemoNarrative,
   validateDemoChannels,
+  createDemoSandboxEvaluate,
+  evaluateDemoGoldenTrace,
 } from '../story-a-demo.js';
 import type {
   StoryADemoStage,
   StoryADemoChannelOutcome,
 } from '../story-a-demo.js';
+import type { RuleHostInput } from '../internalization/rule-host-contracts.js';
+import type { RuleHostHelpers } from '../internalization/rule-host-helpers.js';
 
 const FORBIDDEN_TERMS = [
   'skill', 'model_training', 'Nocturnal', 'nocturnal',
@@ -131,17 +135,21 @@ describe('Story A\' pure helpers', () => {
     expect(computeDemoStatus(stages, outcomes)).toBe('failed');
   });
 
-  it('code_tool_hook activated shows enforcement observed', () => {
+  it('code_tool_hook activated with sandbox pass shows enforcement observed', () => {
     const outcome = makeOutcome({
       channel: 'code_tool_hook',
       status: 'passed',
       activationDecision: { decision: 'activated', activationId: 'act-1', action: 'hook', targetRef: 'ref' },
     });
-    const obs = buildFollowUpObservation('code_tool_hook', outcome);
+    const sandboxResult = { success: true, failedCases: [], executionTimeMs: 1, forbiddenPatternViolations: [] as string[] };
+    const obs = buildFollowUpObservation('code_tool_hook', outcome, sandboxResult);
     expect(obs.status).toBe('passed');
     const {evidence} = obs;
     expect(evidence.enforcementObserved).toBe(true);
     expect(evidence.ruleActivated).toBe(true);
+    expect(evidence.sandboxVerified).toBe(true);
+    expect(evidence.dangerousPathBlocked).toContain('verified by sandbox');
+    expect(evidence.safePathAllowed).toContain('verified by sandbox');
   });
 
   it('code_tool_hook queued_for_approval shows NOT enforcement observed and degraded', () => {
@@ -155,6 +163,7 @@ describe('Story A\' pure helpers', () => {
     const {evidence} = obs;
     expect(evidence.enforcementObserved).toBe(false);
     expect(evidence.ruleActivated).toBe(false);
+    expect(evidence.sandboxVerified).toBe(false);
   });
 
   it('prompt activated shows principle activated', () => {
@@ -179,7 +188,7 @@ describe('Story A\' pure helpers', () => {
     expect((obs.evidence).deferred).toBe(true);
   });
 
-  it('buildDemoNarrative includes run ID and activation info', () => {
+  it('buildDemoNarrative includes run ID, activation info, and SIMULATED/REAL markers', () => {
     const narrative = buildDemoNarrative({
       runId: 'run-42',
       principleId: 'principle-42',
@@ -191,6 +200,94 @@ describe('Story A\' pure helpers', () => {
     expect(narrative).toContain('run-42');
     expect(narrative).toContain('principle-42');
     expect(narrative).toContain('activated');
+    expect(narrative).toContain('[SIMULATED]');
+    expect(narrative).toContain('[REAL]');
+  });
+
+  it('code_tool_hook activated but sandbox failed shows degraded with unverified', () => {
+    const outcome = makeOutcome({
+      channel: 'code_tool_hook',
+      status: 'passed',
+      activationDecision: { decision: 'activated', activationId: 'act-1', action: 'hook', targetRef: 'ref' },
+    });
+    const failedSandbox = {
+      success: false,
+      failedCases: [{ caseId: 'case-1', errorType: 'validation_failed' as const, message: 'expected block but got allow' }],
+      executionTimeMs: 1,
+      forbiddenPatternViolations: [] as string[],
+    };
+    const obs = buildFollowUpObservation('code_tool_hook', outcome, failedSandbox);
+    expect(obs.status).toBe('degraded');
+    expect(obs.evidence.enforcementObserved).toBe(false);
+    expect(obs.evidence.sandboxVerified).toBe(false);
+    expect(obs.evidence.dangerousPathBlocked).toContain('unverified');
+    expect(obs.evidence.sandboxFailures).toBeDefined();
+  });
+
+  it('code_tool_hook activated without sandboxResult shows unverified', () => {
+    const outcome = makeOutcome({
+      channel: 'code_tool_hook',
+      status: 'passed',
+      activationDecision: { decision: 'activated', activationId: 'act-1', action: 'hook', targetRef: 'ref' },
+    });
+    const obs = buildFollowUpObservation('code_tool_hook', outcome);
+    expect(obs.status).toBe('degraded');
+    expect(obs.evidence.enforcementObserved).toBe(false);
+    expect(obs.evidence.sandboxVerified).toBe(false);
+    expect(obs.evidence.dangerousPathBlocked).toContain('unverified');
+  });
+
+  describe('createDemoSandboxEvaluate', () => {
+    it('maps "block" return to block decision', () => {
+      const fn = createDemoSandboxEvaluate('return params.path?.startsWith("/etc") ? "block" : "allow";');
+      const input = {
+        action: { toolName: 'write_file', normalizedPath: null, paramsSummary: { path: '/etc/passwd', content: 'bad' } },
+        workspace: { isRiskPath: false, planStatus: 'UNKNOWN', hasPlanFile: false },
+        session: { currentGfi: 0, recentThinking: false },
+        evolution: { epTier: 0 },
+        derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
+      } as RuleHostInput;
+      const result = fn(input, {} as RuleHostHelpers);
+      expect(result.decision).toBe('block');
+      expect(result.matched).toBe(true);
+    });
+
+    it('maps "allow" return to allow decision', () => {
+      const fn = createDemoSandboxEvaluate('return params.path?.startsWith("/etc") ? "block" : "allow";');
+      const input = {
+        action: { toolName: 'write_file', normalizedPath: null, paramsSummary: { path: '/project/src/config.json', content: '{}' } },
+        workspace: { isRiskPath: false, planStatus: 'UNKNOWN', hasPlanFile: false },
+        session: { currentGfi: 0, recentThinking: false },
+        evolution: { epTier: 0 },
+        derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
+      } as RuleHostInput;
+      const result = fn(input, {} as RuleHostHelpers);
+      expect(result.decision).toBe('allow');
+      expect(result.matched).toBe(true);
+    });
+
+    it('maps any non-"block" return to allow', () => {
+      const fn = createDemoSandboxEvaluate('return "other";');
+      const input = {
+        action: { toolName: 'write_file', normalizedPath: null, paramsSummary: {} },
+        workspace: { isRiskPath: false, planStatus: 'UNKNOWN', hasPlanFile: false },
+        session: { currentGfi: 0, recentThinking: false },
+        evolution: { epTier: 0 },
+        derived: { estimatedLineChanges: 0, bashRisk: 'unknown' },
+      } as RuleHostInput;
+      const result = fn(input, {} as RuleHostHelpers);
+      expect(result.decision).toBe('allow');
+    });
+  });
+
+  describe('evaluateDemoGoldenTrace', () => {
+    it('evaluates the demo rule artifact against its golden trace and passes', () => {
+      const principle = makePrincipleArtifactRecord('sandbox-test');
+      const rule = makeRuleArtifactRecord('sandbox-test', principle);
+      const result = evaluateDemoGoldenTrace(rule);
+      expect(result.success).toBe(true);
+      expect(result.failedCases).toHaveLength(0);
+    });
   });
 
   it('artifact content contains no forbidden terms', () => {

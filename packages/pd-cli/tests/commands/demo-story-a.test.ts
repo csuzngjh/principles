@@ -78,6 +78,25 @@ describe('pd demo story-a CLI', () => {
     expect(stderrSpy).toHaveBeenCalled();
   });
 
+  it('rejects --channels "" with exitCode 1 before workspace creation', async () => {
+    await handleDemoStoryA({ channels: '' });
+
+    expect(process.exitCode).toBe(1);
+    expect(stderrSpy).toHaveBeenCalled();
+    const output = stderrSpy.mock.calls.map(c => c[0]).join('');
+    expect(output).toContain('No channels specified');
+  });
+
+  it('rejects --channels "" in JSON mode with structured empty_channels error', async () => {
+    await handleDemoStoryA({ channels: '', json: true });
+
+    expect(process.exitCode).toBe(1);
+    const output = stdoutSpy.mock.calls.map(c => c[0]).join('');
+    const parsed = JSON.parse(output);
+    expect(parsed.status).toBe('failed');
+    expect(parsed.inputValidationFailure.reason).toBe('empty_channels');
+  });
+
   it('temp workspace is cleaned up after run', async () => {
     // Run with default (temp) workspace — verify the temp dir is gone after
     await handleDemoStoryA({ json: true });
@@ -147,7 +166,7 @@ describe('pd demo story-a CLI', () => {
     expect(cthOutcome!.activationDecision.activationId).toMatch(/^act_code_/);
   });
 
-  it('enforcementObserved is true only after full activation', async () => {
+  it('enforcementObserved is true only after full activation with sandbox verification', async () => {
     await handleDemoStoryA({ json: true });
 
     const output = stdoutSpy.mock.calls.map(c => c[0]).join('');
@@ -162,6 +181,9 @@ describe('pd demo story-a CLI', () => {
     expect(cthObs).toBeDefined();
     expect(cthObs!.enforcementObserved).toBe(true);
     expect(cthObs!.ruleActivated).toBe(true);
+    expect(cthObs!.sandboxVerified).toBe(true);
+    expect(cthObs!.dangerousPathBlocked).toContain('verified by sandbox');
+    expect(cthObs!.safePathAllowed).toContain('verified by sandbox');
   });
 
   it('--json output is exactly one parseable JSON object on stdout', async () => {
@@ -176,6 +198,45 @@ describe('pd demo story-a CLI', () => {
     // Verify stderr is empty (no mixed output)
     const stderrOutput = stderrSpy.mock.calls.map(c => c[0]).join('');
     expect(stderrOutput).toBe('');
+  });
+
+  it('marks simulated stages with simulated=true', async () => {
+    await handleDemoStoryA({ json: true });
+
+    const output = stdoutSpy.mock.calls.map(c => c[0]).join('');
+    const parsed = JSON.parse(output);
+
+    const stages = parsed.stages as { name: string; evidence: Record<string, unknown> }[];
+    const evidenceSeed = stages.find(s => s.name === 'evidence_seed');
+    expect(evidenceSeed!.evidence.simulated).toBe(true);
+    expect(evidenceSeed!.evidence.simulatedNote).toBeDefined();
+
+    const ownerReview = stages.find(s => s.name === 'owner_review');
+    expect(ownerReview!.evidence.simulated).toBe(true);
+  });
+
+  it('marks real stages with simulated=false', async () => {
+    await handleDemoStoryA({ json: true });
+
+    const output = stdoutSpy.mock.calls.map(c => c[0]).join('');
+    const parsed = JSON.parse(output);
+
+    const stages = parsed.stages as { name: string; evidence: Record<string, unknown> }[];
+    const activation = stages.find(s => s.name === 'activation');
+    expect(activation!.evidence.simulated).toBe(false);
+
+    const followUp = stages.find(s => s.name === 'follow_up_observation');
+    expect(followUp!.evidence.simulated).toBe(false);
+  });
+
+  it('narrative contains [SIMULATED] and [REAL] stage markers', async () => {
+    await handleDemoStoryA({ json: true });
+
+    const output = stdoutSpy.mock.calls.map(c => c[0]).join('');
+    const parsed = JSON.parse(output);
+
+    expect(parsed.narrative).toContain('[SIMULATED]');
+    expect(parsed.narrative).toContain('[REAL]');
   });
 });
 
