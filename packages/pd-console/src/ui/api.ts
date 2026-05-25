@@ -560,6 +560,7 @@ interface ApprovalRecord {
   confidenceExplanation: string | undefined;
   effectDescription: string | undefined;
   rejectionEffect: string | undefined;
+  isMvpProven?: boolean;
 }
 
 interface ApprovalListResult {
