@@ -2,6 +2,7 @@ import * as path from 'path';
 import { OperatorHealthReadModel, SchemaConformanceReadModel, PruningReadModel, createInternalizationQueueReadModel, auditCandidateLedgerConsistency, buildGfiWorkspaceSnapshot, classifyGfiWorkspaceHealth } from '@principles/core/runtime-v2';
 import type { OperatorHealthSnapshot, SchemaConformanceResult, OrphanDetectionResult, InternalizationQueueSnapshot, GfiWorkspaceSnapshot, CandidateAuditResult } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
 
 export interface CanaryCheck {
   name: string;
@@ -56,9 +57,15 @@ function buildRecommendedActions(checks: CanaryCheck[]): string[] {
       case 'candidate_audit':
         actions.push('Run `pd candidate audit --workspace <path> --json` for details.');
         break;
-      case 'gfi_snapshot':
-        actions.push('Investigate GFI sessions — consider cleanup or session lifecycle review.');
+      case 'gfi_snapshot': {
+        const gfiDetails = check.details as { warnings?: string[]; configPath?: string } | undefined;
+        if (gfiDetails && gfiDetails.warnings && gfiDetails.warnings.length > 0) {
+          actions.push(`Review .pd/feature-flags.yaml and rerun \`pd runtime features --workspace <path> --json\`.`);
+        } else {
+          actions.push('Investigate GFI sessions — consider cleanup or session lifecycle review.');
+        }
         break;
+      }
       case 'pruning_orphans':
         actions.push('Run `pd runtime pruning orphans --workspace <path> --dry-run` to inspect orphan candidates.');
         break;
@@ -130,6 +137,23 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
     })(),
     (async (): Promise<CanaryCheck> => {
       try {
+        const featureFlags = loadEffectiveFeatureFlags(workspaceDir);
+        const gfiFlag = featureFlags.flags.gfi;
+        if (!gfiFlag || !gfiFlag.enabled) {
+          if (featureFlags.warnings.length > 0) {
+            return {
+              name: 'gfi_snapshot',
+              status: 'degraded',
+              summary: `GFI disabled but config has warnings: ${featureFlags.warnings.join('; ')}`,
+              details: { warnings: featureFlags.warnings, configPath: featureFlags.configPath },
+            };
+          }
+          return {
+            name: 'gfi_snapshot',
+            status: 'healthy',
+            summary: 'GFI feature flag disabled — skipping snapshot.',
+          };
+        }
         const sessionDir = path.join(workspaceDir, '.state', 'sessions');
         const fs = await import('fs');
         const sessions: { sessionId: string; currentGfi: number; lastActivityAt: number; consecutiveErrors: number }[] = [];

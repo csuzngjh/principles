@@ -1,0 +1,183 @@
+/**
+ * Feature Flag Contract — PRI-239
+ *
+ * Pure types and validators for the MVP-Quiet feature flag registry.
+ * No I/O — YAML loading lives in pd-cli.
+ */
+
+export const VALID_CATEGORIES = ['core', 'quiet', 'gone', 'legacy_retire'] as const;
+export type FeatureFlagCategory = (typeof VALID_CATEGORIES)[number];
+
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+export interface FeatureFlagDefinition {
+  id: string;
+  category: FeatureFlagCategory;
+  enabled: boolean;
+  since: string;
+  description?: string;
+}
+
+export interface EffectiveFeatureFlags {
+  flags: Record<string, FeatureFlagDefinition>;
+  source: 'defaults' | 'workspace_file';
+  configPath: string;
+  warnings: string[];
+}
+
+export interface ValidationResultOk {
+  ok: true;
+  value: FeatureFlagDefinition;
+}
+
+export interface ValidationResultErr {
+  ok: false;
+  errors: string[];
+  source: string;
+}
+
+export type ValidationResult = ValidationResultOk | ValidationResultErr;
+
+export function validateFeatureFlagRaw(raw: unknown, source: string): ValidationResult {
+  const errors: string[] = [];
+
+  if (raw === null || raw === undefined || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, errors: ['input must be a non-null object'], source };
+  }
+
+  const obj = raw;
+
+  const id = Object.hasOwn(obj, 'id') ? (obj as Record<string, unknown>).id : undefined;
+  if (typeof id !== 'string' || id.length === 0) {
+    errors.push('id must be a non-empty string');
+  }
+
+  const category = Object.hasOwn(obj, 'category') ? (obj as Record<string, unknown>).category : undefined;
+  if (typeof category !== 'string' || !VALID_CATEGORIES.includes(category as FeatureFlagCategory)) {
+    errors.push(`category must be one of: ${VALID_CATEGORIES.join(', ')}`);
+  }
+
+  const enabled = Object.hasOwn(obj, 'enabled') ? (obj as Record<string, unknown>).enabled : undefined;
+  if (typeof enabled !== 'boolean') {
+    errors.push('enabled must be a boolean');
+  }
+
+  const since = Object.hasOwn(obj, 'since') ? (obj as Record<string, unknown>).since : undefined;
+  if (typeof since !== 'string' || since.length === 0) {
+    errors.push('since must be a non-empty string');
+  }
+
+  const description = Object.hasOwn(obj, 'description') ? (obj as Record<string, unknown>).description : undefined;
+  if (description !== undefined && typeof description !== 'string') {
+    errors.push('description must be a string when present');
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors, source };
+  }
+
+  const value: FeatureFlagDefinition = {
+    id: id as string,
+    category: category as FeatureFlagCategory,
+    enabled: enabled as boolean,
+    since: since as string,
+  };
+
+  if (description !== undefined) {
+    value.description = description as string;
+  }
+
+  return { ok: true, value };
+}
+
+export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
+  // MVP-Core — always enabled, cannot be disabled
+  { id: 'prompt', category: 'core', enabled: true, since: '2026-05-24', description: 'Prompt injection for principle application' },
+  { id: 'code_tool_hook', category: 'core', enabled: true, since: '2026-05-24', description: 'Code tool hook for rule host enforcement' },
+  { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24', description: 'Defer/archive activation writer' },
+
+  // MVP-Quiet — default disabled, opt-in via config
+  // Only flags with real consumption paths are registered (PRI-239 constraint)
+  { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
+
+  // MVP-Gone — permanently disabled, cannot be re-enabled
+  { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
+  { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
+  { id: 'model_training', category: 'gone', enabled: false, since: '2026-05-24', description: 'Model training channel (retired)' },
+  { id: 'trainer', category: 'gone', enabled: false, since: '2026-05-24', description: 'Trainer peer runner (retired)' },
+];
+
+export function computeEffectiveFlags(
+  userFlags: Record<string, unknown>,
+  defaults: FeatureFlagDefinition[],
+  configPath: string,
+): EffectiveFeatureFlags {
+  const warnings: string[] = [];
+  const flags: Record<string, FeatureFlagDefinition> = {};
+
+  const safeKeys = Object.keys(userFlags).filter(key => {
+    if (DANGEROUS_KEYS.has(key)) {
+      warnings.push(`flag '${key}': dangerous key rejected`);
+      return false;
+    }
+    return true;
+  });
+  const hasUserFlags = safeKeys.length > 0;
+
+  for (const def of defaults) {
+    if (!Object.hasOwn(userFlags, def.id) || DANGEROUS_KEYS.has(def.id)) {
+      flags[def.id] = { ...def };
+      continue;
+    }
+
+    const override = userFlags[def.id];
+    const isPlainObj = override !== null && override !== undefined && typeof override === 'object' && !Array.isArray(override);
+    const enabledValue = isPlainObj && Object.hasOwn(override, 'enabled')
+      ? (override as Record<string, unknown>).enabled
+      : undefined;
+
+    if (typeof enabledValue !== 'boolean') {
+      flags[def.id] = { ...def };
+      warnings.push(`flag '${def.id}': malformed override kept default (enabled must be boolean)`);
+      continue;
+    }
+
+    // Gone flags can never be re-enabled
+    if (def.category === 'gone') {
+      flags[def.id] = { ...def };
+      if (enabledValue) {
+        warnings.push(`flag '${def.id}': gone flag cannot be re-enabled`);
+      }
+      continue;
+    }
+
+    // Core flags can never be disabled
+    if (def.category === 'core') {
+      flags[def.id] = { ...def };
+      if (!enabledValue) {
+        warnings.push(`flag '${def.id}': core flag cannot be disabled`);
+      }
+      continue;
+    }
+
+    // Quiet flags: accept valid user override
+    flags[def.id] = {
+      ...def,
+      enabled: enabledValue,
+    };
+  }
+
+  // Warn about unknown flags
+  for (const key of safeKeys) {
+    if (!Object.hasOwn(flags, key)) {
+      warnings.push(`flag '${key}': unknown flag ignored`);
+    }
+  }
+
+  return {
+    flags,
+    source: hasUserFlags ? 'workspace_file' : 'defaults',
+    configPath,
+    warnings,
+  };
+}
