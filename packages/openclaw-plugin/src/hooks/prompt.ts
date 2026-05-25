@@ -267,14 +267,12 @@ export async function handleBeforePromptBuild(
   const {workspaceDir} = ctx;
   const logger = ctx.api?.logger;
   logger?.info?.(`[PD:Prompt] handleBeforePromptBuild called: workspaceDir=${!!workspaceDir}, trigger=${ctx.trigger}, sessionId=${ctx.sessionId?.substring(0, 20)}`);
-  // ──── DEBUG: Verify subagent availability in this context ────
-  const subagent = ctx.api?.runtime?.subagent;
-  logger?.info?.(`[PD:DEBUG:SubagentCheck] trigger=${ctx.trigger}, subagent_exists=${!!subagent}, subagent.run_exists=${!!subagent?.run}`);
-  if (subagent?.run) {
-    logger?.info?.('[PD:DEBUG:SubagentCheck] run entrypoint is callable');
+  if (!workspaceDir) {
+    logger?.warn?.(`[PD:Prompt] workspaceDir is missing — skipping PD context injection`);
+    return;
   }
 
-  const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
+  const wctx = WorkspaceContext.fromHookContext(ctx);
   const { trigger, sessionId } = ctx as { trigger: string | undefined; sessionId: string | undefined };
   const api = ctx.api;
   if (sessionId) {

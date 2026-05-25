@@ -1,4 +1,4 @@
-﻿import * as fs from 'fs';
+import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookLlmOutputEvent, PluginHookAgentContext, TokenUsage } from '../openclaw-sdk.js';
 import { trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
@@ -144,7 +144,7 @@ export function handleLlmOutput(
 ): void {
     if (!ctx.workspaceDir || !ctx.sessionId) return;
 
-    const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
+    const wctx = WorkspaceContext.fromHookContext(ctx);
     const {config} = wctx;
     const {eventLog} = wctx;
 

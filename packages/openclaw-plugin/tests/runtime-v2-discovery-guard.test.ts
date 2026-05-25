@@ -22,14 +22,14 @@ describe('PRI-228: Runtime V2 discovery guard', () => {
   ];
 
   for (const file of guardedFiles) {
-    describe(`${file.name} isolation`, () => {
-      it(`does not import nocturnal or idle modules`, () => {
+    describe(file.name + ' isolation', () => {
+      it('does not import nocturnal or idle modules', () => {
         if (!fs.existsSync(file.path)) return;
         const content = fs.readFileSync(file.path, 'utf-8');
         for (const disallowed of DISALLOWED_RUNTIME_V2_IMPORTS) {
           expect(
             content.includes(disallowed),
-            `${file.name} must not import legacy discovery path: ${disallowed}`,
+            file.name + ' must not import legacy discovery path: ' + disallowed,
           ).toBe(false);
         }
       });
@@ -69,7 +69,7 @@ describe('PRI-228: Runtime V2 discovery guard', () => {
     });
   });
 
-  describe('fromHookContextExplicit does not delegate dangerous paths to fromHookContext', () => {
+  describe('fromHookContextExplicit validates before delegating', () => {
     it('validates workspaceDir BEFORE calling fromHookContext', () => {
       const filePath = path.join(PLUGIN_SRC, 'core', 'workspace-context.ts');
       if (!fs.existsSync(filePath)) return;
@@ -118,6 +118,37 @@ describe('PRI-228: Runtime V2 discovery guard', () => {
       if (!fs.existsSync(filePath)) return;
       const content = fs.readFileSync(filePath, 'utf-8');
       expect(content).toContain('LEGACY_PATH_RESOLVER_FALLBACK');
+    });
+  });
+
+  describe('Hook classification: Runtime V2 vs host enhancement', () => {
+    it('pain.ts is the only Runtime V2 hook — uses fromHookContextExplicit + resolveWorkspaceDirForRuntimeV2', () => {
+      const filePath = path.join(PLUGIN_SRC, 'hooks', 'pain.ts');
+      if (!fs.existsSync(filePath)) return;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toContain('fromHookContextExplicit');
+      expect(content).toContain('resolveWorkspaceDirForRuntimeV2');
+    });
+
+    const hostEnhancementHooks = ['prompt.ts', 'lifecycle.ts', 'gate.ts', 'subagent.ts', 'llm.ts'];
+    for (const hookFile of hostEnhancementHooks) {
+      it(hookFile + ' is a host enhancement hook — uses fromHookContext with early-return guard', () => {
+        const filePath = path.join(PLUGIN_SRC, 'hooks', hookFile);
+        if (!fs.existsSync(filePath)) return;
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const explicitCalls = content.match(/fromHookContextExplicit/g) ?? [];
+        expect(explicitCalls.length, hookFile + ' should NOT use fromHookContextExplicit').toBe(0);
+      });
+    }
+  });
+
+  describe('resolveWorkspaceDirForRuntimeV2 has production caller', () => {
+    it('pain.ts imports and calls resolveWorkspaceDirForRuntimeV2', () => {
+      const filePath = path.join(PLUGIN_SRC, 'hooks', 'pain.ts');
+      if (!fs.existsSync(filePath)) return;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toContain("from '../utils/workspace-resolver.js'");
+      expect(content).toContain('resolveWorkspaceDirForRuntimeV2(');
     });
   });
 });

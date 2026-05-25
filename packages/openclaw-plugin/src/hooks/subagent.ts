@@ -1,4 +1,4 @@
-﻿import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
+import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { extractAgentIdFromSessionKey } from '../utils/session-key.js';
 import { recordEvolutionSuccess } from '../core/evolution-engine.js';
@@ -72,7 +72,7 @@ export async function handleSubagentEnded(
 
     if (!workspaceDir) return;
 
-    const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
+    const wctx = WorkspaceContext.fromHookContext(ctx);
     const logger: HookLogger = ctx.api?.logger ?? console;
     // ── Helper Workflow Lifecycle Notification ──
     // When a helper workflow's subagent ends, notify the workflow manager

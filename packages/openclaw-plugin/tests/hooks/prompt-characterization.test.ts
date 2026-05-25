@@ -194,7 +194,7 @@ describe('Attitude directive — GFI thresholds', () => {
   // Ensure appendParts is non-empty so attitudeDirective is included in appendSystemContext.
   beforeEach(async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
-    (WorkspaceContext.fromHookContextExplicit as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       workspaceDir: '/fake/workspace',
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
@@ -271,7 +271,7 @@ describe('Correction cue detection', () => {
   it('detects "不是这个" and records user turn', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const recordUserTurn = vi.fn();
-    (WorkspaceContext.fromHookContextExplicit as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       workspaceDir: '/fake/workspace',
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
@@ -302,7 +302,7 @@ describe('Correction cue detection', () => {
   it('detects "you are wrong" (English correction cue)', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const recordUserTurn = vi.fn();
-    (WorkspaceContext.fromHookContextExplicit as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       workspaceDir: '/fake/workspace',
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
@@ -333,7 +333,7 @@ describe('Correction cue detection', () => {
   it('does not detect correction cue in non-user trigger', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const recordUserTurn = vi.fn();
-    (WorkspaceContext.fromHookContextExplicit as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       workspaceDir: '/fake/workspace',
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,
@@ -433,7 +433,7 @@ describe('Size guard: never exceeds 9000 chars', () => {
     mockGetPendingDiagnosticianTasks.mockReturnValue([]);
 
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
-    (WorkspaceContext.fromHookContextExplicit as ReturnType<typeof vi.fn>).mockReturnValue({
+    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValue({
       workspaceDir: '/fake/workspace',
       stateDir: '/fake/state',
       resolve: (key: string) => `/fake/${key}`,

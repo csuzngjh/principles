@@ -1,4 +1,4 @@
-﻿import * as fs from 'fs';
+import * as fs from 'fs';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, trackPrincipleValue } from '../core/pain.js';
@@ -12,6 +12,7 @@ import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
 import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
+import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 
@@ -112,10 +113,10 @@ export function handleAfterToolCall(
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> },
   api?: OpenClawPluginApi
 ): void {
-  const effectiveWorkspaceDir = api
-    ? resolveWorkspaceDir(api, ctx, { source: 'after_tool_call' })
-    : validateWorkspaceDir(ctx.workspaceDir) ? undefined : ctx.workspaceDir;
-  if (!effectiveWorkspaceDir) {
+  let effectiveWorkspaceDir: string;
+  try {
+    effectiveWorkspaceDir = resolveWorkspaceDirForRuntimeV2(ctx, api, 'after_tool_call');
+  } catch {
     return;
   }
 

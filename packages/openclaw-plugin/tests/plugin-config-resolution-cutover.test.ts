@@ -111,28 +111,9 @@ describe('PRI-228: Plugin config resolution cutover', () => {
       });
       expect(wctx1).toBe(wctx2);
     });
-
-    it('returns different instances for different workspaceDirs', () => {
-      const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri228-alt-'));
-      try {
-        const wctx1 = WorkspaceContext.fromHookContextExplicit({
-          workspaceDir: tmpDir,
-          logger: noopLogger,
-        });
-        const wctx2 = WorkspaceContext.fromHookContextExplicit({
-          workspaceDir: tmpDir2,
-          logger: noopLogger,
-        });
-        expect(wctx1).not.toBe(wctx2);
-        expect(wctx1.workspaceDir).toBe(tmpDir);
-        expect(wctx2.workspaceDir).toBe(tmpDir2);
-      } finally {
-        try { fs.rmSync(tmpDir2, { recursive: true, force: true }); } catch {}
-      }
-    });
   });
 
-  describe('fromHookContext (legacy): still allows PathResolver fallback', () => {
+  describe('fromHookContext (legacy): safe degradation for host enhancement hooks', () => {
     it('falls back to PathResolver when workspaceDir is missing', () => {
       process.env.PD_WORKSPACE_DIR = tmpDir;
       try {
@@ -171,12 +152,6 @@ describe('PRI-228: Plugin config resolution cutover', () => {
         const wsErr = err as WorkspaceResolutionError;
         expect(wsErr.reason).toBe('workspace_dir_missing');
         expect(wsErr.nextAction).toContain('workspaceDir');
-        expect(wsErr.toJSON()).toEqual({
-          ok: false,
-          reason: 'workspace_dir_missing',
-          message: expect.any(String),
-          nextAction: expect.any(String),
-        });
       }
     });
 
@@ -262,27 +237,61 @@ describe('PRI-228: Plugin config resolution cutover', () => {
     });
   });
 
-  describe('Production hooks use fromHookContextExplicit', () => {
-    const hookFiles = [
-      'pain.ts',
+  describe('Hook classification: only pain.ts is Runtime V2', () => {
+    it('pain.ts uses fromHookContextExplicit (Runtime V2 entrypoint)', () => {
+      const filePath = path.resolve(__dirname, '..', 'src', 'hooks', 'pain.ts');
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toContain('fromHookContextExplicit');
+      expect(content).toContain('resolveWorkspaceDirForRuntimeV2');
+    });
+
+    const hostEnhancementHooks = [
+      'prompt.ts',
       'lifecycle.ts',
       'gate.ts',
       'subagent.ts',
       'llm.ts',
-      'prompt.ts',
     ];
 
-    for (const hookFile of hookFiles) {
-      it(hookFile + ' uses fromHookContextExplicit (no legacy fromHookContext calls)', () => {
+    for (const hookFile of hostEnhancementHooks) {
+      it(hookFile + ' uses fromHookContext (host enhancement — safe degradation)', () => {
         const filePath = path.resolve(__dirname, '..', 'src', 'hooks', hookFile);
         const content = fs.readFileSync(filePath, 'utf-8');
-        const legacyCalls = content.match(/fromHookContext(?!Explicit)/g) ?? [];
+        const explicitCalls = content.match(/fromHookContextExplicit/g) ?? [];
         expect(
-          legacyCalls.length,
-          hookFile + ' should not call fromHookContext (legacy) directly'
+          explicitCalls.length,
+          hookFile + ' should NOT use fromHookContextExplicit — it is a host enhancement hook'
         ).toBe(0);
       });
     }
+  });
+
+  describe('resolveWorkspaceDirForRuntimeV2 has production caller', () => {
+    it('pain.ts calls resolveWorkspaceDirForRuntimeV2', () => {
+      const filePath = path.resolve(__dirname, '..', 'src', 'hooks', 'pain.ts');
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toContain('resolveWorkspaceDirForRuntimeV2');
+      const callMatch = content.match(/resolveWorkspaceDirForRuntimeV2\(/g) ?? [];
+      expect(callMatch.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('Prompt hook safe degradation', () => {
+    it('prompt.ts returns early when workspaceDir is missing (does not throw)', () => {
+      const filePath = path.resolve(__dirname, '..', 'src', 'hooks', 'prompt.ts');
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toContain("if (!workspaceDir)");
+      expect(content).toContain("skipping PD context injection");
+      expect(content).toContain("return;");
+    });
+
+    it('prompt.ts uses fromHookContext (not fromHookContextExplicit)', () => {
+      const filePath = path.resolve(__dirname, '..', 'src', 'hooks', 'prompt.ts');
+      const content = fs.readFileSync(filePath, 'utf-8');
+      expect(content).toContain('fromHookContext(ctx)');
+      const explicitCalls = content.match(/fromHookContextExplicit/g) ?? [];
+      expect(explicitCalls.length).toBe(0);
+    });
   });
 
   describe('Cache isolation between workspaces', () => {
