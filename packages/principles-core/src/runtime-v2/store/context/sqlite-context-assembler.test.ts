@@ -1116,12 +1116,7 @@ describe('SqliteContextAssembler', () => {
   });
 
   it('ignores inherited properties from prototype chain in diagnosticJson', async () => {
-    const djObj: Record<string, unknown> = {};
-    Object.setPrototypeOf(djObj, { sourcePainId: 'inherited-pain-id', reasonSummary: 'inherited-reason' });
-    djObj.sourcePainId = 'own-pain-id';
-    djObj.reasonSummary = 'own-reason';
-
-    const dj = JSON.stringify(djObj);
+    const dj = '{"sourcePainId":"own-pain-id","reasonSummary":"own-reason","provenance":"openclaw_context_bound"}';
     const task = makeDiagnosticianTask({
       taskId: 'task_inherited_props',
     });
@@ -1133,6 +1128,48 @@ describe('SqliteContextAssembler', () => {
 
       expect(payload.diagnosisTarget.painId).toBe('own-pain-id');
       expect(payload.diagnosisTarget.reasonSummary).toBe('own-reason');
+      expect(payload.diagnosisTarget.provenance).toBe('openclaw_context_bound');
+    } finally { cleanupFixture(f); }
+  });
+
+  it('rejects provenance injected into Object.prototype (not own-property)', async () => {
+    const original = Object.getOwnPropertyDescriptor(Object.prototype, 'provenance');
+    try {
+      (Object.prototype as Record<string, unknown>).provenance = 'automatic_hook';
+      const dj = '{"sourcePainId":"pain-no-own-prov","reasonSummary":"no own provenance"}';
+      const task = makeDiagnosticianTask({
+        taskId: 'task_proto_injected_provenance',
+      });
+      const taskWithDj = { ...task, diagnosticJson: dj };
+      const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+      const f = createFixture(tasks);
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.painId).toBe('pain-no-own-prov');
+      expect(payload.diagnosisTarget.provenance).toBeUndefined();
+      cleanupFixture(f);
+    } finally {
+      if (original === undefined) {
+        delete (Object.prototype as Record<string, unknown>).provenance;
+      } else {
+        Object.defineProperty(Object.prototype, 'provenance', original);
+      }
+    }
+  });
+
+  it('does not read constructor or toString as sourcePainId from Object.prototype', async () => {
+    const dj = '{"reasonSummary":"proto-field test"}';
+    const task = makeDiagnosticianTask({
+      taskId: 'task_proto_fields',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.painId).toBeUndefined();
+      expect(payload.diagnosisTarget.provenance).toBeUndefined();
     } finally { cleanupFixture(f); }
   });
 });

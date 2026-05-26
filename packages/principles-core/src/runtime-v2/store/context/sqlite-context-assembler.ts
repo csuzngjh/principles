@@ -308,7 +308,7 @@ export class SqliteContextAssembler implements ContextAssembler {
             sessionIdHint: SqliteContextAssembler.extractStringField(parsed, 'sessionIdHint'),
             agentIdHint: SqliteContextAssembler.extractStringField(parsed, 'agentIdHint'),
             workspaceDir: SqliteContextAssembler.extractStringField(parsed, 'workspaceDir'),
-            provenance: isPainProvenance(parsed.provenance) ? parsed.provenance : undefined,
+            provenance: Object.hasOwn(parsed, 'provenance') && isPainProvenance(parsed.provenance) ? parsed.provenance : undefined,
             provenanceReason: SqliteContextAssembler.extractStringField(parsed, 'provenanceReason'),
           };
         } else {
@@ -333,8 +333,8 @@ export class SqliteContextAssembler implements ContextAssembler {
       sourcePainId: extra.sourcePainId ?? (base as DiagnosticianTaskRecord).sourcePainId,
       sessionIdHint: extra.sessionIdHint ?? (base as DiagnosticianTaskRecord).sessionIdHint,
       agentIdHint: extra.agentIdHint ?? (base as DiagnosticianTaskRecord).agentIdHint,
-      provenance: extra.provenance ?? (base as DiagnosticianTaskRecord).provenance,
-      provenanceReason: extra.provenanceReason ?? (base as DiagnosticianTaskRecord).provenanceReason,
+      provenance: extra.provenance,
+      provenanceReason: extra.provenanceReason,
     };
   }
 }
