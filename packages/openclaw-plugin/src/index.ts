@@ -490,11 +490,11 @@ const plugin = {
         ? '从 OpenClaw 会话中报告 pain（context-bound provenance）'
         : 'Report pain from OpenClaw session (context-bound provenance)',
       acceptsArgs: true,
-      handler: (ctx) => {
+      handler: async (ctx) => {
         try {
           const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handlePainReportCommand(ctx);
+          return await handlePainReportCommand(ctx);
         } catch (err) {
           api.logger.error(`[PD] Command /pd-pain failed: ${String(err)}`);
           return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };

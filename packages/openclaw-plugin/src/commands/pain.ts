@@ -4,9 +4,9 @@ import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.
 import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import type { EmpathyEventStats } from '../types/event-types.js';
-import { emitPainDetectedEvent } from '../hooks/pain.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import { computeHash } from '../utils/hashing.js';
+import { PainToPrincipleService, PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
 
 /**
  * Creates a visual progress bar (e.g., [██████░░░░])
@@ -272,7 +272,7 @@ function handleEmpathySubcommand(
     return { text };
 }
 
-export function handlePainReportCommand(ctx: PluginCommandContext): PluginCommandResult {
+export async function handlePainReportCommand(ctx: PluginCommandContext): Promise<PluginCommandResult> {
   const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'pain-report');
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
   const lang = (ctx.config?.language as string) || 'en';
@@ -309,23 +309,51 @@ export function handlePainReportCommand(ctx: PluginCommandContext): PluginComman
   };
 
   try {
-    const event: EvolutionLoopEvent = {
-      ts: new Date().toISOString(),
-      type: 'pain_detected',
-      data: painData,
-    };
-    emitPainDetectedEvent(wctx, event);
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
+    const service = new PainToPrincipleService({
+      workspaceDir: wctx.workspaceDir,
+      stateDir: wctx.stateDir,
+      ledgerAdapter,
+      owner: 'openclaw-plugin',
+      autoIntakeEnabled: true,
+    });
+
+    const result = await service.recordPain({
+      painId: painData.painId,
+      painType: painData.painType,
+      source: painData.source,
+      reason: painData.reason,
+      score: painData.score,
+      sessionId: painData.sessionId,
+      agentId: painData.agentId,
+      provenance: painData.provenance,
+      recordObservability: true,
+    });
+
+    if (result.status === 'succeeded') {
+      wctx.evolutionReducer.emitSync({
+        ts: new Date().toISOString(),
+        type: 'pain_detected',
+        data: painData,
+      } as EvolutionLoopEvent);
+
+      return {
+        text: isZh
+          ? `✅ Pain 已记录 (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: openclaw_context_bound\n📌 **Session**: ${sessionId}\n\n系统将基于当前会话上下文进行诊断。`
+          : `✅ Pain recorded (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: openclaw_context_bound\n📌 **Session**: ${sessionId}\n\nThe system will diagnose using current session context.`,
+      };
+    }
 
     return {
       text: isZh
-        ? `✅ Pain 已记录 (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: openclaw_context_bound\n📌 **Session**: ${sessionId}\n\n系统将基于当前会话上下文进行诊断。`
-        : `✅ Pain recorded (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: openclaw_context_bound\n📌 **Session**: ${sessionId}\n\nThe system will diagnose using current session context.`,
+        ? `⚠️ Pain 记录未成功 (status: ${result.status})。请检查系统日志或使用 \`/pd-status\` 查看状态。`
+        : `⚠️ Pain recording not accepted (status: ${result.status}). Check system logs or use \`/pd-status\` for status.`,
     };
   } catch (err) {
     return {
       text: isZh
-        ? `❌ Pain 记录失败: ${String(err)}`
-        : `❌ Failed to record pain: ${String(err)}`,
+        ? `❌ Pain 记录失败: ${String(err)}。请检查系统日志或重试。`
+        : `❌ Failed to record pain: ${String(err)}. Check system logs or try again.`,
     };
   }
 }

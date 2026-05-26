@@ -218,7 +218,7 @@ export function handleAfterToolCall(
         sessionId,
         traceId,
         agentId: ctx.agentId,
-        provenance: 'openclaw_context_bound',
+        provenance: (sessionId && sessionId !== 'unknown') ? 'openclaw_context_bound' : 'owner_reported_no_host_trace',
       },
     });
     return;

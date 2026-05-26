@@ -116,7 +116,7 @@ export const DiagnosisTargetSchema = Type.Object({
   source: Type.Optional(Type.String()),
   severity: Type.Optional(Type.String()),
   painId: Type.Optional(Type.String({ minLength: 1 })),
-  sessionIdHint: Type.Optional(Type.String()),
+  sessionIdHint: Type.Optional(Type.String({ minLength: 1 })),
   provenance: Type.Optional(Type.Union([
     Type.Literal('openclaw_context_bound'),
     Type.Literal('owner_reported_no_host_trace'),
