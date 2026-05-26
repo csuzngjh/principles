@@ -23,6 +23,19 @@ vi.mock('@principles/core/runtime-v2', () => ({
   }),
 }));
 
+vi.mock('../../src/services/feature-flag-loader.js', () => ({
+  loadEffectiveFeatureFlags: vi.fn().mockReturnValue({
+    flags: {
+      prompt: { id: 'prompt', enabled: true, category: 'core' },
+      code_tool_hook: { id: 'code_tool_hook', enabled: true, category: 'core' },
+      defer_archive: { id: 'defer_archive', enabled: true, category: 'core' },
+    },
+    source: 'defaults',
+    configPath: '/fake/workspace/.pd/feature-flags.yaml',
+    warnings: [],
+  }),
+}));
+
 import { handleRuntimeInternalizationQueue } from '../../src/commands/runtime-internalization-queue.js';
 
 const WS = '/fake/workspace';
@@ -42,6 +55,7 @@ function emptySnapshot() {
     unresolvableSummary: { count: 0, samples: [] },
     readyTasks: [],
     noReadyTasks: { reason: 'no_candidates', inspectedCount: 0 },
+    suppressedTasks: [],
   };
 }
 

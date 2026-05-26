@@ -186,6 +186,60 @@ describe('InternalizationChainIntegrityReadModel', () => {
     expect(result.brokenLinks.some(l => l.type === 'lease_stuck')).toBe(true);
   });
 
+  it('does NOT report missing_dreamer_task for consumed defer candidate (PRI-253)', () => {
+    // Deferred candidates correctly have no dreamer task — they never enter internalization
+    _setupAllQueries({
+      candidates: [{ candidate_id: 'c-defer', task_id: 'diag-1', source_run_id: 'r1' }],
+      tasks: [],  // no dreamer for this candidate — correct for defer
+      runs: [],
+      piArtifacts: [],
+    });
+    // The candidate must have recommendation_kind = 'defer' in the source_recommendation_json
+    // The read model queries the candidates table — we need to provide the recommendation_kind column
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return {
+          all: vi.fn(() => [{
+            candidate_id: 'c-defer',
+            task_id: 'diag-1',
+            source_run_id: 'r1',
+            recommendation_kind: 'defer',
+          }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'missing_dreamer_task' && l.candidateId === 'c-defer')).toBe(false);
+  });
+
+  it('DOES report missing_dreamer_task for consumed actionable candidate without dreamer (PRI-253)', () => {
+    // Non-defer candidates (principle, rule, prompt, implementation) MUST have dreamer tasks
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return {
+          all: vi.fn(() => [{
+            candidate_id: 'c-action',
+            task_id: 'diag-2',
+            source_run_id: 'r2',
+            recommendation_kind: 'principle',
+          }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'missing_dreamer_task' && l.candidateId === 'c-action')).toBe(true);
+  });
+
   it('includes generatedAt in output', () => {
     mockExistsSync.mockReturnValue(false);
     const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
