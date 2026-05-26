@@ -488,9 +488,6 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" or add ${getInstalledBinDir()} to PATH.`);
     }
 
-    if (spinner) spinner.text = 'Updating OpenClaw config...';
-    await updateOpenClawConfig();
-
     if (spinner) spinner.text = 'Copying templates...';
     const templatesCount = await copyCoreTemplates({
       pluginDir,
@@ -532,6 +529,9 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       verification.storyA = 'skipped';
       verification.storyASkipReason = `Demo verification skipped: ${e instanceof Error ? e.message : String(e)}`;
     }
+
+    if (spinner) spinner.text = 'Updating OpenClaw config...';
+    await updateOpenClawConfig();
 
     cleanupBackup(backupDir);
     if (spinner) spinner.succeed('Install complete!');

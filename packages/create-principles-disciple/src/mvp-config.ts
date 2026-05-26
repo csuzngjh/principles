@@ -181,9 +181,10 @@ export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
   const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
   const nextActions: string[] = [];
   if (components.cli === 'verified') {
-    nextActions.push('Run "pd runtime canary --workspace <path> --json" for diagnostics');
+    nextActions.push('Run pd runtime canary --workspace <path> --json for diagnostics');
   } else if (components.cli === 'verified_local_only' && components.cliLocalPath) {
-    nextActions.push(`Run "${components.cliLocalPath} runtime canary --workspace <path> --json" for diagnostics (global pd not on PATH)`);
+    const quotedPath = components.cliLocalPath.includes(' ') ? `"${components.cliLocalPath}"` : components.cliLocalPath;
+    nextActions.push(`Run ${quotedPath} runtime canary --workspace <path> --json for diagnostics (global pd not on PATH)`);
   }
   if (components.console === 'configured' && components.consoleEntrypoint) {
     nextActions.push(`Open review console: ${components.consoleEntrypoint}`);
@@ -202,9 +203,22 @@ export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
       nextAction: nextActions.join(' | '),
     };
   }
+
+  const failureReasons: string[] = [];
+  if (components.plugin !== 'verified') {
+    failureReasons.push(`plugin_${components.plugin}`);
+  }
+  if (!cliWorking) {
+    failureReasons.push(`cli_${components.cli}`);
+  }
+  if (components.console !== 'configured') {
+    failureReasons.push(`console_${components.console}`);
+  }
+  const reason = failureReasons.length > 0 ? failureReasons.join(',') : 'owner_review_console_not_deliverable';
+
   return {
     success: false as const,
-    reason: 'owner_review_console_not_deliverable',
+    reason,
     nextAction: nextActions.join(' | '),
     components,
     verification,
@@ -268,8 +282,12 @@ export function readEnabledChannelsFromDisk(workspaceDir: string): string[] {
   const enabled: string[] = [];
   for (const [key, value] of Object.entries(parsed)) {
     if (!isMvpChannel(key)) continue;
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
-    if (!Object.hasOwn(value, 'enabled')) continue;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error(`feature-flags.yaml at ${configPath}: MVP channel '${key}' has invalid entry (expected object, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}). Delete the file and re-run the installer.`);
+    }
+    if (!Object.hasOwn(value, 'enabled')) {
+      throw new Error(`feature-flags.yaml at ${configPath}: MVP channel '${key}' is missing required 'enabled' field. Delete the file and re-run the installer.`);
+    }
     const flag = value as Record<string, unknown>;
     if (flag.enabled === true) {
       enabled.push(key);

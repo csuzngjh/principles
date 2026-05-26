@@ -27,6 +27,7 @@ const PLUGIN_OPTIONAL = [
 
 const PD_CLI_REQUIRED = [
   'dist',
+  'dist/index.js',
   'package.json',
 ];
 

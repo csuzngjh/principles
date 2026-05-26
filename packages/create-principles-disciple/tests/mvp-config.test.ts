@@ -1046,4 +1046,121 @@ describe('readEnabledChannelsFromDisk fail loud (Fix C)', () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it('throws on MVP channel with invalid entry (string instead of object)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const badYaml = yaml.dump({ prompt: 'not-an-object', code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
+      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
+      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' has invalid entry/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on MVP channel with null entry', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const badYaml = yaml.dump({ prompt: null, code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
+      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
+      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' has invalid entry/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on MVP channel missing enabled field', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const badYaml = yaml.dump({ prompt: { category: 'core', since: '2026-05-24' }, code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
+      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
+      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' is missing required 'enabled' field/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('verified_local_only nextAction quoting (P2 fix)', () => {
+  const verification: VerificationResult = { features: 'passed', storyA: 'passed' };
+
+  it('path without spaces is not quoted', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'configured', consoleEntrypoint: 'http://localhost:3100', cliLocalPath: '/home/.openclaw/extensions/principles-disciple/bin/pd' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.nextAction).toContain('/home/.openclaw/extensions/principles-disciple/bin/pd runtime canary');
+    expect(result.nextAction).not.toMatch(/"\/home.*pd" runtime canary/);
+  });
+
+  it('path with spaces quotes only the path, not the entire command', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'configured', consoleEntrypoint: 'http://localhost:3100', cliLocalPath: 'C:\\Program Files\\.openclaw\\extensions\\principles-disciple\\bin\\pd.cmd' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.nextAction).toContain('"C:\\Program Files\\.openclaw\\extensions\\principles-disciple\\bin\\pd.cmd" runtime canary');
+    expect(result.nextAction).not.toMatch(/"C:\\Program Files.*--json"/);
+  });
+
+  it('verified cli uses bare pd without any quotes', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.nextAction).toContain('Run pd runtime canary');
+    expect(result.nextAction).not.toContain('"pd');
+  });
+
+  it('entire command is never wrapped in a single pair of quotes', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'not_deliverable', cliLocalPath: '/opt/pd' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.nextAction).not.toMatch(/^".*runtime canary.*"$/);
+    expect(result.nextAction).not.toMatch(/"[^"]*runtime canary[^"]*--json"/);
+  });
+});
+
+describe('Structured failure reason reflects actual failure (P2 fix)', () => {
+  const verification: VerificationResult = { features: 'passed', storyA: 'passed' };
+
+  it('plugin failed → reason contains plugin_failed, not console gap', () => {
+    const components: ComponentStatus = { plugin: 'failed', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('plugin_failed');
+    expect(result.reason).not.toContain('console');
+  });
+
+  it('cli failed → reason contains cli_failed, not console gap', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'failed', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('cli_failed');
+    expect(result.reason).not.toContain('console');
+  });
+
+  it('console not_deliverable alone → reason contains console_not_deliverable', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('console_not_deliverable');
+    expect(result.reason).not.toContain('plugin');
+    expect(result.reason).not.toContain('cli');
+  });
+
+  it('multiple failures → reason is comma-separated', () => {
+    const components: ComponentStatus = { plugin: 'failed', cli: 'failed', console: 'not_deliverable' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('plugin_failed');
+    expect(result.reason).toContain('cli_failed');
+    expect(result.reason).toContain('console_not_deliverable');
+    expect(result.reason).toContain(',');
+  });
+
+  it('cli skipped → reason contains cli_skipped', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'skipped', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('cli_skipped');
+  });
 });
