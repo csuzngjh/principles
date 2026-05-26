@@ -17,7 +17,7 @@ MVP-First Prerequisite Installer for [Principles Disciple](https://github.com/cs
 
 ### MVP Activation Channels
 
-Only three channels are enabled by default:
+Three MVP-Core channels are always enabled and cannot be disabled:
 
 - `prompt` — soft principle injection
 - `code_tool_hook` — RuleHost hard enforcement
@@ -49,7 +49,6 @@ npx create-principles-disciple --yes --workspace "/path/to/workspace" --json
 --smart                 Smart merge mode (generate .update files)
 --yes                   Non-interactive mode with defaults
 --non-interactive       Skip prompts
---channels <list>       Comma-separated MVP channels: prompt,code_tool_hook,defer_archive
 --workspace <path>      Workspace directory
 --json                  Output result as JSON (implies non-interactive)
 ```
@@ -67,10 +66,10 @@ After a successful install, you can re-verify at any time:
 pd runtime canary --workspace "<path>" --json
 ```
 
-## Rerun / Channel Update
+## Rerun / Reinstall
 
-Re-running the installer with `--channels` updates the feature-flags.yaml to match
-the specified channels. Channels not listed are disabled (but their metadata is preserved).
+Re-running the installer updates the feature-flags.yaml. All three MVP-Core channels
+are always enabled — the installer does not allow partial disabling of core channels.
 The installer reads actual enabled channels from disk and reports them in the output.
 
 ## Update Failure Recovery

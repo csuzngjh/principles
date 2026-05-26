@@ -819,3 +819,47 @@ describe('openclaw.json null vs undefined (P2 fix)', () => {
     expect(result.valid).toBe(true);
   });
 });
+
+describe('Install output never implies partial core channel disabling', () => {
+  const verification: VerificationResult = { features: 'passed', storyA: 'passed' };
+
+  it('success output always exposes all three core channels', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(true);
+    expect(result.enabledChannels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
+  });
+
+  it('partial success output does not expose enabledChannels (success=false)', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(false);
+    expect(result.enabledChannels).toBeUndefined();
+  });
+
+  it('partial success nextAction does not imply channels can be partially disabled', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.nextAction).not.toContain('disabled');
+    expect(result.nextAction).not.toContain('channel');
+  });
+
+  it('CLI entry does not expose --channels option', () => {
+    const indexPath = path.resolve(__dirname, '..', 'src', 'index.ts');
+    const content = fs.readFileSync(indexPath, 'utf-8');
+    expect(content).not.toContain('--channels');
+  });
+
+  it('README does not expose --channels option', () => {
+    const readmePath = path.resolve(__dirname, '..', 'README.md');
+    const content = fs.readFileSync(readmePath, 'utf-8');
+    expect(content).not.toContain('--channels');
+    expect(content).not.toContain('Channels not listed are disabled');
+  });
+
+  it('README states core channels cannot be disabled', () => {
+    const readmePath = path.resolve(__dirname, '..', 'README.md');
+    const content = fs.readFileSync(readmePath, 'utf-8');
+    expect(content).toContain('cannot be disabled');
+  });
+});

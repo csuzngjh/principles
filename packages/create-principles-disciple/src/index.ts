@@ -9,7 +9,6 @@ import { uninstall, checkInstallStatus } from './uninstaller.js';
 import { checkEnvironment, detectWorkspace } from './utils/env.js';
 import {
   MVP_CHANNELS,
-  parseChannelsOption,
   buildFailureOutput,
 } from './mvp-config.js';
 
@@ -84,33 +83,13 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   const nonInteractive = options.nonInteractive || options.yes || jsonMode;
 
   const installOptions: InstallOptions | null = nonInteractive
-    ? (() => {
-        const parsed = parseChannelsOption(options.channels);
-        if (parsed.error) {
-          if (jsonMode) {
-            console.log(JSON.stringify(buildFailureOutput('invalid_channels', `${parsed.error}. ${parsed.unknowns.length > 0 ? `Rejected: ${parsed.unknowns.join(', ')}` : ''}`), null, 2));
-            process.exit(1);
-            return null;
-          }
-          logger.error(parsed.error);
-          if (parsed.unknowns.length > 0) {
-            logger.error(`Rejected channels: ${parsed.unknowns.join(', ')}`);
-          }
-          process.exit(1);
-          return null;
-        }
-        if (parsed.unknowns.length > 0 && !jsonMode) {
-          logger.warn(`Unknown channels rejected: ${parsed.unknowns.join(', ')}`);
-        }
-
-        return {
-          language: cliOptions.language || 'zh',
-          mode: cliOptions.mode || (workspaceInfo.isFirstInstall ? 'force' : 'smart'),
-          workspaceDir: cliOptions.workspaceDir || workspaceInfo.detectedPath,
-          channels: parsed.channels,
-          overwriteConfig: false,
-        };
-      })()
+    ? {
+        language: cliOptions.language || 'zh',
+        mode: cliOptions.mode || (workspaceInfo.isFirstInstall ? 'force' : 'smart'),
+        workspaceDir: cliOptions.workspaceDir || workspaceInfo.detectedPath,
+        channels: [...MVP_CHANNELS],
+        overwriteConfig: false,
+      }
     : await runPrompts(cliOptions, workspaceInfo);
 
   if (!installOptions) {
@@ -265,7 +244,6 @@ program
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-y, --yes', 'Non-interactive mode with defaults', false)
   .option('--non-interactive', 'Skip interactive prompts', false)
-  .option('--channels <channels>', `Comma-separated MVP channels: ${MVP_CHANNELS.join(',')}`, MVP_CHANNELS.join(','))
   .option('--json', 'Output result as JSON (implies non-interactive)', false)
   .action(async (options) => {
     await runInstall(options);

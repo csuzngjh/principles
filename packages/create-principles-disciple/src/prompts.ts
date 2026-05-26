@@ -1,8 +1,8 @@
-import { select, confirm, input, checkbox } from '@inquirer/prompts';
+import { select, confirm, input } from '@inquirer/prompts';
 import * as path from 'path';
 import * as os from 'os';
 import { detectWorkspace, type WorkspaceInfo } from './utils/env.js';
-import { type MvpChannel } from './mvp-config.js';
+import { MVP_CHANNELS, type MvpChannel } from './mvp-config.js';
 
 export interface InstallOptions {
   language: 'zh' | 'en';
@@ -74,15 +74,17 @@ async function promptWorkspace(workspaceInfo: WorkspaceInfo): Promise<string> {
   return workspaceInfo.detectedPath;
 }
 
-async function promptChannels(): Promise<MvpChannel[]> {
-  return await checkbox({
-    message: 'Select MVP activation channels (space to select)',
-    choices: [
-      { name: 'prompt — soft principle injection', value: 'prompt' as MvpChannel, checked: true },
-      { name: 'code_tool_hook — RuleHost hard enforcement', value: 'code_tool_hook' as MvpChannel, checked: true },
-      { name: 'defer_archive — graceful deferral', value: 'defer_archive' as MvpChannel, checked: true },
-    ],
-  });
+function showMvpCoreChannels(): void {
+  console.log('\nMVP-Core activation channels (always enabled, cannot be disabled):');
+  for (const ch of MVP_CHANNELS) {
+    const labels: Record<string, string> = {
+      prompt: 'soft principle injection',
+      code_tool_hook: 'RuleHost hard enforcement',
+      defer_archive: 'graceful deferral',
+    };
+    console.log(`  ${ch} — ${labels[ch] ?? ''}`);
+  }
+  console.log();
 }
 
 async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean> {
@@ -90,9 +92,7 @@ async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean>
   console.log(`  Language: ${options.language}`);
   console.log(`  Mode: ${options.mode === 'force' ? 'force overwrite' : 'smart merge'}`);
   console.log(`  Workspace: ${options.workspaceDir}`);
-  if (options.channels && options.channels.length > 0) {
-    console.log(`  Channels: ${options.channels.join(', ')}`);
-  }
+  console.log(`  MVP-Core channels: ${MVP_CHANNELS.join(', ')} (always enabled)`);
 
   return await confirm({
     message: 'Confirm install?',
@@ -122,13 +122,13 @@ export async function runPrompts(
 
   const workspaceDir = cliOptions.workspaceDir ?? await promptWorkspace(wsInfo);
 
-  const channels = cliOptions.channels ?? await promptChannels();
+  showMvpCoreChannels();
 
   const options: InstallOptions = {
     language,
     mode,
     workspaceDir,
-    channels,
+    channels: [...MVP_CHANNELS],
     overwriteConfig: false,
   };
 
@@ -140,4 +140,4 @@ export async function runPrompts(
   return options;
 }
 
-export { confirm, input, select, checkbox };
+export { confirm, input, select };
