@@ -882,4 +882,198 @@ describe('SqliteContextAssembler', () => {
       await expect(f.assembler.assemble(task.taskId)).rejects.toThrow('[storage_unavailable]');
     } finally { cleanupFixture(f); }
   });
+
+  // ── PRI-255: Provenance and evidence contract tests ──
+
+  it('populates diagnosisTarget.provenance and provenanceReason from diagnosticJson', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-prov-1',
+      reasonSummary: 'Owner reported pain from CLI',
+      source: 'manual',
+      severity: 'severe',
+      sessionIdHint: 'cli',
+      provenance: 'owner_reported_no_host_trace',
+      provenanceReason: 'No authenticated host session provenance available for CLI-submitted pain',
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_prov_1',
+      sourcePainId: 'pain-prov-1',
+      reasonSummary: 'Owner reported pain from CLI',
+      source: 'manual',
+      severity: 'severe',
+      sessionIdHint: 'cli',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.provenance).toBe('owner_reported_no_host_trace');
+      expect(payload.diagnosisTarget.provenanceReason).toContain('No authenticated host session');
+      expect(payload.diagnosisTarget.reasonSummary).toBe('Owner reported pain from CLI');
+      expect(payload.diagnosisTarget.source).toBe('manual');
+      expect(payload.diagnosisTarget.severity).toBe('severe');
+      expect(payload.diagnosisTarget.painId).toBe('pain-prov-1');
+    } finally { cleanupFixture(f); }
+  });
+
+  it('sets traceAvailability=unavailable_with_reason for owner_reported_no_host_trace', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-cli-1',
+      reasonSummary: 'CLI pain',
+      source: 'manual',
+      severity: 'severe',
+      sessionIdHint: 'cli',
+      provenance: 'owner_reported_no_host_trace',
+      provenanceReason: 'No authenticated host session provenance available',
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_cli_prov',
+      sourcePainId: 'pain-cli-1',
+      reasonSummary: 'CLI pain',
+      sessionIdHint: 'cli',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.traceAvailability).toBe('unavailable_with_reason');
+      expect(payload.diagnosisTarget.traceUnavailableDetail).toBeDefined();
+      const detail = payload.diagnosisTarget.traceUnavailableDetail;
+      expect(detail?.reason).toContain('CLI-submitted pain');
+      expect(detail?.nextAction).toContain('OpenClaw session');
+      expect(notesInclude(payload.ambiguityNotes, 'owner_reported_no_host_trace')).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('sets traceAvailability=available when fullTrace is resolved', async () => {
+    const sessionId = 'sess-prov-ok';
+    const sourceTaskId = 'task_source_prov';
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-prov-ok',
+      reasonSummary: 'Context-bound pain',
+      source: 'pain',
+      severity: 'severe',
+      sessionIdHint: sessionId,
+      provenance: 'openclaw_context_bound',
+      provenanceReason: 'Pain reported from an OpenClaw host session',
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_diag_prov_ok',
+      sourcePainId: 'pain-prov-ok',
+      sessionIdHint: sessionId,
+      reasonSummary: 'Context-bound pain',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      await ensureSourceTask(f, sourceTaskId, { sessionId, sourcePainId: 'pain-prov-ok' });
+      await createRunWithPayloads(f, sourceTaskId, {
+        inputPayload: JSON.stringify({ toolCalls: [{ toolName: 'Read', status: 'succeeded' }] }),
+        outputPayload: '{}',
+      });
+
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.provenance).toBe('openclaw_context_bound');
+      expect(payload.diagnosisTarget.traceAvailability).toBe('available');
+      expect(payload.fullTrace).not.toBeNull();
+    } finally { cleanupFixture(f); }
+  });
+
+  it('sets traceAvailability=unavailable_with_reason for context-bound pain when trace not found', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-prov-nf',
+      reasonSummary: 'Context-bound but trace missing',
+      source: 'pain',
+      severity: 'severe',
+      sessionIdHint: 'sess-missing',
+      provenance: 'openclaw_context_bound',
+      provenanceReason: 'Pain reported from an OpenClaw host session',
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_diag_prov_nf',
+      sourcePainId: 'pain-prov-nf',
+      sessionIdHint: 'sess-missing',
+      reasonSummary: 'Context-bound but trace missing',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.provenance).toBe('openclaw_context_bound');
+      expect(payload.diagnosisTarget.traceAvailability).toBe('unavailable_with_reason');
+      expect(payload.diagnosisTarget.traceUnavailableDetail).toBeDefined();
+      expect(payload.diagnosisTarget.traceUnavailableDetail?.reason).toContain('source trace could not be resolved');
+    } finally { cleanupFixture(f); }
+  });
+
+  it('reconstructs provenance from diagnosticJson with runtime validation (no unsafe as)', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-validated',
+      reasonSummary: 'Validated pain',
+      source: 'manual',
+      severity: 'moderate',
+      provenance: 'owner_reported_no_host_trace',
+      provenanceReason: 'CLI provenance',
+      extraUnknownField: 'should be ignored',
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_validated',
+      sourcePainId: 'pain-validated',
+      reasonSummary: 'Validated pain',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.provenance).toBe('owner_reported_no_host_trace');
+      expect(payload.diagnosisTarget.reasonSummary).toBe('Validated pain');
+    } finally { cleanupFixture(f); }
+  });
+
+  it('handles malformed diagnosticJson gracefully without crashing', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_malformed_dj',
+      reasonSummary: 'Fallback reason',
+    });
+    const taskWithDj = { ...task, diagnosticJson: 'not-valid-json{{{}}' };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.reasonSummary).toBe('Fallback reason');
+      expect(payload.diagnosisTarget.provenance).toBeUndefined();
+    } finally { cleanupFixture(f); }
+  });
+
+  it('handles diagnosticJson with invalid provenance value gracefully', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-bad-prov',
+      reasonSummary: 'Bad provenance test',
+      provenance: 'invalid_provenance_value',
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_bad_prov',
+      reasonSummary: 'Bad provenance test',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.provenance).toBeUndefined();
+      expect(payload.diagnosisTarget.reasonSummary).toBe('Bad provenance test');
+    } finally { cleanupFixture(f); }
+  });
 });

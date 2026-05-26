@@ -217,6 +217,7 @@ export function handleAfterToolCall(
         sessionId,
         traceId,
         agentId: ctx.agentId,
+        provenance: 'openclaw_context_bound',
       },
     });
     return;
@@ -526,6 +527,7 @@ export function handleAfterToolCall(
       sessionId,
       traceId,
       agentId: ctx.agentId,
+      provenance: 'automatic_hook',
     },
   });
 }

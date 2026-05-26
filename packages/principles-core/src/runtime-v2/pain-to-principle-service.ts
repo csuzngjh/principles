@@ -11,7 +11,7 @@ import { createPainSignalBridge } from './pain-signal-runtime-factory.js';
 import { recordPainSignalObservability } from './pain-signal-observability.js';
 import { FAILURE_CATEGORY_MAP } from './error-categories.js';
 import { createDiagnosticianTaskId } from './pain-signal-bridge.js';
-import type { PainDetectedData, PainSignalBridgeResult } from './pain-signal-bridge.js';
+import type { PainDetectedData, PainSignalBridgeResult, PainProvenance } from './pain-signal-bridge.js';
 import { PDRuntimeError } from './error-categories.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 
@@ -44,6 +44,7 @@ export interface PainToPrincipleInput {
   agentId?: string;
   taskId?: string;
   traceId?: string;
+  provenance?: PainProvenance;
   recordObservability?: boolean;
 }
 
@@ -109,6 +110,7 @@ export class PainToPrincipleService {
       agentId: input.agentId,
       taskId,
       traceId: input.traceId,
+      provenance: input.provenance,
     };
 
     try {

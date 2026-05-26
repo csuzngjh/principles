@@ -101,12 +101,37 @@ export type HistoryQueryResult = Static<typeof HistoryQueryResultSchema>;
 
 // ── Context Payload (general purpose) ──
 
+export type TraceAvailability =
+  | 'available'
+  | 'unavailable_with_reason'
+  | 'ambiguous';
+
+export interface TraceUnavailableDetail {
+  reason: string;
+  nextAction: string;
+}
+
 export const DiagnosisTargetSchema = Type.Object({
   reasonSummary: Type.Optional(Type.String()),
   source: Type.Optional(Type.String()),
   severity: Type.Optional(Type.String()),
   painId: Type.Optional(Type.String({ minLength: 1 })),
-  sessionIdHint: Type.Optional(Type.String({ minLength: 1 })),
+  sessionIdHint: Type.Optional(Type.String()),
+  provenance: Type.Optional(Type.Union([
+    Type.Literal('openclaw_context_bound'),
+    Type.Literal('owner_reported_no_host_trace'),
+    Type.Literal('automatic_hook'),
+  ])),
+  provenanceReason: Type.Optional(Type.String()),
+  traceAvailability: Type.Optional(Type.Union([
+    Type.Literal('available'),
+    Type.Literal('unavailable_with_reason'),
+    Type.Literal('ambiguous'),
+  ])),
+  traceUnavailableDetail: Type.Optional(Type.Object({
+    reason: Type.String(),
+    nextAction: Type.String(),
+  })),
 });
 
 export type DiagnosisTarget = Static<typeof DiagnosisTargetSchema>;

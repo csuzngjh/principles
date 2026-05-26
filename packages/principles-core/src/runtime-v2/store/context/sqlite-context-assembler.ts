@@ -85,6 +85,8 @@ export class SqliteContextAssembler implements ContextAssembler {
       severity: dt.severity || undefined,
       painId: dt.sourcePainId || undefined,
       sessionIdHint: dt.sessionIdHint || undefined,
+      provenance: dt.provenance || undefined,
+      provenanceReason: dt.provenanceReason || undefined,
     };
 
     const ambiguityNotes: string[] = SqliteContextAssembler.buildAmbiguityNotes(
@@ -93,12 +95,39 @@ export class SqliteContextAssembler implements ContextAssembler {
       historyResult.truncated,
     ) ?? [];
 
+    // PRI-255: For CLI-only pain, add explicit degradation note about missing trace
+    if (dt.provenance === 'owner_reported_no_host_trace') {
+      ambiguityNotes.push(
+        'owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable',
+      );
+      diagnosisTarget.traceAvailability = 'unavailable_with_reason';
+      diagnosisTarget.traceUnavailableDetail = {
+        reason: 'CLI-submitted pain has no authenticated host session provenance; conversation trace cannot be bound to an OpenClaw session',
+        nextAction: 'Report pain from within an OpenClaw session to enable context-bound trace, or rely on owner reason alone for diagnosis',
+      };
+    }
+
     // Build fullTrace from source pain trajectory (PRI-171 / PRI-189).
     // Source trace comes from the original execution that caused the pain signal,
     // NOT from the diagnostician task's own runs.
     const fullTrace: FullTracePayloadV2 | null = dt.sourcePainId
       ? await this.buildFullTraceFromSource(dt, ambiguityNotes)
       : null;
+
+    // PRI-255: Set traceAvailability based on fullTrace result
+    if (diagnosisTarget.traceAvailability === undefined) {
+      if (fullTrace !== null) {
+        diagnosisTarget.traceAvailability = 'available';
+      } else if (dt.provenance === 'openclaw_context_bound') {
+        diagnosisTarget.traceAvailability = 'unavailable_with_reason';
+        if (!diagnosisTarget.traceUnavailableDetail) {
+          diagnosisTarget.traceUnavailableDetail = {
+            reason: 'Context-bound pain but source trace could not be resolved',
+            nextAction: 'Check sessionIdHint matches an active OpenClaw session with recorded trajectory',
+          };
+        }
+      }
+    }
 
     const payload: DiagnosticianContextPayload = {
       contextId,
@@ -249,7 +278,23 @@ export class SqliteContextAssembler implements ContextAssembler {
 
     if (base.diagnosticJson) {
       try {
-        extra = JSON.parse(base.diagnosticJson) as Partial<DiagnosticianTaskRecord>;
+        const parsed: unknown = JSON.parse(base.diagnosticJson);
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          const obj = parsed as Record<string, unknown>;
+          extra = {
+            sourcePainId: typeof obj.sourcePainId === 'string' ? obj.sourcePainId : undefined,
+            reasonSummary: typeof obj.reasonSummary === 'string' ? obj.reasonSummary : undefined,
+            source: typeof obj.source === 'string' ? obj.source : undefined,
+            severity: typeof obj.severity === 'string' ? obj.severity : undefined,
+            sessionIdHint: typeof obj.sessionIdHint === 'string' ? obj.sessionIdHint : undefined,
+            agentIdHint: typeof obj.agentIdHint === 'string' ? obj.agentIdHint : undefined,
+            workspaceDir: typeof obj.workspaceDir === 'string' ? obj.workspaceDir : undefined,
+            provenance: (typeof obj.provenance === 'string' && ['openclaw_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'].includes(obj.provenance))
+              ? obj.provenance as DiagnosticianTaskRecord['provenance']
+              : undefined,
+            provenanceReason: typeof obj.provenanceReason === 'string' ? obj.provenanceReason : undefined,
+          };
+        }
       } catch {
         // Malformed JSON — ignore, return base as plain record
       }
@@ -265,6 +310,8 @@ export class SqliteContextAssembler implements ContextAssembler {
       sourcePainId: extra.sourcePainId ?? (base as DiagnosticianTaskRecord).sourcePainId,
       sessionIdHint: extra.sessionIdHint ?? (base as DiagnosticianTaskRecord).sessionIdHint,
       agentIdHint: extra.agentIdHint ?? (base as DiagnosticianTaskRecord).agentIdHint,
+      provenance: extra.provenance ?? (base as DiagnosticianTaskRecord).provenance,
+      provenanceReason: extra.provenanceReason ?? (base as DiagnosticianTaskRecord).provenanceReason,
     };
   }
 }
