@@ -304,13 +304,21 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   const localShim = path.join(getInstalledBinDir(), isWindows() ? 'pd.cmd' : 'pd');
   let localOk = false;
   try {
-    execFileSync(localShim, ['--version'], { stdio: 'pipe', timeout: 10_000 });
+    if (isWindows()) {
+      execSync(`"${localShim}" --version`, { stdio: 'pipe', timeout: 10_000, shell: 'cmd' });
+    } else {
+      execFileSync(localShim, ['--version'], { stdio: 'pipe', timeout: 10_000 });
+    }
     localOk = true;
   } catch { /* local shim failed */ }
 
   const globalOk = (() => {
     try {
-      execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: 10_000 });
+      if (isWindows()) {
+        execSync('pd --version', { stdio: 'pipe', timeout: 10_000, shell: 'cmd' });
+      } else {
+        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: 10_000 });
+      }
       return true;
     } catch {
       return false;
@@ -529,10 +537,18 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     if (spinner) spinner.text = 'Verifying pd demo story-a...';
     try {
       const pdCmd = path.join(getInstalledBinDir(), isWindows() ? 'pd.cmd' : 'pd');
-      execFileSync(pdCmd, ['demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
-        stdio: 'pipe',
-        timeout: 30_000,
-      });
+      if (isWindows()) {
+        execSync(`"${pdCmd}" demo story-a --json --workspace "${options.workspaceDir}"`, {
+          stdio: 'pipe',
+          shell: 'cmd',
+          timeout: 30_000,
+        });
+      } else {
+        execFileSync(pdCmd, ['demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
+          stdio: 'pipe',
+          timeout: 30_000,
+        });
+      }
       verification.storyA = 'passed';
     } catch (e) {
       verification.storyA = 'skipped';

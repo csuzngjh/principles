@@ -32,6 +32,68 @@ describe('MVP channel contract', () => {
   });
 });
 
+describe('Bundle source path contract', () => {
+  const rootDir = path.resolve(__dirname, '..', '..', '..');
+  const pluginSrc = path.join(rootDir, 'packages', 'openclaw-plugin');
+  const pdCliSrc = path.join(rootDir, 'packages', 'pd-cli');
+
+  it('openclaw-plugin source directory exists', () => {
+    expect(fs.existsSync(pluginSrc)).toBe(true);
+  });
+
+  it('openclaw-plugin/dist exists', () => {
+    expect(fs.existsSync(path.join(pluginSrc, 'dist'))).toBe(true);
+  });
+
+  it('openclaw-plugin/openclaw.plugin.json exists', () => {
+    expect(fs.existsSync(path.join(pluginSrc, 'openclaw.plugin.json'))).toBe(true);
+  });
+
+  it('openclaw-plugin/package.json exists', () => {
+    expect(fs.existsSync(path.join(pluginSrc, 'package.json'))).toBe(true);
+  });
+
+  it('pd-cli source directory exists', () => {
+    expect(fs.existsSync(pdCliSrc)).toBe(true);
+  });
+
+  it('pd-cli/dist exists', () => {
+    expect(fs.existsSync(path.join(pdCliSrc, 'dist'))).toBe(true);
+  });
+
+  it('pd-cli/dist/index.js exists', () => {
+    expect(fs.existsSync(path.join(pdCliSrc, 'dist', 'index.js'))).toBe(true);
+  });
+
+  it('pd-cli/package.json exists', () => {
+    expect(fs.existsSync(path.join(pdCliSrc, 'package.json'))).toBe(true);
+  });
+
+  it('bundle-plugin.mjs references packages/openclaw-plugin', () => {
+    const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
+    const content = fs.readFileSync(scriptPath, 'utf-8');
+    expect(content).toContain("join(ROOT_DIR, 'packages', 'openclaw-plugin')");
+  });
+
+  it('bundle-plugin.mjs references packages/pd-cli', () => {
+    const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
+    const content = fs.readFileSync(scriptPath, 'utf-8');
+    expect(content).toContain("join(ROOT_DIR, 'packages', 'pd-cli')");
+  });
+});
+
+describe('Windows .cmd verification contract', () => {
+  it('isWindows() returns boolean', () => {
+    expect(typeof isWindows()).toBe('boolean');
+  });
+
+  it('local shim path uses .cmd on Windows', () => {
+    const binDir = getInstalledBinDir();
+    const expected = isWindows() ? path.join(binDir, 'pd.cmd') : path.join(binDir, 'pd');
+    expect(expected.endsWith(isWindows() ? 'pd.cmd' : 'pd')).toBe(true);
+  });
+});
+
 describe('generateFeatureFlagsYamlContent', () => {
   it('produces valid YAML', () => {
     const content = generateFeatureFlagsYamlContent();

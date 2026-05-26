@@ -13,9 +13,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const ROOT_DIR = join(__dirname, '..', '..', '..');
-const PLUGIN_SRC = join(ROOT_DIR, 'openclaw-plugin');
+const PLUGIN_SRC = join(ROOT_DIR, 'packages', 'openclaw-plugin');
 const PLUGIN_DEST = join(__dirname, '..', 'plugin');
-const PD_CLI_SRC = join(ROOT_DIR, 'pd-cli');
+const PD_CLI_SRC = join(ROOT_DIR, 'packages', 'pd-cli');
 const PD_CLI_DEST = join(__dirname, '..', 'pd-cli');
 
 const SYNC_ITEMS = [
