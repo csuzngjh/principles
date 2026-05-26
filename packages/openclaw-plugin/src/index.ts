@@ -32,7 +32,7 @@ import * as TrajectoryCollector from './hooks/trajectory-collector.js';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
-import { handlePainCommand } from './commands/pain.js';
+import { handlePainCommand, handlePainReportCommand } from './commands/pain.js';
 import { handleContextCommand } from './commands/context.js';
 import { handleFocusCommand } from './commands/focus.js';
 import { handleRollbackCommand } from './commands/rollback.js';
@@ -479,6 +479,25 @@ const plugin = {
           return handlePainCommand(ctx);
         } catch (err) {
           api.logger.error(`[PD] Command /pd-status failed: ${String(err)}`);
+          return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "pd-pain",
+      description: language === 'zh'
+        ? '从 OpenClaw 会话中报告 pain（context-bound provenance）'
+        : 'Report pain from OpenClaw session (context-bound provenance)',
+      acceptsArgs: true,
+      handler: async (ctx) => {
+        try {
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
+          ctx.workspaceDir = workspaceDir;
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return await handlePainReportCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /pd-pain failed: ${String(err)}`);
           return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
         }
       }

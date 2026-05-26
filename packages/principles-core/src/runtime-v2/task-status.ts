@@ -75,20 +75,19 @@ export const DiagnosticianTaskRecordSchema = Type.Intersect([
   TaskRecordSchema,
   Type.Object({
     taskKind: Type.Literal('diagnostician'),
-    /** Pain signal that triggered this diagnosis. */
     sourcePainId: Type.Optional(Type.String()),
-    /** Workspace directory for the diagnosis. */
     workspaceDir: Type.String(),
-    /** Severity hint from the pain signal. */
     severity: Type.Optional(Type.String()),
-    /** Source hint from the pain signal. */
     source: Type.Optional(Type.String()),
-    /** Session ID hint for context assembly. */
     sessionIdHint: Type.Optional(Type.String()),
-    /** Agent ID hint for context assembly. */
     agentIdHint: Type.Optional(Type.String()),
-    /** Human-readable summary of why this task was created. */
     reasonSummary: Type.String(),
+    provenance: Type.Optional(Type.Union([
+      Type.Literal('openclaw_context_bound'),
+      Type.Literal('owner_reported_no_host_trace'),
+      Type.Literal('automatic_hook'),
+    ])),
+    provenanceReason: Type.Optional(Type.String()),
   }),
 ]);
 export type DiagnosticianTaskRecord = Static<typeof DiagnosticianTaskRecordSchema>;

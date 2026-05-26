@@ -109,6 +109,8 @@ export type {
   TrajectoryLocateResult,
   HistoryQueryResult,
   DiagnosisTarget,
+  TraceAvailability,
+  TraceUnavailableDetail,
   ContextPayload,
   DiagnosticianContextPayload,
   ToolCallEntry,
@@ -247,6 +249,7 @@ export type {
   /** @deprecated Use PainToPrincipleServiceOptions instead */
   PainSignalBridgeOptions,
   PainDetectedData,
+  PainProvenance,
   /** @deprecated Use PainToPrincipleOutput instead */
   PainSignalBridgeResult,
   /** @deprecated Internal — use PainToPrincipleOutput.status */
