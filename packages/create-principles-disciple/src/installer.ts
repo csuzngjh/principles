@@ -30,18 +30,22 @@ function getCapturingExecOptions(cwd: string): ExecSyncOptions {
   };
 }
 
-function backupExistingInstall(): string | null {
+interface BackupResult {
+  type: 'no_existing' | 'backed_up';
+  backupDir: string | null;
+}
+
+function backupExistingInstall(): BackupResult {
   const extDir = getPluginExtDir();
-  if (!existsSync(extDir)) return null;
+  if (!existsSync(extDir)) return { type: 'no_existing', backupDir: null };
 
   const backupDir = extDir + '.backup.' + Date.now();
   try {
     renameSync(extDir, backupDir);
     logger.info(`Backed up existing install to ${backupDir}`);
-    return backupDir;
+    return { type: 'backed_up', backupDir };
   } catch (e) {
-    logger.warn(`Could not backup existing install: ${e instanceof Error ? e.message : String(e)}`);
-    return null;
+    throw new Error(`Could not backup existing install at ${extDir}: ${e instanceof Error ? e.message : String(e)}. Aborting to prevent data loss — resolve the lock or rename manually and re-run.`, { cause: e });
   }
 }
 
@@ -219,9 +223,9 @@ function getNpmGlobalBinDir(): string | null {
   }
 }
 
-function installGlobalPdShim(): void {
+function installGlobalPdShim(): boolean {
   const globalBin = getNpmGlobalBinDir();
-  if (!globalBin) return;
+  if (!globalBin) return false;
 
   try {
     mkdirSync(globalBin, { recursive: true });
@@ -242,12 +246,14 @@ function installGlobalPdShim(): void {
       writeFileSync(globalSh, `#!/usr/bin/env sh\nexec "${pluginSh.replace(/"/g, '\\"')}" "$@"\n`, 'utf-8');
       chmodSync(globalSh, 0o755);
     }
-  } catch {
-    // non-fatal — local shim still works
+    return true;
+  } catch (e) {
+    logger.warn(`Global pd shim installation failed: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
   }
 }
 
-function syncPdCli(pluginDir: string): void {
+function syncPdCli(pluginDir: string): boolean {
   const pdCliSourceDir = path.join(pluginDir, 'pd-cli');
   const distDir = path.join(pdCliSourceDir, 'dist');
 
@@ -291,17 +297,27 @@ function syncPdCli(pluginDir: string): void {
     chmodSync(target, 0o755);
   }
 
-  installGlobalPdShim();
+  return installGlobalPdShim();
 }
 
-function verifyPdCliShim(): boolean {
+function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: string } {
   const localShim = path.join(getInstalledBinDir(), isWindows() ? 'pd.cmd' : 'pd');
+  let localOk = false;
   try {
-    execSync(`"${localShim}" --version`, { stdio: 'pipe', shell: isWindows() ? 'cmd' : '/bin/sh' });
-    return true;
-  } catch {
-    return false;
-  }
+    execFileSync(localShim, ['--version'], { stdio: 'pipe', timeout: 10_000 });
+    localOk = true;
+  } catch { /* local shim failed */ }
+
+  const globalOk = (() => {
+    try {
+      execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: 10_000 });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  return { localOk, globalOk, localPath: localShim };
 }
 
 interface CopyOptions {
@@ -425,14 +441,14 @@ function readEnabledChannelsFromDisk(workspaceDir: string): string[] {
   const parsed = (() => { try { return yaml.load(rawYaml); } catch { return null; } })();
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return [];
 
-  const flags = parsed as Record<string, unknown>;
   const enabled: string[] = [];
-  for (const [key, value] of Object.entries(flags)) {
-    if (isMvpChannel(key) && typeof value === 'object' && value !== null) {
-      const flag = value as Record<string, unknown>;
-      if (flag.enabled === true) {
-        enabled.push(key);
-      }
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!isMvpChannel(key)) continue;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
+    if (!Object.hasOwn(value, 'enabled')) continue;
+    const flag = value as Record<string, unknown>;
+    if (flag.enabled === true) {
+      enabled.push(key);
     }
   }
   return enabled;
@@ -462,7 +478,8 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     await checkBuiltPlugin(pluginDir);
 
     if (spinner) spinner.text = 'Backing up existing install...';
-    backupDir = backupExistingInstall();
+    const { backupDir: backupDirFromResult } = backupExistingInstall();
+    backupDir = backupDirFromResult;
 
     if (spinner) spinner.text = 'Installing plugin...';
     await installPluginToStaging(pluginDir);
@@ -472,12 +489,18 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     components.plugin = 'verified';
 
     if (spinner) spinner.text = 'Installing pd CLI...';
-    syncPdCli(pluginDir);
+    const globalShimOk = syncPdCli(pluginDir);
 
-    if (verifyPdCliShim()) {
+    const cliVerify = verifyPdCliShim();
+    if (cliVerify.globalOk) {
+      components.cli = 'verified';
+    } else if (cliVerify.localOk && !globalShimOk) {
+      components.cli = 'verified';
+      logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" or add ${getInstalledBinDir()} to PATH.`);
+    } else if (cliVerify.localOk) {
       components.cli = 'verified';
     } else {
-      throw new Error('PD CLI shim verification failed — pd command is not executable after install');
+      throw new Error('PD CLI verification failed — pd command is not executable after install. Check Node.js and PATH configuration.');
     }
 
     if (spinner) spinner.text = 'Updating OpenClaw config...';

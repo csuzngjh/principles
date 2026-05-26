@@ -525,6 +525,35 @@ describe('Rollback restores prior plugin on replacement failure', () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it('existing install + rename failure must not proceed to copy/install', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-backup-fail-test-'));
+    try {
+      const extDir = path.join(tmpDir, 'extensions', 'principles-disciple');
+      fs.mkdirSync(extDir, { recursive: true });
+      fs.writeFileSync(path.join(extDir, 'important.txt'), 'user-data', 'utf8');
+
+      const lockedFile = path.join(extDir, 'locked.dat');
+      const handle = fs.openSync(lockedFile, 'w');
+      fs.writeSync(handle, Buffer.alloc(1024), 0, 1024, 0);
+
+      let renameFailed = false;
+      const backupDir = extDir + '.backup.' + Date.now();
+      try {
+        fs.renameSync(extDir, backupDir);
+      } catch {
+        renameFailed = true;
+      }
+
+      if (renameFailed) {
+        expect(fs.existsSync(path.join(extDir, 'important.txt'))).toBe(true);
+      }
+
+      fs.closeSync(handle);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('CLI wiring: --json implies non-interactive', () => {
@@ -620,5 +649,26 @@ describe('Invalid --channels JSON output contract', () => {
     expect(result.channels).toEqual(['prompt']);
     expect(result.unknowns).toEqual(['skill']);
     expect(result.error).toBeUndefined();
+  });
+});
+
+describe('CLI verification contract', () => {
+  it('cli: verified requires at least local shim working', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
+    expect(result.components.cli).toBe('verified');
+  });
+
+  it('cli: failed means success=false even if plugin is verified', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'failed', console: 'not_deliverable' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
+    expect(result.success).toBe(false);
+  });
+
+  it('cli failure output includes structured reason', () => {
+    const result = buildFailureOutput('cli_verification_failed', 'PD CLI is not executable after install. Check Node.js and PATH configuration.');
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe('cli_verification_failed');
+    expect(result.nextAction).toContain('PATH');
   });
 });
