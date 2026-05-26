@@ -46,6 +46,8 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-040 | Published artifact missing components that source-tree tests assume exist | PRI-247 |
 | ERR-041 | Install success reported when delivered components are incomplete | PRI-247 |
 | ERR-042 | Output reports requested config instead of actual disk state | PRI-247 |
+| ERR-043 | nextAction wraps entire shell command in quotes, making it unrunnable | PRI-247 |
+| ERR-044 | Structured failure reason hardcoded to console gap regardless of actual failure | PRI-247 |
 
 ---
 
@@ -558,6 +560,26 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-162 / PR #701
 - **Date**: 2026-05-24
 - **Recurrence**: Same class as ERR-034
+
+**[ERR-043]** | nextAction wraps entire shell command in quotes, making it unrunnable
+
+- **What happened**: `buildSuccessOutput` for `verified_local_only` generated `Run "C:\path\pd.cmd runtime canary --workspace <path> --json"` — the entire command including arguments was wrapped in a single pair of quotes. A shell would interpret the whole string as the executable name, not a command with arguments.
+- **Why it's wrong**: Shell quoting must only wrap the path component when it contains spaces. The arguments (`runtime canary --workspace ...`) must be outside the quotes. This is the same class as ERR-042 (output contract violation) — the output claims to be a runnable command but is not.
+- **Correct approach**: Only quote the path portion: `Run "C:\path with spaces\pd.cmd" runtime canary --workspace <path> --json`. Paths without spaces need no quotes: `Run /opt/pd runtime canary ...`. Use `path.includes(' ')` to decide.
+- **How to prevent**: When generating shell commands in output, always test that the command is syntactically valid. Add tests that verify: (1) paths without spaces are not quoted, (2) paths with spaces quote only the path, (3) the entire command is never wrapped in a single pair of quotes.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-042
+
+**[ERR-044]** | Structured failure reason hardcoded to console gap regardless of actual failure
+
+- **What happened**: `buildSuccessOutput` always set `reason: 'owner_review_console_not_deliverable'` when `isComplete` was false, even when the actual failure was `plugin: 'failed'` or `cli: 'failed'`. A user seeing `reason: owner_review_console_not_deliverable` would investigate the console, but the real problem was a broken CLI or plugin.
+- **Why it's wrong**: The `reason` field is a contract with the caller for diagnostics and automated remediation. An incorrect reason misdirects troubleshooting. This is the same class as ERR-002 (silent degradation hides failure reason) and ERR-042 (output does not reflect actual state).
+- **Correct approach**: Compute the reason from the actual component statuses: `plugin_failed`, `cli_failed`, `console_not_deliverable`. When multiple components fail, comma-separate the reasons. Never hardcode a single reason when multiple failure modes exist.
+- **How to prevent**: When a function has multiple failure paths, the output must distinguish them. Add tests that: (1) each failure mode produces a distinct reason, (2) the reason does not mention unrelated components, (3) multiple failures produce a combined reason.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-002, ERR-042
 
 ---
 
