@@ -1,9 +1,4 @@
 #!/usr/bin/env node
-/**
- * Bundle plugin + pd-cli for npm publishing.
- * Copies pre-built plugin files from openclaw-plugin and pd-cli to package directories.
- * MUST produce identical output to what sync-plugin.mjs syncs.
- */
 
 import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -18,34 +13,41 @@ const PLUGIN_DEST = join(__dirname, '..', 'plugin');
 const PD_CLI_SRC = join(ROOT_DIR, 'packages', 'pd-cli');
 const PD_CLI_DEST = join(__dirname, '..', 'pd-cli');
 
-const SYNC_ITEMS = [
+const PLUGIN_REQUIRED = [
   'dist',
   'templates',
-  'scripts',
-  'docs',
   'openclaw.plugin.json',
   'package.json',
 ];
 
-const PD_CLI_ITEMS = [
+const PLUGIN_OPTIONAL = [
+  'scripts',
+  'docs',
+];
+
+const PD_CLI_REQUIRED = [
   'dist',
   'package.json',
 ];
 
 console.log('📦 Bundling plugin + pd-cli for npm publish...\n');
 
-const distDir = join(PLUGIN_SRC, 'dist');
-if (!existsSync(distDir)) {
-  console.error('❌ openclaw-plugin/dist not found.');
-  console.error('   Run: cd packages/openclaw-plugin && npm run build');
-  process.exit(1);
+for (const item of PLUGIN_REQUIRED) {
+  const src = join(PLUGIN_SRC, item);
+  if (!existsSync(src)) {
+    console.error(`❌ Required plugin item not found: ${src}`);
+    console.error(`   Run: cd packages/openclaw-plugin && npm run build`);
+    process.exit(1);
+  }
 }
 
-const pdCliDist = join(PD_CLI_SRC, 'dist');
-if (!existsSync(pdCliDist)) {
-  console.error('❌ pd-cli/dist not found.');
-  console.error('   Run: cd packages/pd-cli && npm run build');
-  process.exit(1);
+for (const item of PD_CLI_REQUIRED) {
+  const src = join(PD_CLI_SRC, item);
+  if (!existsSync(src)) {
+    console.error(`❌ Required pd-cli item not found: ${src}`);
+    console.error(`   Run: cd packages/pd-cli && npm run build`);
+    process.exit(1);
+  }
 }
 
 if (existsSync(PLUGIN_DEST)) {
@@ -54,10 +56,20 @@ if (existsSync(PLUGIN_DEST)) {
 }
 mkdirSync(PLUGIN_DEST, { recursive: true });
 
-for (const item of SYNC_ITEMS) {
+for (const item of PLUGIN_REQUIRED) {
+  const src = join(PLUGIN_SRC, item);
+  console.log(`  Copying plugin/${item}...`);
+  try {
+    cpSync(src, join(PLUGIN_DEST, item), { recursive: true });
+  } catch {
+    cpSync(src, join(PLUGIN_DEST, item));
+  }
+}
+
+for (const item of PLUGIN_OPTIONAL) {
   const src = join(PLUGIN_SRC, item);
   if (!existsSync(src)) {
-    console.log(`  ⚠️  Skipping ${item} (not found in source)`);
+    console.log(`  ⚠️  Skipping optional plugin/${item} (not found in source)`);
     continue;
   }
   console.log(`  Copying plugin/${item}...`);
@@ -74,12 +86,8 @@ if (existsSync(PD_CLI_DEST)) {
 }
 mkdirSync(PD_CLI_DEST, { recursive: true });
 
-for (const item of PD_CLI_ITEMS) {
+for (const item of PD_CLI_REQUIRED) {
   const src = join(PD_CLI_SRC, item);
-  if (!existsSync(src)) {
-    console.error(`❌ pd-cli/${item} not found. Cannot bundle pd-cli.`);
-    process.exit(1);
-  }
   console.log(`  Copying pd-cli/${item}...`);
   try {
     cpSync(src, join(PD_CLI_DEST, item), { recursive: true });

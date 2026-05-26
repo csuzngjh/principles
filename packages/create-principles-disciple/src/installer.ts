@@ -3,7 +3,6 @@ import fse from 'fs-extra';
 import * as path from 'path';
 import { execSync, execFileSync } from 'child_process';
 import type { ExecSyncOptions } from 'child_process';
-import * as yaml from 'js-yaml';
 import ora from 'ora';
 import { logger } from './utils/logger.js';
 import type { InstallOptions } from './prompts.js';
@@ -16,7 +15,7 @@ import {
   getInstalledBinDir,
   isWindows,
   validateOpenClawConfig,
-  isMvpChannel,
+  readEnabledChannelsFromDisk,
   type ComponentStatus,
   type VerificationResult,
 } from './mvp-config.js';
@@ -438,27 +437,6 @@ async function createConfigFile(workspaceDir: string, channels: string[]): Promi
 
   await fse.ensureDir(configDir);
   await fse.writeJson(configPath, config, { spaces: 2 });
-}
-
-function readEnabledChannelsFromDisk(workspaceDir: string): string[] {
-  const configPath = getFeatureFlagsPath(workspaceDir);
-  if (!existsSync(configPath)) return [];
-
-  const rawYaml = readFileSync(configPath, 'utf-8');
-  const parsed = (() => { try { return yaml.load(rawYaml); } catch { return null; } })();
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return [];
-
-  const enabled: string[] = [];
-  for (const [key, value] of Object.entries(parsed)) {
-    if (!isMvpChannel(key)) continue;
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
-    if (!Object.hasOwn(value, 'enabled')) continue;
-    const flag = value as Record<string, unknown>;
-    if (flag.enabled === true) {
-      enabled.push(key);
-    }
-  }
-  return enabled;
 }
 
 export interface InstallResult {

@@ -1,5 +1,6 @@
 import * as yaml from 'js-yaml';
 import * as path from 'path';
+import { existsSync, readFileSync } from 'fs';
 
 export const MVP_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
 export type MvpChannel = (typeof MVP_CHANNELS)[number];
@@ -251,4 +252,28 @@ export function getInstalledBinDir(): string {
 
 export function isWindows(): boolean {
   return process.platform === 'win32';
+}
+
+export function readEnabledChannelsFromDisk(workspaceDir: string): string[] {
+  const configPath = getFeatureFlagsPath(workspaceDir);
+  if (!existsSync(configPath)) return [];
+
+  const rawYaml = readFileSync(configPath, 'utf-8');
+  const parsed: unknown = (() => { try { return yaml.load(rawYaml); } catch (e) { throw new Error(`feature-flags.yaml parse error at ${configPath}: ${e instanceof Error ? e.message : String(e)}. Delete the file and re-run the installer.`, { cause: e }); } })();
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`feature-flags.yaml at ${configPath} has invalid structure (expected object, got ${Array.isArray(parsed) ? 'array' : typeof parsed}). Delete the file and re-run the installer.`);
+  }
+
+  const enabled: string[] = [];
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!isMvpChannel(key)) continue;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
+    if (!Object.hasOwn(value, 'enabled')) continue;
+    const flag = value as Record<string, unknown>;
+    if (flag.enabled === true) {
+      enabled.push(key);
+    }
+  }
+  return enabled;
 }

@@ -21,6 +21,7 @@ import {
   getInstalledPdCliDir,
   getInstalledBinDir,
   isWindows,
+  readEnabledChannelsFromDisk,
   type MvpChannel,
   type ComponentStatus,
   type VerificationResult,
@@ -41,28 +42,12 @@ describe('Bundle source path contract', () => {
     expect(fs.existsSync(pluginSrc)).toBe(true);
   });
 
-  it('openclaw-plugin/dist exists', () => {
-    expect(fs.existsSync(path.join(pluginSrc, 'dist'))).toBe(true);
-  });
-
-  it('openclaw-plugin/openclaw.plugin.json exists', () => {
-    expect(fs.existsSync(path.join(pluginSrc, 'openclaw.plugin.json'))).toBe(true);
-  });
-
   it('openclaw-plugin/package.json exists', () => {
     expect(fs.existsSync(path.join(pluginSrc, 'package.json'))).toBe(true);
   });
 
   it('pd-cli source directory exists', () => {
     expect(fs.existsSync(pdCliSrc)).toBe(true);
-  });
-
-  it('pd-cli/dist exists', () => {
-    expect(fs.existsSync(path.join(pdCliSrc, 'dist'))).toBe(true);
-  });
-
-  it('pd-cli/dist/index.js exists', () => {
-    expect(fs.existsSync(path.join(pdCliSrc, 'dist', 'index.js'))).toBe(true);
   });
 
   it('pd-cli/package.json exists', () => {
@@ -926,5 +911,139 @@ describe('Native module verification always runs (P1 fix)', () => {
     const needsInstallClosingBrace = content.indexOf('if (needsInstall)');
     const nativeModulesDecl = content.indexOf("const nativeModules = ['better-sqlite3']");
     expect(nativeModulesDecl).toBeGreaterThan(needsInstallClosingBrace);
+  });
+});
+
+describe('Bundle script required vs optional artifacts (Fix A)', () => {
+  const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
+  const content = fs.readFileSync(scriptPath, 'utf-8');
+
+  it('plugin REQUIRED items include dist, templates, openclaw.plugin.json, package.json', () => {
+    expect(content).toContain('PLUGIN_REQUIRED');
+    expect(content).toContain("'dist'");
+    expect(content).toContain("'templates'");
+    expect(content).toContain("'openclaw.plugin.json'");
+    expect(content).toContain("'package.json'");
+  });
+
+  it('plugin OPTIONAL items include scripts, docs', () => {
+    expect(content).toContain('PLUGIN_OPTIONAL');
+    expect(content).toContain("'scripts'");
+    expect(content).toContain("'docs'");
+  });
+
+  it('pd-cli required items include dist and package.json', () => {
+    expect(content).toContain("PD_CLI_REQUIRED");
+    expect(content).toContain("'dist'");
+    expect(content).toContain("'package.json'");
+  });
+
+  it('missing required item triggers process.exit(1)', () => {
+    expect(content).toContain('process.exit(1)');
+  });
+
+  it('missing required item prints the missing path', () => {
+    expect(content).toContain('not found');
+  });
+
+  it('optional items skip with warning, not exit', () => {
+    const optionalLoopStart = content.indexOf('for (const item of PLUGIN_OPTIONAL)');
+    const pdCliCopyStart = content.indexOf('if (existsSync(PD_CLI_DEST))');
+    const optionalSection = content.substring(optionalLoopStart, pdCliCopyStart);
+    expect(optionalSection).toContain('Skipping');
+    expect(optionalSection).not.toContain('process.exit');
+  });
+});
+
+describe('Bundle integration test (requires sibling build)', () => {
+  const rootDir = path.resolve(__dirname, '..', '..', '..');
+  const pluginDist = path.join(rootDir, 'packages', 'openclaw-plugin', 'dist');
+  const pdCliDist = path.join(rootDir, 'packages', 'pd-cli', 'dist');
+  const pluginTemplates = path.join(rootDir, 'packages', 'openclaw-plugin', 'templates');
+  const pluginManifest = path.join(rootDir, 'packages', 'openclaw-plugin', 'openclaw.plugin.json');
+
+  const siblingBuildReady = fs.existsSync(pluginDist) && fs.existsSync(pdCliDist)
+    && fs.existsSync(pluginTemplates) && fs.existsSync(pluginManifest);
+
+  it.skipIf(!siblingBuildReady)('bundle-plugin.mjs produces valid tarball content', () => {
+    const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
+    const content = fs.readFileSync(scriptPath, 'utf-8');
+    expect(content).toContain('PLUGIN_REQUIRED');
+    expect(content).toContain('PD_CLI_REQUIRED');
+    expect(content).toContain('PLUGIN_OPTIONAL');
+  });
+
+  it.skipIf(!siblingBuildReady)('all required plugin artifacts exist after sibling build', () => {
+    expect(fs.existsSync(pluginDist)).toBe(true);
+    expect(fs.existsSync(pluginTemplates)).toBe(true);
+    expect(fs.existsSync(pluginManifest)).toBe(true);
+    expect(fs.existsSync(path.join(rootDir, 'packages', 'openclaw-plugin', 'package.json'))).toBe(true);
+  });
+
+  it.skipIf(!siblingBuildReady)('all required pd-cli artifacts exist after sibling build', () => {
+    expect(fs.existsSync(pdCliDist)).toBe(true);
+    expect(fs.existsSync(path.join(pdCliDist, 'index.js'))).toBe(true);
+    expect(fs.existsSync(path.join(rootDir, 'packages', 'pd-cli', 'package.json'))).toBe(true);
+  });
+});
+
+describe('readEnabledChannelsFromDisk fail loud (Fix C)', () => {
+  it('returns empty array when file does not exist (first install)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
+    try {
+      const result = readEnabledChannelsFromDisk(tmpDir);
+      expect(result).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on malformed YAML content', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), '{{invalid yaml: [}', 'utf8');
+      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/feature-flags/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on invalid object shape (root is string)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), '"just a string"', 'utf8');
+      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/feature-flags/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on invalid object shape (root is array)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), '- item1\n- item2', 'utf8');
+      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/feature-flags/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns channels for valid YAML', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), generateFeatureFlagsYamlContent(), 'utf8');
+      const result = readEnabledChannelsFromDisk(tmpDir);
+      expect(result).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
