@@ -1,19 +1,23 @@
-/**
- * 彩色日志输出工具
- */
 import pc from 'picocolors';
 
+let _quiet = false;
+
+export function setQuietMode(quiet: boolean): void {
+  _quiet = quiet;
+}
+
 const logger = {
-  info: (msg: string) => console.log(`${pc.blue('ℹ')} ${msg}`),
-  success: (msg: string) => console.log(`${pc.green('✔')} ${msg}`),
-  warn: (msg: string) => console.log(`${pc.yellow('⚠')} ${msg}`),
-  error: (msg: string) => console.log(`${pc.red('✖')} ${msg}`),
-  
+  info: (msg: string) => { if (!_quiet) console.log(`${pc.blue('ℹ')} ${msg}`); },
+  success: (msg: string) => { if (!_quiet) console.log(`${pc.green('✔')} ${msg}`); },
+  warn: (msg: string) => { if (!_quiet) console.log(`${pc.yellow('⚠')} ${msg}`); },
+  error: (msg: string) => { if (!_quiet) console.log(`${pc.red('✖')} ${msg}`); },
+
   step: (msg: string) => {
-    console.log(`\n${pc.yellow('📦')} ${msg}\n`);
+    if (!_quiet) console.log(`\n${pc.yellow('📦')} ${msg}\n`);
   },
-  
+
   list: (title: string, entries: { name: string; value: string }[]) => {
+    if (_quiet) return;
     console.log(`\n${pc.bold(title)}`);
     entries.forEach(e => console.log(`  ${pc.cyan(e.name)}: ${e.value}`));
   }

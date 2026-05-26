@@ -1,6 +1,3 @@
-/**
- * 安装器模块
- */
 import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
@@ -10,137 +7,95 @@ import ora from 'ora';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';
 import type { InstallOptions } from './prompts.js';
+import {
+  generateFeatureFlagsYamlContent,
+  getFeatureFlagsPath,
+  buildNextAction,
+  buildFailureReason,
+  buildFailureNextAction,
+} from './mvp-config.js';
 
-// 跨平台 execSync 选项：Windows 需要 shell，Unix 可以直接执行
 const getExecOptions = (cwd: string): ExecSyncOptions => {
   const options: ExecSyncOptions = {
     cwd,
     stdio: 'inherit' as const,
     env: process.env,
   };
-  // Windows 需要 shell 来正确执行 npm 命令
   if (process.platform === 'win32') {
     options.shell = process.env.ComSpec || 'cmd.exe';
   }
   return options;
 };
 
-const ALWAYS_ON_SKILLS = new Set([
-  'admin',
-  'bootstrap-tools',
-  'deductive-audit',
-  'feedback',
-  'init-strategy',
-  'inject-rule',
-  'pd-mentor',
-  'plan-script',
-  'profile',
-  'triage',
-]);
-
-const FEATURE_SKILL_MAP: Record<string, string[]> = {
-  evolution: ['evolve-task', 'evolution-framework-update', 'evolve-system', 'watch-evolution', 'pd-daily', 'report'],
-  trust: [], // Built-in feature (trust-engine.ts, gate.ts), no skills needed
-  pain: ['pain', 'root-cause'],
-  reflection: ['reflection', 'reflection-log'],
-  okr: ['manage-okr'],
-  hygiene: ['pd-grooming'],
-};
-
-export interface InstallResult {
-  success: boolean;
-  pluginDir: string;
-  workspaceDir: string;
-  skillsCount: number;
-  templatesCount: number;
-  error?: string;
-}
-
-/**
- * 获取模板目录
- */
-function getTemplatesDir(pluginDir: string, language: string): string {
-  return path.join(pluginDir, 'templates', 'langs', language);
-}
-
-/**
- * 清理旧版本
- */
 async function cleanOldVersion(): Promise<void> {
   const extDir = getPluginExtDir();
   if (existsSync(extDir)) {
     await fse.remove(extDir);
-    logger.info(`已删除旧版本: ${extDir}`);
+    logger.info(`Removed old version: ${extDir}`);
   }
 }
 
-/**
- * 检查内置插件是否存在
- */
 async function checkBuiltPlugin(pluginDir: string): Promise<void> {
-  logger.step('检查内置插件');
+  logger.step('Checking built plugin');
 
   const distDir = path.join(pluginDir, 'plugin', 'dist');
   const pluginJson = path.join(pluginDir, 'plugin', 'openclaw.plugin.json');
 
   if (!existsSync(distDir) || !existsSync(pluginJson)) {
-    logger.error('内置插件文件缺失');
-    logger.error(`期望位置: ${distDir}`);
-    logger.error('这可能是安装包损坏，请重新安装或联系开发者');
-    process.exit(1);
+    throw new Error(`Built plugin files missing. Expected at: ${distDir}. This may be a corrupted package. Reinstall or contact the developer.`);
   }
 
-  logger.success('内置插件检查通过');
+  logger.success('Built plugin check passed');
 }
 
-/**
- * 安装插件到 OpenClaw
- */
 async function installPlugin(pluginDir: string): Promise<void> {
-  logger.step('安装插件到 OpenClaw');
+  logger.step('Installing plugin to OpenClaw');
 
   const extDir = getPluginExtDir();
   const configDir = getOpenClawConfigDir();
   const configPath = path.join(configDir, 'openclaw.json');
   const builtPluginDir = path.join(pluginDir, 'plugin');
 
-  // 复制内置插件文件
   await fse.ensureDir(extDir);
   await fse.copy(builtPluginDir, extDir, { overwrite: true });
-  logger.info('已复制插件文件');
+  logger.info('Plugin files copied');
 
-  // 更新 openclaw.json 配置
   if (existsSync(configPath)) {
-    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    const rawConfig = readFileSync(configPath, 'utf-8');
+    const config: unknown = JSON.parse(rawConfig);
 
-    // 添加到 allow 列表
-    if (!config.plugins) config.plugins = {};
-    if (!config.plugins.allow) config.plugins.allow = [];
-    if (!config.plugins.allow.includes('principles-disciple')) {
-      config.plugins.allow.push('principles-disciple');
+    if (config !== null && typeof config === 'object' && !Array.isArray(config)) {
+      const configObj = config as Record<string, unknown>;
+      if (!configObj.plugins) configObj.plugins = {};
+      const plugins = configObj.plugins as Record<string, unknown>;
+      if (!plugins.allow) plugins.allow = [];
+      const allow = plugins.allow as string[];
+      if (!allow.includes('principles-disciple')) {
+        allow.push('principles-disciple');
+      }
+
+      if (!plugins.entries) plugins.entries = {};
+      const entries = plugins.entries as Record<string, unknown>;
+      entries['principles-disciple'] = { enabled: true };
+
+      if (!plugins.installs) plugins.installs = {};
+      const installs = plugins.installs as Record<string, unknown>;
+      installs['principles-disciple'] = {
+        source: 'path',
+        installPath: extDir,
+        installedAt: new Date().toISOString(),
+      };
+
+      writeFileSync(configPath, JSON.stringify(configObj, null, 2));
     }
-
-    // 添加到 entries
-    if (!config.plugins.entries) config.plugins.entries = {};
-    config.plugins.entries['principles-disciple'] = { enabled: true };
-
-    // 添加到 installs（使用 OpenClaw 正确格式）
-    if (!config.plugins.installs) config.plugins.installs = {};
-    config.plugins.installs['principles-disciple'] = {
-      source: 'path',
-      installPath: extDir,
-      installedAt: new Date().toISOString(),
-    };
-
-    writeFileSync(configPath, JSON.stringify(config, null, 2));
   }
 
-  logger.success('插件安装成功');
+  logger.success('Plugin installed');
 }
 
 function verifyNativeModule(modulePath: string): boolean {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS require to verify module existence
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     require(modulePath);
     return true;
   } catch {
@@ -155,7 +110,7 @@ async function installPluginDependencies(): Promise<void> {
   const nativeModules = ['better-sqlite3'];
 
   if (!existsSync(packageJsonPath)) {
-    logger.warn('插件 package.json 不存在，跳过依赖安装');
+    logger.warn('Plugin package.json not found, skipping dependency install');
     return;
   }
 
@@ -175,7 +130,7 @@ async function installPluginDependencies(): Promise<void> {
       for (const mod of nativeModules) {
         const modPath = path.join(extDir, 'node_modules', mod);
         if (existsSync(modPath) && !verifyNativeModule(mod)) {
-          logger.warn(`原生模块 ${mod} 验证失败，需要重新编译`);
+          logger.warn(`Native module ${mod} verification failed, needs rebuild`);
           needsInstall = true;
           break;
         }
@@ -184,24 +139,24 @@ async function installPluginDependencies(): Promise<void> {
   }
 
   if (!needsInstall) {
-    logger.success('插件依赖已安装');
+    logger.success('Plugin dependencies already installed');
     return;
   }
 
-  logger.step('安装插件运行时依赖');
+  logger.step('Installing plugin runtime dependencies');
   try {
     const execOpts = getExecOptions(extDir);
-    logger.info('下载并安装 npm 依赖...');
+    logger.info('Downloading and installing npm dependencies...');
     execSync('npm install --ignore-scripts', execOpts);
 
     for (const mod of nativeModules) {
       const modPath = path.join(extDir, 'node_modules', mod);
       if (existsSync(modPath)) {
-        logger.info(`编译原生模块 ${mod}...`);
+        logger.info(`Compiling native module ${mod}...`);
         try {
           execSync(`npm rebuild ${mod}`, execOpts);
         } catch (e) {
-          logger.warn(`原生模块 ${mod} 编译失败: ${e instanceof Error ? e.message : String(e)}`);
+          logger.warn(`Native module ${mod} compile failed: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
     }
@@ -211,232 +166,191 @@ async function installPluginDependencies(): Promise<void> {
       const nativeModPath = path.join(extDir, 'node_modules', nativeMod);
       if (existsSync(nativeModPath)) {
         if (verifyNativeModule(nativeMod)) {
-          logger.success(`原生模块 ${nativeMod} 验证通过`);
+          logger.success(`Native module ${nativeMod} verified`);
         } else {
-          logger.warn(`原生模块 ${nativeMod} 验证失败`);
+          logger.warn(`Native module ${nativeMod} verification failed`);
           nativeModulesOk = false;
         }
       }
     }
 
     if (nativeModulesOk) {
-      logger.success('插件依赖安装完成');
+      logger.success('Plugin dependencies installed');
     } else {
-      logger.warn('部分原生模块可能无法正常工作');
-      logger.info('如果遇到问题，运行: cd ~/.openclaw/extensions/principles-disciple && npm rebuild');
+      logger.warn('Some native modules may not work correctly');
+      logger.info('If issues occur, run: cd ~/.openclaw/extensions/principles-disciple && npm rebuild');
     }
   } catch (error) {
-    logger.error('依赖安装失败');
-    logger.error(`错误: ${error instanceof Error ? error.message : String(error)}`);
+    logger.error('Dependency install failed');
+    logger.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
     logger.info('');
-    logger.info('手动修复步骤:');
+    logger.info('Manual fix steps:');
     logger.info(`  cd ${extDir}`);
     logger.info('  npm install --ignore-scripts');
     logger.info('  npm rebuild better-sqlite3');
-    // 不退出，让安装继续，可能基本功能还能用
   }
 }
 
-/**
- * 复制 Skills
- */
-async function copySkills(pluginDir: string, language: string, features: string[]): Promise<number> {
-  logger.step('复制 Skills');
-  
-  const skillsSrc = path.join(getTemplatesDir(pluginDir, language), 'skills');
-  const skillsDest = path.join(getPluginExtDir(), 'skills');
-  
-  if (!existsSync(skillsSrc)) {
-    // 回退到中文
-    const fallbackSrc = path.join(getTemplatesDir(pluginDir, 'zh'), 'skills');
-    if (existsSync(fallbackSrc)) {
-      await fse.ensureDir(skillsDest);
-      await fse.copy(fallbackSrc, skillsDest, { overwrite: true });
-    }
-  } else {
-    await fse.ensureDir(skillsDest);
-    await fse.copy(skillsSrc, skillsDest, { overwrite: true });
-  }
-  
-  const selectedFeatureSet = new Set(features);
-  const enabledSkills = new Set<string>(ALWAYS_ON_SKILLS);
-
-  for (const feature of selectedFeatureSet) {
-    const mappedSkills = FEATURE_SKILL_MAP[feature] || [];
-    for (const skill of mappedSkills) {
-      enabledSkills.add(skill);
-    }
-  }
-
-  if (existsSync(skillsDest)) {
-    const installedSkills = readdirSync(skillsDest).filter((entry) => statSync(path.join(skillsDest, entry)).isDirectory());
-
-    for (const skillDir of installedSkills) {
-      if (!enabledSkills.has(skillDir)) {
-        await fse.remove(path.join(skillsDest, skillDir));
-      }
-    }
-  }
-
-  const count = existsSync(skillsDest)
-    ? readdirSync(skillsDest).filter((entry) => statSync(path.join(skillsDest, entry)).isDirectory()).length
-    : 0;
-  logger.success(`已复制 ${count} 个 Skills`);
-  return count;
-}
-
-interface CopyCoreTemplatesOptions {
+interface CopyOptions {
   pluginDir: string;
   language: string;
   workspaceDir: string;
   mode: 'smart' | 'force';
 }
 
-/**
- * 复制核心模板到工作区
- */
-async function copyCoreTemplates(options: CopyCoreTemplatesOptions): Promise<number> {
-  const { pluginDir, language, workspaceDir, mode } = options;
-  logger.step('复制核心模板');
+async function copyCoreTemplates(opts: CopyOptions): Promise<number> {
+  logger.step('Copying core templates');
 
   let count = 0;
-  const coreSrc = path.join(getTemplatesDir(pluginDir, language), 'core');
+  const coreSrc = path.join(opts.pluginDir, 'templates', 'langs', opts.language, 'core');
 
   if (!existsSync(coreSrc)) {
-    logger.warn('核心模板目录不存在');
-    return 0;
+    const fallbackSrc = path.join(opts.pluginDir, 'templates', 'langs', 'en', 'core');
+    if (!existsSync(fallbackSrc)) {
+      logger.warn('Core templates directory not found');
+      return 0;
+    }
   }
 
-  const files = readdirSync(coreSrc).filter(f => f.endsWith('.md'));
+  const actualSrc = existsSync(coreSrc) ? coreSrc : path.join(opts.pluginDir, 'templates', 'langs', 'en', 'core');
+  const files = readdirSync(actualSrc).filter(f => f.endsWith('.md'));
 
   for (const file of files) {
-    const srcPath = path.join(coreSrc, file);
-    const destPath = path.join(workspaceDir, file);
+    const srcPath = path.join(actualSrc, file);
+    const destPath = path.join(opts.workspaceDir, file);
 
-    if (existsSync(destPath) && mode === 'smart') {
-      // 智能模式：生成 .update 文件
+    if (existsSync(destPath) && opts.mode === 'smart') {
       const updatePath = `${destPath}.update`;
       await fse.copy(srcPath, updatePath, { overwrite: true });
-      logger.info(`${file} -> ${file}.update (智能模式)`);
+      logger.info(`${file} -> ${file}.update (smart mode)`);
     } else {
-      await fse.ensureDir(workspaceDir);
+      await fse.ensureDir(opts.workspaceDir);
       await fse.copy(srcPath, destPath, { overwrite: true });
-      logger.info(`${file} (已复制)`);
+      logger.info(`${file} (copied)`);
     }
     count++;
   }
 
-  logger.success(`已复制 ${count} 个核心模板`);
+  logger.success(`Copied ${count} core templates`);
   return count;
 }
 
-/**
- * 复制身份层文件到工作区
- */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Installer function signature - parameters represent distinct configuration dimensions (source, language, destination, mode) that don't logically group into options object
-async function copyPrinciplesLayer(
-  pluginDir: string,
-  language: string,
-  workspaceDir: string,
-  mode: 'smart' | 'force'
-): Promise<number> {
-  logger.step('复制身份层文件');
+async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
+  logger.step('Copying principles layer');
 
   let count = 0;
-  const principlesSrc = path.join(pluginDir, 'templates', 'workspace', '.principles');
-  const principlesDest = path.join(workspaceDir, '.principles');
+  const principlesSrc = path.join(opts.pluginDir, 'templates', 'workspace', '.principles');
+  const principlesDest = path.join(opts.workspaceDir, '.principles');
 
   if (!existsSync(principlesSrc)) {
-    logger.warn('身份层模板目录不存在');
+    logger.warn('Principles layer templates directory not found');
     return 0;
   }
 
-  // 复制所有文件
   const files = readdirSync(principlesSrc);
 
-  // Custom logic for THINKING_OS.md language support
-  const langThinkingOsSrc = path.join(pluginDir, 'templates', 'langs', language, 'principles', 'THINKING_OS.md');
+  const langThinkingOsSrc = path.join(opts.pluginDir, 'templates', 'langs', opts.language, 'principles', 'THINKING_OS.md');
 
   for (const file of files) {
     let srcPath = path.join(principlesSrc, file);
     if (file === 'THINKING_OS.md' && existsSync(langThinkingOsSrc)) {
       srcPath = langThinkingOsSrc;
     }
-    const destPath = path.join(principlesDest, file);    
-    // 跳过目录（models 目录单独处理）
+    const destPath = path.join(principlesDest, file);
     if (statSync(srcPath).isDirectory()) {
       continue;
     }
-    
-    if (existsSync(destPath) && mode === 'smart') {
+
+    if (existsSync(destPath) && opts.mode === 'smart') {
       const updatePath = `${destPath}.update`;
       await fse.copy(srcPath, updatePath, { overwrite: true });
-      logger.info(`.principles/${file} -> .update (智能模式)`);
+      logger.info(`.principles/${file} -> .update (smart mode)`);
     } else {
       await fse.ensureDir(principlesDest);
       await fse.copy(srcPath, destPath, { overwrite: true });
-      logger.info(`.principles/${file} (已复制)`);
+      logger.info(`.principles/${file} (copied)`);
     }
     count++;
   }
-  
-  // 复制 models 目录
+
   const modelsSrc = path.join(principlesSrc, 'models');
   const modelsDest = path.join(principlesDest, 'models');
-  
+
   if (existsSync(modelsSrc)) {
     await fse.ensureDir(modelsDest);
     await fse.copy(modelsSrc, modelsDest, { overwrite: true });
     const modelCount = readdirSync(modelsDest).length;
-    logger.info(`.principles/models/ (${modelCount} 个思维模型)`);
+    logger.info(`.principles/models/ (${modelCount} thinking models)`);
     count += modelCount;
   }
-  
-  logger.success(`身份层文件已复制`);
+
+  logger.success('Principles layer files copied');
   return count;
 }
 
-/**
- * 创建配置文件
- */
-async function createConfigFile(workspaceDir: string, features: string[]): Promise<void> {
+async function generateFeatureFlagsConfig(workspaceDir: string): Promise<string> {
+  logger.step('Generating feature-flags.yaml');
+
+  const configPath = getFeatureFlagsPath(workspaceDir);
+  const configDir = path.dirname(configPath);
+
+  if (existsSync(configPath)) {
+    logger.info('feature-flags.yaml already exists — preserving user config');
+    return configPath;
+  }
+
+  await fse.ensureDir(configDir);
+  const yamlContent = generateFeatureFlagsYamlContent();
+  writeFileSync(configPath, yamlContent, 'utf8');
+
+  logger.success(`Feature flags config created: ${configPath}`);
+  return configPath;
+}
+
+async function createConfigFile(workspaceDir: string, channels: string[]): Promise<void> {
   const configDir = getOpenClawConfigDir();
   const configPath = path.join(configDir, 'principles-disciple.json');
-  
+
+  if (existsSync(configPath)) {
+    const existingRaw = readFileSync(configPath, 'utf-8');
+    const existing: unknown = JSON.parse(existingRaw);
+    if (existing !== null && typeof existing === 'object' && !Array.isArray(existing)) {
+      const existingObj = existing as Record<string, unknown>;
+      if (Object.hasOwn(existingObj, 'channels') || Object.hasOwn(existingObj, 'features')) {
+        logger.info('Existing config preserved — not overwriting channel/feature settings');
+        return;
+      }
+    }
+  }
+
   const config = {
     workspace: workspaceDir,
     state: path.join(workspaceDir, '.state'),
-    features,
-    debug: false,
+    channels,
     installedAt: new Date().toISOString(),
+    mvpFirst: true,
   };
-  
+
   await fse.ensureDir(configDir);
   await fse.writeJson(configPath, config, { spaces: 2 });
-  
-  logger.success(`配置文件已创建: ${configPath}`);
+
+  logger.success(`Config file created: ${configPath}`);
 }
 
-/**
- * 生成更新摘要
- */
 async function generateUpdateSummary(
   workspaceDir: string,
-  mode: 'smart' | 'force'
+  mode: 'smart' | 'force',
 ): Promise<number> {
-  // 只在智能模式（更新）时生成
   if (mode !== 'smart') return 0;
-  
+
   const updateFiles: string[] = [];
-  
-  // 查找所有 .update 文件
+
   const findUpdateFiles = (dir: string): void => {
     if (!existsSync(dir)) return;
     const entries = readdirSync(dir);
     for (const entry of entries) {
       const fullPath = path.join(dir, entry);
       if (statSync(fullPath).isDirectory()) {
-        // 跳过隐藏目录和 node_modules
         if (entry.startsWith('.') || entry === 'node_modules') continue;
         findUpdateFiles(fullPath);
       } else if (entry.endsWith('.update')) {
@@ -444,54 +358,30 @@ async function generateUpdateSummary(
       }
     }
   };
-  
+
   findUpdateFiles(workspaceDir);
-  
+
   if (updateFiles.length === 0) return 0;
-  
-  // 生成更新摘要
+
   const summaryPath = path.join(workspaceDir, '.principles', 'UPDATE_SUMMARY.md');
   const [timestamp] = new Date().toISOString().split('T');
-  
-  let content = `# 更新摘要 (${timestamp})
 
-## ⚠️ 待合并的更新文件
+  let content = `# Update Summary (${timestamp})\n\n## Pending merge files\n\n`;
+  content += `| File | Status |\n|------|--------|\n`;
 
-以下文件有新版本可用，**必须手动合并**：
-
-| 文件 | 状态 |
-|------|------|
-`;
-  
   for (const file of updateFiles) {
     const relativePath = path.relative(workspaceDir, file);
-    content += `| \`${relativePath}\` | 待合并 |\n`;
+    content += `| \`${relativePath}\` | pending merge |\n`;
   }
-  
-  content += `
-## 合并步骤
 
-1. 逐个打开 .update 文件
-2. 对比原文件，识别新增/修改内容
-3. 将有价值的更新合并到原文件
-4. 删除 .update 文件
+  content += `\n## Merge steps\n\n1. Open each .update file\n2. Compare with original\n3. Merge valuable changes\n4. Delete .update file\n`;
 
-## 查看完整变更日志
-
-\`\`\`bash
-cat ~/clawd/docs/CHANGELOG.md | head -100
-\`\`\`
-
----
-*此文件在每次更新时自动生成，合并完成后可删除*
-`;
-  
   await fse.ensureDir(path.dirname(summaryPath));
   await fse.writeFile(summaryPath, content);
-  
-  logger.info(`更新摘要已生成: ${summaryPath}`);
-  logger.warn(`发现 ${updateFiles.length} 个待合并的更新文件`);
-  
+
+  logger.info(`Update summary generated: ${summaryPath}`);
+  logger.warn(`${updateFiles.length} update file(s) need manual merge`);
+
   return updateFiles.length;
 }
 
@@ -499,41 +389,31 @@ export interface InstallResult {
   success: boolean;
   pluginDir: string;
   workspaceDir: string;
-  skillsCount: number;
+  featureFlagsPath: string;
   templatesCount: number;
   updateFilesCount?: number;
+  reason?: string;
+  nextAction?: string;
   error?: string;
 }
 
-/**
- * 主安装流程
- */
-export async function install(options: InstallOptions, pluginDir: string): Promise<InstallResult> {
-  const spinner = ora('正在安装...').start();
+export async function install(options: InstallOptions, pluginDir: string, quiet = false): Promise<InstallResult> {
+  const spinner = quiet ? null : ora('Installing...').start();
 
   try {
-    // 1. 清理旧版本
-    spinner.text = '清理旧版本...';
+    if (spinner) spinner.text = 'Cleaning old version...';
     await cleanOldVersion();
 
-    // 2. 检查内置插件
-    spinner.text = '检查内置插件...';
+    if (spinner) spinner.text = 'Checking built plugin...';
     await checkBuiltPlugin(pluginDir);
 
-    // 3. 安装插件
-    spinner.text = '安装插件...';
+    if (spinner) spinner.text = 'Installing plugin...';
     await installPlugin(pluginDir);
 
-    // 4. 安装插件依赖
-    spinner.text = '安装插件依赖...';
+    if (spinner) spinner.text = 'Installing plugin dependencies...';
     await installPluginDependencies();
 
-    // 5. 复制 Skills
-    spinner.text = '复制 Skills...';
-    const skillsCount = await copySkills(pluginDir, options.language, options.features);
-
-    // 6. 复制核心模板
-    spinner.text = '复制核心模板...';
+    if (spinner) spinner.text = 'Copying core templates...';
     const templatesCount = await copyCoreTemplates({
       pluginDir,
       language: options.language,
@@ -541,42 +421,49 @@ export async function install(options: InstallOptions, pluginDir: string): Promi
       mode: options.mode,
     });
 
-    // 7. 复制身份层
-    spinner.text = '复制身份层...';
-    const principlesCount = await copyPrinciplesLayer(
+    if (spinner) spinner.text = 'Copying principles layer...';
+    const principlesCount = await copyPrinciplesLayer({
       pluginDir,
-      options.language,
-      options.workspaceDir,
-      options.mode
-    );
+      language: options.language,
+      workspaceDir: options.workspaceDir,
+      mode: options.mode,
+    });
 
-    // 8. 创建配置文件
-    spinner.text = '创建配置文件...';
-    await createConfigFile(options.workspaceDir, options.features);
+    if (spinner) spinner.text = 'Generating feature flags config...';
+    const featureFlagsPath = await generateFeatureFlagsConfig(options.workspaceDir);
 
-    // 9. 生成更新摘要（如果是更新模式）
-    spinner.text = '生成更新摘要...';
+    if (spinner) spinner.text = 'Creating config file...';
+    await createConfigFile(options.workspaceDir, options.channels);
+
+    if (spinner) spinner.text = 'Generating update summary...';
     const updateFilesCount = await generateUpdateSummary(options.workspaceDir, options.mode);
-    
-    spinner.succeed('安装完成！');
-    
+
+    if (spinner) spinner.succeed('Install complete!');
+
+    const mvpNextAction = buildNextAction();
+
     return {
       success: true,
       pluginDir: getPluginExtDir(),
       workspaceDir: options.workspaceDir,
-      skillsCount,
+      featureFlagsPath,
       templatesCount: templatesCount + principlesCount,
       updateFilesCount,
+      nextAction: mvpNextAction,
     };
   } catch (error) {
-    spinner.fail('安装失败');
+    if (spinner) spinner.fail('Install failed');
+    const errorMsg = error instanceof Error ? error.message : String(error);
+
     return {
       success: false,
       pluginDir: getPluginExtDir(),
       workspaceDir: options.workspaceDir,
-      skillsCount: 0,
+      featureFlagsPath: getFeatureFlagsPath(options.workspaceDir),
       templatesCount: 0,
-      error: error instanceof Error ? error.message : String(error),
+      reason: buildFailureReason(errorMsg),
+      nextAction: buildFailureNextAction(),
+      error: errorMsg,
     };
   }
 }
