@@ -85,7 +85,7 @@ function severityFromScore(score: number | undefined): string {
 }
 
 function inferProvenance(data: PainDetectedData): PainProvenance {
-  if (data.source === 'manual' && (!data.sessionId || data.sessionId === 'cli')) {
+  if (data.source === 'manual' && (!data.sessionId || data.sessionId === 'cli' || data.sessionId === 'unknown')) {
     return 'owner_reported_no_host_trace';
   }
   if (data.sessionId && data.sessionId !== 'cli' && data.sessionId !== 'unknown') {

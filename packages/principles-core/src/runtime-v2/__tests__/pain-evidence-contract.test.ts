@@ -195,6 +195,36 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
     expect(dj.provenance).toBe('owner_reported_no_host_trace');
   });
 
+  it('infers owner_reported_no_host_trace when manual source with unknown sessionId', async () => {
+    const capturedTasks = new Map<string, TaskRecord>();
+    const stateManager = makeMockStateManager(capturedTasks);
+    const ledgerAdapter = makeMockLedgerAdapter();
+    const runner = makeMockRunner();
+
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner: runner as never,
+      intakeService: undefined as never,
+      ledgerAdapter,
+      autoIntakeEnabled: false,
+    });
+
+    const painData: PainDetectedData = {
+      painId: 'pain_infer_unknown_session',
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'Manual report with unknown session',
+      score: 85,
+      sessionId: 'unknown',
+    };
+
+    await bridge.onPainDetected(painData);
+
+    const dj = getDiagnosticJson(capturedTasks, painData.painId);
+    expect(dj.provenance).toBe('owner_reported_no_host_trace');
+    expect(dj.provenanceReason).toContain('No authenticated host session provenance');
+  });
+
   it('maps score to severity correctly', async () => {
     const capturedTasks = new Map<string, TaskRecord>();
     const stateManager = makeMockStateManager(capturedTasks);

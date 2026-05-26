@@ -138,6 +138,16 @@ export class SqliteContextAssembler implements ContextAssembler {
             nextAction: 'Check sessionIdHint matches an active OpenClaw session with recorded trajectory',
           };
         }
+      } else if (dt.provenance === 'automatic_hook' || dt.provenance === 'owner_reported_no_host_trace') {
+        diagnosisTarget.traceAvailability = 'unavailable_with_reason';
+        if (!diagnosisTarget.traceUnavailableDetail) {
+          diagnosisTarget.traceUnavailableDetail = {
+            reason: dt.provenance === 'automatic_hook'
+              ? 'Automatic hook pain but source trace could not be resolved'
+              : 'Owner-reported pain without host session trace',
+            nextAction: 'Provide pain from an OpenClaw session to enable context-bound trace',
+          };
+        }
       }
     }
 

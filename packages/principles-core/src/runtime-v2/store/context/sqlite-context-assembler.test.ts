@@ -1020,6 +1020,35 @@ describe('SqliteContextAssembler', () => {
     } finally { cleanupFixture(f); }
   });
 
+  it('sets traceAvailability=unavailable_with_reason for automatic_hook when trace not found', async () => {
+    const dj = JSON.stringify({
+      sourcePainId: 'pain-auto-nf',
+      reasonSummary: 'Automatic hook pain but trace missing',
+      source: 'write',
+      severity: 'moderate',
+      sessionIdHint: 'sess-auto-missing',
+      provenance: 'automatic_hook',
+      provenanceReason: 'Detected by automatic hook',
+    });
+    const task = makeDiagnosticianTask({
+      taskId: 'task_diag_auto_nf',
+      sourcePainId: 'pain-auto-nf',
+      sessionIdHint: 'sess-auto-missing',
+      reasonSummary: 'Automatic hook pain but trace missing',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks, { withLocator: true });
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.provenance).toBe('automatic_hook');
+      expect(payload.diagnosisTarget.traceAvailability).toBe('unavailable_with_reason');
+      expect(payload.diagnosisTarget.traceUnavailableDetail).toBeDefined();
+      expect(payload.diagnosisTarget.traceUnavailableDetail?.reason).toContain('Automatic hook pain');
+    } finally { cleanupFixture(f); }
+  });
+
   it('reconstructs provenance from diagnosticJson with runtime validation (no unsafe as)', async () => {
     const dj = JSON.stringify({
       sourcePainId: 'pain-validated',
