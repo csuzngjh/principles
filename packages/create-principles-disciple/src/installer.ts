@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import type { ExecSyncOptions } from 'child_process';
 import ora from 'ora';
 import { logger } from './utils/logger.js';
@@ -112,7 +112,7 @@ async function updateOpenClawConfig(): Promise<void> {
   if (!Array.isArray(plugins.allow)) {
     throw new Error('openclaw.json plugins.allow is not an array. Fix manually and re-run installer.');
   }
-  const allow = [...(plugins.allow as string[])];
+  const allow = (plugins.allow as unknown[]).filter((a): a is string => typeof a === 'string');
   if (!allow.includes('principles-disciple')) {
     allow.push('principles-disciple');
   }
@@ -369,14 +369,14 @@ async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
   return count;
 }
 
-async function generateFeatureFlagsConfig(workspaceDir: string): Promise<string> {
+async function generateFeatureFlagsConfig(workspaceDir: string, channels: string[]): Promise<string> {
   const configPath = getFeatureFlagsPath(workspaceDir);
   const configDir = path.dirname(configPath);
 
   if (existsSync(configPath)) return configPath;
 
   await fse.ensureDir(configDir);
-  writeFileSync(configPath, generateFeatureFlagsYamlContent(), 'utf8');
+  writeFileSync(configPath, generateFeatureFlagsYamlContent(channels), 'utf8');
   return configPath;
 }
 
@@ -393,10 +393,10 @@ async function createConfigFile(workspaceDir: string, channels: string[]): Promi
     if (existing !== null && typeof existing === 'object' && !Array.isArray(existing)) {
       const existingObj = existing as Record<string, unknown>;
       if (Object.hasOwn(existingObj, 'channels') && Array.isArray(existingObj.channels)) {
-        existingChannels = existingObj.channels as string[];
+        existingChannels = (existingObj.channels as unknown[]).filter((c): c is string => typeof c === 'string');
       }
       if (Object.hasOwn(existingObj, 'features') && Array.isArray(existingObj.features)) {
-        existingFeatures = existingObj.features as string[];
+        existingFeatures = (existingObj.features as unknown[]).filter((f): f is string => typeof f === 'string');
       }
     }
   }
@@ -477,7 +477,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     });
 
     if (spinner) spinner.text = 'Generating feature flags...';
-    const featureFlagsPath = await generateFeatureFlagsConfig(options.workspaceDir);
+    const featureFlagsPath = await generateFeatureFlagsConfig(options.workspaceDir, options.channels);
     verification.features = 'passed';
 
     if (spinner) spinner.text = 'Creating config...';
@@ -486,9 +486,8 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     if (spinner) spinner.text = 'Verifying pd demo story-a...';
     try {
       const pdCmd = path.join(getInstalledBinDir(), isWindows() ? 'pd.cmd' : 'pd');
-      execSync(`"${pdCmd}" demo story-a --json --workspace "${options.workspaceDir}"`, {
+      execFileSync(pdCmd, ['demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
         stdio: 'pipe',
-        shell: isWindows() ? 'cmd' : '/bin/sh',
         timeout: 30_000,
       });
       verification.storyA = 'passed';

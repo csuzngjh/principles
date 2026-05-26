@@ -51,9 +51,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   }
 
   if (jsonMode && !options.yes && !options.nonInteractive) {
-    console.log(JSON.stringify(buildFailureOutput('json_requires_non_interactive', 'Use --json together with --yes or --non-interactive'), null, 2));
-    process.exit(1);
-    return;
+    options.yes = true;
   }
 
   const workspaceInfo = detectWorkspace();

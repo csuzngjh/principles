@@ -40,12 +40,14 @@ export interface InstallFailureOutput {
 
 export type InstallOutput = InstallSuccessOutput | InstallFailureOutput;
 
-export function generateFeatureFlagsYamlContent(): string {
+export function generateFeatureFlagsYamlContent(channels?: string[]): string {
+  const enabledSet = new Set<string>(channels ?? MVP_CHANNELS);
   const flags: Record<string, { enabled: boolean; category: string; since: string; description?: string }> = {};
 
   for (const flag of DEFAULT_FEATURE_FLAGS) {
+    const isEnabled = enabledSet.has(flag.id);
     flags[flag.id] = {
-      enabled: flag.enabled,
+      enabled: isEnabled,
       category: flag.category,
       since: flag.since,
     };

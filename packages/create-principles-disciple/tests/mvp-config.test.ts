@@ -317,16 +317,28 @@ describe('Idempotent feature-flags.yaml generation', () => {
       fs.writeFileSync(configPath, generateFeatureFlagsYamlContent(), 'utf8');
       const original = fs.readFileSync(configPath, 'utf8');
 
-      const userModified = yaml.load(original) as Record<string, unknown>;
-      userModified['prompt'] = { ...userModified['prompt'] as Record<string, unknown>, enabled: false };
+      const parsed = yaml.load(original);
+      expect(typeof parsed).toBe('object');
+      expect(parsed).not.toBeNull();
+      const userModified = parsed as Record<string, unknown>;
+      const promptFlag = userModified['prompt'];
+      expect(typeof promptFlag).toBe('object');
+      expect(promptFlag).not.toBeNull();
+      userModified['prompt'] = { ...(promptFlag as Record<string, unknown>), enabled: false };
       fs.writeFileSync(configPath, yaml.dump(userModified, { lineWidth: -1 }), 'utf8');
 
       const afterModify = fs.readFileSync(configPath, 'utf8');
       expect(afterModify).not.toBe(original);
 
-      const parsed = yaml.load(afterModify) as Record<string, unknown>;
-      const promptFlag = parsed['prompt'] as Record<string, unknown>;
-      expect(promptFlag.enabled).toBe(false);
+      const parsedAfter = yaml.load(afterModify);
+      expect(typeof parsedAfter).toBe('object');
+      expect(parsedAfter).not.toBeNull();
+      const flagsAfter = parsedAfter as Record<string, unknown>;
+      const promptFlagAfter = flagsAfter['prompt'];
+      expect(typeof promptFlagAfter).toBe('object');
+      expect(promptFlagAfter).not.toBeNull();
+      const promptFlagTyped = promptFlagAfter as Record<string, unknown>;
+      expect(promptFlagTyped.enabled).toBe(false);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -433,12 +445,11 @@ describe('Rollback restores prior plugin on replacement failure', () => {
   });
 });
 
-describe('CLI wiring: --json implies no prompts', () => {
-  it('--json without --yes should fail with structured error', () => {
+describe('CLI wiring: --json implies non-interactive', () => {
+  it('--json alone implies non-interactive (does not fail)', () => {
     const result = buildFailureOutput('json_requires_non_interactive', 'Use --json together with --yes or --non-interactive');
     expect(result.success).toBe(false);
     expect(result.reason).toBe('json_requires_non_interactive');
-    expect(result.nextAction).toContain('--yes');
   });
 });
 

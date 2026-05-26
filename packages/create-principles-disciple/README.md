@@ -38,7 +38,7 @@ npx create-principles-disciple --yes --workspace "/path/to/workspace" --json
 
 ## Options
 
-```
+```text
 --lang <en|zh>          Language preference (default: zh)
 --force                 Force overwrite existing installation
 --smart                 Smart merge mode (generate .update files)
@@ -51,7 +51,12 @@ npx create-principles-disciple --yes --workspace "/path/to/workspace" --json
 
 ## Post-Install Verification
 
-After a successful install:
+The installer automatically verifies the installation during setup:
+
+1. **Feature flags** — `.pd/feature-flags.yaml` is generated and validated
+2. **Story A demo** — `pd demo story-a` is executed to confirm runtime integration
+
+After a successful install, you can re-verify at any time:
 
 ```bash
 pd runtime canary --workspace "<path>" --json
