@@ -11,6 +11,7 @@ import * as path from 'path';
 import { createInternalizationQueueReadModel } from '@principles/core/runtime-v2';
 import type { InternalizationQueueSnapshot } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
 
 interface QueueOptions {
   workspace?: string;
@@ -70,13 +71,26 @@ function formatTextOutput(snap: InternalizationQueueSnapshot): string {
     lines.push(`  no_ready_tasks: ${snap.noReadyTasks.reason} (inspected: ${snap.noReadyTasks.inspectedCount})`);
   }
 
+  if (snap.suppressedTasks.length > 0) {
+    lines.push(`  suppressed (${snap.suppressedTasks.length}):`);
+    for (const s of snap.suppressedTasks.slice(0, 5)) {
+      lines.push(`    ${s.taskId} (${s.taskKind}, ${s.channel}) reason: ${s.reason}`);
+    }
+  }
+
   return lines.join('\n');
 }
 
 export async function handleRuntimeInternalizationQueue(opts: QueueOptions): Promise<void> {
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
 
-  const { readModel, close } = await createInternalizationQueueReadModel({ workspaceDir });
+  const featureFlags = loadEffectiveFeatureFlags(workspaceDir);
+  const enabledChannels = new Set(
+    Object.values(featureFlags.flags)
+      .filter(f => f.enabled)
+      .map(f => f.id),
+  );
+  const { readModel, close } = await createInternalizationQueueReadModel({ workspaceDir, enabledChannels });
 
   try {
     const snapshot = await readModel.getSnapshot();

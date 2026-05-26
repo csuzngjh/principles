@@ -855,7 +855,18 @@ export type {
   LeaseConflictSample,
   UnresolvableSample,
   InternalizationQueueReadModelHandle,
+  CreateQueueReadModelOptions,
 } from './internalization-queue-read-model.js';
+
+// ── Queue Actionability Policy (PRI-253) ─────────────────────────────────────
+
+export { classifyTaskActionability, MVP_CORE_TASK_KINDS } from './internalization/queue-actionability.js';
+export type {
+  ActionabilityPolicyInput,
+  SuppressedDiagnostic,
+  TaskActionabilityResult,
+  TaskClassificationInput,
+} from './internalization/queue-actionability.js';
 
 // ── Recovery Sweep Service (PRI-149 Tier 2) ────────────────────────────────
 
