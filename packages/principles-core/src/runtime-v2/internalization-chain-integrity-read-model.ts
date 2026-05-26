@@ -180,8 +180,12 @@ export class InternalizationChainIntegrityReadModel {
       db = new Database(this.dbPath, { readonly: true });
 
       const consumedCandidates = db.prepare(
-        "SELECT candidate_id, task_id, source_run_id FROM principle_candidates WHERE status = 'consumed'"
-      ).all() as { candidate_id: string; task_id: string; source_run_id: string }[];
+        "SELECT candidate_id, task_id, source_run_id, recommendation_kind FROM principle_candidates WHERE status = 'consumed'"
+      ).all() as { candidate_id: string; task_id: string; source_run_id: string; recommendation_kind: string | null }[];
+
+      // Recommendation kinds that do NOT require internalization — they are correctly
+      // absent from the internalization pipeline by design (see internalization-route.ts).
+      const NON_INTERNALIZABLE_KINDS = new Set(['defer']);
 
       const allTasks = db.prepare(
         'SELECT task_id, task_kind, status, result_ref, lease_owner, lease_expires_at, attempt_count, max_attempts, diagnostic_json FROM tasks'
@@ -207,6 +211,12 @@ export class InternalizationChainIntegrityReadModel {
       const philosopherTasks = allTasks.filter(t => t.task_kind === 'philosopher');
 
       for (const candidate of consumedCandidates) {
+        // Deferred (and other non-internalizable) candidates never enter the pipeline
+        // and correctly have no dreamer task. Skip them to avoid false positives.
+        if (candidate.recommendation_kind && NON_INTERNALIZABLE_KINDS.has(candidate.recommendation_kind)) {
+          continue;
+        }
+
         const hasAnyDreamerForCandidate = dreamerTasks.some(dt => {
           try {
             const diag = dt.diagnostic_json ? JSON.parse(dt.diagnostic_json) : null;

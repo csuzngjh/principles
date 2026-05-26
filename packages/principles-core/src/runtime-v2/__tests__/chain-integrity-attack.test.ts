@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS principle_candidates (
   task_id TEXT NOT NULL,
   source_run_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  recommendation_kind TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -83,11 +84,11 @@ describe('Chain Integrity Attack Tests (PRI-209)', () => {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  function insertCandidate(opts: { candidateId: string; taskId: string; sourceRunId: string; status?: string }): void {
+  function insertCandidate(opts: { candidateId: string; taskId: string; sourceRunId: string; status?: string; recommendationKind?: string }): void {
     const db = new Database(dbPath);
     db.prepare(
-      `INSERT OR REPLACE INTO principle_candidates (candidate_id, task_id, source_run_id, status) VALUES (?, ?, ?, ?)`,
-    ).run(opts.candidateId, opts.taskId, opts.sourceRunId, opts.status ?? 'consumed');
+      `INSERT OR REPLACE INTO principle_candidates (candidate_id, task_id, source_run_id, status, recommendation_kind) VALUES (?, ?, ?, ?, ?)`,
+    ).run(opts.candidateId, opts.taskId, opts.sourceRunId, opts.status ?? 'consumed', opts.recommendationKind ?? 'principle');
     db.close();
   }
 
