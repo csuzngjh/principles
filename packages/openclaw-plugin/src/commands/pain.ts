@@ -4,6 +4,9 @@ import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.
 import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import type { EmpathyEventStats } from '../types/event-types.js';
+import { emitPainDetectedEvent } from '../hooks/pain.js';
+import type { EvolutionLoopEvent } from '../core/evolution-types.js';
+import { computeHash } from '../utils/hashing.js';
 
 /**
  * Creates a visual progress bar (e.g., [██████░░░░])
@@ -267,4 +270,62 @@ function handleEmpathySubcommand(
     }
 
     return { text };
+}
+
+export function handlePainReportCommand(ctx: PluginCommandContext): PluginCommandResult {
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'pain-report');
+  const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
+  const lang = (ctx.config?.language as string) || 'en';
+  const isZh = lang === 'zh';
+  const { sessionId } = ctx as SessionAwareCommandContext;
+  const args = normalizeCommandArgs(ctx.args).trim();
+
+  if (!args) {
+    return {
+      text: isZh
+        ? '❌ 请提供 pain reason。用法: `/pd-pain <描述你遇到的问题>`'
+        : '❌ Please provide a pain reason. Usage: `/pd-pain <describe the issue you encountered>`',
+    };
+  }
+
+  if (!sessionId || sessionId === 'unknown') {
+    return {
+      text: isZh
+        ? '❌ 无法获取当前会话 ID。请在 OpenClaw 对话会话中使用此命令。'
+        : '❌ Session ID not available. Please use this command in an OpenClaw chat session.',
+    };
+  }
+
+  const painId = `manual_${Date.now()}_${computeHash(sessionId).slice(0, 8)}`;
+  const painData = {
+    painId,
+    painType: 'user_frustration' as const,
+    source: 'manual',
+    reason: args,
+    score: 90,
+    sessionId,
+    agentId: 'openclaw-host',
+    provenance: 'openclaw_context_bound' as const,
+  };
+
+  try {
+    const event: EvolutionLoopEvent = {
+      ts: new Date().toISOString(),
+      type: 'pain_detected',
+      data: painData,
+    };
+    emitPainDetectedEvent(wctx, event);
+
+    return {
+      text: isZh
+        ? `✅ Pain 已记录 (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: openclaw_context_bound\n📌 **Session**: ${sessionId}\n\n系统将基于当前会话上下文进行诊断。`
+        : `✅ Pain recorded (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: openclaw_context_bound\n📌 **Session**: ${sessionId}\n\nThe system will diagnose using current session context.`,
+    };
+  } catch (err) {
+    return {
+      text: isZh
+        ? `❌ Pain 记录失败: ${String(err)}`
+        : `❌ Failed to record pain: ${String(err)}`,
+    };
+  }
 }

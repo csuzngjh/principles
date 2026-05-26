@@ -918,7 +918,7 @@ describe('SqliteContextAssembler', () => {
     } finally { cleanupFixture(f); }
   });
 
-  it('sets traceAvailability=unavailable_with_reason for owner_reported_no_host_trace', async () => {
+  it('sets traceAvailability=unavailable_with_reason for owner_reported_no_host_trace and does NOT call trace locator', async () => {
     const dj = JSON.stringify({
       sourcePainId: 'pain-cli-1',
       reasonSummary: 'CLI pain',
@@ -936,7 +936,11 @@ describe('SqliteContextAssembler', () => {
     });
     const taskWithDj = { ...task, diagnosticJson: dj };
     const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
-    const f = createFixture(tasks);
+    const f = createFixture(tasks, { withLocator: true });
+    const locator = f.sourceTraceLocator;
+    expect(locator).toBeDefined();
+    if (!locator) return;
+    const locateSpy = vi.spyOn(locator, 'locate');
     try {
       const payload = await f.assembler.assemble(task.taskId);
 
@@ -946,7 +950,9 @@ describe('SqliteContextAssembler', () => {
       expect(detail?.reason).toContain('CLI-submitted pain');
       expect(detail?.nextAction).toContain('OpenClaw session');
       expect(notesInclude(payload.ambiguityNotes, 'owner_reported_no_host_trace')).toBe(true);
-    } finally { cleanupFixture(f); }
+      expect(payload.fullTrace).toBeNull();
+      expect(locateSpy).not.toHaveBeenCalled();
+    } finally { cleanupFixture(f); locateSpy.mockRestore(); }
   });
 
   it('sets traceAvailability=available when fullTrace is resolved', async () => {

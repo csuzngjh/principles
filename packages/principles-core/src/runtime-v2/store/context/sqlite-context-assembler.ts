@@ -29,6 +29,16 @@ import type { TaskRecord, DiagnosticianTaskRecord } from '../../task-status.js';
 import type { RunRecord } from '../../runtime-protocol.js';
 import { PDRuntimeError } from '../../error-categories.js';
 
+const PAIN_PROVENANCE_VALUES = ['openclaw_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isPainProvenance(value: unknown): value is (typeof PAIN_PROVENANCE_VALUES)[number] {
+  return typeof value === 'string' && (PAIN_PROVENANCE_VALUES as readonly string[]).includes(value);
+}
+
 // ── SqliteContextAssembler ──
 
 export class SqliteContextAssembler implements ContextAssembler {
@@ -96,6 +106,9 @@ export class SqliteContextAssembler implements ContextAssembler {
     ) ?? [];
 
     // PRI-255: For CLI-only pain, add explicit degradation note about missing trace
+    // and SKIP source trace lookup entirely — no-host-trace pain must not attempt
+    // to bind a conversation trace it cannot legitimately claim.
+    let fullTrace: FullTracePayloadV2 | null = null;
     if (dt.provenance === 'owner_reported_no_host_trace') {
       ambiguityNotes.push(
         'owner_reported_no_host_trace: no authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable',
@@ -105,14 +118,12 @@ export class SqliteContextAssembler implements ContextAssembler {
         reason: 'CLI-submitted pain has no authenticated host session provenance; conversation trace cannot be bound to an OpenClaw session',
         nextAction: 'Report pain from within an OpenClaw session to enable context-bound trace, or rely on owner reason alone for diagnosis',
       };
+    } else if (dt.sourcePainId) {
+      // Build fullTrace from source pain trajectory (PRI-171 / PRI-189).
+      // Source trace comes from the original execution that caused the pain signal,
+      // NOT from the diagnostician task's own runs.
+      fullTrace = await this.buildFullTraceFromSource(dt, ambiguityNotes);
     }
-
-    // Build fullTrace from source pain trajectory (PRI-171 / PRI-189).
-    // Source trace comes from the original execution that caused the pain signal,
-    // NOT from the diagnostician task's own runs.
-    const fullTrace: FullTracePayloadV2 | null = dt.sourcePainId
-      ? await this.buildFullTraceFromSource(dt, ambiguityNotes)
-      : null;
 
     // PRI-255: Set traceAvailability based on fullTrace result
     if (diagnosisTarget.traceAvailability === undefined) {
@@ -279,20 +290,17 @@ export class SqliteContextAssembler implements ContextAssembler {
     if (base.diagnosticJson) {
       try {
         const parsed: unknown = JSON.parse(base.diagnosticJson);
-        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-          const obj = parsed as Record<string, unknown>;
+        if (isRecord(parsed)) {
           extra = {
-            sourcePainId: typeof obj.sourcePainId === 'string' ? obj.sourcePainId : undefined,
-            reasonSummary: typeof obj.reasonSummary === 'string' ? obj.reasonSummary : undefined,
-            source: typeof obj.source === 'string' ? obj.source : undefined,
-            severity: typeof obj.severity === 'string' ? obj.severity : undefined,
-            sessionIdHint: typeof obj.sessionIdHint === 'string' ? obj.sessionIdHint : undefined,
-            agentIdHint: typeof obj.agentIdHint === 'string' ? obj.agentIdHint : undefined,
-            workspaceDir: typeof obj.workspaceDir === 'string' ? obj.workspaceDir : undefined,
-            provenance: (typeof obj.provenance === 'string' && ['openclaw_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'].includes(obj.provenance))
-              ? obj.provenance as DiagnosticianTaskRecord['provenance']
-              : undefined,
-            provenanceReason: typeof obj.provenanceReason === 'string' ? obj.provenanceReason : undefined,
+            sourcePainId: typeof parsed.sourcePainId === 'string' ? parsed.sourcePainId : undefined,
+            reasonSummary: typeof parsed.reasonSummary === 'string' ? parsed.reasonSummary : undefined,
+            source: typeof parsed.source === 'string' ? parsed.source : undefined,
+            severity: typeof parsed.severity === 'string' ? parsed.severity : undefined,
+            sessionIdHint: typeof parsed.sessionIdHint === 'string' ? parsed.sessionIdHint : undefined,
+            agentIdHint: typeof parsed.agentIdHint === 'string' ? parsed.agentIdHint : undefined,
+            workspaceDir: typeof parsed.workspaceDir === 'string' ? parsed.workspaceDir : undefined,
+            provenance: isPainProvenance(parsed.provenance) ? parsed.provenance : undefined,
+            provenanceReason: typeof parsed.provenanceReason === 'string' ? parsed.provenanceReason : undefined,
           };
         }
       } catch {

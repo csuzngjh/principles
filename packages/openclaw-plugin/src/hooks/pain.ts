@@ -67,6 +67,7 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
         agentId: painData.agentId,
         taskId: painData.taskId,
         traceId: painData.traceId,
+        provenance: painData.provenance,
         recordObservability: true,
       });
       if (result.status === 'failed' && result.failureCategory) {
