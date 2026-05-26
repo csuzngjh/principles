@@ -96,9 +96,9 @@ export function parseChannelsOption(raw: unknown): { channels: MvpChannel[]; unk
   const parsed = raw.split(',').map((f: string) => f.trim().toLowerCase()).filter(Boolean);
   const { valid, unknowns } = validateMvpChannels(parsed);
   if (valid.length === 0 && parsed.length > 0) {
-    return { channels: [...MVP_CHANNELS], unknowns, error: `No valid MVP channels in "${raw}". Valid: ${MVP_CHANNELS.join(', ')}` };
+    return { channels: [], unknowns, error: `All specified channels are invalid: "${raw}". Valid MVP channels: ${MVP_CHANNELS.join(', ')}` };
   }
-  return { channels: valid.length > 0 ? valid : [...MVP_CHANNELS], unknowns };
+  return { channels: valid, unknowns };
 }
 
 export function validateOpenClawConfig(config: unknown): { valid: boolean; error?: string } {
@@ -118,6 +118,11 @@ export function validateOpenClawConfig(config: unknown): { valid: boolean; error
     if (allow !== undefined) {
       if (!Array.isArray(allow)) {
         return { valid: false, error: 'openclaw.json plugins.allow must be an array' };
+      }
+      for (const elem of allow as unknown[]) {
+        if (typeof elem !== 'string') {
+          return { valid: false, error: 'openclaw.json plugins.allow contains non-string elements' };
+        }
       }
     }
     if (entries !== undefined) {

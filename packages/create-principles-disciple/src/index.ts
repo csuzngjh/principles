@@ -86,11 +86,21 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   const installOptions: InstallOptions | null = nonInteractive
     ? (() => {
         const parsed = parseChannelsOption(options.channels);
-        if (parsed.error && !jsonMode) {
-          logger.warn(parsed.error);
+        if (parsed.error) {
+          if (jsonMode) {
+            console.log(JSON.stringify(buildFailureOutput('invalid_channels', `${parsed.error}. ${parsed.unknowns.length > 0 ? `Rejected: ${parsed.unknowns.join(', ')}` : ''}`), null, 2));
+            process.exit(1);
+            return null;
+          }
+          logger.error(parsed.error);
+          if (parsed.unknowns.length > 0) {
+            logger.error(`Rejected channels: ${parsed.unknowns.join(', ')}`);
+          }
+          process.exit(1);
+          return null;
         }
         if (parsed.unknowns.length > 0 && !jsonMode) {
-          logger.warn(`Unknown channels ignored: ${parsed.unknowns.join(', ')}`);
+          logger.warn(`Unknown channels rejected: ${parsed.unknowns.join(', ')}`);
         }
 
         return {
@@ -157,6 +167,30 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       console.log();
       console.log('Ready.');
       console.log(`Diagnostics: pd runtime canary --workspace "${result.workspaceDir}" --json`);
+    } else if (result.components.plugin === 'verified' && result.components.cli === 'verified') {
+      console.log();
+      logger.warn('Install partially complete — runtime + CLI verified, but review console is not yet deliverable');
+      console.log();
+      console.log('Principles Disciple Setup');
+      console.log();
+      console.log('Installing MVP components');
+      console.log(`  Runtime integration ............ ${result.components.plugin}`);
+      console.log(`  Operator CLI ................... ${result.components.cli}`);
+      console.log(`  Review console ................. ${result.components.console}`);
+      console.log();
+      console.log('Enabled capabilities');
+      for (const ch of result.enabledChannels) {
+        console.log(`  ${ch}`);
+      }
+      console.log();
+      console.log('Verification');
+      console.log(`  Feature flags .................. ${result.verification.features}`);
+      console.log(`  Story A demo ................... ${result.verification.storyA}${result.verification.storyASkipReason ? ` (${result.verification.storyASkipReason})` : ''}`);
+      console.log();
+      console.log('Not ready for seed-customer release — owner review console is a release-blocking gap.');
+      console.log(`Diagnostics: pd runtime canary --workspace "${result.workspaceDir}" --json`);
+      process.exit(1);
+      return;
     } else {
       logger.error(`Install failed: ${result.reason || result.error}`);
       if (result.nextAction) {

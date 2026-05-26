@@ -1,6 +1,11 @@
 # create-principles-disciple
 
-MVP-First Integration Wizard for [Principles Disciple](https://github.com/csuzngjh/principles).
+MVP-First Prerequisite Installer for [Principles Disciple](https://github.com/csuzngjh/principles).
+
+> **Note:** This installer delivers runtime integration and operator CLI only.
+> The owner review console is a **release-blocking gap** — the installer reports
+> `success: false` until console delivery is complete. This is by design per
+> ADR-0014 MVP-First strategy.
 
 ## What This Installer Delivers
 
@@ -61,6 +66,12 @@ After a successful install, you can re-verify at any time:
 ```bash
 pd runtime canary --workspace "<path>" --json
 ```
+
+## Rerun / Channel Update
+
+Re-running the installer with `--channels` updates the feature-flags.yaml to match
+the specified channels. Channels not listed are disabled (but their metadata is preserved).
+The installer reads actual enabled channels from disk and reports them in the output.
 
 ## Update Failure Recovery
 

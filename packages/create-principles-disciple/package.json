@@ -9,6 +9,7 @@
   "files": [
     "dist",
     "plugin",
+    "pd-cli",
     "templates",
     "README.md",
     "LICENSE"

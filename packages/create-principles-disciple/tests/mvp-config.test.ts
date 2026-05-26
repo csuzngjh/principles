@@ -40,7 +40,7 @@ describe('generateFeatureFlagsYamlContent', () => {
     expect(parsed).not.toBeNull();
   });
 
-  it('core flags are enabled by default', () => {
+  it('core flags are enabled by default (no channels arg)', () => {
     const parsed = yaml.load(generateFeatureFlagsYamlContent()) as Record<string, unknown>;
     for (const ch of MVP_CHANNELS) {
       const flag = parsed[ch] as Record<string, unknown> | undefined;
@@ -75,7 +75,7 @@ describe('generateFeatureFlagsYamlContent', () => {
     expect(Object.hasOwn(parsed, 'skill')).toBe(false);
   });
 
-  it('only MVP channels are enabled', () => {
+  it('only MVP channels are enabled by default', () => {
     const parsed = yaml.load(generateFeatureFlagsYamlContent()) as Record<string, unknown>;
     const enabledFlags: string[] = [];
     for (const [key, value] of Object.entries(parsed)) {
@@ -85,6 +85,33 @@ describe('generateFeatureFlagsYamlContent', () => {
       }
     }
     expect(enabledFlags.sort()).toEqual(['code_tool_hook', 'defer_archive', 'prompt']);
+  });
+
+  it('respects selected channels — only prompt enabled', () => {
+    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
+    const promptFlag = parsed['prompt'] as Record<string, unknown>;
+    expect(promptFlag.enabled).toBe(true);
+    const codeToolFlag = parsed['code_tool_hook'] as Record<string, unknown>;
+    expect(codeToolFlag.enabled).toBe(false);
+    const deferFlag = parsed['defer_archive'] as Record<string, unknown>;
+    expect(deferFlag.enabled).toBe(false);
+  });
+
+  it('respects selected channels — prompt + defer_archive', () => {
+    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt', 'defer_archive'])) as Record<string, unknown>;
+    const promptFlag = parsed['prompt'] as Record<string, unknown>;
+    expect(promptFlag.enabled).toBe(true);
+    const codeToolFlag = parsed['code_tool_hook'] as Record<string, unknown>;
+    expect(codeToolFlag.enabled).toBe(false);
+    const deferFlag = parsed['defer_archive'] as Record<string, unknown>;
+    expect(deferFlag.enabled).toBe(true);
+  });
+
+  it('preserves category and since metadata regardless of channel selection', () => {
+    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
+    const codeToolFlag = parsed['code_tool_hook'] as Record<string, unknown>;
+    expect(codeToolFlag.category).toBe('core');
+    expect(typeof codeToolFlag.since).toBe('string');
   });
 
   it('written to temp workspace is loadable', () => {
@@ -158,17 +185,24 @@ describe('parseChannelsOption', () => {
     expect(result.error).toContain('expects a string');
   });
 
-  it('reports unknowns and falls back when all invalid', () => {
+  it('all-invalid channels returns error with empty channels', () => {
     const result = parseChannelsOption('skill,nocturnal');
-    expect(result.channels).toEqual([...MVP_CHANNELS]);
+    expect(result.channels).toEqual([]);
     expect(result.unknowns).toEqual(['skill', 'nocturnal']);
-    expect(result.error).toContain('No valid MVP channels');
+    expect(result.error).toContain('All specified channels are invalid');
   });
 
-  it('separates valid from unknown', () => {
+  it('all-invalid evolution/trust/pain returns error', () => {
+    const result = parseChannelsOption('evolution,trust,pain');
+    expect(result.channels).toEqual([]);
+    expect(result.error).toBeDefined();
+  });
+
+  it('separates valid from unknown — partial valid returns valid only', () => {
     const result = parseChannelsOption('prompt,skill');
     expect(result.channels).toEqual(['prompt']);
     expect(result.unknowns).toEqual(['skill']);
+    expect(result.error).toBeUndefined();
   });
 });
 
@@ -198,6 +232,14 @@ describe('validateOpenClawConfig', () => {
     expect(validateOpenClawConfig({ plugins: { allow: 'bad' } }).valid).toBe(false);
   });
 
+  it('rejects non-string elements in allow', () => {
+    expect(validateOpenClawConfig({ plugins: { allow: ['valid', 42, null, 'also-valid'] } }).valid).toBe(false);
+  });
+
+  it('accepts all-string allow array', () => {
+    expect(validateOpenClawConfig({ plugins: { allow: ['principles-disciple', 'other-plugin'] } }).valid).toBe(true);
+  });
+
   it('rejects non-object entries', () => {
     expect(validateOpenClawConfig({ plugins: { entries: 'bad' } }).valid).toBe(false);
   });
@@ -216,28 +258,30 @@ describe('validateOpenClawConfig', () => {
 });
 
 describe('buildSuccessOutput', () => {
-  const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
   const verification: VerificationResult = { features: 'passed', storyA: 'passed' };
 
   it('returns success true when plugin+cli verified and console configured', () => {
-    const fullComponents = { ...components, console: 'configured' as const };
-    const result = buildSuccessOutput({ workspace: '/tmp/ws', components: fullComponents, channels: [...MVP_CHANNELS], verification });
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(true);
   });
 
   it('returns success false when console not deliverable', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
   });
 
   it('includes nextAction with canary command', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.nextAction).toContain('pd runtime canary');
   });
 
-  it('includes console not deliverable in nextAction', () => {
+  it('includes console not deliverable in nextAction when not_deliverable', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
-    expect(result.nextAction).toContain('not yet deliverable');
+    expect(result.nextAction).toContain('release-blocking');
   });
 });
 
@@ -306,39 +350,70 @@ describe('Path helpers', () => {
   });
 });
 
-describe('Idempotent feature-flags.yaml generation', () => {
-  it('preserves existing feature-flags.yaml on re-run', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-idem-test-'));
+describe('Rerun --channels updates feature-flags.yaml', () => {
+  it('fresh install with all channels enables all', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rerun-test-'));
     try {
       const configDir = path.join(tmpDir, '.pd');
       fs.mkdirSync(configDir, { recursive: true });
       const configPath = path.join(configDir, 'feature-flags.yaml');
 
-      fs.writeFileSync(configPath, generateFeatureFlagsYamlContent(), 'utf8');
-      const original = fs.readFileSync(configPath, 'utf8');
-
-      const parsed = yaml.load(original);
+      fs.writeFileSync(configPath, generateFeatureFlagsYamlContent(['prompt', 'code_tool_hook', 'defer_archive']), 'utf8');
+      const parsed = yaml.load(fs.readFileSync(configPath, 'utf8'));
       expect(typeof parsed).toBe('object');
       expect(parsed).not.toBeNull();
-      const userModified = parsed as Record<string, unknown>;
-      const promptFlag = userModified['prompt'];
-      expect(typeof promptFlag).toBe('object');
-      expect(promptFlag).not.toBeNull();
-      userModified['prompt'] = { ...(promptFlag as Record<string, unknown>), enabled: false };
-      fs.writeFileSync(configPath, yaml.dump(userModified, { lineWidth: -1 }), 'utf8');
+      const flags = parsed as Record<string, unknown>;
+      for (const ch of MVP_CHANNELS) {
+        const flag = flags[ch] as Record<string, unknown>;
+        expect(flag.enabled).toBe(true);
+      }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 
-      const afterModify = fs.readFileSync(configPath, 'utf8');
-      expect(afterModify).not.toBe(original);
+  it('rerun with --channels prompt disables other channels', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rerun-test-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const configPath = path.join(configDir, 'feature-flags.yaml');
 
-      const parsedAfter = yaml.load(afterModify);
-      expect(typeof parsedAfter).toBe('object');
-      expect(parsedAfter).not.toBeNull();
-      const flagsAfter = parsedAfter as Record<string, unknown>;
-      const promptFlagAfter = flagsAfter['prompt'];
-      expect(typeof promptFlagAfter).toBe('object');
-      expect(promptFlagAfter).not.toBeNull();
-      const promptFlagTyped = promptFlagAfter as Record<string, unknown>;
-      expect(promptFlagTyped.enabled).toBe(false);
+      fs.writeFileSync(configPath, generateFeatureFlagsYamlContent(['prompt', 'code_tool_hook', 'defer_archive']), 'utf8');
+
+      fs.writeFileSync(configPath, generateFeatureFlagsYamlContent(['prompt']), 'utf8');
+
+      const parsed = yaml.load(fs.readFileSync(configPath, 'utf8'));
+      expect(typeof parsed).toBe('object');
+      expect(parsed).not.toBeNull();
+      const flags = parsed as Record<string, unknown>;
+      const promptFlag = flags['prompt'] as Record<string, unknown>;
+      expect(promptFlag.enabled).toBe(true);
+      const codeToolFlag = flags['code_tool_hook'] as Record<string, unknown>;
+      expect(codeToolFlag.enabled).toBe(false);
+      const deferFlag = flags['defer_archive'] as Record<string, unknown>;
+      expect(deferFlag.enabled).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rerun preserves category and since metadata for disabled channels', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rerun-test-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const configPath = path.join(configDir, 'feature-flags.yaml');
+
+      fs.writeFileSync(configPath, generateFeatureFlagsYamlContent(['prompt']), 'utf8');
+      const parsed = yaml.load(fs.readFileSync(configPath, 'utf8'));
+      expect(typeof parsed).toBe('object');
+      expect(parsed).not.toBeNull();
+      const flags = parsed as Record<string, unknown>;
+      const codeToolFlag = flags['code_tool_hook'] as Record<string, unknown>;
+      expect(codeToolFlag.enabled).toBe(false);
+      expect(codeToolFlag.category).toBe('core');
+      expect(typeof codeToolFlag.since).toBe('string');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -376,10 +451,11 @@ describe('Malformed channels rejected', () => {
     expect(result.channels).toEqual([]);
   });
 
-  it('all-invalid channels falls back to defaults', () => {
+  it('all-invalid channels returns error with empty channels', () => {
     const result = parseChannelsOption('skill,nocturnal,evolution');
-    expect(result.channels).toEqual([...MVP_CHANNELS]);
+    expect(result.channels).toEqual([]);
     expect(result.unknowns.length).toBeGreaterThan(0);
+    expect(result.error).toContain('All specified channels are invalid');
   });
 });
 
@@ -398,6 +474,12 @@ describe('Malformed openclaw.json fails structurally', () => {
   it('array entries fails', () => {
     const result = validateOpenClawConfig({ plugins: { entries: [] } });
     expect(result.valid).toBe(false);
+  });
+
+  it('non-string elements in allow fails', () => {
+    const result = validateOpenClawConfig({ plugins: { allow: ['ok', 42] } });
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('non-string');
   });
 });
 
@@ -446,7 +528,7 @@ describe('Rollback restores prior plugin on replacement failure', () => {
 });
 
 describe('CLI wiring: --json implies non-interactive', () => {
-  it('--json alone implies non-interactive (does not fail)', () => {
+  it('--json alone implies non-interactive (auto-sets --yes)', () => {
     const result = buildFailureOutput('json_requires_non_interactive', 'Use --json together with --yes or --non-interactive');
     expect(result.success).toBe(false);
     expect(result.reason).toBe('json_requires_non_interactive');
@@ -454,9 +536,10 @@ describe('CLI wiring: --json implies non-interactive', () => {
 });
 
 describe('Install success output exposes plugin/cli/console status', () => {
+  const verification: VerificationResult = { features: 'passed', storyA: 'passed' };
+
   it('full success output has all component fields', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
-    const verification: VerificationResult = { features: 'passed', storyA: 'passed' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(true);
     expect(result.components.plugin).toBe('verified');
@@ -470,19 +553,72 @@ describe('Install success output exposes plugin/cli/console status', () => {
 
   it('partial success (console not deliverable) returns success false', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
-    const verification: VerificationResult = { features: 'passed', storyA: 'passed' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
-    expect(result.nextAction).toContain('not yet deliverable');
+    expect(result.nextAction).toContain('release-blocking');
   });
 });
 
 describe('Console delivery contract', () => {
-  it('not_deliverable console is explicit in output', () => {
+  const verification: VerificationResult = { features: 'passed', storyA: 'skipped', storyASkipReason: 'Console not available' };
+
+  it('not_deliverable console means success=false', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
-    const verification: VerificationResult = { features: 'passed', storyA: 'skipped', storyASkipReason: 'Console not available' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(false);
     expect(result.components.console).toBe('not_deliverable');
     expect(result.nextAction).toContain('release-blocking');
+  });
+
+  it('configured console with entrypoint means success=true', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(true);
+    expect(result.components.consoleEntrypoint).toBe('http://localhost:3100');
+  });
+
+  it('plugin failed means success=false regardless of console', () => {
+    const components: ComponentStatus = { plugin: 'failed', cli: 'verified', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(false);
+  });
+
+  it('cli failed means success=false regardless of console', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'failed', console: 'configured', consoleEntrypoint: 'http://localhost:3100' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('Tarball content contract', () => {
+  it('package.json files array includes plugin and pd-cli', () => {
+    const pkgJsonPath = path.resolve(__dirname, '..', 'package.json');
+    const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8')) as Record<string, unknown>;
+    const files = pkgJson.files;
+    expect(Array.isArray(files)).toBe(true);
+    const filesArr = files as string[];
+    expect(filesArr).toContain('plugin');
+    expect(filesArr).toContain('pd-cli');
+    expect(filesArr).toContain('dist');
+    expect(filesArr).toContain('templates');
+  });
+});
+
+describe('Invalid --channels JSON output contract', () => {
+  it('all-invalid channels produces structured failure output', () => {
+    const result = parseChannelsOption('skill,nocturnal');
+    expect(result.channels).toEqual([]);
+    expect(result.error).toBeDefined();
+    const failure = buildFailureOutput('invalid_channels', `${result.error}. Rejected: ${result.unknowns.join(', ')}`);
+    expect(failure.success).toBe(false);
+    expect(failure.reason).toBe('invalid_channels');
+    expect(failure.nextAction).toContain('Rejected');
+  });
+
+  it('partial valid channels produces valid output with rejected channels exposed', () => {
+    const result = parseChannelsOption('prompt,skill');
+    expect(result.channels).toEqual(['prompt']);
+    expect(result.unknowns).toEqual(['skill']);
+    expect(result.error).toBeUndefined();
   });
 });
