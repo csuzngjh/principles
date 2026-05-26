@@ -438,4 +438,160 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
     expect(snap.unresolvableSummary.count).toBe(0);
   });
 
+  // ── P9: Actionability policy (PRI-253 P1-2) ──────────────────────────────
+
+  it('suppressed disabled-channel task does NOT pollute pendingCount or countsBy*', async () => {
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'sup1', taskKind: 'dreamer', status: 'pending', channel: 'skill' }),
+        makeTask({ taskId: 'act1', taskKind: 'dreamer', status: 'pending', channel: 'prompt' }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    model.setPolicy({
+      enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+      actionableTaskKinds: new Set(['dreamer', 'philosopher', 'scribe', 'artificer']),
+    });
+    const snap = await model.getSnapshot();
+
+    // Only the prompt-channel task is actionable
+    expect(snap.pendingCount).toBe(1);
+    expect(snap.countsByTaskKind.dreamer).toBe(1);
+    expect(snap.countsByChannel.prompt).toBe(1);
+    expect(snap.countsByChannel.skill).toBeUndefined();
+    // Suppressed task is in diagnostics, not in actionable summaries
+    expect(snap.suppressedTasks).toHaveLength(1);
+    expect(snap.suppressedTasks[0]?.reason).toBe('channel_disabled');
+    expect(snap.suppressedTasks[0]?.taskId).toBe('sup1');
+  });
+
+  it('suppressed non-MVP taskKind (rollout_reviewer) does NOT pollute counts', async () => {
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'rr1', taskKind: 'rollout_reviewer', status: 'pending', channel: 'prompt' }),
+        makeTask({ taskId: 'act2', taskKind: 'dreamer', status: 'pending', channel: 'prompt' }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    model.setPolicy({
+      enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+      actionableTaskKinds: new Set(['dreamer', 'philosopher', 'scribe', 'artificer']),
+    });
+    const snap = await model.getSnapshot();
+
+    expect(snap.pendingCount).toBe(1);
+    expect(snap.countsByTaskKind.rollout_reviewer).toBeUndefined();
+    expect(snap.countsByTaskKind.dreamer).toBe(1);
+    expect(snap.suppressedTasks).toHaveLength(1);
+    expect(snap.suppressedTasks[0]?.reason).toBe('task_kind_not_mvp_actionable');
+  });
+
+  it('suppressed task with missing dependency does NOT pollute blockedSummary', async () => {
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'rr-blk', taskKind: 'rollout_reviewer', status: 'pending', channel: 'prompt', dependencyTaskIds: ['missing'] }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    model.setPolicy({
+      enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+      actionableTaskKinds: new Set(['dreamer', 'philosopher', 'scribe', 'artificer']),
+    });
+    const snap = await model.getSnapshot();
+
+    // Suppressed before dependency resolution — no blocked entry
+    expect(snap.blockedSummary.count).toBe(0);
+    expect(snap.suppressedTasks).toHaveLength(1);
+    expect(snap.noReadyTasks?.reason).toBe('no_candidates');
+  });
+
+  it('suppressed task does NOT pollute retryWaitCount', async () => {
+    const sm = createSm(
+      [],
+      [
+        makeTask({ taskId: 'rr-rw', taskKind: 'evaluator', status: 'retry_wait', channel: 'prompt' }),
+      ],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    model.setPolicy({
+      enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+      actionableTaskKinds: new Set(['dreamer', 'philosopher', 'scribe', 'artificer']),
+    });
+    const snap = await model.getSnapshot();
+
+    expect(snap.retryWaitCount).toBe(0);
+    expect(snap.suppressedTasks).toHaveLength(1);
+    expect(snap.noReadyTasks?.reason).toBe('no_candidates');
+  });
+
+  it('philosopher IS actionable with policy set (PRI-253 P1-1 chain fix)', async () => {
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'phil-1', taskKind: 'philosopher', status: 'pending', channel: 'prompt' }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    model.setPolicy({
+      enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+      actionableTaskKinds: new Set(['dreamer', 'philosopher', 'scribe', 'artificer']),
+    });
+    const snap = await model.getSnapshot();
+
+    expect(snap.pendingCount).toBe(1);
+    expect(snap.countsByTaskKind.philosopher).toBe(1);
+    expect(snap.suppressedTasks).toHaveLength(0);
+  });
+
+  it('all tasks suppressed → no_candidates (not blocked/failed), suppressed visible', async () => {
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'rr1', taskKind: 'rollout_reviewer', status: 'pending', channel: 'prompt' }),
+        makeTask({ taskId: 'ev1', taskKind: 'evaluator', status: 'pending', channel: 'prompt' }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    model.setPolicy({
+      enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+      actionableTaskKinds: new Set(['dreamer', 'philosopher', 'scribe', 'artificer']),
+    });
+    const snap = await model.getSnapshot();
+
+    expect(snap.pendingCount).toBe(0);
+    expect(snap.noReadyTasks?.reason).toBe('no_candidates');
+    expect(snap.noReadyTasks?.inspectedCount).toBe(0);
+    expect(snap.suppressedTasks).toHaveLength(2);
+  });
+
+  it('malformed task still counts as invalid even when suppressed channel', async () => {
+    // Malformed task on rollout_reviewer — can't determine actionability, always visible
+    const sm = createSm(
+      [
+        makeTask({ taskId: 'malformed', taskKind: 'rollout_reviewer', status: 'pending', diagnosticJson: '{bad' }),
+      ],
+      [],
+      () => null,
+    );
+    model = new InternalizationQueueReadModel(sm);
+    model.setPolicy({
+      enabledChannels: new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+      actionableTaskKinds: new Set(['dreamer', 'philosopher', 'scribe', 'artificer']),
+    });
+    const snap = await model.getSnapshot();
+
+    expect(snap.invalidMetadataCount).toBe(1);
+    expect(snap.sampleInvalidTaskIds).toContain('malformed');
+    expect(snap.noReadyTasks?.reason).toBe('all_hydration_failed');
+  });
+
 });

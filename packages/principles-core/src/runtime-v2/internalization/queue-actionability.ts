@@ -16,6 +16,7 @@ import type { PeerRunnerKind, InternalizationChannel } from './peer-runner-contr
 
 export const MVP_CORE_TASK_KINDS: readonly PeerRunnerKind[] = [
   'dreamer',
+  'philosopher',
   'scribe',
   'artificer',
 ] as const;

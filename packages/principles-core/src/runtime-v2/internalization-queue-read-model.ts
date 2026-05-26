@@ -131,10 +131,10 @@ export class InternalizationQueueReadModel {
     // Filter to PeerRunnerKind tasks first — all counts below are PI-specific
     const peerTasks = [...pending, ...retryWait].filter(t => isPeerRunnerKind(t.taskKind));
 
-    const pendingCount = peerTasks.filter(t => t.status === 'pending').length;
-    const retryWaitCount = peerTasks.filter(t => t.status === 'retry_wait').length;
+    let pendingCount = 0;
+    let retryWaitCount = 0;
 
-    // Accumulators
+    // Accumulators (actionable-only, except invalidMetadata which is always visible)
     const countsByTaskKind: Record<string, number> = {};
     const countsByChannel: Record<string, number> = {};
     let invalidMetadataCount = 0;
@@ -153,6 +153,7 @@ export class InternalizationQueueReadModel {
     let leaseConflicts = 0;
     let retryWaitPendingCount = 0;
     let unresolvableCount = 0;
+    let actionableInspected = 0;
 
     const nowMs = Date.now();
 
@@ -160,6 +161,7 @@ export class InternalizationQueueReadModel {
       const piTask = hydratePITaskRecord(rawTask);
 
       if (!piTask) {
+        // Malformed metadata — always visible, always can degrade
         invalidMetadataCount++;
         hydrationFailures++;
         if (sampleInvalidTaskIds.length < MAX_SAMPLES) {
@@ -168,7 +170,26 @@ export class InternalizationQueueReadModel {
         continue;
       }
 
-      // Aggregate counts
+      // Apply actionability policy IMMEDIATELY after successful hydration.
+      // Suppressed tasks go to diagnostics only — they do NOT participate in
+      // actionable counts, dependency blocking, no-ready reason, or canary health.
+      if (this.policy) {
+        const classification = classifyTaskActionability(
+          { taskId: piTask.taskId, taskKind: piTask.taskKind, channel: piTask.channel },
+          this.policy,
+        );
+        if (!classification.actionable) {
+          suppressedTasks.push(classification.diagnostic);
+          continue;
+        }
+      }
+
+      // ── Everything below is actionable-only ──────────────────────────────────
+
+      actionableInspected++;
+      if (piTask.status === 'pending') pendingCount++;
+      else if (piTask.status === 'retry_wait') retryWaitCount++;
+
       countsByTaskKind[piTask.taskKind] = (countsByTaskKind[piTask.taskKind] ?? 0) + 1;
       countsByChannel[piTask.channel] = (countsByChannel[piTask.channel] ?? 0) + 1;
 
@@ -233,24 +254,14 @@ export class InternalizationQueueReadModel {
         continue;
       }
 
-      // decision === 'proceed' — task passed dependency gate
-      // Apply actionability policy if configured
-      if (this.policy) {
-        const classification = classifyTaskActionability(
-          { taskId: piTask.taskId, taskKind: piTask.taskKind, channel: piTask.channel },
-          this.policy,
-        );
-        if (!classification.actionable) {
-          suppressedTasks.push(classification.diagnostic);
-          continue;
-        }
-      }
-
+      // decision === 'proceed' — task passed dependency gate, actionable
       readyTasks.push({ taskId: piTask.taskId, taskKind: piTask.taskKind, channel: piTask.channel });
     }
 
     // Determine noReadyTasks reason using dominance logic (same as orchestrator)
-    const inspectedCount = peerTasks.length;
+    // inspectedCount includes actionable tasks AND malformed tasks (always visible).
+    // Clean suppressed tasks are excluded — they're not actionable and not broken.
+    const inspectedCount = actionableInspected + hydrationFailures;
     let noReadyTasks: InternalizationQueueSnapshot['noReadyTasks'] = null;
 
     if (readyTasks.length === 0) {
