@@ -78,4 +78,23 @@ describe('Command Registration', () => {
     expect(result).toBeDefined();
     expect(result.text).toBeDefined();
   });
+
+  it('passes workspaceDir to handler even when ctx.config is undefined', async () => {
+    const { registeredCommands, api } = createMockApi();
+    plugin.register(api);
+
+    const pdPain = registeredCommands.find((c) => c.name === 'pd-pain');
+    expect(pdPain).toBeDefined();
+
+    const ctx: any = {
+      workspaceDir: '/mock/workspace',
+      args: 'test pain reason',
+      sessionId: 'session-123',
+    };
+
+    const result = await pdPain!.handler(ctx);
+    expect(result).toBeDefined();
+    expect(result.text).toBeDefined();
+    expect(ctx.workspaceDir).toBe('/mock/workspace');
+  });
 });

@@ -493,6 +493,7 @@ const plugin = {
       handler: async (ctx) => {
         try {
           const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
+          ctx.workspaceDir = workspaceDir;
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return await handlePainReportCommand(ctx);
         } catch (err) {
