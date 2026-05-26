@@ -653,10 +653,27 @@ describe('Invalid --channels JSON output contract', () => {
 });
 
 describe('CLI verification contract', () => {
-  it('cli: verified requires at least local shim working', () => {
+  it('cli: verified (global) — nextAction uses bare pd', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
     expect(result.components.cli).toBe('verified');
+    expect(result.nextAction).toContain('pd runtime canary');
+    expect(result.nextAction).not.toContain('global pd not on PATH');
+  });
+
+  it('cli: verified_local_only — nextAction uses local shim path', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'not_deliverable', cliLocalPath: '/home/.openclaw/extensions/principles-disciple/bin/pd' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
+    expect(result.components.cli).toBe('verified_local_only');
+    expect(result.nextAction).toContain('/home/.openclaw/extensions/principles-disciple/bin/pd');
+    expect(result.nextAction).toContain('global pd not on PATH');
+    expect(result.nextAction).not.toMatch(/"(?:pd|pd\.cmd)" runtime canary/);
+  });
+
+  it('cli: verified_local_only counts as CLI working for isComplete', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'configured', consoleEntrypoint: 'http://localhost:3100', cliLocalPath: '/local/pd' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
+    expect(result.success).toBe(true);
   });
 
   it('cli: failed means success=false even if plugin is verified', () => {

@@ -489,16 +489,15 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     components.plugin = 'verified';
 
     if (spinner) spinner.text = 'Installing pd CLI...';
-    const globalShimOk = syncPdCli(pluginDir);
+    syncPdCli(pluginDir);
 
     const cliVerify = verifyPdCliShim();
     if (cliVerify.globalOk) {
       components.cli = 'verified';
-    } else if (cliVerify.localOk && !globalShimOk) {
-      components.cli = 'verified';
-      logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" or add ${getInstalledBinDir()} to PATH.`);
     } else if (cliVerify.localOk) {
-      components.cli = 'verified';
+      components.cli = 'verified_local_only';
+      components.cliLocalPath = cliVerify.localPath;
+      logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" or add ${getInstalledBinDir()} to PATH.`);
     } else {
       throw new Error('PD CLI verification failed — pd command is not executable after install. Check Node.js and PATH configuration.');
     }
@@ -544,10 +543,13 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     if (spinner) spinner.succeed('Install complete!');
 
     const actualEnabledChannels = readEnabledChannelsFromDisk(options.workspaceDir);
-    const isComplete = components.plugin === 'verified' && components.cli === 'verified' && components.console === 'configured';
+    const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
+    const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
     const nextActions: string[] = [];
     if (components.cli === 'verified') {
       nextActions.push(`pd runtime canary --workspace "${options.workspaceDir}" --json`);
+    } else if (components.cli === 'verified_local_only' && components.cliLocalPath) {
+      nextActions.push(`"${components.cliLocalPath}" runtime canary --workspace "${options.workspaceDir}" --json`);
     }
     if (components.console === 'not_deliverable') {
       nextActions.push('Owner review console is not yet deliverable — this is a release-blocking gap');

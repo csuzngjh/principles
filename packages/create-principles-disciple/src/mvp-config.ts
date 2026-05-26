@@ -10,9 +10,10 @@ export const MVP_GONE_FLAGS = ['nocturnal', 'idle_trigger', 'model_training', 't
 
 export interface ComponentStatus {
   plugin: 'verified' | 'failed' | 'skipped';
-  cli: 'verified' | 'failed' | 'skipped';
+  cli: 'verified' | 'verified_local_only' | 'failed' | 'skipped';
   console: 'configured' | 'not_deliverable' | 'skipped';
   consoleEntrypoint?: string;
+  cliLocalPath?: string;
 }
 
 export interface VerificationResult {
@@ -148,10 +149,13 @@ export interface BuildOutputOptions {
 
 export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
   const { workspace, components, channels, verification } = opts;
-  const isComplete = components.plugin === 'verified' && components.cli === 'verified' && components.console === 'configured';
+  const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
+  const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
   const nextActions: string[] = [];
   if (components.cli === 'verified') {
     nextActions.push('Run "pd runtime canary --workspace <path> --json" for diagnostics');
+  } else if (components.cli === 'verified_local_only' && components.cliLocalPath) {
+    nextActions.push(`Run "${components.cliLocalPath} runtime canary --workspace <path> --json" for diagnostics (global pd not on PATH)`);
   }
   if (components.console === 'configured' && components.consoleEntrypoint) {
     nextActions.push(`Open review console: ${components.consoleEntrypoint}`);

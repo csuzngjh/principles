@@ -167,7 +167,11 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       console.log();
       console.log('Ready.');
       console.log(`Diagnostics: pd runtime canary --workspace "${result.workspaceDir}" --json`);
-    } else if (result.components.plugin === 'verified' && result.components.cli === 'verified') {
+    } else if (result.components.plugin === 'verified' && (result.components.cli === 'verified' || result.components.cli === 'verified_local_only')) {
+      const cliLabel = result.components.cli === 'verified_local_only' ? 'verified (local only)' : result.components.cli;
+      const diagCmd = result.components.cli === 'verified_local_only' && result.components.cliLocalPath
+        ? `"${result.components.cliLocalPath}" runtime canary --workspace "${result.workspaceDir}" --json`
+        : `pd runtime canary --workspace "${result.workspaceDir}" --json`;
       console.log();
       logger.warn('Install partially complete — runtime + CLI verified, but review console is not yet deliverable');
       console.log();
@@ -175,7 +179,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       console.log();
       console.log('Installing MVP components');
       console.log(`  Runtime integration ............ ${result.components.plugin}`);
-      console.log(`  Operator CLI ................... ${result.components.cli}`);
+      console.log(`  Operator CLI ................... ${cliLabel}`);
       console.log(`  Review console ................. ${result.components.console}`);
       console.log();
       console.log('Enabled capabilities');
@@ -188,7 +192,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       console.log(`  Story A demo ................... ${result.verification.storyA}${result.verification.storyASkipReason ? ` (${result.verification.storyASkipReason})` : ''}`);
       console.log();
       console.log('Not ready for seed-customer release — owner review console is a release-blocking gap.');
-      console.log(`Diagnostics: pd runtime canary --workspace "${result.workspaceDir}" --json`);
+      console.log(`Diagnostics: ${diagCmd}`);
       process.exit(1);
       return;
     } else {
