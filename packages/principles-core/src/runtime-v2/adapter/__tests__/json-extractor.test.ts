@@ -143,7 +143,7 @@ describe('extractJsonObject', () => {
     expect(result).toBeNull();
   });
 
-  it('parses JSON object after array-like prefix that contains an object', () => {
+  it('parses JSON object after prose prefix', () => {
     const input = 'Result: {"found":true}';
     const result = extractJsonObject(input);
     expect(result).toEqual({ found: true });

@@ -88,6 +88,7 @@ describe('feature-flag-loader', () => {
       try {
         const result = loadEffectiveFeatureFlags(tmpDir);
         expect(result.source).toBe('defaults');
+        expect(result.warnings.some(w => w.includes('expected a mapping'))).toBe(true);
       } finally {
         cleanup(tmpDir);
       }
@@ -121,6 +122,7 @@ describe('feature-flag-loader', () => {
       try {
         const result = loadEffectiveFeatureFlags(tmpDir);
         expect(result.warnings.some(w => w.includes("dangerous key '__proto__' rejected"))).toBe(true);
+        expect(Object.hasOwn(result.flags, '__proto__')).toBe(false);
       } finally {
         cleanup(tmpDir);
       }
@@ -132,6 +134,7 @@ describe('feature-flag-loader', () => {
       try {
         const result = loadEffectiveFeatureFlags(tmpDir);
         expect(result.warnings.some(w => w.includes("dangerous key 'constructor' rejected"))).toBe(true);
+        expect(Object.hasOwn(result.flags, 'constructor')).toBe(false);
       } finally {
         cleanup(tmpDir);
       }
@@ -143,6 +146,7 @@ describe('feature-flag-loader', () => {
       try {
         const result = loadEffectiveFeatureFlags(tmpDir);
         expect(result.warnings.some(w => w.includes("dangerous key 'prototype' rejected"))).toBe(true);
+        expect(Object.hasOwn(result.flags, 'prototype')).toBe(false);
       } finally {
         cleanup(tmpDir);
       }
