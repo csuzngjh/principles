@@ -43,10 +43,13 @@ export type InstallOutput = InstallSuccessOutput | InstallFailureOutput;
 
 export function generateFeatureFlagsYamlContent(channels?: string[]): string {
   const enabledSet = new Set<string>(channels ?? MVP_CHANNELS);
+  for (const core of MVP_CHANNELS) {
+    enabledSet.add(core);
+  }
   const flags: Record<string, { enabled: boolean; category: string; since: string; description?: string }> = {};
 
   for (const flag of DEFAULT_FEATURE_FLAGS) {
-    const isEnabled = enabledSet.has(flag.id);
+    const isEnabled = flag.category === 'core' ? true : enabledSet.has(flag.id);
     flags[flag.id] = {
       enabled: isEnabled,
       category: flag.category,
@@ -99,11 +102,17 @@ export function parseChannelsOption(raw: unknown): { channels: MvpChannel[]; unk
   if (valid.length === 0 && parsed.length > 0) {
     return { channels: [], unknowns, error: `All specified channels are invalid: "${raw}". Valid MVP channels: ${MVP_CHANNELS.join(', ')}` };
   }
-  return { channels: valid, unknowns };
+  const channelSet = new Set<string>(valid);
+  for (const core of MVP_CHANNELS) {
+    channelSet.add(core);
+  }
+  const channels = [...MVP_CHANNELS].filter(ch => channelSet.has(ch));
+  return { channels, unknowns };
 }
 
 export function validateOpenClawConfig(config: unknown): { valid: boolean; error?: string } {
-  if (config == null) return { valid: true };
+  if (config === undefined) return { valid: true };
+  if (config === null) return { valid: false, error: 'openclaw.json exists but parsed as null — expected a non-null object' };
   if (typeof config !== 'object' || Array.isArray(config)) {
     return { valid: false, error: 'openclaw.json root must be an object' };
   }

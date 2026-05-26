@@ -149,29 +149,28 @@ describe('generateFeatureFlagsYamlContent', () => {
     expect(enabledFlags.sort()).toEqual(['code_tool_hook', 'defer_archive', 'prompt']);
   });
 
-  it('respects selected channels — only prompt enabled', () => {
+  it('core flags are always enabled regardless of channels parameter', () => {
     const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
-    const promptFlag = parsed['prompt'] as Record<string, unknown>;
-    expect(promptFlag.enabled).toBe(true);
-    const codeToolFlag = parsed['code_tool_hook'] as Record<string, unknown>;
-    expect(codeToolFlag.enabled).toBe(false);
-    const deferFlag = parsed['defer_archive'] as Record<string, unknown>;
-    expect(deferFlag.enabled).toBe(false);
+    for (const ch of MVP_CHANNELS) {
+      const flag = parsed[ch] as Record<string, unknown> | undefined;
+      expect(flag).toBeDefined();
+      expect(flag?.enabled).toBe(true);
+      expect(flag?.category).toBe('core');
+    }
   });
 
-  it('respects selected channels — prompt + defer_archive', () => {
-    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt', 'defer_archive'])) as Record<string, unknown>;
-    const promptFlag = parsed['prompt'] as Record<string, unknown>;
-    expect(promptFlag.enabled).toBe(true);
-    const codeToolFlag = parsed['code_tool_hook'] as Record<string, unknown>;
-    expect(codeToolFlag.enabled).toBe(false);
-    const deferFlag = parsed['defer_archive'] as Record<string, unknown>;
-    expect(deferFlag.enabled).toBe(true);
+  it('core flags are always enabled even with empty channels', () => {
+    const parsed = yaml.load(generateFeatureFlagsYamlContent([])) as Record<string, unknown>;
+    for (const ch of MVP_CHANNELS) {
+      const flag = parsed[ch] as Record<string, unknown> | undefined;
+      expect(flag?.enabled).toBe(true);
+    }
   });
 
-  it('preserves category and since metadata regardless of channel selection', () => {
+  it('preserves category and since metadata for core flags', () => {
     const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
     const codeToolFlag = parsed['code_tool_hook'] as Record<string, unknown>;
+    expect(codeToolFlag.enabled).toBe(true);
     expect(codeToolFlag.category).toBe('core');
     expect(typeof codeToolFlag.since).toBe('string');
   });
@@ -235,9 +234,9 @@ describe('parseChannelsOption', () => {
     expect(result.channels).toEqual([...MVP_CHANNELS]);
   });
 
-  it('parses valid channels', () => {
+  it('parses valid channels and always includes all core channels', () => {
     const result = parseChannelsOption('prompt,defer_archive');
-    expect(result.channels).toEqual(['prompt', 'defer_archive']);
+    expect(result.channels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
     expect(result.unknowns).toEqual([]);
   });
 
@@ -260,17 +259,23 @@ describe('parseChannelsOption', () => {
     expect(result.error).toBeDefined();
   });
 
-  it('separates valid from unknown — partial valid returns valid only', () => {
+  it('separates valid from unknown — partial valid returns all core channels plus rejected channels exposed', () => {
     const result = parseChannelsOption('prompt,skill');
-    expect(result.channels).toEqual(['prompt']);
+    expect(result.channels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
     expect(result.unknowns).toEqual(['skill']);
     expect(result.error).toBeUndefined();
   });
 });
 
 describe('validateOpenClawConfig', () => {
-  it('accepts null config', () => {
-    expect(validateOpenClawConfig(null).valid).toBe(true);
+  it('rejects null config — file exists but parsed as null', () => {
+    const result = validateOpenClawConfig(null);
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('null');
+  });
+
+  it('accepts undefined config — file does not exist yet', () => {
+    expect(validateOpenClawConfig(undefined).valid).toBe(true);
   });
 
   it('accepts valid config', () => {
@@ -434,7 +439,7 @@ describe('Rerun --channels updates feature-flags.yaml', () => {
     }
   });
 
-  it('rerun with --channels prompt disables other channels', () => {
+  it('rerun with --channels prompt still enables all core channels', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rerun-test-'));
     try {
       const configDir = path.join(tmpDir, '.pd');
@@ -449,18 +454,16 @@ describe('Rerun --channels updates feature-flags.yaml', () => {
       expect(typeof parsed).toBe('object');
       expect(parsed).not.toBeNull();
       const flags = parsed as Record<string, unknown>;
-      const promptFlag = flags['prompt'] as Record<string, unknown>;
-      expect(promptFlag.enabled).toBe(true);
-      const codeToolFlag = flags['code_tool_hook'] as Record<string, unknown>;
-      expect(codeToolFlag.enabled).toBe(false);
-      const deferFlag = flags['defer_archive'] as Record<string, unknown>;
-      expect(deferFlag.enabled).toBe(false);
+      for (const ch of MVP_CHANNELS) {
+        const flag = flags[ch] as Record<string, unknown>;
+        expect(flag.enabled).toBe(true);
+      }
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it('rerun preserves category and since metadata for disabled channels', () => {
+  it('rerun preserves category and since metadata for core channels', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rerun-test-'));
     try {
       const configDir = path.join(tmpDir, '.pd');
@@ -473,7 +476,7 @@ describe('Rerun --channels updates feature-flags.yaml', () => {
       expect(parsed).not.toBeNull();
       const flags = parsed as Record<string, unknown>;
       const codeToolFlag = flags['code_tool_hook'] as Record<string, unknown>;
-      expect(codeToolFlag.enabled).toBe(false);
+      expect(codeToolFlag.enabled).toBe(true);
       expect(codeToolFlag.category).toBe('core');
       expect(typeof codeToolFlag.since).toBe('string');
     } finally {
@@ -706,9 +709,9 @@ describe('Invalid --channels JSON output contract', () => {
     expect(failure.nextAction).toContain('Rejected');
   });
 
-  it('partial valid channels produces valid output with rejected channels exposed', () => {
+  it('partial valid channels produces all core channels plus rejected channels exposed', () => {
     const result = parseChannelsOption('prompt,skill');
-    expect(result.channels).toEqual(['prompt']);
+    expect(result.channels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
     expect(result.unknowns).toEqual(['skill']);
     expect(result.error).toBeUndefined();
   });
@@ -749,5 +752,70 @@ describe('CLI verification contract', () => {
     expect(result.success).toBe(false);
     expect(result.reason).toBe('cli_verification_failed');
     expect(result.nextAction).toContain('PATH');
+  });
+});
+
+describe('Core channels are never partially disabled (P1 fix)', () => {
+  it('parseChannelsOption with only prompt returns all three core channels', () => {
+    const result = parseChannelsOption('prompt');
+    expect(result.channels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
+  });
+
+  it('parseChannelsOption with prompt+defer_archive returns all three core channels', () => {
+    const result = parseChannelsOption('prompt,defer_archive');
+    expect(result.channels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
+  });
+
+  it('parseChannelsOption default returns all three core channels', () => {
+    const result = parseChannelsOption(null);
+    expect(result.channels).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
+  });
+
+  it('generateFeatureFlagsYamlContent with subset channels still enables all core', () => {
+    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
+    const promptFlag = parsed['prompt'] as Record<string, unknown>;
+    expect(promptFlag.enabled).toBe(true);
+    const codeToolFlag = parsed['code_tool_hook'] as Record<string, unknown>;
+    expect(codeToolFlag.enabled).toBe(true);
+    const deferFlag = parsed['defer_archive'] as Record<string, unknown>;
+    expect(deferFlag.enabled).toBe(true);
+  });
+
+  it('YAML output matches runtime behavior — no core flag can be disabled', () => {
+    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
+    const coreFlags = Object.entries(parsed).filter(([, v]) => {
+      if (typeof v !== 'object' || v === null) return false;
+      const flag = v as Record<string, unknown>;
+      return flag.category === 'core';
+    });
+    for (const [, v] of coreFlags) {
+      const flag = v as Record<string, unknown>;
+      expect(flag.enabled).toBe(true);
+    }
+  });
+
+  it('quiet flag remains disabled when not in channels', () => {
+    const parsed = yaml.load(generateFeatureFlagsYamlContent(['prompt'])) as Record<string, unknown>;
+    const gfiFlag = parsed['gfi'] as Record<string, unknown>;
+    expect(gfiFlag.enabled).toBe(false);
+    expect(gfiFlag.category).toBe('quiet');
+  });
+});
+
+describe('openclaw.json null vs undefined (P2 fix)', () => {
+  it('null config is rejected — file exists but parsed as null', () => {
+    const result = validateOpenClawConfig(null);
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('null');
+  });
+
+  it('undefined config is accepted — file does not exist', () => {
+    const result = validateOpenClawConfig(undefined);
+    expect(result.valid).toBe(true);
+  });
+
+  it('empty object is accepted — valid new config', () => {
+    const result = validateOpenClawConfig({});
+    expect(result.valid).toBe(true);
   });
 });
