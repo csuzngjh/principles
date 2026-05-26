@@ -863,3 +863,68 @@ describe('Install output never implies partial core channel disabling', () => {
     expect(content).toContain('cannot be disabled');
   });
 });
+
+describe('Installer has no @principles/core runtime dependency (P1 fix)', () => {
+  it('package.json does not depend on @principles/core', () => {
+    const pkgJsonPath = path.resolve(__dirname, '..', 'package.json');
+    const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8')) as Record<string, unknown>;
+    const deps = pkgJson.dependencies as Record<string, unknown> | undefined;
+    expect(deps).toBeDefined();
+    expect(Object.keys(deps ?? {})).not.toContain('@principles/core');
+  });
+
+  it('mvp-config.ts does not import from @principles/core', () => {
+    const mvpConfigPath = path.resolve(__dirname, '..', 'src', 'mvp-config.ts');
+    const content = fs.readFileSync(mvpConfigPath, 'utf-8');
+    expect(content).not.toContain('@principles/core');
+  });
+
+  it('inlined DEFAULT_FEATURE_FLAGS matches core definition', () => {
+    const mvpConfigPath = path.resolve(__dirname, '..', 'src', 'mvp-config.ts');
+    const content = fs.readFileSync(mvpConfigPath, 'utf-8');
+    expect(content).toContain("'prompt', category: 'core'");
+    expect(content).toContain("'code_tool_hook', category: 'core'");
+    expect(content).toContain("'defer_archive', category: 'core'");
+    expect(content).toContain("'gfi', category: 'quiet'");
+    expect(content).toContain("'nocturnal', category: 'gone'");
+  });
+});
+
+describe('CLI verification requires localOk first (P1 fix)', () => {
+  it('installer.ts checks localOk before globalOk', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const localOkCheck = content.indexOf('!cliVerify.localOk');
+    const globalOkCheck = content.indexOf('cliVerify.globalOk');
+    expect(localOkCheck).toBeGreaterThan(0);
+    expect(globalOkCheck).toBeGreaterThan(0);
+    expect(localOkCheck).toBeLessThan(globalOkCheck);
+  });
+
+  it('localOk failure throws, does not fall through to globalOk', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('if (!cliVerify.localOk)');
+    expect(content).toContain('local shim is not executable');
+  });
+});
+
+describe('Native module verification always runs (P1 fix)', () => {
+  it('installer.ts does not early-return on existing node_modules', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const needsInstallBlock = content.indexOf('if (needsInstall)');
+    const nativeRebuild = content.indexOf('npm rebuild');
+    expect(needsInstallBlock).toBeGreaterThan(0);
+    expect(nativeRebuild).toBeGreaterThan(0);
+    expect(nativeRebuild).toBeGreaterThan(needsInstallBlock);
+  });
+
+  it('native rebuild runs outside needsInstall guard', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const needsInstallClosingBrace = content.indexOf('if (needsInstall)');
+    const nativeModulesDecl = content.indexOf("const nativeModules = ['better-sqlite3']");
+    expect(nativeModulesDecl).toBeGreaterThan(needsInstallClosingBrace);
+  });
+});

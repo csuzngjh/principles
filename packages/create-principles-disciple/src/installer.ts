@@ -180,35 +180,34 @@ async function installPluginDependencies(): Promise<void> {
     }
   }
 
-  if (!needsInstall) return;
-
-  const execOpts = getCapturingExecOptions(extDir);
-  try {
-    execSync('npm install --ignore-scripts', execOpts);
-  } catch (e) {
-    throw new Error(`npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm install --ignore-scripts`, { cause: e });
+  if (needsInstall) {
+    const execOpts = getCapturingExecOptions(extDir);
+    try {
+      execSync('npm install --ignore-scripts', execOpts);
+    } catch (e) {
+      throw new Error(`npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm install --ignore-scripts`, { cause: e });
+    }
   }
 
   const nativeModules = ['better-sqlite3'];
+  const execOpts = getCapturingExecOptions(extDir);
   for (const mod of nativeModules) {
     const modPath = path.join(extDir, 'node_modules', mod);
-    if (existsSync(modPath)) {
-      try {
-        execSync(`npm rebuild ${mod}`, execOpts);
-      } catch (e) {
-        throw new Error(`Native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm rebuild ${mod}`, { cause: e });
-      }
+    if (!existsSync(modPath)) continue;
+    try {
+      execSync(`npm rebuild ${mod}`, execOpts);
+    } catch (e) {
+      throw new Error(`Native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm rebuild ${mod}`, { cause: e });
     }
   }
 
   for (const nativeMod of nativeModules) {
     const nativeModPath = path.join(extDir, 'node_modules', nativeMod);
-    if (existsSync(nativeModPath)) {
-      try {
-        execSync('node -e "require(\'' + nativeMod + '\')"', { cwd: extDir, stdio: 'pipe' });
-      } catch {
-        throw new Error(`Native module ${nativeMod} verification failed after rebuild. The install cannot proceed.`);
-      }
+    if (!existsSync(nativeModPath)) continue;
+    try {
+      execSync('node -e "require(\'' + nativeMod + '\')"', { cwd: extDir, stdio: 'pipe' });
+    } catch {
+      throw new Error(`Native module ${nativeMod} verification failed after rebuild. The install cannot proceed.`);
     }
   }
 }
@@ -500,14 +499,15 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     syncPdCli(pluginDir);
 
     const cliVerify = verifyPdCliShim();
+    if (!cliVerify.localOk) {
+      throw new Error('PD CLI verification failed — local shim is not executable after install. Check Node.js and PATH configuration.');
+    }
     if (cliVerify.globalOk) {
       components.cli = 'verified';
-    } else if (cliVerify.localOk) {
+    } else {
       components.cli = 'verified_local_only';
       components.cliLocalPath = cliVerify.localPath;
       logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" or add ${getInstalledBinDir()} to PATH.`);
-    } else {
-      throw new Error('PD CLI verification failed — pd command is not executable after install. Check Node.js and PATH configuration.');
     }
 
     if (spinner) spinner.text = 'Updating OpenClaw config...';

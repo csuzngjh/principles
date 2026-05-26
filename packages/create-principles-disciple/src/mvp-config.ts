@@ -1,4 +1,3 @@
-import { DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
 import * as yaml from 'js-yaml';
 import * as path from 'path';
 
@@ -7,6 +6,25 @@ export type MvpChannel = (typeof MVP_CHANNELS)[number];
 
 export const MVP_QUIET_FLAGS = ['gfi'] as const;
 export const MVP_GONE_FLAGS = ['nocturnal', 'idle_trigger', 'model_training', 'trainer'] as const;
+
+export interface FeatureFlagDefinition {
+  id: string;
+  category: string;
+  enabled: boolean;
+  since: string;
+  description?: string;
+}
+
+const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
+  { id: 'prompt', category: 'core', enabled: true, since: '2026-05-24', description: 'Prompt injection for principle application' },
+  { id: 'code_tool_hook', category: 'core', enabled: true, since: '2026-05-24', description: 'Code tool hook for rule host enforcement' },
+  { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24', description: 'Defer/archive activation writer' },
+  { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
+  { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
+  { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
+  { id: 'model_training', category: 'gone', enabled: false, since: '2026-05-24', description: 'Model training channel (retired)' },
+  { id: 'trainer', category: 'gone', enabled: false, since: '2026-05-24', description: 'Trainer peer runner (retired)' },
+];
 
 export interface ComponentStatus {
   plugin: 'verified' | 'failed' | 'skipped';
