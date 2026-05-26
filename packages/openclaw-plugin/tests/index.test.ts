@@ -1,6 +1,29 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import plugin from '../src/index';
-import type { PluginCommandDefinition } from '../src/openclaw-sdk.js';
+import type { PluginCommandDefinition, OpenClawPluginApi, PluginCommandContext } from '../src/openclaw-sdk.js';
+
+function createMockApi(): { registeredCommands: PluginCommandDefinition[]; api: OpenClawPluginApi } {
+  const registeredCommands: PluginCommandDefinition[] = [];
+  const api: OpenClawPluginApi = {
+    rootDir: '/mock',
+    pluginConfig: { language: 'en' },
+    logger: {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    },
+    config: {},
+    registerCommand: (cmd: PluginCommandDefinition) => {
+      registeredCommands.push(cmd);
+    },
+    registerService: () => {},
+    registerTool: () => {},
+    registerHttpRoute: () => {},
+    on: () => {},
+  };
+  return { registeredCommands, api };
+}
 
 describe('OpenClaw Plugin Scaffolding', () => {
   it('should export a valid register function', () => {
@@ -10,31 +33,6 @@ describe('OpenClaw Plugin Scaffolding', () => {
 });
 
 describe('Command Registration', () => {
-  function createMockApi() {
-    const registeredCommands: PluginCommandDefinition[] = [];
-    return {
-      registeredCommands,
-      api: {
-        rootDir: '/mock',
-        pluginConfig: { language: 'en' },
-        logger: {
-          debug: () => {},
-          info: () => {},
-          warn: () => {},
-          error: () => {},
-        },
-        config: {},
-        registerCommand: (cmd: PluginCommandDefinition) => {
-          registeredCommands.push(cmd);
-        },
-        registerService: () => {},
-        registerTool: () => {},
-        registerHttpRoute: () => {},
-        on: () => {},
-      } as any,
-    };
-  }
-
   it('registers /pd-pain with acceptsArgs: true', () => {
     const { registeredCommands, api } = createMockApi();
     plugin.register(api);
@@ -51,10 +49,11 @@ describe('Command Registration', () => {
     const pdPain = registeredCommands.find((c) => c.name === 'pd-pain');
     expect(pdPain).toBeDefined();
 
-    const ctx = {
+    const ctx: PluginCommandContext = {
+      sessionId: 'session-123',
+      sessionKey: 'sk-123',
       args: 'test pain reason',
       config: { workspaceDir: '/mock', language: 'en' },
-      sessionId: 'session-123',
     };
 
     const result = pdPain!.handler(ctx);
@@ -69,7 +68,9 @@ describe('Command Registration', () => {
     const pdPain = registeredCommands.find((c) => c.name === 'pd-pain');
     expect(pdPain).toBeDefined();
 
-    const ctx = {
+    const ctx: PluginCommandContext = {
+      sessionId: '',
+      sessionKey: '',
       args: 'test pain reason',
       config: { language: 'en' },
     };
@@ -86,10 +87,11 @@ describe('Command Registration', () => {
     const pdPain = registeredCommands.find((c) => c.name === 'pd-pain');
     expect(pdPain).toBeDefined();
 
-    const ctx: any = {
+    const ctx: PluginCommandContext = {
+      sessionId: 'session-123',
+      sessionKey: 'sk-123',
       workspaceDir: '/mock/workspace',
       args: 'test pain reason',
-      sessionId: 'session-123',
     };
 
     const result = await pdPain!.handler(ctx);

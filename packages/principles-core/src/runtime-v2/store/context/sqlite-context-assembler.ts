@@ -67,15 +67,13 @@ export class SqliteContextAssembler implements ContextAssembler {
       );
     }
 
-    const dt = SqliteContextAssembler.reconstructDiagnosticianRecord(task);
+    const ambiguityNotes: string[] = [];
+
+    const dt = SqliteContextAssembler.reconstructDiagnosticianRecord(task, ambiguityNotes);
 
     const runs = await this.runStore.listRunsByTask(taskId);
     const runIds = runs.map((r) => r.runId);
 
-    // Use the earliest run's startedAt as time window start so that all runs,
-    // including imported openclaw-history runs that predate the task creation,
-    // are included in the conversation window. Without an explicit lower bound,
-    // the default 24-hour window would filter out all historical runs.
     const firstRunStartedAt = runs[0]?.startedAt;
     const earliestStart = firstRunStartedAt !== undefined
       ? runs.reduce((earliest, r) => r.startedAt < earliest ? r.startedAt : earliest, firstRunStartedAt)
@@ -99,11 +97,14 @@ export class SqliteContextAssembler implements ContextAssembler {
       provenanceReason: dt.provenanceReason || undefined,
     };
 
-    const ambiguityNotes: string[] = SqliteContextAssembler.buildAmbiguityNotes(
+    const convAmbiguityNotes = SqliteContextAssembler.buildAmbiguityNotes(
       taskId,
       historyResult.entries,
       historyResult.truncated,
-    ) ?? [];
+    );
+    if (convAmbiguityNotes) {
+      ambiguityNotes.push(...convAmbiguityNotes);
+    }
 
     // PRI-255: For CLI-only pain, add explicit degradation note about missing trace
     // and SKIP source trace lookup entirely — no-host-trace pain must not attempt
@@ -279,11 +280,19 @@ export class SqliteContextAssembler implements ContextAssembler {
     return notes.length > 0 ? notes : undefined;
   }
 
+  private static extractStringField(obj: Record<string, unknown>, key: string): string | undefined {
+    if (!Object.hasOwn(obj, key) || typeof obj[key] !== 'string') return undefined;
+    return obj[key];
+  }
+
   /**
    * Reconstruct a DiagnosticianTaskRecord from a base TaskRecord by decoding
    * the diagnostic_json column (if present).
    */
-  private static reconstructDiagnosticianRecord(task: TaskRecord): DiagnosticianTaskRecord {
+  private static reconstructDiagnosticianRecord(
+    task: TaskRecord,
+    ambiguityNotes: string[],
+  ): DiagnosticianTaskRecord {
     const base = task as TaskRecord & { workspaceDir?: string };
     let extra: Partial<DiagnosticianTaskRecord> = {};
 
@@ -292,19 +301,25 @@ export class SqliteContextAssembler implements ContextAssembler {
         const parsed: unknown = JSON.parse(base.diagnosticJson);
         if (isRecord(parsed)) {
           extra = {
-            sourcePainId: typeof parsed.sourcePainId === 'string' ? parsed.sourcePainId : undefined,
-            reasonSummary: typeof parsed.reasonSummary === 'string' ? parsed.reasonSummary : undefined,
-            source: typeof parsed.source === 'string' ? parsed.source : undefined,
-            severity: typeof parsed.severity === 'string' ? parsed.severity : undefined,
-            sessionIdHint: typeof parsed.sessionIdHint === 'string' ? parsed.sessionIdHint : undefined,
-            agentIdHint: typeof parsed.agentIdHint === 'string' ? parsed.agentIdHint : undefined,
-            workspaceDir: typeof parsed.workspaceDir === 'string' ? parsed.workspaceDir : undefined,
+            sourcePainId: SqliteContextAssembler.extractStringField(parsed, 'sourcePainId'),
+            reasonSummary: SqliteContextAssembler.extractStringField(parsed, 'reasonSummary'),
+            source: SqliteContextAssembler.extractStringField(parsed, 'source'),
+            severity: SqliteContextAssembler.extractStringField(parsed, 'severity'),
+            sessionIdHint: SqliteContextAssembler.extractStringField(parsed, 'sessionIdHint'),
+            agentIdHint: SqliteContextAssembler.extractStringField(parsed, 'agentIdHint'),
+            workspaceDir: SqliteContextAssembler.extractStringField(parsed, 'workspaceDir'),
             provenance: isPainProvenance(parsed.provenance) ? parsed.provenance : undefined,
-            provenanceReason: typeof parsed.provenanceReason === 'string' ? parsed.provenanceReason : undefined,
+            provenanceReason: SqliteContextAssembler.extractStringField(parsed, 'provenanceReason'),
           };
+        } else {
+          ambiguityNotes.push(
+            `diagnosticJson for task ${task.taskId} parsed to non-object (${Array.isArray(parsed) ? 'array' : typeof parsed}); evidence fields unavailable`,
+          );
         }
-      } catch {
-        // Malformed JSON — ignore, return base as plain record
+      } catch (parseErr) {
+        ambiguityNotes.push(
+          `diagnosticJson for task ${task.taskId} is malformed JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}; evidence fields unavailable`,
+        );
       }
     }
 

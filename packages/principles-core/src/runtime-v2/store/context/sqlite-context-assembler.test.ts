@@ -1082,4 +1082,57 @@ describe('SqliteContextAssembler', () => {
       expect(payload.diagnosisTarget.reasonSummary).toBe('Bad provenance test');
     } finally { cleanupFixture(f); }
   });
+
+  it('produces ambiguity note when diagnosticJson is malformed JSON', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_malformed_observable',
+      reasonSummary: 'Fallback reason',
+    });
+    const taskWithDj = { ...task, diagnosticJson: 'not-valid-json{{{}}' };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.reasonSummary).toBe('Fallback reason');
+      expect(payload.ambiguityNotes?.some((n) => n.includes('malformed JSON'))).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('produces ambiguity note when diagnosticJson parses to non-object', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_array_dj',
+      reasonSummary: 'Fallback reason',
+    });
+    const taskWithDj = { ...task, diagnosticJson: JSON.stringify([1, 2, 3]) };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.reasonSummary).toBe('Fallback reason');
+      expect(payload.ambiguityNotes?.some((n) => n.includes('non-object'))).toBe(true);
+    } finally { cleanupFixture(f); }
+  });
+
+  it('ignores inherited properties from prototype chain in diagnosticJson', async () => {
+    const djObj: Record<string, unknown> = {};
+    Object.setPrototypeOf(djObj, { sourcePainId: 'inherited-pain-id', reasonSummary: 'inherited-reason' });
+    djObj.sourcePainId = 'own-pain-id';
+    djObj.reasonSummary = 'own-reason';
+
+    const dj = JSON.stringify(djObj);
+    const task = makeDiagnosticianTask({
+      taskId: 'task_inherited_props',
+    });
+    const taskWithDj = { ...task, diagnosticJson: dj };
+    const tasks = new Map([[taskWithDj.taskId, taskWithDj]]);
+    const f = createFixture(tasks);
+    try {
+      const payload = await f.assembler.assemble(task.taskId);
+
+      expect(payload.diagnosisTarget.painId).toBe('own-pain-id');
+      expect(payload.diagnosisTarget.reasonSummary).toBe('own-reason');
+    } finally { cleanupFixture(f); }
+  });
 });
