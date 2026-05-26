@@ -23,6 +23,7 @@ import { isPeerRunnerKind } from './internalization/peer-runner-contracts.js';
 import { hydratePITaskRecord } from './internalization/pitask-metadata.js';
 import { validateInternalizationTaskReady } from './internalization/internalization-state-machine.js';
 import { isUnresolvable } from './internalization/internalization-task-guards.js';
+import { classifyTaskActionability, type ActionabilityPolicyInput, MVP_CORE_TASK_KINDS, type SuppressedDiagnostic } from './internalization/queue-actionability.js';
 
 // ── Output types ────────────────────────────────────────────────────────────
 
@@ -91,6 +92,8 @@ export interface InternalizationQueueSnapshot {
   unresolvableSummary: { count: number; samples: UnresolvableSample[] };
   readyTasks: ReadyTask[];
   noReadyTasks: NoReadyTasksDiagnosis | null;
+  /** Tasks suppressed from the actionable queue — disabled channels or non-MVP task kinds */
+  suppressedTasks: SuppressedDiagnostic[];
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -111,7 +114,13 @@ function hasUnexpiredLease(
 // ── Read Model ───────────────────────────────────────────────────────────────
 
 export class InternalizationQueueReadModel {
+  private policy: ActionabilityPolicyInput | null = null;
+
   constructor(private readonly stateManager: RuntimeStateHandle['stateManager']) {}
+
+  setPolicy(policy: ActionabilityPolicyInput): void {
+    this.policy = policy;
+  }
 
   async getSnapshot(): Promise<InternalizationQueueSnapshot> {
     const [pending, retryWait] = await Promise.all([
@@ -136,6 +145,7 @@ export class InternalizationQueueReadModel {
     const retryWaitPendingSamples: RetryWaitPendingSample[] = [];
     const unresolvableSamples: UnresolvableSample[] = [];
     const readyTasks: ReadyTask[] = [];
+    const suppressedTasks: SuppressedDiagnostic[] = [];
 
     let hydrationFailures = 0;
     let blockedCount = 0;
@@ -223,7 +233,19 @@ export class InternalizationQueueReadModel {
         continue;
       }
 
-      // decision === 'proceed' — task is ready to lease
+      // decision === 'proceed' — task passed dependency gate
+      // Apply actionability policy if configured
+      if (this.policy) {
+        const classification = classifyTaskActionability(
+          { taskId: piTask.taskId, taskKind: piTask.taskKind, channel: piTask.channel },
+          this.policy,
+        );
+        if (!classification.actionable) {
+          suppressedTasks.push(classification.diagnostic);
+          continue;
+        }
+      }
+
       readyTasks.push({ taskId: piTask.taskId, taskKind: piTask.taskKind, channel: piTask.channel });
     }
 
@@ -270,6 +292,7 @@ export class InternalizationQueueReadModel {
       unresolvableSummary: { count: unresolvableCount, samples: unresolvableSamples },
       readyTasks,
       noReadyTasks,
+      suppressedTasks,
     };
   }
 
@@ -293,11 +316,22 @@ export interface InternalizationQueueReadModelHandle {
   close: () => Promise<void>;
 }
 
+export interface CreateQueueReadModelOptions {
+  workspaceDir: string;
+  readonly?: boolean;
+  /** Enabled activation channels — loaded from feature flags at CLI boundary */
+  enabledChannels?: Set<string>;
+}
+
 export async function createInternalizationQueueReadModel(
-  opts: { workspaceDir: string; readonly?: boolean },
+  opts: CreateQueueReadModelOptions,
 ): Promise<InternalizationQueueReadModelHandle> {
   const handle = await createRuntimeStateHandle({ workspaceDir: opts.workspaceDir, readonly: opts.readonly });
   const readModel = new InternalizationQueueReadModel(handle.stateManager);
+  readModel.setPolicy({
+    enabledChannels: opts.enabledChannels ?? new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+    actionableTaskKinds: new Set(MVP_CORE_TASK_KINDS),
+  });
   return {
     readModel,
     close: handle.close,

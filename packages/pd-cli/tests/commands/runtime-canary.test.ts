@@ -50,6 +50,9 @@ vi.mock('../../src/services/feature-flag-loader.js', () => ({
     source: 'defaults',
     configPath: '/fake/workspace/.pd/feature-flags.yaml',
     flags: {
+      prompt: { id: 'prompt', category: 'core', enabled: true, since: '2026-05-24' },
+      code_tool_hook: { id: 'code_tool_hook', category: 'core', enabled: true, since: '2026-05-24' },
+      defer_archive: { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24' },
       gfi: { id: 'gfi', category: 'quiet', enabled: true, since: '2026-05-24' },
     },
     warnings: [],
@@ -100,7 +103,7 @@ function healthyQueueSnapshot() {
     leaseConflictSummary: { count: 0, samples: [], sampleTaskIds: [] },
     retryWaitPendingSummary: { count: 0, samples: [] },
     unresolvableSummary: { count: 0, samples: [] },
-    readyTasks: [], noReadyTasks: null,
+    readyTasks: [], noReadyTasks: null, suppressedTasks: [],
   };
 }
 
@@ -227,6 +230,7 @@ describe('runCanaryChecks', () => {
         { taskId: 'task-def-456', taskKind: 'philosopher', channel: 'pi' },
       ],
       noReadyTasks: null,
+      suppressedTasks: [],
     });
 
     const result = await runCanaryChecks(WS);
@@ -254,6 +258,7 @@ describe('runCanaryChecks', () => {
       unresolvableSummary: { count: 0, samples: [] },
       readyTasks: [],
       noReadyTasks: { reason: 'all_hydration_failed', inspectedCount: 5 },
+      suppressedTasks: [],
     });
 
     const result = await runCanaryChecks(WS);

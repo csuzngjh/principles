@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS principle_candidates (
   task_id TEXT NOT NULL,
   status TEXT NOT NULL,
   source_run_id TEXT,
+  recommendation_kind TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -123,10 +124,10 @@ describe('Chain Integrity — Real Production Path', () => {
     ).run(opts.artifactId, opts.runId ?? 'run-default', opts.taskId, opts.artifactKind, opts.contentJson ?? '{}');
   }
 
-  function insertCandidate(opts: { candidateId: string; taskId: string; status: string; sourceRunId?: string }) {
+  function insertCandidate(opts: { candidateId: string; taskId: string; status: string; sourceRunId?: string; recommendationKind?: string }) {
     db.prepare(
-      `INSERT OR REPLACE INTO principle_candidates (candidate_id, task_id, status, source_run_id) VALUES (?, ?, ?, ?)`,
-    ).run(opts.candidateId, opts.taskId, opts.status, opts.sourceRunId ?? null);
+      `INSERT OR REPLACE INTO principle_candidates (candidate_id, task_id, status, source_run_id, recommendation_kind) VALUES (?, ?, ?, ?, ?)`,
+    ).run(opts.candidateId, opts.taskId, opts.status, opts.sourceRunId ?? null, opts.recommendationKind ?? 'principle');
   }
 
   it('dependency artifact exists and lineage correct → healthy/passed', () => {
