@@ -56,6 +56,7 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
     score: opts.score ?? 80,
     sessionId: 'cli',
     agentId: 'pd-cli',
+    provenance: 'owner_reported_no_host_trace',
     recordObservability: true,
   });
 

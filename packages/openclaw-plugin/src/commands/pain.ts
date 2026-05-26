@@ -4,6 +4,9 @@ import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.
 import { normalizeCommandArgs } from '../utils/io.js';
 import { resolvePluginCommandWorkspaceDir } from '../utils/workspace-resolver.js';
 import type { EmpathyEventStats } from '../types/event-types.js';
+import type { EvolutionLoopEvent } from '../core/evolution-types.js';
+import { computeHash } from '../utils/hashing.js';
+import { PainToPrincipleService, PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
 
 /**
  * Creates a visual progress bar (e.g., [██████░░░░])
@@ -267,4 +270,90 @@ function handleEmpathySubcommand(
     }
 
     return { text };
+}
+
+export async function handlePainReportCommand(ctx: PluginCommandContext): Promise<PluginCommandResult> {
+  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'pain-report');
+  const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
+  const lang = (ctx.config?.language as string) || 'en';
+  const isZh = lang === 'zh';
+  const { sessionId } = ctx as SessionAwareCommandContext;
+  const args = normalizeCommandArgs(ctx.args).trim();
+
+  if (!args) {
+    return {
+      text: isZh
+        ? '❌ 请提供 pain reason。用法: `/pd-pain <描述你遇到的问题>`'
+        : '❌ Please provide a pain reason. Usage: `/pd-pain <describe the issue you encountered>`',
+    };
+  }
+
+  if (!sessionId || sessionId === 'unknown') {
+    return {
+      text: isZh
+        ? '❌ 无法获取当前会话 ID。请在 OpenClaw 对话会话中使用此命令。'
+        : '❌ Session ID not available. Please use this command in an OpenClaw chat session.',
+    };
+  }
+
+  const painId = `manual_${Date.now()}_${computeHash(sessionId).slice(0, 8)}`;
+  const painData = {
+    painId,
+    painType: 'user_frustration' as const,
+    source: 'manual',
+    reason: args,
+    score: 90,
+    sessionId,
+    agentId: 'openclaw-host',
+    provenance: 'openclaw_context_bound' as const,
+  };
+
+  try {
+    const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
+    const service = new PainToPrincipleService({
+      workspaceDir: wctx.workspaceDir,
+      stateDir: wctx.stateDir,
+      ledgerAdapter,
+      owner: 'openclaw-plugin',
+      autoIntakeEnabled: true,
+    });
+
+    const result = await service.recordPain({
+      painId: painData.painId,
+      painType: painData.painType,
+      source: painData.source,
+      reason: painData.reason,
+      score: painData.score,
+      sessionId: painData.sessionId,
+      agentId: painData.agentId,
+      provenance: painData.provenance,
+      recordObservability: true,
+    });
+
+    if (result.status === 'succeeded') {
+      wctx.evolutionReducer.emitSync({
+        ts: new Date().toISOString(),
+        type: 'pain_detected',
+        data: painData,
+      } as EvolutionLoopEvent);
+
+      return {
+        text: isZh
+          ? `✅ Pain 已记录 (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: openclaw_context_bound\n📌 **Session**: ${sessionId}\n\n系统将基于当前会话上下文进行诊断。`
+          : `✅ Pain recorded (context-bound)\n\n📋 **Pain ID**: ${painId}\n📝 **Reason**: ${args}\n🔗 **Provenance**: openclaw_context_bound\n📌 **Session**: ${sessionId}\n\nThe system will diagnose using current session context.`,
+      };
+    }
+
+    return {
+      text: isZh
+        ? `⚠️ Pain 记录未成功 (status: ${result.status})。请检查系统日志或使用 \`/pd-status\` 查看状态。`
+        : `⚠️ Pain recording not accepted (status: ${result.status}). Check system logs or use \`/pd-status\` for status.`,
+    };
+  } catch (err) {
+    return {
+      text: isZh
+        ? `❌ Pain 记录失败: ${String(err)}。请检查系统日志或重试。`
+        : `❌ Failed to record pain: ${String(err)}. Check system logs or try again.`,
+    };
+  }
 }
