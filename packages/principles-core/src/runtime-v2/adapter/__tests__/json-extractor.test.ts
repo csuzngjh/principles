@@ -94,4 +94,82 @@ describe('extractJsonObject', () => {
     const result = extractJsonObject(input);
     expect(result).toEqual({ taskId: 't1', summary: 'Use {braces} for objects', score: 0.5 });
   });
+
+  it('parses JSON with escaped quotes inside string values', () => {
+    const input = '{"taskId":"t1","message":"He said \\"hello\\""}';
+    const result = extractJsonObject(input);
+    expect(result).toEqual({ taskId: 't1', message: 'He said "hello"' });
+  });
+
+  it('parses JSON with null values', () => {
+    const input = '{"taskId":"t1","optional":null}';
+    const result = extractJsonObject(input);
+    expect(result).toEqual({ taskId: 't1', optional: null });
+  });
+
+  it('parses JSON with boolean and number values', () => {
+    const input = '{"active":true,"count":42,"ratio":3.14,"negative":-1}';
+    const result = extractJsonObject(input);
+    expect(result).toEqual({ active: true, count: 42, ratio: 3.14, negative: -1 });
+  });
+
+  it('returns null for array containing objects at top level', () => {
+    const input = '[{"a":1},{"b":2}]';
+    const result = extractJsonObject(input);
+    expect(result).toBeNull();
+  });
+
+  it('parses JSON with Unicode characters', () => {
+    const input = '{"taskId":"t1","label":"\\u4f60\\u597d"}';
+    const result = extractJsonObject(input);
+    expect(result).toEqual({ taskId: 't1', label: '\u4f60\u597d' });
+  });
+
+  it('parses JSON with escaped backslash in string', () => {
+    const input = '{"path":"C:\\\\Users\\\\test"}';
+    const result = extractJsonObject(input);
+    expect(result).toEqual({ path: 'C:\\Users\\test' });
+  });
+
+  it('parses deeply nested JSON object', () => {
+    const input = '{"a":{"b":{"c":{"d":"deep"}}}}';
+    const result = extractJsonObject(input);
+    expect(result).toEqual({ a: { b: { c: { d: 'deep' } } } });
+  });
+
+  it('returns null for string with unmatched opening brace', () => {
+    const input = 'some text { "key": "value" no close';
+    const result = extractJsonObject(input);
+    expect(result).toBeNull();
+  });
+
+  it('parses JSON object after prose prefix', () => {
+    const input = 'Result: {"found":true}';
+    const result = extractJsonObject(input);
+    expect(result).toEqual({ found: true });
+  });
+
+  it('handles code fence with extra whitespace', () => {
+    const input = '```  json  \n  {"taskId":"t1"}  \n```';
+    const result = extractJsonObject(input);
+    expect(result).toEqual({ taskId: 't1' });
+  });
+
+  it('returns null for bracket-scanned array starting with [ that contains an object with escaped quotes', () => {
+    const input = '[{"msg":"He said \\"hello\\""}]';
+    const result = extractJsonObject(input);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for bracket-scanned array with escaped backslash inside string', () => {
+    const input = '[{"path":"C:\\\\Users"}]';
+    const result = extractJsonObject(input);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for bracket-scanned array with nested braces inside strings', () => {
+    const input = '[{"template":"Use {braces} here"}]';
+    const result = extractJsonObject(input);
+    expect(result).toBeNull();
+  });
 });
