@@ -16,11 +16,14 @@ import * as path from 'path';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';
+import { getGlobalShimPaths } from './mvp-config.js';
 
 export interface UninstallResult {
   success: boolean;
   removedDirs: string[];
   removedFiles: string[];
+  removedGlobalShims: string[];
+  skippedGlobalShims: string[];
   preservedPaths: string[];  // 保留的路径（供用户确认）
   error?: string;
 }
@@ -57,6 +60,39 @@ export function checkInstallStatus(): {
 }
 
 /**
+ * 清理全局 pd shim 文件
+ */
+async function removeGlobalPdShim(): Promise<{ removed: string[]; skipped: string[] }> {
+  const removed: string[] = [];
+  const skipped: string[] = [];
+  
+  const shimPaths = getGlobalShimPaths();
+  
+  if (shimPaths.length === 0) {
+    logger.info('无法检测 npm 全局 bin 目录，跳过全局命令清理');
+    return { removed, skipped };
+  }
+  
+  for (const shimPath of shimPaths) {
+    if (!existsSync(shimPath)) {
+      skipped.push(shimPath);
+      continue;
+    }
+    
+    try {
+      await fse.remove(shimPath);
+      removed.push(shimPath);
+      logger.success(`已删除全局命令: ${shimPath}`);
+    } catch (error) {
+      logger.warn(`删除全局命令失败: ${shimPath} - ${error instanceof Error ? error.message : String(error)}`);
+      skipped.push(shimPath);
+    }
+  }
+  
+  return { removed, skipped };
+}
+
+/**
  * 获取用户工作区路径（用于显示保护提醒）
  */
 function getWorkspacePath(): string | null {
@@ -89,6 +125,8 @@ export async function uninstall(
     success: false,
     removedDirs: [],
     removedFiles: [],
+    removedGlobalShims: [],
+    skippedGlobalShims: [],
     preservedPaths: [],
   };
   
@@ -162,7 +200,14 @@ export async function uninstall(
       }
     }
     
-    // 6. 记录保留的路径
+    // 6. 清理全局 pd shim
+    console.log('\n');
+    logger.info('正在清理全局命令...');
+    const { removed, skipped } = await removeGlobalPdShim();
+    result.removedGlobalShims = removed;
+    result.skippedGlobalShims = skipped;
+    
+    // 7. 记录保留的路径
     if (workspaceDir) {
       result.preservedPaths.push(workspaceDir);
       if (existsSync(path.join(workspaceDir, '.principles'))) {
