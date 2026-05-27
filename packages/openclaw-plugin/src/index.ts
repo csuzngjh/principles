@@ -228,7 +228,7 @@ const plugin = {
         if (!workspaceDir) {
           api.logger.error(
             `[PD:llm_output] workspaceDir resolution failed. ` +
-            `agentId=${(ctx as unknown as Record<string, unknown>).agentId ?? '(missing)'} ` +
+            `agentId=${ctx.agentId ?? '(missing)'} ` +
             `sessionId=${ctx.sessionId ?? '(missing)'}. ` +
             `Hook skipped — LLM analysis bypassed. ` +
             `NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json with {"workspace":"<path>"}`,
@@ -369,19 +369,40 @@ const plugin = {
     // ── Hook: Lifecycle ──
     api.on('before_reset', (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_reset');
-      if (!workspaceDir) return;
+      if (!workspaceDir) {
+        api.logger.error(
+          `[PD:before_reset] workspaceDir resolution failed. ` +
+          `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+          `Hook skipped. NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json`,
+        );
+        return;
+      }
       return handleBeforeReset(event, { ...ctx, workspaceDir });
     });
     
     api.on('before_compaction', (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_compaction');
-      if (!workspaceDir) return;
+      if (!workspaceDir) {
+        api.logger.error(
+          `[PD:before_compaction] workspaceDir resolution failed. ` +
+          `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+          `Hook skipped. NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json`,
+        );
+        return;
+      }
       return handleBeforeCompaction(event, { ...ctx, workspaceDir });
     });
     
     api.on('after_compaction', (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_compaction');
-      if (!workspaceDir) return;
+      if (!workspaceDir) {
+        api.logger.error(
+          `[PD:after_compaction] workspaceDir resolution failed. ` +
+          `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+          `Hook skipped. NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json`,
+        );
+        return;
+      }
       return handleAfterCompaction(event, { ...ctx, workspaceDir });
     });
 
