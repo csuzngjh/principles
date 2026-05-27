@@ -644,7 +644,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When writing trust-boundary code (reading from DB, parsing config, injecting into prompt): (1) never use `as` on untrusted data — use `typeof` checks; (2) always use existing project dependencies for parsing (js-yaml, not hand-rolled); (3) always filter by both channel AND action; (4) always check validation_status; (5) always enforce budget limits; (6) always use normalized workspace paths from context objects.
 - **Source**: PRI-261 / PR #727
 - **Date**: 2026-05-27
-- **Recurrence**: Same root cause as ERR-001, ERR-005, ERR-027
+- **Recurrence**: Same root cause as ERR-001, ERR-005, ERR-027. Recurred again in second review pass: `mapRowToRecord()` still converted malformed required fields to `''` instead of returning null, and `as Record<string, unknown>` remained in both `SqliteActivationStateStore` and plugin reader. Required fields must be non-empty or the entire row is rejected — empty-string defaults on activation_id/artifact_id/action/activated_at silently produce invalid activation records that pass downstream validation.
 
 ---
 

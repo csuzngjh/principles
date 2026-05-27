@@ -534,4 +534,73 @@ describe('Runtime V2 prompt activation — additional guard tests', () => {
     expect(result.principles).toHaveLength(0);
     expect(result.warnings.some((w) => w.includes('artifact_not_validated'))).toBe(true);
   });
+
+  it('malformed activation row with empty artifact_id is rejected', async () => {
+    const db = sqliteConn.getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('', 'idem-empty-artifact', '', 'prompt', 'prompt_activate', '', now);
+
+    const store = new SqliteActivationStateStore(sqliteConn);
+    const activations = await store.listPromptActivations();
+    const emptyArtifact = activations.find((a) => a.idempotencyKey === 'idem-empty-artifact');
+    expect(emptyArtifact).toBeUndefined();
+  });
+
+  it('malformed activation row with empty activation_id is rejected', async () => {
+    const db = sqliteConn.getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('', 'idem-empty-actid', 'some-artifact', 'prompt', 'prompt_activate', '', now);
+
+    const store = new SqliteActivationStateStore(sqliteConn);
+    const activations = await store.listPromptActivations();
+    const emptyActId = activations.find((a) => a.idempotencyKey === 'idem-empty-actid');
+    expect(emptyActId).toBeUndefined();
+  });
+
+  it('malformed activation row with empty action is rejected', async () => {
+    const db = sqliteConn.getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('act-malformed-action', 'idem-empty-action', 'some-artifact', 'prompt', '', '', now);
+
+    const store = new SqliteActivationStateStore(sqliteConn);
+    const activations = await store.listPromptActivations();
+    const emptyAction = activations.find((a) => a.idempotencyKey === 'idem-empty-action');
+    expect(emptyAction).toBeUndefined();
+  });
+
+  it('malformed activation row with empty activated_at is rejected', async () => {
+    const db = sqliteConn.getDb();
+    db.prepare(`
+      INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('act-malformed-at', 'idem-empty-at', 'some-artifact', 'prompt', 'prompt_activate', '', '');
+
+    const store = new SqliteActivationStateStore(sqliteConn);
+    const activations = await store.listPromptActivations();
+    const emptyAt = activations.find((a) => a.idempotencyKey === 'idem-empty-at');
+    expect(emptyAt).toBeUndefined();
+  });
+
+  it('malformed activation row with invalid channel is rejected', async () => {
+    const db = sqliteConn.getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('act-bad-channel', 'idem-bad-channel', 'some-artifact', 'invalid_channel', 'prompt_activate', '', now);
+
+    const store = new SqliteActivationStateStore(sqliteConn);
+    const activations = await store.listPromptActivations();
+    const badChannel = activations.find((a) => a.idempotencyKey === 'idem-bad-channel');
+    expect(badChannel).toBeUndefined();
+  });
 });

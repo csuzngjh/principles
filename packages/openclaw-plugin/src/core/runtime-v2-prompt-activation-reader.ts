@@ -148,12 +148,7 @@ export class PromptActivationReader {
   ): { ok: true; principle: ActivatedPrinciple } | { ok: false; warning: string } {
     const db = sqliteConn.getDb();
 
-    let artifactRow: {
-      artifact_id: string;
-      artifact_kind: string;
-      content_json: string;
-      validation_status: string;
-    } | undefined;
+    let contentJson: string;
 
     try {
       const row = db.prepare(`
@@ -162,37 +157,40 @@ export class PromptActivationReader {
         WHERE artifact_id = ?
       `).get(activation.artifactId);
 
-      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      if (!isRecord(row)) {
         return { ok: false, warning: `artifact_query_unexpected: artifactId=${activation.artifactId}; nextAction=check_pi_artifacts_table` };
       }
 
-      const r = row as Record<string, unknown>;
-      artifactRow = {
-        artifact_id: typeof r.artifact_id === 'string' ? r.artifact_id : '',
-        artifact_kind: typeof r.artifact_kind === 'string' ? r.artifact_kind : '',
-        content_json: typeof r.content_json === 'string' ? r.content_json : '',
-        validation_status: typeof r.validation_status === 'string' ? r.validation_status : '',
-      };
+      const artifact_id = Object.hasOwn(row, 'artifact_id') && typeof row.artifact_id === 'string' && row.artifact_id.length > 0 ? row.artifact_id : null;
+      const artifact_kind = Object.hasOwn(row, 'artifact_kind') && typeof row.artifact_kind === 'string' ? row.artifact_kind : null;
+      const raw_content_json = Object.hasOwn(row, 'content_json') && typeof row.content_json === 'string' ? row.content_json : null;
+      const validation_status = Object.hasOwn(row, 'validation_status') && typeof row.validation_status === 'string' ? row.validation_status : null;
+
+      if (!artifact_id) {
+        return { ok: false, warning: `artifact_not_found: artifactId=${activation.artifactId} activationId=${activation.activationId}; nextAction=verify_artifact_exists_or_remove_stale_activation` };
+      }
+
+      if (artifact_kind !== 'principle') {
+        return { ok: false, warning: `artifact_not_principle: artifactId=${artifact_id} kind=${artifact_kind ?? 'missing'}; nextAction=skip_non_principle_activations` };
+      }
+
+      if (validation_status !== 'validated') {
+        return { ok: false, warning: `artifact_not_validated: artifactId=${artifact_id} status=${validation_status ?? 'missing'}; nextAction=skip_unvalidated_artifacts` };
+      }
+
+      if (raw_content_json === null) {
+        return { ok: false, warning: `artifact_missing_content_json: artifactId=${artifact_id}; nextAction=ensure_artifact_has_content_json` };
+      }
+
+      contentJson = raw_content_json;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return { ok: false, warning: `artifact_query_failed: artifactId=${activation.artifactId} reason=${msg}; nextAction=check_pi_artifacts_table` };
     }
 
-    if (!artifactRow.artifact_id) {
-      return { ok: false, warning: `artifact_not_found: artifactId=${activation.artifactId} activationId=${activation.activationId}; nextAction=verify_artifact_exists_or_remove_stale_activation` };
-    }
-
-    if (artifactRow.artifact_kind !== 'principle') {
-      return { ok: false, warning: `artifact_not_principle: artifactId=${activation.artifactId} kind=${artifactRow.artifact_kind}; nextAction=skip_non_principle_activations` };
-    }
-
-    if (artifactRow.validation_status !== 'validated') {
-      return { ok: false, warning: `artifact_not_validated: artifactId=${activation.artifactId} status=${artifactRow.validation_status}; nextAction=skip_unvalidated_artifacts` };
-    }
-
     let parsed: unknown;
     try {
-      parsed = JSON.parse(artifactRow.content_json);
+      parsed = JSON.parse(contentJson);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return { ok: false, warning: `artifact_content_json_parse_error: artifactId=${activation.artifactId} reason=${msg}; nextAction=fix_artifact_content_json` };

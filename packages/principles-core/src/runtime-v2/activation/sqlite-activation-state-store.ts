@@ -1,6 +1,16 @@
 import type { ActivationStateReadModel, ActivationStatusRecord } from './activation-types.js';
 import type { SqliteConnection } from '../store/sqlite-connection.js';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readStringField(row: Record<string, unknown>, key: string): string | null {
+  if (!Object.hasOwn(row, key)) return null;
+  const val = row[key];
+  return typeof val === 'string' && val.length > 0 ? val : null;
+}
+
 function validateChannel(value: unknown): ActivationStatusRecord['channel'] | null {
   if (typeof value !== 'string') return null;
   const valid = ['prompt', 'defer_archive', 'code_tool_hook'] as const;
@@ -10,17 +20,32 @@ function validateChannel(value: unknown): ActivationStatusRecord['channel'] | nu
   return null;
 }
 
-function mapRowToRecord(row: Record<string, unknown>): ActivationStatusRecord | null {
+function mapRowToRecord(row: unknown): ActivationStatusRecord | null {
+  if (!isRecord(row)) return null;
+
   const channel = validateChannel(row.channel);
   if (!channel) return null;
+
+  const activationId = readStringField(row, 'activation_id');
+  const idempotencyKey = readStringField(row, 'idempotency_key');
+  const artifactId = readStringField(row, 'artifact_id');
+  const action = readStringField(row, 'action');
+  const activatedAt = readStringField(row, 'activated_at');
+
+  if (!activationId || !idempotencyKey || !artifactId || !action || !activatedAt) {
+    return null;
+  }
+
+  const targetRef = readStringField(row, 'target_ref');
+
   return {
-    activationId: typeof row.activation_id === 'string' ? row.activation_id : '',
-    idempotencyKey: typeof row.idempotency_key === 'string' ? row.idempotency_key : '',
-    artifactId: typeof row.artifact_id === 'string' ? row.artifact_id : '',
+    activationId,
+    idempotencyKey,
+    artifactId,
     channel,
-    action: typeof row.action === 'string' ? row.action : '',
-    targetRef: typeof row.target_ref === 'string' ? row.target_ref : '',
-    activatedAt: typeof row.activated_at === 'string' ? row.activated_at : '',
+    action,
+    targetRef: targetRef ?? '',
+    activatedAt,
   };
 }
 
@@ -35,9 +60,7 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
       WHERE idempotency_key = ?
     `).get(idempotencyKey);
 
-    if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
-
-    return mapRowToRecord(row as Record<string, unknown>);
+    return mapRowToRecord(row);
   }
 
   async recordActivation(record: ActivationStatusRecord): Promise<void> {
@@ -71,8 +94,7 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
 
     const result: ActivationStatusRecord[] = [];
     for (const row of rows) {
-      if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
-      const record = mapRowToRecord(row as Record<string, unknown>);
+      const record = mapRowToRecord(row);
       if (record) result.push(record);
     }
     return result;
