@@ -13,6 +13,7 @@ import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
 import { getCachedMaskedPrincipleSet } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
+import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../core/runtime-v2-prompt-activation-reader.js';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
@@ -702,6 +703,54 @@ ${heartbeatChecklist}
     logger?.warn?.(`[PD:Prompt] Failed to load evolution principles: ${String(e)}`);
   }
 
+  let runtimeV2PrinciplesContent = '';
+  const runtimeV2PrincipleIds = new Set<string>();
+  try {
+    const reader = new PromptActivationReader(wctx.workspaceDir, { logger });
+    const v2Result = await reader.readActivatedPrinciples();
+
+    if (v2Result.warnings.length > 0) {
+      logger?.info?.(`[PD:RuntimeV2] Activation read warnings: ${v2Result.warnings.join('; ')}`);
+    }
+
+    const legacyActiveIds = new Set<string>();
+    try {
+      const legacyActive = wctx.evolutionReducer.getActivePrinciples();
+      for (const p of legacyActive) {
+        legacyActiveIds.add(p.id);
+      }
+      const legacyProbation = wctx.evolutionReducer.getProbationPrinciples();
+      for (const p of legacyProbation) {
+        legacyActiveIds.add(p.id);
+      }
+    } catch {
+      // best-effort dedup
+    }
+
+    const dedupedV2 = v2Result.principles.filter((p) => !legacyActiveIds.has(p.principleId));
+
+    if (dedupedV2.length > 0) {
+      let remaining = RUNTIME_V2_PRINCIPLE_BUDGET;
+      const lines: string[] = [];
+      lines.push('Runtime V2 activated principles (owner-approved):');
+      remaining -= 'Runtime V2 activated principles (owner-approved):'.length;
+
+      for (const p of dedupedV2) {
+        const entry = `- [${escapeXml(p.principleId)}] ${escapeXml(p.text)}`;
+        if (remaining < entry.length + 1) {
+          logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — truncating after ${lines.length - 1} principles`);
+          break;
+        }
+        lines.push(entry);
+        remaining -= entry.length + 1;
+        runtimeV2PrincipleIds.add(p.principleId);
+      }
+      runtimeV2PrinciplesContent = lines.join('\n');
+    }
+  } catch (e) {
+    logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);
+  }
+
   // Build appendSystemContext with recency effect
   // Content order (most important last): behavioral_constraints -> project_context -> working_memory -> reflection_log -> thinking_os -> principles
   const appendParts: string[] = [];
@@ -730,9 +779,10 @@ ${empathySilenceConstraint}
     appendParts.push(`<thinking_os>\n${thinkingOsContent}\n</thinking_os>`);
   }
 
-  // 3. Evolution Loop principles (active/probation)
-  if (evolutionPrinciplesContent) {
-    appendParts.push(`<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`);
+  // 3. Evolution Loop principles (active/probation + Runtime V2 activated)
+  const combinedEvolutionContent = [evolutionPrinciplesContent, runtimeV2PrinciplesContent].filter(Boolean).join('\n');
+  if (combinedEvolutionContent) {
+    appendParts.push(`<evolution_principles>\n${combinedEvolutionContent}\n</evolution_principles>`);
   }
 
   // Routing Guidance (section 5 — injected between evolution principles and core principles)
@@ -882,7 +932,7 @@ ${attitudeDirective}
     appendSystemContext,
     {
       diagnosticianMode: pendingDiagTaskCount > 0,
-      blocks: { projectContextContent, thinkingOsContent, evolutionPrinciplesContent },
+      blocks: { projectContextContent, thinkingOsContent, evolutionPrinciplesContent: combinedEvolutionContent || evolutionPrinciplesContent },
     }
   );
 
