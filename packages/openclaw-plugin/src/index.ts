@@ -64,6 +64,10 @@ let workspaceInitialized = false;
 // Track started evolution workers — one per workspace
 const startedWorkspaces = new Set<string>();
 
+const HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION =
+  'verify gateway plugin activation and hook workspace binding; ' +
+  'migrate live hook workspace resolution to PD-owned canonical configuration before relying on config-based recovery';
+
 // Map from childSessionKey → shadowObservationId
 // Used to complete shadow observations when subagent ends
 const pendingShadowObservations = new Map<string, string>();
@@ -104,7 +108,7 @@ const plugin = {
             `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
             `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
             `Hook skipped — no mutation will occur. ` +
-            `NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json with {"workspace":"<path>"}`,
+            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
           );
           return;
         }
@@ -163,7 +167,7 @@ const plugin = {
             `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
             `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
             `Hook skipped — security gate bypassed. ` +
-            `NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json with {"workspace":"<path>"}`,
+            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
           );
           return;
         }
@@ -198,7 +202,7 @@ const plugin = {
             `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
             `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
             `Hook skipped — pain detection bypassed. ` +
-            `NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json with {"workspace":"<path>"}`,
+            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
           );
           return;
         }
@@ -231,7 +235,7 @@ const plugin = {
             `agentId=${ctx.agentId ?? '(missing)'} ` +
             `sessionId=${ctx.sessionId ?? '(missing)'}. ` +
             `Hook skipped — LLM analysis bypassed. ` +
-            `NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json with {"workspace":"<path>"}`,
+            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
           );
           return;
         }
@@ -373,7 +377,7 @@ const plugin = {
         api.logger.error(
           `[PD:before_reset] workspaceDir resolution failed. ` +
           `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
-          `Hook skipped. NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json`,
+          `Hook skipped. NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
         );
         return;
       }
@@ -386,7 +390,7 @@ const plugin = {
         api.logger.error(
           `[PD:before_compaction] workspaceDir resolution failed. ` +
           `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
-          `Hook skipped. NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json`,
+          `Hook skipped. NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
         );
         return;
       }
@@ -399,7 +403,7 @@ const plugin = {
         api.logger.error(
           `[PD:after_compaction] workspaceDir resolution failed. ` +
           `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
-          `Hook skipped. NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json`,
+          `Hook skipped. NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
         );
         return;
       }

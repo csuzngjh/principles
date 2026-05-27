@@ -36,12 +36,14 @@ export function getLlmE2eConfig(): LlmE2eTestConfig | null {
   }
 
   if (sensenovaApiKey) {
+    const provider = process.env.LLM_E2E_PROVIDER ?? 'sensenova';
+    const isSensenova = provider === 'sensenova';
     return {
       apiKey: sensenovaApiKey,
       model: process.env.LLM_E2E_MODEL ?? SENSENOVA_DEFAULT_MODEL,
-      provider: process.env.LLM_E2E_PROVIDER ?? 'sensenova',
+      provider,
       apiKeyEnv: process.env.SENSENOVA_API_KEY ? 'SENSENOVA_API_KEY' : 'ANTHROPIC_AUTH_TOKEN',
-      baseUrl: process.env.LLM_E2E_BASE_URL ?? SENSENOVA_DEFAULT_BASE_URL,
+      baseUrl: process.env.LLM_E2E_BASE_URL ?? (isSensenova ? SENSENOVA_DEFAULT_BASE_URL : undefined),
       timeoutMs: 120_000,
       maxRetries: 2,
       reasoning: false,

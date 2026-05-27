@@ -85,4 +85,29 @@ describe('getLlmE2eConfig', () => {
     expect(config.baseUrl).toBe('https://token.sensenova.cn/v1');
     expect(config.apiKeyEnv).toBe('ANTHROPIC_AUTH_TOKEN');
   });
+
+  it('SENSENOVA_API_KEY fallback with non-sensenova provider does not get sensenova baseUrl', () => {
+    delete process.env.LLM_E2E_API_KEY;
+    process.env.SENSENOVA_API_KEY = 'sensenova-key';
+    process.env.LLM_E2E_PROVIDER = 'openrouter';
+    delete process.env.LLM_E2E_BASE_URL;
+    const config = getLlmE2eConfig();
+    expect(config).not.toBeNull();
+    if (!config) return;
+    expect(config.provider).toBe('openrouter');
+    expect(config.baseUrl).toBeUndefined();
+  });
+
+  it('ANTHROPIC_AUTH_TOKEN fallback with non-sensenova provider does not get sensenova baseUrl', () => {
+    delete process.env.LLM_E2E_API_KEY;
+    delete process.env.SENSENOVA_API_KEY;
+    process.env.ANTHROPIC_AUTH_TOKEN = 'anthropic-key';
+    process.env.LLM_E2E_PROVIDER = 'openrouter';
+    delete process.env.LLM_E2E_BASE_URL;
+    const config = getLlmE2eConfig();
+    expect(config).not.toBeNull();
+    if (!config) return;
+    expect(config.provider).toBe('openrouter');
+    expect(config.baseUrl).toBeUndefined();
+  });
 });
