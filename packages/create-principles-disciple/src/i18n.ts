@@ -74,6 +74,11 @@ const translations: Record<Language, Record<string, string>> = {
     pd_installed: 'Principles Disciple is installed',
     pd_not_installed: 'Principles Disciple is not installed',
     install_hint: 'Install with:',
+    // npm error hints
+    npm_hint_network_timeout: 'Hint: Network timeout. Try:\n  1. Switch npm registry: npm config set registry https://registry.npmmirror.com\n  2. Check network connection\n  3. Manual: cd {path} && npm install --ignore-scripts',
+    npm_hint_permission_denied: 'Hint: Permission denied. Check directory permissions or run as administrator.',
+    npm_hint_disk_space: 'Hint: Insufficient disk space. Please clean up and try again.',
+    npm_hint_manual_fix: 'Manual fix: cd {path} && npm install --ignore-scripts',
   },
   zh: {
     select_language: '选择语言',
@@ -148,6 +153,11 @@ const translations: Record<Language, Record<string, string>> = {
     pd_installed: 'Principles Disciple 已安装',
     pd_not_installed: 'Principles Disciple 未安装',
     install_hint: '通过以下命令安装：',
+    // npm 错误提示
+    npm_hint_network_timeout: '提示：网络连接超时，可尝试：\n  1. 切换 npm 源：npm config set registry https://registry.npmmirror.com\n  2. 检查网络连接\n  3. 手动执行：cd {path} && npm install --ignore-scripts',
+    npm_hint_permission_denied: '提示：权限不足，请检查目录权限或以管理员身份运行。',
+    npm_hint_disk_space: '提示：磁盘空间不足，请清理后重试。',
+    npm_hint_manual_fix: '手动修复：cd {path} && npm install --ignore-scripts',
   },
 };
 

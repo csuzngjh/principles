@@ -24,6 +24,101 @@ import {
 
 const INSTALL_TIMEOUT_MS = parseInt(process.env.PD_INSTALL_TIMEOUT_MS || '300000', 10);
 
+// 超时常量
+const PD_CLI_VERIFICATION_TIMEOUT_MS = 10_000;
+const STORY_A_VERIFICATION_TIMEOUT_MS = 30_000;
+const CONSOLE_HEALTH_CHECK_TIMEOUT_MS = 8_000;
+const CONSOLE_WARMUP_TIME_MS = 6_000;
+
+// 端口范围常量
+const CONSOLE_PORT_RANGE_MIN = 3100;
+const CONSOLE_PORT_RANGE_MAX = 3199;
+
+// 允许的原生模块白名单
+const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
+
+/**
+ * 验证原生模块名称，防止命令注入
+ */
+function validateNativeModule(moduleName: string): void {
+  if (!ALLOWED_NATIVE_MODULES.includes(moduleName)) {
+    throw new Error(`Security error: Native module "${moduleName}" is not in the allowed list`);
+  }
+}
+
+/**
+ * 执行 npm install 并提供友好的错误提示
+ */
+async function runNpmInstall(cwd: string, componentName: string = 'npm'): Promise<void> {
+  const execOpts = getCapturingExecOptions(cwd);
+  try {
+    execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
+  } catch (e) {
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    let hint = '';
+    
+    // 动态导入 i18n 以避免循环依赖
+    const { t, getLanguage } = await import('./i18n.js');
+    const lang = getLanguage();
+    
+    if (errorMsg.includes('ETIMEDOUT') || errorMsg.includes('network') || errorMsg.includes('timeout')) {
+      hint = '\n\n' + t('npm_hint_network_timeout').replace('{path}', cwd);
+    } else if (errorMsg.includes('EACCES') || errorMsg.includes('permission') || errorMsg.includes('EPERM')) {
+      hint = '\n\n' + t('npm_hint_permission_denied');
+    } else if (errorMsg.includes('ENOSPC')) {
+      hint = '\n\n' + t('npm_hint_disk_space');
+    } else {
+      hint = '\n\n' + t('npm_hint_manual_fix').replace('{path}', cwd);
+    }
+    
+    throw new Error(`${componentName} npm install failed: ${errorMsg}${hint}`, { cause: e });
+  }
+}
+
+/**
+ * 重建原生模块
+ */
+async function rebuildNativeModules(cwd: string, componentName: string): Promise<void> {
+  for (const mod of ALLOWED_NATIVE_MODULES) {
+    const modPath = path.join(cwd, 'node_modules', mod);
+    if (!existsSync(modPath)) continue;
+    
+    try {
+      execSync(`npm rebuild ${mod}`, getCapturingExecOptions(cwd));
+    } catch (e) {
+      throw new Error(`${componentName} native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${cwd} && npm rebuild ${mod}`, { cause: e });
+    }
+  }
+}
+
+/**
+ * 验证原生模块
+ */
+function verifyNativeModules(cwd: string, componentName: string): void {
+  for (const nativeMod of ALLOWED_NATIVE_MODULES) {
+    const nativeModPath = path.join(cwd, 'node_modules', nativeMod);
+    if (!existsSync(nativeModPath)) continue;
+    
+    try {
+      execFileSync(process.execPath, ['-e', `require('${nativeMod}')`], { cwd, stdio: 'pipe' });
+    } catch {
+      throw new Error(`${componentName} native module ${nativeMod} verification failed after rebuild. The install cannot proceed.`);
+    }
+  }
+}
+
+/**
+ * 验证路径是否在工作区目录内，防止路径遍历攻击
+ */
+function validateWorkspacePath(targetPath: string, workspaceDir: string): void {
+  const resolved = path.resolve(targetPath);
+  const workspace = path.resolve(workspaceDir);
+  
+  if (!resolved.startsWith(workspace + path.sep) && resolved !== workspace) {
+    throw new Error(`Security error: Path "${targetPath}" is outside workspace directory "${workspaceDir}"`);
+  }
+}
+
 interface InstallStep {
   name: string;
   weight: number;
@@ -256,48 +351,11 @@ async function installPluginDependencies(): Promise<void> {
   }
 
   if (needsInstall) {
-    const execOpts = getCapturingExecOptions(extDir);
-    try {
-      execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      let hint = '';
-      
-      if (errorMsg.includes('ETIMEDOUT') || errorMsg.includes('network') || errorMsg.includes('timeout')) {
-        hint = '\n\n提示：网络连接超时，可尝试：\n  1. 切换 npm 源：npm config set registry https://registry.npmmirror.com\n  2. 检查网络连接\n  3. 手动执行：cd ' + extDir + ' && npm install --ignore-scripts';
-      } else if (errorMsg.includes('EACCES') || errorMsg.includes('permission') || errorMsg.includes('EPERM')) {
-        hint = '\n\n提示：权限不足，请检查目录权限或以管理员身份运行，或手动执行：cd ' + extDir + ' && npm install --ignore-scripts';
-      } else if (errorMsg.includes('ENOSPC')) {
-        hint = '\n\n提示：磁盘空间不足，请清理后重试。';
-      } else {
-        hint = '\n\n手动修复：cd ' + extDir + ' && npm install --ignore-scripts';
-      }
-      
-      throw new Error(`npm install failed: ${errorMsg}${hint}`, { cause: e });
-    }
+    await runNpmInstall(extDir, 'Plugin');
   }
 
-  const nativeModules = ['better-sqlite3'];
-  const execOpts = getCapturingExecOptions(extDir);
-  for (const mod of nativeModules) {
-    const modPath = path.join(extDir, 'node_modules', mod);
-    if (!existsSync(modPath)) continue;
-    try {
-      execSync(`npm rebuild ${mod}`, execOpts);
-    } catch (e) {
-      throw new Error(`Native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm rebuild ${mod}`, { cause: e });
-    }
-  }
-
-  for (const nativeMod of nativeModules) {
-    const nativeModPath = path.join(extDir, 'node_modules', nativeMod);
-    if (!existsSync(nativeModPath)) continue;
-    try {
-      execSync('node -e "require(\'' + nativeMod + '\')"', { cwd: extDir, stdio: 'pipe' });
-    } catch {
-      throw new Error(`Native module ${nativeMod} verification failed after rebuild. The install cannot proceed.`);
-    }
-  }
+  await rebuildNativeModules(extDir, 'Plugin');
+  verifyNativeModules(extDir, 'Plugin');
 }
 
 function getNpmGlobalBinDir(): string | null {
@@ -392,16 +450,16 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   let localOk = false;
   try {
     const installedEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
-    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: 10_000 });
+    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
     localOk = true;
   } catch { /* local entry failed */ }
 
   const globalOk = (() => {
     try {
       if (isWindows()) {
-        execSync('pd --version', { stdio: 'pipe', timeout: 10_000, shell: 'cmd' });
+        execSync('pd --version', { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, shell: 'cmd' });
       } else {
-        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: 10_000 });
+        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
       }
       return true;
     } catch {
@@ -470,23 +528,8 @@ async function installConsoleDependencies(): Promise<void> {
     throw new Error('Console package.json not found after copy — install is corrupted');
   }
 
-  const execOpts = getCapturingExecOptions(consoleDest);
-  try {
-    execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
-  } catch (e) {
-    throw new Error(`Console npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${consoleDest} && npm install --ignore-scripts --legacy-peer-deps`, { cause: e });
-  }
-
-  const nativeModules = ['better-sqlite3'];
-  for (const mod of nativeModules) {
-    const modPath = path.join(consoleDest, 'node_modules', mod);
-    if (!existsSync(modPath)) continue;
-    try {
-      execSync(`npm rebuild ${mod}`, getCapturingExecOptions(consoleDest));
-    } catch (e) {
-      throw new Error(`Console native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${consoleDest} && npm rebuild ${mod}`, { cause: e });
-    }
-  }
+  await runNpmInstall(consoleDest, 'Console');
+  await rebuildNativeModules(consoleDest, 'Console');
 }
 
 async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null; reason?: string }> {
@@ -497,7 +540,7 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
     return { ok: false, url: '', process: null, reason: 'Console server entry not found' };
   }
 
-  const port = 3100 + Math.floor(Math.random() * 100);
+  const port = CONSOLE_PORT_RANGE_MIN + Math.floor(Math.random() * (CONSOLE_PORT_RANGE_MAX - CONSOLE_PORT_RANGE_MIN + 1));
   const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth', '--host', '127.0.0.1'], {
     stdio: 'pipe',
     env: { ...process.env },
@@ -519,7 +562,7 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
     childStdout += chunk.toString();
   });
 
-  await new Promise<void>((resolve) => { setTimeout(resolve, 6000); });
+  await new Promise<void>((resolve) => { setTimeout(resolve, CONSOLE_WARMUP_TIME_MS); });
 
   if (childExited) {
     const stderrHint = childStderr.slice(0, 500);
@@ -539,7 +582,7 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
         });
       });
       req.on('error', reject);
-      req.setTimeout(8000, () => { req.destroy(); reject(new Error('health check timeout')); });
+      req.setTimeout(CONSOLE_HEALTH_CHECK_TIMEOUT_MS, () => { req.destroy(); reject(new Error('health check timeout')); });
     });
 
     if (result.statusCode !== 200) {
@@ -594,6 +637,10 @@ async function copyCoreTemplates(opts: CopyOptions): Promise<number> {
   for (const file of files) {
     const srcPath = path.join(actualSrc, file);
     const destPath = path.join(opts.workspaceDir, file);
+    
+    // 验证目标路径安全
+    validateWorkspacePath(destPath, opts.workspaceDir);
+    
     if (existsSync(destPath) && opts.mode === 'smart') {
       await fse.copy(srcPath, `${destPath}.update`, { overwrite: true });
     } else {
@@ -622,6 +669,9 @@ async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
     }
     const destPath = path.join(principlesDest, file);
     if (statSync(srcPath).isDirectory()) continue;
+
+    // 验证目标路径安全
+    validateWorkspacePath(destPath, opts.workspaceDir);
 
     if (existsSync(destPath) && opts.mode === 'smart') {
       await fse.copy(srcPath, `${destPath}.update`, { overwrite: true });
@@ -819,7 +869,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       const installedPdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
       execFileSync(process.execPath, [installedPdCliEntry, 'demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
         stdio: 'pipe',
-        timeout: 30_000,
+        timeout: STORY_A_VERIFICATION_TIMEOUT_MS,
       });
       verification.storyA = 'passed';
     } catch (e) {
