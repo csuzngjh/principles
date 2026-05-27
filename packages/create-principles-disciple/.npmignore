@@ -1,0 +1,6 @@
+src/
+scripts/
+tests/
+tsconfig.json
+vitest.config.ts
+node_modules/
