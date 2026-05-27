@@ -932,7 +932,7 @@ ${attitudeDirective}
     appendSystemContext,
     {
       diagnosticianMode: pendingDiagTaskCount > 0,
-      blocks: { projectContextContent, thinkingOsContent, evolutionPrinciplesContent },
+      blocks: { projectContextContent, thinkingOsContent, evolutionPrinciplesContent: combinedEvolutionContent || evolutionPrinciplesContent },
     }
   );
 
