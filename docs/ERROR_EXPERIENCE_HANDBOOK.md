@@ -48,6 +48,9 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-042 | Output reports requested config instead of actual disk state | PRI-247 |
 | ERR-043 | nextAction wraps entire shell command in quotes, making it unrunnable | PRI-247 |
 | ERR-044 | Structured failure reason hardcoded to console gap regardless of actual failure | PRI-247 |
+| ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
+| ERR-046 | Rollback failure silently swallowed — install result may falsely claim old state restored | PRI-247 |
+| ERR-047 | Non-boolean enabled field in feature flags silently treated as disabled | PRI-247 |
 
 ---
 
@@ -580,6 +583,42 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-247 / PR #721
 - **Date**: 2026-05-26
 - **Recurrence**: Same class as ERR-002, ERR-042
+
+---
+
+**[ERR-045]** | Shell interpolation of user-provided paths enables command injection
+
+- **What happened**: Story A verification used `execSync(\`"${pdCmd}" demo story-a --json --workspace "${options.workspaceDir}"\`, { shell: 'cmd' })`. The `workspaceDir` is user-provided and enters a shell string via template literal interpolation. A workspace path containing shell metacharacters (e.g., `&`, `|`, `$(...)`) would be interpreted by cmd.exe, enabling command injection.
+- **Why it's wrong**: Any user-provided path that flows into a shell command string is an injection vector. Even with quoting, cmd.exe has complex escaping rules that make safe interpolation nearly impossible. This is a security vulnerability, not just a reliability issue.
+- **Correct approach**: Use `execFileSync(process.execPath, [entry, ...args])` which passes arguments as an array without shell interpretation. No shell = no injection. This also eliminates the `.cmd` wrapper dependency for verification.
+- **How to prevent**: Never use `execSync` with `shell` option for commands that include user input. Always prefer `execFileSync` with array arguments. When shell is unavoidable, validate/sanitize inputs first.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-024 (security mechanism exists but is bypassed)
+
+---
+
+**[ERR-046]** | Rollback failure silently swallowed — install result may falsely claim old state restored
+
+- **What happened**: `restoreBackup()` caught its own errors and only logged them. The install catch block then returned `success: false` with `nextAction: 'Previous install has been restored if it existed'` — but if rollback failed, the previous install was NOT restored and the user received misleading guidance.
+- **Why it's wrong**: After a failed install + failed rollback, the system is in an uncertain state. Telling the user "previous install restored" when it wasn't is worse than no message at all — it prevents the user from taking corrective action. This is the same class as ERR-002 (silent degradation hides failure reason).
+- **Correct approach**: `restoreBackup` returns `{ restored: boolean; error?: string }`. The install catch block distinguishes: (1) install failed, rollback succeeded → normal failure with restored state; (2) install failed, rollback failed → CRITICAL, state uncertain, manual intervention required. JSON output `reason` includes `install_failed_rollback_failed` for the second case.
+- **How to prevent**: Any function that can fail must report its outcome. When composing operations (install + rollback), each failure mode must be distinguishable in the output. Never assume a recovery action succeeded without confirmation.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-002, ERR-044
+
+---
+
+**[ERR-047]** | Non-boolean enabled field in feature flags silently treated as disabled
+
+- **What happened**: `readEnabledChannelsFromDisk()` checked `flag.enabled === true` but did not validate that `enabled` was a boolean. YAML values like `enabled: "true"` (string), `enabled: 1` (number), or `enabled: null` were silently treated as disabled, since strict equality `=== true` fails for non-boolean types.
+- **Why it's wrong**: A user writing `enabled: "true"` in YAML expects the channel to be enabled. Silently treating it as disabled violates the principle of least surprise and violates Runtime Contract Rule 3 (required fields must fail loud when malformed). This is the same class as ERR-001/ERR-005 (using `===` comparison instead of runtime type validation).
+- **Correct approach**: Validate `typeof flag.enabled === 'boolean'` before comparing. Non-boolean values throw a structured error with the configPath, channel name, actual type, and remediation instructions.
+- **How to prevent**: When validating configuration fields, always check the type first, then the value. Never rely on strict equality to implicitly reject wrong types — it silently accepts the wrong behavior instead of failing loud.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-001, ERR-005
 
 ---
 
