@@ -51,6 +51,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
 | ERR-046 | Rollback failure silently swallowed — install result may falsely claim old state restored | PRI-247 |
 | ERR-047 | Non-boolean enabled field in feature flags silently treated as disabled | PRI-247 |
+| ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
 
 ---
 
@@ -146,7 +147,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` type assertions on values from untrusted JSON sources (`Record<string, unknown>`). Always validate with `typeof` checks before using the value. When extracting fields from parsed JSON, treat every field as `unknown` and narrow with runtime type guards.
 - **Source**: PRI-189
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-213 (PR #688): `event.data.toolName as string` and `event.data.score as number` in `groupEventsIntoSessions()` bypassed runtime validation on `RawEventEntry.data` fields. `score: NaN` and `score: Infinity` passed `typeof === 'number'` check. `validatePainSignal()` used `as Record<string, unknown>` instead of type guard. Fixed by excluding malformed entries from scoring arrays and adding `isStringRecord()` type guard. Also 2026-05-25 PRI-239 (PR #702): `(parsed as Record<string, unknown>)[key]` in `feature-flag-loader.ts` bypassed runtime validation on YAML-parsed input. Fixed by replacing `as Record` with `isRecord()` type guard.
+- **Recurrence**: Yes - 2026-05-23 PRI-213 (PR #688): `event.data.toolName as string` and `event.data.score as number` in `groupEventsIntoSessions()` bypassed runtime validation on `RawEventEntry.data` fields. `score: NaN` and `score: Infinity` passed `typeof === 'number'` check. `validatePainSignal()` used `as Record<string, unknown>` instead of type guard. Fixed by excluding malformed entries from scoring arrays and adding `isStringRecord()` type guard. Also 2026-05-25 PRI-239 (PR #702): `(parsed as Record<string, unknown>)[key]` in `feature-flag-loader.ts` bypassed runtime validation on YAML-parsed input. Fixed by replacing `as Record` with `isRecord()` type guard. Also 2026-05-27 PRI-261 (PR #727): `SqliteActivationStateStore.listPromptActivations()` and `PromptActivationReader` used `as` casts on SQLite query results, and `mapRowToRecord()` defaulted malformed required fields to `''` instead of returning null. Fixed by replacing all `as` with `isRecord()` + `Object.hasOwn()` + `typeof` field readers, and making `mapRowToRecord()` return null when any required field is empty or missing.
 
 ---
 
@@ -242,7 +243,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` array type casts on untrusted JSON arrays without validating element types first. Always apply element-wise type guards when preserving data from invalid payloads.
 - **Source**: PRI-191
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Fixed by replacing `as Record` with `readOwnProperty` helper and `Array.from().filter()` for element-wise validation. Also 2026-05-23 PRI-225 (PR #693): `result.dependencyTaskIds = depIds as string[]` on already-validated array bypassed type system. Fixed by constructing `validatedDependencyTaskIds: string[]` with element-wise `typeof` check and push, no `as` assertion. Also 2026-05-25 PRI-239 (PR #702): `feature-flag-loader.ts` used `(parsed as Record<string, unknown>)[key]` to read YAML-parsed values at input trust boundary. Same class as all prior — `as` bypasses runtime narrowing on untrusted data. Fixed by adding `isRecord()` type guard.
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Fixed by replacing `as Record` with `readOwnProperty` helper and `Array.from().filter()` for element-wise validation. Also 2026-05-23 PRI-225 (PR #693): `result.dependencyTaskIds = depIds as string[]` on already-validated array bypassed type system. Fixed by constructing `validatedDependencyTaskIds: string[]` with element-wise `typeof` check and push, no `as` assertion. Also 2026-05-25 PRI-239 (PR #702): `feature-flag-loader.ts` used `(parsed as Record<string, unknown>)[key]` to read YAML-parsed values at input trust boundary. Same class as all prior — `as` bypasses runtime narrowing on untrusted data. Fixed by adding `isRecord()` type guard. Also 2026-05-27 PRI-261 (PR #727): same `as Record<string, unknown>` pattern on SQLite query results in both `SqliteActivationStateStore` and `PromptActivationReader`. Fixed by replacing with `isRecord()` + `Object.hasOwn()` + per-field `typeof` validation.
 
 ---
 
@@ -622,6 +623,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-048]** | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected
+
+- **What happened**: Runtime V2 `ActivationDispatcher` writes activation records to the `activations` SQLite table (`channel='prompt', action='prompt_activate'`), but the live OpenClaw prompt hook (`handleBeforePromptBuild`) only reads from the legacy `evolutionReducer.getActivePrinciples()`. The activation write path and the prompt read path are completely separate systems — activation dispatch never calls `evolutionReducer.promote()`, so activated principles never appear in agent prompts and never change agent behavior.
+- **Why it's wrong**: This is the same class as ERR-024/ERR-025 (defense exists but is not enforced; test proves isolated behavior not production path). The activation dispatcher and its tests prove that activation records are written correctly, but the production prompt injection path never consumes those records. The MVP value chain is broken: owner approves → activation record written → principle NOT injected → agent behavior unchanged. The two systems evolved independently (Runtime V2 activation is new; legacy evolutionReducer predates it) and were never connected.
+- **Correct approach**: The live prompt hook must directly consume Runtime V2 activation records as a first-class source, independent of the legacy evolution reducer. A `PromptActivationReader` reads `activations` table (channel='prompt') → resolves artifact content → returns injectable principles. The prompt hook merges these with legacy principles, deduplicating by principleId. Feature flag gating is checked. Malformed/missing data fails loud with structured warnings.
+- **How to prevent**: When adding a new write path (activation dispatch), immediately verify the corresponding read path (prompt injection) consumes it. Never assume two independently-evolved systems are connected without an explicit binding test. The TDD RED→GREEN cycle (write failing test first that proves the disconnect, then implement the binding) prevents this class of error.
+- **Source**: PRI-261
+- **Date**: 2026-05-27
+- **Recurrence**: Same class as ERR-024, ERR-025. Recurred in PRI-261 PR review: initial implementation also missed validation_status guard, action filter, budget limit, and used `as` type bypass + hand-rolled YAML parser.
+
+---
+
 **[ERR-037]** | UI action buttons gated only by `status`, ignoring backend actionability field
 
 - **What happened**: Backend correctly returns `isMvpProven: false` for legacy channel records, but the approval-detail-dialog hides approve/reject buttons based solely on `approval.status === "pending"`. A legacy pending record would still show action buttons, which then fail with 403 on submit.
@@ -657,10 +670,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 42 |
-| Last updated | 2026-05-26 |
+| Total lessons | 43 |
+| Last updated | 2026-05-27 |
 | Top category | Schema & Type |
-| Recurring errors | 19 |
+| Recurring errors | 21 |
 
 ---
 

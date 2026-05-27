@@ -10,6 +10,16 @@ export class MemoryActivationStateStore implements ActivationStateReadModel {
   async recordActivation(record: ActivationStatusRecord): Promise<void> {
     this.activations.set(record.idempotencyKey, record);
   }
+
+  async listPromptActivations(): Promise<ActivationStatusRecord[]> {
+    const result: ActivationStatusRecord[] = [];
+    for (const record of this.activations.values()) {
+      if (record.channel === 'prompt') {
+        result.push(record);
+      }
+    }
+    return result.sort((a, b) => a.activatedAt.localeCompare(b.activatedAt));
+  }
 }
 
 export class MemoryArtifactReadModel implements ActivationArtifactReadModel {
