@@ -1,6 +1,54 @@
 import type { ActivationStateReadModel, ActivationStatusRecord } from './activation-types.js';
 import type { SqliteConnection } from '../store/sqlite-connection.js';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readStringField(row: Record<string, unknown>, key: string): string | null {
+  if (!Object.hasOwn(row, key)) return null;
+  const val = row[key];
+  return typeof val === 'string' && val.length > 0 ? val : null;
+}
+
+function validateChannel(value: unknown): ActivationStatusRecord['channel'] | null {
+  if (typeof value !== 'string') return null;
+  const valid = ['prompt', 'defer_archive', 'code_tool_hook'] as const;
+  for (const c of valid) {
+    if (value === c) return c;
+  }
+  return null;
+}
+
+function mapRowToRecord(row: unknown): ActivationStatusRecord | null {
+  if (!isRecord(row)) return null;
+
+  const channel = validateChannel(row.channel);
+  if (!channel) return null;
+
+  const activationId = readStringField(row, 'activation_id');
+  const idempotencyKey = readStringField(row, 'idempotency_key');
+  const artifactId = readStringField(row, 'artifact_id');
+  const action = readStringField(row, 'action');
+  const activatedAt = readStringField(row, 'activated_at');
+
+  if (!activationId || !idempotencyKey || !artifactId || !action || !activatedAt) {
+    return null;
+  }
+
+  const targetRef = readStringField(row, 'target_ref');
+
+  return {
+    activationId,
+    idempotencyKey,
+    artifactId,
+    channel,
+    action,
+    targetRef: targetRef ?? '',
+    activatedAt,
+  };
+}
+
 export class SqliteActivationStateStore implements ActivationStateReadModel {
   constructor(private readonly connection: SqliteConnection) {}
 
@@ -10,27 +58,9 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
       SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at
       FROM activations
       WHERE idempotency_key = ?
-    `).get(idempotencyKey) as {
-      activation_id: string;
-      idempotency_key: string;
-      artifact_id: string;
-      channel: string;
-      action: string;
-      target_ref: string;
-      activated_at: string;
-    } | undefined;
+    `).get(idempotencyKey);
 
-    if (!row) return null;
-
-    return {
-      activationId: row.activation_id,
-      idempotencyKey: row.idempotency_key,
-      artifactId: row.artifact_id,
-      channel: row.channel as ActivationStatusRecord['channel'],
-      action: row.action,
-      targetRef: row.target_ref,
-      activatedAt: row.activated_at,
-    };
+    return mapRowToRecord(row);
   }
 
   async recordActivation(record: ActivationStatusRecord): Promise<void> {
@@ -49,5 +79,24 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
       record.targetRef,
       record.activatedAt,
     );
+  }
+
+  async listPromptActivations(): Promise<ActivationStatusRecord[]> {
+    const db = this.connection.getDb();
+    const rows = db.prepare(`
+      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at
+      FROM activations
+      WHERE channel = 'prompt'
+      ORDER BY activated_at ASC
+    `).all();
+
+    if (!Array.isArray(rows)) return [];
+
+    const result: ActivationStatusRecord[] = [];
+    for (const row of rows) {
+      const record = mapRowToRecord(row);
+      if (record) result.push(record);
+    }
+    return result;
   }
 }

@@ -123,7 +123,7 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       const approvalStore = makeInMemoryApprovalQueueStoreForTest();
       const dispatcher = new ActivationDispatcher(
         { getArtifactById: async (id: string) => id === artifact.artifactId ? artifact : null },
-        { getActivationStatus: async () => null, recordActivation: async () => { void 0; } },
+        { getActivationStatus: async () => null, recordActivation: async () => { void 0; }, listPromptActivations: async () => [] },
         { writers, approvalQueueStore: approvalStore },
       );
       const decision = await dispatcher.dispatch({
