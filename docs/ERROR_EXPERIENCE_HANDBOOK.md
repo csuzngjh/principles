@@ -51,6 +51,7 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
 | ERR-046 | Rollback failure silently swallowed — install result may falsely claim old state restored | PRI-247 |
 | ERR-047 | Non-boolean enabled field in feature flags silently treated as disabled | PRI-247 |
+| ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
 
 ---
 
@@ -622,6 +623,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
+**[ERR-048]** | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected
+
+- **What happened**: Runtime V2 `ActivationDispatcher` writes activation records to the `activations` SQLite table (`channel='prompt', action='prompt_activate'`), but the live OpenClaw prompt hook (`handleBeforePromptBuild`) only reads from the legacy `evolutionReducer.getActivePrinciples()`. The activation write path and the prompt read path are completely separate systems — activation dispatch never calls `evolutionReducer.promote()`, so activated principles never appear in agent prompts and never change agent behavior.
+- **Why it's wrong**: This is the same class as ERR-024/ERR-025 (defense exists but is not enforced; test proves isolated behavior not production path). The activation dispatcher and its tests prove that activation records are written correctly, but the production prompt injection path never consumes those records. The MVP value chain is broken: owner approves → activation record written → principle NOT injected → agent behavior unchanged. The two systems evolved independently (Runtime V2 activation is new; legacy evolutionReducer predates it) and were never connected.
+- **Correct approach**: The live prompt hook must directly consume Runtime V2 activation records as a first-class source, independent of the legacy evolution reducer. A `PromptActivationReader` reads `activations` table (channel='prompt') → resolves artifact content → returns injectable principles. The prompt hook merges these with legacy principles, deduplicating by principleId. Feature flag gating is checked. Malformed/missing data fails loud with structured warnings.
+- **How to prevent**: When adding a new write path (activation dispatch), immediately verify the corresponding read path (prompt injection) consumes it. Never assume two independently-evolved systems are connected without an explicit binding test. The TDD RED→GREEN cycle (write failing test first that proves the disconnect, then implement the binding) prevents this class of error.
+- **Source**: PRI-261
+- **Date**: 2026-05-27
+- **Recurrence**: Same class as ERR-024, ERR-025
+
+---
+
 **[ERR-037]** | UI action buttons gated only by `status`, ignoring backend actionability field
 
 - **What happened**: Backend correctly returns `isMvpProven: false` for legacy channel records, but the approval-detail-dialog hides approve/reject buttons based solely on `approval.status === "pending"`. A legacy pending record would still show action buttons, which then fail with 403 on submit.
@@ -657,8 +670,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 42 |
-| Last updated | 2026-05-26 |
+| Total lessons | 43 |
+| Last updated | 2026-05-27 |
 | Top category | Schema & Type |
 | Recurring errors | 19 |
 

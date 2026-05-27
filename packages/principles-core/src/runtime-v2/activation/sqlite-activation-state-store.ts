@@ -50,4 +50,32 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
       record.activatedAt,
     );
   }
+
+  async listPromptActivations(): Promise<ActivationStatusRecord[]> {
+    const db = this.connection.getDb();
+    const rows = db.prepare(`
+      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at
+      FROM activations
+      WHERE channel = 'prompt'
+      ORDER BY activated_at ASC
+    `).all() as {
+      activation_id: string;
+      idempotency_key: string;
+      artifact_id: string;
+      channel: string;
+      action: string;
+      target_ref: string;
+      activated_at: string;
+    }[];
+
+    return rows.map((row) => ({
+      activationId: row.activation_id,
+      idempotencyKey: row.idempotency_key,
+      artifactId: row.artifact_id,
+      channel: row.channel as ActivationStatusRecord['channel'],
+      action: row.action,
+      targetRef: row.target_ref,
+      activatedAt: row.activated_at,
+    }));
+  }
 }

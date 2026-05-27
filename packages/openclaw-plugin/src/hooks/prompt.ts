@@ -13,6 +13,7 @@ import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
 import { getCachedMaskedPrincipleSet } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
+import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
@@ -702,6 +703,46 @@ ${heartbeatChecklist}
     logger?.warn?.(`[PD:Prompt] Failed to load evolution principles: ${String(e)}`);
   }
 
+  // Runtime V2 prompt activation injection — owner-approved activated principles
+  let runtimeV2PrinciplesContent = '';
+  const runtimeV2PrincipleIds = new Set<string>();
+  try {
+    const reader = new PromptActivationReader(workspaceDir, { logger });
+    const v2Result = await reader.readActivatedPrinciples();
+
+    if (v2Result.warnings.length > 0) {
+      logger?.info?.(`[PD:RuntimeV2] Activation read warnings: ${v2Result.warnings.join('; ')}`);
+    }
+
+    const legacyActiveIds = new Set<string>();
+    try {
+      const legacyActive = wctx.evolutionReducer.getActivePrinciples();
+      for (const p of legacyActive) {
+        legacyActiveIds.add(p.id);
+      }
+      const legacyProbation = wctx.evolutionReducer.getProbationPrinciples();
+      for (const p of legacyProbation) {
+        legacyActiveIds.add(p.id);
+      }
+    } catch {
+      // best-effort dedup
+    }
+
+    const dedupedV2 = v2Result.principles.filter((p) => !legacyActiveIds.has(p.principleId));
+
+    if (dedupedV2.length > 0) {
+      const lines: string[] = [];
+      lines.push('Runtime V2 activated principles (owner-approved):');
+      for (const p of dedupedV2) {
+        lines.push(`- [${escapeXml(p.principleId)}] ${escapeXml(p.text)}`);
+        runtimeV2PrincipleIds.add(p.principleId);
+      }
+      runtimeV2PrinciplesContent = lines.join('\n');
+    }
+  } catch (e) {
+    logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);
+  }
+
   // Build appendSystemContext with recency effect
   // Content order (most important last): behavioral_constraints -> project_context -> working_memory -> reflection_log -> thinking_os -> principles
   const appendParts: string[] = [];
@@ -733,6 +774,11 @@ ${empathySilenceConstraint}
   // 3. Evolution Loop principles (active/probation)
   if (evolutionPrinciplesContent) {
     appendParts.push(`<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`);
+  }
+
+  // 3.5. Runtime V2 activated principles (owner-approved, prompt channel)
+  if (runtimeV2PrinciplesContent) {
+    appendParts.push(`<evolution_principles>\n${runtimeV2PrinciplesContent}\n</evolution_principles>`);
   }
 
   // Routing Guidance (section 5 — injected between evolution principles and core principles)
