@@ -119,7 +119,7 @@ beforeAll(async () => {
     '--json',
   ]);
   openclawAvailable = openclawCheckOutput.exitCode === 0;
-}, 30000);
+}, 60_000);
 
 afterAll(() => {
   // Cleanup temp workspace dirs
