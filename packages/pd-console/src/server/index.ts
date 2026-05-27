@@ -67,6 +67,7 @@ const WEB_ROOT = computeWebRoot(__dirname);
 interface ServerOptions {
   workspace: string;
   port: number;
+  host: string;
   noAuth: boolean;
   token?: string;
 }
@@ -109,6 +110,7 @@ function parseArgs(argv: string[]): ServerOptions {
   const args = argv.slice(2);
   let workspace = resolveWorkspaceDir(argv);
   let port = 3100;
+  let host = '127.0.0.1';
   let noAuth = false;
   let token: string | undefined = undefined;
 
@@ -121,6 +123,9 @@ function parseArgs(argv: string[]): ServerOptions {
       }
       port = parsed;
       i++;
+    } else if (args[i] === '--host' && i + 1 < args.length) {
+      host = args[i + 1];
+      i++;
     } else if (args[i] === '--no-auth') {
       noAuth = true;
     } else if (args[i] === '--token' && i + 1 < args.length) {
@@ -129,7 +134,12 @@ function parseArgs(argv: string[]): ServerOptions {
     }
   }
 
-  return { workspace, port, noAuth, token };
+  if (noAuth && host !== '127.0.0.1' && host !== 'localhost') {
+    console.error('[pd-console] --no-auth is only allowed with loopback binding (127.0.0.1 or localhost). Got --host ' + host);
+    process.exit(1);
+  }
+
+  return { workspace, port, host, noAuth, token };
 }
 
 // ── MIME type helpers ──────────────────────────────────────────────────────────────────────
@@ -777,7 +787,7 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
 // ── Server startup ───────────────────────────────────────────────────────────
 
 export async function main(): Promise<void> {
-  const { workspace, port, noAuth, token } = parseArgs(process.argv);
+  const { workspace, port, host, noAuth, token } = parseArgs(process.argv);
 
   const authConfig = new AuthConfig({
     cliToken: token,
@@ -803,8 +813,8 @@ export async function main(): Promise<void> {
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
 
-  server.listen(port, () => {
-    console.log('[pd-console] Listening on http://localhost:' + port);
+  server.listen(port, host, () => {
+    console.log('[pd-console] Listening on http://' + host + ':' + port);
     console.log('[pd-console] Workspace: ' + workspace);
     console.log('[pd-console] Auth: ' + (authConfig.isEnabled() ? 'enabled' : 'disabled'));
   });

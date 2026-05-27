@@ -43,6 +43,14 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-002 | Catch-and-degrade pattern silently swallows failure reasons | PRI-171 |
 | ERR-011 | CLI commands directly import RuntimeStateManager instead of Tier 2 boundary facades | PRI-131 |
 | ERR-024 | Security validator exists but is not wired into enforcement path — defense is illusory | PRI-210 |
+| ERR-040 | Published artifact missing components that source-tree tests assume exist | PRI-247 |
+| ERR-041 | Install success reported when delivered components are incomplete | PRI-247 |
+| ERR-042 | Output reports requested config instead of actual disk state | PRI-247 |
+| ERR-043 | nextAction wraps entire shell command in quotes, making it unrunnable | PRI-247 |
+| ERR-044 | Structured failure reason hardcoded to console gap regardless of actual failure | PRI-247 |
+| ERR-045 | Shell interpolation of user-provided paths enables command injection | PRI-247 |
+| ERR-046 | Rollback failure silently swallowed — install result may falsely claim old state restored | PRI-247 |
+| ERR-047 | Non-boolean enabled field in feature flags silently treated as disabled | PRI-247 |
 
 ---
 
@@ -150,7 +158,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Every catch-and-degrade pattern must expose the failure reason via `ambiguityNotes` / telemetry / logging. Review all catch blocks that return fallback values and verify they communicate why the fallback was triggered.
 - **Source**: PRI-171
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-24 PRI-240 (PR #699): `cleanupTempWorkspace` had `catch { void 0; }` that silently swallowed cleanup failures with no observability. Fixed by outputting structured `[pd-cli] cleanup warning:` to stderr. Also 2026-05-25 PRI-239 (PR #702): canary `gfi_snapshot` returned `healthy` when GFI disabled but `featureFlags.warnings.length > 0` (malformed YAML/override). Degraded config was not surfaced. Fixed by returning `degraded` with structured details when warnings present. Also 2026-05-25 PRI-245 (PR #711): PainPage `GfiGauge` component showed persistent skeleton when `useAutoRefresh` fetch failed — `gfi.data` was null and `gfi.error` was set, but `GfiGauge` only checked `!gfi` and rendered skeleton forever with no error visibility. Fixed by passing `error` and `onRetry` props to `GfiGauge` and rendering error state with retry button when `error && !gfi`. Also 2026-05-25 PRI-246 (PR #715): Initial code_tool_hook implementation returned overall `passed` when `ActivationDispatcher.dispatch()` returned `queued_for_approval`. The `approveAndReactivate` function created a second dispatcher without `approvalQueueStore`, which hit the `!this.approvalQueueStore` guard and returned `refused` — but the outer `runChannelOutcome` classified this as `degraded` and `computeDemoStatus` still returned `passed` when no stages outright failed. The demo declared the story passed when RuleHost was never actually activated. Fixed by rewriting `approveAndReactivate` to directly call `writer.activate()` + `stateStore.recordActivation()` after real `SqliteApprovalQueueStore.approve()`, completing the full queued→approved→activated chain with observable activation evidence.
+- **Recurrence**: Yes - 2026-05-24 PRI-240 (PR #699): `cleanupTempWorkspace` had `catch { void 0; }` that silently swallowed cleanup failures with no observability. Fixed by outputting structured `[pd-cli] cleanup warning:` to stderr. Also 2026-05-25 PRI-239 (PR #702): canary `gfi_snapshot` returned `healthy` when GFI disabled but `featureFlags.warnings.length > 0` (malformed YAML/override). Degraded config was not surfaced. Fixed by returning `degraded` with structured details when warnings present. Also 2026-05-25 PRI-245 (PR #711): PainPage `GfiGauge` component showed persistent skeleton when `useAutoRefresh` fetch failed — `gfi.data` was null and `gfi.error` was set, but `GfiGauge` only checked `!gfi` and rendered skeleton forever with no error visibility. Fixed by passing `error` and `onRetry` props to `GfiGauge` and rendering error state with retry button when `error && !gfi`. Also 2026-05-25 PRI-246 (PR #715): Initial code_tool_hook implementation returned overall `passed` when `ActivationDispatcher.dispatch()` returned `queued_for_approval`. The `approveAndReactivate` function created a second dispatcher without `approvalQueueStore`, which hit the `!this.approvalQueueStore` guard and returned `refused` — but the outer `runChannelOutcome` classified this as `degraded` and `computeDemoStatus` still returned `passed` when no stages outright failed. The demo declared the story passed when RuleHost was never actually activated. Fixed by rewriting `approveAndReactivate` to directly call `writer.activate()` + `stateStore.recordActivation()` after real `SqliteApprovalQueueStore.approve()`, completing the full queued→approved→activated chain with observable activation evidence. Also 2026-05-26 PRI-247 (PR #721): `readEnabledChannelsFromDisk()` silently returned `[]` when feature-flags.yaml was malformed, unreadable, or had invalid structure. The installer would then report channels from the install options instead of actual disk state, creating operator observability gap. Fixed by throwing structured errors for parse failures and invalid object shapes, with remediation hints.
 
 ---
 
@@ -470,7 +478,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: For every PR that adds defensive logic, verify that at least one test exercises the production path that would invoke the defense. If no production path calls the new code, the PR must not claim to provide defense. Review trigger: any PR where the diff adds a new module but does not modify any existing production code to call it.
 - **Source**: PRI-209 / PR #689
 - **Date**: 2026-05-23
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): Healthy baseline test used `expect(['ok', 'degraded']).toContain(overallStatus)`, allowing `degraded` to pass. This meant a regression that introduced new warning-level broken links in the healthy path would not be caught. The test proved the code didn't crash, but not that the healthy path remained healthy. Fixed by tightening to `expect(overallStatus).toBe('ok')`. Also 2026-05-23 PRI-225 (PR #693): `bestEffortParentIds` was added to `PIMetadataParseResult.malformed` but not wired into the philosopher dependency check. The dependency check only accepted `status === 'parsed'`, so malformed metadata with extractable parent IDs still produced `philosopher_dependency_unverifiable`. Test proved `bestEffortParentIds` was populated correctly, but not that the production path used it for topology verification. Fixed by adding `else if (philMeta.status === 'malformed')` branch in the dependency check. Also 2026-05-24 PRI-240 (PR #699): RuleHost fixture test only asserted inside `if (result.status === 'passed')` conditional branches, so if the fixture returned `failed`, all assertions were skipped and the test passed vacuously. Fixed by adding unconditional `expect(['passed', 'degraded', 'failed']).toContain(result.status)` before the conditional branches. Also 2026-05-25 PRI-245 (PR #711): Navigation tests only checked source-code string patterns (e.g., `toContain('href: "/overview"')`) but missed that the Diagnostics Overview nav item had `href: "/"` instead of `href: "/overview"`, and the `isActive` function used `startsWith` which caused `/` to match all paths. Tests proved the strings existed in source, but not that the nav-to-route mapping was correct. Fixed by extracting `isNavActive` to a testable utility with unit tests, and adding nav-to-route mapping tests that verify every sidebar href has a corresponding App route. Also 2026-05-25 PRI-246 (PR #715): Initial Story A' demo was a "带叙事包装的 activation synthetic fixture" — pure function tests proved `makePrincipleArtifactRecord`/`makeRuleArtifactRecord`/`computeDemoStatus` helpers worked in isolation, but the orchestration used in-memory stores instead of real `RuntimeStateManager`/`SqliteActivationStateStore`/`SqliteApprovalQueueStore`. No `state.db` was created, no activation was recorded, no approval queue was exercised. Tests proved the narrative formatting, not that the real workspace dispatch path works. Fixed by moving orchestration to `pd-cli` I/O boundary with real `RuntimeStateManager`, `ActivationDispatcher.dispatch()`, `SqliteApprovalQueueStore.approve()`, and `RuleHostWriter.activate()` + `SqliteActivationStateStore.recordActivation()`. Added regression tests verifying state.db contains artifacts and activations after explicit workspace run. Second review round: `enforcementObserved`, `dangerousPathBlocked`, `safePathAllowed` were hardcoded `true` without executing the rule code against the golden trace. The demo artifact contained real `implementationCode` and `goldenTrace` but `buildFollowUpObservation` never ran them — it only checked activation status. Tests encoded the unverified claims. Fixed by adding `createDemoSandboxEvaluate` (adapts demo's `function evaluate(toolName, params)` to `ReplayEvaluateFn` via `new Function()`) and `evaluateDemoGoldenTrace` (extracts code + goldenTrace from artifact, runs `evaluateInRefinerSandbox`). `buildFollowUpObservation` now requires `isActivated && sandboxResult?.success` for `enforcementObserved: true`. Also: `evidence_seed`/`owner_review` stages now carry `simulated: true` markers; narrative includes `[SIMULATED]`/`[REAL]` stage markers; `--channels ""` rejected before workspace creation.
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): Healthy baseline test used `expect(['ok', 'degraded']).toContain(overallStatus)`, allowing `degraded` to pass. This meant a regression that introduced new warning-level broken links in the healthy path would not be caught. The test proved the code didn't crash, but not that the healthy path remained healthy. Fixed by tightening to `expect(overallStatus).toBe('ok')`. Also 2026-05-23 PRI-225 (PR #693): `bestEffortParentIds` was added to `PIMetadataParseResult.malformed` but not wired into the philosopher dependency check. The dependency check only accepted `status === 'parsed'`, so malformed metadata with extractable parent IDs still produced `philosopher_dependency_unverifiable`. Test proved `bestEffortParentIds` was populated correctly, but not that the production path used it for topology verification. Fixed by adding `else if (philMeta.status === 'malformed')` branch in the dependency check. Also 2026-05-24 PRI-240 (PR #699): RuleHost fixture test only asserted inside `if (result.status === 'passed')` conditional branches, so if the fixture returned `failed`, all assertions were skipped and the test passed vacuously. Fixed by adding unconditional `expect(['passed', 'degraded', 'failed']).toContain(result.status)` before the conditional branches. Also 2026-05-25 PRI-245 (PR #711): Navigation tests only checked source-code string patterns (e.g., `toContain('href: "/overview"')`) but missed that the Diagnostics Overview nav item had `href: "/"` instead of `href: "/overview"`, and the `isActive` function used `startsWith` which caused `/` to match all paths. Tests proved the strings existed in source, but not that the nav-to-route mapping was correct. Fixed by extracting `isNavActive` to a testable utility with unit tests, and adding nav-to-route mapping tests that verify every sidebar href has a corresponding App route. Also 2026-05-25 PRI-246 (PR #715): Initial Story A' demo was a "带叙事包装的 activation synthetic fix[... 2201 chars truncated for brevity]... Also 2026-05-27 PRI-247 (PR #721): Static/string tests claimed delivery success but real `npm pack` + clean install was broken. Tests checked source code patterns (e.g., `toContain('CORE_REQUIRED')`, `toContain('installBundledCore')`) but never ran `npm pack` → install to clean temp HOME → verify `@principles/core` resolves. Two specific failures: (1) `@principles/core` was referenced as `file:./core.tgz` in bundled package.json but `core.tgz` was corrupted/missing in the installed location because npm cannot resolve nested tarball `file:` references across directory boundaries; (2) console health test used `process.env.HOME` instead of the temp HOME directory where the installer actually deployed files. Root cause: same class as ERR-025 — tests proved isolated behavior (source patterns exist, functions are defined) but not production defense (real tarball install succeeds, real console starts on loopback). Fixed by: (a) switching from `file:./core.tgz` to `file:./core` directory reference (npm resolves directory symlinks reliably), (b) adding `smoke-packaged-install.test.ts` that runs `npm pack` → install to clean temp HOME → `--json` install → assert all components verified → start console → hit `/api/health` on 127.0.0.1 → verify loopback-only + rollback on failure injection.
 
 ---
 
@@ -556,6 +564,62 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-05-24
 - **Recurrence**: Same class as ERR-034
 
+**[ERR-043]** | nextAction wraps entire shell command in quotes, making it unrunnable
+
+- **What happened**: `buildSuccessOutput` for `verified_local_only` generated `Run "C:\path\pd.cmd runtime canary --workspace <path> --json"` — the entire command including arguments was wrapped in a single pair of quotes. A shell would interpret the whole string as the executable name, not a command with arguments.
+- **Why it's wrong**: Shell quoting must only wrap the path component when it contains spaces. The arguments (`runtime canary --workspace ...`) must be outside the quotes. This is the same class as ERR-042 (output contract violation) — the output claims to be a runnable command but is not.
+- **Correct approach**: Only quote the path portion: `Run "C:\path with spaces\pd.cmd" runtime canary --workspace <path> --json`. Paths without spaces need no quotes: `Run /opt/pd runtime canary ...`. Use `path.includes(' ')` to decide.
+- **How to prevent**: When generating shell commands in output, always test that the command is syntactically valid. Add tests that verify: (1) paths without spaces are not quoted, (2) paths with spaces quote only the path, (3) the entire command is never wrapped in a single pair of quotes.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-042
+
+**[ERR-044]** | Structured failure reason hardcoded to console gap regardless of actual failure
+
+- **What happened**: `buildSuccessOutput` always set `reason: 'owner_review_console_not_deliverable'` when `isComplete` was false, even when the actual failure was `plugin: 'failed'` or `cli: 'failed'`. A user seeing `reason: owner_review_console_not_deliverable` would investigate the console, but the real problem was a broken CLI or plugin.
+- **Why it's wrong**: The `reason` field is a contract with the caller for diagnostics and automated remediation. An incorrect reason misdirects troubleshooting. This is the same class as ERR-002 (silent degradation hides failure reason) and ERR-042 (output does not reflect actual state).
+- **Correct approach**: Compute the reason from the actual component statuses: `plugin_failed`, `cli_failed`, `console_not_deliverable`. When multiple components fail, comma-separate the reasons. Never hardcode a single reason when multiple failure modes exist.
+- **How to prevent**: When a function has multiple failure paths, the output must distinguish them. Add tests that: (1) each failure mode produces a distinct reason, (2) the reason does not mention unrelated components, (3) multiple failures produce a combined reason.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-002, ERR-042
+
+---
+
+**[ERR-045]** | Shell interpolation of user-provided paths enables command injection
+
+- **What happened**: Story A verification used `execSync(\`"${pdCmd}" demo story-a --json --workspace "${options.workspaceDir}"\`, { shell: 'cmd' })`. The `workspaceDir` is user-provided and enters a shell string via template literal interpolation. A workspace path containing shell metacharacters (e.g., `&`, `|`, `$(...)`) would be interpreted by cmd.exe, enabling command injection.
+- **Why it's wrong**: Any user-provided path that flows into a shell command string is an injection vector. Even with quoting, cmd.exe has complex escaping rules that make safe interpolation nearly impossible. This is a security vulnerability, not just a reliability issue.
+- **Correct approach**: Use `execFileSync(process.execPath, [entry, ...args])` which passes arguments as an array without shell interpretation. No shell = no injection. This also eliminates the `.cmd` wrapper dependency for verification.
+- **How to prevent**: Never use `execSync` with `shell` option for commands that include user input. Always prefer `execFileSync` with array arguments. When shell is unavoidable, validate/sanitize inputs first.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-024 (security mechanism exists but is bypassed)
+
+---
+
+**[ERR-046]** | Rollback failure silently swallowed — install result may falsely claim old state restored
+
+- **What happened**: `restoreBackup()` caught its own errors and only logged them. The install catch block then returned `success: false` with `nextAction: 'Previous install has been restored if it existed'` — but if rollback failed, the previous install was NOT restored and the user received misleading guidance.
+- **Why it's wrong**: After a failed install + failed rollback, the system is in an uncertain state. Telling the user "previous install restored" when it wasn't is worse than no message at all — it prevents the user from taking corrective action. This is the same class as ERR-002 (silent degradation hides failure reason).
+- **Correct approach**: `restoreBackup` returns `{ restored: boolean; error?: string }`. The install catch block distinguishes: (1) install failed, rollback succeeded → normal failure with restored state; (2) install failed, rollback failed → CRITICAL, state uncertain, manual intervention required. JSON output `reason` includes `install_failed_rollback_failed` for the second case.
+- **How to prevent**: Any function that can fail must report its outcome. When composing operations (install + rollback), each failure mode must be distinguishable in the output. Never assume a recovery action succeeded without confirmation.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-002, ERR-044
+
+---
+
+**[ERR-047]** | Non-boolean enabled field in feature flags silently treated as disabled
+
+- **What happened**: `readEnabledChannelsFromDisk()` checked `flag.enabled === true` but did not validate that `enabled` was a boolean. YAML values like `enabled: "true"` (string), `enabled: 1` (number), or `enabled: null` were silently treated as disabled, since strict equality `=== true` fails for non-boolean types.
+- **Why it's wrong**: A user writing `enabled: "true"` in YAML expects the channel to be enabled. Silently treating it as disabled violates the principle of least surprise and violates Runtime Contract Rule 3 (required fields must fail loud when malformed). This is the same class as ERR-001/ERR-005 (using `===` comparison instead of runtime type validation).
+- **Correct approach**: Validate `typeof flag.enabled === 'boolean'` before comparing. Non-boolean values throw a structured error with the configPath, channel name, actual type, and remediation instructions.
+- **How to prevent**: When validating configuration fields, always check the type first, then the value. Never rely on strict equality to implicitly reject wrong types — it silently accepts the wrong behavior instead of failing loud.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-001, ERR-005
+
 ---
 
 **[ERR-037]** | UI action buttons gated only by `status`, ignoring backend actionability field
@@ -593,7 +657,43 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 39 |
-| Last updated | 2026-05-25 |
+| Total lessons | 42 |
+| Last updated | 2026-05-26 |
 | Top category | Schema & Type |
 | Recurring errors | 19 |
+
+---
+
+**[ERR-040]** | Published artifact missing components that source-tree tests assume exist
+
+- **What happened**: The installer's `syncPdCli()` function expected `pd-cli/dist/index.js` to exist in the package root, but `bundle-plugin.mjs` only copied the OpenClaw plugin — not pd-cli. The `package.json files` array didn't include `pd-cli`. Source-tree tests passed because pd-cli existed in the monorepo, but the published npm tarball would be missing it entirely.
+- **Why it's wrong**: Tests that run against the monorepo source tree do not prove the published artifact works. When the bundle script and `files` array don't include a required component, the published package is broken but CI passes. This is the same class as ERR-025 (tests prove isolated behavior, not production defense) and ERR-026 (test environment drifts from production).
+- **Correct approach**: For any package that bundles artifacts from other packages, the bundle script must copy ALL required components, the `files` array must include them, and a tarball content contract test must verify the published package contains every expected file.
+- **How to prevent**: Add a tarball content contract test that: (1) reads `package.json files` array, (2) asserts required directories are listed, (3) after `npm pack`, asserts the tarball contains expected files. Run this test in CI, not just locally.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-025, ERR-026
+
+---
+
+**[ERR-041]** | Install success reported when delivered components are incomplete
+
+- **What happened**: `install()` returned `success: true` and printed "Ready." when `components.console` was `not_deliverable`. The interactive output said the installation was complete, but a core product surface (owner review console) was missing. This created a contradiction: the installer claimed success while explicitly noting a release-blocking gap.
+- **Why it's wrong**: `success: true` means the full product contract is met. If any required component is not deliverable, the install is not successful. Reporting success with an undeliverable component misleads both users and automation. This is the same class as ERR-002 (catch-and-degrade swallows failure) and ERR-009 (silently skip invalid instead of failing loud) — the system claims everything is fine when it's not.
+- **Correct approach**: `success` must require ALL required components to be verified/delivered. If any component is `not_deliverable` or `failed`, `success` must be `false`. Interactive output must clearly distinguish full success ("Ready.") from partial success ("Runtime + CLI verified, but console is not yet deliverable"). The README must explicitly state what the installer delivers and what is a known gap.
+- **How to prevent**: When defining a component delivery contract, `success` must be a conjunction of ALL required component statuses. If any component is not verified, success is false. Add tests that verify: (1) each component failure makes success=false, (2) all components verified makes success=true, (3) interactive output matches the actual success state.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-002, ERR-009. Recurred 2026-05-26 PRI-247 (PR #721): `bundle-plugin.mjs` silently skipped missing artifacts without exit(1). If `templates/` or `openclaw.plugin.json` was absent, the bundle would produce an incomplete tarball that passes CI but fails at runtime. Fixed by adding PLUGIN_REQUIRED/PD_CLI_REQUIRED arrays with process.exit(1) on missing items, and PLUGIN_OPTIONAL for items that skip with warning.
+
+---
+
+**[ERR-042]** | Output reports requested config instead of actual disk state
+
+- **What happened**: The installer returned `enabledChannels: options.channels` in its result, but the actual feature-flags.yaml on disk might have different channels enabled (e.g., from a previous install). When rerunning with `--channels prompt`, the output said `enabledChannels: ['prompt']` but the disk still had all three MVP channels enabled because `generateFeatureFlagsConfig()` skipped writing when the file already existed.
+- **Why it's wrong**: The output is a contract with the caller. If it says `enabledChannels: ['prompt']` but the disk has `['prompt', 'code_tool_hook', 'defer_archive']`, the caller cannot trust the output. This is the same class as ERR-034 (canonical config not consumed by caller) — the output should reflect the source of truth (disk), not the input parameters.
+- **Correct approach**: (1) When `--channels` is specified, always rewrite `feature-flags.yaml` to match (no early return on existing file). (2) After writing, read the actual enabled channels from disk and return those in the output. (3) If preserving existing config, explicitly report `configuration_preserved` and read from disk.
+- **How to prevent**: When a function returns state that should reflect disk, always read from disk after writing — never return the input parameters as if they were the result. Add tests that: (1) write config, (2) modify config, (3) verify output matches disk, not input.
+- **Source**: PRI-247 / PR #721
+- **Date**: 2026-05-26
+- **Recurrence**: Same class as ERR-034

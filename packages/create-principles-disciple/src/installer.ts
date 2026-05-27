@@ -1,169 +1,212 @@
-/**
- * 安装器模块
- */
-import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import * as http from 'http';
+import { execSync, execFileSync, spawn, type ChildProcess } from 'child_process';
 import type { ExecSyncOptions } from 'child_process';
 import ora from 'ora';
 import { logger } from './utils/logger.js';
-import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';
 import type { InstallOptions } from './prompts.js';
+import {
+  generateFeatureFlagsYamlContent,
+  getFeatureFlagsPath,
+  getOpenClawDir,
+  getPluginExtDir,
+  getInstalledPdCliDir,
+  getInstalledBinDir,
+  getInstalledConsoleDir,
+  isWindows,
+  validateOpenClawConfig,
+  readEnabledChannelsFromDisk,
+  type ComponentStatus,
+  type VerificationResult,
+} from './mvp-config.js';
 
-// 跨平台 execSync 选项：Windows 需要 shell，Unix 可以直接执行
-const getExecOptions = (cwd: string): ExecSyncOptions => {
-  const options: ExecSyncOptions = {
+const INSTALL_TIMEOUT_MS = parseInt(process.env.PD_INSTALL_TIMEOUT_MS || '300000', 10);
+
+function getCapturingExecOptions(cwd: string, timeoutOverride?: number): ExecSyncOptions {
+  return {
     cwd,
-    stdio: 'inherit' as const,
+    stdio: 'pipe' as const,
     env: process.env,
+    timeout: timeoutOverride ?? INSTALL_TIMEOUT_MS,
   };
-  // Windows 需要 shell 来正确执行 npm 命令
-  if (process.platform === 'win32') {
-    options.shell = process.env.ComSpec || 'cmd.exe';
-  }
-  return options;
-};
-
-const ALWAYS_ON_SKILLS = new Set([
-  'admin',
-  'bootstrap-tools',
-  'deductive-audit',
-  'feedback',
-  'init-strategy',
-  'inject-rule',
-  'pd-mentor',
-  'plan-script',
-  'profile',
-  'triage',
-]);
-
-const FEATURE_SKILL_MAP: Record<string, string[]> = {
-  evolution: ['evolve-task', 'evolution-framework-update', 'evolve-system', 'watch-evolution', 'pd-daily', 'report'],
-  trust: [], // Built-in feature (trust-engine.ts, gate.ts), no skills needed
-  pain: ['pain', 'root-cause'],
-  reflection: ['reflection', 'reflection-log'],
-  okr: ['manage-okr'],
-  hygiene: ['pd-grooming'],
-};
-
-export interface InstallResult {
-  success: boolean;
-  pluginDir: string;
-  workspaceDir: string;
-  skillsCount: number;
-  templatesCount: number;
-  error?: string;
 }
 
-/**
- * 获取模板目录
- */
-function getTemplatesDir(pluginDir: string, language: string): string {
-  return path.join(pluginDir, 'templates', 'langs', language);
+interface BackupResult {
+  type: 'no_existing' | 'backed_up';
+  backupDir: string | null;
 }
 
-/**
- * 清理旧版本
- */
-async function cleanOldVersion(): Promise<void> {
+function backupExistingInstall(): BackupResult {
   const extDir = getPluginExtDir();
-  if (existsSync(extDir)) {
-    await fse.remove(extDir);
-    logger.info(`已删除旧版本: ${extDir}`);
+  if (!existsSync(extDir)) return { type: 'no_existing', backupDir: null };
+
+  const backupDir = extDir + '.backup.' + Date.now();
+  try {
+    renameSync(extDir, backupDir);
+    logger.info(`Backed up existing install to ${backupDir}`);
+    return { type: 'backed_up', backupDir };
+  } catch (e) {
+    throw new Error(`Could not backup existing install at ${extDir}: ${e instanceof Error ? e.message : String(e)}. Aborting to prevent data loss — resolve the lock or rename manually and re-run.`, { cause: e });
   }
 }
 
-/**
- * 检查内置插件是否存在
- */
-async function checkBuiltPlugin(pluginDir: string): Promise<void> {
-  logger.step('检查内置插件');
+function restoreBackup(backupDir: string | null): { restored: boolean; error?: string } {
+  if (!backupDir || !existsSync(backupDir)) return { restored: true };
+  const extDir = getPluginExtDir();
+  try {
+    if (existsSync(extDir)) {
+      rmSync(extDir, { recursive: true, force: true });
+    }
+    renameSync(backupDir, extDir);
+    logger.info('Restored previous install from backup');
+    return { restored: true };
+  } catch (e) {
+    const msg = `Failed to restore backup: ${e instanceof Error ? e.message : String(e)}`;
+    logger.error(msg);
+    return { restored: false, error: msg };
+  }
+}
 
+function cleanupBackup(backupDir: string | null): void {
+  if (!backupDir || !existsSync(backupDir)) return;
+  try {
+    rmSync(backupDir, { recursive: true, force: true });
+  } catch {
+    // non-fatal
+  }
+}
+
+async function checkBuiltPlugin(pluginDir: string): Promise<void> {
   const distDir = path.join(pluginDir, 'plugin', 'dist');
   const pluginJson = path.join(pluginDir, 'plugin', 'openclaw.plugin.json');
 
   if (!existsSync(distDir) || !existsSync(pluginJson)) {
-    logger.error('内置插件文件缺失');
-    logger.error(`期望位置: ${distDir}`);
-    logger.error('这可能是安装包损坏，请重新安装或联系开发者');
-    process.exit(1);
+    throw new Error(`Built plugin files missing at ${distDir}. Package may be corrupted.`);
   }
 
-  logger.success('内置插件检查通过');
+  const manifestRaw: unknown = JSON.parse(readFileSync(pluginJson, 'utf-8'));
+  if (typeof manifestRaw !== 'object' || manifestRaw === null || Array.isArray(manifestRaw)) {
+    throw new Error('openclaw.plugin.json is not a valid object');
+  }
+  const manifest = manifestRaw as Record<string, unknown>;
+  const { activation } = manifest;
+  if (typeof activation !== 'object' || activation === null || Array.isArray(activation)) {
+    throw new Error('openclaw.plugin.json is missing activation object — PD hooks will not execute via gateway');
+  }
+  const activationObj = activation as Record<string, unknown>;
+  const { onCapabilities } = activationObj;
+  if (!Array.isArray(onCapabilities) || !(onCapabilities as unknown[]).includes('hook')) {
+    throw new Error('openclaw.plugin.json.activation.onCapabilities does not include "hook" — PD hooks will not execute via gateway. Re-bundle after PR #725 is merged.');
+  }
+
+  const pkgJsonPath = path.join(pluginDir, 'plugin', 'package.json');
+  if (existsSync(pkgJsonPath)) {
+    const pkgRaw: unknown = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+    if (typeof pkgRaw === 'object' && pkgRaw !== null && !Array.isArray(pkgRaw)) {
+      const pkg = pkgRaw as Record<string, unknown>;
+      const { openclaw } = pkg;
+      if (typeof openclaw === 'object' && openclaw !== null && !Array.isArray(openclaw)) {
+        const openclawObj = openclaw as Record<string, unknown>;
+        if (openclawObj.setupEntry !== './dist/bundle.js') {
+          throw new Error(`plugin package.json openclaw.setupEntry is "${String(openclawObj.setupEntry)}" (expected "./dist/bundle.js") — gateway will not load PD hooks. Re-bundle after PR #725 is merged.`);
+        }
+      }
+    }
+  }
 }
 
-/**
- * 安装插件到 OpenClaw
- */
-async function installPlugin(pluginDir: string): Promise<void> {
-  logger.step('安装插件到 OpenClaw');
-
+async function installPluginToStaging(pluginDir: string): Promise<void> {
   const extDir = getPluginExtDir();
-  const configDir = getOpenClawConfigDir();
-  const configPath = path.join(configDir, 'openclaw.json');
   const builtPluginDir = path.join(pluginDir, 'plugin');
 
-  // 复制内置插件文件
   await fse.ensureDir(extDir);
   await fse.copy(builtPluginDir, extDir, { overwrite: true });
-  logger.info('已复制插件文件');
-
-  // 更新 openclaw.json 配置
-  if (existsSync(configPath)) {
-    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-
-    // 添加到 allow 列表
-    if (!config.plugins) config.plugins = {};
-    if (!config.plugins.allow) config.plugins.allow = [];
-    if (!config.plugins.allow.includes('principles-disciple')) {
-      config.plugins.allow.push('principles-disciple');
-    }
-
-    // 添加到 entries
-    if (!config.plugins.entries) config.plugins.entries = {};
-    config.plugins.entries['principles-disciple'] = { enabled: true };
-
-    // 添加到 installs（使用 OpenClaw 正确格式）
-    if (!config.plugins.installs) config.plugins.installs = {};
-    config.plugins.installs['principles-disciple'] = {
-      source: 'path',
-      installPath: extDir,
-      installedAt: new Date().toISOString(),
-    };
-
-    writeFileSync(configPath, JSON.stringify(config, null, 2));
-  }
-
-  logger.success('插件安装成功');
 }
 
-function verifyNativeModule(modulePath: string): boolean {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS require to verify module existence
-    require(modulePath);
-    return true;
-  } catch {
-    return false;
+async function updateOpenClawConfig(): Promise<void> {
+  const configDir = getOpenClawDir();
+  const configPath = path.join(configDir, 'openclaw.json');
+  const extDir = getPluginExtDir();
+
+  if (!existsSync(configPath)) return;
+
+  const rawConfig = readFileSync(configPath, 'utf-8');
+  const config: unknown = JSON.parse(rawConfig);
+
+  const validation = validateOpenClawConfig(config);
+  if (!validation.valid) {
+    throw new Error(`Malformed openclaw.json: ${validation.error}. Fix manually and re-run installer.`);
   }
+
+  if (config === null || typeof config !== 'object' || Array.isArray(config)) return;
+
+  const configObj = { ...(config as Record<string, unknown>) };
+
+  if (!configObj.plugins) configObj.plugins = {};
+  if (typeof configObj.plugins !== 'object' || configObj.plugins === null || Array.isArray(configObj.plugins)) {
+    throw new Error('openclaw.json plugins field is malformed. Fix manually and re-run installer.');
+  }
+  const plugins = { ...(configObj.plugins as Record<string, unknown>) };
+
+  if (!plugins.allow) plugins.allow = [];
+  if (!Array.isArray(plugins.allow)) {
+    throw new Error('openclaw.json plugins.allow is not an array. Fix manually and re-run installer.');
+  }
+  const allow = (plugins.allow as unknown[]).filter((a): a is string => typeof a === 'string');
+  if (!allow.includes('principles-disciple')) {
+    allow.push('principles-disciple');
+  }
+  plugins.allow = allow;
+
+  if (!plugins.entries) plugins.entries = {};
+  if (typeof plugins.entries !== 'object' || plugins.entries === null || Array.isArray(plugins.entries)) {
+    throw new Error('openclaw.json plugins.entries is malformed. Fix manually and re-run installer.');
+  }
+  const entries = { ...(plugins.entries as Record<string, unknown>) };
+  entries['principles-disciple'] = { enabled: true };
+  plugins.entries = entries;
+
+  if (!plugins.installs) plugins.installs = {};
+  if (typeof plugins.installs !== 'object' || plugins.installs === null || Array.isArray(plugins.installs)) {
+    throw new Error('openclaw.json plugins.installs is malformed. Fix manually and re-run installer.');
+  }
+  const installs = { ...(plugins.installs as Record<string, unknown>) };
+  installs['principles-disciple'] = {
+    source: 'path',
+    installPath: extDir,
+    installedAt: new Date().toISOString(),
+  };
+  plugins.installs = installs;
+
+  configObj.plugins = plugins;
+  writeFileSync(configPath, JSON.stringify(configObj, null, 2));
 }
 
 async function installPluginDependencies(): Promise<void> {
   const extDir = getPluginExtDir();
   const packageJsonPath = path.join(extDir, 'package.json');
   const nodeModulesPath = path.join(extDir, 'node_modules');
-  const nativeModules = ['better-sqlite3'];
 
   if (!existsSync(packageJsonPath)) {
-    logger.warn('插件 package.json 不存在，跳过依赖安装');
-    return;
+    throw new Error('Plugin package.json not found after copy — install is corrupted');
   }
 
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-  const allDeps = Object.keys({ ...packageJson.dependencies, ...packageJson.devDependencies });
+  const packageJsonRaw: unknown = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+  if (typeof packageJsonRaw !== 'object' || packageJsonRaw === null || Array.isArray(packageJsonRaw)) {
+    throw new Error('Plugin package.json is malformed');
+  }
+  const pkg = packageJsonRaw as Record<string, unknown>;
+  const deps = (typeof pkg.dependencies === 'object' && pkg.dependencies !== null && !Array.isArray(pkg.dependencies))
+    ? Object.keys(pkg.dependencies as Record<string, unknown>)
+    : [];
+  const devDeps = (typeof pkg.devDependencies === 'object' && pkg.devDependencies !== null && !Array.isArray(pkg.devDependencies))
+    ? Object.keys(pkg.devDependencies as Record<string, unknown>)
+    : [];
+  const allDeps = [...deps, ...devDeps];
 
   let needsInstall = !existsSync(nodeModulesPath);
-
   if (!needsInstall) {
     for (const dep of allDeps) {
       if (!existsSync(path.join(extDir, 'node_modules', dep))) {
@@ -171,412 +214,609 @@ async function installPluginDependencies(): Promise<void> {
         break;
       }
     }
-    if (!needsInstall) {
-      for (const mod of nativeModules) {
-        const modPath = path.join(extDir, 'node_modules', mod);
-        if (existsSync(modPath) && !verifyNativeModule(mod)) {
-          logger.warn(`原生模块 ${mod} 验证失败，需要重新编译`);
-          needsInstall = true;
-          break;
-        }
-      }
+  }
+
+  if (needsInstall) {
+    const execOpts = getCapturingExecOptions(extDir);
+    try {
+      execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
+    } catch (e) {
+      throw new Error(`npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm install --ignore-scripts`, { cause: e });
     }
   }
 
-  if (!needsInstall) {
-    logger.success('插件依赖已安装');
-    return;
+  const nativeModules = ['better-sqlite3'];
+  const execOpts = getCapturingExecOptions(extDir);
+  for (const mod of nativeModules) {
+    const modPath = path.join(extDir, 'node_modules', mod);
+    if (!existsSync(modPath)) continue;
+    try {
+      execSync(`npm rebuild ${mod}`, execOpts);
+    } catch (e) {
+      throw new Error(`Native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm rebuild ${mod}`, { cause: e });
+    }
   }
 
-  logger.step('安装插件运行时依赖');
+  for (const nativeMod of nativeModules) {
+    const nativeModPath = path.join(extDir, 'node_modules', nativeMod);
+    if (!existsSync(nativeModPath)) continue;
+    try {
+      execSync('node -e "require(\'' + nativeMod + '\')"', { cwd: extDir, stdio: 'pipe' });
+    } catch {
+      throw new Error(`Native module ${nativeMod} verification failed after rebuild. The install cannot proceed.`);
+    }
+  }
+}
+
+function getNpmGlobalBinDir(): string | null {
   try {
-    const execOpts = getExecOptions(extDir);
-    logger.info('下载并安装 npm 依赖...');
-    execSync('npm install --ignore-scripts', execOpts);
+    const prefix = execSync('npm prefix -g', { encoding: 'utf-8', stdio: 'pipe' }).trim();
+    if (!prefix) return null;
+    return process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
+  } catch {
+    return null;
+  }
+}
 
-    for (const mod of nativeModules) {
-      const modPath = path.join(extDir, 'node_modules', mod);
-      if (existsSync(modPath)) {
-        logger.info(`编译原生模块 ${mod}...`);
-        try {
-          execSync(`npm rebuild ${mod}`, execOpts);
-        } catch (e) {
-          logger.warn(`原生模块 ${mod} 编译失败: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-    }
+function installGlobalPdShim(): boolean {
+  const globalBin = getNpmGlobalBinDir();
+  if (!globalBin) return false;
 
-    let nativeModulesOk = true;
-    for (const nativeMod of nativeModules) {
-      const nativeModPath = path.join(extDir, 'node_modules', nativeMod);
-      if (existsSync(nativeModPath)) {
-        if (verifyNativeModule(nativeMod)) {
-          logger.success(`原生模块 ${nativeMod} 验证通过`);
-        } else {
-          logger.warn(`原生模块 ${nativeMod} 验证失败`);
-          nativeModulesOk = false;
-        }
-      }
-    }
+  try {
+    mkdirSync(globalBin, { recursive: true });
+    const installedBinDir = getInstalledBinDir();
 
-    if (nativeModulesOk) {
-      logger.success('插件依赖安装完成');
+    if (isWindows()) {
+      const pluginCmd = path.join(installedBinDir, 'pd.cmd');
+      writeFileSync(path.join(globalBin, 'pd.cmd'), `@echo off\r\ncall "${pluginCmd.replace(/"/g, '""')}" %*\r\n`, 'utf-8');
+      const pluginPs = path.join(installedBinDir, 'pd.ps1');
+      writeFileSync(
+        path.join(globalBin, 'pd.ps1'),
+        `$shim = "${pluginPs.replace(/`/g, '``').replace(/"/g, '`"')}"\r\n& $shim @args\r\nexit $LASTEXITCODE\r\n`,
+        'utf-8',
+      );
     } else {
-      logger.warn('部分原生模块可能无法正常工作');
-      logger.info('如果遇到问题，运行: cd ~/.openclaw/extensions/principles-disciple && npm rebuild');
+      const pluginSh = path.join(installedBinDir, 'pd');
+      const globalSh = path.join(globalBin, 'pd');
+      writeFileSync(globalSh, `#!/usr/bin/env sh\nexec "${pluginSh.replace(/"/g, '\\"')}" "$@"\n`, 'utf-8');
+      chmodSync(globalSh, 0o755);
     }
-  } catch (error) {
-    logger.error('依赖安装失败');
-    logger.error(`错误: ${error instanceof Error ? error.message : String(error)}`);
-    logger.info('');
-    logger.info('手动修复步骤:');
-    logger.info(`  cd ${extDir}`);
-    logger.info('  npm install --ignore-scripts');
-    logger.info('  npm rebuild better-sqlite3');
-    // 不退出，让安装继续，可能基本功能还能用
+    return true;
+  } catch (e) {
+    logger.warn(`Global pd shim installation failed: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
   }
 }
 
-/**
- * 复制 Skills
- */
-async function copySkills(pluginDir: string, language: string, features: string[]): Promise<number> {
-  logger.step('复制 Skills');
-  
-  const skillsSrc = path.join(getTemplatesDir(pluginDir, language), 'skills');
-  const skillsDest = path.join(getPluginExtDir(), 'skills');
-  
-  if (!existsSync(skillsSrc)) {
-    // 回退到中文
-    const fallbackSrc = path.join(getTemplatesDir(pluginDir, 'zh'), 'skills');
-    if (existsSync(fallbackSrc)) {
-      await fse.ensureDir(skillsDest);
-      await fse.copy(fallbackSrc, skillsDest, { overwrite: true });
-    }
+function syncPdCli(pluginDir: string): boolean {
+  const pdCliSourceDir = path.join(pluginDir, 'pd-cli');
+  const distDir = path.join(pdCliSourceDir, 'dist');
+
+  if (!existsSync(path.join(distDir, 'index.js'))) {
+    throw new Error('PD CLI dist/index.js not found in package. Cannot install pd command.');
+  }
+
+  const installedPdCliDir = getInstalledPdCliDir();
+  rmSync(installedPdCliDir, { recursive: true, force: true });
+  mkdirSync(installedPdCliDir, { recursive: true });
+  cpSync(distDir, path.join(installedPdCliDir, 'dist'), { recursive: true });
+  copyFileSync(path.join(pdCliSourceDir, 'package.json'), path.join(installedPdCliDir, 'package.json'));
+
+  const installedBinDir = getInstalledBinDir();
+  mkdirSync(installedBinDir, { recursive: true });
+  const installedEntry = path.join(installedPdCliDir, 'dist', 'index.js');
+
+  if (isWindows()) {
+    const cmdShim = [
+      '@echo off',
+      `node "${installedEntry.replace(/"/g, '""')}" %*`,
+      '',
+    ].join('\r\n');
+    writeFileSync(path.join(installedBinDir, 'pd.cmd'), cmdShim, 'utf-8');
+    const psShim = [
+      '$ErrorActionPreference = "Stop"',
+      `$entry = "${installedEntry.replace(/`/g, '``').replace(/"/g, '`"')}"`,
+      '& node $entry @args',
+      'exit $LASTEXITCODE',
+      '',
+    ].join('\r\n');
+    writeFileSync(path.join(installedBinDir, 'pd.ps1'), psShim, 'utf-8');
   } else {
-    await fse.ensureDir(skillsDest);
-    await fse.copy(skillsSrc, skillsDest, { overwrite: true });
+    const shShim = [
+      '#!/usr/bin/env sh',
+      `exec node "${installedEntry.replace(/"/g, '\\"')}" "$@"`,
+      '',
+    ].join('\n');
+    const target = path.join(installedBinDir, 'pd');
+    writeFileSync(target, shShim, 'utf-8');
+    chmodSync(target, 0o755);
   }
-  
-  const selectedFeatureSet = new Set(features);
-  const enabledSkills = new Set<string>(ALWAYS_ON_SKILLS);
 
-  for (const feature of selectedFeatureSet) {
-    const mappedSkills = FEATURE_SKILL_MAP[feature] || [];
-    for (const skill of mappedSkills) {
-      enabledSkills.add(skill);
+  return installGlobalPdShim();
+}
+
+function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: string } {
+  const localShim = path.join(getInstalledBinDir(), isWindows() ? 'pd.cmd' : 'pd');
+  let localOk = false;
+  try {
+    const installedEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
+    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: 10_000 });
+    localOk = true;
+  } catch { /* local entry failed */ }
+
+  const globalOk = (() => {
+    try {
+      if (isWindows()) {
+        execSync('pd --version', { stdio: 'pipe', timeout: 10_000, shell: 'cmd' });
+      } else {
+        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: 10_000 });
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  return { localOk, globalOk, localPath: localShim };
+}
+
+function installConsole(consoleDir: string): void {
+  const consoleSrc = path.join(consoleDir, 'console');
+  const consoleDest = getInstalledConsoleDir();
+
+  if (!existsSync(consoleSrc)) {
+    throw new Error('Console bundle not found in package. Cannot install pd-console.');
+  }
+
+  const serverJs = path.join(consoleSrc, 'dist', 'server.js');
+  const webIndex = path.join(consoleSrc, 'dist', 'web', 'index.html');
+  if (!existsSync(serverJs)) {
+    throw new Error('Console dist/server.js not found in bundle. Package may be corrupted.');
+  }
+  if (!existsSync(webIndex)) {
+    throw new Error('Console dist/web/index.html not found in bundle. Package may be corrupted.');
+  }
+
+  rmSync(consoleDest, { recursive: true, force: true });
+  cpSync(consoleSrc, consoleDest, { recursive: true });
+}
+
+function getInstalledCoreDir(): string {
+  return path.join(getPluginExtDir(), 'core');
+}
+
+function installBundledCore(pluginDir: string): void {
+  const coreSrc = path.join(pluginDir, 'core');
+  const coreDest = getInstalledCoreDir();
+
+  if (!existsSync(coreSrc)) {
+    throw new Error('Bundled @principles/core not found in package. Cannot resolve runtime dependencies.');
+  }
+
+  const corePkgJson = path.join(coreSrc, 'package.json');
+  const coreDist = path.join(coreSrc, 'dist');
+  if (!existsSync(corePkgJson) || !existsSync(coreDist)) {
+    throw new Error('Bundled @principles/core is incomplete (missing package.json or dist). Package may be corrupted.');
+  }
+
+  rmSync(coreDest, { recursive: true, force: true });
+  cpSync(coreSrc, coreDest, { recursive: true });
+}
+
+function ensureCoreDependency(_targetDir: string): void {
+  const coreDir = getInstalledCoreDir();
+  if (!existsSync(coreDir)) {
+    throw new Error('Installed @principles/core not found. Run installBundledCore first.');
+  }
+}
+
+async function installConsoleDependencies(): Promise<void> {
+  const consoleDest = getInstalledConsoleDir();
+  const packageJsonPath = path.join(consoleDest, 'package.json');
+
+  if (!existsSync(packageJsonPath)) {
+    throw new Error('Console package.json not found after copy — install is corrupted');
+  }
+
+  const execOpts = getCapturingExecOptions(consoleDest);
+  try {
+    execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
+  } catch (e) {
+    throw new Error(`Console npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${consoleDest} && npm install --ignore-scripts --legacy-peer-deps`, { cause: e });
+  }
+
+  const nativeModules = ['better-sqlite3'];
+  for (const mod of nativeModules) {
+    const modPath = path.join(consoleDest, 'node_modules', mod);
+    if (!existsSync(modPath)) continue;
+    try {
+      execSync(`npm rebuild ${mod}`, getCapturingExecOptions(consoleDest));
+    } catch (e) {
+      throw new Error(`Console native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${consoleDest} && npm rebuild ${mod}`, { cause: e });
     }
   }
+}
 
-  if (existsSync(skillsDest)) {
-    const installedSkills = readdirSync(skillsDest).filter((entry) => statSync(path.join(skillsDest, entry)).isDirectory());
+async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null; reason?: string }> {
+  const consoleDest = getInstalledConsoleDir();
+  const serverEntry = path.join(consoleDest, 'dist', 'server.js');
 
-    for (const skillDir of installedSkills) {
-      if (!enabledSkills.has(skillDir)) {
-        await fse.remove(path.join(skillsDest, skillDir));
+  if (!existsSync(serverEntry)) {
+    return { ok: false, url: '', process: null, reason: 'Console server entry not found' };
+  }
+
+  const port = 3100 + Math.floor(Math.random() * 100);
+  const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth', '--host', '127.0.0.1'], {
+    stdio: 'pipe',
+    env: { ...process.env },
+    detached: false,
+  });
+
+  let childExited = false;
+  let childExitCode: number | null = null;
+  let childStderr = '';
+  let childStdout = '';
+  child.on('exit', (code) => {
+    childExited = true;
+    childExitCode = code;
+  });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    childStderr += chunk.toString();
+  });
+  child.stdout?.on('data', (chunk: Buffer) => {
+    childStdout += chunk.toString();
+  });
+
+  await new Promise<void>((resolve) => { setTimeout(resolve, 6000); });
+
+  if (childExited) {
+    const stderrHint = childStderr.slice(0, 500);
+    return { ok: false, url: '', process: null, reason: `Console process exited prematurely with code ${childExitCode}. Stderr: ${stderrHint}` };
+  }
+
+  const url = `http://127.0.0.1:${port}`;
+  let ok = false;
+  let reason = '';
+  try {
+    const result = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const req = http.get(`${url}/api/health`, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() });
+        });
+      });
+      req.on('error', reject);
+      req.setTimeout(8000, () => { req.destroy(); reject(new Error('health check timeout')); });
+    });
+
+    if (result.statusCode !== 200) {
+      reason = `Console /api/health returned HTTP ${result.statusCode} (expected 200)`;
+    } else if (!result.body || result.body.trim().length === 0) {
+      reason = 'Console /api/health returned empty body';
+    } else {
+      try {
+        const parsed: unknown = JSON.parse(result.body);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          reason = 'Console /api/health returned non-object JSON';
+        } else {
+          ok = true;
+        }
+      } catch {
+        reason = 'Console /api/health returned malformed JSON';
       }
     }
+  } catch (e) {
+    reason = `Console health check failed: ${e instanceof Error ? e.message : String(e)}. Stderr: ${childStderr.slice(0, 300)}. Stdout: ${childStdout.slice(0, 300)}`;
   }
 
-  const count = existsSync(skillsDest)
-    ? readdirSync(skillsDest).filter((entry) => statSync(path.join(skillsDest, entry)).isDirectory()).length
-    : 0;
-  logger.success(`已复制 ${count} 个 Skills`);
-  return count;
+  if (!ok) {
+    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    try {
+      if (!childExited) {
+        child.kill('SIGKILL');
+      }
+    } catch { /* ignore */ }
+    return { ok: false, url, process: null, reason };
+  }
+
+  return { ok: true, url, process: child };
 }
 
-interface CopyCoreTemplatesOptions {
+interface CopyOptions {
   pluginDir: string;
   language: string;
   workspaceDir: string;
   mode: 'smart' | 'force';
 }
 
-/**
- * 复制核心模板到工作区
- */
-async function copyCoreTemplates(options: CopyCoreTemplatesOptions): Promise<number> {
-  const { pluginDir, language, workspaceDir, mode } = options;
-  logger.step('复制核心模板');
-
+async function copyCoreTemplates(opts: CopyOptions): Promise<number> {
   let count = 0;
-  const coreSrc = path.join(getTemplatesDir(pluginDir, language), 'core');
+  const coreSrc = path.join(opts.pluginDir, 'templates', 'langs', opts.language, 'core');
+  const fallbackSrc = path.join(opts.pluginDir, 'templates', 'langs', 'en', 'core');
+  const actualSrc = existsSync(coreSrc) ? coreSrc : (existsSync(fallbackSrc) ? fallbackSrc : null);
 
-  if (!existsSync(coreSrc)) {
-    logger.warn('核心模板目录不存在');
-    return 0;
-  }
+  if (!actualSrc) return 0;
 
-  const files = readdirSync(coreSrc).filter(f => f.endsWith('.md'));
-
+  const files = readdirSync(actualSrc).filter(f => f.endsWith('.md'));
   for (const file of files) {
-    const srcPath = path.join(coreSrc, file);
-    const destPath = path.join(workspaceDir, file);
-
-    if (existsSync(destPath) && mode === 'smart') {
-      // 智能模式：生成 .update 文件
-      const updatePath = `${destPath}.update`;
-      await fse.copy(srcPath, updatePath, { overwrite: true });
-      logger.info(`${file} -> ${file}.update (智能模式)`);
+    const srcPath = path.join(actualSrc, file);
+    const destPath = path.join(opts.workspaceDir, file);
+    if (existsSync(destPath) && opts.mode === 'smart') {
+      await fse.copy(srcPath, `${destPath}.update`, { overwrite: true });
     } else {
-      await fse.ensureDir(workspaceDir);
+      await fse.ensureDir(opts.workspaceDir);
       await fse.copy(srcPath, destPath, { overwrite: true });
-      logger.info(`${file} (已复制)`);
     }
     count++;
   }
-
-  logger.success(`已复制 ${count} 个核心模板`);
   return count;
 }
 
-/**
- * 复制身份层文件到工作区
- */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Installer function signature - parameters represent distinct configuration dimensions (source, language, destination, mode) that don't logically group into options object
-async function copyPrinciplesLayer(
-  pluginDir: string,
-  language: string,
-  workspaceDir: string,
-  mode: 'smart' | 'force'
-): Promise<number> {
-  logger.step('复制身份层文件');
-
+async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
   let count = 0;
-  const principlesSrc = path.join(pluginDir, 'templates', 'workspace', '.principles');
-  const principlesDest = path.join(workspaceDir, '.principles');
+  const principlesSrc = path.join(opts.pluginDir, 'templates', 'workspace', '.principles');
+  const principlesDest = path.join(opts.workspaceDir, '.principles');
 
-  if (!existsSync(principlesSrc)) {
-    logger.warn('身份层模板目录不存在');
-    return 0;
-  }
+  if (!existsSync(principlesSrc)) return 0;
 
-  // 复制所有文件
   const files = readdirSync(principlesSrc);
-
-  // Custom logic for THINKING_OS.md language support
-  const langThinkingOsSrc = path.join(pluginDir, 'templates', 'langs', language, 'principles', 'THINKING_OS.md');
+  const langThinkingOsSrc = path.join(opts.pluginDir, 'templates', 'langs', opts.language, 'principles', 'THINKING_OS.md');
 
   for (const file of files) {
     let srcPath = path.join(principlesSrc, file);
     if (file === 'THINKING_OS.md' && existsSync(langThinkingOsSrc)) {
       srcPath = langThinkingOsSrc;
     }
-    const destPath = path.join(principlesDest, file);    
-    // 跳过目录（models 目录单独处理）
-    if (statSync(srcPath).isDirectory()) {
-      continue;
-    }
-    
-    if (existsSync(destPath) && mode === 'smart') {
-      const updatePath = `${destPath}.update`;
-      await fse.copy(srcPath, updatePath, { overwrite: true });
-      logger.info(`.principles/${file} -> .update (智能模式)`);
+    const destPath = path.join(principlesDest, file);
+    if (statSync(srcPath).isDirectory()) continue;
+
+    if (existsSync(destPath) && opts.mode === 'smart') {
+      await fse.copy(srcPath, `${destPath}.update`, { overwrite: true });
     } else {
       await fse.ensureDir(principlesDest);
       await fse.copy(srcPath, destPath, { overwrite: true });
-      logger.info(`.principles/${file} (已复制)`);
     }
     count++;
   }
-  
-  // 复制 models 目录
+
   const modelsSrc = path.join(principlesSrc, 'models');
   const modelsDest = path.join(principlesDest, 'models');
-  
   if (existsSync(modelsSrc)) {
     await fse.ensureDir(modelsDest);
     await fse.copy(modelsSrc, modelsDest, { overwrite: true });
-    const modelCount = readdirSync(modelsDest).length;
-    logger.info(`.principles/models/ (${modelCount} 个思维模型)`);
-    count += modelCount;
+    count += readdirSync(modelsDest).length;
   }
-  
-  logger.success(`身份层文件已复制`);
   return count;
 }
 
-/**
- * 创建配置文件
- */
-async function createConfigFile(workspaceDir: string, features: string[]): Promise<void> {
-  const configDir = getOpenClawConfigDir();
-  const configPath = path.join(configDir, 'principles-disciple.json');
-  
-  const config = {
-    workspace: workspaceDir,
-    state: path.join(workspaceDir, '.state'),
-    features,
-    debug: false,
-    installedAt: new Date().toISOString(),
-  };
-  
+async function generateFeatureFlagsConfig(workspaceDir: string, channels: string[]): Promise<string> {
+  const configPath = getFeatureFlagsPath(workspaceDir);
+  const configDir = path.dirname(configPath);
+
   await fse.ensureDir(configDir);
-  await fse.writeJson(configPath, config, { spaces: 2 });
-  
-  logger.success(`配置文件已创建: ${configPath}`);
+  writeFileSync(configPath, generateFeatureFlagsYamlContent(channels), 'utf8');
+  return configPath;
 }
 
-/**
- * 生成更新摘要
- */
-async function generateUpdateSummary(
-  workspaceDir: string,
-  mode: 'smart' | 'force'
-): Promise<number> {
-  // 只在智能模式（更新）时生成
-  if (mode !== 'smart') return 0;
-  
-  const updateFiles: string[] = [];
-  
-  // 查找所有 .update 文件
-  const findUpdateFiles = (dir: string): void => {
-    if (!existsSync(dir)) return;
-    const entries = readdirSync(dir);
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry);
-      if (statSync(fullPath).isDirectory()) {
-        // 跳过隐藏目录和 node_modules
-        if (entry.startsWith('.') || entry === 'node_modules') continue;
-        findUpdateFiles(fullPath);
-      } else if (entry.endsWith('.update')) {
-        updateFiles.push(fullPath);
+async function createConfigFile(workspaceDir: string, channels: string[]): Promise<void> {
+  const configDir = getOpenClawDir();
+  const configPath = path.join(configDir, 'principles-disciple.json');
+
+  let existingChannels: string[] | null = null;
+  let existingFeatures: string[] | null = null;
+
+  if (existsSync(configPath)) {
+    const existingRaw = readFileSync(configPath, 'utf-8');
+    const existing: unknown = JSON.parse(existingRaw);
+    if (existing !== null && typeof existing === 'object' && !Array.isArray(existing)) {
+      const existingObj = existing as Record<string, unknown>;
+      if (Object.hasOwn(existingObj, 'channels') && Array.isArray(existingObj.channels)) {
+        existingChannels = (existingObj.channels as unknown[]).filter((c): c is string => typeof c === 'string');
+      }
+      if (Object.hasOwn(existingObj, 'features') && Array.isArray(existingObj.features)) {
+        existingFeatures = (existingObj.features as unknown[]).filter((f): f is string => typeof f === 'string');
       }
     }
-  };
-  
-  findUpdateFiles(workspaceDir);
-  
-  if (updateFiles.length === 0) return 0;
-  
-  // 生成更新摘要
-  const summaryPath = path.join(workspaceDir, '.principles', 'UPDATE_SUMMARY.md');
-  const [timestamp] = new Date().toISOString().split('T');
-  
-  let content = `# 更新摘要 (${timestamp})
-
-## ⚠️ 待合并的更新文件
-
-以下文件有新版本可用，**必须手动合并**：
-
-| 文件 | 状态 |
-|------|------|
-`;
-  
-  for (const file of updateFiles) {
-    const relativePath = path.relative(workspaceDir, file);
-    content += `| \`${relativePath}\` | 待合并 |\n`;
   }
-  
-  content += `
-## 合并步骤
 
-1. 逐个打开 .update 文件
-2. 对比原文件，识别新增/修改内容
-3. 将有价值的更新合并到原文件
-4. 删除 .update 文件
+  const config: Record<string, unknown> = {
+    workspace: workspaceDir,
+    state: path.join(workspaceDir, '.state'),
+    channels: existingChannels ?? channels,
+    installedAt: new Date().toISOString(),
+    mvpFirst: true,
+  };
 
-## 查看完整变更日志
+  if (existingFeatures) {
+    config.features = existingFeatures;
+  }
 
-\`\`\`bash
-cat ~/clawd/docs/CHANGELOG.md | head -100
-\`\`\`
-
----
-*此文件在每次更新时自动生成，合并完成后可删除*
-`;
-  
-  await fse.ensureDir(path.dirname(summaryPath));
-  await fse.writeFile(summaryPath, content);
-  
-  logger.info(`更新摘要已生成: ${summaryPath}`);
-  logger.warn(`发现 ${updateFiles.length} 个待合并的更新文件`);
-  
-  return updateFiles.length;
+  await fse.ensureDir(configDir);
+  await fse.writeJson(configPath, config, { spaces: 2 });
 }
 
 export interface InstallResult {
   success: boolean;
-  pluginDir: string;
   workspaceDir: string;
-  skillsCount: number;
+  featureFlagsPath: string;
   templatesCount: number;
-  updateFilesCount?: number;
+  components: ComponentStatus;
+  verification: VerificationResult;
+  enabledChannels: string[];
+  nextAction: string;
+  reason?: string;
   error?: string;
 }
 
-/**
- * 主安装流程
- */
-export async function install(options: InstallOptions, pluginDir: string): Promise<InstallResult> {
-  const spinner = ora('正在安装...').start();
+export async function install(options: InstallOptions, pluginDir: string, quiet = false): Promise<InstallResult> {
+  const spinner = quiet ? null : ora('Installing...').start();
+  let backupDir: string | null = null;
+  const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };
+  const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
+  let consoleProcess: ChildProcess | null = null;
+
+  const killConsoleChild = () => {
+    if (consoleProcess) {
+      try { consoleProcess.kill('SIGTERM'); } catch { /* ignore */ }
+      try { consoleProcess.kill('SIGKILL'); } catch { /* ignore */ }
+      consoleProcess = null;
+    }
+  };
 
   try {
-    // 1. 清理旧版本
-    spinner.text = '清理旧版本...';
-    await cleanOldVersion();
-
-    // 2. 检查内置插件
-    spinner.text = '检查内置插件...';
+    if (spinner) spinner.text = 'Checking built plugin...';
     await checkBuiltPlugin(pluginDir);
+    verification.manifestActivation = 'verified';
 
-    // 3. 安装插件
-    spinner.text = '安装插件...';
-    await installPlugin(pluginDir);
+    if (spinner) spinner.text = 'Backing up existing install...';
+    const { backupDir: backupDirFromResult } = backupExistingInstall();
+    backupDir = backupDirFromResult;
 
-    // 4. 安装插件依赖
-    spinner.text = '安装插件依赖...';
+    if (spinner) spinner.text = 'Installing bundled @principles/core...';
+    installBundledCore(pluginDir);
+
+    if (spinner) spinner.text = 'Installing plugin...';
+    await installPluginToStaging(pluginDir);
+
+    if (spinner) spinner.text = 'Pre-filling @principles/core for plugin...';
+    ensureCoreDependency(getPluginExtDir());
+
+    if (spinner) spinner.text = 'Installing plugin dependencies...';
     await installPluginDependencies();
+    components.plugin = 'verified';
 
-    // 5. 复制 Skills
-    spinner.text = '复制 Skills...';
-    const skillsCount = await copySkills(pluginDir, options.language, options.features);
+    if (spinner) spinner.text = 'Installing pd CLI...';
+    syncPdCli(pluginDir);
 
-    // 6. 复制核心模板
-    spinner.text = '复制核心模板...';
+    if (spinner) spinner.text = 'Pre-filling @principles/core for pd-cli...';
+    ensureCoreDependency(getInstalledPdCliDir());
+
+    if (spinner) spinner.text = 'Verifying pd CLI...';
+    const cliVerify = verifyPdCliShim();
+    if (!cliVerify.localOk) {
+      throw new Error('PD CLI verification failed — local shim is not executable after install. Check Node.js and PATH configuration.');
+    }
+    if (cliVerify.globalOk) {
+      components.cli = 'verified';
+    } else {
+      components.cli = 'verified_local_only';
+      components.cliLocalPath = cliVerify.localPath;
+      logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" or add ${getInstalledBinDir()} to PATH.`);
+    }
+
+    if (spinner) spinner.text = 'Installing pd-console...';
+    installConsole(pluginDir);
+
+    if (spinner) spinner.text = 'Pre-filling @principles/core for console...';
+    ensureCoreDependency(getInstalledConsoleDir());
+
+    if (spinner) spinner.text = 'Installing console dependencies...';
+    await installConsoleDependencies();
+
+    if (spinner) spinner.text = 'Verifying pd-console...';
+    const consoleVerify = await verifyConsole(options.workspaceDir);
+    if (consoleVerify.ok) {
+      components.console = 'configured';
+      components.consoleEntrypoint = consoleVerify.url;
+      consoleProcess = consoleVerify.process;
+    } else {
+      throw new Error(`Console verification failed: ${consoleVerify.reason ?? 'unknown'}. Installation rolled back — plugin and CLI are not activated.`);
+    }
+
+    if (spinner) spinner.text = 'Copying templates...';
     const templatesCount = await copyCoreTemplates({
       pluginDir,
       language: options.language,
       workspaceDir: options.workspaceDir,
       mode: options.mode,
     });
-
-    // 7. 复制身份层
-    spinner.text = '复制身份层...';
-    const principlesCount = await copyPrinciplesLayer(
+    const principlesCount = await copyPrinciplesLayer({
       pluginDir,
-      options.language,
-      options.workspaceDir,
-      options.mode
-    );
-
-    // 8. 创建配置文件
-    spinner.text = '创建配置文件...';
-    await createConfigFile(options.workspaceDir, options.features);
-
-    // 9. 生成更新摘要（如果是更新模式）
-    spinner.text = '生成更新摘要...';
-    const updateFilesCount = await generateUpdateSummary(options.workspaceDir, options.mode);
-    
-    spinner.succeed('安装完成！');
-    
-    return {
-      success: true,
-      pluginDir: getPluginExtDir(),
+      language: options.language,
       workspaceDir: options.workspaceDir,
-      skillsCount,
+      mode: options.mode,
+    });
+
+    if (spinner) spinner.text = 'Generating feature flags...';
+    const featureFlagsPath = await generateFeatureFlagsConfig(options.workspaceDir, options.channels);
+    verification.features = 'passed';
+
+    if (spinner) spinner.text = 'Creating config...';
+    await createConfigFile(options.workspaceDir, options.channels);
+
+    if (spinner) spinner.text = 'Verifying pd demo story-a...';
+    try {
+      const installedPdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
+      execFileSync(process.execPath, [installedPdCliEntry, 'demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
+        stdio: 'pipe',
+        timeout: 30_000,
+      });
+      verification.storyA = 'passed';
+    } catch (e) {
+      throw new Error(`Story A demo verification failed: ${e instanceof Error ? e.message : String(e)}. Installation rolled back — plugin and CLI are not activated.`, { cause: e });
+    }
+
+    if (spinner) spinner.text = 'Updating OpenClaw config...';
+    await updateOpenClawConfig();
+
+    cleanupBackup(backupDir);
+    if (spinner) spinner.succeed('Install complete!');
+
+    killConsoleChild();
+
+    const actualEnabledChannels = readEnabledChannelsFromDisk(options.workspaceDir);
+    const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
+    const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
+    const nextActions: string[] = [];
+    if (components.cli === 'verified') {
+      nextActions.push(`pd runtime canary --workspace "${options.workspaceDir}" --json`);
+    } else if (components.cli === 'verified_local_only' && components.cliLocalPath) {
+      nextActions.push(`"${components.cliLocalPath}" runtime canary --workspace "${options.workspaceDir}" --json`);
+    }
+    if (components.console === 'configured') {
+      nextActions.push(`pd console --workspace "${options.workspaceDir}" --no-auth (listens on 127.0.0.1 only)`);
+    }
+
+    return {
+      success: isComplete,
+      workspaceDir: options.workspaceDir,
+      featureFlagsPath,
       templatesCount: templatesCount + principlesCount,
-      updateFilesCount,
+      components,
+      verification,
+      enabledChannels: actualEnabledChannels.length > 0 ? actualEnabledChannels : options.channels,
+      nextAction: nextActions.join(' | '),
     };
   } catch (error) {
-    spinner.fail('安装失败');
+    if (spinner) spinner.fail('Install failed');
+
+    killConsoleChild();
+
+    const restoreResult = restoreBackup(backupDir);
+
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const rollbackSuffix = restoreResult.restored
+      ? 'Previous install has been restored.'
+      : `CRITICAL: Rollback also failed — installation state is uncertain. ${restoreResult.error ?? ''} Resolve manually: check ${getPluginExtDir()} and ${backupDir}`;
+    const nextAction = restoreResult.restored
+      ? 'Check the error above. Previous install has been restored. Fix the issue and re-run the installer.'
+      : `Installation and rollback both failed. Check ${getPluginExtDir()} and ${backupDir} manually. Error: ${errorMsg}`;
+    const reason = restoreResult.restored
+      ? errorMsg
+      : `install_failed_rollback_failed: ${errorMsg}`;
+
     return {
       success: false,
-      pluginDir: getPluginExtDir(),
       workspaceDir: options.workspaceDir,
-      skillsCount: 0,
+      featureFlagsPath: getFeatureFlagsPath(options.workspaceDir),
       templatesCount: 0,
-      error: error instanceof Error ? error.message : String(error),
+      components,
+      verification,
+      enabledChannels: options.channels,
+      nextAction,
+      reason,
+      error: `${errorMsg} — ${rollbackSuffix}`,
     };
   }
 }
