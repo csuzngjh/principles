@@ -654,19 +654,20 @@ async function copyCoreTemplates(opts: CopyOptions): Promise<number> {
 
 async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
   let count = 0;
-  const principlesSrc = path.join(opts.pluginDir, 'templates', 'workspace', '.principles');
+  
+  // 根据语言选择源目录
+  const langPrinciplesSrc = path.join(opts.pluginDir, 'templates', 'langs', opts.language, 'principles');
+  const defaultPrinciplesSrc = path.join(opts.pluginDir, 'templates', 'workspace', '.principles');
+  const actualPrinciplesSrc = existsSync(langPrinciplesSrc) ? langPrinciplesSrc : defaultPrinciplesSrc;
+  
   const principlesDest = path.join(opts.workspaceDir, '.principles');
 
-  if (!existsSync(principlesSrc)) return 0;
+  if (!existsSync(actualPrinciplesSrc)) return 0;
 
-  const files = readdirSync(principlesSrc);
-  const langThinkingOsSrc = path.join(opts.pluginDir, 'templates', 'langs', opts.language, 'principles', 'THINKING_OS.md');
+  const files = readdirSync(actualPrinciplesSrc);
 
   for (const file of files) {
-    let srcPath = path.join(principlesSrc, file);
-    if (file === 'THINKING_OS.md' && existsSync(langThinkingOsSrc)) {
-      srcPath = langThinkingOsSrc;
-    }
+    const srcPath = path.join(actualPrinciplesSrc, file);
     const destPath = path.join(principlesDest, file);
     if (statSync(srcPath).isDirectory()) continue;
 
@@ -682,7 +683,7 @@ async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
     count++;
   }
 
-  const modelsSrc = path.join(principlesSrc, 'models');
+  const modelsSrc = path.join(actualPrinciplesSrc, 'models');
   const modelsDest = path.join(principlesDest, 'models');
   if (existsSync(modelsSrc)) {
     await fse.ensureDir(modelsDest);
