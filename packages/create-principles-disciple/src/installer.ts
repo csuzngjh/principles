@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
-import { execSync, execFileSync } from 'child_process';
+import * as http from 'http';
+import { execSync, execFileSync, spawn, type ChildProcess } from 'child_process';
 import type { ExecSyncOptions } from 'child_process';
 import ora from 'ora';
 import { logger } from './utils/logger.js';
@@ -13,6 +14,7 @@ import {
   getPluginExtDir,
   getInstalledPdCliDir,
   getInstalledBinDir,
+  getInstalledConsoleDir,
   isWindows,
   validateOpenClawConfig,
   readEnabledChannelsFromDisk,
@@ -358,6 +360,99 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   return { localOk, globalOk, localPath: localShim };
 }
 
+function installConsole(consoleDir: string): void {
+  const consoleSrc = path.join(consoleDir, 'console');
+  const consoleDest = getInstalledConsoleDir();
+
+  if (!existsSync(consoleSrc)) {
+    throw new Error('Console bundle not found in package. Cannot install pd-console.');
+  }
+
+  const serverJs = path.join(consoleSrc, 'dist', 'server.js');
+  const webIndex = path.join(consoleSrc, 'dist', 'web', 'index.html');
+  if (!existsSync(serverJs)) {
+    throw new Error('Console dist/server.js not found in bundle. Package may be corrupted.');
+  }
+  if (!existsSync(webIndex)) {
+    throw new Error('Console dist/web/index.html not found in bundle. Package may be corrupted.');
+  }
+
+  rmSync(consoleDest, { recursive: true, force: true });
+  cpSync(consoleSrc, consoleDest, { recursive: true });
+}
+
+async function installConsoleDependencies(): Promise<void> {
+  const consoleDest = getInstalledConsoleDir();
+  const packageJsonPath = path.join(consoleDest, 'package.json');
+
+  if (!existsSync(packageJsonPath)) {
+    throw new Error('Console package.json not found after copy — install is corrupted');
+  }
+
+  const execOpts = getCapturingExecOptions(consoleDest);
+  try {
+    execSync('npm install --ignore-scripts', execOpts);
+  } catch (e) {
+    throw new Error(`Console npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${consoleDest} && npm install --ignore-scripts`, { cause: e });
+  }
+
+  const nativeModules = ['better-sqlite3'];
+  for (const mod of nativeModules) {
+    const modPath = path.join(consoleDest, 'node_modules', mod);
+    if (!existsSync(modPath)) continue;
+    try {
+      execSync(`npm rebuild ${mod}`, getCapturingExecOptions(consoleDest));
+    } catch (e) {
+      throw new Error(`Console native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${consoleDest} && npm rebuild ${mod}`, { cause: e });
+    }
+  }
+}
+
+async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null }> {
+  const consoleDest = getInstalledConsoleDir();
+  const serverEntry = path.join(consoleDest, 'dist', 'server.js');
+
+  if (!existsSync(serverEntry)) {
+    return { ok: false, url: '', process: null };
+  }
+
+  const port = 3100 + Math.floor(Math.random() * 100);
+  const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth'], {
+    stdio: 'pipe',
+    env: { ...process.env },
+    detached: false,
+  });
+
+  await new Promise<void>((resolve) => { setTimeout(resolve, 3000); });
+
+  const url = `http://localhost:${port}`;
+  let ok = false;
+  try {
+    await new Promise<string>((resolve, reject) => {
+      const req = http.get(`${url}/api/health`, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const body = Buffer.concat(chunks).toString();
+          ok = body.length > 0;
+          resolve(body);
+        });
+      });
+      req.on('error', reject);
+      req.setTimeout(5000, () => { req.destroy(); reject(new Error('timeout')); });
+    });
+  } catch {
+    ok = false;
+  }
+
+  if (!ok) {
+    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    return { ok: false, url, process: null };
+  }
+
+  return { ok: true, url, process: child };
+}
+
 interface CopyOptions {
   pluginDir: string;
   language: string;
@@ -487,8 +582,9 @@ export interface InstallResult {
 export async function install(options: InstallOptions, pluginDir: string, quiet = false): Promise<InstallResult> {
   const spinner = quiet ? null : ora('Installing...').start();
   let backupDir: string | null = null;
-  const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'not_deliverable' };
+  const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
+  let consoleProcess: ChildProcess | null = null;
 
   try {
     if (spinner) spinner.text = 'Checking built plugin...';
@@ -519,6 +615,23 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       components.cli = 'verified_local_only';
       components.cliLocalPath = cliVerify.localPath;
       logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" or add ${getInstalledBinDir()} to PATH.`);
+    }
+
+    if (spinner) spinner.text = 'Installing pd-console...';
+    installConsole(pluginDir);
+
+    if (spinner) spinner.text = 'Installing console dependencies...';
+    await installConsoleDependencies();
+
+    if (spinner) spinner.text = 'Verifying pd-console...';
+    const consoleVerify = await verifyConsole(options.workspaceDir);
+    if (consoleVerify.ok) {
+      components.console = 'configured';
+      components.consoleEntrypoint = consoleVerify.url;
+      consoleProcess = consoleVerify.process;
+    } else {
+      components.console = 'not_deliverable';
+      logger.warn('Console verification failed — console will not be available. Plugin and CLI are still functional.');
     }
 
     if (spinner) spinner.text = 'Copying templates...';
@@ -561,6 +674,10 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     cleanupBackup(backupDir);
     if (spinner) spinner.succeed('Install complete!');
 
+    if (consoleProcess) {
+      try { consoleProcess.kill('SIGTERM'); } catch { /* ignore */ }
+    }
+
     const actualEnabledChannels = readEnabledChannelsFromDisk(options.workspaceDir);
     const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
     const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
@@ -570,11 +687,12 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     } else if (components.cli === 'verified_local_only' && components.cliLocalPath) {
       nextActions.push(`"${components.cliLocalPath}" runtime canary --workspace "${options.workspaceDir}" --json`);
     }
-    if (components.console === 'not_deliverable') {
-      nextActions.push('Owner review console is not yet deliverable — this is a release-blocking gap');
+    if (components.console === 'configured') {
+      const consoleDir = getInstalledConsoleDir();
+      nextActions.push(`pd console --workspace "${options.workspaceDir}" (or: node ${path.join(consoleDir, 'dist', 'server.js')} --workspace "${options.workspaceDir}" --no-auth)`);
     }
-    if (components.console === 'configured' && components.consoleEntrypoint) {
-      nextActions.push(`Open review console: ${components.consoleEntrypoint}`);
+    if (components.console === 'not_deliverable') {
+      nextActions.push('Console verification failed — use pd CLI for review. See logs above for details.');
     }
 
     return {

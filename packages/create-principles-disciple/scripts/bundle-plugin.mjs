@@ -12,6 +12,8 @@ const PLUGIN_SRC = join(ROOT_DIR, 'packages', 'openclaw-plugin');
 const PLUGIN_DEST = join(__dirname, '..', 'plugin');
 const PD_CLI_SRC = join(ROOT_DIR, 'packages', 'pd-cli');
 const PD_CLI_DEST = join(__dirname, '..', 'pd-cli');
+const CONSOLE_SRC = join(ROOT_DIR, 'packages', 'pd-console');
+const CONSOLE_DEST = join(__dirname, '..', 'console');
 
 const PLUGIN_REQUIRED = [
   'dist',
@@ -31,6 +33,14 @@ const PD_CLI_REQUIRED = [
   'package.json',
 ];
 
+const CONSOLE_REQUIRED = [
+  'dist',
+  'dist/server.js',
+  'dist/server/index.js',
+  'dist/web/index.html',
+  'package.json',
+];
+
 console.log('📦 Bundling plugin + pd-cli for npm publish...\n');
 
 for (const item of PLUGIN_REQUIRED) {
@@ -47,6 +57,15 @@ for (const item of PD_CLI_REQUIRED) {
   if (!existsSync(src)) {
     console.error(`❌ Required pd-cli item not found: ${src}`);
     console.error(`   Run: cd packages/pd-cli && npm run build`);
+    process.exit(1);
+  }
+}
+
+for (const item of CONSOLE_REQUIRED) {
+  const src = join(CONSOLE_SRC, item);
+  if (!existsSync(src)) {
+    console.error(`❌ Required console item not found: ${src}`);
+    console.error(`   Run: cd packages/pd-console && npm run build`);
     process.exit(1);
   }
 }
@@ -97,9 +116,28 @@ for (const item of PD_CLI_REQUIRED) {
   }
 }
 
-console.log('\n✅ Plugin + pd-cli bundled successfully!');
+if (existsSync(CONSOLE_DEST)) {
+  console.log('  Removing old console/ directory...');
+  rmSync(CONSOLE_DEST, { recursive: true, force: true });
+}
+mkdirSync(CONSOLE_DEST, { recursive: true });
+
+for (const item of CONSOLE_REQUIRED) {
+  const src = join(CONSOLE_SRC, item);
+  const dest = join(CONSOLE_DEST, item);
+  console.log(`  Copying console/${item}...`);
+  try {
+    cpSync(src, dest, { recursive: true });
+  } catch {
+    mkdirSync(dirname(dest), { recursive: true });
+    copyFileSync(src, dest);
+  }
+}
+
+console.log('\n✅ Plugin + pd-cli + pd-console bundled successfully!');
 console.log(`   Plugin: ${PLUGIN_DEST}`);
 console.log(`   pd-cli: ${PD_CLI_DEST}`);
+console.log(`   Console: ${CONSOLE_DEST}`);
 
 console.log('\n🔍 Verifying hook activation contract...');
 
@@ -134,3 +172,21 @@ if (setupEntry !== './dist/bundle.js') {
 console.log('  ✅ plugin package.json openclaw.setupEntry === "./dist/bundle.js"');
 
 console.log('\n✅ Hook activation contract verified!');
+
+console.log('\n🔍 Verifying console bundle...');
+
+const consoleServerJs = join(CONSOLE_DEST, 'dist', 'server.js');
+if (!existsSync(consoleServerJs)) {
+  console.error(`❌ console dist/server.js not found at ${consoleServerJs}`);
+  process.exit(1);
+}
+console.log('  ✅ console dist/server.js present');
+
+const consoleWebIndex = join(CONSOLE_DEST, 'dist', 'web', 'index.html');
+if (!existsSync(consoleWebIndex)) {
+  console.error(`❌ console dist/web/index.html not found at ${consoleWebIndex}`);
+  process.exit(1);
+}
+console.log('  ✅ console dist/web/index.html present');
+
+console.log('\n✅ Console bundle verified!');

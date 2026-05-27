@@ -10,6 +10,7 @@
     "dist",
     "plugin",
     "pd-cli",
+    "console",
     "templates",
     "README.md",
     "LICENSE"

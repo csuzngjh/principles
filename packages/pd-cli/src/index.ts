@@ -836,4 +836,21 @@ const _legacyCleanupCmd = legacyCmd
     await handleLegacyCleanup(opts.workspace, apply);
   });
 
+program
+  .command('console')
+  .description('Start the pd-console web UI for principle review')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-p, --port <port>', 'Port to listen on', '3100')
+  .option('--no-auth', 'Disable authentication (local dev only)', false)
+  .option('--json', 'Output JSON status', false)
+  .action(async (opts) => {
+    const { handleConsole } = await import('./commands/console.js');
+    await handleConsole({
+      workspace: opts.workspace,
+      port: opts.port,
+      noAuth: opts.noAuth,
+      json: opts.json,
+    });
+  });
+
 program.parse();

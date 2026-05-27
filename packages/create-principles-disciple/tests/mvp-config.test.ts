@@ -333,7 +333,7 @@ describe('buildSuccessOutput', () => {
   it('includes console not deliverable in nextAction when not_deliverable', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
-    expect(result.nextAction).toContain('release-blocking');
+    expect(result.nextAction).toContain('Console verification failed');
   });
 });
 
@@ -634,7 +634,7 @@ describe('Install success output exposes plugin/cli/console status', () => {
     const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
-    expect(result.nextAction).toContain('release-blocking');
+    expect(result.nextAction).toContain('Console verification failed');
   });
 });
 
@@ -646,7 +646,7 @@ describe('Console delivery contract', () => {
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
     expect(result.components.console).toBe('not_deliverable');
-    expect(result.nextAction).toContain('release-blocking');
+    expect(result.nextAction).toContain('Console verification failed');
   });
 
   it('configured console with entrypoint means success=true', () => {
@@ -1306,5 +1306,140 @@ describe('Plugin manifest activation contract verified at install time (P2-3 fix
     const mvpConfigPath = path.resolve(__dirname, '..', 'src', 'mvp-config.ts');
     const content = fs.readFileSync(mvpConfigPath, 'utf-8');
     expect(content).toContain('manifestActivation');
+  });
+});
+
+describe('Console delivery in npm tarball (F.1)', () => {
+  it('package.json files array includes console', () => {
+    const pkgPath = path.resolve(__dirname, '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    expect(pkg.files).toContain('console');
+  });
+
+  it('bundle-plugin.mjs includes CONSOLE_REQUIRED with server.js and web/index.html', () => {
+    const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
+    const content = fs.readFileSync(scriptPath, 'utf-8');
+    expect(content).toContain('CONSOLE_REQUIRED');
+    expect(content).toContain('dist/server.js');
+    expect(content).toContain('dist/web/index.html');
+  });
+
+  it('bundle-plugin.mjs exits on missing console required artifacts', () => {
+    const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
+    const content = fs.readFileSync(scriptPath, 'utf-8');
+    const consoleSection = content.substring(content.indexOf('CONSOLE_REQUIRED'));
+    expect(consoleSection).toContain('process.exit(1)');
+  });
+});
+
+describe('Console install into stable location (F.3)', () => {
+  it('installer.ts has installConsole function', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('function installConsole');
+  });
+
+  it('installer.ts has installConsoleDependencies function', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('function installConsoleDependencies');
+  });
+
+  it('installer.ts has verifyConsole function', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('async function verifyConsole');
+  });
+
+  it('console is installed to getInstalledConsoleDir', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('getInstalledConsoleDir()');
+  });
+
+  it('console install failure triggers rollback', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const consoleInstallSection = content.substring(content.indexOf('installConsole'));
+    expect(consoleInstallSection).toContain('throw new Error');
+  });
+});
+
+describe('Console launch path (F.4 / C)', () => {
+  it('pd-cli has console command registered', () => {
+    const indexPath = path.resolve(__dirname, '..', '..', 'pd-cli', 'src', 'index.ts');
+    const content = fs.readFileSync(indexPath, 'utf-8');
+    expect(content).toContain("'console'");
+  });
+
+  it('pd-cli has console.ts command file', () => {
+    const consolePath = path.resolve(__dirname, '..', '..', 'pd-cli', 'src', 'commands', 'console.ts');
+    expect(fs.existsSync(consolePath)).toBe(true);
+  });
+
+  it('buildSuccessOutput includes pd console in nextAction when configured', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
+    expect(result.nextAction).toContain('pd console');
+  });
+});
+
+describe('Complete install success (F.6)', () => {
+  const verification: VerificationResult = { features: 'passed', storyA: 'passed', manifestActivation: 'verified' };
+
+  it('plugin verified + cli verified + console configured = success true', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(true);
+    expect(result.components.plugin).toBe('verified');
+    expect(result.components.cli).toBe('verified');
+    expect(result.components.console).toBe('configured');
+  });
+
+  it('plugin verified + cli verified_local_only + console configured = success true', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'configured', cliLocalPath: '/opt/pd' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(true);
+  });
+
+  it('console not_deliverable = success false even if plugin+cli verified', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('JSON output remains one parseable object (F.7)', () => {
+  it('success output is valid JSON', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'configured' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
+    const json = JSON.stringify(result);
+    const parsed = JSON.parse(json);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('failure output is valid JSON', () => {
+    const components: ComponentStatus = { plugin: 'failed', cli: 'verified', console: 'configured' };
+    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'skipped' } });
+    const json = JSON.stringify(result);
+    const parsed = JSON.parse(json);
+    expect(parsed.success).toBe(false);
+    expect(parsed.reason).toContain('plugin_failed');
+  });
+});
+
+describe('Hook activation contract preserved after merge (F.8)', () => {
+  it('openclaw.plugin.json has activation.onCapabilities with hook', () => {
+    const manifestPath = path.resolve(__dirname, '..', 'plugin', 'openclaw.plugin.json');
+    if (!fs.existsSync(manifestPath)) return;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    expect(manifest.activation?.onCapabilities).toContain('hook');
+  });
+
+  it('plugin package.json has openclaw.setupEntry', () => {
+    const pkgPath = path.resolve(__dirname, '..', 'plugin', 'package.json');
+    if (!fs.existsSync(pkgPath)) return;
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    expect(pkg.openclaw?.setupEntry).toBe('./dist/bundle.js');
   });
 });

@@ -187,11 +187,11 @@ export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
     const quotedPath = components.cliLocalPath.includes(' ') ? `"${components.cliLocalPath}"` : components.cliLocalPath;
     nextActions.push(`Run ${quotedPath} runtime canary --workspace <path> --json for diagnostics (global pd not on PATH)`);
   }
-  if (components.console === 'configured' && components.consoleEntrypoint) {
-    nextActions.push(`Open review console: ${components.consoleEntrypoint}`);
+  if (components.console === 'configured') {
+    nextActions.push('Start console: pd console --workspace <path> --no-auth');
   }
   if (components.console === 'not_deliverable') {
-    nextActions.push('Owner review console is not yet deliverable — see release-blocking follow-up issue');
+    nextActions.push('Console verification failed — use pd CLI for review. See logs for details.');
   }
 
   if (isComplete) {
@@ -263,6 +263,10 @@ export function getInstalledPdCliDir(): string {
 
 export function getInstalledBinDir(): string {
   return path.join(getPluginExtDir(), 'bin');
+}
+
+export function getInstalledConsoleDir(): string {
+  return path.join(getPluginExtDir(), 'console');
 }
 
 export function isWindows(): boolean {
