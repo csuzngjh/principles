@@ -20,12 +20,14 @@ import {
   type VerificationResult,
 } from './mvp-config.js';
 
-function getCapturingExecOptions(cwd: string): ExecSyncOptions {
+const INSTALL_TIMEOUT_MS = parseInt(process.env.PD_INSTALL_TIMEOUT_MS || '300000', 10);
+
+function getCapturingExecOptions(cwd: string, timeoutOverride?: number): ExecSyncOptions {
   return {
     cwd,
     stdio: 'pipe' as const,
     env: process.env,
-    timeout: 120_000,
+    timeout: timeoutOverride ?? INSTALL_TIMEOUT_MS,
   };
 }
 
@@ -48,8 +50,8 @@ function backupExistingInstall(): BackupResult {
   }
 }
 
-function restoreBackup(backupDir: string | null): void {
-  if (!backupDir || !existsSync(backupDir)) return;
+function restoreBackup(backupDir: string | null): { restored: boolean; error?: string } {
+  if (!backupDir || !existsSync(backupDir)) return { restored: true };
   const extDir = getPluginExtDir();
   try {
     if (existsSync(extDir)) {
@@ -57,8 +59,11 @@ function restoreBackup(backupDir: string | null): void {
     }
     renameSync(backupDir, extDir);
     logger.info('Restored previous install from backup');
+    return { restored: true };
   } catch (e) {
-    logger.error(`Failed to restore backup: ${e instanceof Error ? e.message : String(e)}`);
+    const msg = `Failed to restore backup: ${e instanceof Error ? e.message : String(e)}`;
+    logger.error(msg);
+    return { restored: false, error: msg };
   }
 }
 
@@ -77,6 +82,36 @@ async function checkBuiltPlugin(pluginDir: string): Promise<void> {
 
   if (!existsSync(distDir) || !existsSync(pluginJson)) {
     throw new Error(`Built plugin files missing at ${distDir}. Package may be corrupted.`);
+  }
+
+  const manifestRaw: unknown = JSON.parse(readFileSync(pluginJson, 'utf-8'));
+  if (typeof manifestRaw !== 'object' || manifestRaw === null || Array.isArray(manifestRaw)) {
+    throw new Error('openclaw.plugin.json is not a valid object');
+  }
+  const manifest = manifestRaw as Record<string, unknown>;
+  const { activation } = manifest;
+  if (typeof activation !== 'object' || activation === null || Array.isArray(activation)) {
+    throw new Error('openclaw.plugin.json is missing activation object — PD hooks will not execute via gateway');
+  }
+  const activationObj = activation as Record<string, unknown>;
+  const { onCapabilities } = activationObj;
+  if (!Array.isArray(onCapabilities) || !(onCapabilities as unknown[]).includes('hook')) {
+    throw new Error('openclaw.plugin.json.activation.onCapabilities does not include "hook" — PD hooks will not execute via gateway. Re-bundle after PR #725 is merged.');
+  }
+
+  const pkgJsonPath = path.join(pluginDir, 'plugin', 'package.json');
+  if (existsSync(pkgJsonPath)) {
+    const pkgRaw: unknown = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+    if (typeof pkgRaw === 'object' && pkgRaw !== null && !Array.isArray(pkgRaw)) {
+      const pkg = pkgRaw as Record<string, unknown>;
+      const { openclaw } = pkg;
+      if (typeof openclaw === 'object' && openclaw !== null && !Array.isArray(openclaw)) {
+        const openclawObj = openclaw as Record<string, unknown>;
+        if (openclawObj.setupEntry !== './dist/bundle.js') {
+          throw new Error(`plugin package.json openclaw.setupEntry is "${String(openclawObj.setupEntry)}" (expected "./dist/bundle.js") — gateway will not load PD hooks. Re-bundle after PR #725 is merged.`);
+        }
+      }
+    }
   }
 }
 
@@ -302,13 +337,10 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   const localShim = path.join(getInstalledBinDir(), isWindows() ? 'pd.cmd' : 'pd');
   let localOk = false;
   try {
-    if (isWindows()) {
-      execSync(`"${localShim}" --version`, { stdio: 'pipe', timeout: 10_000, shell: 'cmd' });
-    } else {
-      execFileSync(localShim, ['--version'], { stdio: 'pipe', timeout: 10_000 });
-    }
+    const installedEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
+    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: 10_000 });
     localOk = true;
-  } catch { /* local shim failed */ }
+  } catch { /* local entry failed */ }
 
   const globalOk = (() => {
     try {
@@ -461,6 +493,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
   try {
     if (spinner) spinner.text = 'Checking built plugin...';
     await checkBuiltPlugin(pluginDir);
+    verification.manifestActivation = 'verified';
 
     if (spinner) spinner.text = 'Backing up existing install...';
     const { backupDir: backupDirFromResult } = backupExistingInstall();
@@ -511,19 +544,11 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
 
     if (spinner) spinner.text = 'Verifying pd demo story-a...';
     try {
-      const pdCmd = path.join(getInstalledBinDir(), isWindows() ? 'pd.cmd' : 'pd');
-      if (isWindows()) {
-        execSync(`"${pdCmd}" demo story-a --json --workspace "${options.workspaceDir}"`, {
-          stdio: 'pipe',
-          shell: 'cmd',
-          timeout: 30_000,
-        });
-      } else {
-        execFileSync(pdCmd, ['demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
-          stdio: 'pipe',
-          timeout: 30_000,
-        });
-      }
+      const installedPdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
+      execFileSync(process.execPath, [installedPdCliEntry, 'demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
+        stdio: 'pipe',
+        timeout: 30_000,
+      });
       verification.storyA = 'passed';
     } catch (e) {
       verification.storyA = 'skipped';
@@ -566,9 +591,19 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
   } catch (error) {
     if (spinner) spinner.fail('Install failed');
 
-    restoreBackup(backupDir);
+    const restoreResult = restoreBackup(backupDir);
 
     const errorMsg = error instanceof Error ? error.message : String(error);
+    const rollbackSuffix = restoreResult.restored
+      ? 'Previous install has been restored.'
+      : `CRITICAL: Rollback also failed — installation state is uncertain. ${restoreResult.error ?? ''} Resolve manually: check ${getPluginExtDir()} and ${backupDir}`;
+    const nextAction = restoreResult.restored
+      ? 'Check the error above. Previous install has been restored.'
+      : `Installation and rollback both failed. Check ${getPluginExtDir()} and ${backupDir} manually. Error: ${errorMsg}`;
+    const reason = restoreResult.restored
+      ? errorMsg
+      : `install_failed_rollback_failed: ${errorMsg}`;
+
     return {
       success: false,
       workspaceDir: options.workspaceDir,
@@ -577,9 +612,9 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       components,
       verification,
       enabledChannels: options.channels,
-      nextAction: 'Check the error above. Previous install has been restored if it existed.',
-      reason: errorMsg,
-      error: errorMsg,
+      nextAction,
+      reason,
+      error: `${errorMsg} — ${rollbackSuffix}`,
     };
   }
 }

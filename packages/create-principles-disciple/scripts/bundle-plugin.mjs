@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -100,3 +100,37 @@ for (const item of PD_CLI_REQUIRED) {
 console.log('\n✅ Plugin + pd-cli bundled successfully!');
 console.log(`   Plugin: ${PLUGIN_DEST}`);
 console.log(`   pd-cli: ${PD_CLI_DEST}`);
+
+console.log('\n🔍 Verifying hook activation contract...');
+
+const manifestPath = join(PLUGIN_DEST, 'openclaw.plugin.json');
+if (!existsSync(manifestPath)) {
+  console.error('❌ openclaw.plugin.json not found in bundled plugin');
+  process.exit(1);
+}
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+const onCapabilities = manifest?.activation?.onCapabilities;
+if (!Array.isArray(onCapabilities) || !onCapabilities.includes('hook')) {
+  console.error('❌ openclaw.plugin.json.activation.onCapabilities does not include "hook"');
+  console.error('   PD hooks will not execute via OpenClaw gateway without this entry.');
+  console.error('   See PR #725 for the fix that adds this field.');
+  process.exit(1);
+}
+console.log('  ✅ openclaw.plugin.json.activation.onCapabilities includes "hook"');
+
+const pluginPkgPath = join(PLUGIN_DEST, 'package.json');
+if (!existsSync(pluginPkgPath)) {
+  console.error('❌ plugin package.json not found');
+  process.exit(1);
+}
+const pluginPkg = JSON.parse(readFileSync(pluginPkgPath, 'utf-8'));
+const setupEntry = pluginPkg?.openclaw?.setupEntry;
+if (setupEntry !== './dist/bundle.js') {
+  console.error(`❌ plugin package.json openclaw.setupEntry is "${setupEntry}" (expected "./dist/bundle.js")`);
+  console.error('   OpenClaw gateway will not load PD hooks without this entry point.');
+  console.error('   See PR #725 for the fix that adds this field.');
+  process.exit(1);
+}
+console.log('  ✅ plugin package.json openclaw.setupEntry === "./dist/bundle.js"');
+
+console.log('\n✅ Hook activation contract verified!');

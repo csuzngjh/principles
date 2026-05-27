@@ -39,6 +39,7 @@ export interface VerificationResult {
   features: 'passed' | 'failed' | 'skipped';
   storyA: 'passed' | 'failed' | 'skipped';
   storyASkipReason?: string;
+  manifestActivation?: 'verified' | 'missing_hook' | 'missing_setup_entry' | 'skipped';
 }
 
 export interface InstallSuccessOutput {
@@ -289,6 +290,9 @@ export function readEnabledChannelsFromDisk(workspaceDir: string): string[] {
       throw new Error(`feature-flags.yaml at ${configPath}: MVP channel '${key}' is missing required 'enabled' field. Delete the file and re-run the installer.`);
     }
     const flag = value as Record<string, unknown>;
+    if (typeof flag.enabled !== 'boolean') {
+      throw new Error(`feature-flags.yaml at ${configPath}: MVP channel '${key}' has invalid 'enabled' value (expected boolean, got ${flag.enabled === null ? 'null' : typeof flag.enabled}). Delete the file and re-run the installer.`);
+    }
     if (flag.enabled === true) {
       enabled.push(key);
     }

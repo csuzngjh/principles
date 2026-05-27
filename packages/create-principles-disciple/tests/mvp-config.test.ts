@@ -1164,3 +1164,147 @@ describe('Structured failure reason reflects actual failure (P2 fix)', () => {
     expect(result.reason).toContain('cli_skipped');
   });
 });
+
+describe('enabled field must be boolean (P1-3 fix)', () => {
+  it('throws on enabled: "true" (string instead of boolean)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-bool-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const badYaml = yaml.dump({ prompt: { enabled: 'true', category: 'core', since: '2026-05-24' }, code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
+      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
+      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' has invalid 'enabled' value.*expected boolean.*got string/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on enabled: 1 (number instead of boolean)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-bool-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const badYaml = yaml.dump({ prompt: { enabled: 1, category: 'core', since: '2026-05-24' }, code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
+      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
+      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' has invalid 'enabled' value.*expected boolean.*got number/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on enabled: null', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-ff-bool-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const badYaml = yaml.dump({ prompt: { enabled: null, category: 'core', since: '2026-05-24' }, code_tool_hook: { enabled: true, category: 'core', since: '2026-05-24' }, defer_archive: { enabled: true, category: 'core', since: '2026-05-24' } });
+      fs.writeFileSync(path.join(configDir, 'feature-flags.yaml'), badYaml, 'utf8');
+      expect(() => readEnabledChannelsFromDisk(tmpDir)).toThrow(/MVP channel 'prompt' has invalid 'enabled' value.*expected boolean.*got null/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Story A verification uses execFileSync, not shell (P1-1 fix)', () => {
+  it('installer.ts uses process.execPath for story-a verification', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('process.execPath');
+    expect(content).toContain("installedPdCliEntry, 'demo', 'story-a'");
+  });
+
+  it('installer.ts does not use shell:cmd for story-a', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const storyASection = content.substring(content.indexOf('story-a'), content.indexOf('verification.storyA'));
+    expect(storyASection).not.toContain("shell: 'cmd'");
+    expect(storyASection).not.toContain('execSync');
+  });
+
+  it('CLI verification uses process.execPath for localOk', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const verifySection = content.substring(content.indexOf('verifyPdCliShim'), content.indexOf('interface CopyOptions'));
+    expect(verifySection).toContain('process.execPath');
+    expect(verifySection).toContain('installedEntry');
+  });
+});
+
+describe('Rollback failure is not swallowed (P1-4 fix)', () => {
+  it('restoreBackup returns { restored: true } on success', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('restored: true');
+    expect(content).toContain('restored: false');
+  });
+
+  it('install catch block distinguishes rollback success vs failure', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('install_failed_rollback_failed');
+    expect(content).toContain('restoreResult.restored');
+  });
+
+  it('rollback failure reason includes manual resolution path', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('installation state is uncertain');
+  });
+});
+
+describe('Install timeout is configurable (P2-1 fix)', () => {
+  it('default timeout is 300 seconds (5 minutes)', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain("'300000'");
+  });
+
+  it('timeout reads from PD_INSTALL_TIMEOUT_MS env var', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('PD_INSTALL_TIMEOUT_MS');
+  });
+});
+
+describe('Bundle hook activation contract (P2-2 fix)', () => {
+  const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
+  const content = fs.readFileSync(scriptPath, 'utf-8');
+
+  it('bundle script verifies onCapabilities includes hook', () => {
+    expect(content).toContain('onCapabilities');
+    expect(content).toContain("'hook'");
+  });
+
+  it('bundle script verifies openclaw.setupEntry', () => {
+    expect(content).toContain('setupEntry');
+    expect(content).toContain("'./dist/bundle.js'");
+  });
+
+  it('bundle script exits on missing hook activation', () => {
+    const hookSection = content.substring(content.indexOf('onCapabilities'));
+    expect(hookSection).toContain('process.exit(1)');
+  });
+});
+
+describe('Plugin manifest activation contract verified at install time (P2-3 fix)', () => {
+  it('checkBuiltPlugin validates onCapabilities includes hook', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('onCapabilities');
+    expect(content).toContain("includes('hook')");
+  });
+
+  it('checkBuiltPlugin validates openclaw.setupEntry', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('setupEntry');
+    expect(content).toContain("'./dist/bundle.js'");
+  });
+
+  it('verification result includes manifestActivation field', () => {
+    const mvpConfigPath = path.resolve(__dirname, '..', 'src', 'mvp-config.ts');
+    const content = fs.readFileSync(mvpConfigPath, 'utf-8');
+    expect(content).toContain('manifestActivation');
+  });
+});
