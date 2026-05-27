@@ -220,6 +220,96 @@ describe('Real packaged install smoke test', () => {
     expect(healthOk).toBe(true);
   }, 60_000);
 
+  it('/api/v1/approvals returns valid contract (non-404)', async () => {
+    const installedConsoleDir = getInstalledConsoleDir(tempHomeDir);
+    const serverEntry = path.join(installedConsoleDir, 'dist', 'server.js');
+    if (!fs.existsSync(serverEntry)) {
+      throw new Error('Console server entry not found at installed location');
+    }
+
+    const port = 3400 + Math.floor(Math.random() * 100);
+    const child = spawn(process.execPath, [
+      serverEntry,
+      '--workspace', tempWorkspaceDir,
+      '--port', String(port),
+      '--host', '127.0.0.1',
+      '--no-auth',
+    ], {
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        HOME: tempHomeDir,
+        USERPROFILE: tempHomeDir,
+      },
+    });
+
+    let childStderr = '';
+    child.stderr?.on('data', (chunk: Buffer) => { childStderr += chunk.toString(); });
+
+    await new Promise<void>((resolve) => { setTimeout(resolve, 6000); });
+
+    let approvalsOk = false;
+    let approvalsReason = '';
+    try {
+      const result = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+        const req = http.get(`http://127.0.0.1:${port}/api/v1/approvals`, (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () => {
+            resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() });
+          });
+        });
+        req.on('error', reject);
+        req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')); });
+      });
+
+      if (result.statusCode === 404) {
+        approvalsReason = `Got 404 — approvals route not registered`;
+      } else if (result.statusCode !== 200) {
+        approvalsReason = `Got HTTP ${result.statusCode} (expected 200)`;
+      } else {
+        const parsed: unknown = JSON.parse(result.body);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          approvalsReason = 'Response body is not a JSON object';
+        } else {
+          const entries = Object.entries(parsed);
+          const itemsEntry = entries.find(([k]) => k === 'items');
+          const totalEntry = entries.find(([k]) => k === 'total');
+          const statsEntry = entries.find(([k]) => k === 'stats');
+          if (itemsEntry === undefined) {
+            approvalsReason = 'Response missing "items" field';
+          } else if (totalEntry === undefined) {
+            approvalsReason = 'Response missing "total" field';
+          } else if (statsEntry === undefined) {
+            approvalsReason = 'Response missing "stats" field';
+          } else {
+            const items = itemsEntry[1];
+            const total = totalEntry[1];
+            const stats = statsEntry[1];
+            if (!Array.isArray(items)) {
+              approvalsReason = 'Response "items" is not an array';
+            } else if (typeof total !== 'number') {
+              approvalsReason = 'Response "total" is not a number';
+            } else if (typeof stats !== 'object' || stats === null || Array.isArray(stats)) {
+              approvalsReason = 'Response "stats" is not an object';
+            } else {
+              approvalsOk = true;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      approvalsReason = `${e}. Stderr: ${childStderr.slice(0, 500)}`;
+    } finally {
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      try { child.kill('SIGKILL'); } catch { /* ignore */ }
+    }
+
+    if (!approvalsOk) {
+      throw new Error(`/api/v1/approvals contract check failed: ${approvalsReason}`);
+    }
+  }, 60_000);
+
   it('console refuses --no-auth with non-loopback host', () => {
     const installedConsoleDir = getInstalledConsoleDir(tempHomeDir);
     const serverEntry = path.join(installedConsoleDir, 'dist', 'server.js');
