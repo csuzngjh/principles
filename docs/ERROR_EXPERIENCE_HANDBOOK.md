@@ -52,7 +52,6 @@ Errors where AI assistants violated the core/plugin boundary or other architectu
 | ERR-046 | Rollback failure silently swallowed — install result may falsely claim old state restored | PRI-247 |
 | ERR-047 | Non-boolean enabled field in feature flags silently treated as disabled | PRI-247 |
 | ERR-048 | Runtime V2 activation write path disconnected from live prompt read path — activation succeeds but principle never injected | PRI-261 |
-| ERR-049 | `as` type bypass and hand-rolled config parser in trust-boundary code — review caught multiple Runtime Contract violations | PRI-261 |
 
 ---
 
@@ -148,7 +147,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` type assertions on values from untrusted JSON sources (`Record<string, unknown>`). Always validate with `typeof` checks before using the value. When extracting fields from parsed JSON, treat every field as `unknown` and narrow with runtime type guards.
 - **Source**: PRI-189
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-213 (PR #688): `event.data.toolName as string` and `event.data.score as number` in `groupEventsIntoSessions()` bypassed runtime validation on `RawEventEntry.data` fields. `score: NaN` and `score: Infinity` passed `typeof === 'number'` check. `validatePainSignal()` used `as Record<string, unknown>` instead of type guard. Fixed by excluding malformed entries from scoring arrays and adding `isStringRecord()` type guard. Also 2026-05-25 PRI-239 (PR #702): `(parsed as Record<string, unknown>)[key]` in `feature-flag-loader.ts` bypassed runtime validation on YAML-parsed input. Fixed by replacing `as Record` with `isRecord()` type guard.
+- **Recurrence**: Yes - 2026-05-23 PRI-213 (PR #688): `event.data.toolName as string` and `event.data.score as number` in `groupEventsIntoSessions()` bypassed runtime validation on `RawEventEntry.data` fields. `score: NaN` and `score: Infinity` passed `typeof === 'number'` check. `validatePainSignal()` used `as Record<string, unknown>` instead of type guard. Fixed by excluding malformed entries from scoring arrays and adding `isStringRecord()` type guard. Also 2026-05-25 PRI-239 (PR #702): `(parsed as Record<string, unknown>)[key]` in `feature-flag-loader.ts` bypassed runtime validation on YAML-parsed input. Fixed by replacing `as Record` with `isRecord()` type guard. Also 2026-05-27 PRI-261 (PR #727): `SqliteActivationStateStore.listPromptActivations()` and `PromptActivationReader` used `as` casts on SQLite query results, and `mapRowToRecord()` defaulted malformed required fields to `''` instead of returning null. Fixed by replacing all `as` with `isRecord()` + `Object.hasOwn()` + `typeof` field readers, and making `mapRowToRecord()` return null when any required field is empty or missing.
 
 ---
 
@@ -244,7 +243,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Never use `as` array type casts on untrusted JSON arrays without validating element types first. Always apply element-wise type guards when preserving data from invalid payloads.
 - **Source**: PRI-191
 - **Date**: 2026-05-19
-- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Fixed by replacing `as Record` with `readOwnProperty` helper and `Array.from().filter()` for element-wise validation. Also 2026-05-23 PRI-225 (PR #693): `result.dependencyTaskIds = depIds as string[]` on already-validated array bypassed type system. Fixed by constructing `validatedDependencyTaskIds: string[]` with element-wise `typeof` check and push, no `as` assertion. Also 2026-05-25 PRI-239 (PR #702): `feature-flag-loader.ts` used `(parsed as Record<string, unknown>)[key]` to read YAML-parsed values at input trust boundary. Same class as all prior — `as` bypasses runtime narrowing on untrusted data. Fixed by adding `isRecord()` type guard.
+- **Recurrence**: Yes - 2026-05-23 PRI-209 (PR #689): `extractPIMetadata()` used `as Record<string, unknown>` on `JSON.parse` result. `dependencyTaskIds` non-string elements passed through without filtering. Fixed by replacing `as Record` with `readOwnProperty` helper and `Array.from().filter()` for element-wise validation. Also 2026-05-23 PRI-225 (PR #693): `result.dependencyTaskIds = depIds as string[]` on already-validated array bypassed type system. Fixed by constructing `validatedDependencyTaskIds: string[]` with element-wise `typeof` check and push, no `as` assertion. Also 2026-05-25 PRI-239 (PR #702): `feature-flag-loader.ts` used `(parsed as Record<string, unknown>)[key]` to read YAML-parsed values at input trust boundary. Same class as all prior — `as` bypasses runtime narrowing on untrusted data. Fixed by adding `isRecord()` type guard. Also 2026-05-27 PRI-261 (PR #727): same `as Record<string, unknown>` pattern on SQLite query results in both `SqliteActivationStateStore` and `PromptActivationReader`. Fixed by replacing with `isRecord()` + `Object.hasOwn()` + per-field `typeof` validation.
 
 ---
 
@@ -552,7 +551,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When writing a guard that prevents new callers of a subsystem, ensure the detection covers all naming patterns used by that subsystem, not just a specific subset. Test: add a test case for a dynamic import of a non-frozen-basename legacy module and verify it's detected.
 - **Source**: PRI-227 / PR #701
 - **Date**: 2026-05-24
-- **Recurrence**: Same class as ERR-024, ERR-025. Recurred in PRI-261 PR review: initial implementation also missed validation_status guard, action filter, budget limit, and used `as` type bypass + hand-rolled YAML parser.. Recurred 2026-05-24 PR #701: first fix added `idle` to the dynamic import extractor (`findImportLines`), but the actual enforcement logic (the `isNocturnalKeyword` check that decides whether to validate against the allowlist) still only checked `nocturnal`, `sleep_reflection`, and `sleep-cycle` — not `idle`. The new extractor tests proved extraction worked, but not that the real scan would reject an unallowed idle caller. Fixed by adding `idle` to the `isNocturnalKeyword` check and adding an enforcement test. Also recurred 2026-05-24 PR #701: adding `lowerLine.includes('idle')` to `isNocturnalKeyword` caused false positives on `HybridLedgerStore` (hybr**idle**dgerstore contains the substring `idle`). The `legacyPathPatterns` `/idle/` regex had the same issue. Fixed by using word-boundary regex `/(?:^|[-_/.])idle(?:[-_/.]|$)/i` that matches `idle` only at path/identifier segment boundaries, not as a substring within `hybrid`.
+- **Recurrence**: Same class as ERR-024, ERR-025. Recurred 2026-05-24 PR #701: first fix added `idle` to the dynamic import extractor (`findImportLines`), but the actual enforcement logic (the `isNocturnalKeyword` check that decides whether to validate against the allowlist) still only checked `nocturnal`, `sleep_reflection`, and `sleep-cycle` — not `idle`. The new extractor tests proved extraction worked, but not that the real scan would reject an unallowed idle caller. Fixed by adding `idle` to the `isNocturnalKeyword` check and adding an enforcement test. Also recurred 2026-05-24 PR #701: adding `lowerLine.includes('idle')` to `isNocturnalKeyword` caused false positives on `HybridLedgerStore` (hybr**idle**dgerstore contains the substring `idle`). The `legacyPathPatterns` `/idle/` regex had the same issue. Fixed by using word-boundary regex `/(?:^|[-_/.])idle(?:[-_/.]|$)/i` that matches `idle` only at path/identifier segment boundaries, not as a substring within `hybrid`.
 
 ---
 
@@ -636,18 +635,6 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-049]** | `as` type bypass and hand-rolled config parser in trust-boundary code — review caught multiple Runtime Contract violations
-
-- **What happened**: The initial `PromptActivationReader` implementation used `as` type assertions to cast SQLite query results (bypassing runtime validation), hand-rolled a drift-prone YAML parser instead of using the existing `js-yaml` dependency, and did not filter by `validation_status='validated'` or `action='prompt_activate'`. The `SqliteActivationStateStore.listPromptActivations()` also used `as` to cast DB rows. The prompt hook used raw `workspaceDir` instead of `wctx.workspaceDir`.
-- **Why it's wrong**: Same root cause as ERR-001/ERR-005 (`as` bypasses runtime validation) and ERR-027 (config drift from hand-rolled parsing). The `as` casts on DB rows mean malformed data would pass through without validation. The hand-rolled YAML parser could not handle edge cases (dangerous keys like `__proto__`, multi-line values, nested structures). Missing validation_status filter means rejected/pending artifacts could be injected. Missing action filter means deactivation records could inject. No budget limit means Runtime V2 principles could consume the entire prompt budget and push out core principles.
-- **Correct approach**: Use `typeof` checks and `Object.hasOwn()` for all DB row field access. Use `js-yaml` (already a project dependency) for feature flag parsing with `JSON_SCHEMA` safety. Filter activations by both `channel='prompt' AND action='prompt_activate'`. Only inject `validation_status='validated'` artifacts. Add `RUNTIME_V2_PRINCIPLE_BUDGET` constant and enforce it in the prompt hook. Use `wctx.workspaceDir` (normalized) instead of raw `workspaceDir`. Reject dangerous YAML keys (`__proto__`, `constructor`, `prototype`).
-- **How to prevent**: When writing trust-boundary code (reading from DB, parsing config, injecting into prompt): (1) never use `as` on untrusted data — use `typeof` checks; (2) always use existing project dependencies for parsing (js-yaml, not hand-rolled); (3) always filter by both channel AND action; (4) always check validation_status; (5) always enforce budget limits; (6) always use normalized workspace paths from context objects.
-- **Source**: PRI-261 / PR #727
-- **Date**: 2026-05-27
-- **Recurrence**: Same root cause as ERR-001, ERR-005, ERR-027. Recurred again in second review pass: `mapRowToRecord()` still converted malformed required fields to `''` instead of returning null, and `as Record<string, unknown>` remained in both `SqliteActivationStateStore` and plugin reader. Required fields must be non-empty or the entire row is rejected — empty-string defaults on activation_id/artifact_id/action/activated_at silently produce invalid activation records that pass downstream validation.
-
----
-
 **[ERR-037]** | UI action buttons gated only by `status`, ignoring backend actionability field
 
 - **What happened**: Backend correctly returns `isMvpProven: false` for legacy channel records, but the approval-detail-dialog hides approve/reject buttons based solely on `approval.status === "pending"`. A legacy pending record would still show action buttons, which then fail with 403 on submit.
@@ -683,10 +670,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 44 |
+| Total lessons | 43 |
 | Last updated | 2026-05-27 |
 | Top category | Schema & Type |
-| Recurring errors | 20 |
+| Recurring errors | 21 |
 
 ---
 
