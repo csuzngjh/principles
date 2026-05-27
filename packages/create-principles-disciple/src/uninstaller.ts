@@ -10,13 +10,13 @@
  *    - State files (.state/ directory)
  *    - Any user data
  */
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';
-import { getGlobalShimPaths } from './mvp-config.js';
+import { getGlobalShimPaths, getInstalledBinDir, isWindows } from './mvp-config.js';
 import { setLanguage, t, getLanguage } from './i18n.js';
 
 export interface UninstallResult {
@@ -67,7 +67,32 @@ export function checkInstallStatus(): {
 }
 
 /**
+ * 检查 shim 文件是否由 Principles Disciple 创建
+ * 通过读取文件内容，确认其目标指向 PD 安装目录
+ */
+function isPdOwnedShim(shimPath: string): boolean {
+  try {
+    const content = readFileSync(shimPath, 'utf-8');
+    const pdBinDir = getInstalledBinDir();
+    const pdBinPath = isWindows()
+      ? path.join(pdBinDir, 'pd.cmd')
+      : path.join(pdBinDir, 'pd');
+
+    if (isWindows()) {
+      // Windows cmd/ps1 shim 应包含 PD 安装路径
+      return content.includes(pdBinDir) || content.includes(pdBinPath);
+    } else {
+      // Unix shim 通常是符号链接或脚本，检查是否指向 PD 安装目录
+      return content.includes(pdBinDir) || content.includes(pdBinPath);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Clean up global pd shim files
+ * Only deletes shims that were created by Principles Disciple
  */
 async function removeGlobalPdShim(): Promise<{ removed: string[]; skipped: string[] }> {
   const removed: string[] = [];
@@ -82,6 +107,12 @@ async function removeGlobalPdShim(): Promise<{ removed: string[]; skipped: strin
 
   for (const shimPath of shimPaths) {
     if (!existsSync(shimPath)) {
+      skipped.push(shimPath);
+      continue;
+    }
+
+    if (!isPdOwnedShim(shimPath)) {
+      logger.warn(`${t('global_command_skip_not_owned')}: ${shimPath}`);
       skipped.push(shimPath);
       continue;
     }
@@ -159,7 +190,7 @@ export async function uninstall(
 
     if (workspaceDir && existsSync(workspaceDir)) {
       logger.info(t('workspace_files_preserved'));
-      console.log(`   📁 ${t('workspace_dir')}: ${workspaceDir}`);
+      console.log(`   📁 ${t('workspace_dir_label')}: ${workspaceDir}`);
       console.log(`   📄 ${t('md_files_preserved')}`);
       console.log(`   📁 ${t('principles_dir_preserved')}`);
       console.log(`   📁 ${t('state_dir_preserved')}`);

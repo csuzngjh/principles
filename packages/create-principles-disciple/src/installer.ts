@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as http from 'http';
 import { execSync, execFileSync, spawn, type ChildProcess } from 'child_process';
 import type { ExecSyncOptions } from 'child_process';
-import ora from 'ora';
+import ora, { type Ora } from 'ora';
 import { logger } from './utils/logger.js';
 import type { InstallOptions } from './prompts.js';
 import {
@@ -36,15 +36,6 @@ const CONSOLE_PORT_RANGE_MAX = 3199;
 
 // 允许的原生模块白名单
 const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
-
-/**
- * 验证原生模块名称，防止命令注入
- */
-function validateNativeModule(moduleName: string): void {
-  if (!ALLOWED_NATIVE_MODULES.includes(moduleName)) {
-    throw new Error(`Security error: Native module "${moduleName}" is not in the allowed list`);
-  }
-}
 
 /**
  * 执行 npm install 并提供友好的错误提示
@@ -125,26 +116,29 @@ interface InstallStep {
 }
 
 const INSTALL_STEPS: InstallStep[] = [
-  { name: 'Checking built plugin', weight: 5 },
-  { name: 'Backing up existing install', weight: 5 },
-  { name: 'Installing bundled @principles/core', weight: 10 },
-  { name: 'Installing plugin', weight: 15 },
-  { name: 'Installing plugin dependencies', weight: 25 },
-  { name: 'Installing pd CLI', weight: 10 },
-  { name: 'Verifying pd CLI', weight: 5 },
-  { name: 'Installing pd-console', weight: 10 },
+  { name: 'Checking built plugin', weight: 3 },
+  { name: 'Backing up existing install', weight: 3 },
+  { name: 'Installing bundled @principles/core', weight: 8 },
+  { name: 'Installing plugin', weight: 10 },
+  { name: 'Pre-filling @principles/core for plugin', weight: 3 },
+  { name: 'Installing plugin dependencies', weight: 20 },
+  { name: 'Installing pd CLI', weight: 8 },
+  { name: 'Pre-filling @principles/core for pd-cli', weight: 3 },
+  { name: 'Verifying pd CLI', weight: 3 },
+  { name: 'Installing pd-console', weight: 8 },
+  { name: 'Pre-filling @principles/core for console', weight: 3 },
   { name: 'Installing console dependencies', weight: 10 },
-  { name: 'Verifying pd-console', weight: 5 },
-  { name: 'Copying templates', weight: 5 },
+  { name: 'Verifying pd-console', weight: 3 },
+  { name: 'Copying templates', weight: 3 },
   { name: 'Generating feature flags', weight: 2 },
   { name: 'Creating config', weight: 2 },
-  { name: 'Verifying pd demo story-a', weight: 8 },
+  { name: 'Verifying pd demo story-a', weight: 5 },
   { name: 'Updating OpenClaw config', weight: 3 },
 ];
 
 const TOTAL_WEIGHT = INSTALL_STEPS.reduce((sum, step) => sum + step.weight, 0);
 
-function updateProgress(spinner: ora.Ora | null, currentStep: number, message: string): void {
+function updateProgress(spinner: Ora | null, currentStep: number, message: string): void {
   if (!spinner) return;
   
   if (currentStep < 0 || currentStep >= INSTALL_STEPS.length) {
