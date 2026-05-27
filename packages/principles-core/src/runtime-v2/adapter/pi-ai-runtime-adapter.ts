@@ -68,7 +68,7 @@ export interface PiAiRuntimeAdapterConfig {
   workspace?: string;
   /** Optional StoreEventEmitter for telemetry. Falls back to global storeEmitter. */
   eventEmitter?: StoreEventEmitter;
-  /** Reasoning/thinking level. Set to false to disable thinking for models that enable it by default (e.g., MiniMax). Default: undefined (use model default). */
+  /** Reasoning/thinking level. Set to false to disable thinking for models that enable it by default. Default: undefined (use model default). */
   reasoning?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | false;
   /** Internal override for the retry delay backoff, primarily for fast unit testing. */
   _testBackoffDelayMs?: number;

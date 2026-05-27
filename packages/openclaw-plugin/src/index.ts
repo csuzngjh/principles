@@ -64,6 +64,10 @@ let workspaceInitialized = false;
 // Track started evolution workers — one per workspace
 const startedWorkspaces = new Set<string>();
 
+const HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION =
+  'verify gateway plugin activation and hook workspace binding; ' +
+  'migrate live hook workspace resolution to PD-owned canonical configuration before relying on config-based recovery';
+
 // Map from childSessionKey → shadowObservationId
 // Used to complete shadow observations when subagent ends
 const pendingShadowObservations = new Map<string, string>();
@@ -98,7 +102,16 @@ const plugin = {
       'before_prompt_build',
       async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_prompt_build');
-        if (!workspaceDir) return;
+        if (!workspaceDir) {
+          api.logger.error(
+            `[PD:before_prompt_build] workspaceDir resolution failed. ` +
+            `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
+            `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
+            `Hook skipped — no mutation will occur. ` +
+            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+          );
+          return;
+        }
         try {
           if (!workspaceInitialized) {
             migrateDirectoryStructure(api, workspaceDir);
@@ -148,7 +161,16 @@ const plugin = {
       'before_tool_call',
       (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_tool_call');
-        if (!workspaceDir) return;
+        if (!workspaceDir) {
+          api.logger.error(
+            `[PD:before_tool_call] workspaceDir resolution failed. ` +
+            `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
+            `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
+            `Hook skipped — security gate bypassed. ` +
+            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+          );
+          return;
+        }
         try {
           const pluginConfig = api.pluginConfig ?? {};
           const {logger} = api;
@@ -174,7 +196,16 @@ const plugin = {
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_tool_call');
-        if (!workspaceDir) return;
+        if (!workspaceDir) {
+          api.logger.error(
+            `[PD:after_tool_call] workspaceDir resolution failed. ` +
+            `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
+            `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
+            `Hook skipped — pain detection bypassed. ` +
+            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+          );
+          return;
+        }
         try {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
@@ -197,8 +228,17 @@ const plugin = {
     api.on(
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
-        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx as unknown as Record<string, unknown>, api, 'llm_output');
-        if (!workspaceDir) return;
+        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'llm_output');
+        if (!workspaceDir) {
+          api.logger.error(
+            `[PD:llm_output] workspaceDir resolution failed. ` +
+            `agentId=${ctx.agentId ?? '(missing)'} ` +
+            `sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+            `Hook skipped — LLM analysis bypassed. ` +
+            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+          );
+          return;
+        }
         try {
           handleLlmOutput(event, { ...ctx, workspaceDir });
 
@@ -237,7 +277,7 @@ const plugin = {
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         try {
-          const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx as unknown as Record<string, unknown>, api, 'trajectory.llm_output');
+          const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'trajectory.llm_output');
           if (!workspaceDir) return;
           TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
           // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
@@ -333,19 +373,40 @@ const plugin = {
     // ── Hook: Lifecycle ──
     api.on('before_reset', (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_reset');
-      if (!workspaceDir) return;
+      if (!workspaceDir) {
+        api.logger.error(
+          `[PD:before_reset] workspaceDir resolution failed. ` +
+          `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+          `Hook skipped. NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+        );
+        return;
+      }
       return handleBeforeReset(event, { ...ctx, workspaceDir });
     });
     
     api.on('before_compaction', (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_compaction');
-      if (!workspaceDir) return;
+      if (!workspaceDir) {
+        api.logger.error(
+          `[PD:before_compaction] workspaceDir resolution failed. ` +
+          `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+          `Hook skipped. NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+        );
+        return;
+      }
       return handleBeforeCompaction(event, { ...ctx, workspaceDir });
     });
     
     api.on('after_compaction', (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_compaction');
-      if (!workspaceDir) return;
+      if (!workspaceDir) {
+        api.logger.error(
+          `[PD:after_compaction] workspaceDir resolution failed. ` +
+          `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+          `Hook skipped. NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+        );
+        return;
+      }
       return handleAfterCompaction(event, { ...ctx, workspaceDir });
     });
 
