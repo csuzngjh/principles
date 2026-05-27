@@ -11,6 +11,7 @@ import {
   MVP_CHANNELS,
   buildFailureOutput,
 } from './mvp-config.js';
+import { setLanguage, t, getLanguage } from './i18n.js';
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,9 @@ const PLUGIN_DIR = path.resolve(__dirname, '..');
 
 async function runInstall(options: Record<string, unknown>): Promise<void> {
   const jsonMode = options.json === true;
+
+  // Set language early
+  setLanguage((options.lang as 'zh' | 'en') || 'zh');
 
   if (jsonMode) {
     setQuietMode(true);
@@ -34,7 +38,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     if (jsonMode) {
       console.log(JSON.stringify(buildFailureOutput('node_not_found', 'Install Node.js >= 18 and retry'), null, 2));
     } else {
-      logger.error('Node.js is required (>= 18). Install Node.js first.');
+      logger.error(t('node_required'));
     }
     process.exit(1);
     return;
@@ -43,7 +47,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   if (!jsonMode) {
     logger.success(`Node.js ${env.nodeVersion}`);
     if (!env.hasOpenClaw) {
-      logger.warn('OpenClaw not detected — PD CLI commands still work in standalone mode');
+      logger.warn(t('openclaw_not_detected'));
     } else {
       logger.success(`OpenClaw ${env.openclawVersion}`);
     }
@@ -70,11 +74,11 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 
   if (!jsonMode && !options.nonInteractive && !options.yes) {
     if (workspaceInfo.isFirstInstall) {
-      logger.info('First-time install detected — will copy all files');
+      logger.info(t('first_install_detected'));
     } else {
-      logger.info('Existing install detected — will use smart merge mode');
+      logger.info(t('existing_install_detected'));
       if (workspaceInfo.coreFiles.length > 0) {
-        logger.info(`  Existing core files: ${workspaceInfo.coreFiles.join(', ')}`);
+        logger.info(`  ${t('existing_core_files')} ${workspaceInfo.coreFiles.join(', ')}`);
       }
     }
     console.log();
@@ -84,7 +88,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 
   const installOptions: InstallOptions | null = nonInteractive
     ? {
-        language: cliOptions.language || 'zh',
+        language: cliOptions.language || getLanguage(),
         mode: cliOptions.mode || (workspaceInfo.isFirstInstall ? 'force' : 'smart'),
         workspaceDir: cliOptions.workspaceDir || workspaceInfo.detectedPath,
         channels: [...MVP_CHANNELS],
@@ -96,7 +100,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
     if (jsonMode) {
       console.log(JSON.stringify(buildFailureOutput('cancelled', 'Re-run the installer'), null, 2));
     } else {
-      logger.info('Install cancelled');
+      logger.info(t('cancel_install'));
     }
     process.exit(0);
     return;
@@ -122,62 +126,62 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   } else {
     if (result.success) {
       console.log();
-      logger.success('Install complete!');
+      logger.success(t('install_complete'));
       console.log();
-      console.log('Principles Disciple Setup');
+      console.log(t('principles_disciple_setup'));
       console.log();
-      console.log('Detecting environment');
-      console.log(`  OpenClaw integration target .... ${env.hasOpenClaw ? 'found' : 'not found'}`);
-      console.log(`  Node.js ........................ found (${env.nodeVersion})`);
+      console.log(t('detecting_environment'));
+      console.log(`  OpenClaw integration target .... ${env.hasOpenClaw ? t('openclaw_target_found') : t('openclaw_target_not_found')}`);
+      console.log(`  Node.js ........................ ${t('node_found')} (${env.nodeVersion})`);
       console.log();
-      console.log('Installing MVP components');
+      console.log(t('installing_mvp_components'));
       console.log(`  Runtime integration ............ ${result.components.plugin}`);
       console.log(`  Operator CLI ................... ${result.components.cli}`);
       console.log(`  Review console ................. ${result.components.console}${result.components.consoleEntrypoint ? ` (${result.components.consoleEntrypoint})` : ''}`);
       console.log();
-      console.log('Enabled capabilities');
+      console.log(t('enabled_capabilities'));
       for (const ch of result.enabledChannels) {
         console.log(`  ${ch}`);
       }
       console.log();
-      console.log('Verification');
+      console.log(t('verification'));
       console.log(`  Feature flags .................. ${result.verification.features}`);
       console.log(`  Story A demo ................... ${result.verification.storyA}${result.verification.storyASkipReason ? ` (${result.verification.storyASkipReason})` : ''}`);
       console.log();
-      console.log('Ready.');
-      console.log(`Diagnostics: pd runtime canary --workspace "${result.workspaceDir}" --json`);
+      console.log(t('ready'));
+      console.log(`${t('diagnostics')}: pd runtime canary --workspace "${result.workspaceDir}" --json`);
     } else if (result.components.plugin === 'verified' && (result.components.cli === 'verified' || result.components.cli === 'verified_local_only')) {
       const cliLabel = result.components.cli === 'verified_local_only' ? 'verified (local only)' : result.components.cli;
       const diagCmd = result.components.cli === 'verified_local_only' && result.components.cliLocalPath
         ? `"${result.components.cliLocalPath}" runtime canary --workspace "${result.workspaceDir}" --json`
         : `pd runtime canary --workspace "${result.workspaceDir}" --json`;
       console.log();
-      logger.warn('Install partially complete — runtime + CLI verified, but review console is not yet deliverable');
+      logger.warn(t('install_partial_complete'));
       console.log();
-      console.log('Principles Disciple Setup');
+      console.log(t('principles_disciple_setup'));
       console.log();
-      console.log('Installing MVP components');
+      console.log(t('installing_mvp_components'));
       console.log(`  Runtime integration ............ ${result.components.plugin}`);
       console.log(`  Operator CLI ................... ${cliLabel}`);
       console.log(`  Review console ................. ${result.components.console}`);
       console.log();
-      console.log('Enabled capabilities');
+      console.log(t('enabled_capabilities'));
       for (const ch of result.enabledChannels) {
         console.log(`  ${ch}`);
       }
       console.log();
-      console.log('Verification');
+      console.log(t('verification'));
       console.log(`  Feature flags .................. ${result.verification.features}`);
       console.log(`  Story A demo ................... ${result.verification.storyA}${result.verification.storyASkipReason ? ` (${result.verification.storyASkipReason})` : ''}`);
       console.log();
-      console.log('Not ready for seed-customer release — owner review console is a release-blocking gap.');
-      console.log(`Diagnostics: ${diagCmd}`);
+      console.log(t('not_ready_for_release'));
+      console.log(`${t('diagnostics')}: ${diagCmd}`);
       process.exit(1);
       return;
     } else {
-      logger.error(`Install failed: ${result.reason || result.error}`);
+      logger.error(`${t('install_failed')}: ${result.reason || result.error}`);
       if (result.nextAction) {
-        logger.info(`Next action: ${result.nextAction}`);
+        logger.info(`${t('next_action')}: ${result.nextAction}`);
       }
       process.exit(1);
       return;
@@ -186,6 +190,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
 }
 
 async function runUninstall(options: Record<string, unknown>): Promise<void> {
+  setLanguage('zh');
   console.log(banner);
   console.log();
 
@@ -196,34 +201,35 @@ async function runUninstall(options: Record<string, unknown>): Promise<void> {
   });
 
   if (!result.success) {
-    logger.error(`Uninstall failed: ${result.error}`);
+    logger.error(`${t('uninstall_failed')}: ${result.error}`);
     process.exit(1);
     return;
   }
 }
 
 async function showStatus(): Promise<void> {
+  setLanguage('zh');
   console.log(banner);
   console.log();
 
   const status = checkInstallStatus();
 
-  console.log('Install status:\n');
+  console.log(`${t('install_status')}\n`);
 
   for (const p of status.paths) {
     const icon = p.type === 'dir' ? '[dir]' : '[file]';
-    const statusIcon = p.exists ? 'OK' : 'MISSING';
+    const statusIcon = p.exists ? t('install_status_ok') : t('install_status_missing');
     console.log(`  ${statusIcon} ${icon} ${p.name}`);
     console.log(`     ${p.path}`);
   }
 
   console.log();
   if (status.isInstalled) {
-    logger.success('Principles Disciple is installed');
+    logger.success(t('pd_installed'));
     console.log('\n  User data (MD files, memory, state) is preserved on uninstall');
   } else {
-    logger.warn('Principles Disciple is not installed');
-    console.log('\n  Install with:');
+    logger.warn(t('pd_not_installed'));
+    console.log(`\n  ${t('install_hint')}:`);
     console.log('  npx create-principles-disciple');
   }
 }

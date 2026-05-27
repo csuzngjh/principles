@@ -24,6 +24,45 @@ import {
 
 const INSTALL_TIMEOUT_MS = parseInt(process.env.PD_INSTALL_TIMEOUT_MS || '300000', 10);
 
+interface InstallStep {
+  name: string;
+  weight: number;
+}
+
+const INSTALL_STEPS: InstallStep[] = [
+  { name: 'Checking built plugin', weight: 5 },
+  { name: 'Backing up existing install', weight: 5 },
+  { name: 'Installing bundled @principles/core', weight: 10 },
+  { name: 'Installing plugin', weight: 15 },
+  { name: 'Installing plugin dependencies', weight: 25 },
+  { name: 'Installing pd CLI', weight: 10 },
+  { name: 'Verifying pd CLI', weight: 5 },
+  { name: 'Installing pd-console', weight: 10 },
+  { name: 'Installing console dependencies', weight: 10 },
+  { name: 'Verifying pd-console', weight: 5 },
+  { name: 'Copying templates', weight: 5 },
+  { name: 'Generating feature flags', weight: 2 },
+  { name: 'Creating config', weight: 2 },
+  { name: 'Verifying pd demo story-a', weight: 8 },
+  { name: 'Updating OpenClaw config', weight: 3 },
+];
+
+const TOTAL_WEIGHT = INSTALL_STEPS.reduce((sum, step) => sum + step.weight, 0);
+
+function updateProgress(spinner: ora.Ora | null, currentStep: number, message: string): void {
+  if (!spinner) return;
+  
+  if (currentStep < 0 || currentStep >= INSTALL_STEPS.length) {
+    spinner.text = message;
+    return;
+  }
+  
+  const completedWeight = INSTALL_STEPS.slice(0, currentStep + 1).reduce((sum, s) => sum + s.weight, 0);
+  const percent = Math.round((completedWeight / TOTAL_WEIGHT) * 100);
+  
+  spinner.text = `${message} (${percent}%)`;
+}
+
 function getCapturingExecOptions(cwd: string, timeoutOverride?: number): ExecSyncOptions {
   return {
     cwd,
@@ -221,7 +260,20 @@ async function installPluginDependencies(): Promise<void> {
     try {
       execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
     } catch (e) {
-      throw new Error(`npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm install --ignore-scripts`, { cause: e });
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      let hint = '';
+      
+      if (errorMsg.includes('ETIMEDOUT') || errorMsg.includes('network') || errorMsg.includes('timeout')) {
+        hint = '\n\n提示：网络连接超时，可尝试：\n  1. 切换 npm 源：npm config set registry https://registry.npmmirror.com\n  2. 检查网络连接\n  3. 手动执行：cd ' + extDir + ' && npm install --ignore-scripts';
+      } else if (errorMsg.includes('EACCES') || errorMsg.includes('permission') || errorMsg.includes('EPERM')) {
+        hint = '\n\n提示：权限不足，请检查目录权限或以管理员身份运行，或手动执行：cd ' + extDir + ' && npm install --ignore-scripts';
+      } else if (errorMsg.includes('ENOSPC')) {
+        hint = '\n\n提示：磁盘空间不足，请清理后重试。';
+      } else {
+        hint = '\n\n手动修复：cd ' + extDir + ' && npm install --ignore-scripts';
+      }
+      
+      throw new Error(`npm install failed: ${errorMsg}${hint}`, { cause: e });
     }
   }
 
@@ -655,6 +707,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
   const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
   let consoleProcess: ChildProcess | null = null;
+  let stepIndex = 0;
 
   const killConsoleChild = () => {
     if (consoleProcess) {
@@ -665,34 +718,42 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
   };
 
   try {
-    if (spinner) spinner.text = 'Checking built plugin...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Checking built plugin...');
     await checkBuiltPlugin(pluginDir);
     verification.manifestActivation = 'verified';
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Backing up existing install...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Backing up existing install...');
     const { backupDir: backupDirFromResult } = backupExistingInstall();
     backupDir = backupDirFromResult;
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing bundled @principles/core...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/core...');
     installBundledCore(pluginDir);
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing plugin...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
     await installPluginToStaging(pluginDir);
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Pre-filling @principles/core for plugin...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for plugin...');
     ensureCoreDependency(getPluginExtDir());
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing plugin dependencies...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin dependencies...');
     await installPluginDependencies();
     components.plugin = 'verified';
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing pd CLI...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing pd CLI...');
     syncPdCli(pluginDir);
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Pre-filling @principles/core for pd-cli...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for pd-cli...');
     ensureCoreDependency(getInstalledPdCliDir());
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Verifying pd CLI...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd CLI...');
     const cliVerify = verifyPdCliShim();
     if (!cliVerify.localOk) {
       throw new Error('PD CLI verification failed — local shim is not executable after install. Check Node.js and PATH configuration.');
@@ -704,17 +765,21 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       components.cliLocalPath = cliVerify.localPath;
       logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" or add ${getInstalledBinDir()} to PATH.`);
     }
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing pd-console...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing pd-console...');
     installConsole(pluginDir);
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Pre-filling @principles/core for console...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for console...');
     ensureCoreDependency(getInstalledConsoleDir());
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing console dependencies...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing console dependencies...');
     await installConsoleDependencies();
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Verifying pd-console...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd-console...');
     const consoleVerify = await verifyConsole(options.workspaceDir);
     if (consoleVerify.ok) {
       components.console = 'configured';
@@ -723,8 +788,9 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     } else {
       throw new Error(`Console verification failed: ${consoleVerify.reason ?? 'unknown'}. Installation rolled back — plugin and CLI are not activated.`);
     }
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Copying templates...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Copying templates...');
     const templatesCount = await copyCoreTemplates({
       pluginDir,
       language: options.language,
@@ -737,15 +803,18 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       workspaceDir: options.workspaceDir,
       mode: options.mode,
     });
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Generating feature flags...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Generating feature flags...');
     const featureFlagsPath = await generateFeatureFlagsConfig(options.workspaceDir, options.channels);
     verification.features = 'passed';
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Creating config...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Creating config...');
     await createConfigFile(options.workspaceDir, options.channels);
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Verifying pd demo story-a...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd demo story-a...');
     try {
       const installedPdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
       execFileSync(process.execPath, [installedPdCliEntry, 'demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
@@ -756,8 +825,9 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     } catch (e) {
       throw new Error(`Story A demo verification failed: ${e instanceof Error ? e.message : String(e)}. Installation rolled back — plugin and CLI are not activated.`, { cause: e });
     }
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Updating OpenClaw config...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Updating OpenClaw config...');
     await updateOpenClawConfig();
 
     cleanupBackup(backupDir);
