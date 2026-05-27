@@ -2,18 +2,13 @@
 
 MVP-First Prerequisite Installer for [Principles Disciple](https://github.com/csuzngjh/principles).
 
-> **Note:** This installer delivers runtime integration and operator CLI only.
-> The owner review console is a **release-blocking gap** — the installer reports
-> `success: false` until console delivery is complete. This is by design per
-> ADR-0014 MVP-First strategy.
-
 ## What This Installer Delivers
 
 | Component | Status | Description |
 |-----------|--------|-------------|
 | Runtime integration | Installed & verified | OpenClaw plugin with MVP activation channels |
 | Operator CLI (`pd`) | Installed & verified | Command-line tool for diagnostics and demo |
-| Review console | **Not yet deliverable** | Owner review surface is a release-blocking gap |
+| Review console | Installed & configured | Local web UI for principle review (loopback only) |
 
 ### MVP Activation Channels
 
@@ -59,12 +54,33 @@ The installer automatically verifies the installation during setup:
 
 1. **Feature flags** — `.pd/feature-flags.yaml` is generated and validated
 2. **Story A demo** — `pd demo story-a` is executed to confirm runtime integration
+3. **Console health** — `/api/health` is checked on the local console instance
 
 After a successful install, you can re-verify at any time:
 
 ```bash
 pd runtime canary --workspace "<path>" --json
 ```
+
+## Console
+
+The installer delivers a local pd-console web UI for principle review.
+
+### Starting the Console
+
+```bash
+pd console --workspace "/path/to/workspace" --no-auth
+```
+
+The console listens on **127.0.0.1 only** (loopback) — it is not accessible from other machines on the network. When using `--no-auth`, loopback binding is enforced; the server will refuse to start if `--no-auth` is combined with a non-loopback host.
+
+Open `http://127.0.0.1:3100` in your browser to access the console.
+
+### Console Security
+
+- Default binding: `127.0.0.1` (loopback only)
+- `--no-auth` is only permitted with loopback binding
+- For network access, use `--host <ip>` with `--token <secret>` or set `PD_CONSOLE_TOKEN` environment variable
 
 ## Rerun / Reinstall
 

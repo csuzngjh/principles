@@ -11,6 +11,7 @@
     "plugin",
     "pd-cli",
     "console",
+    "core",
     "templates",
     "README.md",
     "LICENSE"

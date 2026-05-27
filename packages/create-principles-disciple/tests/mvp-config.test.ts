@@ -318,22 +318,16 @@ describe('buildSuccessOutput', () => {
     expect(result.success).toBe(true);
   });
 
-  it('returns success false when console not deliverable', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+  it('returns success false when console skipped', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
   });
 
   it('includes nextAction with canary command', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.nextAction).toContain('pd runtime canary');
-  });
-
-  it('includes console not deliverable in nextAction when not_deliverable', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
-    const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
-    expect(result.nextAction).toContain('Console verification failed');
   });
 });
 
@@ -630,23 +624,21 @@ describe('Install success output exposes plugin/cli/console status', () => {
     expect(result.verification.storyA).toBe('passed');
   });
 
-  it('partial success (console not deliverable) returns success false', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+  it('partial success (console skipped) returns success false', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
-    expect(result.nextAction).toContain('Console verification failed');
   });
 });
 
 describe('Console delivery contract', () => {
   const verification: VerificationResult = { features: 'passed', storyA: 'skipped', storyASkipReason: 'Console not available' };
 
-  it('not_deliverable console means success=false', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+  it('skipped console means success=false', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
-    expect(result.components.console).toBe('not_deliverable');
-    expect(result.nextAction).toContain('Console verification failed');
+    expect(result.components.console).toBe('skipped');
   });
 
   it('configured console with entrypoint means success=true', () => {
@@ -704,7 +696,7 @@ describe('Invalid --channels JSON output contract', () => {
 
 describe('CLI verification contract', () => {
   it('cli: verified (global) — nextAction uses bare pd', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
     expect(result.components.cli).toBe('verified');
     expect(result.nextAction).toContain('pd runtime canary');
@@ -712,7 +704,7 @@ describe('CLI verification contract', () => {
   });
 
   it('cli: verified_local_only — nextAction uses local shim path', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'not_deliverable', cliLocalPath: '/home/.openclaw/extensions/principles-disciple/bin/pd' };
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'skipped', cliLocalPath: '/home/.openclaw/extensions/principles-disciple/bin/pd' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
     expect(result.components.cli).toBe('verified_local_only');
     expect(result.nextAction).toContain('/home/.openclaw/extensions/principles-disciple/bin/pd');
@@ -727,7 +719,7 @@ describe('CLI verification contract', () => {
   });
 
   it('cli: failed means success=false even if plugin is verified', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'failed', console: 'not_deliverable' };
+    const components: ComponentStatus = { plugin: 'verified', cli: 'failed', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification: { features: 'passed', storyA: 'passed' } });
     expect(result.success).toBe(false);
   });
@@ -816,14 +808,14 @@ describe('Install output never implies partial core channel disabling', () => {
   });
 
   it('partial success output does not expose enabledChannels (success=false)', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
     expect(result.enabledChannels).toBeUndefined();
   });
 
   it('partial success nextAction does not imply channels can be partially disabled', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.nextAction).not.toContain('disabled');
     expect(result.nextAction).not.toContain('channel');
@@ -1112,7 +1104,7 @@ describe('verified_local_only nextAction quoting (P2 fix)', () => {
   });
 
   it('entire command is never wrapped in a single pair of quotes', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'not_deliverable', cliLocalPath: '/opt/pd' };
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified_local_only', console: 'skipped', cliLocalPath: '/opt/pd' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.nextAction).not.toMatch(/^".*runtime canary.*"$/);
     expect(result.nextAction).not.toMatch(/"[^"]*runtime canary[^"]*--json"/);
@@ -1138,22 +1130,22 @@ describe('Structured failure reason reflects actual failure (P2 fix)', () => {
     expect(result.reason).not.toContain('console');
   });
 
-  it('console not_deliverable alone → reason contains console_not_deliverable', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+  it('console skipped alone → reason contains console_skipped', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
-    expect(result.reason).toContain('console_not_deliverable');
+    expect(result.reason).toContain('console_skipped');
     expect(result.reason).not.toContain('plugin');
     expect(result.reason).not.toContain('cli');
   });
 
   it('multiple failures → reason is comma-separated', () => {
-    const components: ComponentStatus = { plugin: 'failed', cli: 'failed', console: 'not_deliverable' };
+    const components: ComponentStatus = { plugin: 'failed', cli: 'failed', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
     expect(result.reason).toContain('plugin_failed');
     expect(result.reason).toContain('cli_failed');
-    expect(result.reason).toContain('console_not_deliverable');
+    expect(result.reason).toContain('console_skipped');
     expect(result.reason).toContain(',');
   });
 
@@ -1402,8 +1394,8 @@ describe('Complete install success (F.6)', () => {
     expect(result.success).toBe(true);
   });
 
-  it('console not_deliverable = success false even if plugin+cli verified', () => {
-    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'not_deliverable' };
+  it('console skipped = success false even if plugin+cli verified', () => {
+    const components: ComponentStatus = { plugin: 'verified', cli: 'verified', console: 'skipped' };
     const result = buildSuccessOutput({ workspace: '/tmp/ws', components, channels: [...MVP_CHANNELS], verification });
     expect(result.success).toBe(false);
   });
@@ -1441,5 +1433,222 @@ describe('Hook activation contract preserved after merge (F.8)', () => {
     if (!fs.existsSync(pkgPath)) return;
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
     expect(pkg.openclaw?.setupEntry).toBe('./dist/bundle.js');
+  });
+});
+
+describe('Atomic install: console/story-a fail triggers rollback', () => {
+  it('installer.ts throws on console verify failure (not not_deliverable)', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const consoleVerifySection = content.substring(content.indexOf('verifyConsole'));
+    expect(consoleVerifySection).toContain('throw new Error');
+    expect(consoleVerifySection).not.toContain('not_deliverable');
+  });
+
+  it('installer.ts throws on story-a failure (not skipped)', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const storyASection = content.substring(content.indexOf('story-a'), content.indexOf('updateOpenClawConfig'));
+    expect(storyASection).toContain('throw new Error');
+    expect(storyASection).not.toContain("verification.storyA = 'skipped'");
+  });
+
+  it('updateOpenClawConfig runs after all verification', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const storyALastIndex = content.lastIndexOf("verification.storyA = 'passed'");
+    const updateConfigIndex = content.indexOf('await updateOpenClawConfig()');
+    expect(updateConfigIndex).toBeGreaterThan(storyALastIndex);
+  });
+
+  it('cleanupBackup runs after updateOpenClawConfig', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const updateConfigIndex = content.indexOf('await updateOpenClawConfig()');
+    const cleanupIndex = content.indexOf('cleanupBackup(backupDir)');
+    expect(cleanupIndex).toBeGreaterThan(updateConfigIndex);
+  });
+
+  it('catch block kills console child process', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const catchBlock = content.substring(content.indexOf('} catch (error)'));
+    expect(catchBlock).toContain('killConsoleChild');
+  });
+});
+
+describe('Console health check contract (HTTP 200 + parseable JSON)', () => {
+  it('verifyConsole checks HTTP status code 200', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const verifySection = content.substring(content.indexOf('async function verifyConsole'));
+    expect(verifySection).toContain('statusCode !== 200');
+  });
+
+  it('verifyConsole parses response as JSON', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const verifySection = content.substring(content.indexOf('async function verifyConsole'));
+    expect(verifySection).toContain('JSON.parse');
+  });
+
+  it('verifyConsole detects malformed JSON', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const verifySection = content.substring(content.indexOf('async function verifyConsole'));
+    expect(verifySection).toContain('malformed JSON');
+  });
+
+  it('verifyConsole detects empty body', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const verifySection = content.substring(content.indexOf('async function verifyConsole'));
+    expect(verifySection).toContain('empty body');
+  });
+
+  it('verifyConsole detects premature child exit', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const verifySection = content.substring(content.indexOf('async function verifyConsole'));
+    expect(verifySection).toContain('exited prematurely');
+  });
+
+  it('verifyConsole kills child on failure with SIGKILL fallback', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const verifySection = content.substring(content.indexOf('async function verifyConsole'));
+    expect(verifySection).toContain('SIGKILL');
+  });
+
+  it('verifyConsole returns structured reason on failure', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const verifySection = content.substring(content.indexOf('async function verifyConsole'));
+    expect(verifySection).toContain('reason:');
+  });
+});
+
+describe('Console loopback-only binding', () => {
+  it('verifyConsole spawns with --host 127.0.0.1', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const verifySection = content.substring(content.indexOf('async function verifyConsole'));
+    expect(verifySection).toContain("'--host', '127.0.0.1'");
+  });
+
+  it('verifyConsole health check uses 127.0.0.1 not localhost', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const verifySection = content.substring(content.indexOf('async function verifyConsole'));
+    expect(verifySection).toContain('http://127.0.0.1:');
+    expect(verifySection).not.toContain('http://localhost:');
+  });
+
+  it('pd-console server defaults to 127.0.0.1 host', () => {
+    const serverPath = path.resolve(__dirname, '..', '..', 'pd-console', 'src', 'server', 'index.ts');
+    if (!fs.existsSync(serverPath)) return;
+    const content = fs.readFileSync(serverPath, 'utf-8');
+    expect(content).toContain("let host = '127.0.0.1'");
+  });
+
+  it('pd-console server rejects --no-auth with non-loopback host', () => {
+    const serverPath = path.resolve(__dirname, '..', '..', 'pd-console', 'src', 'server', 'index.ts');
+    if (!fs.existsSync(serverPath)) return;
+    const content = fs.readFileSync(serverPath, 'utf-8');
+    expect(content).toContain('--no-auth is only allowed with loopback');
+  });
+
+  it('pd console CLI uses --host 127.0.0.1', () => {
+    const consoleCmdPath = path.resolve(__dirname, '..', '..', 'pd-cli', 'src', 'commands', 'console.ts');
+    if (!fs.existsSync(consoleCmdPath)) return;
+    const content = fs.readFileSync(consoleCmdPath, 'utf-8');
+    expect(content).toContain("'--host', host");
+    expect(content).toContain("const host = '127.0.0.1'");
+  });
+});
+
+describe('pd console CLI contract', () => {
+  it('process.exit(1) is followed by return', () => {
+    const consoleCmdPath = path.resolve(__dirname, '..', '..', 'pd-cli', 'src', 'commands', 'console.ts');
+    if (!fs.existsSync(consoleCmdPath)) return;
+    const content = fs.readFileSync(consoleCmdPath, 'utf-8');
+    const exit1Indices: number[] = [];
+    let searchFrom = 0;
+    while (true) {
+      const idx = content.indexOf('process.exit(1)', searchFrom);
+      if (idx === -1) break;
+      exit1Indices.push(idx);
+      searchFrom = idx + 1;
+    }
+    for (const idx of exit1Indices) {
+      const after = content.substring(idx + 'process.exit(1)'.length).trimStart();
+      expect(after.startsWith('return') || after.startsWith(';')).toBe(true);
+    }
+  });
+
+  it('--json failure output includes reason and nextAction', () => {
+    const consoleCmdPath = path.resolve(__dirname, '..', '..', 'pd-cli', 'src', 'commands', 'console.ts');
+    if (!fs.existsSync(consoleCmdPath)) return;
+    const content = fs.readFileSync(consoleCmdPath, 'utf-8');
+    const jsonErrorBlocks = content.match(/JSON\.stringify\(\{[^}]*success: false[^}]*\}\)/g) ?? [];
+    expect(jsonErrorBlocks.length).toBeGreaterThanOrEqual(2);
+    for (const block of jsonErrorBlocks) {
+      expect(block).toContain('reason');
+      expect(block).toContain('nextAction');
+    }
+  });
+
+  it('does not report success before spawn confirms running', () => {
+    const consoleCmdPath = path.resolve(__dirname, '..', '..', 'pd-cli', 'src', 'commands', 'console.ts');
+    if (!fs.existsSync(consoleCmdPath)) return;
+    const content = fs.readFileSync(consoleCmdPath, 'utf-8');
+    expect(content).toContain('startupConfirmed');
+    const successOutputIdx = content.indexOf("success: true");
+    const setTimeoutIdx = content.indexOf('setTimeout');
+    expect(successOutputIdx).toBeGreaterThan(setTimeoutIdx);
+  });
+});
+
+describe('Bundled @principles/core delivery', () => {
+  it('package.json files array includes core', () => {
+    const pkgPath = path.resolve(__dirname, '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    expect(pkg.files).toContain('core');
+  });
+
+  it('bundle-plugin.mjs includes CORE_REQUIRED with dist and package.json', () => {
+    const scriptPath = path.resolve(__dirname, '..', 'scripts', 'bundle-plugin.mjs');
+    const content = fs.readFileSync(scriptPath, 'utf-8');
+    expect(content).toContain('CORE_REQUIRED');
+    expect(content).toContain('CORE_SRC');
+    expect(content).toContain('CORE_DEST');
+  });
+
+  it('installer.ts has installBundledCore function', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('function installBundledCore');
+  });
+
+  it('installer.ts has ensureCoreDependency function', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    expect(content).toContain('function ensureCoreDependency');
+  });
+
+  it('installer.ts calls ensureCoreDependency before npm install', () => {
+    const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
+    const content = fs.readFileSync(installerPath, 'utf-8');
+    const ensurePluginCore = content.indexOf("ensureCoreDependency(getPluginExtDir())");
+    const pluginNpmInstall = content.indexOf("await installPluginDependencies()");
+    expect(ensurePluginCore).toBeGreaterThan(0);
+    expect(pluginNpmInstall).toBeGreaterThan(0);
+    expect(ensurePluginCore).toBeLessThan(pluginNpmInstall);
+
+    const ensureConsoleCore = content.indexOf("ensureCoreDependency(getInstalledConsoleDir())");
+    const consoleNpmInstall = content.indexOf("await installConsoleDependencies()");
+    expect(ensureConsoleCore).toBeGreaterThan(0);
+    expect(consoleNpmInstall).toBeGreaterThan(0);
+    expect(ensureConsoleCore).toBeLessThan(consoleNpmInstall);
   });
 });

@@ -30,7 +30,7 @@ const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
 export interface ComponentStatus {
   plugin: 'verified' | 'failed' | 'skipped';
   cli: 'verified' | 'verified_local_only' | 'failed' | 'skipped';
-  console: 'configured' | 'not_deliverable' | 'skipped';
+  console: 'configured' | 'skipped';
   consoleEntrypoint?: string;
   cliLocalPath?: string;
 }
@@ -188,10 +188,7 @@ export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
     nextActions.push(`Run ${quotedPath} runtime canary --workspace <path> --json for diagnostics (global pd not on PATH)`);
   }
   if (components.console === 'configured') {
-    nextActions.push('Start console: pd console --workspace <path> --no-auth');
-  }
-  if (components.console === 'not_deliverable') {
-    nextActions.push('Console verification failed — use pd CLI for review. See logs for details.');
+    nextActions.push('Start console: pd console --workspace <path> --no-auth (listens on 127.0.0.1 only)');
   }
 
   if (isComplete) {
@@ -215,7 +212,7 @@ export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
   if (components.console !== 'configured') {
     failureReasons.push(`console_${components.console}`);
   }
-  const reason = failureReasons.length > 0 ? failureReasons.join(',') : 'owner_review_console_not_deliverable';
+  const reason = failureReasons.length > 0 ? failureReasons.join(',') : 'incomplete_install';
 
   return {
     success: false as const,

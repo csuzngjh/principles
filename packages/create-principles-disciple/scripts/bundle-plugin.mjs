@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -14,6 +14,8 @@ const PD_CLI_SRC = join(ROOT_DIR, 'packages', 'pd-cli');
 const PD_CLI_DEST = join(__dirname, '..', 'pd-cli');
 const CONSOLE_SRC = join(ROOT_DIR, 'packages', 'pd-console');
 const CONSOLE_DEST = join(__dirname, '..', 'console');
+const CORE_SRC = join(ROOT_DIR, 'packages', 'principles-core');
+const CORE_DEST = join(__dirname, '..', 'core');
 
 const PLUGIN_REQUIRED = [
   'dist',
@@ -38,6 +40,12 @@ const CONSOLE_REQUIRED = [
   'dist/server.js',
   'dist/server/index.js',
   'dist/web/index.html',
+  'package.json',
+];
+
+const CORE_REQUIRED = [
+  'dist',
+  'dist/index.js',
   'package.json',
 ];
 
@@ -66,6 +74,15 @@ for (const item of CONSOLE_REQUIRED) {
   if (!existsSync(src)) {
     console.error(`❌ Required console item not found: ${src}`);
     console.error(`   Run: cd packages/pd-console && npm run build`);
+    process.exit(1);
+  }
+}
+
+for (const item of CORE_REQUIRED) {
+  const src = join(CORE_SRC, item);
+  if (!existsSync(src)) {
+    console.error(`❌ Required core item not found: ${src}`);
+    console.error(`   Run: cd packages/principles-core && npm run build`);
     process.exit(1);
   }
 }
@@ -138,6 +155,50 @@ console.log('\n✅ Plugin + pd-cli + pd-console bundled successfully!');
 console.log(`   Plugin: ${PLUGIN_DEST}`);
 console.log(`   pd-cli: ${PD_CLI_DEST}`);
 console.log(`   Console: ${CONSOLE_DEST}`);
+
+if (existsSync(CORE_DEST)) {
+  console.log('  Removing old core/ directory...');
+  rmSync(CORE_DEST, { recursive: true, force: true });
+}
+mkdirSync(CORE_DEST, { recursive: true });
+
+for (const item of CORE_REQUIRED) {
+  const src = join(CORE_SRC, item);
+  const dest = join(CORE_DEST, item);
+  console.log(`  Copying core/${item}...`);
+  try {
+    cpSync(src, dest, { recursive: true });
+  } catch {
+    mkdirSync(dirname(dest), { recursive: true });
+    copyFileSync(src, dest);
+  }
+}
+
+console.log(`   Core: ${CORE_DEST}`);
+
+console.log('\n🔧 Rewriting @principles/core dependency in bundled packages...');
+
+function removeCoreDependency(pkgPath, label, coreRef) {
+  if (!existsSync(pkgPath)) return;
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  let changed = false;
+  if (pkg.dependencies && '@principles/core' in pkg.dependencies) {
+    pkg.dependencies['@principles/core'] = coreRef;
+    changed = true;
+  }
+  if (pkg.devDependencies && '@principles/core' in pkg.devDependencies) {
+    delete pkg.devDependencies['@principles/core'];
+    changed = true;
+  }
+  if (changed) {
+    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+    console.log(`  ✅ Rewrote @principles/core → ${coreRef} in ${label}/package.json`);
+  }
+}
+
+removeCoreDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', 'file:./core');
+removeCoreDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', 'file:../core');
+removeCoreDependency(join(CONSOLE_DEST, 'package.json'), 'console', 'file:../core');
 
 console.log('\n🔍 Verifying hook activation contract...');
 

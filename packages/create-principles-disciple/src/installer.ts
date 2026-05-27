@@ -219,7 +219,7 @@ async function installPluginDependencies(): Promise<void> {
   if (needsInstall) {
     const execOpts = getCapturingExecOptions(extDir);
     try {
-      execSync('npm install --ignore-scripts', execOpts);
+      execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
     } catch (e) {
       throw new Error(`npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm install --ignore-scripts`, { cause: e });
     }
@@ -381,6 +381,35 @@ function installConsole(consoleDir: string): void {
   cpSync(consoleSrc, consoleDest, { recursive: true });
 }
 
+function getInstalledCoreDir(): string {
+  return path.join(getPluginExtDir(), 'core');
+}
+
+function installBundledCore(pluginDir: string): void {
+  const coreSrc = path.join(pluginDir, 'core');
+  const coreDest = getInstalledCoreDir();
+
+  if (!existsSync(coreSrc)) {
+    throw new Error('Bundled @principles/core not found in package. Cannot resolve runtime dependencies.');
+  }
+
+  const corePkgJson = path.join(coreSrc, 'package.json');
+  const coreDist = path.join(coreSrc, 'dist');
+  if (!existsSync(corePkgJson) || !existsSync(coreDist)) {
+    throw new Error('Bundled @principles/core is incomplete (missing package.json or dist). Package may be corrupted.');
+  }
+
+  rmSync(coreDest, { recursive: true, force: true });
+  cpSync(coreSrc, coreDest, { recursive: true });
+}
+
+function ensureCoreDependency(_targetDir: string): void {
+  const coreDir = getInstalledCoreDir();
+  if (!existsSync(coreDir)) {
+    throw new Error('Installed @principles/core not found. Run installBundledCore first.');
+  }
+}
+
 async function installConsoleDependencies(): Promise<void> {
   const consoleDest = getInstalledConsoleDir();
   const packageJsonPath = path.join(consoleDest, 'package.json');
@@ -391,9 +420,9 @@ async function installConsoleDependencies(): Promise<void> {
 
   const execOpts = getCapturingExecOptions(consoleDest);
   try {
-    execSync('npm install --ignore-scripts', execOpts);
+    execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
   } catch (e) {
-    throw new Error(`Console npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${consoleDest} && npm install --ignore-scripts`, { cause: e });
+    throw new Error(`Console npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${consoleDest} && npm install --ignore-scripts --legacy-peer-deps`, { cause: e });
   }
 
   const nativeModules = ['better-sqlite3'];
@@ -408,46 +437,87 @@ async function installConsoleDependencies(): Promise<void> {
   }
 }
 
-async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null }> {
+async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null; reason?: string }> {
   const consoleDest = getInstalledConsoleDir();
   const serverEntry = path.join(consoleDest, 'dist', 'server.js');
 
   if (!existsSync(serverEntry)) {
-    return { ok: false, url: '', process: null };
+    return { ok: false, url: '', process: null, reason: 'Console server entry not found' };
   }
 
   const port = 3100 + Math.floor(Math.random() * 100);
-  const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth'], {
+  const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth', '--host', '127.0.0.1'], {
     stdio: 'pipe',
     env: { ...process.env },
     detached: false,
   });
 
-  await new Promise<void>((resolve) => { setTimeout(resolve, 3000); });
+  let childExited = false;
+  let childExitCode: number | null = null;
+  let childStderr = '';
+  let childStdout = '';
+  child.on('exit', (code) => {
+    childExited = true;
+    childExitCode = code;
+  });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    childStderr += chunk.toString();
+  });
+  child.stdout?.on('data', (chunk: Buffer) => {
+    childStdout += chunk.toString();
+  });
 
-  const url = `http://localhost:${port}`;
+  await new Promise<void>((resolve) => { setTimeout(resolve, 6000); });
+
+  if (childExited) {
+    const stderrHint = childStderr.slice(0, 500);
+    return { ok: false, url: '', process: null, reason: `Console process exited prematurely with code ${childExitCode}. Stderr: ${stderrHint}` };
+  }
+
+  const url = `http://127.0.0.1:${port}`;
   let ok = false;
+  let reason = '';
   try {
-    await new Promise<string>((resolve, reject) => {
+    const result = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
       const req = http.get(`${url}/api/health`, (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
         res.on('end', () => {
-          const body = Buffer.concat(chunks).toString();
-          ok = body.length > 0;
-          resolve(body);
+          resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() });
         });
       });
       req.on('error', reject);
-      req.setTimeout(5000, () => { req.destroy(); reject(new Error('timeout')); });
+      req.setTimeout(8000, () => { req.destroy(); reject(new Error('health check timeout')); });
     });
-  } catch {
-    ok = false;
+
+    if (result.statusCode !== 200) {
+      reason = `Console /api/health returned HTTP ${result.statusCode} (expected 200)`;
+    } else if (!result.body || result.body.trim().length === 0) {
+      reason = 'Console /api/health returned empty body';
+    } else {
+      try {
+        const parsed: unknown = JSON.parse(result.body);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          reason = 'Console /api/health returned non-object JSON';
+        } else {
+          ok = true;
+        }
+      } catch {
+        reason = 'Console /api/health returned malformed JSON';
+      }
+    }
+  } catch (e) {
+    reason = `Console health check failed: ${e instanceof Error ? e.message : String(e)}. Stderr: ${childStderr.slice(0, 300)}. Stdout: ${childStdout.slice(0, 300)}`;
   }
 
   if (!ok) {
     try { child.kill('SIGTERM'); } catch { /* ignore */ }
-    return { ok: false, url, process: null };
+    try {
+      if (!childExited) {
+        child.kill('SIGKILL');
+      }
+    } catch { /* ignore */ }
+    return { ok: false, url, process: null, reason };
   }
 
   return { ok: true, url, process: child };
@@ -586,6 +656,14 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
   let consoleProcess: ChildProcess | null = null;
 
+  const killConsoleChild = () => {
+    if (consoleProcess) {
+      try { consoleProcess.kill('SIGTERM'); } catch { /* ignore */ }
+      try { consoleProcess.kill('SIGKILL'); } catch { /* ignore */ }
+      consoleProcess = null;
+    }
+  };
+
   try {
     if (spinner) spinner.text = 'Checking built plugin...';
     await checkBuiltPlugin(pluginDir);
@@ -595,8 +673,14 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     const { backupDir: backupDirFromResult } = backupExistingInstall();
     backupDir = backupDirFromResult;
 
+    if (spinner) spinner.text = 'Installing bundled @principles/core...';
+    installBundledCore(pluginDir);
+
     if (spinner) spinner.text = 'Installing plugin...';
     await installPluginToStaging(pluginDir);
+
+    if (spinner) spinner.text = 'Pre-filling @principles/core for plugin...';
+    ensureCoreDependency(getPluginExtDir());
 
     if (spinner) spinner.text = 'Installing plugin dependencies...';
     await installPluginDependencies();
@@ -605,6 +689,10 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     if (spinner) spinner.text = 'Installing pd CLI...';
     syncPdCli(pluginDir);
 
+    if (spinner) spinner.text = 'Pre-filling @principles/core for pd-cli...';
+    ensureCoreDependency(getInstalledPdCliDir());
+
+    if (spinner) spinner.text = 'Verifying pd CLI...';
     const cliVerify = verifyPdCliShim();
     if (!cliVerify.localOk) {
       throw new Error('PD CLI verification failed — local shim is not executable after install. Check Node.js and PATH configuration.');
@@ -620,6 +708,9 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     if (spinner) spinner.text = 'Installing pd-console...';
     installConsole(pluginDir);
 
+    if (spinner) spinner.text = 'Pre-filling @principles/core for console...';
+    ensureCoreDependency(getInstalledConsoleDir());
+
     if (spinner) spinner.text = 'Installing console dependencies...';
     await installConsoleDependencies();
 
@@ -630,8 +721,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       components.consoleEntrypoint = consoleVerify.url;
       consoleProcess = consoleVerify.process;
     } else {
-      components.console = 'not_deliverable';
-      logger.warn('Console verification failed — console will not be available. Plugin and CLI are still functional.');
+      throw new Error(`Console verification failed: ${consoleVerify.reason ?? 'unknown'}. Installation rolled back — plugin and CLI are not activated.`);
     }
 
     if (spinner) spinner.text = 'Copying templates...';
@@ -664,8 +754,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       });
       verification.storyA = 'passed';
     } catch (e) {
-      verification.storyA = 'skipped';
-      verification.storyASkipReason = `Demo verification skipped: ${e instanceof Error ? e.message : String(e)}`;
+      throw new Error(`Story A demo verification failed: ${e instanceof Error ? e.message : String(e)}. Installation rolled back — plugin and CLI are not activated.`, { cause: e });
     }
 
     if (spinner) spinner.text = 'Updating OpenClaw config...';
@@ -674,9 +763,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     cleanupBackup(backupDir);
     if (spinner) spinner.succeed('Install complete!');
 
-    if (consoleProcess) {
-      try { consoleProcess.kill('SIGTERM'); } catch { /* ignore */ }
-    }
+    killConsoleChild();
 
     const actualEnabledChannels = readEnabledChannelsFromDisk(options.workspaceDir);
     const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
@@ -688,11 +775,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       nextActions.push(`"${components.cliLocalPath}" runtime canary --workspace "${options.workspaceDir}" --json`);
     }
     if (components.console === 'configured') {
-      const consoleDir = getInstalledConsoleDir();
-      nextActions.push(`pd console --workspace "${options.workspaceDir}" (or: node ${path.join(consoleDir, 'dist', 'server.js')} --workspace "${options.workspaceDir}" --no-auth)`);
-    }
-    if (components.console === 'not_deliverable') {
-      nextActions.push('Console verification failed — use pd CLI for review. See logs above for details.');
+      nextActions.push(`pd console --workspace "${options.workspaceDir}" --no-auth (listens on 127.0.0.1 only)`);
     }
 
     return {
@@ -704,10 +787,11 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       verification,
       enabledChannels: actualEnabledChannels.length > 0 ? actualEnabledChannels : options.channels,
       nextAction: nextActions.join(' | '),
-      ...(isComplete ? {} : { reason: 'owner_review_console_not_deliverable' }),
     };
   } catch (error) {
     if (spinner) spinner.fail('Install failed');
+
+    killConsoleChild();
 
     const restoreResult = restoreBackup(backupDir);
 
@@ -716,7 +800,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       ? 'Previous install has been restored.'
       : `CRITICAL: Rollback also failed — installation state is uncertain. ${restoreResult.error ?? ''} Resolve manually: check ${getPluginExtDir()} and ${backupDir}`;
     const nextAction = restoreResult.restored
-      ? 'Check the error above. Previous install has been restored.'
+      ? 'Check the error above. Previous install has been restored. Fix the issue and re-run the installer.'
       : `Installation and rollback both failed. Check ${getPluginExtDir()} and ${backupDir} manually. Error: ${errorMsg}`;
     const reason = restoreResult.restored
       ? errorMsg
