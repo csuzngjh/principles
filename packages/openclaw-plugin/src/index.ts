@@ -224,7 +224,7 @@ const plugin = {
     api.on(
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
-        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx as unknown as Record<string, unknown>, api, 'llm_output');
+        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'llm_output');
         if (!workspaceDir) {
           api.logger.error(
             `[PD:llm_output] workspaceDir resolution failed. ` +
@@ -273,7 +273,7 @@ const plugin = {
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         try {
-          const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx as unknown as Record<string, unknown>, api, 'trajectory.llm_output');
+          const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'trajectory.llm_output');
           if (!workspaceDir) return;
           TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
           // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
