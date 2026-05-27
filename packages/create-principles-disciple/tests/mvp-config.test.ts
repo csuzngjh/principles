@@ -887,22 +887,24 @@ describe('CLI verification requires localOk first (P1 fix)', () => {
 });
 
 describe('Native module verification always runs (P1 fix)', () => {
-  it('installer.ts does not early-return on existing node_modules', () => {
+  it('rebuildNativeModules runs outside needsInstall guard', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     const needsInstallBlock = content.indexOf('if (needsInstall)');
-    const nativeRebuild = content.indexOf('npm rebuild');
+    const rebuildCall = content.indexOf("rebuildNativeModules(extDir, 'Plugin')");
     expect(needsInstallBlock).toBeGreaterThan(0);
-    expect(nativeRebuild).toBeGreaterThan(0);
-    expect(nativeRebuild).toBeGreaterThan(needsInstallBlock);
+    expect(rebuildCall).toBeGreaterThan(0);
+    expect(rebuildCall).toBeGreaterThan(needsInstallBlock);
   });
 
-  it('native rebuild runs outside needsInstall guard', () => {
+  it('verifyNativeModules runs after rebuildNativeModules', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    const needsInstallClosingBrace = content.indexOf('if (needsInstall)');
-    const nativeModulesDecl = content.indexOf("const nativeModules = ['better-sqlite3']");
-    expect(nativeModulesDecl).toBeGreaterThan(needsInstallClosingBrace);
+    const rebuildCall = content.indexOf("rebuildNativeModules(extDir, 'Plugin')");
+    const verifyCall = content.indexOf("verifyNativeModules(extDir, 'Plugin')");
+    expect(rebuildCall).toBeGreaterThan(0);
+    expect(verifyCall).toBeGreaterThan(0);
+    expect(verifyCall).toBeGreaterThan(rebuildCall);
   });
 });
 
@@ -1209,9 +1211,11 @@ describe('Story A verification uses execFileSync, not shell (P1-1 fix)', () => {
   it('installer.ts does not use shell:cmd for story-a', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
-    const storyASection = content.substring(content.indexOf('story-a'), content.indexOf('verification.storyA'));
+    const startMarker = "updateProgress(spinner, stepIndex, 'Verifying pd demo story-a...'";
+    const storyASection = content.substring(content.indexOf(startMarker), content.indexOf('verification.storyA'));
     expect(storyASection).not.toContain("shell: 'cmd'");
     expect(storyASection).not.toContain('execSync');
+    expect(storyASection).toContain('execFileSync');
   });
 
   it('CLI verification uses process.execPath for localOk', () => {
@@ -1650,5 +1654,50 @@ describe('Bundled @principles/core delivery', () => {
     expect(ensureConsoleCore).toBeGreaterThan(0);
     expect(consoleNpmInstall).toBeGreaterThan(0);
     expect(ensureConsoleCore).toBeLessThan(consoleNpmInstall);
+  });
+});
+
+describe('Shim ownership verification before deletion (P1 fix)', () => {
+  it('uninstaller checks isPdOwnedShim before removing each shim', () => {
+    const uninstallerPath = path.resolve(__dirname, '..', 'src', 'uninstaller.ts');
+    const content = fs.readFileSync(uninstallerPath, 'utf-8');
+    const removeFnSection = content.substring(content.indexOf('async function removeGlobalPdShim'));
+    expect(removeFnSection).toContain('isPdOwnedShim');
+    expect(removeFnSection).toContain('skipped.push');
+  });
+
+  it('non-PD-owned shim is skipped, not deleted', () => {
+    const uninstallerPath = path.resolve(__dirname, '..', 'src', 'uninstaller.ts');
+    const content = fs.readFileSync(uninstallerPath, 'utf-8');
+    const removeFnSection = content.substring(content.indexOf('async function removeGlobalPdShim'));
+    const ownershipCheck = removeFnSection.indexOf('!isPdOwnedShim');
+    const skipPush = removeFnSection.indexOf('skipped.push(shimPath)', ownershipCheck);
+    const fseRemove = removeFnSection.indexOf('fse.remove(shimPath)', ownershipCheck);
+    expect(ownershipCheck).toBeGreaterThan(0);
+    expect(skipPush).toBeGreaterThan(0);
+    expect(skipPush).toBeLessThan(fseRemove);
+  });
+
+  it('PD-owned shim proceeds to fse.remove', () => {
+    const uninstallerPath = path.resolve(__dirname, '..', 'src', 'uninstaller.ts');
+    const content = fs.readFileSync(uninstallerPath, 'utf-8');
+    const removeFnSection = content.substring(content.indexOf('async function removeGlobalPdShim'));
+    expect(removeFnSection).toContain('fse.remove(shimPath)');
+    expect(removeFnSection).toContain('removed.push(shimPath)');
+  });
+
+  it('isPdOwnedShim reads file content and checks PD install dir', () => {
+    const uninstallerPath = path.resolve(__dirname, '..', 'src', 'uninstaller.ts');
+    const content = fs.readFileSync(uninstallerPath, 'utf-8');
+    const isPdOwnedSection = content.substring(content.indexOf('function isPdOwnedShim'), content.indexOf('async function removeGlobalPdShim'));
+    expect(isPdOwnedSection).toContain('readFileSync');
+    expect(isPdOwnedSection).toContain('getInstalledBinDir');
+    expect(isPdOwnedSection).toContain('content.includes');
+  });
+
+  it('UninstallResult includes skippedGlobalShims field', () => {
+    const uninstallerPath = path.resolve(__dirname, '..', 'src', 'uninstaller.ts');
+    const content = fs.readFileSync(uninstallerPath, 'utf-8');
+    expect(content).toContain('skippedGlobalShims');
   });
 });
