@@ -208,20 +208,30 @@ export async function runCanaryChecks(workspaceDir: string): Promise<CanaryOutpu
     })(),
     (async (): Promise<CanaryCheck> => {
       try {
-        const { readModel, close } = await createInternalizationQueueReadModel({ workspaceDir, readonly: true });
+        const featureFlags = loadEffectiveFeatureFlags(workspaceDir);
+        const enabledChannels = new Set(
+          Object.values(featureFlags.flags)
+            .filter(f => f.enabled)
+            .map(f => f.id),
+        );
+        const { readModel, close } = await createInternalizationQueueReadModel({ workspaceDir, readonly: true, enabledChannels });
         try {
           const snapshot: InternalizationQueueSnapshot = await readModel.getSnapshot();
           const hasBlocked = snapshot.blockedSummary.count > 0;
           const hasDepFailed = snapshot.dependencyFailedSummary.count > 0;
           const hasInvalid = snapshot.invalidMetadataCount > 0;
           const hasLeaseConflicts = snapshot.leaseConflictSummary.count > 0;
+          // Suppressed tasks (disabled channels / non-MVP kinds) do NOT degrade health
           const status = (hasBlocked || hasDepFailed || hasInvalid || hasLeaseConflicts) ? 'degraded' : 'healthy';
+          const suppressedNote = snapshot.suppressedTasks.length > 0
+            ? ` (${snapshot.suppressedTasks.length} suppressed non-MVP)`
+            : '';
           return {
             name: 'internalization_queue',
             status,
             summary: status === 'healthy'
-              ? `Queue OK. ${snapshot.readyTasks.length} ready, ${snapshot.pendingCount} pending, ${snapshot.retryWaitCount} retry_wait.`
-              : `Queue degraded: ${snapshot.blockedSummary.count} blocked, ${snapshot.dependencyFailedSummary.count} dep-failed, ${snapshot.invalidMetadataCount} invalid metadata, ${snapshot.leaseConflictSummary.count} lease conflicts.`,
+              ? `Queue OK. ${snapshot.readyTasks.length} ready, ${snapshot.pendingCount} pending, ${snapshot.retryWaitCount} retry_wait${suppressedNote}.`
+              : `Queue degraded: ${snapshot.blockedSummary.count} blocked, ${snapshot.dependencyFailedSummary.count} dep-failed, ${snapshot.invalidMetadataCount} invalid metadata, ${snapshot.leaseConflictSummary.count} lease conflicts${suppressedNote}.`,
             details: snapshot,
           };
         } finally {

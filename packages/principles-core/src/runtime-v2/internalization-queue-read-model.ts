@@ -23,6 +23,7 @@ import { isPeerRunnerKind } from './internalization/peer-runner-contracts.js';
 import { hydratePITaskRecord } from './internalization/pitask-metadata.js';
 import { validateInternalizationTaskReady } from './internalization/internalization-state-machine.js';
 import { isUnresolvable } from './internalization/internalization-task-guards.js';
+import { classifyTaskActionability, type ActionabilityPolicyInput, MVP_CORE_TASK_KINDS, type SuppressedDiagnostic } from './internalization/queue-actionability.js';
 
 // ── Output types ────────────────────────────────────────────────────────────
 
@@ -91,6 +92,8 @@ export interface InternalizationQueueSnapshot {
   unresolvableSummary: { count: number; samples: UnresolvableSample[] };
   readyTasks: ReadyTask[];
   noReadyTasks: NoReadyTasksDiagnosis | null;
+  /** Tasks suppressed from the actionable queue — disabled channels or non-MVP task kinds */
+  suppressedTasks: SuppressedDiagnostic[];
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -111,7 +114,13 @@ function hasUnexpiredLease(
 // ── Read Model ───────────────────────────────────────────────────────────────
 
 export class InternalizationQueueReadModel {
+  private policy: ActionabilityPolicyInput | null = null;
+
   constructor(private readonly stateManager: RuntimeStateHandle['stateManager']) {}
+
+  setPolicy(policy: ActionabilityPolicyInput): void {
+    this.policy = policy;
+  }
 
   async getSnapshot(): Promise<InternalizationQueueSnapshot> {
     const [pending, retryWait] = await Promise.all([
@@ -122,10 +131,10 @@ export class InternalizationQueueReadModel {
     // Filter to PeerRunnerKind tasks first — all counts below are PI-specific
     const peerTasks = [...pending, ...retryWait].filter(t => isPeerRunnerKind(t.taskKind));
 
-    const pendingCount = peerTasks.filter(t => t.status === 'pending').length;
-    const retryWaitCount = peerTasks.filter(t => t.status === 'retry_wait').length;
+    let pendingCount = 0;
+    let retryWaitCount = 0;
 
-    // Accumulators
+    // Accumulators (actionable-only, except invalidMetadata which is always visible)
     const countsByTaskKind: Record<string, number> = {};
     const countsByChannel: Record<string, number> = {};
     let invalidMetadataCount = 0;
@@ -136,6 +145,7 @@ export class InternalizationQueueReadModel {
     const retryWaitPendingSamples: RetryWaitPendingSample[] = [];
     const unresolvableSamples: UnresolvableSample[] = [];
     const readyTasks: ReadyTask[] = [];
+    const suppressedTasks: SuppressedDiagnostic[] = [];
 
     let hydrationFailures = 0;
     let blockedCount = 0;
@@ -143,6 +153,7 @@ export class InternalizationQueueReadModel {
     let leaseConflicts = 0;
     let retryWaitPendingCount = 0;
     let unresolvableCount = 0;
+    let actionableInspected = 0;
 
     const nowMs = Date.now();
 
@@ -150,6 +161,7 @@ export class InternalizationQueueReadModel {
       const piTask = hydratePITaskRecord(rawTask);
 
       if (!piTask) {
+        // Malformed metadata — always visible, always can degrade
         invalidMetadataCount++;
         hydrationFailures++;
         if (sampleInvalidTaskIds.length < MAX_SAMPLES) {
@@ -158,7 +170,26 @@ export class InternalizationQueueReadModel {
         continue;
       }
 
-      // Aggregate counts
+      // Apply actionability policy IMMEDIATELY after successful hydration.
+      // Suppressed tasks go to diagnostics only — they do NOT participate in
+      // actionable counts, dependency blocking, no-ready reason, or canary health.
+      if (this.policy) {
+        const classification = classifyTaskActionability(
+          { taskId: piTask.taskId, taskKind: piTask.taskKind, channel: piTask.channel },
+          this.policy,
+        );
+        if (!classification.actionable) {
+          suppressedTasks.push(classification.diagnostic);
+          continue;
+        }
+      }
+
+      // ── Everything below is actionable-only ──────────────────────────────────
+
+      actionableInspected++;
+      if (piTask.status === 'pending') pendingCount++;
+      else if (piTask.status === 'retry_wait') retryWaitCount++;
+
       countsByTaskKind[piTask.taskKind] = (countsByTaskKind[piTask.taskKind] ?? 0) + 1;
       countsByChannel[piTask.channel] = (countsByChannel[piTask.channel] ?? 0) + 1;
 
@@ -223,12 +254,14 @@ export class InternalizationQueueReadModel {
         continue;
       }
 
-      // decision === 'proceed' — task is ready to lease
+      // decision === 'proceed' — task passed dependency gate, actionable
       readyTasks.push({ taskId: piTask.taskId, taskKind: piTask.taskKind, channel: piTask.channel });
     }
 
     // Determine noReadyTasks reason using dominance logic (same as orchestrator)
-    const inspectedCount = peerTasks.length;
+    // inspectedCount includes actionable tasks AND malformed tasks (always visible).
+    // Clean suppressed tasks are excluded — they're not actionable and not broken.
+    const inspectedCount = actionableInspected + hydrationFailures;
     let noReadyTasks: InternalizationQueueSnapshot['noReadyTasks'] = null;
 
     if (readyTasks.length === 0) {
@@ -270,6 +303,7 @@ export class InternalizationQueueReadModel {
       unresolvableSummary: { count: unresolvableCount, samples: unresolvableSamples },
       readyTasks,
       noReadyTasks,
+      suppressedTasks,
     };
   }
 
@@ -293,11 +327,22 @@ export interface InternalizationQueueReadModelHandle {
   close: () => Promise<void>;
 }
 
+export interface CreateQueueReadModelOptions {
+  workspaceDir: string;
+  readonly?: boolean;
+  /** Enabled activation channels — loaded from feature flags at CLI boundary */
+  enabledChannels?: Set<string>;
+}
+
 export async function createInternalizationQueueReadModel(
-  opts: { workspaceDir: string; readonly?: boolean },
+  opts: CreateQueueReadModelOptions,
 ): Promise<InternalizationQueueReadModelHandle> {
   const handle = await createRuntimeStateHandle({ workspaceDir: opts.workspaceDir, readonly: opts.readonly });
   const readModel = new InternalizationQueueReadModel(handle.stateManager);
+  readModel.setPolicy({
+    enabledChannels: opts.enabledChannels ?? new Set(['prompt', 'code_tool_hook', 'defer_archive']),
+    actionableTaskKinds: new Set(MVP_CORE_TASK_KINDS),
+  });
   return {
     readModel,
     close: handle.close,

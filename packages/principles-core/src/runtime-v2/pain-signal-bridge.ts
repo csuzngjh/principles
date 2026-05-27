@@ -21,6 +21,11 @@ import type { PDErrorCategory } from './error-categories.js';
 
 // ── Input type (defined here — not imported from openclaw-plugin) ───────────────
 
+export type PainProvenance =
+  | 'openclaw_context_bound'
+  | 'owner_reported_no_host_trace'
+  | 'automatic_hook';
+
 export interface PainDetectedData {
   painId: string;
   painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
@@ -31,6 +36,7 @@ export interface PainDetectedData {
   agentId?: string;
   taskId?: string;
   traceId?: string;
+  provenance?: PainProvenance;
 }
 
 export type PainSignalBridgeStatus = 'succeeded' | 'skipped' | 'failed' | 'retried';
@@ -70,6 +76,48 @@ export function createDiagnosticianTaskId(painId: string): string {
 }
 
 // ── Bridge ───────────────────────────────────────────────────────────────────
+
+function severityFromScore(score: number | undefined): string {
+  if (score === undefined) return 'moderate';
+  if (score >= 70) return 'severe';
+  if (score >= 40) return 'moderate';
+  return 'mild';
+}
+
+function inferProvenance(data: PainDetectedData): PainProvenance {
+  if (data.source === 'manual' && (!data.sessionId || data.sessionId === 'cli' || data.sessionId === 'unknown')) {
+    return 'owner_reported_no_host_trace';
+  }
+  if (data.sessionId && data.sessionId !== 'cli' && data.sessionId !== 'unknown') {
+    return 'openclaw_context_bound';
+  }
+  return 'automatic_hook';
+}
+
+function provenanceReason(provenance: PainProvenance): string {
+  switch (provenance) {
+    case 'openclaw_context_bound':
+      return 'Pain reported from an OpenClaw host session with authenticated sessionId';
+    case 'owner_reported_no_host_trace':
+      return 'No authenticated host session provenance available for CLI-submitted pain; fullTrace unavailable';
+    case 'automatic_hook':
+      return 'Pain detected by automatic hook (after_tool_call)';
+  }
+}
+
+function buildDiagnosticJson(data: PainDetectedData): string {
+  const provenance = data.provenance ?? inferProvenance(data);
+  return JSON.stringify({
+    sourcePainId: data.painId,
+    reasonSummary: data.reason,
+    source: data.source,
+    severity: severityFromScore(data.score),
+    sessionIdHint: data.sessionId ?? null,
+    agentIdHint: data.agentId ?? null,
+    provenance,
+    provenanceReason: provenanceReason(provenance),
+  });
+}
 
 export class PainSignalBridge {
   private readonly stateManager: RuntimeStateManager;
@@ -141,6 +189,10 @@ export class PainSignalBridge {
       }
     } else {
       // Rule d: no existing task — create new.
+      // PRI-255: Persist pain evidence into diagnosticJson so that
+      // SqliteContextAssembler can reconstruct reasonSummary, source,
+      // severity, sourcePainId, sessionIdHint, agentIdHint, and provenance.
+      const diagnosticJson = buildDiagnosticJson(data);
       await this.stateManager.createTask({
         taskId,
         taskKind: 'diagnostician',
@@ -148,6 +200,7 @@ export class PainSignalBridge {
         status: 'pending',
         attemptCount: 0,
         maxAttempts: 3,
+        diagnosticJson,
       });
     }
 

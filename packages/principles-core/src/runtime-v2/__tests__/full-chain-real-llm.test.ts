@@ -63,7 +63,7 @@ describe.skipIf(!config)('Full Internalization Chain Real LLM E2E', () => {
     const ee = new StoreEventEmitter();
     const ra = new PiAiRuntimeAdapter(adapterConfig);
 
-    const owner = 'e2e-chain-minimax';
+    const owner = 'e2e-chain-sensenova';
     const opts = { owner, runtimeKind: 'pi-ai' as const, pollIntervalMs: 100, timeoutMs: adapterConfig.timeoutMs };
 
     dreamerRunner = new DreamerRunner(

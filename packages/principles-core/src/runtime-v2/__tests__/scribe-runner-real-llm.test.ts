@@ -56,17 +56,17 @@ describe.skipIf(!config)('ScribeRunner Real LLM E2E', () => {
 
     dreamerRunner = new DreamerRunner(
       { stateManager: sm, runtimeAdapter: ra, eventEmitter: ee, validator: new DefaultDreamerValidator(), artifactStore: as },
-      { owner: 'e2e-scribe-minimax', runtimeKind: 'pi-ai', pollIntervalMs: 100, timeoutMs: adapterConfig.timeoutMs },
+      { owner: 'e2e-scribe-sensenova', runtimeKind: 'pi-ai', pollIntervalMs: 100, timeoutMs: adapterConfig.timeoutMs },
     );
 
     philosopherRunner = new PhilosopherRunner(
       { stateManager: sm, runtimeAdapter: ra, eventEmitter: ee, validator: new DefaultPhilosopherValidator(), artifactStore: as },
-      { owner: 'e2e-scribe-minimax', runtimeKind: 'pi-ai', pollIntervalMs: 100, timeoutMs: adapterConfig.timeoutMs },
+      { owner: 'e2e-scribe-sensenova', runtimeKind: 'pi-ai', pollIntervalMs: 100, timeoutMs: adapterConfig.timeoutMs },
     );
 
     scribeRunner = new ScribeRunner(
       { stateManager: sm, runtimeAdapter: ra, eventEmitter: ee, validator: new DefaultScribeValidator(), artifactStore: as },
-      { owner: 'e2e-scribe-minimax', runtimeKind: 'pi-ai', pollIntervalMs: 100, timeoutMs: adapterConfig.timeoutMs },
+      { owner: 'e2e-scribe-sensenova', runtimeKind: 'pi-ai', pollIntervalMs: 100, timeoutMs: adapterConfig.timeoutMs },
     );
   });
 
@@ -125,7 +125,7 @@ describe.skipIf(!config)('ScribeRunner Real LLM E2E', () => {
     return { dreamerTaskId, philosopherTaskId };
   }
 
-  it('should succeed with valid ScribeOutput from real MiniMax LLM after Dreamer→Philosopher', async () => {
+  it('should succeed with valid ScribeOutput from real SenseNova LLM after Dreamer→Philosopher', async () => {
     const { philosopherTaskId } = await runDreamerPhilosopherChain();
 
     const scribeTaskId = `scribe-e2e-${Date.now()}`;

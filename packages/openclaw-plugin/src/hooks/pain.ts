@@ -67,6 +67,7 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
         agentId: painData.agentId,
         taskId: painData.taskId,
         traceId: painData.traceId,
+        provenance: painData.provenance,
         recordObservability: true,
       });
       if (result.status === 'failed' && result.failureCategory) {
@@ -217,6 +218,7 @@ export function handleAfterToolCall(
         sessionId,
         traceId,
         agentId: ctx.agentId,
+        provenance: (sessionId && sessionId !== 'unknown') ? 'openclaw_context_bound' : 'owner_reported_no_host_trace',
       },
     });
     return;
@@ -526,6 +528,7 @@ export function handleAfterToolCall(
       sessionId,
       traceId,
       agentId: ctx.agentId,
+      provenance: 'automatic_hook',
     },
   });
 }
