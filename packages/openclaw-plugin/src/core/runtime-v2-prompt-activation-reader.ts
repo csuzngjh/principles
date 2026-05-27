@@ -1,7 +1,10 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import * as yaml from 'js-yaml';
 import { SqliteConnection, SqliteActivationStateStore, computeEffectiveFlags, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, EffectiveFeatureFlags } from '@principles/core/runtime-v2';
+
+export const RUNTIME_V2_PRINCIPLE_BUDGET = 2000;
 
 export interface ActivatedPrinciple {
   principleId: string;
@@ -20,14 +23,18 @@ export interface PromptActivationReaderDeps {
   logger?: { warn?: (msg: string) => void; info?: (msg: string) => void; error?: (msg: string) => void };
 }
 
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 export class PromptActivationReader {
-  private readonly stateDir: string;
   private readonly workspaceDir: string;
   private readonly deps: PromptActivationReaderDeps;
 
   constructor(workspaceDir: string, deps?: PromptActivationReaderDeps) {
     this.workspaceDir = workspaceDir;
-    this.stateDir = path.join(workspaceDir, '.pd');
     this.deps = deps ?? {};
   }
 
@@ -50,6 +57,10 @@ export class PromptActivationReader {
       const activations = await store.listPromptActivations();
 
       for (const activation of activations) {
+        if (activation.channel !== 'prompt' || activation.action !== 'prompt_activate') {
+          continue;
+        }
+
         const result = this.resolvePrincipleFromActivation(sqliteConn, activation);
         if (result.ok) {
           principles.push(result.principle);
@@ -75,54 +86,59 @@ export class PromptActivationReader {
   }
 
   private loadFeatureFlags(): EffectiveFeatureFlags {
-    const configPath = path.join(this.stateDir, 'feature-flags.yaml');
-    let userFlags: Record<string, unknown> = {};
+    const configPath = path.join(this.workspaceDir, '.pd', 'feature-flags.yaml');
 
+    if (!fs.existsSync(configPath)) {
+      return computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
+    }
+
+    let raw: string;
     try {
-      if (fs.existsSync(configPath)) {
-        const raw = fs.readFileSync(configPath, 'utf8');
-        userFlags = this.parseSimpleYaml(raw);
-      }
+      raw = fs.readFileSync(configPath, 'utf8');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.deps.logger?.warn?.(`[PD:RuntimeV2] Feature flags unreadable: ${msg} — using defaults`);
+      return computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
     }
 
-    return computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, configPath);
-  }
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+    } catch {
+      this.deps.logger?.warn?.(`[PD:RuntimeV2] Feature flags YAML parse error — using defaults`);
+      return {
+        ...computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath),
+        warnings: ['feature-flags.yaml: YAML parse error, using defaults'],
+      };
+    }
 
-  private parseSimpleYaml(raw: string): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
-    let currentKey = '';
+    if (!isRecord(parsed)) {
+      this.deps.logger?.warn?.(`[PD:RuntimeV2] Feature flags not a mapping — using defaults`);
+      return {
+        ...computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath),
+        warnings: ['feature-flags.yaml: expected a mapping, using defaults'],
+      };
+    }
 
-    for (const line of raw.split('\n')) {
-      const trimmed = line.trimEnd();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-
-      const topMatch = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*):\s*$/);
-      if (topMatch) {
-        currentKey = topMatch[1];
-        result[currentKey] = {};
+    const parsedRecord: Record<string, unknown> = Object.create(null);
+    const yamlWarnings: string[] = [];
+    for (const key of Object.keys(parsed)) {
+      if (DANGEROUS_KEYS.has(key)) {
+        yamlWarnings.push(`feature-flags.yaml: dangerous key '${key}' rejected`);
         continue;
       }
-
-      const propMatch = trimmed.match(/^\s+([a-zA-Z_][a-zA-Z0-9_]*):\s*(.+)$/);
-      if (propMatch && currentKey) {
-        const propKey = propMatch[1];
-        const propVal = propMatch[2].trim();
-        const parent = result[currentKey];
-        if (parent && typeof parent === 'object' && !Array.isArray(parent)) {
-          if (propVal === 'true') {
-            (parent as Record<string, unknown>)[propKey] = true;
-          } else if (propVal === 'false') {
-            (parent as Record<string, unknown>)[propKey] = false;
-          } else {
-            (parent as Record<string, unknown>)[propKey] = propVal;
-          }
-        }
+      if (Object.hasOwn(parsed, key)) {
+        parsedRecord[key] = parsed[key];
       }
     }
 
+    const result = computeEffectiveFlags(parsedRecord, DEFAULT_FEATURE_FLAGS, configPath);
+    if (yamlWarnings.length > 0) {
+      result.warnings = [...yamlWarnings, ...result.warnings];
+      for (const w of yamlWarnings) {
+        this.deps.logger?.warn?.(`[PD:RuntimeV2] ${w}`);
+      }
+    }
     return result;
   }
 
@@ -140,17 +156,29 @@ export class PromptActivationReader {
     } | undefined;
 
     try {
-      artifactRow = db.prepare(`
+      const row = db.prepare(`
         SELECT artifact_id, artifact_kind, content_json, validation_status
         FROM pi_artifacts
         WHERE artifact_id = ?
-      `).get(activation.artifactId) as typeof artifactRow | undefined;
+      `).get(activation.artifactId);
+
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        return { ok: false, warning: `artifact_query_unexpected: artifactId=${activation.artifactId}; nextAction=check_pi_artifacts_table` };
+      }
+
+      const r = row as Record<string, unknown>;
+      artifactRow = {
+        artifact_id: typeof r.artifact_id === 'string' ? r.artifact_id : '',
+        artifact_kind: typeof r.artifact_kind === 'string' ? r.artifact_kind : '',
+        content_json: typeof r.content_json === 'string' ? r.content_json : '',
+        validation_status: typeof r.validation_status === 'string' ? r.validation_status : '',
+      };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return { ok: false, warning: `artifact_query_failed: artifactId=${activation.artifactId} reason=${msg}; nextAction=check_pi_artifacts_table` };
     }
 
-    if (!artifactRow) {
+    if (!artifactRow.artifact_id) {
       return { ok: false, warning: `artifact_not_found: artifactId=${activation.artifactId} activationId=${activation.activationId}; nextAction=verify_artifact_exists_or_remove_stale_activation` };
     }
 
@@ -158,25 +186,30 @@ export class PromptActivationReader {
       return { ok: false, warning: `artifact_not_principle: artifactId=${activation.artifactId} kind=${artifactRow.artifact_kind}; nextAction=skip_non_principle_activations` };
     }
 
-    let parsed: Record<string, unknown>;
+    if (artifactRow.validation_status !== 'validated') {
+      return { ok: false, warning: `artifact_not_validated: artifactId=${activation.artifactId} status=${artifactRow.validation_status}; nextAction=skip_unvalidated_artifacts` };
+    }
+
+    let parsed: unknown;
     try {
       parsed = JSON.parse(artifactRow.content_json);
-      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return { ok: false, warning: `artifact_content_malformed: artifactId=${activation.artifactId} reason=parsed_to_non_object; nextAction=fix_artifact_content_json` };
-      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return { ok: false, warning: `artifact_content_json_parse_error: artifactId=${activation.artifactId} reason=${msg}; nextAction=fix_artifact_content_json` };
     }
 
-    const principleId = Object.hasOwn(parsed, 'principleId') ? parsed.principleId : undefined;
-    const text = Object.hasOwn(parsed, 'text') ? parsed.text : undefined;
+    if (!isRecord(parsed)) {
+      return { ok: false, warning: `artifact_content_malformed: artifactId=${activation.artifactId} reason=parsed_to_non_object; nextAction=fix_artifact_content_json` };
+    }
 
-    if (typeof principleId !== 'string' || principleId.length === 0) {
+    const principleId = Object.hasOwn(parsed, 'principleId') && typeof parsed.principleId === 'string' ? parsed.principleId : undefined;
+    const text = Object.hasOwn(parsed, 'text') && typeof parsed.text === 'string' ? parsed.text : undefined;
+
+    if (!principleId || principleId.length === 0) {
       return { ok: false, warning: `artifact_missing_principle_id: artifactId=${activation.artifactId}; nextAction=ensure_artifact_has_principleId` };
     }
 
-    if (typeof text !== 'string' || text.length === 0) {
+    if (!text || text.length === 0) {
       return { ok: false, warning: `artifact_missing_text: artifactId=${activation.artifactId} principleId=${principleId}; nextAction=ensure_artifact_has_text` };
     }
 

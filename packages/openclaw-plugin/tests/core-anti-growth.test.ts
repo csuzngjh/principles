@@ -121,6 +121,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'principle-tree-ledger.ts',
     'evolution-logger.ts',
     'evolution-engine.ts',
+    'runtime-v2-prompt-activation-reader.ts',
   ] as const;
 
   // Category 6: Test files

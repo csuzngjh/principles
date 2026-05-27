@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { SqliteConnection, SqliteActivationStateStore } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord } from '@principles/core/runtime-v2';
+import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../../src/core/runtime-v2-prompt-activation-reader.js';
 
 const TEST_PRINCIPLE_TEXT = 'UNIQUE_RUNTIME_V2_TEST_PRINCIPLE_7x9k2';
 
@@ -368,7 +369,7 @@ describe('Runtime V2 prompt activation injection', () => {
     expect(result).toBeDefined();
     expect(result?.appendSystemContext).not.toContain(TEST_PRINCIPLE_TEXT);
     const warnCalls = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
-    const hasActivationWarning = warnCalls.some((c: string) => c.includes('artifact_not_found') || c.includes('activation'));
+    const hasActivationWarning = warnCalls.some((c: string) => c.includes('artifact_not_found') || c.includes('artifact_query_unexpected') || c.includes('activation'));
     expect(hasActivationWarning).toBe(true);
   });
 
@@ -425,5 +426,112 @@ describe('Runtime V2 prompt activation injection', () => {
 
     expect(result?.appendSystemContext).toContain(TEST_PRINCIPLE_TEXT);
     expect(promoteSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('Runtime V2 prompt activation — additional guard tests', () => {
+  it('rejected/pending artifact is not injected', async () => {
+    const artifactId = 'art-v2-rejected-101';
+    const principleId = 'princ-v2-rejected-101';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId, validationStatus: 'rejected' });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const reader = new PromptActivationReader(tempWorkspaceDir);
+    const result = await reader.readActivatedPrinciples();
+
+    expect(result.principles).toHaveLength(0);
+    expect(result.warnings.some((w) => w.includes('artifact_not_validated'))).toBe(true);
+  });
+
+  it('prompt channel with wrong action is not injected', async () => {
+    const artifactId = 'art-v2-wrong-action-102';
+    const principleId = 'princ-v2-wrong-action-102';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({
+      artifactId,
+      principleId,
+      channel: 'prompt',
+      action: 'prompt_deactivate',
+    });
+
+    const reader = new PromptActivationReader(tempWorkspaceDir);
+    const result = await reader.readActivatedPrinciples();
+
+    expect(result.principles).toHaveLength(0);
+  });
+
+  it('multiple or oversized Runtime V2 principles are trimmed to budget', async () => {
+    const longText = 'A'.repeat(800);
+    for (let i = 0; i < 5; i++) {
+      const artifactId = `art-v2-budget-${i}`;
+      const principleId = `princ-v2-budget-${i}`;
+      insertValidatedPrincipleArtifact({ artifactId, principleId, text: longText });
+      await insertPromptActivation({ artifactId, principleId });
+    }
+
+    const reader = new PromptActivationReader(tempWorkspaceDir);
+    const result = await reader.readActivatedPrinciples();
+
+    expect(result.principles.length).toBe(5);
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const hookResult = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    const injected = hookResult?.appendSystemContext ?? '';
+    const markerCount = (injected.match(/princ-v2-budget-/g) || []).length;
+    expect(markerCount).toBeLessThan(5);
+    expect(markerCount).toBeGreaterThan(0);
+  });
+
+  it('malformed DB/config input fails loud with warning', async () => {
+    const pdDir = path.join(tempWorkspaceDir, '.pd');
+    fs.writeFileSync(
+      path.join(pdDir, 'feature-flags.yaml'),
+      '__proto__:\n  enabled: true\nprompt:\n  enabled: true\nconstructor:\n  enabled: false\n',
+      'utf8',
+    );
+
+    const warnSpy = vi.fn();
+    const reader = new PromptActivationReader(tempWorkspaceDir, {
+      logger: { warn: warnSpy, info: vi.fn(), error: vi.fn() },
+    });
+    const result = await reader.readActivatedPrinciples();
+
+    const warnCalls = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    const hasDangerousKeyWarning = warnCalls.some(
+      (c: string) => c.includes('dangerous key') || c.includes('__proto__') || c.includes('constructor'),
+    );
+    expect(hasDangerousKeyWarning).toBe(true);
+    expect(result.principles).toEqual([]);
+  });
+
+  it('reader uses normalized workspaceDir correctly', async () => {
+    const artifactId = 'art-v2-norm-105';
+    const principleId = 'princ-v2-norm-105';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const reader = new PromptActivationReader(tempWorkspaceDir);
+    const result = await reader.readActivatedPrinciples();
+
+    expect(result.principles).toHaveLength(1);
+    expect(result.principles[0].principleId).toBe(principleId);
+  });
+
+  it('pending validation status artifact is not injected', async () => {
+    const artifactId = 'art-v2-pending-106';
+    const principleId = 'princ-v2-pending-106';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId, validationStatus: 'pending' });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const reader = new PromptActivationReader(tempWorkspaceDir);
+    const result = await reader.readActivatedPrinciples();
+
+    expect(result.principles).toHaveLength(0);
+    expect(result.warnings.some((w) => w.includes('artifact_not_validated'))).toBe(true);
   });
 });
