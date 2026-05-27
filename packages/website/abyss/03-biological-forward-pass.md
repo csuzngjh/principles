@@ -276,6 +276,32 @@ If an Agent cannot perceive this kind of pain, it will turn into an extremely di
 ![Illustration: Silicon Pain Receptor Grading System](/images/abyss/03/abyss-03-silicon-pain.png)
 
 
+### A More Foundational Question: The Eyes Decide the World
+
+But before we go further, we have to ask something even more foundational:
+
+> **Large language models do not have innate pain receptors.**
+
+Human pain is hardwired — touch fire, and the nervous system completes perception, transmission, and response within milliseconds, without any additional design. But an AI Agent's "pain" must be **explicitly constructed** by an external system. If you don't build it, the agent cannot perceive it. Without perception, there is no reflection. Without reflection, principles will not grow.
+
+This points to a fact that is easy to overlook:
+
+> **The kinds of failure an agent can perceive are not a natural fact. They are a product design choice.**
+>
+> **The kind of eyes you give an agent determines the kind of world it can see.**
+
+An agent that can only perceive "tool call failures" — no matter how clever its diagnostician — can only circle around the tool-invocation layer.
+An agent that can perceive "goals drifting off course" gives humans a chance to make more meaningful judgments based on that evidence.
+An agent that can perceive "users repeatedly correcting it" gives humans a chance to crystallize principles aligned with human expectations.
+
+These three layers of perception do not automatically produce three layers of wisdom — perception is a necessary condition, not a sufficient one. But **without perception, even the necessary condition is missing**.
+
+So beyond Pain Signal itself, PD has to keep asking a plainer question:
+
+> **What should the agent see? Have we given it a wide enough sensory system?**
+
+Memory layer and learning layer have been discussed extensively in recent years, but the sensing layer — "how should an agent perceive what's going wrong with itself" — has received noticeably less attention. How deeply this layer is built may decide where the ceiling of an agent system actually sits.
+
 ---
 
 ## 04 What Happens After Pain Crosses the Threshold?
@@ -492,7 +518,9 @@ Without Pain, principles are just chicken soup.
 Without Reflection, pain is just noise.
 Without Progress, the system is just repeating.
 
-True wisdom must grow from the friction of forward actions time and time again.
+And one step earlier still: **without a wide enough sensory system, the agent doesn't even know where it hurts.** The kinds of pain decide where reflection can point, and where reflection can point decides what soil principles can grow in.
+
+True wisdom must grow from the friction of forward actions, time and time again.
 
 ---
 

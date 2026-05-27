@@ -266,7 +266,7 @@ function installPlugin(args) {
     execSync(pluginArgs.join(' '), { cwd: PLUGIN_SOURCE_DIR, shell: true, stdio: 'inherit' });
     console.log('✅ Plugin installed');
   } catch (error) {
-    console.error('\n❌ Plugin installation failed');
+    console.error(`\n❌ Plugin installation script failed: ${error.message}`);
     process.exit(1);
   }
 }

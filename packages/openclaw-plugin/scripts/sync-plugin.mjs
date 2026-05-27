@@ -1007,6 +1007,35 @@ function getTempDir() {
 }
 
 /**
+ * Strip Anaconda/Miniconda entries from PATH on Windows.
+ *
+ * Anaconda ships an ancient cygpath (2016, at
+ * D:\ProgramData\anaconda3\Library\usr\bin\cygpath) that converts Unix-style
+ * paths INCORRECTLY in MINGW/MSYS — e.g. "/c/Users/..." becomes
+ * "D:\ProgramData\anaconda3\Library\c\Users\..." instead of "C:\Users\...".
+ * npm-installed CLI POSIX shims (openclaw, pd, etc.) call cygpath -w for path
+ * conversion and break when the wrong cygpath is found first in PATH.
+ *
+ * This does not affect schtasks (runs in a clean session) or PowerShell
+ * Start-Process (uses Split-Path, not cygpath). It protects the port check
+ * and error-recovery paths that execSync child processes.
+ */
+function sanitizePathForWindows() {
+    const pathSep = isWindows() ? ';' : ':';
+    const originalPath = process.env.PATH || '';
+    const entries = originalPath.split(pathSep).filter(Boolean);
+    const sanitized = entries.filter(entry => {
+        const lower = entry.toLowerCase().replace(/[/\\]/g, '/');
+        return !lower.includes('/anaconda') && !lower.includes('/conda') && !lower.includes('/miniconda');
+    });
+    if (sanitized.length !== entries.length) {
+        const removed = entries.length - sanitized.length;
+        process.env.PATH = sanitized.join(pathSep);
+        console.log(`   🧹 Sanitized PATH: removed ${removed} Anaconda/Conda entr${removed > 1 ? 'ies' : 'y'} (fixes cygpath bug on MINGW/MSYS)`);
+    }
+}
+
+/**
  * Restart OpenClaw Gateway (cross-platform).
  */
 function restartGateway() {
@@ -1026,6 +1055,10 @@ function restartGateway() {
  */
 function restartGatewayWindows() {
     const logPath = join(getTempDir(), 'openclaw-auto-restart.log');
+
+    // Strip Anaconda from PATH so any execSync child process (especially the
+    // port-check Test-NetConnection shell) does not inherit poisoned cygpath.
+    sanitizePathForWindows();
 
     try {
         // Kill existing gateway processes first — taskkill fails across Windows sessions,
@@ -1090,7 +1123,7 @@ function restartGatewayWindows() {
 
         // Wait for gateway to be listening on port (同步等待，不异步)
         const port = 18789;
-        const deadline = Date.now() + 30000; // Gateway 初始化可能需要 20+ 秒 (如 Windows schtasks 重启)
+        const deadline = Date.now() + 60000; // Gateway 初始化可能需要 20+ 秒 (如 Windows schtasks 重启)
         let gatewayListening = false;
 
         while (Date.now() < deadline) {
@@ -1112,7 +1145,10 @@ function restartGatewayWindows() {
 
         if (!gatewayListening) {
             console.warn('\n⚠️  Gateway may not be running on port 18789 (plugin files are installed).');
-            console.warn('   Run "openclaw gateway start" to verify.');
+            console.warn('   If the gateway was started but is unreachable, try:');
+            console.warn('     1. From PowerShell: openclaw gateway start');
+            console.warn('     2. If using Git Bash, strip Anaconda from PATH first:');
+            console.warn('        PATH=$(echo "$PATH" | tr ":" "\\n" | grep -iv anaconda | tr "\\n" ":") openclaw gateway start');
             return false;
         }
 
@@ -1122,6 +1158,8 @@ function restartGatewayWindows() {
     } catch (error) {
         console.warn(`\n⚠️  Gateway restart failed: ${error.message}`);
         console.warn('   Plugin files are installed. Run "openclaw gateway start" manually.');
+        console.warn('   If using Git Bash with Anaconda in PATH, first run:');
+        console.warn('     export PATH=$(echo "$PATH" | tr ":" "\\n" | grep -iv anaconda | tr "\\n" ":")');
         return false;
     }
 }
@@ -1314,8 +1352,17 @@ function main() {
     if (args.restart) {
         const restarted = restartGateway();
         if (!restarted) {
-            console.error('\n❌ Gateway restart failed. Please restart manually: openclaw gateway start');
-            process.exit(1);
+            console.warn('\n⚠️  Plugin files installed but gateway restart was not confirmed.');
+            console.warn('   The gateway may already be running. Verify with:');
+            console.warn('     PowerShell: openclaw gateway status');
+            console.warn('     Git Bash:   Test-NetConnection -ComputerName localhost -Port 18789');
+            console.warn('');
+            console.warn('   If "openclaw gateway start" fails with a path error on Git Bash:');
+            console.warn('     this is caused by Anaconda\'s old cygpath tool polluting PATH.');
+            console.warn('     Run: export PATH=$(echo "$PATH" | tr ":" "\\n" | grep -iv anaconda | tr "\\n" ":")');
+            console.warn('     Then: openclaw gateway start');
+            console.warn('');
+            console.warn('   Or simply restart from PowerShell (not affected by the cygpath bug).');
         }
     } else {
         console.log('\n💡 Restart OpenClaw Gateway to load the new version.');
