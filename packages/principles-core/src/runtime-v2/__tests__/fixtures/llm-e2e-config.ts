@@ -14,30 +14,34 @@ export interface RetryOptions {
   delayMs?: number;
 }
 
+const SENSENOVA_DEFAULT_BASE_URL = 'https://token.sensenova.cn/v1';
+const SENSENOVA_DEFAULT_MODEL = 'deepseek-v4-flash';
+
 export function getLlmE2eConfig(): LlmE2eTestConfig | null {
   const llmE2eApiKey = process.env.LLM_E2E_API_KEY;
-  const minimaxApiKey = process.env.MINIMAX_CN_API_KEY;
+  const sensenovaApiKey = process.env.SENSENOVA_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN;
 
   if (llmE2eApiKey) {
     const provider = process.env.LLM_E2E_PROVIDER ?? 'sensenova';
     const isSensenova = provider === 'sensenova';
     return {
       apiKey: llmE2eApiKey,
-      model: process.env.LLM_E2E_MODEL ?? 'deepseek-v4-flash',
+      model: process.env.LLM_E2E_MODEL ?? SENSENOVA_DEFAULT_MODEL,
       provider,
       apiKeyEnv: 'LLM_E2E_API_KEY',
-      baseUrl: process.env.LLM_E2E_BASE_URL ?? (isSensenova ? 'https://token.sensenova.cn/v1' : undefined),
+      baseUrl: process.env.LLM_E2E_BASE_URL ?? (isSensenova ? SENSENOVA_DEFAULT_BASE_URL : undefined),
       timeoutMs: 120_000,
       maxRetries: 2,
     };
   }
 
-  if (minimaxApiKey) {
+  if (sensenovaApiKey) {
     return {
-      apiKey: minimaxApiKey,
-      model: process.env.LLM_E2E_MODEL ?? 'MiniMax-M2.7',
-      provider: process.env.LLM_E2E_PROVIDER ?? 'minimax-cn',
-      apiKeyEnv: 'MINIMAX_CN_API_KEY',
+      apiKey: sensenovaApiKey,
+      model: process.env.LLM_E2E_MODEL ?? SENSENOVA_DEFAULT_MODEL,
+      provider: process.env.LLM_E2E_PROVIDER ?? 'sensenova',
+      apiKeyEnv: process.env.SENSENOVA_API_KEY ? 'SENSENOVA_API_KEY' : 'ANTHROPIC_AUTH_TOKEN',
+      baseUrl: process.env.LLM_E2E_BASE_URL ?? SENSENOVA_DEFAULT_BASE_URL,
       timeoutMs: 120_000,
       maxRetries: 2,
       reasoning: false,

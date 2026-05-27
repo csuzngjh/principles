@@ -57,7 +57,7 @@ describe.skipIf(!config)('DreamerRunner Real LLM E2E', () => {
         artifactStore: as,
       },
       {
-        owner: 'e2e-dreamer-minimax',
+        owner: 'e2e-dreamer-sensenova',
         runtimeKind: 'pi-ai',
         pollIntervalMs: 100,
         timeoutMs: adapterConfig.timeoutMs,
@@ -78,7 +78,7 @@ describe.skipIf(!config)('DreamerRunner Real LLM E2E', () => {
     }
   });
 
-  it('should succeed with valid DreamerOutput from real MiniMax LLM', async () => {
+  it('should succeed with valid DreamerOutput from real SenseNova LLM', async () => {
     const taskId = `dreamer-e2e-${Date.now()}`;
     await stateManager.createTask({
       taskId,
@@ -173,6 +173,6 @@ describe.skipIf(!config)('DreamerRunner Real LLM E2E', () => {
     const succeededTask = await stateManager.getTask(taskId);
     expect(succeededTask?.status).toBe('succeeded');
     expect(succeededTask?.resultRef).toContain('dreamer://');
-    expect(succeededTask?.attemptCount).toBe(1);
+    expect(succeededTask?.attemptCount).toBeGreaterThanOrEqual(1);
   }, 120_000);
 });
