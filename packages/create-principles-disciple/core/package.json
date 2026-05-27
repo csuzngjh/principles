@@ -1,0 +1,92 @@
+{
+  "name": "@principles/core",
+  "version": "0.1.0",
+  "description": "Universal Evolution SDK - framework-agnostic pain signal capture and principle injection",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./pain-signal": {
+      "types": "./dist/pain-signal.d.ts",
+      "default": "./dist/pain-signal.js"
+    },
+    "./pain-signal-adapter": {
+      "types": "./dist/pain-signal-adapter.d.ts",
+      "default": "./dist/pain-signal-adapter.js"
+    },
+    "./storage-adapter": {
+      "types": "./dist/storage-adapter.d.ts",
+      "default": "./dist/storage-adapter.js"
+    },
+    "./evolution-hook": {
+      "types": "./dist/evolution-hook.d.ts",
+      "default": "./dist/evolution-hook.js"
+    },
+    "./principle-injector": {
+      "types": "./dist/principle-injector.d.ts",
+      "default": "./dist/principle-injector.js"
+    },
+    "./telemetry-event": {
+      "types": "./dist/telemetry-event.d.ts",
+      "default": "./dist/telemetry-event.js"
+    },
+    "./pain-recorder": {
+      "types": "./dist/pain-recorder.d.ts",
+      "default": "./dist/pain-recorder.js"
+    },
+    "./pain-flag-resolver": {
+      "types": "./dist/pain-flag-resolver.d.ts",
+      "default": "./dist/pain-flag-resolver.js"
+    },
+    "./io": {
+      "types": "./dist/io.d.ts",
+      "default": "./dist/io.js"
+    },
+    "./workspace-resolver": {
+      "types": "./dist/types/workspace-resolver.d.ts",
+      "default": "./dist/types/workspace-resolver.js"
+    },
+    "./trajectory-store": {
+      "types": "./dist/trajectory-store.d.ts",
+      "default": "./dist/trajectory-store.js"
+    },
+    "./prompt-builder": {
+      "types": "./dist/prompt-builder/index.d.ts",
+      "default": "./dist/prompt-builder/index.js"
+    },
+    "./evolution-store": {
+      "types": "./dist/evolution-store.d.ts",
+      "default": "./dist/evolution-store.js"
+    },
+    "./runtime-v2": {
+      "types": "./dist/runtime-v2/index.d.ts",
+      "default": "./dist/runtime-v2/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:bench": "vitest bench",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "^0.73.1",
+    "@sinclair/typebox": "^0.34.48",
+    "better-sqlite3": "^12.9.0",
+    "js-yaml": "^4.1.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.6.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  },
+  "license": "MIT"
+}

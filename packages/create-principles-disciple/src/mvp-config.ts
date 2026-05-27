@@ -1,0 +1,302 @@
+import * as yaml from 'js-yaml';
+import * as path from 'path';
+import { existsSync, readFileSync } from 'fs';
+
+export const MVP_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
+export type MvpChannel = (typeof MVP_CHANNELS)[number];
+
+export const MVP_QUIET_FLAGS = ['gfi'] as const;
+export const MVP_GONE_FLAGS = ['nocturnal', 'idle_trigger', 'model_training', 'trainer'] as const;
+
+export interface FeatureFlagDefinition {
+  id: string;
+  category: string;
+  enabled: boolean;
+  since: string;
+  description?: string;
+}
+
+const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
+  { id: 'prompt', category: 'core', enabled: true, since: '2026-05-24', description: 'Prompt injection for principle application' },
+  { id: 'code_tool_hook', category: 'core', enabled: true, since: '2026-05-24', description: 'Code tool hook for rule host enforcement' },
+  { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24', description: 'Defer/archive activation writer' },
+  { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
+  { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
+  { id: 'idle_trigger', category: 'gone', enabled: false, since: '2026-05-24', description: 'Idle trigger for background processing (retired)' },
+  { id: 'model_training', category: 'gone', enabled: false, since: '2026-05-24', description: 'Model training channel (retired)' },
+  { id: 'trainer', category: 'gone', enabled: false, since: '2026-05-24', description: 'Trainer peer runner (retired)' },
+];
+
+export interface ComponentStatus {
+  plugin: 'verified' | 'failed' | 'skipped';
+  cli: 'verified' | 'verified_local_only' | 'failed' | 'skipped';
+  console: 'configured' | 'skipped';
+  consoleEntrypoint?: string;
+  cliLocalPath?: string;
+}
+
+export interface VerificationResult {
+  features: 'passed' | 'failed' | 'skipped';
+  storyA: 'passed' | 'failed' | 'skipped';
+  storyASkipReason?: string;
+  manifestActivation?: 'verified' | 'missing_hook' | 'missing_setup_entry' | 'skipped';
+}
+
+export interface InstallSuccessOutput {
+  success: true;
+  workspace: string;
+  components: ComponentStatus;
+  enabledChannels: MvpChannel[];
+  verification: VerificationResult;
+  nextAction: string;
+}
+
+export interface InstallFailureOutput {
+  success: false;
+  reason: string;
+  nextAction: string;
+  components?: Partial<ComponentStatus>;
+  verification?: Partial<VerificationResult>;
+}
+
+export type InstallOutput = InstallSuccessOutput | InstallFailureOutput;
+
+export function generateFeatureFlagsYamlContent(channels?: string[]): string {
+  const enabledSet = new Set<string>(channels ?? MVP_CHANNELS);
+  for (const core of MVP_CHANNELS) {
+    enabledSet.add(core);
+  }
+  const flags: Record<string, { enabled: boolean; category: string; since: string; description?: string }> = {};
+
+  for (const flag of DEFAULT_FEATURE_FLAGS) {
+    const isEnabled = flag.category === 'core' ? true : enabledSet.has(flag.id);
+    flags[flag.id] = {
+      enabled: isEnabled,
+      category: flag.category,
+      since: flag.since,
+    };
+    if (flag.description) {
+      flags[flag.id].description = flag.description;
+    }
+  }
+
+  return yaml.dump(flags, { lineWidth: -1, quotingType: '"' });
+}
+
+export function validateMvpChannels(channels: unknown): {
+  valid: MvpChannel[];
+  unknowns: string[];
+} {
+  if (!Array.isArray(channels)) {
+    return { valid: [], unknowns: [] };
+  }
+
+  const mvpSet = new Set<string>(MVP_CHANNELS);
+  const valid: MvpChannel[] = [];
+  const unknowns: string[] = [];
+
+  for (const ch of channels) {
+    if (typeof ch !== 'string') continue;
+    if (mvpSet.has(ch)) {
+      valid.push(ch as MvpChannel);
+    } else {
+      unknowns.push(ch);
+    }
+  }
+
+  return { valid, unknowns };
+}
+
+export function parseChannelsOption(raw: unknown): { channels: MvpChannel[]; unknowns: string[]; error?: string } {
+  if (raw == null) {
+    return { channels: [...MVP_CHANNELS], unknowns: [] };
+  }
+  if (typeof raw !== 'string') {
+    return { channels: [], unknowns: [], error: `--channels expects a string, got ${typeof raw}` };
+  }
+  if (raw.trim().length === 0) {
+    return { channels: [...MVP_CHANNELS], unknowns: [] };
+  }
+  const parsed = raw.split(',').map((f: string) => f.trim().toLowerCase()).filter(Boolean);
+  const { valid, unknowns } = validateMvpChannels(parsed);
+  if (valid.length === 0 && parsed.length > 0) {
+    return { channels: [], unknowns, error: `All specified channels are invalid: "${raw}". Valid MVP channels: ${MVP_CHANNELS.join(', ')}` };
+  }
+  const channelSet = new Set<string>(valid);
+  for (const core of MVP_CHANNELS) {
+    channelSet.add(core);
+  }
+  const channels = [...MVP_CHANNELS].filter(ch => channelSet.has(ch));
+  return { channels, unknowns };
+}
+
+export function validateOpenClawConfig(config: unknown): { valid: boolean; error?: string } {
+  if (config === undefined) return { valid: true };
+  if (config === null) return { valid: false, error: 'openclaw.json exists but parsed as null — expected a non-null object' };
+  if (typeof config !== 'object' || Array.isArray(config)) {
+    return { valid: false, error: 'openclaw.json root must be an object' };
+  }
+  const obj = config as Record<string, unknown>;
+  if (Object.hasOwn(obj, 'plugins')) {
+    const { plugins } = obj;
+    if (plugins == null) return { valid: true };
+    if (typeof plugins !== 'object' || Array.isArray(plugins)) {
+      return { valid: false, error: 'openclaw.json plugins must be an object' };
+    }
+    const pluginsObj = plugins as Record<string, unknown>;
+    const { allow, entries, installs } = pluginsObj;
+    if (allow !== undefined) {
+      if (!Array.isArray(allow)) {
+        return { valid: false, error: 'openclaw.json plugins.allow must be an array' };
+      }
+      for (const elem of allow as unknown[]) {
+        if (typeof elem !== 'string') {
+          return { valid: false, error: 'openclaw.json plugins.allow contains non-string elements' };
+        }
+      }
+    }
+    if (entries !== undefined) {
+      if (typeof entries !== 'object' || entries === null || Array.isArray(entries)) {
+        return { valid: false, error: 'openclaw.json plugins.entries must be an object' };
+      }
+    }
+    if (installs !== undefined) {
+      if (typeof installs !== 'object' || installs === null || Array.isArray(installs)) {
+        return { valid: false, error: 'openclaw.json plugins.installs must be an object' };
+      }
+    }
+  }
+  return { valid: true };
+}
+
+export interface BuildOutputOptions {
+  workspace: string;
+  components: ComponentStatus;
+  channels: MvpChannel[];
+  verification: VerificationResult;
+}
+
+export function buildSuccessOutput(opts: BuildOutputOptions): InstallOutput {
+  const { workspace, components, channels, verification } = opts;
+  const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
+  const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
+  const nextActions: string[] = [];
+  if (components.cli === 'verified') {
+    nextActions.push('Run pd runtime canary --workspace <path> --json for diagnostics');
+  } else if (components.cli === 'verified_local_only' && components.cliLocalPath) {
+    const quotedPath = components.cliLocalPath.includes(' ') ? `"${components.cliLocalPath}"` : components.cliLocalPath;
+    nextActions.push(`Run ${quotedPath} runtime canary --workspace <path> --json for diagnostics (global pd not on PATH)`);
+  }
+  if (components.console === 'configured') {
+    nextActions.push('Start console: pd console --workspace <path> --no-auth (listens on 127.0.0.1 only)');
+  }
+
+  if (isComplete) {
+    return {
+      success: true as const,
+      workspace,
+      components,
+      enabledChannels: channels,
+      verification,
+      nextAction: nextActions.join(' | '),
+    };
+  }
+
+  const failureReasons: string[] = [];
+  if (components.plugin !== 'verified') {
+    failureReasons.push(`plugin_${components.plugin}`);
+  }
+  if (!cliWorking) {
+    failureReasons.push(`cli_${components.cli}`);
+  }
+  if (components.console !== 'configured') {
+    failureReasons.push(`console_${components.console}`);
+  }
+  const reason = failureReasons.length > 0 ? failureReasons.join(',') : 'incomplete_install';
+
+  return {
+    success: false as const,
+    reason,
+    nextAction: nextActions.join(' | '),
+    components,
+    verification,
+  };
+}
+
+export function buildFailureOutput(reason: string, nextAction: string): InstallFailureOutput {
+  return {
+    success: false,
+    reason,
+    nextAction,
+  };
+}
+
+export function getFeatureFlagsPath(workspaceDir: string): string {
+  return path.join(workspaceDir, '.pd', 'feature-flags.yaml');
+}
+
+export function isMvpChannel(value: string): value is MvpChannel {
+  return (MVP_CHANNELS as readonly string[]).includes(value);
+}
+
+export function getHomeDir(): string {
+  return process.env.HOME
+    || process.env.USERPROFILE
+    || (process.env.HOMEDRIVE && process.env.HOMEPATH ? process.env.HOMEDRIVE + process.env.HOMEPATH : null)
+    || '.';
+}
+
+export function getOpenClawDir(): string {
+  return path.join(getHomeDir(), '.openclaw');
+}
+
+export function getPluginExtDir(): string {
+  return path.join(getOpenClawDir(), 'extensions', 'principles-disciple');
+}
+
+export function getInstalledPdCliDir(): string {
+  return path.join(getPluginExtDir(), 'pd-cli');
+}
+
+export function getInstalledBinDir(): string {
+  return path.join(getPluginExtDir(), 'bin');
+}
+
+export function getInstalledConsoleDir(): string {
+  return path.join(getPluginExtDir(), 'console');
+}
+
+export function isWindows(): boolean {
+  return process.platform === 'win32';
+}
+
+export function readEnabledChannelsFromDisk(workspaceDir: string): string[] {
+  const configPath = getFeatureFlagsPath(workspaceDir);
+  if (!existsSync(configPath)) return [];
+
+  const rawYaml = readFileSync(configPath, 'utf-8');
+  const parsed: unknown = (() => { try { return yaml.load(rawYaml); } catch (e) { throw new Error(`feature-flags.yaml parse error at ${configPath}: ${e instanceof Error ? e.message : String(e)}. Delete the file and re-run the installer.`, { cause: e }); } })();
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`feature-flags.yaml at ${configPath} has invalid structure (expected object, got ${Array.isArray(parsed) ? 'array' : typeof parsed}). Delete the file and re-run the installer.`);
+  }
+
+  const enabled: string[] = [];
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!isMvpChannel(key)) continue;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error(`feature-flags.yaml at ${configPath}: MVP channel '${key}' has invalid entry (expected object, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}). Delete the file and re-run the installer.`);
+    }
+    if (!Object.hasOwn(value, 'enabled')) {
+      throw new Error(`feature-flags.yaml at ${configPath}: MVP channel '${key}' is missing required 'enabled' field. Delete the file and re-run the installer.`);
+    }
+    const flag = value as Record<string, unknown>;
+    if (typeof flag.enabled !== 'boolean') {
+      throw new Error(`feature-flags.yaml at ${configPath}: MVP channel '${key}' has invalid 'enabled' value (expected boolean, got ${flag.enabled === null ? 'null' : typeof flag.enabled}). Delete the file and re-run the installer.`);
+    }
+    if (flag.enabled === true) {
+      enabled.push(key);
+    }
+  }
+  return enabled;
+}
