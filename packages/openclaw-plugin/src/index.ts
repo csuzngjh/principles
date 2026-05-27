@@ -98,7 +98,16 @@ const plugin = {
       'before_prompt_build',
       async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_prompt_build');
-        if (!workspaceDir) return;
+        if (!workspaceDir) {
+          api.logger.error(
+            `[PD:before_prompt_build] workspaceDir resolution failed. ` +
+            `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
+            `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
+            `Hook skipped — no mutation will occur. ` +
+            `NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json with {"workspace":"<path>"}`,
+          );
+          return;
+        }
         try {
           if (!workspaceInitialized) {
             migrateDirectoryStructure(api, workspaceDir);
@@ -148,7 +157,16 @@ const plugin = {
       'before_tool_call',
       (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_tool_call');
-        if (!workspaceDir) return;
+        if (!workspaceDir) {
+          api.logger.error(
+            `[PD:before_tool_call] workspaceDir resolution failed. ` +
+            `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
+            `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
+            `Hook skipped — security gate bypassed. ` +
+            `NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json with {"workspace":"<path>"}`,
+          );
+          return;
+        }
         try {
           const pluginConfig = api.pluginConfig ?? {};
           const {logger} = api;
@@ -174,7 +192,16 @@ const plugin = {
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_tool_call');
-        if (!workspaceDir) return;
+        if (!workspaceDir) {
+          api.logger.error(
+            `[PD:after_tool_call] workspaceDir resolution failed. ` +
+            `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
+            `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
+            `Hook skipped — pain detection bypassed. ` +
+            `NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json with {"workspace":"<path>"}`,
+          );
+          return;
+        }
         try {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
@@ -198,7 +225,16 @@ const plugin = {
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx as unknown as Record<string, unknown>, api, 'llm_output');
-        if (!workspaceDir) return;
+        if (!workspaceDir) {
+          api.logger.error(
+            `[PD:llm_output] workspaceDir resolution failed. ` +
+            `agentId=${(ctx as unknown as Record<string, unknown>).agentId ?? '(missing)'} ` +
+            `sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+            `Hook skipped — LLM analysis bypassed. ` +
+            `NextAction: set PD_WORKSPACE_DIR env var or create ~/.openclaw/principles-disciple.json with {"workspace":"<path>"}`,
+          );
+          return;
+        }
         try {
           handleLlmOutput(event, { ...ctx, workspaceDir });
 
