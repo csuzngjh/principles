@@ -60,7 +60,7 @@ describe.skipIf(!config)('PhilosopherRunner Real LLM E2E', () => {
         artifactStore: as,
       },
       {
-        owner: 'e2e-philosopher-minimax',
+        owner: 'e2e-philosopher-sensenova',
         runtimeKind: 'pi-ai',
         pollIntervalMs: 100,
         timeoutMs: adapterConfig.timeoutMs,
@@ -97,7 +97,7 @@ describe.skipIf(!config)('PhilosopherRunner Real LLM E2E', () => {
     }
   });
 
-  it('should succeed with valid PhilosopherOutput from real MiniMax LLM after Dreamer', async () => {
+  it('should succeed with valid PhilosopherOutput from real SenseNova LLM after Dreamer', async () => {
     const dreamerTaskId = `dreamer-for-philosopher-${Date.now()}`;
     await stateManager.createTask({
       taskId: dreamerTaskId,

@@ -21,6 +21,7 @@
   "openclaw": {
     "id": "principles-disciple",
     "name": "Principles Disciple",
+    "setupEntry": "./dist/bundle.js",
     "extensions": [
       "./dist/bundle.js"
     ]
