@@ -185,8 +185,14 @@ export class ApprovalsConsoleModel {
         now: new Date().toISOString(),
         confirm: true,
       });
-    } catch {
-      return undefined;
+    } catch (dispatchErr) {
+      const dispatchMsg = dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr);
+      return {
+        decision: 'refused' as const,
+        reason: `activation_dispatch_failed: ${dispatchMsg}`,
+        channel: existing.channel,
+        riskLevel: 'low' as const,
+      };
     }
   }
 

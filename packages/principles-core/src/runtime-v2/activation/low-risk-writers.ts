@@ -10,7 +10,8 @@ function extractPrincipleId(artifact: PIArtifactSnapshot): string | null {
     if (sourceId !== '') return sourceId;
   }
   try {
-    const parsed = JSON.parse(artifact.contentJson) as Record<string, unknown>;
+    const parsed = JSON.parse(artifact.contentJson);
+    if (!isRecord(parsed)) return null;
     if (typeof parsed.principleId === 'string' && parsed.principleId.trim() !== '') {
       return parsed.principleId.trim();
     }
