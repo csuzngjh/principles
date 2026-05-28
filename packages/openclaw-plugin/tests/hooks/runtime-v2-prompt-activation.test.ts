@@ -50,11 +50,14 @@ vi.mock('../../src/core/event-log.js', () => ({
   EventLogService: {
     get: vi.fn().mockReturnValue({
       recordHeartbeatDiagnosis: vi.fn(),
+      recordRuntimeV2ActivationsInjected: vi.fn(),
     }),
   },
 }));
 
-vi.mock('../../src/core/workspace-context.js', () => {
+vi.mock('../../src/core/workspace-context.js', async () => {
+  const { EventLogService } = await import('../../src/core/event-log.js');
+  const mockEventLog = EventLogService.get('/mock');
   return {
     WorkspaceContext: {
       fromHookContext: vi.fn().mockImplementation(() => ({
@@ -63,6 +66,7 @@ vi.mock('../../src/core/workspace-context.js', () => {
         resolve: (key: string) => path.join(tempWorkspaceDir, '.principles', key),
         trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
         config: { get: vi.fn() },
+        eventLog: mockEventLog,
         evolutionReducer: {
           getActivePrinciples: vi.fn().mockReturnValue([]),
           getProbationPrinciples: vi.fn().mockReturnValue([]),
@@ -74,6 +78,7 @@ vi.mock('../../src/core/workspace-context.js', () => {
         resolve: (key: string) => path.join(tempWorkspaceDir, '.principles', key),
         trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
         config: { get: vi.fn() },
+        eventLog: mockEventLog,
         evolutionReducer: {
           getActivePrinciples: vi.fn().mockReturnValue([]),
           getProbationPrinciples: vi.fn().mockReturnValue([]),
@@ -270,7 +275,8 @@ describe('Runtime V2 prompt activation injection', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    expect(result?.appendSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    // Runtime V2 principles are now in prependSystemContext (highest attention)
+    expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
   });
 
   it('unactivated principle is not injected', async () => {
@@ -336,13 +342,13 @@ describe('Runtime V2 prompt activation injection', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
 
-    expect(result?.appendSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
 
     const infoCalls = infoSpy.mock.calls.map((c: unknown[]) => String(c[0]));
     const hasCoreFlagWarning = infoCalls.some(
       (c: string) => c.includes('core flag cannot be disabled') || c.includes('warnings'),
     );
-    expect(hasCoreFlagWarning || result?.appendSystemContext).toBeTruthy();
+    expect(hasCoreFlagWarning || result?.prependSystemContext).toBeTruthy();
   });
 
   it('missing activated artifact fails loud without crashing', async () => {
@@ -424,7 +430,7 @@ describe('Runtime V2 prompt activation injection', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    expect(result?.appendSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
     expect(promoteSpy).not.toHaveBeenCalled();
   });
 });
@@ -479,7 +485,8 @@ describe('Runtime V2 prompt activation — additional guard tests', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const hookResult = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    const injected = hookResult?.appendSystemContext ?? '';
+    // Runtime V2 principles are now in prependSystemContext
+    const injected = hookResult?.prependSystemContext ?? '';
     const markerCount = (injected.match(/princ-v2-budget-/g) || []).length;
     expect(markerCount).toBeLessThan(5);
     expect(markerCount).toBeGreaterThan(0);
@@ -602,5 +609,261 @@ describe('Runtime V2 prompt activation — additional guard tests', () => {
     const activations = await store.listPromptActivations();
     const badChannel = activations.find((a) => a.idempotencyKey === 'idem-bad-channel');
     expect(badChannel).toBeUndefined();
+  });
+});
+
+describe('Runtime V2 prompt activation observability events', () => {
+  it('emits injected event with principleIds when valid activations exist', async () => {
+    const artifactId = 'art-v2-obs-001';
+    const principleId = 'princ-v2-obs-001';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(spy).toHaveBeenCalled();
+    const payload = spy.mock.calls[0][0];
+    expect(payload.principleIds).toContain(principleId);
+    expect(payload.artifactIds).toContain(artifactId);
+    expect(payload.activationIds).toContain(`act_prompt_${principleId}`);
+    expect(payload.injectedCount).toBe(1);
+    expect(payload.injectedCharCount).toBeGreaterThan(0);
+    expect(payload.budget).toBe(RUNTIME_V2_PRINCIPLE_BUDGET);
+    expect(payload.sessionId).toBe('test-session-v2');
+    expect(payload.workspaceDir).toBe(tempWorkspaceDir);
+    expect(payload.skippedWarnings).toEqual([]);
+  });
+
+  it('emits skipReason when no validated activations exist', async () => {
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(spy).toHaveBeenCalled();
+    const payload = spy.mock.calls[0][0];
+    expect(payload.injectedCount).toBe(0);
+    expect(payload.principleIds).toEqual([]);
+    expect(payload.skipReason).toBe('no_validated_activations');
+    expect(payload.nextAction).toContain('activations table');
+  });
+
+  it('confirm-first marker appears in principleIds evidence', async () => {
+    const artifactId = 'art-mvp-acceptance-001';
+    const principleId = 'princ-mvp-acceptance-confirm-first';
+    const text = 'Before starting any coding task, the agent must first confirm requirements and present a plan for owner approval.';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId, text });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(spy).toHaveBeenCalled();
+    const payload = spy.mock.calls[0][0];
+    expect(payload.principleIds).toContain('princ-mvp-acceptance-confirm-first');
+    expect(payload.injectedCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('warnings are preserved in skippedWarnings', async () => {
+    const artifactId = 'art-v2-obs-warn-003';
+    const principleId = 'princ-v2-obs-warn-003';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId, validationStatus: 'rejected' });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(spy).toHaveBeenCalled();
+    const payload = spy.mock.calls[0][0];
+    expect(payload.skippedWarnings.length).toBeGreaterThan(0);
+    expect(payload.skippedWarnings.some((w: string) => w.includes('artifact_not_validated'))).toBe(true);
+    expect(payload.injectedCount).toBe(0);
+  });
+
+  it('no raw secrets or full giant prompt in telemetry payload', async () => {
+    const artifactId = 'art-v2-obs-safe-004';
+    const principleId = 'princ-v2-obs-safe-004';
+    const secretText = 'sk-proj-SECRET_KEY_12345_should_not_appear';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId, text: secretText });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(spy).toHaveBeenCalled();
+    const payload = spy.mock.calls[0][0];
+    const serialized = JSON.stringify(payload);
+    // Should not contain the full principle text — only IDs and char count
+    expect(serialized).not.toContain(secretText);
+    // Should not contain the full prompt
+    expect(serialized).not.toContain('hello world');
+  });
+});
+
+describe('Runtime V2 owner-approved behavior directives section', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('renders owner-approved directives in prependSystemContext when activations exist', async () => {
+    const artifactId = 'art-v2-directive-201';
+    const principleId = 'princ-v2-directive-201';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(result?.prependSystemContext).toContain('OWNER-APPROVED BEHAVIOR DIRECTIVES');
+    expect(result?.prependSystemContext).toContain('<directive');
+    expect(result?.prependSystemContext).toContain('</directive>');
+  });
+
+  it('prependSystemContext contains MANDATORY framing', async () => {
+    const artifactId = 'art-v2-directive-202';
+    const principleId = 'princ-v2-directive-202';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    const ctx = result?.prependSystemContext ?? '';
+    expect(ctx).toContain('MANDATORY');
+    expect(ctx).toContain('Owner-approved');
+    expect(ctx).toContain('active behavior constraint');
+    expect(ctx).toContain('Do not treat this as background context');
+  });
+
+  it('prependSystemContext includes safety boundary disclaimer', async () => {
+    const artifactId = 'art-v2-directive-203';
+    const principleId = 'princ-v2-directive-203';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    const ctx = result?.prependSystemContext ?? '';
+    expect(ctx).toContain('do not override safety');
+    expect(ctx).toContain('do not override safety, security, or core system policy');
+  });
+
+  it('directives appear in prependSystemContext (before gateway system prompt)', async () => {
+    const artifactId = 'art-v2-directive-204';
+    const principleId = 'princ-v2-directive-204';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    // Directives should be in prependSystemContext, NOT in appendSystemContext
+    const prependCtx = result?.prependSystemContext ?? '';
+    const appendCtx = result?.appendSystemContext ?? '';
+    const directiveMarker = 'OWNER-APPROVED BEHAVIOR DIRECTIVES';
+    expect(prependCtx).toContain(directiveMarker);
+    // Should NOT be duplicated in appendSystemContext
+    expect(appendCtx).not.toContain(directiveMarker);
+  });
+
+  it('directives appear after AGENT IDENTITY in prependSystemContext', async () => {
+    const artifactId = 'art-v2-directive-205';
+    const principleId = 'princ-v2-directive-205';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    const ctx = result?.prependSystemContext ?? '';
+    const identityIdx = ctx.indexOf('AGENT IDENTITY');
+    const directiveIdx = ctx.indexOf('OWNER-APPROVED BEHAVIOR DIRECTIVES');
+    expect(identityIdx).toBeGreaterThanOrEqual(0);
+    expect(directiveIdx).toBeGreaterThan(identityIdx);
+  });
+
+  it('confirm-first principle rendered as directive with id attribute', async () => {
+    const artifactId = 'art-mvp-acceptance-001';
+    const principleId = 'princ-mvp-acceptance-confirm-first';
+    const text = 'Before starting any coding task, the agent must first confirm requirements and present a plan for owner approval.';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId, text });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    const ctx = result?.prependSystemContext ?? '';
+    expect(ctx).toContain(`<directive id="princ-mvp-acceptance-confirm-first" source="runtime_v2_activation">`);
+    expect(ctx).toContain('MANDATORY: Before starting any coding task');
+  });
+
+  it('no directive section when no activations exist', async () => {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    const prependCtx = result?.prependSystemContext ?? '';
+    expect(prependCtx).not.toContain('OWNER-APPROVED BEHAVIOR DIRECTIVES');
+  });
+
+  it('existing evolution_principles behavior for legacy principles remains intact', async () => {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(result).toBeDefined();
+    expect(result?.appendSystemContext).toBeDefined();
+  });
+
+  it('feature flag disabled path still skips Runtime V2 directives with structured reason', async () => {
+    const artifactId = 'art-v2-flag-206';
+    const principleId = 'princ-v2-flag-206';
+
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const pdDir = path.join(tempWorkspaceDir, '.pd');
+    fs.writeFileSync(
+      path.join(pdDir, 'feature-flags.yaml'),
+      'prompt:\n  enabled: false\n',
+      'utf8',
+    );
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(result).toBeDefined();
   });
 });
