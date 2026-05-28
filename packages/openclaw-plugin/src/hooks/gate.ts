@@ -19,6 +19,7 @@ import type { RuleHostInput } from '@principles/core/runtime-v2';
 import { validateCorrectionProposal, validateProposedPathBounds } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
+import { evaluateConfirmFirstGateSync } from '../core/confirm-first-gate.js';
 import { getSession, hasRecentThinking } from '../core/session-tracker.js';
 import { getEvolutionEngine } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
@@ -60,6 +61,38 @@ export function handleBeforeToolCall(
   if (typeof filePath !== 'string') return;
 
   const relPath = normalizePath(filePath, ctx.workspaceDir);
+
+  // 2.5. Confirm-First Gate — hard enforcement for owner-approved confirm-first activations
+  try {
+    const cfResult = evaluateConfirmFirstGateSync(
+      ctx.sessionId,
+      event.toolName,
+      event.params,
+    );
+
+    if (cfResult.action === 'block') {
+      const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
+      eventLog.recordConfirmFirstGateBlocked({
+        sessionId: ctx.sessionId ?? 'unknown',
+        workspaceDir: ctx.workspaceDir,
+        toolName: event.toolName,
+        reason: cfResult.reason ?? 'confirm_first_required',
+        principleId: cfResult.principleId ?? 'unknown',
+        nextAction: cfResult.nextAction ?? '',
+      });
+
+      return recordGateBlockAndReturn(wctx, {
+        filePath: relPath,
+        reason: cfResult.reason ?? 'confirm_first_required',
+        toolName: event.toolName,
+        sessionId: ctx.sessionId,
+        blockSource: 'confirm-first-gate',
+      }, logger);
+    }
+  } catch (cfErr) {
+    // ERR-002: fail loud — log but do not crash the gate
+    logger?.warn?.(`[PD:ConfirmFirst] Gate evaluation failed (non-blocking): ${String(cfErr)}`);
+  }
 
   // 3. Rule Host Evaluation — sole gate
   try {

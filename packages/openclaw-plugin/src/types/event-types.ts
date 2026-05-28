@@ -26,6 +26,7 @@ export type {
   RuleHostAutoCorrectProposedEventData,
   RuleHostAutoCorrectAppliedEventData,
   RuntimeV2PromptActivationsInjectedEventData,
+  RuntimeV2ConfirmFirstGateEventData,
   ToolCallStats,
   ErrorStats,
   PainStats,

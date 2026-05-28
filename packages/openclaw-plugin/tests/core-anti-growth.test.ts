@@ -94,6 +94,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'external-training-contract.ts',
     'merge-gate-audit.ts',
     'shadow-observation-registry.ts',
+    'confirm-first-gate.ts',
     'control-ui-db.ts',
     'thinking-models.ts',
     'pd-task-reconciler.ts',

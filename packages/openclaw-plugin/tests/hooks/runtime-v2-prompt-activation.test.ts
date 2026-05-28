@@ -275,7 +275,8 @@ describe('Runtime V2 prompt activation injection', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    expect(result?.appendSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    // Runtime V2 principles are now in prependSystemContext (highest attention)
+    expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
   });
 
   it('unactivated principle is not injected', async () => {
@@ -341,13 +342,13 @@ describe('Runtime V2 prompt activation injection', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), ctx);
 
-    expect(result?.appendSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
 
     const infoCalls = infoSpy.mock.calls.map((c: unknown[]) => String(c[0]));
     const hasCoreFlagWarning = infoCalls.some(
       (c: string) => c.includes('core flag cannot be disabled') || c.includes('warnings'),
     );
-    expect(hasCoreFlagWarning || result?.appendSystemContext).toBeTruthy();
+    expect(hasCoreFlagWarning || result?.prependSystemContext).toBeTruthy();
   });
 
   it('missing activated artifact fails loud without crashing', async () => {
@@ -429,7 +430,7 @@ describe('Runtime V2 prompt activation injection', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    expect(result?.appendSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+    expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
     expect(promoteSpy).not.toHaveBeenCalled();
   });
 });
@@ -484,7 +485,8 @@ describe('Runtime V2 prompt activation — additional guard tests', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const hookResult = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    const injected = hookResult?.appendSystemContext ?? '';
+    // Runtime V2 principles are now in prependSystemContext
+    const injected = hookResult?.prependSystemContext ?? '';
     const markerCount = (injected.match(/princ-v2-budget-/g) || []).length;
     expect(markerCount).toBeLessThan(5);
     expect(markerCount).toBeGreaterThan(0);
@@ -730,7 +732,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     vi.resetModules();
   });
 
-  it('renders <owner_approved_behavior_directives> section when activations exist', async () => {
+  it('renders owner-approved directives in prependSystemContext when activations exist', async () => {
     const artifactId = 'art-v2-directive-201';
     const principleId = 'princ-v2-directive-201';
 
@@ -740,11 +742,12 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    expect(result?.appendSystemContext).toContain('<owner_approved_behavior_directives>');
-    expect(result?.appendSystemContext).toContain('</owner_approved_behavior_directives>');
+    expect(result?.prependSystemContext).toContain('OWNER-APPROVED BEHAVIOR DIRECTIVES');
+    expect(result?.prependSystemContext).toContain('<directive');
+    expect(result?.prependSystemContext).toContain('</directive>');
   });
 
-  it('section contains MANDATORY framing', async () => {
+  it('prependSystemContext contains MANDATORY framing', async () => {
     const artifactId = 'art-v2-directive-202';
     const principleId = 'princ-v2-directive-202';
 
@@ -754,14 +757,14 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    const ctx = result?.appendSystemContext ?? '';
+    const ctx = result?.prependSystemContext ?? '';
     expect(ctx).toContain('MANDATORY');
     expect(ctx).toContain('Owner-approved');
     expect(ctx).toContain('active behavior constraint');
     expect(ctx).toContain('Do not treat this as background context');
   });
 
-  it('section includes safety boundary disclaimer', async () => {
+  it('prependSystemContext includes safety boundary disclaimer', async () => {
     const artifactId = 'art-v2-directive-203';
     const principleId = 'princ-v2-directive-203';
 
@@ -771,12 +774,12 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    const ctx = result?.appendSystemContext ?? '';
+    const ctx = result?.prependSystemContext ?? '';
     expect(ctx).toContain('do not override safety');
     expect(ctx).toContain('do not override safety, security, or core system policy');
   });
 
-  it('section appears after <evolution_principles> in prompt', async () => {
+  it('directives appear in prependSystemContext (before gateway system prompt)', async () => {
     const artifactId = 'art-v2-directive-204';
     const principleId = 'princ-v2-directive-204';
 
@@ -786,21 +789,16 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    const ctx = result?.appendSystemContext ?? '';
-    // Use the actual section content to avoid matching the EXECUTION RULES comment
-    const evoIdx = ctx.indexOf('<evolution_principles>\n');
-    // Find the actual section (after the comment block), not the EXECUTION RULES reference
-    const directiveSectionMarker = 'Owner-approved behavior directives are active operating constraints';
-    const directiveIdx = ctx.indexOf(directiveSectionMarker);
-    if (evoIdx >= 0 && directiveIdx >= 0) {
-      expect(directiveIdx).toBeGreaterThan(evoIdx);
-    } else if (directiveIdx >= 0) {
-      // No legacy principles — directive section should still exist
-      expect(directiveIdx).toBeGreaterThanOrEqual(0);
-    }
+    // Directives should be in prependSystemContext, NOT in appendSystemContext
+    const prependCtx = result?.prependSystemContext ?? '';
+    const appendCtx = result?.appendSystemContext ?? '';
+    const directiveMarker = 'OWNER-APPROVED BEHAVIOR DIRECTIVES';
+    expect(prependCtx).toContain(directiveMarker);
+    // Should NOT be duplicated in appendSystemContext
+    expect(appendCtx).not.toContain(directiveMarker);
   });
 
-  it('section appears before <core_principles> in prompt', async () => {
+  it('directives appear after AGENT IDENTITY in prependSystemContext', async () => {
     const artifactId = 'art-v2-directive-205';
     const principleId = 'princ-v2-directive-205';
 
@@ -810,13 +808,11 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    const ctx = result?.appendSystemContext ?? '';
-    const directiveSectionMarker = 'Owner-approved behavior directives are active operating constraints';
-    const directiveIdx = ctx.indexOf(directiveSectionMarker);
-    const coreIdx = ctx.indexOf('<core_principles>\n');
-    if (coreIdx >= 0 && directiveIdx >= 0) {
-      expect(directiveIdx).toBeLessThan(coreIdx);
-    }
+    const ctx = result?.prependSystemContext ?? '';
+    const identityIdx = ctx.indexOf('AGENT IDENTITY');
+    const directiveIdx = ctx.indexOf('OWNER-APPROVED BEHAVIOR DIRECTIVES');
+    expect(identityIdx).toBeGreaterThanOrEqual(0);
+    expect(directiveIdx).toBeGreaterThan(identityIdx);
   });
 
   it('confirm-first principle rendered as directive with id attribute', async () => {
@@ -830,7 +826,7 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    const ctx = result?.appendSystemContext ?? '';
+    const ctx = result?.prependSystemContext ?? '';
     expect(ctx).toContain(`<directive id="princ-mvp-acceptance-confirm-first" source="runtime_v2_activation">`);
     expect(ctx).toContain('MANDATORY: Before starting any coding task');
   });
@@ -839,9 +835,8 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
-    const ctx = result?.appendSystemContext ?? '';
-    const directiveSectionMarker = 'Owner-approved behavior directives are active operating constraints';
-    expect(ctx).not.toContain(directiveSectionMarker);
+    const prependCtx = result?.prependSystemContext ?? '';
+    expect(prependCtx).not.toContain('OWNER-APPROVED BEHAVIOR DIRECTIVES');
   });
 
   it('existing evolution_principles behavior for legacy principles remains intact', async () => {

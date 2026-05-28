@@ -8,6 +8,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
+import { detectApprovalMarker, setConfirmFirstApproval, setConfirmFirstDirective } from '../core/confirm-first-gate.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
@@ -288,6 +289,13 @@ export async function handleBeforePromptBuild(
 
     if (latestUserIndex) {
       const userText = getTextContent(latestUserIndex.message);
+
+      // ── Confirm-first approval detection ──
+      // If user sends approval language, mark session as approved for confirm-first gate
+      if (sessionId && detectApprovalMarker(userText)) {
+        setConfirmFirstApproval(sessionId);
+      }
+
       // Use CorrectionCueLearner for detection — supports learned keywords, not just hardcoded list
       let correctionCue: string | null = null;
       try {
@@ -777,6 +785,27 @@ ${heartbeatChecklist}
     } catch (logErr) {
       logger?.warn?.(`[PD:RuntimeV2] Failed to emit activation observability event: ${String(logErr)}`);
     }
+
+    // ── Set confirm-first directive state for gate enforcement ──
+    if (sessionId) {
+      const hasConfirmFirst = dedupedV2.some(
+        (p) =>
+          p.principleId === 'princ-mvp-acceptance-confirm-first' ||
+          (p.text.toLowerCase().includes('confirm requirements') &&
+           p.text.toLowerCase().includes('owner approval')),
+      );
+      if (hasConfirmFirst) {
+        const cfPrinciple = dedupedV2.find(
+          (p) =>
+            p.principleId === 'princ-mvp-acceptance-confirm-first' ||
+            (p.text.toLowerCase().includes('confirm requirements') &&
+             p.text.toLowerCase().includes('owner approval')),
+        );
+        setConfirmFirstDirective(sessionId, true, cfPrinciple?.principleId);
+      } else {
+        setConfirmFirstDirective(sessionId, false);
+      }
+    }
   } catch (e) {
     logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);
   }
@@ -815,10 +844,13 @@ ${empathySilenceConstraint}
   }
 
   // 3.5. Owner-Approved Behavior Directives (Runtime V2 activated principles)
-  // Separated from evolution_principles for stronger operational framing.
+  // PLACED IN prependSystemContext (before gateway system prompt) for highest LLM attention.
   // These are owner-reviewed, validated behavior constraints — not background context.
   if (runtimeV2PrincipleIds.size > 0) {
     const directiveLines: string[] = [];
+    directiveLines.push('');
+    directiveLines.push('## 【OWNER-APPROVED BEHAVIOR DIRECTIVES】');
+    directiveLines.push('');
     directiveLines.push('Owner-approved behavior directives are active operating constraints learned from prior owner corrections.');
     directiveLines.push('These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.');
     directiveLines.push('For ambiguous coding or file-changing tasks, follow these directives before using mutating tools.');
@@ -832,7 +864,7 @@ ${empathySilenceConstraint}
       directiveLines.push('');
     }
     directiveLines.push('Note: These directives do not override safety, security, or core system policy.');
-    appendParts.push(`<owner_approved_behavior_directives>\n${directiveLines.join('\n')}\n</owner_approved_behavior_directives>`);
+    prependSystemContext += directiveLines.join('\n');
   }
 
   // Routing Guidance (section 5 — injected between evolution principles and core principles)
@@ -963,7 +995,6 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 - \`<reflection_log>\` - Past lessons (inform your approach)
 - \`<thinking_os>\` - Thinking models (guide your reasoning)
 - \`<evolution_principles>\` - Newly learned principles (active + probation)
-- \`<owner_approved_behavior_directives>\` - Owner-approved mandatory behavior constraints (MUST follow unless safety conflict)
 - \`<routing_guidance>\` - Delegation suggestions (non-authoritative, best-effort)
 - \`<core_principles>\` - Core rules (NON-NEGOTIABLE, highest priority)
 
