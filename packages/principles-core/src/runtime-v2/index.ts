@@ -827,6 +827,7 @@ export type {
 
 export type { PIArtifactRecord, PIArtifactStore } from './internalization/pi-artifact.js';
 export { MemoryPIArtifactStore } from './internalization/pi-artifact-store.js';
+export { SqlitePIArtifactStore } from './store/artifact/sqlite-pi-artifact-store.js';
 
 // ── Intake To Internalization Bridge (PRI-142) ────────────────────────────────
 

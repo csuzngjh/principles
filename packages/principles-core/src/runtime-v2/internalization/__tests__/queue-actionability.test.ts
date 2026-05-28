@@ -79,14 +79,12 @@ describe('classifyTaskActionability', () => {
     expect(result.actionable).toBe(true);
   });
 
-  it('suppresses evaluator task with task_kind_not_mvp_actionable reason', () => {
+  it('classifies enabled-channel MVP-Core evaluator as actionable', () => {
     const result = classifyTaskActionability(
       { taskId: 'eval-abc-prompt', taskKind: 'evaluator', channel: 'prompt' },
       defaultPolicy,
     );
-    expect(result.actionable).toBe(false);
-    if (result.actionable) throw new Error('expected not actionable');
-    expect(result.reason).toBe('task_kind_not_mvp_actionable');
+    expect(result.actionable).toBe(true);
   });
 
   it('suppresses trainer task with task_kind_not_mvp_actionable reason', () => {
@@ -124,15 +122,15 @@ describe('classifyTaskActionability', () => {
 });
 
 describe('MVP_CORE_TASK_KINDS constant', () => {
-  it('includes dreamer, philosopher, scribe, artificer', () => {
+  it('includes dreamer, philosopher, scribe, artificer, evaluator', () => {
     expect(MVP_CORE_TASK_KINDS).toContain('dreamer');
     expect(MVP_CORE_TASK_KINDS).toContain('philosopher');
     expect(MVP_CORE_TASK_KINDS).toContain('scribe');
     expect(MVP_CORE_TASK_KINDS).toContain('artificer');
+    expect(MVP_CORE_TASK_KINDS).toContain('evaluator');
   });
 
   it('does not include post-MVP runners', () => {
-    expect(MVP_CORE_TASK_KINDS).not.toContain('evaluator');
     expect(MVP_CORE_TASK_KINDS).not.toContain('rollout_reviewer');
     expect(MVP_CORE_TASK_KINDS).not.toContain('trainer');
   });

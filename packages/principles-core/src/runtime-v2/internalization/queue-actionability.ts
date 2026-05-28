@@ -19,6 +19,7 @@ export const MVP_CORE_TASK_KINDS: readonly PeerRunnerKind[] = [
   'philosopher',
   'scribe',
   'artificer',
+  'evaluator',
 ] as const;
 
 // ── Types ────────────────────────────────────────────────────────────────────

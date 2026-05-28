@@ -68,4 +68,11 @@ export class MemoryPIArtifactStore implements PIArtifactStore {
     }
     return results;
   }
+
+  async updateValidationStatus(artifactId: string, validationStatus: PIArtifactRecord['validationStatus']): Promise<boolean> {
+    const existing = this.artifacts.get(artifactId);
+    if (!existing) return false;
+    this.artifacts.set(artifactId, { ...existing, validationStatus, updatedAt: new Date().toISOString() });
+    return true;
+  }
 }
