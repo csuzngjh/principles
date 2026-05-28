@@ -437,18 +437,29 @@ export class EvaluatorRunner {
 
     const resultRef = `evaluator://${ctx.runId}`;
 
-    if (ctx.output.evaluation.decision === 'approved' && ctx.output.sourceArtificerArtifactId) {
-      try {
-        await this.artifactStore.updateValidationStatus(
-          ctx.output.sourceArtificerArtifactId,
-          'validated',
-        );
-      } catch (updateErr) {
-        this.emitEvaluatorEvent('evaluator_source_validation_update_failed', ctx.taskId, {
-          runId: ctx.runId,
-          sourceArtifactId: ctx.output.sourceArtificerArtifactId,
-          errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
-        });
+    if (ctx.output.evaluation.decision === 'approved') {
+      const principleArtifactId = await this.resolvePrincipleBearerArtifact(ctx.output, ctx.taskId);
+      if (principleArtifactId) {
+        try {
+          const updated = await this.artifactStore.updateValidationStatus(
+            principleArtifactId,
+            'validated',
+          );
+          if (!updated) {
+            this.emitEvaluatorEvent('evaluator_source_validation_update_not_found', ctx.taskId, {
+              runId: ctx.runId,
+              sourceArtifactId: principleArtifactId,
+              reason: 'principle_artifact_not_found_in_store',
+              nextAction: 'verify_artifact_lineage_and_store_consistency',
+            });
+          }
+        } catch (updateErr) {
+          this.emitEvaluatorEvent('evaluator_source_validation_update_failed', ctx.taskId, {
+            runId: ctx.runId,
+            sourceArtifactId: principleArtifactId,
+            errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
+          });
+        }
       }
     }
 
@@ -690,6 +701,97 @@ export class EvaluatorRunner {
       case 'timed_out': return 'timeout';
       case 'cancelled': return 'cancelled';
       default: return 'execution_failed';
+    }
+  }
+
+  private async resolvePrincipleBearerArtifact(
+    output: EvaluatorOutputV1,
+    taskId: string,
+  ): Promise<string | null> {
+    // Strategy 1: Use scribeArtifactId from sourceTrace (the Scribe artifact carries principleDraft)
+    const scribeArtifactId = output.sourceTrace?.scribeArtifactId;
+    if (typeof scribeArtifactId === 'string' && scribeArtifactId.trim() !== '') {
+      const scribeArtifact = await this.artifactStore.getArtifactById(scribeArtifactId);
+      if (scribeArtifact && scribeArtifact.artifactKind === 'principle') {
+        return scribeArtifactId;
+      }
+      // Scribe artifact not found or wrong kind — fall through to lineage search
+      this.emitEvaluatorEvent('evaluator_scribe_artifact_not_principle', taskId, {
+        scribeArtifactId,
+        actualKind: scribeArtifact?.artifactKind ?? 'not_found',
+      });
+    }
+
+    // Strategy 2: Search lineage for a principle-kind artifact with principleDraft content
+    const lineageArtifactIds = await this.resolveLineageArtifactIds(taskId);
+    for (const lineageId of lineageArtifactIds) {
+      const artifact = await this.artifactStore.getArtifactById(lineageId);
+      if (!artifact) continue;
+      if (artifact.artifactKind !== 'principle') continue;
+      if (this.hasPrincipleDraftContent(artifact.contentJson)) {
+        return lineageId;
+      }
+    }
+
+    // Strategy 3: Fallback — no principle-bearing artifact found
+    this.emitEvaluatorEvent('evaluator_no_principle_bearer_found', taskId, {
+      runId: output.taskId,
+      scribeArtifactId: scribeArtifactId ?? 'not_provided',
+      lineageCount: lineageArtifactIds.length,
+      reason: 'no_principle_bearing_artifact_in_lineage',
+      nextAction: 'verify_scribe_artifact_exists_and_has_principle_draft',
+    });
+    return null;
+  }
+
+  private async resolveLineageArtifactIds(taskId: string): Promise<string[]> {
+    try {
+      const task = await this.stateManager.getTask(taskId);
+      if (!task) return [];
+      const piTask = hydratePITaskRecord(task);
+      const deps = piTask?.dependencyTaskIds ?? [];
+      const results = await Promise.allSettled(
+        deps.map((depId) => this.artifactStore.listBySourceTaskId(depId)),
+      );
+      const ids: string[] = [];
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          for (const artifact of result.value) {
+            ids.push(artifact.artifactId);
+          }
+        }
+      }
+      return ids;
+    } catch {
+      return [];
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  private hasPrincipleDraftContent(contentJson: string): boolean {
+    try {
+      const parsed: unknown = JSON.parse(contentJson);
+      if (typeof parsed !== 'object' || parsed === null) return false;
+      const record = parsed as Record<string, unknown>;
+      // Check for principleDraft.title + principleDraft.statement
+      if (Object.hasOwn(record, 'principleDraft')) {
+        const draft = record.principleDraft;
+        if (typeof draft === 'object' && draft !== null) {
+          const draftRecord = draft as Record<string, unknown>;
+          if (Object.hasOwn(draftRecord, 'title') && typeof draftRecord.title === 'string' && draftRecord.title.trim() !== ''
+            && Object.hasOwn(draftRecord, 'statement') && typeof draftRecord.statement === 'string' && draftRecord.statement.trim() !== '') {
+            return true;
+          }
+        }
+      }
+      // Check for principleId + text (alternative principle format)
+      if (Object.hasOwn(record, 'principleId') && typeof record.principleId === 'string' && record.principleId.trim() !== ''
+        && Object.hasOwn(record, 'text') && typeof record.text === 'string' && record.text.trim() !== '') {
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
     }
   }
 
