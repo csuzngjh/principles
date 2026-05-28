@@ -27,10 +27,29 @@
         </div>
       </div>
 
-      <!-- Right Column: Abstract Card Visual -->
+      <!-- Right Column: Bilingual Contextual Visual -->
       <div class="hero-visual-wrapper">
-        <div class="hero-visual">
-          <img src="/images/pd_hero_21_9.png" :alt="lang === 'zh-CN' ? 'PD 认知场域' : 'PD Cognitive Arena'" />
+        <div v-if="lang === 'zh-CN'" class="hero-visual hero-video-container">
+          <video 
+            src="/promo.mp4" 
+            poster="/images/promo-poster-zh.webp"
+            controls 
+            preload="metadata" 
+            class="hero-video-player"
+          >
+            <track kind="subtitles" src="/promo.vtt" srclang="zh" label="中文" default />
+          </video>
+        </div>
+        <div v-else class="hero-visual hero-video-container">
+          <video 
+            src="/promo-en.mp4" 
+            poster="/images/promo-poster-en.webp"
+            controls 
+            preload="metadata" 
+            class="hero-video-player"
+          >
+            <track kind="subtitles" src="/promo-en.vtt" srclang="en" label="English" default />
+          </video>
         </div>
       </div>
     </div>
@@ -128,9 +147,29 @@ const { lang } = useData()
   z-index: 2;
 }
 
+.hero-video-container {
+  aspect-ratio: 16 / 9 !important;
+  transition: all 0.3s ease;
+}
+
+.hero-video-container:hover {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 25px var(--accent-dim);
+}
+
+.hero-video-player {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 @media (max-width: 959px) {
   .hero-visual {
     aspect-ratio: 16 / 7;
+  }
+  .hero-video-container {
+    aspect-ratio: 16 / 9 !important;
   }
 }
 </style>
