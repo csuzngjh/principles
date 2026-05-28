@@ -1243,11 +1243,12 @@ function main() {
     {
         const langsDir = join(INSTALL_DIR, 'templates', 'langs');
         if (existsSync(langsDir)) {
-            const unselectedLang = args.lang === 'zh' ? 'en' : 'zh';
+            const normalizedLang = (args.lang || 'zh').toLowerCase();
+            const unselectedLang = normalizedLang === 'zh' ? 'en' : 'zh';
             const unselectedPath = join(langsDir, unselectedLang);
             if (existsSync(unselectedPath)) {
                 rmSync(unselectedPath, { recursive: true, force: true });
-                console.log(`  🗑️  removed templates/langs/${unselectedLang} (lang: ${args.lang})`);
+                console.log(`  🗑️  removed templates/langs/${unselectedLang} (lang: ${normalizedLang})`);
             }
         }
     }
