@@ -13,9 +13,7 @@ import {
 } from './mvp-config.js';
 import { setLanguage, t, getLanguage, type Language } from './i18n.js';
 
-export function isLanguage(value: unknown): value is Language {
-  return value === 'zh' || value === 'en';
-}
+export { isLanguage } from './i18n.js';
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

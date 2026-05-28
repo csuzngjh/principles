@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isLanguage } from '../src/index.js';
+import { isLanguage } from '../src/i18n.js';
 
 describe('isLanguage type guard', () => {
   it('returns true for valid languages', () => {

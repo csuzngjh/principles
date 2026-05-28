@@ -1704,8 +1704,8 @@ describe('Shim ownership verification before deletion (P1 fix)', () => {
 
 describe('--lang validation rejects invalid values (P2 fix)', () => {
   it('index.ts has isLanguage type guard', () => {
-    const indexPath = path.resolve(__dirname, '..', 'src', 'index.ts');
-    const content = fs.readFileSync(indexPath, 'utf-8');
+    const i18nPath = path.resolve(__dirname, '..', 'src', 'i18n.ts');
+    const content = fs.readFileSync(i18nPath, 'utf-8');
     expect(content).toContain('function isLanguage');
     expect(content).toContain("value === 'zh' || value === 'en'");
   });
