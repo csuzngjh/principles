@@ -29,9 +29,11 @@ export class CentralDatabase {
     return this._closed;
   }
 
-  constructor() {
+  constructor(dbPath?: string) {
     const openClawDir = os.homedir();
-    this.dbPath = path.join(openClawDir, '.openclaw', CENTRAL_DB_DIR, CENTRAL_DB_NAME);
+    this.dbPath = dbPath
+      || (process.env.PD_CENTRAL_DB_PATH ? path.resolve(process.env.PD_CENTRAL_DB_PATH) : null)
+      || path.join(openClawDir, '.openclaw', CENTRAL_DB_DIR, CENTRAL_DB_NAME);
     
     // Ensure directory exists
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
