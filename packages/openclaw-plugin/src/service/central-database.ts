@@ -181,9 +181,11 @@ export class CentralDatabase {
   private discoverWorkspaces(): void {
     const openClawDir = os.homedir();
     const workspacesDir = path.join(openClawDir, '.openclaw');
-    
+
     this.workspaces.length = 0;
-    
+
+    if (!fs.existsSync(workspacesDir)) return;
+
     const entries = fs.readdirSync(workspacesDir);
     for (const entry of entries) {
       if (entry.startsWith('workspace-') && entry !== 'workspace') {
