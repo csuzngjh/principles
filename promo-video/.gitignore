@@ -1,0 +1,5 @@
+node_modules/
+renders/
+assets/*.mp3
+.env
+.DS_Store

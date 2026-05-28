@@ -1,0 +1,234 @@
+<template id="scene-04-anchor-template">
+  <div id="scene-04-anchor" data-composition-id="scene-04-anchor" data-width="1920" data-height="1080">
+    <div class="scene-container">
+      <!-- Camera Rig for slow, majestic zoom-out (camera pull-back) -->
+      <div class="camera-rig" id="s4-camera-rig">
+        <!-- Technical backdrop wireframe grid -->
+        <div class="tech-grid"></div>
+
+        <!-- Super-intelligence core glow (large, extremely soft pulsing radial accent) -->
+        <div class="ambient-glow" id="s4-glow"></div>
+
+        <div class="scene-content">
+          <!-- Central図腾图 (Friction Node Figure) -->
+          <div class="friction-node-anchor" id="s4-node"></div>
+
+          <!-- Luminous Premium Quote -->
+          <div class="philosophical-quote" id="s4-quote">
+            <div class="quote-main">From Tool to Partner</div>
+            <div class="quote-sub">Pain + Reflection = Progress</div>
+          </div>
+
+          <!-- Wesley Soul Slogan (Phase B) -->
+          <div class="soul-slogan-wrapper" id="s4-slogan" style="opacity: 0; display: flex; flex-direction: column; align-items: center; gap: 24px; text-align: center; position: absolute; top: 52%; left: 50%; transform: translate(-50%, -50%); width: 100%; pointer-events: none;">
+            <div class="friction-node-large" style="width: 12px; height: 12px; border-radius: 50%; background: #7EB8DA; opacity: 0.6; box-shadow: 0 0 15px rgba(126, 184, 218, 0.45); margin-bottom: 8px;"></div>
+            <div class="slogan-main" style="font-size: 60px; font-weight: 300; letter-spacing: 0.15em; color: #E0E2E6; text-shadow: 0 0 25px rgba(126, 184, 218, 0.35);">BURN PAIN, CO-EVOLVE.</div>
+            <div class="brand-sub" style="font-family: 'JetBrains Mono', monospace; font-size: 16px; letter-spacing: 0.3em; color: #7EB8DA; text-transform: uppercase;">PRINCIPLES DISCIPLE (PD)</div>
+            <div class="english-sub" style="font-family: 'JetBrains Mono', monospace; font-size: 13px; letter-spacing: 0.15em; color: #8A8F99; text-transform: uppercase; margin-top: -8px;">BEHAVIOR INTERNALIZATION SYSTEM</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      #scene-04-anchor {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        background: #000000; /* Deep pitch black canvas */
+        overflow: hidden;
+        font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+      }
+
+      .scene-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      /* Camera Rig - allows cinematic dolly pull-back zoom out */
+      .camera-rig {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        transform-origin: center center;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1;
+      }
+
+      /* Technical background mesh grid */
+      .tech-grid {
+        position: absolute;
+        inset: 0;
+        background-image: 
+          linear-gradient(rgba(255, 255, 255, 0.008) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.008) 1px, transparent 1px);
+        background-size: 80px 80px;
+        background-position: center center;
+        z-index: 3;
+        pointer-events: none;
+      }
+
+      /* Extremely soft, majestic accent blue core glow */
+      .ambient-glow {
+        position: absolute;
+        width: 1200px;
+        height: 1200px;
+        background: radial-gradient(circle, rgba(126, 184, 218, 0.08) 0%, rgba(126, 184, 218, 0.015) 45%, transparent 75%);
+        border-radius: 50%;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 2;
+        pointer-events: none;
+        opacity: 0.6;
+        will-change: opacity;
+      }
+
+      .scene-content {
+        position: relative;
+        padding: 120px 160px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 36px;
+        z-index: 10;
+      }
+
+      /* Friction Node - anchor decoration symbol */
+      .friction-node-anchor {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #7EB8DA;
+        opacity: 0;
+        box-shadow: 0 0 15px rgba(126, 184, 218, 0.4);
+      }
+
+      .philosophical-quote {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        opacity: 0;
+        filter: blur(15px); /* Soft lens focus blur */
+        will-change: opacity, filter, letter-spacing, transform;
+      }
+
+      .quote-main {
+        color: #E0E2E6;
+        font-size: 64px;
+        font-weight: 300; /* Elegant light editorial font weight */
+        letter-spacing: 0.25em; /* Wide premium starting tracking */
+        text-shadow: 0 0 25px rgba(224, 226, 230, 0.2);
+      }
+
+      .quote-sub {
+        color: #8A8F99;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 16px;
+        letter-spacing: 0.3em;
+      }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function() {
+        window.__timelines = window.__timelines || {};
+        const tl = gsap.timeline({ paused: true });
+
+        // Set initial states
+        tl.set("#s4-quote", { opacity: 0, y: 15 });
+        tl.set("#s4-slogan", { opacity: 0, filter: "blur(12px)", scale: 0.96 });
+        tl.set("#s4-node", { opacity: 0, scale: 0 });
+        tl.set("#s4-camera-rig", { scale: 1.06 }); // Start zoomed in slightly
+
+        // Majestic camera dolly zoom-out pull back (scale: 1.06 -> 1.0 over 12s)
+        tl.to("#s4-camera-rig", {
+          scale: 1.0,
+          duration: 12.0,
+          ease: "sine.out"
+        }, 0);
+
+        // Core glow low-frequency deep breathing pulse
+        tl.to("#s4-glow", {
+          opacity: 1.0,
+          scale: 1.05,
+          duration: 6.0,
+          yoyo: true,
+          repeat: 1,
+          ease: "sine.inOut"
+        }, 0);
+
+        // Friction node figure appears first elegantly
+        tl.to("#s4-node", {
+          opacity: 0.6,
+          scale: 1,
+          duration: 1.2,
+          ease: "power2.out"
+        }, 0);
+
+        // Phase A: Luminous Premium Quote Reveal
+        tl.to("#s4-quote", {
+          opacity: 1,
+          y: 0,
+          filter: "blur(0px)",
+          duration: 2.2,
+          ease: "power2.out"
+        }, 0.5);
+        
+        tl.to(".quote-main", {
+          letterSpacing: "0.2em",
+          duration: 2.2,
+          ease: "power2.out"
+        }, 0.5);
+
+        // Gentle breathing text-shadow glow pulse for Phase A quote
+        tl.to(".quote-main", {
+          textShadow: "0 0 35px rgba(224, 226, 230, 0.4)",
+          duration: 2.5,
+          yoyo: true,
+          repeat: 1,
+          ease: "sine.inOut"
+        }, 1.2);
+
+        // Phase A Exit: Fade quote out elegantly at 5.0s
+        tl.to("#s4-quote", {
+          opacity: 0,
+          filter: "blur(8px)",
+          y: -15,
+          duration: 1.0,
+          ease: "power2.in"
+        }, 5.0);
+
+        // Phase B: Luminous Soul Slogan Reveal (燃烧痛苦，协同进化)
+        tl.to("#s4-slogan", {
+          opacity: 1,
+          filter: "blur(0px)",
+          scale: 1,
+          duration: 2.0,
+          ease: "power3.out"
+        }, 6.0);
+
+        // Phase B Exit: Outro fade out all elements at 10.0s before final transition
+        tl.to(["#s4-slogan", "#s4-node", "#s4-glow"], {
+          opacity: 0,
+          scale: 0.97,
+          filter: "blur(10px)",
+          duration: 1.8,
+          ease: "power2.in"
+        }, 10.0);
+
+        window.__timelines["scene-04-anchor"] = tl;
+      })();
+    </script>
+  </div>
+</template>
