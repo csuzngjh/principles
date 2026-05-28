@@ -1,10 +1,5 @@
-﻿<<<<<<< HEAD
-﻿<p align="center">
-  <img src="assets/banner.png" width="100%" alt="Principles Disciple Banner">
-=======
 <p align="center">
-  <video src="packages/website/public/promo-en.mp4" width="100%" controls poster="assets/banner.png"></video>
->>>>>>> origin/main
+  <img src="assets/banner.png" width="100%" alt="Principles Disciple Banner">
 </p>
 
 <p align="center">

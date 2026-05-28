@@ -32,7 +32,6 @@
         <div v-if="lang === 'zh-CN'" class="hero-visual hero-video-container">
           <video 
             src="/promo.mp4" 
-<<<<<<< HEAD
             poster="/images/promo-poster-zh.webp"
             controls 
             preload="metadata" 
@@ -40,17 +39,10 @@
           >
             <track kind="subtitles" src="/promo.vtt" srclang="zh" label="中文" default />
           </video>
-=======
-            controls 
-            preload="metadata" 
-            class="hero-video-player"
-          ></video>
->>>>>>> origin/main
         </div>
         <div v-else class="hero-visual hero-video-container">
           <video 
             src="/promo-en.mp4" 
-<<<<<<< HEAD
             poster="/images/promo-poster-en.webp"
             controls 
             preload="metadata" 
@@ -58,12 +50,6 @@
           >
             <track kind="subtitles" src="/promo-en.vtt" srclang="en" label="English" default />
           </video>
-=======
-            controls 
-            preload="metadata" 
-            class="hero-video-player"
-          ></video>
->>>>>>> origin/main
         </div>
       </div>
     </div>
