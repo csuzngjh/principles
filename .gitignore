@@ -83,6 +83,9 @@ code-concise/
 docs/
 # Exception: AI assistant handbook must be committed
 !docs/ERROR_EXPERIENCE_HANDBOOK.md
+# Exception: website docs must be committed
+!packages/website/docs/
+!packages/website/zh/docs/
 
 # Interactive Conversation Test Output
 packages/openclaw-plugin/tests/interactive-conversation/output/
