@@ -14,7 +14,7 @@
  * 3. Gate hook (before_tool_call) checks cached state synchronously
  */
 
-import { LOW_RISK_WRITE_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
+import { BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 
 /** Per-session confirm-first state */
 interface ConfirmFirstSessionState {
