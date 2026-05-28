@@ -5,7 +5,7 @@
  *
  * Installs the complete Principles Disciple system:
  * - openclaw-plugin to ~/.openclaw/extensions/principles-disciple
- * - pd-console to ~/.openclaw/pd-console/
+ * - pd-console to ~/.openclaw/extensions/principles-disciple/console/
  *
  * Usage:
  *   node scripts/install.mjs [options]
@@ -45,8 +45,9 @@ function getHomeDir() {
 
 const OPENCLAW_DIR = join(getHomeDir(), '.openclaw');
 const INSTALL_PLUGIN_DIR = join(OPENCLAW_DIR, 'extensions', 'principles-disciple');
-const INSTALL_CONSOLE_DIR = join(OPENCLAW_DIR, 'pd-console');
-const INSTALL_BIN_DIR = join(INSTALL_CONSOLE_DIR, 'bin');
+// Console lives INSIDE the plugin extension dir — same location as npm installer
+const INSTALL_CONSOLE_DIR = join(INSTALL_PLUGIN_DIR, 'console');
+const INSTALL_BIN_DIR = join(INSTALL_PLUGIN_DIR, 'bin');
 
 const MIN_NODE_VERSION = '18.0.0';
 
@@ -65,16 +66,16 @@ function copyDir(src, dest) {
   }
 }
 
-function injectCorePackage() {
+function injectCorePackage(targetDir) {
   const monorepoModules = join(ROOT_DIR, 'node_modules', '@principles', 'core');
-  const targetModules = join(INSTALL_CONSOLE_DIR, 'node_modules', '@principles', 'core');
+  const targetModules = join(targetDir, 'node_modules', '@principles', 'core');
 
   if (!existsSync(monorepoModules)) {
-    console.warn('  ⚠️  @principles/core not found in monorepo node_modules — pd-console may fail to start');
+    console.warn('  ⚠️  @principles/core not found in monorepo node_modules');
     return;
   }
 
-  console.log('  📦 Injecting @principles/core into pd-console...');
+  console.log('  📦 Injecting @principles/core...');
   mkdirSync(dirname(targetModules), { recursive: true });
   try {
     execSync(`cp -rL "${monorepoModules}" "${targetModules}"`, { stdio: 'ignore' });
@@ -150,10 +151,10 @@ Options:
   --help, -h         Show this help message
 
 After installation, start the WebUI:
-  node ~/.openclaw/pd-console/dist/server/index.js --workspace <workspace-dir> --port 3100
+  node ~/.openclaw/extensions/principles-disciple/console/dist/server.js --workspace <workspace-dir> --port 3100
 
 Or use the helper script:
-  ~/.openclaw/pd-console/bin/pd-console.ps1 --workspace <workspace-dir>
+  ~/.openclaw/extensions/principles-disciple/bin/pd-console.ps1 --workspace <workspace-dir>
 `);
 }
 
@@ -266,6 +267,60 @@ function installPlugin(args) {
     console.error(`\n❌ Plugin installation script failed: ${error.message}`);
     process.exit(1);
   }
+
+  // Register plugin in openclaw.json (sync-plugin.mjs does not do this)
+  registerPlugin();
+}
+
+/**
+ * Register principles-disciple in openclaw.json.
+ * Merges with existing config — preserves hooks, config, and other user settings.
+ * Does NOT write plugins.installs (OpenClaw manages installs.json).
+ */
+function registerPlugin() {
+  const configPath = join(OPENCLAW_DIR, 'openclaw.json');
+  if (!existsSync(configPath)) {
+    console.warn('  ⚠️  openclaw.json not found — skipping plugin registration');
+    return;
+  }
+
+  try {
+    const raw = readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(raw);
+    if (typeof config !== 'object' || config === null || Array.isArray(config)) return;
+
+    let modified = false;
+
+    // Ensure plugins object exists
+    if (!config.plugins) { config.plugins = {}; modified = true; }
+    const plugins = config.plugins;
+
+    // Add to plugins.allow (idempotent)
+    if (!Array.isArray(plugins.allow)) { plugins.allow = []; modified = true; }
+    if (!plugins.allow.includes('principles-disciple')) {
+      plugins.allow.push('principles-disciple');
+      modified = true;
+    }
+
+    // Merge plugins.entries (preserve existing hooks, config, etc.)
+    if (!plugins.entries) { plugins.entries = {}; modified = true; }
+    const existing = (typeof plugins.entries['principles-disciple'] === 'object' && plugins.entries['principles-disciple'] !== null)
+      ? plugins.entries['principles-disciple']
+      : {};
+    plugins.entries['principles-disciple'] = { ...existing, enabled: true };
+    modified = true;
+
+    if (modified) {
+      const tmp = configPath + '.tmp.' + Date.now();
+      writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+      rmSync(configPath, { force: true });
+      copyFileSync(tmp, configPath);
+      rmSync(tmp, { force: true });
+      console.log('  ✅ Plugin registered in openclaw.json');
+    }
+  } catch (e) {
+    console.warn(`  ⚠️  Could not register plugin in openclaw.json: ${e.message}`);
+  }
 }
 
 // ── pd-console installation ──────────────────────────────────────────────────────────────
@@ -310,8 +365,8 @@ function installPdConsole(args) {
   );
   console.log('  📄 package.json');
 
-  // Inject @principles/core from monorepo (similar to plugin install)
-  injectCorePackage();
+  // Inject @principles/core from monorepo (console lives inside plugin dir)
+  injectCorePackage(INSTALL_CONSOLE_DIR);
 
   // Install production dependencies for pd-console
   console.log('  📦 Installing pd-console dependencies...');
@@ -324,7 +379,7 @@ function installPdConsole(args) {
     console.warn(`  ⚠️  npm install failed for pd-console: ${e.message}`);
   }
 
-  // Create startup scripts
+  // Create startup scripts — console is at extensions/principles-disciple/console/
   if (isWindows()) {
     const psScript = [
       '# PD Console startup script',
@@ -332,7 +387,7 @@ function installPdConsole(args) {
       'if (-not $workspace) { $workspace = "$env:USERPROFILE\\.openclaw\\workspace-main" }',
       '$port = $args[1]',
       'if (-not $port) { $port = 3100 }',
-      '$serverEntry = "$PSScriptRoot\\dist\\server\\index.js"',
+      '$serverEntry = "$PSScriptRoot\\..\\console\\dist\\server.js"',
       'if (-not (Test-Path $serverEntry)) {',
       '  Write-Host "❌ pd-console not installed. Run install.mjs first."',
       '  exit 1',
@@ -349,7 +404,7 @@ function installPdConsole(args) {
       'if "%WORKSPACE%"=="" set WORKSPACE=%USERPROFILE%\\.openclaw\\workspace-main',
       'set PORT=%2',
       'if "%PORT%"=="" set PORT=3100',
-      'node "%~dp0..\\dist\\server\\index.js" --workspace %WORKSPACE% --port %PORT%',
+      'node "%~dp0..\\console\\dist\\server.js" --workspace %WORKSPACE% --port %PORT%',
       '',
     ].join('\r\n');
     writeFileSync(join(INSTALL_BIN_DIR, 'pd-console.cmd'), cmdScript, 'utf-8');
@@ -359,7 +414,7 @@ function installPdConsole(args) {
       '#!/usr/bin/env sh',
       'workspace=${1:-$HOME/.openclaw/workspace-main}',
       'port=${2:-3100}',
-      'server_entry="$(dirname "$0")/../dist/server/index.js"',
+      'server_entry="$(dirname "$0")/../console/dist/server.js"',
       'if [ ! -f "$server_entry" ]; then',
       '  echo "❌ pd-console not installed. Run install.mjs first."',
       '  exit 1',
@@ -372,26 +427,8 @@ function installPdConsole(args) {
     console.log('  📄 bin/pd-console.sh');
   }
 
-  // Update version
   const sourceVersion = getVersion(PD_CONSOLE_SOURCE_DIR);
   if (sourceVersion) {
-    try {
-      const configPath = join(OPENCLAW_DIR, 'openclaw.json');
-      if (existsSync(configPath)) {
-        const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-        if (!config.pdConsole) config.pdConsole = {};
-        config.pdConsole.version = sourceVersion;
-        config.pdConsole.installedAt = new Date().toISOString();
-        const raw = JSON.stringify(config, null, 2) + '\n';
-        const tmp = configPath + '.tmp.' + Date.now();
-        writeFileSync(tmp, raw, 'utf-8');
-        rmSync(configPath, { force: true });
-        copyFileSync(tmp, configPath);
-        rmSync(tmp, { force: true });
-      }
-    } catch (e) {
-      console.warn(`⚠️  Could not update openclaw.json: ${e.message}`);
-    }
     console.log(`✅ pd-console installed: v${sourceVersion}`);
   }
 }
@@ -399,7 +436,7 @@ function installPdConsole(args) {
 // ── Verification ─────────────────────────────────────────────────────────────────────
 
 function verifyPdConsole() {
-  const serverEntry = join(INSTALL_CONSOLE_DIR, 'dist', 'server', 'index.js');
+  const serverEntry = join(INSTALL_CONSOLE_DIR, 'dist', 'server.js');
   if (!existsSync(serverEntry)) {
     console.error('❌ pd-console server entry not found after installation');
     process.exit(1);
@@ -458,12 +495,13 @@ function main() {
 
   if (!args.skipConsole) {
     console.log('\n🌐 To start the PD Console WebUI:');
+    const extDir = join(OPENCLAW_DIR, 'extensions', 'principles-disciple');
     if (isWindows()) {
-      console.log('   .\\bin\\pd-console.ps1 --workspace <path-to-workspace>');
-      console.log('   Or: node ~/.openclaw/pd-console/dist/server/index.js --workspace <path-to-workspace> --port 3100');
+      console.log(`   ${extDir}\\bin\\pd-console.ps1 --workspace <path-to-workspace>`);
+      console.log(`   Or: node ${extDir}\\console\\dist\\server.js --workspace <path-to-workspace> --port 3100`);
     } else {
-      console.log('   ~/.openclaw/pd-console/bin/pd-console.sh <path-to-workspace>');
-      console.log('   Or: node ~/.openclaw/pd-console/dist/server/index.js --workspace <path-to-workspace> --port 3100');
+      console.log(`   ${extDir}/bin/pd-console.sh <path-to-workspace>`);
+      console.log(`   Or: node ${extDir}/console/dist/server.js --workspace <path-to-workspace> --port 3100`);
     }
   }
 }

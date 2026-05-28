@@ -21,4 +21,5 @@ export interface PIArtifactStore {
   getArtifactById(artifactId: string): Promise<PIArtifactRecord | null>;
   listBySourceTaskId(sourceTaskId: string): Promise<PIArtifactRecord[]>;
   listLineage(artifactId: string): Promise<PIArtifactRecord[]>;
+  updateValidationStatus(artifactId: string, validationStatus: PIArtifactValidationStatus): Promise<boolean>;
 }

@@ -127,4 +127,14 @@ export class SqlitePIArtifactStore implements PIArtifactStore {
     `).all(...artifact.lineageArtifactIds) as PiArtifactRow[];
     return rows.map(rowToRecord);
   }
+
+  async updateValidationStatus(artifactId: string, validationStatus: PIArtifactRecord['validationStatus']): Promise<boolean> {
+    const db = this.connection.getDb();
+    const now = new Date().toISOString();
+    const result = db.prepare(`
+      UPDATE pi_artifacts SET validation_status = ?, updated_at = ?
+      WHERE artifact_id = ?
+    `).run(validationStatus, now, artifactId);
+    return result.changes > 0;
+  }
 }

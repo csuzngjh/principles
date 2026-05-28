@@ -551,22 +551,33 @@ function verifyInstalledFingerprint() {
 }
 
 /**
- * Update the plugin version in openclaw.json after successful sync.
- * This ensures the recorded version always matches the installed version.
+ * Update the plugin version in installs.json after successful sync.
+ * OpenClaw manages install records in ~/.openclaw/plugins/installs.json,
+ * NOT in openclaw.json (plugins.installs is a legacy/transient field).
  */
 function updateInstalledPluginVersion(version) {
-    const configPath = join(OPENCLAW_DIR, 'openclaw.json');
+    const installsDir = join(OPENCLAW_DIR, 'plugins');
+    const installsPath = join(installsDir, 'installs.json');
     try {
-        const raw = readFileSync(configPath, 'utf-8');
-        const config = JSON.parse(raw);
-        if (config?.plugins?.installs?.['principles-disciple']) {
-            config.plugins.installs['principles-disciple'].version = version;
-            config.plugins.installs['principles-disciple'].installedAt = new Date().toISOString();
-            writeFileAtomic(configPath, JSON.stringify(config, null, 2) + '\n');
-            console.log(`✅ openclaw.json updated: version=${version}`);
+        if (!existsSync(installsDir)) {
+            mkdirSync(installsDir, { recursive: true });
         }
+        let installs = { version: 1, installRecords: {} };
+        if (existsSync(installsPath)) {
+            const raw = readFileSync(installsPath, 'utf-8');
+            installs = JSON.parse(raw);
+        }
+        if (!installs.installRecords) installs.installRecords = {};
+        installs.installRecords['principles-disciple'] = {
+            source: 'path',
+            installPath: INSTALL_DIR,
+            version: version,
+            installedAt: new Date().toISOString(),
+        };
+        writeFileAtomic(installsPath, JSON.stringify(installs, null, 2) + '\n');
+        console.log(`✅ installs.json updated: version=${version}`);
     } catch (err) {
-        console.warn(`⚠️  Could not update openclaw.json: ${err.message}`);
+        console.warn(`⚠️  Could not update installs.json: ${err.message}`);
     }
 }
 

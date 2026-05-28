@@ -203,19 +203,26 @@ export class PromptActivationReader {
     const principleId = Object.hasOwn(parsed, 'principleId') && typeof parsed.principleId === 'string' ? parsed.principleId : undefined;
     const text = Object.hasOwn(parsed, 'text') && typeof parsed.text === 'string' ? parsed.text : undefined;
 
-    if (!principleId || principleId.length === 0) {
-      return { ok: false, warning: `artifact_missing_principle_id: artifactId=${activation.artifactId}; nextAction=ensure_artifact_has_principleId` };
+    const draftObj = Object.hasOwn(parsed, 'principleDraft') && isRecord(parsed.principleDraft) ? parsed.principleDraft : null;
+    const draftTitle = draftObj && Object.hasOwn(draftObj, 'title') && typeof draftObj.title === 'string' ? draftObj.title : undefined;
+    const draftStatement = draftObj && Object.hasOwn(draftObj, 'statement') && typeof draftObj.statement === 'string' ? draftObj.statement : undefined;
+
+    const resolvedPrincipleId = principleId && principleId.length > 0 ? principleId : draftTitle;
+    const resolvedText = text && text.length > 0 ? text : draftStatement;
+
+    if (!resolvedPrincipleId || resolvedPrincipleId.length === 0) {
+      return { ok: false, warning: `artifact_missing_principle_id: artifactId=${activation.artifactId}; nextAction=ensure_artifact_has_principleId_or_principleDraft_title` };
     }
 
-    if (!text || text.length === 0) {
-      return { ok: false, warning: `artifact_missing_text: artifactId=${activation.artifactId} principleId=${principleId}; nextAction=ensure_artifact_has_text` };
+    if (!resolvedText || resolvedText.length === 0) {
+      return { ok: false, warning: `artifact_missing_text: artifactId=${activation.artifactId} principleId=${resolvedPrincipleId}; nextAction=ensure_artifact_has_text_or_principleDraft_statement` };
     }
 
     return {
       ok: true,
       principle: {
-        principleId,
-        text,
+        principleId: resolvedPrincipleId,
+        text: resolvedText,
         artifactId: activation.artifactId,
         activationId: activation.activationId,
       },
