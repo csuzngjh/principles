@@ -1,32 +1,41 @@
 /**
- * 卸载器模块
- * 
- * ⚠️ 安全原则：
- * 1. 只删除插件系统文件（~/.openclaw/extensions/principles-disciple）
- * 2. 只删除插件配置文件（~/.openclaw/principles-disciple.json）
- * 3. 绝对不删除用户工作区的任何文件：
- *    - MD 文件（AGENTS.md, SOUL.md 等）
- *    - 记忆文件（.principles/ 目录）
- *    - 状态文件（.state/ 目录）
- *    - 任何用户数据
+ * Uninstaller module
+ *
+ * ⚠️ Safety principles:
+ * 1. Only delete plugin system files (~/.openclaw/extensions/principles-disciple)
+ * 2. Only delete plugin config files (~/.openclaw/principles-disciple.json)
+ * 3. Never delete any files from user workspace:
+ *    - MD files (AGENTS.md, SOUL.md, etc.)
+ *    - Memory files (.principles/ directory)
+ *    - State files (.state/ directory)
+ *    - Any user data
  */
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';
+import { getGlobalShimPaths, getInstalledBinDir, isWindows } from './mvp-config.js';
+import { setLanguage, t, getLanguage } from './i18n.js';
 
 export interface UninstallResult {
   success: boolean;
   removedDirs: string[];
   removedFiles: string[];
-  preservedPaths: string[];  // 保留的路径（供用户确认）
+  removedGlobalShims: string[];
+  skippedGlobalShims: string[];
+  preservedPaths: string[];  // Preserved paths (for user confirmation)
   error?: string;
 }
 
+async function detectAndSetLanguage(): Promise<void> {
+  // Simple implementation - default to Chinese, can be improved later
+  setLanguage('zh');
+}
+
 /**
- * 检查安装状态
+ * Check install status
  */
 export function checkInstallStatus(): {
   isInstalled: boolean;
@@ -38,31 +47,96 @@ export function checkInstallStatus(): {
   }[];
 } {
   const configDir = getOpenClawConfigDir();
-  
+
+  const lang = getLanguage();
   const paths = [
-    { path: getPluginExtDir(), name: '插件扩展目录', type: 'dir' as const },
-    { path: path.join(configDir, 'principles-disciple.json'), name: '配置文件', type: 'file' as const },
+    { path: getPluginExtDir(), name: lang === 'zh' ? '插件扩展目录' : 'Plugin extension directory', type: 'dir' as const },
+    { path: path.join(configDir, 'principles-disciple.json'), name: lang === 'zh' ? '配置文件' : 'Config file', type: 'file' as const },
   ];
-  
+
   const checkedPaths = paths.map(p => ({
     exists: existsSync(p.path),
     path: p.path,
     name: p.name,
     type: p.type,
   }));
-  
+
   const isInstalled = checkedPaths.some(p => p.exists);
-  
+
   return { isInstalled, paths: checkedPaths };
 }
 
 /**
- * 获取用户工作区路径（用于显示保护提醒）
+ * 检查 shim 文件是否由 Principles Disciple 创建
+ * 通过读取文件内容，确认其目标指向 PD 安装目录
+ */
+function isPdOwnedShim(shimPath: string): boolean {
+  try {
+    const content = readFileSync(shimPath, 'utf-8');
+    const pdBinDir = getInstalledBinDir();
+    const pdBinPath = isWindows()
+      ? path.join(pdBinDir, 'pd.cmd')
+      : path.join(pdBinDir, 'pd');
+
+    if (isWindows()) {
+      // Windows cmd/ps1 shim 应包含 PD 安装路径
+      return content.includes(pdBinDir) || content.includes(pdBinPath);
+    } else {
+      // Unix shim 通常是符号链接或脚本，检查是否指向 PD 安装目录
+      return content.includes(pdBinDir) || content.includes(pdBinPath);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Clean up global pd shim files
+ * Only deletes shims that were created by Principles Disciple
+ */
+async function removeGlobalPdShim(): Promise<{ removed: string[]; skipped: string[] }> {
+  const removed: string[] = [];
+  const skipped: string[] = [];
+
+  const shimPaths = getGlobalShimPaths();
+
+  if (shimPaths.length === 0) {
+    logger.info(t('cannot_detect_npm_global'));
+    return { removed, skipped };
+  }
+
+  for (const shimPath of shimPaths) {
+    if (!existsSync(shimPath)) {
+      skipped.push(shimPath);
+      continue;
+    }
+
+    if (!isPdOwnedShim(shimPath)) {
+      logger.warn(`${t('global_command_skip_not_owned')}: ${shimPath}`);
+      skipped.push(shimPath);
+      continue;
+    }
+
+    try {
+      await fse.remove(shimPath);
+      removed.push(shimPath);
+      logger.success(`${t('global_command_deleted')}: ${shimPath}`);
+    } catch (error) {
+      logger.warn(`${t('global_command_delete_failed')}: ${shimPath} - ${error instanceof Error ? error.message : String(error)}`);
+      skipped.push(shimPath);
+    }
+  }
+
+  return { removed, skipped };
+}
+
+/**
+ * Get user workspace path (for showing preservation notice)
  */
 function getWorkspacePath(): string | null {
   const configDir = getOpenClawConfigDir();
   const configPath = path.join(configDir, 'principles-disciple.json');
-  
+
   if (existsSync(configPath)) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports -- Reason: CommonJS require for synchronous JSON loading - ESM import() would require async refactoring throughout the module
@@ -76,93 +150,104 @@ function getWorkspacePath(): string | null {
 }
 
 /**
- * 执行卸载
- * 
- * @param options.force 跳过确认提示（危险，仅用于脚本）
+ * Execute uninstall
+ *
+ * @param options.force Skip confirmation prompt (dangerous, for scripts only)
  */
 export async function uninstall(
   options: {
     force?: boolean;
   } = {}
 ): Promise<UninstallResult> {
+  await detectAndSetLanguage();
+
   const result: UninstallResult = {
     success: false,
     removedDirs: [],
     removedFiles: [],
+    removedGlobalShims: [],
+    skippedGlobalShims: [],
     preservedPaths: [],
   };
-  
+
   try {
-    // 1. 检查安装状态
+    // 1. Check install status
     const status = checkInstallStatus();
-    
+
     if (!status.isInstalled) {
-      logger.warn('未检测到已安装的 Principles Disciple');
+      logger.warn(t('no_install_detected'));
       result.success = true;
       return result;
     }
-    
-    // 2. 获取工作区路径并显示保护提醒
+
+    // 2. Get workspace path and show preservation notice
     const workspaceDir = getWorkspacePath();
-    
-    console.log('');
-    logger.warn('⚠️  重要提醒：');
-    console.log('   卸载操作仅移除插件系统文件，不会删除您的个人数据。');
-    console.log('');
-    
+
+    console.log('\n');
+    logger.warn(t('uninstall_warning_title'));
+    console.log(`   ${t('uninstall_warning_msg')}`);
+    console.log('\n');
+
     if (workspaceDir && existsSync(workspaceDir)) {
-      logger.info('以下工作区文件将被保留：');
-      console.log(`   📁 工作区目录: ${workspaceDir}`);
-      console.log('   📄 MD 文件 (AGENTS.md, SOUL.md, PRINCIPLES.md 等)');
-      console.log('   📁 .principles/ 目录（身份层配置）');
-      console.log('   📁 .state/ 目录（进化状态和记忆）');
-      console.log('');
+      logger.info(t('workspace_files_preserved'));
+      console.log(`   📁 ${t('workspace_dir_label')}: ${workspaceDir}`);
+      console.log(`   📄 ${t('md_files_preserved')}`);
+      console.log(`   📁 ${t('principles_dir_preserved')}`);
+      console.log(`   📁 ${t('state_dir_preserved')}`);
+      console.log('\n');
     }
-    
-    // 3. 显示将要删除的内容
-    logger.info('以下插件文件将被删除：');
+
+    // 3. Show what will be deleted
+    logger.info(t('plugin_files_will_delete'));
     for (const p of status.paths) {
       if (p.exists) {
         const icon = p.type === 'dir' ? '📁' : '📄';
         console.log(`  ${icon} ${p.name}: ${p.path}`);
       }
     }
-    console.log('');
-    
-    // 4. 确认卸载（除非 --force）
+    console.log('\n');
+
+    // 4. Confirm uninstall (unless --force)
     if (!options.force) {
       const confirmed = await confirm({
-        message: '确认卸载插件？（您的个人数据将保留）',
+        message: t('confirm_uninstall'),
         default: false,
       });
-      
+
       if (!confirmed) {
-        logger.info('卸载已取消');
+        logger.info(t('uninstall_cancelled'));
         result.success = true;
         return result;
       }
     }
-    
-    // 5. 执行删除（仅限插件系统文件）
+
+    // 5. Execute deletion (only plugin system files)
     for (const p of status.paths) {
       if (!p.exists) continue;
-      
+
       try {
         if (p.type === 'dir') {
           await fse.remove(p.path);
           result.removedDirs.push(p.path);
-          logger.success(`已删除: ${p.name}`);
+          logger.success(`${t('deleted')}: ${p.name}`);
         } else {
           await fse.remove(p.path);
           result.removedFiles.push(p.path);
-          logger.success(`已删除: ${p.name}`);
+          logger.success(`${t('deleted')}: ${p.name}`);
         }
       } catch (error) {
-        logger.error(`删除失败: ${p.name} - ${error instanceof Error ? error.message : String(error)}`);
+        logger.error(`${t('delete_failed')}: ${p.name} - ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    
-    // 6. 记录保留的路径
+
+    // 6. Clean up global pd shim
+    console.log('\n');
+    logger.info(t('cleaning_global_commands'));
+    const { removed, skipped } = await removeGlobalPdShim();
+    result.removedGlobalShims = removed;
+    result.skippedGlobalShims = skipped;
+
+    // 7. Record preserved paths
     if (workspaceDir) {
       result.preservedPaths.push(workspaceDir);
       if (existsSync(path.join(workspaceDir, '.principles'))) {
@@ -172,24 +257,24 @@ export async function uninstall(
         result.preservedPaths.push(path.join(workspaceDir, '.state'));
       }
     }
-    
+
     result.success = true;
-    
-    console.log('');
-    logger.success('✅ 卸载完成！');
-    console.log('');
-    
+
+    console.log('\n');
+    logger.success(t('uninstall_complete'));
+    console.log('\n');
+
     if (result.preservedPaths.length > 0) {
-      logger.info('💡 您的个人数据已保留在以下位置：');
+      logger.info(t('personal_data_preserved'));
       result.preservedPaths.forEach(p => console.log(`   ${p}`));
-      console.log('');
-      logger.info('如需彻底清理，请手动删除上述目录。');
+      console.log('\n');
+      logger.info(t('manual_cleanup_hint'));
     }
-    
+
     return result;
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error);
-    logger.error(`卸载失败: ${result.error}`);
+    logger.error(`${t('uninstall_failed')}: ${result.error}`);
     return result;
   }
 }
