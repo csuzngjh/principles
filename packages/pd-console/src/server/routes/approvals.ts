@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ApprovalStatus, InternalizationChannel } from '@principles/core/runtime-v2';
 import { MVP_CHANNELS } from '@principles/core/runtime-v2';
-import { ApprovalsConsoleModel } from '../models/ApprovalsConsoleModel.js';
+import { ApprovalsConsoleModel, type ApproveWithActivationResult } from '../models/ApprovalsConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
 import { parseQuery, readBody } from '../utils/request.js';
 
@@ -121,7 +121,7 @@ export async function handleApprovalsRoute(
       }
 
       const note = typeof parsed.note === 'string' ? parsed.note : undefined;
-      const result = await model.approve(approvalId, 'operator', note);
+      const result: ApproveWithActivationResult = await model.approve(approvalId, 'operator', note);
       if (!result.ok) {
         if (result.error === 'not_found') {
           sendNotFound(res, 'Approval ' + approvalId + ' not found');
@@ -132,7 +132,7 @@ export async function handleApprovalsRoute(
         }
         return;
       }
-      sendSuccess(res, result.record);
+      sendSuccess(res, { record: result.record, activation: result.activation });
     } catch (err: unknown) {
       const message = getErrorMessage(err);
       if (message === 'Request body too large') {
