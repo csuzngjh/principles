@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import * as path from 'path';
 import { isPdOwnedShim, checkInstallStatus } from '../src/uninstaller.js';
 import { getInstalledBinDir, isWindows } from '../src/mvp-config.js';
 

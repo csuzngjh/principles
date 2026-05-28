@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { setLanguage, getLanguage, t, type Language } from '../src/i18n.js';
+import { setLanguage, getLanguage, t } from '../src/i18n.js';
 
 describe('internationalization utilities', () => {
   afterEach(() => {
@@ -37,12 +37,7 @@ describe('internationalization utilities', () => {
       expect(t('workspace_dir')).toBe('Workspace directory');
     });
 
-    it('falls back to English when key is missing in current language', () => {
-      setLanguage('zh');
-      expect(t('unknown_key')).toBe('unknown_key');
-    });
-
-    it('returns key when translation is missing in both languages', () => {
+    it('falls back to key when translation is missing', () => {
       setLanguage('zh');
       expect(t('nonexistent_key_12345')).toBe('nonexistent_key_12345');
     });

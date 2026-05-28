@@ -1,13 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as path from 'path';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as childProcess from 'child_process';
 import { validateWorkspacePath, verifyNativeModules, rebuildNativeModules, checkBuiltPlugin } from '../src/installer.js';
 
 vi.mock('fs');
 vi.mock('child_process', () => ({
   execFileSync: vi.fn(() => Buffer.from('')),
+  execSync: vi.fn(() => Buffer.from('')),
 }));
 
 describe('validateWorkspacePath security guard', () => {
@@ -93,6 +92,50 @@ describe('Native module verification', () => {
   });
 });
 
+describe('rebuildNativeModules', () => {
+  const mockExecSync = vi.mocked(childProcess.execSync);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExecSync.mockImplementation(() => Buffer.from(''));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('skips modules that do not exist', async () => {
+    const mockExistsSync = vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+
+    await expect(rebuildNativeModules('/test/path', 'Test')).resolves.not.toThrow();
+
+    expect(mockExistsSync).toHaveBeenCalled();
+    expect(mockExecSync).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds existing native modules', async () => {
+    const mockExistsSync = vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
+      return p.toString().includes('better-sqlite3');
+    });
+    mockExecSync.mockImplementation(() => Buffer.from(''));
+
+    await expect(rebuildNativeModules('/test/path', 'Test')).resolves.not.toThrow();
+
+    expect(mockExecSync).toHaveBeenCalled();
+  });
+
+  it('throws when rebuild fails', async () => {
+    const mockExistsSync = vi.spyOn(fs, 'existsSync').mockImplementation((p) => {
+      return p.toString().includes('better-sqlite3');
+    });
+    mockExecSync.mockImplementation(() => {
+      throw new Error('rebuild failed');
+    });
+
+    await expect(rebuildNativeModules('/test/path', 'Test')).rejects.toThrow(/rebuild failed/);
+  });
+});
+
 describe('checkBuiltPlugin validation', () => {
   const mockReadFileSync = vi.spyOn(fs, 'readFileSync');
   const mockExistsSync = vi.spyOn(fs, 'existsSync');
@@ -135,23 +178,5 @@ describe('checkBuiltPlugin validation', () => {
     }));
 
     await expect(checkBuiltPlugin('/test/plugin')).rejects.toThrow(/does not include "hook"/);
-  });
-});
-
-describe('installProgress calculation', () => {
-  it('progress percentage is calculated correctly', () => {
-    const INSTALL_STEPS = [
-      { name: 'Step 1', weight: 10 },
-      { name: 'Step 2', weight: 20 },
-      { name: 'Step 3', weight: 30 },
-    ];
-    const TOTAL_WEIGHT = INSTALL_STEPS.reduce((sum, s) => sum + s.weight, 0);
-
-    expect(TOTAL_WEIGHT).toBe(60);
-
-    const completedWeight = INSTALL_STEPS.slice(0, 2).reduce((sum, s) => sum + s.weight, 0);
-    const percent = Math.round((completedWeight / TOTAL_WEIGHT) * 100);
-    
-    expect(percent).toBe(50);
   });
 });

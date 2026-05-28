@@ -14,15 +14,29 @@ describe('environment detection utilities', () => {
   const mockExecSync = vi.mocked(childProcess.execSync);
   const mockExistsSync = vi.spyOn(fs, 'existsSync');
   const mockHomedir = vi.spyOn(os, 'homedir');
+  let savedOpenClawWorkspace: string | undefined;
+  let savedPdWorkspaceDir: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockHomedir.mockReturnValue('/home/user');
     mockExecSync.mockImplementation(() => '');
+    savedOpenClawWorkspace = process.env.OPENCLAW_WORKSPACE;
+    savedPdWorkspaceDir = process.env.PD_WORKSPACE_DIR;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    if (savedOpenClawWorkspace !== undefined) {
+      process.env.OPENCLAW_WORKSPACE = savedOpenClawWorkspace;
+    } else {
+      delete process.env.OPENCLAW_WORKSPACE;
+    }
+    if (savedPdWorkspaceDir !== undefined) {
+      process.env.PD_WORKSPACE_DIR = savedPdWorkspaceDir;
+    } else {
+      delete process.env.PD_WORKSPACE_DIR;
+    }
   });
 
   describe('checkEnvironment', () => {
@@ -76,8 +90,6 @@ describe('environment detection utilities', () => {
 
   describe('detectWorkspace', () => {
     it('detects workspace from environment variable OPENCLAW_WORKSPACE', () => {
-      const originalOpenClawEnv = process.env.OPENCLAW_WORKSPACE;
-      const originalPdEnv = process.env.PD_WORKSPACE_DIR;
       process.env.OPENCLAW_WORKSPACE = '/custom/workspace';
       delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockReturnValue(true);
@@ -86,13 +98,9 @@ describe('environment detection utilities', () => {
 
       expect(result.detectedPath).toBe('/custom/workspace');
       expect(result.exists).toBe(true);
-      process.env.OPENCLAW_WORKSPACE = originalOpenClawEnv;
-      process.env.PD_WORKSPACE_DIR = originalPdEnv;
     });
 
     it('detects workspace from environment variable PD_WORKSPACE_DIR', () => {
-      const originalOpenClawEnv = process.env.OPENCLAW_WORKSPACE;
-      const originalPdEnv = process.env.PD_WORKSPACE_DIR;
       delete process.env.OPENCLAW_WORKSPACE;
       process.env.PD_WORKSPACE_DIR = '/pd/workspace';
       mockExistsSync.mockReturnValue(true);
@@ -101,11 +109,11 @@ describe('environment detection utilities', () => {
 
       expect(result.detectedPath).toBe('/pd/workspace');
       expect(result.exists).toBe(true);
-      process.env.OPENCLAW_WORKSPACE = originalOpenClawEnv;
-      process.env.PD_WORKSPACE_DIR = originalPdEnv;
     });
 
     it('returns default path when no workspace exists', () => {
+      delete process.env.OPENCLAW_WORKSPACE;
+      delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockReturnValue(false);
 
       const result = detectWorkspace();
@@ -116,6 +124,8 @@ describe('environment detection utilities', () => {
     });
 
     it('detects existing workspace with principles', () => {
+      delete process.env.OPENCLAW_WORKSPACE;
+      delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockImplementation((p: string) => {
         if (p.toString() === '/home/user/clawd') return true;
         if (p.toString() === '/home/user/clawd/.principles/PRINCIPLES.md') return true;
@@ -129,6 +139,8 @@ describe('environment detection utilities', () => {
     });
 
     it('detects existing workspace without principles but with core files', () => {
+      delete process.env.OPENCLAW_WORKSPACE;
+      delete process.env.PD_WORKSPACE_DIR;
       mockExistsSync.mockImplementation((p: string) => {
         if (p.toString() === '/home/user/clawd') return true;
         if (p.toString() === '/home/user/clawd/.principles/PRINCIPLES.md') return false;

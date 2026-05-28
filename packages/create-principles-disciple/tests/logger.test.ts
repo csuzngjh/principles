@@ -2,17 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { logger, setQuietMode, banner } from '../src/utils/logger.js';
 
 describe('logger utilities', () => {
-  const originalLog = console.log;
-  const mockLog = vi.fn();
+  let mockLog: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    mockLog = vi.fn();
     console.log = mockLog;
     setQuietMode(false);
   });
 
   afterEach(() => {
-    console.log = originalLog;
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    setQuietMode(false);
   });
 
   describe('setQuietMode', () => {
@@ -78,6 +78,16 @@ describe('logger utilities', () => {
       expect(mockLog).toHaveBeenCalledWith(expect.stringContaining('Test Title'));
       expect(mockLog).toHaveBeenCalledWith(expect.stringContaining('Name1'));
       expect(mockLog).toHaveBeenCalledWith(expect.stringContaining('Value1'));
+    });
+
+    it('list skips output in quiet mode', () => {
+      setQuietMode(true);
+      
+      logger.list('Test Title', [
+        { name: 'Name1', value: 'Value1' },
+      ]);
+      
+      expect(mockLog).not.toHaveBeenCalled();
     });
   });
 
