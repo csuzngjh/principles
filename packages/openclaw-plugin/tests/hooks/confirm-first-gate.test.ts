@@ -31,11 +31,14 @@ describe('Confirm-First Gate', () => {
     it('detects English approval markers', () => {
       expect(detectApprovalMarker('approved')).toBe(true);
       expect(detectApprovalMarker('go ahead')).toBe(true);
-      expect(detectApprovalMarker('proceed')).toBe(true);
-      expect(detectApprovalMarker('confirm')).toBe(true);
+      expect(detectApprovalMarker('lgtm')).toBe(true);
       expect(detectApprovalMarker('yes, do it')).toBe(true);
       expect(detectApprovalMarker('do it')).toBe(true);
-      expect(detectApprovalMarker('lgtm')).toBe(true);
+      expect(detectApprovalMarker('yes, proceed')).toBe(true);
+      expect(detectApprovalMarker('yes, execute')).toBe(true);
+      expect(detectApprovalMarker('proceed with the plan')).toBe(true);
+      expect(detectApprovalMarker('execute the plan')).toBe(true);
+      expect(detectApprovalMarker('please proceed with the plan')).toBe(true);
     });
 
     it('rejects vague text', () => {
@@ -61,6 +64,15 @@ describe('Confirm-First Gate', () => {
       expect(detectApprovalMarker("can't approve yet")).toBe(false);
       expect(detectApprovalMarker("won't proceed")).toBe(false);
       expect(detectApprovalMarker("stop")).toBe(false);
+    });
+
+    it('rejects ambiguous English phrases without explicit approval context', () => {
+      expect(detectApprovalMarker('please confirm requirements before proceeding')).toBe(false);
+      expect(detectApprovalMarker('how should we proceed?')).toBe(false);
+      expect(detectApprovalMarker('confirm the requirement first')).toBe(false);
+      expect(detectApprovalMarker('should I proceed?')).toBe(false);
+      expect(detectApprovalMarker('I need to confirm something')).toBe(false);
+      expect(detectApprovalMarker('let me confirm the plan')).toBe(false);
     });
   });
 
@@ -142,6 +154,21 @@ describe('Confirm-First Gate', () => {
 
       expect(evaluateConfirmFirstGateSync('session-1', 'write', {}).action).toBe('allow');
       expect(evaluateConfirmFirstGateSync('session-2', 'write', {}).action).toBe('block');
+    });
+
+    it('blocks apply_patch with no path when directive active', () => {
+      setConfirmFirstDirective('session-1', true, 'princ-mvp-acceptance-confirm-first');
+      // apply_patch with patch body but no path/file_path
+      const result = evaluateConfirmFirstGateSync('session-1', 'apply_patch', { patch: '@@ -1 +1 @@\n-old\n+new' });
+      expect(result.action).toBe('block');
+      expect(result.reason).toBe('confirm_first_required');
+    });
+
+    it('allows apply_patch after approval', () => {
+      setConfirmFirstDirective('session-1', true, 'princ-mvp-acceptance-confirm-first');
+      setConfirmFirstApproval('session-1');
+      const result = evaluateConfirmFirstGateSync('session-1', 'apply_patch', { patch: '@@ -1 +1 @@\n-old\n+new' });
+      expect(result.action).toBe('allow');
     });
 
     it('reset clears both directive and approval state', () => {

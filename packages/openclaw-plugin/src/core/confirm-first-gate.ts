@@ -75,10 +75,10 @@ export function detectApprovalMarker(message: string): boolean {
   // Multi-word Chinese markers
   const zhPhraseMarkers = /按计划执行|可以执行|就这么做|去执行|照.*做|没问题.*执行/;
 
-  // English markers — single-word approvals
-  const enMarkers = /\bapproved\b|\bgo\s*ahead\b|\bproceed\b|\bconfirm\b|\blgtm\b/i;
-  // English phrase markers that are unambiguous
-  const enPhraseMarkers = /\byes,?\s*(do\s+it|proceed|execute)\b|\bdo\s+it\b/i;
+  // English markers — unambiguous single-word approvals only
+  const enMarkers = /\bapproved\b|\bgo\s*ahead\b|\blgtm\b/i;
+  // English phrase markers — require explicit approval context
+  const enPhraseMarkers = /\byes,?\s*(do\s+it|proceed|execute)\b|\bdo\s+it\b|\bproceed\s+with\s+the\s+plan\b|\bexecute\s+the\s+plan\b|\bplease\s+proceed\s+with\s+the\s+plan\b/i;
 
   // Check Chinese
   if (zhExactMarkers.test(trimmed) || zhPhraseMarkers.test(trimmed)) {
