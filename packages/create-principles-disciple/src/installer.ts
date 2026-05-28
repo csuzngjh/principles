@@ -252,7 +252,6 @@ async function installPluginToStaging(pluginDir: string): Promise<void> {
 async function updateOpenClawConfig(): Promise<void> {
   const configDir = getOpenClawDir();
   const configPath = path.join(configDir, 'openclaw.json');
-  const extDir = getPluginExtDir();
 
   if (!existsSync(configPath)) return;
 
@@ -289,23 +288,60 @@ async function updateOpenClawConfig(): Promise<void> {
     throw new Error('openclaw.json plugins.entries is malformed. Fix manually and re-run installer.');
   }
   const entries = { ...(plugins.entries as Record<string, unknown>) };
-  entries['principles-disciple'] = { enabled: true };
+  // Merge with existing config — preserve hooks, config, and other user settings
+  const existingEntry = (typeof entries['principles-disciple'] === 'object' && entries['principles-disciple'] !== null && !Array.isArray(entries['principles-disciple']))
+    ? { ...(entries['principles-disciple'] as Record<string, unknown>) }
+    : {};
+  entries['principles-disciple'] = { ...existingEntry, enabled: true };
   plugins.entries = entries;
 
-  if (!plugins.installs) plugins.installs = {};
-  if (typeof plugins.installs !== 'object' || plugins.installs === null || Array.isArray(plugins.installs)) {
-    throw new Error('openclaw.json plugins.installs is malformed. Fix manually and re-run installer.');
-  }
-  const installs = { ...(plugins.installs as Record<string, unknown>) };
-  installs['principles-disciple'] = {
-    source: 'path',
-    installPath: extDir,
-    installedAt: new Date().toISOString(),
-  };
-  plugins.installs = installs;
+  // Do NOT write plugins.installs — OpenClaw manages install records in
+  // ~/.openclaw/plugins/installs.json and strips plugins.installs from
+  // openclaw.json on every write. Writing it here causes duplicate
+  // registration and config corruption loops.
 
   configObj.plugins = plugins;
   writeFileSync(configPath, JSON.stringify(configObj, null, 2));
+
+  // Write install record to installs.json (the canonical store)
+  const installsDir = path.join(configDir, 'plugins');
+  const installsPath = path.join(installsDir, 'installs.json');
+  try {
+    if (!existsSync(installsDir)) {
+      mkdirSync(installsDir, { recursive: true });
+    }
+    let installs: Record<string, unknown> = { version: 1, installRecords: {} };
+    if (existsSync(installsPath)) {
+      const raw = readFileSync(installsPath, 'utf-8');
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        installs = parsed as Record<string, unknown>;
+      }
+    }
+    if (!installs.installRecords || typeof installs.installRecords !== 'object') {
+      installs.installRecords = {};
+    }
+    const extDir = getPluginExtDir();
+    const pkgPath = path.join(extDir, 'package.json');
+    let version: string | undefined = undefined;
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        if (typeof pkg === 'object' && pkg !== null && 'version' in (pkg as Record<string, unknown>)) {
+          version = (pkg as Record<string, unknown>).version as string;
+        }
+      } catch { /* ignore */ }
+    }
+    (installs.installRecords as Record<string, unknown>)['principles-disciple'] = {
+      source: 'path',
+      installPath: extDir,
+      ...(version ? { version } : {}),
+      installedAt: new Date().toISOString(),
+    };
+    writeFileSync(installsPath, JSON.stringify(installs, null, 2));
+  } catch {
+    // Non-fatal — installs.json is managed by OpenClaw and will self-heal
+  }
 }
 
 async function installPluginDependencies(): Promise<void> {
@@ -522,6 +558,8 @@ async function installConsoleDependencies(): Promise<void> {
   await rebuildNativeModules(consoleDest, 'Console');
 }
 
+const CONSOLE_PORT_MAX_RETRIES = 3;
+
 async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null; reason?: string }> {
   const consoleDest = getInstalledConsoleDir();
   const serverEntry = path.join(consoleDest, 'dist', 'server.js');
@@ -530,82 +568,97 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
     return { ok: false, url: '', process: null, reason: 'Console server entry not found' };
   }
 
-  const port = CONSOLE_PORT_RANGE_MIN + Math.floor(Math.random() * (CONSOLE_PORT_RANGE_MAX - CONSOLE_PORT_RANGE_MIN + 1));
-  const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth', '--host', '127.0.0.1'], {
-    stdio: 'pipe',
-    env: { ...process.env },
-    detached: false,
-  });
-
-  let childExited = false;
-  let childExitCode: number | null = null;
-  let childStderr = '';
-  let childStdout = '';
-  child.on('exit', (code) => {
-    childExited = true;
-    childExitCode = code;
-  });
-  child.stderr?.on('data', (chunk: Buffer) => {
-    childStderr += chunk.toString();
-  });
-  child.stdout?.on('data', (chunk: Buffer) => {
-    childStdout += chunk.toString();
-  });
-
-  await new Promise<void>((resolve) => { setTimeout(resolve, CONSOLE_WARMUP_TIME_MS); });
-
-  if (childExited) {
-    const stderrHint = childStderr.slice(0, 500);
-    return { ok: false, url: '', process: null, reason: `Console process exited prematurely with code ${childExitCode}. Stderr: ${stderrHint}` };
+  // Build a shuffled port list to avoid retrying the same port
+  const portRange: number[] = [];
+  for (let p = CONSOLE_PORT_RANGE_MIN; p <= CONSOLE_PORT_RANGE_MAX; p++) portRange.push(p);
+  for (let i = portRange.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [portRange[i], portRange[j]] = [portRange[j], portRange[i]];
   }
+  const portsToTry = portRange.slice(0, CONSOLE_PORT_MAX_RETRIES);
 
-  const url = `http://127.0.0.1:${port}`;
-  let ok = false;
-  let reason = '';
-  try {
-    const result = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
-      const req = http.get(`${url}/api/health`, (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => {
-          resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() });
-        });
-      });
-      req.on('error', reject);
-      req.setTimeout(CONSOLE_HEALTH_CHECK_TIMEOUT_MS, () => { req.destroy(); reject(new Error('health check timeout')); });
+  let lastReason = '';
+
+  for (const port of portsToTry) {
+    const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth', '--host', '127.0.0.1'], {
+      stdio: 'pipe',
+      env: { ...process.env },
+      detached: false,
     });
 
-    if (result.statusCode !== 200) {
-      reason = `Console /api/health returned HTTP ${result.statusCode} (expected 200)`;
-    } else if (!result.body || result.body.trim().length === 0) {
-      reason = 'Console /api/health returned empty body';
-    } else {
-      try {
-        const parsed: unknown = JSON.parse(result.body);
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-          reason = 'Console /api/health returned non-object JSON';
-        } else {
-          ok = true;
-        }
-      } catch {
-        reason = 'Console /api/health returned malformed JSON';
-      }
+    let childExited = false;
+    let childExitCode: number | null = null;
+    let childStderr = '';
+    let childStdout = '';
+    child.on('exit', (code) => {
+      childExited = true;
+      childExitCode = code;
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      childStderr += chunk.toString();
+    });
+    child.stdout?.on('data', (chunk: Buffer) => {
+      childStdout += chunk.toString();
+    });
+
+    await new Promise<void>((resolve) => { setTimeout(resolve, CONSOLE_WARMUP_TIME_MS); });
+
+    if (childExited) {
+      lastReason = `Console process exited prematurely with code ${childExitCode} on port ${port}. Stderr: ${childStderr.slice(0, 500)}`;
+      continue; // Try next port
     }
-  } catch (e) {
-    reason = `Console health check failed: ${e instanceof Error ? e.message : String(e)}. Stderr: ${childStderr.slice(0, 300)}. Stdout: ${childStdout.slice(0, 300)}`;
-  }
 
-  if (!ok) {
-    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    const url = `http://127.0.0.1:${port}`;
+    let ok = false;
+    let reason = '';
     try {
-      if (!childExited) {
-        child.kill('SIGKILL');
+      const result = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+        const req = http.get(`${url}/api/health`, (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () => {
+            resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() });
+          });
+        });
+        req.on('error', reject);
+        req.setTimeout(CONSOLE_HEALTH_CHECK_TIMEOUT_MS, () => { req.destroy(); reject(new Error('health check timeout')); });
+      });
+
+      if (result.statusCode !== 200) {
+        reason = `Console /api/health returned HTTP ${result.statusCode} (expected 200)`;
+      } else if (!result.body || result.body.trim().length === 0) {
+        reason = 'Console /api/health returned empty body';
+      } else {
+        try {
+          const parsed: unknown = JSON.parse(result.body);
+          if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            reason = 'Console /api/health returned non-object JSON';
+          } else {
+            ok = true;
+          }
+        } catch {
+          reason = 'Console /api/health returned malformed JSON';
+        }
       }
-    } catch { /* ignore */ }
-    return { ok: false, url, process: null, reason };
+    } catch (e) {
+      reason = `Console health check failed on port ${port}: ${e instanceof Error ? e.message : String(e)}. Stderr: ${childStderr.slice(0, 300)}. Stdout: ${childStdout.slice(0, 300)}`;
+    }
+
+    if (!ok) {
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      try {
+        if (!childExited) {
+          child.kill('SIGKILL');
+        }
+      } catch { /* ignore */ }
+      lastReason = reason;
+      continue; // Try next port
+    }
+
+    return { ok: true, url, process: child };
   }
 
-  return { ok: true, url, process: child };
+  return { ok: false, url: '', process: null, reason: `All ${CONSOLE_PORT_MAX_RETRIES} port attempts failed. Last: ${lastReason}` };
 }
 
 interface CopyOptions {

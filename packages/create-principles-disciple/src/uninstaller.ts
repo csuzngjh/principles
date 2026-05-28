@@ -10,7 +10,7 @@
  *    - State files (.state/ directory)
  *    - Any user data
  */
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
 import { confirm } from '@inquirer/prompts';
@@ -150,6 +150,75 @@ function getWorkspacePath(): string | null {
 }
 
 /**
+ * Remove principles-disciple entries from openclaw.json
+ * Cleans plugins.allow, plugins.entries, and plugins.installs
+ */
+function cleanupOpenClawConfig(): { cleaned: boolean; error?: string } {
+  const configDir = getOpenClawConfigDir();
+  const configPath = path.join(configDir, 'openclaw.json');
+
+  if (!existsSync(configPath)) {
+    return { cleaned: false };
+  }
+
+  try {
+    const raw = readFileSync(configPath, 'utf-8');
+    const config: unknown = JSON.parse(raw);
+
+    if (config === null || typeof config !== 'object' || Array.isArray(config)) {
+      return { cleaned: false, error: 'openclaw.json is not an object' };
+    }
+
+    const configObj = config as Record<string, unknown>;
+    let modified = false;
+
+    // Clean plugins.allow
+    if (Array.isArray(configObj.plugins) || typeof configObj.plugins !== 'object' || configObj.plugins === null) {
+      // plugins is not an object, skip
+    } else {
+      const plugins = configObj.plugins as Record<string, unknown>;
+
+      // Remove from plugins.allow
+      if (Array.isArray(plugins.allow)) {
+        const before = plugins.allow.length;
+        const filtered = (plugins.allow as unknown[]).filter(
+          (a): a is string => typeof a === 'string' && a !== 'principles-disciple'
+        );
+        plugins.allow = filtered;
+        if (filtered.length !== before) modified = true;
+      }
+
+      // Remove from plugins.entries
+      if (typeof plugins.entries === 'object' && plugins.entries !== null && !Array.isArray(plugins.entries)) {
+        const entries = plugins.entries as Record<string, unknown>;
+        if ('principles-disciple' in entries) {
+          delete entries['principles-disciple'];
+          modified = true;
+        }
+      }
+
+      // Remove from plugins.installs (legacy field, but clean it up anyway)
+      if (typeof plugins.installs === 'object' && plugins.installs !== null && !Array.isArray(plugins.installs)) {
+        const installs = plugins.installs as Record<string, unknown>;
+        if ('principles-disciple' in installs) {
+          delete installs['principles-disciple'];
+          modified = true;
+        }
+      }
+    }
+
+    if (modified) {
+      writeFileSync(configPath, JSON.stringify(configObj, null, 2) + '\n');
+      return { cleaned: true };
+    }
+
+    return { cleaned: false };
+  } catch (err) {
+    return { cleaned: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Execute uninstall
  *
  * @param options.force Skip confirmation prompt (dangerous, for scripts only)
@@ -246,6 +315,14 @@ export async function uninstall(
     const { removed, skipped } = await removeGlobalPdShim();
     result.removedGlobalShims = removed;
     result.skippedGlobalShims = skipped;
+
+    // 6.5. Clean up openclaw.json entries
+    const configCleanup = cleanupOpenClawConfig();
+    if (configCleanup.cleaned) {
+      logger.success(t('openclaw_config_cleaned') || 'openclaw.json: removed principles-disciple entries');
+    } else if (configCleanup.error) {
+      logger.warn(`${t('openclaw_config_cleanup_failed') || 'openclaw.json cleanup failed'}: ${configCleanup.error}`);
+    }
 
     // 7. Record preserved paths
     if (workspaceDir) {
