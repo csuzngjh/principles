@@ -13,7 +13,7 @@ import {
 } from './mvp-config.js';
 import { setLanguage, t, getLanguage, type Language } from './i18n.js';
 
-function isLanguage(value: unknown): value is Language {
+export function isLanguage(value: unknown): value is Language {
   return value === 'zh' || value === 'en';
 }
 
