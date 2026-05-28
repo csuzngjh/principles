@@ -1,0 +1,384 @@
+<template id="scene-03-friction-template">
+  <div id="scene-03-friction" class="clip" data-composition-id="scene-03-friction" data-width="1920" data-height="1080" data-start="20" data-duration="13" data-track-index="1">
+    <div class="scene-container">
+      <!-- Vignette stays outside camera-rig for physical grounding -->
+      <div class="vignette"></div>
+
+      <!-- Camera Rig for slow cinematic pushes and physical alarm vibrations -->
+      <div class="camera-rig" id="s3-camera-rig">
+        <!-- Technical wireframe coordinates grid -->
+        <div class="tech-grid"></div>
+
+        <!-- Ambient radial glow behind the compiler box -->
+        <div class="ambient-glow" id="s3-glow"></div>
+
+        <!-- Emergency Pain Flash Overlay (inside camera-rig for unified lighting) -->
+        <div class="pain-flash" id="s3-pain-flash"></div>
+
+        <!-- Pain Trigger Center Text -->
+        <div class="pain-trigger-overlay" id="s3-pain-trigger">
+          <div class="friction-node-large"></div>
+          <div class="pain-header">Behavioral Drift Detected</div>
+          <div class="pain-alarm">Triggering Pain Signal</div>
+          <div class="pain-sub">Constructive Friction Activated</div>
+        </div>
+
+        <!-- Alchemy compilation flow container -->
+        <div class="alchemy-container" id="s3-alchemy">
+          
+          <!-- Concept visual -->
+          <div class="concept-visual">
+            <div class="fragments">
+              <div class="frag">"Don't touch prod DB"</div>
+              <div class="frag">"Confirm on error first"</div>
+              <div class="frag">"No infinite retries"</div>
+            </div>
+            
+            <div class="pd-node">
+              <div class="node-core"></div>
+              <div class="node-ring"></div>
+            </div>
+            
+            <div class="principle-line">
+              <div class="line-glow"></div>
+              <span class="line-text">Durable Agent Character</span>
+            </div>
+          </div>
+
+          <div class="features-text">Owner-governed · Observable · Reversible</div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      #scene-03-friction {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        background: #050608;
+        overflow: hidden;
+        font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+      }
+
+      .scene-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+      }
+
+      /* Camera Rig - supports dolly pushes and alarm shockwaves */
+      .camera-rig {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        transform-origin: center center;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 1;
+      }
+
+      .vignette {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle, transparent 40%, rgba(5, 6, 8, 0.95) 100%);
+        pointer-events: none;
+        z-index: 15;
+      }
+
+      /* Technical background mesh grid */
+      .tech-grid {
+        position: absolute;
+        inset: 0;
+        background-image: 
+          linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
+        background-size: 80px 80px;
+        background-position: center center;
+        z-index: 3;
+        pointer-events: none;
+      }
+
+      /* Soft pulsing ambient glow behind compiler box */
+      .ambient-glow {
+        position: absolute;
+        width: 1200px;
+        height: 1200px;
+        background: radial-gradient(circle, rgba(126, 184, 218, 0.06) 0%, rgba(126, 184, 218, 0.01) 40%, transparent 70%);
+        border-radius: 50%;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 2;
+        pointer-events: none;
+      }
+
+      /* Edge Emergency Flash */
+      .pain-flash {
+        position: absolute;
+        inset: 0;
+        box-shadow: inset 0 0 120px rgba(180, 80, 80, 0);
+        pointer-events: none;
+        z-index: 8;
+      }
+
+      /* Friction Node - Large (brand element) */
+      .friction-node-large {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #7EB8DA;
+        opacity: 0.6;
+        margin-bottom: 8px;
+      }
+
+      /* Pain Alarm Screen */
+      .pain-trigger-overlay {
+        position: absolute;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 16px;
+        z-index: 12;
+        opacity: 0;
+        transform: scale(0.9);
+      }
+
+      .pain-header {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 16px;
+        color: rgba(180, 80, 80, 0.85);
+        letter-spacing: 4px;
+        text-shadow: 0 0 10px rgba(180, 80, 80, 0.35);
+      }
+
+      .pain-alarm {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 64px;
+        font-weight: 900;
+        color: #E0E2E6;
+        letter-spacing: -2px;
+        text-shadow: 0 0 25px rgba(180, 80, 80, 0.5);
+      }
+
+      .pain-sub {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        color: #8A8F99;
+        letter-spacing: 2px;
+      }
+
+      /* Alchemy Flow Styling */
+      .alchemy-container {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 15;
+        opacity: 0;
+      }
+
+      .concept-visual {
+        display: flex;
+        align-items: center;
+        gap: 60px;
+        width: 1000px;
+        justify-content: space-between;
+      }
+
+      .fragments {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .frag {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        padding: 12px 24px;
+        border-radius: 8px;
+        color: #8A8F99;
+        font-size: 16px;
+        font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+      }
+
+      .pd-node {
+        position: relative;
+        width: 80px;
+        height: 80px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .node-core {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: #7EB8DA;
+        box-shadow: 0 0 20px #7EB8DA;
+      }
+
+      .node-ring {
+        position: absolute;
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        border: 2px solid rgba(126, 184, 218, 0.4);
+      }
+
+      .principle-line {
+        position: relative;
+        flex-grow: 1;
+        height: 2px;
+        background: rgba(126, 184, 218, 0.2);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        transform-origin: left;
+        transform: scaleX(0);
+      }
+
+      .line-glow {
+        position: absolute;
+        inset: 0;
+        background: #7EB8DA;
+        box-shadow: 0 0 15px #7EB8DA;
+        transform-origin: left;
+        transform: scaleX(0);
+      }
+
+      .line-text {
+        position: absolute;
+        top: -40px;
+        color: #E0E2E6;
+        font-size: 24px;
+        font-weight: 300;
+        letter-spacing: 2px;
+        opacity: 0;
+      }
+
+      .features-text {
+        position: absolute;
+        bottom: 120px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        color: #8A8F99;
+        letter-spacing: 3px;
+        opacity: 0;
+      }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function() {
+        window.__timelines = window.__timelines || {};
+        const tl = gsap.timeline({ paused: true });
+
+        // Set initial states
+        tl.set("#s3-camera-rig", { scale: 1.0 });
+        tl.set(".node-core", { scale: 0 });
+        tl.set(".node-ring", { scale: 0, opacity: 0 });
+        tl.set(".frag", { x: -50, opacity: 0 });
+        tl.set("#s3-pain-flash", { boxShadow: "inset 0 0 0px rgba(180, 80, 80, 0)" });
+
+        // Slow camera dolly-in push across scene runtime
+        tl.to("#s3-camera-rig", {
+          scale: 1.04,
+          duration: 13.0,
+          ease: "sine.out"
+        }, 0);
+
+        // Slowly drift ambient glow behind compiler box
+        tl.to("#s3-glow", {
+          x: "5%",
+          y: "-5%",
+          duration: 6.0,
+          yoyo: true,
+          repeat: 1,
+          ease: "sine.inOut"
+        }, 0);
+
+        // Beat 1: Alarm / Crash Flash (0 - 3s)
+        tl.to("#s3-pain-trigger", {
+          opacity: 1,
+          scale: 1,
+          duration: 0.6,
+          ease: "expo.out"
+        }, 0.1);
+
+        // Ominous warm heartbeat warning flash (mild pulsing effect, no violent jumps)
+        const pulseTimes = [0.2, 1.2];
+        pulseTimes.forEach((time) => {
+          tl.to("#s3-pain-flash", {
+            boxShadow: "inset 0 0 80px rgba(180, 80, 80, 0.2)",
+            duration: 0.35,
+            overwrite: "auto",
+            ease: "sine.out"
+          }, time);
+          
+          tl.to("#s3-pain-flash", {
+            boxShadow: "inset 0 0 0px rgba(180, 80, 80, 0)",
+            duration: 0.45,
+            overwrite: "auto",
+            ease: "sine.in"
+          }, time + 0.35);
+        });
+
+        // Beat 2: Climax transition into Alchemy flow (2.8s - 4.5s)
+        tl.to("#s3-pain-trigger", {
+          opacity: 0,
+          scale: 1.1,
+          duration: 0.6,
+          ease: "power3.in"
+        }, 2.8);
+
+        tl.to("#s3-alchemy", {
+          opacity: 1,
+          duration: 1.0,
+          ease: "power2.out"
+        }, 3.4);
+
+        // Beat 3: New Concept animation (4.0s - 10.0s)
+        // PD node appears
+        tl.to(".node-core", { scale: 1, duration: 1.0, ease: "elastic.out(1, 0.5)" }, 4.0);
+        tl.to(".node-ring", { scale: 1, opacity: 1, duration: 1.5, ease: "power2.out" }, 4.2);
+        
+        // Fragments slide in
+        tl.to(".frag", { opacity: 1, x: 0, duration: 0.8, stagger: 0.2, ease: "power2.out" }, 4.5);
+        
+        // Fragments get absorbed into node
+        tl.to(".frag", { x: 100, opacity: 0, duration: 0.6, stagger: 0.1, ease: "power2.in" }, 6.5);
+        tl.to(".node-core", { scale: 1.5, boxShadow: "0 0 40px #7EB8DA", duration: 0.5, yoyo: true, repeat: 1 }, 7.2);
+        
+        // Principle line shoots out
+        tl.to(".principle-line", { scaleX: 1, duration: 1.0, ease: "power2.out" }, 7.5);
+        tl.to(".line-glow", { scaleX: 1, duration: 1.0, ease: "power2.inOut" }, 7.8);
+        tl.to(".line-text", { opacity: 1, y: 10, duration: 0.8, ease: "power2.out" }, 8.2);
+
+        // Features text fade in
+        tl.to(".features-text", { opacity: 1, duration: 1.0 }, 8.5);
+
+        // Elegant exit animation before global transition to Scene 4
+        tl.to("#s3-alchemy", {
+          opacity: 0,
+          y: -20,
+          filter: "blur(6px)",
+          duration: 1.2,
+          ease: "power2.in"
+        }, 11.5);
+
+        window.__timelines["scene-03-friction"] = tl;
+      })();
+    </script>
+  </div>
+</template>

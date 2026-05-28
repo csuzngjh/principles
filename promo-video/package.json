@@ -1,0 +1,17 @@
+{
+  "name": "promo-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.6.51 preview",
+    "check": "npx --yes hyperframes@0.6.51 lint && npx --yes hyperframes@0.6.51 validate && npx --yes hyperframes@0.6.51 inspect",
+    "render": "npx --yes hyperframes@0.6.51 render",
+    "publish": "npx --yes hyperframes@0.6.51 publish"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "edge-tts-universal": "^1.4.0",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.0"
+  }
+}
