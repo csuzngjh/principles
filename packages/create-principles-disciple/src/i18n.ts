@@ -174,5 +174,5 @@ export function getLanguage(): Language {
 }
 
 export function t(key: string): string {
-  return translations[currentLanguage][key] || translations['en'][key] || key;
+  return translations[currentLanguage][key] || translations.en[key] || key;
 }

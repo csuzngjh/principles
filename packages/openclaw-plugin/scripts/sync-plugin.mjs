@@ -684,52 +684,6 @@ function syncFilteredManifest(lang) {
 }
 
 /**
- * Sync skills directories based on the skills field in openclaw.plugin.json.
- * Reads the manifest to find declared skill paths, resolves them relative to
- * source root, then copies each to the install target.
- */
-function syncSkillDirs(lang) {
-    const manifestPath = join(SOURCE_DIR, 'openclaw.plugin.json');
-    if (!existsSync(manifestPath)) return;
-
-    let skillsPaths;
-    try {
-        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-        skillsPaths = manifest.skills;
-    } catch {
-        return;
-    }
-
-    if (!skillsPaths || !Array.isArray(skillsPaths)) return;
-
-    const selectedLang = (lang || 'zh').toLowerCase();
-    if (!['zh', 'en'].includes(selectedLang)) {
-        console.error(`❌ Invalid language: ${selectedLang}. Expected zh or en.`);
-        process.exit(1);
-    }
-    const langPrefix = `templates/langs/${selectedLang}/skills`;
-
-    for (const sp of skillsPaths) {
-        if (typeof sp !== 'string') continue;
-        // Only copy skills matching the selected language
-        if (!sp.startsWith(langPrefix)) {
-            console.log(`  ⏭️  skipping ${sp} (lang: ${selectedLang})`);
-            continue;
-        }
-        const source = join(SOURCE_DIR, sp);
-        const name = sp.split('/').pop();
-        const target = join(INSTALL_DIR, 'skills', name);
-        if (!existsSync(source)) {
-            console.warn(`  ⚠️  skills path not found: ${sp}`);
-            continue;
-        }
-        if (existsSync(target)) rmSync(target, { recursive: true, force: true });
-        cpSync(source, target, { recursive: true });
-        console.log(`  📄 skills/${name} (from ${sp})`);
-    }
-}
-
-/**
  * @deprecated Replaced by syncFilteredManifest(). Kept for backwards
  * compatibility with old installs that may call it externally.
  * syncFilteredManifest filters the skills array BEFORE writing the manifest
@@ -1281,8 +1235,25 @@ function main() {
 
     console.log('\n📦 Syncing files to OpenClaw...');
     for (const item of SYNC_ITEMS) syncItem(item);
+
+    // After syncing templates, remove the non-selected language to avoid
+    // waste on disk. OpenClaw only loads skills declared in the filtered
+    // manifest (syncFilteredManifest), but having unselected lang files on
+    // disk inflates the install footprint and confuses inspection.
+    {
+        const langsDir = join(INSTALL_DIR, 'templates', 'langs');
+        if (existsSync(langsDir)) {
+            const normalizedLang = (args.lang || 'zh').toLowerCase();
+            const unselectedLang = normalizedLang === 'zh' ? 'en' : 'zh';
+            const unselectedPath = join(langsDir, unselectedLang);
+            if (existsSync(unselectedPath)) {
+                rmSync(unselectedPath, { recursive: true, force: true });
+                console.log(`  🗑️  removed templates/langs/${unselectedLang} (lang: ${normalizedLang})`);
+            }
+        }
+    }
+
     syncFilteredManifest(args.lang);
-    syncSkillDirs(args.lang);
     syncPdCli();
 
     injectLocalWorkspacePackages();
