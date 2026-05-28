@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2",
-    "msedge-tts": "^2.0.5",
-    "universal-edge-tts": "^1.3.3"
+    "edge-tts-universal": "^1.4.0",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.0"
   }
 }
