@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { rmSync, mkdirSync, readdirSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import os from 'os';
 import Database from 'better-sqlite3';
 
@@ -11,14 +11,18 @@ import { CentralDatabase, getCentralDatabase, resetCentralDatabase } from '../..
 const REAL_HOME = os.homedir();
 const OPENCLAW_DIR = join(REAL_HOME, '.openclaw');
 const CENTRAL_DB_DIR = '.central';
-const CENTRAL_DB_PATH = join(OPENCLAW_DIR, CENTRAL_DB_DIR, 'aggregated.db');
 
-function makeWorkspaceName(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+/** Each test gets its own DB file via PD_CENTRAL_DB_PATH env var. */
+let tempDbDir = '';
+
+function makeTempDbPath(): string {
+  const dir = join(os.tmpdir(), `pd-cdb-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  mkdirSync(dir, { recursive: true });
+  return join(dir, 'aggregated.db');
 }
 
 function cleanupTestDirs() {
-  // Clean up central DB and test workspace dirs
+  // Clean up workspace dirs (cdb-test-* names) and .central/
   if (existsSync(OPENCLAW_DIR)) {
     for (const entry of readdirSync(OPENCLAW_DIR)) {
       if (entry.startsWith('cdb-test-') || entry === '.central') {
@@ -28,17 +32,29 @@ function cleanupTestDirs() {
       }
     }
   }
+  // Clean up temp DB dirs from this run
+  if (tempDbDir) {
+    try { rmSync(tempDbDir, { recursive: true, force: true }); } catch { /* noop */ }
+  }
 }
 
 beforeEach(() => {
   cleanupTestDirs();
+  const dbPath = makeTempDbPath();
+  tempDbDir = dirname(dbPath);
+  process.env.PD_CENTRAL_DB_PATH = dbPath;
   resetCentralDatabase();
 });
 
 afterEach(() => {
   resetCentralDatabase();
+  delete process.env.PD_CENTRAL_DB_PATH;
   cleanupTestDirs();
 });
+
+function makeWorkspaceName(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 // ── Trajectory DB helper ────────────────────────────────────────────────────
 

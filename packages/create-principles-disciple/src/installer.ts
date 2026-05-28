@@ -37,32 +37,37 @@ const CONSOLE_PORT_RANGE_MAX = 3199;
 // 允许的原生模块白名单
 const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
 
+function getCapturingExecOptions(cwd: string, timeoutOverride?: number): ExecSyncOptions {
+  return {
+    cwd,
+    stdio: 'pipe' as const,
+    env: process.env,
+    timeout: timeoutOverride ?? INSTALL_TIMEOUT_MS,
+  };
+}
+
 /**
  * 执行 npm install 并提供友好的错误提示
  */
-async function runNpmInstall(cwd: string, componentName: string = 'npm'): Promise<void> {
+async function runNpmInstall(cwd: string, componentName = 'npm'): Promise<void> {
   const execOpts = getCapturingExecOptions(cwd);
   try {
     execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e);
-    let hint = '';
 
     // 动态导入 i18n 以避免循环依赖
-    const { t, getLanguage } = await import('./i18n.js');
-    const lang = getLanguage();
+    const { t } = await import('./i18n.js');
 
-    if (errorMsg.includes('ETIMEDOUT') || errorMsg.includes('network') || errorMsg.includes('timeout')) {
-      hint = '\n\n' + t('npm_hint_network_timeout').replace('{path}', cwd);
-    } else if (errorMsg.includes('EACCES') || errorMsg.includes('permission') || errorMsg.includes('EPERM')) {
-      hint = '\n\n' + t('npm_hint_permission_denied');
-    } else if (errorMsg.includes('ENOSPC')) {
-      hint = '\n\n' + t('npm_hint_disk_space');
-    } else {
-      hint = '\n\n' + t('npm_hint_manual_fix').replace('{path}', cwd);
-    }
+    const hint = errorMsg.includes('ETIMEDOUT') || errorMsg.includes('network') || errorMsg.includes('timeout')
+      ? t('npm_hint_network_timeout').replace('{path}', cwd)
+      : errorMsg.includes('EACCES') || errorMsg.includes('permission') || errorMsg.includes('EPERM')
+      ? t('npm_hint_permission_denied')
+      : errorMsg.includes('ENOSPC')
+      ? t('npm_hint_disk_space')
+      : t('npm_hint_manual_fix').replace('{path}', cwd);
 
-    throw new Error(`${componentName} npm install failed: ${errorMsg}${hint}`, { cause: e });
+    throw new Error(`${componentName} npm install failed: ${errorMsg}\n\n${hint}`, { cause: e });
   }
 }
 
@@ -150,15 +155,6 @@ function updateProgress(spinner: Ora | null, currentStep: number, message: strin
   const percent = Math.round((completedWeight / TOTAL_WEIGHT) * 100);
 
   spinner.text = `${message} (${percent}%)`;
-}
-
-function getCapturingExecOptions(cwd: string, timeoutOverride?: number): ExecSyncOptions {
-  return {
-    cwd,
-    stdio: 'pipe' as const,
-    env: process.env,
-    timeout: timeoutOverride ?? INSTALL_TIMEOUT_MS,
-  };
 }
 
 interface BackupResult {
