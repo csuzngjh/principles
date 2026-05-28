@@ -722,15 +722,30 @@ export class EvaluatorRunner {
       });
     }
 
-    // Strategy 2: Search lineage for a principle-kind artifact with principleDraft content
+    // Strategy 2: Search lineage for all principle-kind artifacts with principleDraft content
     const lineageArtifactIds = await this.resolveLineageArtifactIds(taskId);
+    const candidates: string[] = [];
     for (const lineageId of lineageArtifactIds) {
       const artifact = await this.artifactStore.getArtifactById(lineageId);
       if (!artifact) continue;
       if (artifact.artifactKind !== 'principle') continue;
       if (this.hasPrincipleDraftContent(artifact.contentJson)) {
-        return lineageId;
+        candidates.push(lineageId);
       }
+    }
+
+    if (candidates.length === 1) {
+      const [only] = candidates;
+      return only ?? null;
+    }
+
+    if (candidates.length > 1) {
+      this.emitEvaluatorEvent('evaluator_principle_bearer_ambiguous', taskId, {
+        candidateArtifactIds: candidates,
+        reason: 'multiple_principle_bearing_artifacts_in_lineage',
+        nextAction: 'disambiguate_principle_source_or_fix_lineage',
+      });
+      return null;
     }
 
     // Strategy 3: Fallback — no principle-bearing artifact found
@@ -771,28 +786,29 @@ export class EvaluatorRunner {
   private hasPrincipleDraftContent(contentJson: string): boolean {
     try {
       const parsed: unknown = JSON.parse(contentJson);
-      if (typeof parsed !== 'object' || parsed === null) return false;
-      const record = parsed as Record<string, unknown>;
+      if (!EvaluatorRunner.isRecord(parsed)) return false;
       // Check for principleDraft.title + principleDraft.statement
-      if (Object.hasOwn(record, 'principleDraft')) {
-        const draft = record.principleDraft;
-        if (typeof draft === 'object' && draft !== null) {
-          const draftRecord = draft as Record<string, unknown>;
-          if (Object.hasOwn(draftRecord, 'title') && typeof draftRecord.title === 'string' && draftRecord.title.trim() !== ''
-            && Object.hasOwn(draftRecord, 'statement') && typeof draftRecord.statement === 'string' && draftRecord.statement.trim() !== '') {
-            return true;
-          }
+      if (Object.hasOwn(parsed, 'principleDraft')) {
+        const draft = parsed.principleDraft;
+        if (EvaluatorRunner.isRecord(draft)
+          && Object.hasOwn(draft, 'title') && typeof draft.title === 'string' && draft.title.trim() !== ''
+          && Object.hasOwn(draft, 'statement') && typeof draft.statement === 'string' && draft.statement.trim() !== '') {
+          return true;
         }
       }
       // Check for principleId + text (alternative principle format)
-      if (Object.hasOwn(record, 'principleId') && typeof record.principleId === 'string' && record.principleId.trim() !== ''
-        && Object.hasOwn(record, 'text') && typeof record.text === 'string' && record.text.trim() !== '') {
+      if (Object.hasOwn(parsed, 'principleId') && typeof parsed.principleId === 'string' && parsed.principleId.trim() !== ''
+        && Object.hasOwn(parsed, 'text') && typeof parsed.text === 'string' && parsed.text.trim() !== '') {
         return true;
       }
       return false;
     } catch {
       return false;
     }
+  }
+
+  private static isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this

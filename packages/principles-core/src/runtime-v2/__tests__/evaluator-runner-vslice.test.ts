@@ -494,6 +494,330 @@ describe('EvaluatorRunner (vertical slice)', () => {
     expect(notFoundEvent?.payload?.reason).toBe('principle_artifact_not_found_in_store');
   });
 
+  it('fallback lineage with 1 principle-bearing artifact validates it', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    // Output has no scribeArtifactId — forces fallback to lineage search
+    const output = makeEvaluatorOutput();
+    (output.sourceTrace as unknown as Record<string, unknown>).scribeArtifactId = undefined;
+
+    // Evaluator must depend on both artificer and scribe tasks for lineage search
+    const evaluatorBothDeps = makeEvaluatorTask({
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [ARTIFICER_TASK_ID, SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+      }),
+    });
+
+    const artificerTask = makeArtificerTask();
+    const scribeTask = makeScribeTask();
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(evaluatorBothDeps),
+      getTask: vi.fn().mockImplementation((id: string) => {
+        if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorBothDeps);
+        if (id === ARTIFICER_TASK_ID) return Promise.resolve(artificerTask);
+        if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
+        return Promise.resolve(null);
+      }),
+      getRunsByTask: vi.fn().mockResolvedValue([{
+        runId: 'run-evaluator-001',
+        taskId: EVALUATOR_TASK_ID,
+        runtimeKind: 'evaluator',
+        startedAt: new Date().toISOString(),
+      }]),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
+
+    const deps: EvaluatorRunnerDeps = {
+      stateManager,
+      runtimeAdapter: {
+        startRun: vi.fn().mockResolvedValue({ runId: 'run-evaluator-001', runtimeKind: 'evaluator', startedAt: new Date().toISOString() }),
+        pollRun: vi.fn().mockResolvedValue({ status: 'succeeded', runId: 'run-evaluator-001' }),
+        fetchOutput: vi.fn().mockResolvedValue({ payload: output }),
+        cancelRun: vi.fn().mockResolvedValue(undefined),
+      } as unknown as PDRuntimeAdapter,
+      eventEmitter,
+      validator: new DefaultEvaluatorValidator(),
+      artifactStore: store,
+    };
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // Scribe artifact should be validated via lineage fallback
+    const scribeArtifact = await store.getArtifactById('pi-art-scribe-001');
+    expect(scribeArtifact).not.toBeNull();
+    expect(scribeArtifact?.validationStatus).toBe('validated');
+  });
+
+  it('fallback lineage with 2 principle-bearing artifacts emits ambiguity and validates none', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    // Add a second principle-bearing artifact from a different task
+    const SECOND_SCRIBE_TASK_ID = 'scribe-002';
+    const secondScribeArtifact: PIArtifactRecord = {
+      artifactId: 'pi-art-scribe-002',
+      artifactKind: 'principle',
+      sourceTaskId: SECOND_SCRIBE_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({
+        principleDraft: {
+          title: 'Always handle errors',
+          statement: 'Every function must handle errors gracefully.',
+        },
+        generatedAt: new Date().toISOString(),
+      }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await store.upsertArtifact(secondScribeArtifact);
+
+    // Output has no scribeArtifactId — forces fallback to lineage search
+    const output = makeEvaluatorOutput();
+    (output.sourceTrace as unknown as Record<string, unknown>).scribeArtifactId = undefined;
+
+    // Mock deps: evaluator depends on both artificer and second scribe task
+    const evaluatorTaskBothDeps = makeEvaluatorTask({
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [ARTIFICER_TASK_ID, SCRIBE_TASK_ID, SECOND_SCRIBE_TASK_ID],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+      }),
+    });
+
+    const artificerTask = makeArtificerTask();
+    const scribeTask = makeScribeTask();
+    const secondScribeTask: TaskRecord = {
+      taskId: SECOND_SCRIBE_TASK_ID,
+      taskKind: 'scribe',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'scribe://run-002',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [{ artifactType: 'principle', ref: 'pi-art-scribe-002' }],
+      }),
+    };
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(evaluatorTaskBothDeps),
+      getTask: vi.fn().mockImplementation((id: string) => {
+        if (id === EVALUATOR_TASK_ID) return Promise.resolve(evaluatorTaskBothDeps);
+        if (id === ARTIFICER_TASK_ID) return Promise.resolve(artificerTask);
+        if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
+        if (id === SECOND_SCRIBE_TASK_ID) return Promise.resolve(secondScribeTask);
+        return Promise.resolve(null);
+      }),
+      getRunsByTask: vi.fn().mockResolvedValue([{
+        runId: 'run-evaluator-001',
+        taskId: EVALUATOR_TASK_ID,
+        runtimeKind: 'evaluator',
+        startedAt: new Date().toISOString(),
+      }]),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
+
+    const deps: EvaluatorRunnerDeps = {
+      stateManager,
+      runtimeAdapter: {
+        startRun: vi.fn().mockResolvedValue({ runId: 'run-evaluator-001', runtimeKind: 'evaluator', startedAt: new Date().toISOString() }),
+        pollRun: vi.fn().mockResolvedValue({ status: 'succeeded', runId: 'run-evaluator-001' }),
+        fetchOutput: vi.fn().mockResolvedValue({ payload: output }),
+        cancelRun: vi.fn().mockResolvedValue(undefined),
+      } as unknown as PDRuntimeAdapter,
+      eventEmitter,
+      validator: new DefaultEvaluatorValidator(),
+      artifactStore: store,
+    };
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // Ambiguity telemetry should be emitted
+    const events = (eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call: unknown[]) => call[0] as { eventType: string; payload: Record<string, unknown> },
+    );
+    const ambiguousEvent = events.find((e) => e.eventType === 'evaluator_principle_bearer_ambiguous');
+    expect(ambiguousEvent).toBeDefined();
+    expect(ambiguousEvent?.payload?.candidateArtifactIds).toEqual(
+      expect.arrayContaining(['pi-art-scribe-001', 'pi-art-scribe-002']),
+    );
+    expect(ambiguousEvent?.payload?.reason).toBe('multiple_principle_bearing_artifacts_in_lineage');
+
+    // Neither scribe artifact should be validated
+    const scribe1 = await store.getArtifactById('pi-art-scribe-001');
+    const scribe2 = await store.getArtifactById('pi-art-scribe-002');
+    expect(scribe1?.validationStatus).toBe('pending');
+    expect(scribe2?.validationStatus).toBe('pending');
+  });
+
+  it('hasPrincipleDraftContent rejects malformed JSON, array, null, and inherited properties', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+
+    // Artificer artifact has implementationPlan, not principleDraft — should NOT be treated as principle bearer
+    const artificerOnly = makeArtificerArtifact();
+    artificerOnly.contentJson = JSON.stringify({ implementationPlan: { summary: 'test' } });
+    await store.upsertArtifact(artificerOnly);
+
+    // Malformed: array
+    const arrayArtifact: PIArtifactRecord = {
+      artifactId: 'pi-art-array',
+      artifactKind: 'principle',
+      sourceTaskId: 'other-task',
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: '[1, 2, 3]',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await store.upsertArtifact(arrayArtifact);
+
+    // Malformed: null
+    const nullArtifact: PIArtifactRecord = {
+      artifactId: 'pi-art-null',
+      artifactKind: 'principle',
+      sourceTaskId: 'other-task-2',
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: 'null',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await store.upsertArtifact(nullArtifact);
+
+    // Malformed: inherited property (toString as principleDraft)
+    const inheritedArtifact: PIArtifactRecord = {
+      artifactId: 'pi-art-inherited',
+      artifactKind: 'principle',
+      sourceTaskId: 'other-task-3',
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: JSON.stringify({ toString: 'not-a-draft' }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await store.upsertArtifact(inheritedArtifact);
+
+    // Output has no scribeArtifactId — forces lineage fallback
+    const output = makeEvaluatorOutput();
+    (output.sourceTrace as unknown as Record<string, unknown>).scribeArtifactId = undefined;
+
+    // Evaluator depends on all the tasks above
+    const allDepsTask = makeEvaluatorTask({
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: [ARTIFICER_TASK_ID, 'other-task', 'other-task-2', 'other-task-3'],
+        channel: 'prompt',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+      }),
+    });
+
+    const stateManager = {
+      acquireLease: vi.fn().mockResolvedValue(allDepsTask),
+      getTask: vi.fn().mockImplementation((id: string) => {
+        if (id === EVALUATOR_TASK_ID) return Promise.resolve(allDepsTask);
+        if (id === ARTIFICER_TASK_ID) return Promise.resolve(makeArtificerTask());
+        return Promise.resolve(makeScribeTask({ taskId: id }));
+      }),
+      getRunsByTask: vi.fn().mockResolvedValue([{
+        runId: 'run-evaluator-001',
+        taskId: EVALUATOR_TASK_ID,
+        runtimeKind: 'evaluator',
+        startedAt: new Date().toISOString(),
+      }]),
+      updateRunOutput: vi.fn().mockResolvedValue(undefined),
+      markTaskSucceeded: vi.fn().mockResolvedValue(undefined),
+      markTaskFailed: vi.fn().mockResolvedValue(undefined),
+      markTaskRetryWait: vi.fn().mockResolvedValue(undefined),
+      getRetryPolicy: vi.fn().mockReturnValue({ shouldRetry: () => false }),
+    } as unknown as RuntimeStateManager;
+
+    const eventEmitter = { emitTelemetry: vi.fn() } as unknown as StoreEventEmitter;
+
+    const deps: EvaluatorRunnerDeps = {
+      stateManager,
+      runtimeAdapter: {
+        startRun: vi.fn().mockResolvedValue({ runId: 'run-evaluator-001', runtimeKind: 'evaluator', startedAt: new Date().toISOString() }),
+        pollRun: vi.fn().mockResolvedValue({ status: 'succeeded', runId: 'run-evaluator-001' }),
+        fetchOutput: vi.fn().mockResolvedValue({ payload: output }),
+        cancelRun: vi.fn().mockResolvedValue(undefined),
+      } as unknown as PDRuntimeAdapter,
+      eventEmitter,
+      validator: new DefaultEvaluatorValidator(),
+      artifactStore: store,
+    };
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // No artifact should be validated — none have valid principleDraft content
+    const events = (eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call: unknown[]) => call[0] as { eventType: string; payload: Record<string, unknown> },
+    );
+    const noBearerEvent = events.find((e) => e.eventType === 'evaluator_no_principle_bearer_found');
+    expect(noBearerEvent).toBeDefined();
+
+    // All artifacts should remain pending
+    const arr = await store.getArtifactById('pi-art-array');
+    const nil = await store.getArtifactById('pi-art-null');
+    const inh = await store.getArtifactById('pi-art-inherited');
+    expect(arr?.validationStatus).toBe('pending');
+    expect(nil?.validationStatus).toBe('pending');
+    expect(inh?.validationStatus).toBe('pending');
+  });
+
   it('mismatched sourceArtificerArtifactId does not write artifact or mark succeeded', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makeArtificerArtifact());
