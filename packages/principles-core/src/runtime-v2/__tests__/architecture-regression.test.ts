@@ -278,6 +278,9 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'evolution-logger.ts',
   'evolution-engine.ts',
 
+  // ── Runtime V2 ──────────────────────────────────────────────────────────
+  'runtime-v2-prompt-activation-reader.ts',
+
   // ── Test Files ──────────────────────────────────────────────────────────
   '__tests__/focus-history.test.ts',
   'principle-compiler/__tests__/compiler-replay-gate.test.ts',
@@ -329,7 +332,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
   });
 });
 

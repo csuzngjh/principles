@@ -202,16 +202,13 @@ function checkPrerequisites() {
 
 function installRootDeps() {
   console.log('\n📦 Installing root dependencies...');
-  const nodeModulesDir = join(ROOT_DIR, 'node_modules');
-  if (!existsSync(nodeModulesDir)) {
-    try {
-      execSync('npm install', { cwd: ROOT_DIR, stdio: 'inherit' });
-    } catch (error) {
-      console.error('❌ Failed to install root dependencies');
-      process.exit(1);
-    }
+  try {
+    execSync('npm install --prefer-offline --no-audit --no-fund', { cwd: ROOT_DIR, stdio: 'inherit' });
+    console.log('✅ Dependencies installed');
+  } catch (error) {
+    console.error('❌ Failed to install root dependencies');
+    process.exit(1);
   }
-  console.log('✅ Dependencies installed');
 }
 
 function buildCoreAndCli() {
@@ -230,10 +227,10 @@ function buildPdConsole() {
   console.log('\n🔨 Building pd-console...');
 
   try {
-    execSync('npm run build:ui', { cwd: PD_CONSOLE_SOURCE_DIR, stdio: 'inherit' });
-    console.log('✅ pd-console UI built');
+    execSync('npm run build', { cwd: PD_CONSOLE_SOURCE_DIR, stdio: 'inherit' });
+    console.log('✅ pd-console built (UI + server)');
   } catch (error) {
-    console.error('\n❌ pd-console UI build failed');
+    console.error('\n❌ pd-console build failed');
     process.exit(1);
   }
 }
