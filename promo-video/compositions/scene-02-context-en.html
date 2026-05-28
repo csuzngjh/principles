@@ -1,0 +1,369 @@
+<template id="scene-02-context-template">
+  <div id="scene-02-context" class="clip" data-composition-id="scene-02-context" data-width="1920" data-height="1080" data-start="9" data-duration="11" data-track-index="1">
+    <div class="scene-container">
+      <!-- Vignette layer stays static outside camera-rig for visual grounding -->
+      <div class="vignette"></div>
+
+      <!-- Camera Rig wrapper for zoom and shockwave shakes -->
+      <div class="camera-rig" id="s2-camera-rig">
+        <!-- Technical backdrop wireframe grid -->
+        <div class="tech-grid"></div>
+
+        <!-- Ambient radial glow behind the memory cards -->
+        <div class="ambient-glow" id="s2-glow"></div>
+
+        <!-- Section Badge -->
+        <div class="section-badge" id="s2-badge">
+          <span class="friction-node"></span>
+          <span>Agent Behavioral Drift</span>
+        </div>
+
+        <!-- Glassmorphic Panels Container -->
+        <div class="panels-container">
+          <!-- Panel 1 -->
+          <div class="panel-wrapper" id="s2-panel-1">
+            <div class="glass-panel">
+              <div class="panel-header">SCENARIO 1</div>
+              <div class="panel-body">
+                <div class="icon-wrap">↺</div>
+                <span class="token">Drift Corrected Thrice</span>
+                <span class="value">Status: Still recurring in similar scenarios</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 2 -->
+          <div class="panel-wrapper" id="s2-panel-2">
+            <div class="glass-panel">
+              <div class="panel-header">SCENARIO 2</div>
+              <div class="panel-body">
+                <div class="icon-wrap">🛡️</div>
+                <span class="token">Preconfigured Safety Limits</span>
+                <span class="value">Status: Bypassed without permission during complex tasks</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 3 -->
+          <div class="panel-wrapper" id="s2-panel-3">
+            <div class="glass-panel">
+              <div class="panel-header">SCENARIO 3</div>
+              <div class="panel-body">
+                <div class="icon-wrap">⚓</div>
+                <span class="token">Expected Operational Paradigm</span>
+                <span class="value">Status: Slowly forgotten as context window expands</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Text Overlay -->
+        <div class="scene-content">
+          <h1 class="main-title" id="s2-title">Every new session... everything goes to zero.</h1>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      #scene-02-context {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        background: #050608;
+        overflow: hidden;
+        font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+      }
+
+      .scene-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+      }
+
+      /* Camera Rig - allows slow pushes and violent impact shakes */
+      .camera-rig {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        transform-origin: center center;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 1;
+      }
+
+      .vignette {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle, transparent 30%, rgba(5, 6, 8, 0.95) 100%);
+        pointer-events: none;
+        z-index: 15;
+      }
+
+      /* Atmospheric background lighting behind memory blocks */
+      .ambient-glow {
+        position: absolute;
+        width: 1200px;
+        height: 1200px;
+        background: radial-gradient(circle, rgba(126, 184, 218, 0.06) 0%, rgba(126, 184, 218, 0.01) 50%, transparent 75%);
+        border-radius: 50%;
+        top: 40%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 2;
+        pointer-events: none;
+      }
+
+      /* Technical background mesh grid */
+      .tech-grid {
+        position: absolute;
+        inset: 0;
+        background-image: 
+          linear-gradient(rgba(255, 255, 255, 0.01) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.01) 1px, transparent 1px);
+        background-size: 80px 80px;
+        background-position: center center;
+        z-index: 3;
+        pointer-events: none;
+      }
+
+      /* Panels Layout */
+      .panels-container {
+        display: flex;
+        justify-content: center;
+        gap: 60px;
+        width: 100%;
+        max-width: 1400px;
+        margin-top: -40px;
+        z-index: 5;
+      }
+
+      /* Section Badge — website pattern */
+      .section-badge {
+        position: absolute;
+        top: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 16px;
+        border-radius: 99px;
+        background: rgba(126, 184, 218, 0.10);
+        border: 1px solid rgba(126, 184, 218, 0.12);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #7EB8DA;
+        z-index: 25;
+        opacity: 0;
+      }
+
+      .friction-node {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #7EB8DA;
+        opacity: 0.5;
+      }
+
+      .panel-wrapper {
+        position: relative;
+        width: 320px;
+        height: 400px;
+      }
+
+      .glass-panel {
+        width: 100%;
+        height: 100%;
+        border-radius: 14px;
+        background: #13151A;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        box-sizing: border-box;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        transition: border-color 0.3s ease;
+      }
+
+      .panel-wrapper:hover .glass-panel {
+        border-color: rgba(126, 184, 218, 0.2);
+      }
+
+      .panel-header {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        color: #8A8F99;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        padding-bottom: 12px;
+        letter-spacing: 1px;
+      }
+
+      .panel-body {
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 16px;
+        margin-top: 20px;
+      }
+
+      .icon-wrap {
+        font-size: 32px;
+        opacity: 0.6;
+        margin-bottom: 12px;
+        filter: grayscale(100%) brightness(200%);
+      }
+
+      .token {
+        font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+        font-size: 20px;
+        font-weight: 500;
+        color: #E0E2E6;
+        letter-spacing: 1px;
+      }
+
+      .value {
+        font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+        font-size: 14px;
+        color: #8A8F99;
+        line-height: 1.5;
+      }
+
+
+      /* Text Overlay */
+      .scene-content {
+        position: absolute;
+        bottom: 120px;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: center;
+        z-index: 20;
+        padding: 0 160px;
+        box-sizing: border-box;
+      }
+
+      .main-title {
+        color: #E0E2E6;
+        font-size: 40px;
+        font-weight: 300; /* Low editorial weight for maximum elegance */
+        text-align: center;
+        max-width: 1200px;
+        line-height: 1.4;
+        letter-spacing: 0.08em; /* Premium spacing in intro */
+        text-shadow: 0 0 15px rgba(224, 226, 230, 0.15);
+        opacity: 0;
+        filter: blur(12px); /* Cinematic soft lens blur */
+        will-change: opacity, transform, filter, letter-spacing;
+      }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function() {
+        window.__timelines = window.__timelines || {};
+        const tl = gsap.timeline({ paused: true });
+
+        // Set initial states
+        tl.set("#s2-badge", { opacity: 0, y: -10 });
+        tl.set("#s2-title", { opacity: 0, y: 15 });
+        tl.set(["#s2-panel-1", "#s2-panel-2", "#s2-panel-3"], { opacity: 0, scale: 0.9, y: 50 });
+        tl.set("#s2-camera-rig", { scale: 1.0 });
+
+        // Slow camera dolly-in push across scene runtime
+        tl.to("#s2-camera-rig", {
+          scale: 1.04,
+          duration: 11.0,
+          ease: "sine.out"
+        }, 0);
+
+        // Slowly drift ambient glow behind blocks
+        tl.to("#s2-glow", {
+          x: "-5%",
+          y: "8%",
+          duration: 5.5,
+          yoyo: true,
+          repeat: 1,
+          ease: "sine.inOut"
+        }, 0);
+
+        // Badge entrance
+        tl.to("#s2-badge", {
+          opacity: 1,
+          y: 0,
+          duration: 0.9,
+          ease: "power2.out"
+        }, 0);
+
+        // Step 1: Smooth Staggered Entrance of 3 panels (0-3s)
+        tl.to(["#s2-panel-1", "#s2-panel-2", "#s2-panel-3"], {
+          opacity: 1,
+          scale: 1,
+          y: 0,
+          duration: 1.5,
+          stagger: 0.3,
+          ease: "cubic-bezier(0.16, 1, 0.3, 1)"
+        }, 0.2);
+
+        // Slow cinematic title lens-blur & tracking focus
+        tl.to("#s2-title", {
+          opacity: 1,
+          y: 0,
+          letterSpacing: "0.08em", // wider tracking
+          filter: "blur(0px)",
+          duration: 1.8,
+          ease: "power2.out"
+        }, 1.2);
+
+        // Step 2: Forgetting Effect (Dissolve panels into air)
+        function addForgetEffect(panelId, startTime) {
+          const glassSelector = `${panelId} .glass-panel`;
+
+          // Panel dissolves elegantly upwards and blurs
+          tl.to(glassSelector, {
+            opacity: 0,
+            y: -40,
+            filter: "blur(10px)",
+            duration: 1.5,
+            ease: "power2.inOut"
+          }, startTime);
+        }
+
+        // Panel 1 dissolves
+        addForgetEffect("#s2-panel-1", 4.0);
+        // Panel 2 dissolves
+        addForgetEffect("#s2-panel-2", 5.5);
+        // Panel 3 dissolves
+        addForgetEffect("#s2-panel-3", 7.0);
+
+        // Title emphasizes "归零"
+        tl.to("#s2-title", {
+          textShadow: "0 0 35px rgba(224, 226, 230, 0.4)",
+          scale: 1.02,
+          duration: 1.5,
+          ease: "power2.inOut"
+        }, 7.5);
+
+        // Fade out everything elegantly with lens blur at the end of the scene before global transition
+        tl.to(["#s2-title", "#s2-badge", ".panels-container"], {
+          opacity: 0,
+          y: -15,
+          filter: "blur(6px)",
+          duration: 1.2,
+          ease: "power2.in"
+        }, 9.5);
+
+        window.__timelines["scene-02-context"] = tl;
+      })();
+    </script>
+  </div>
+</template>
