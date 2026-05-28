@@ -176,3 +176,7 @@ export function getLanguage(): Language {
 export function t(key: string): string {
   return translations[currentLanguage][key] || translations.en[key] || key;
 }
+
+export function isLanguage(value: unknown): value is Language {
+  return value === 'zh' || value === 'en';
+}
