@@ -47,11 +47,11 @@ async function runNpmInstall(cwd: string, componentName: string = 'npm'): Promis
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : String(e);
     let hint = '';
-    
+
     // 动态导入 i18n 以避免循环依赖
     const { t, getLanguage } = await import('./i18n.js');
     const lang = getLanguage();
-    
+
     if (errorMsg.includes('ETIMEDOUT') || errorMsg.includes('network') || errorMsg.includes('timeout')) {
       hint = '\n\n' + t('npm_hint_network_timeout').replace('{path}', cwd);
     } else if (errorMsg.includes('EACCES') || errorMsg.includes('permission') || errorMsg.includes('EPERM')) {
@@ -61,7 +61,7 @@ async function runNpmInstall(cwd: string, componentName: string = 'npm'): Promis
     } else {
       hint = '\n\n' + t('npm_hint_manual_fix').replace('{path}', cwd);
     }
-    
+
     throw new Error(`${componentName} npm install failed: ${errorMsg}${hint}`, { cause: e });
   }
 }
@@ -73,7 +73,7 @@ async function rebuildNativeModules(cwd: string, componentName: string): Promise
   for (const mod of ALLOWED_NATIVE_MODULES) {
     const modPath = path.join(cwd, 'node_modules', mod);
     if (!existsSync(modPath)) continue;
-    
+
     try {
       execSync(`npm rebuild ${mod}`, getCapturingExecOptions(cwd));
     } catch (e) {
@@ -89,7 +89,7 @@ function verifyNativeModules(cwd: string, componentName: string): void {
   for (const nativeMod of ALLOWED_NATIVE_MODULES) {
     const nativeModPath = path.join(cwd, 'node_modules', nativeMod);
     if (!existsSync(nativeModPath)) continue;
-    
+
     try {
       execFileSync(process.execPath, ['-e', `require('${nativeMod}')`], { cwd, stdio: 'pipe' });
     } catch {
@@ -104,7 +104,7 @@ function verifyNativeModules(cwd: string, componentName: string): void {
 function validateWorkspacePath(targetPath: string, workspaceDir: string): void {
   const resolved = path.resolve(targetPath);
   const workspace = path.resolve(workspaceDir);
-  
+
   if (!resolved.startsWith(workspace + path.sep) && resolved !== workspace) {
     throw new Error(`Security error: Path "${targetPath}" is outside workspace directory "${workspaceDir}"`);
   }
@@ -140,15 +140,15 @@ const TOTAL_WEIGHT = INSTALL_STEPS.reduce((sum, step) => sum + step.weight, 0);
 
 function updateProgress(spinner: Ora | null, currentStep: number, message: string): void {
   if (!spinner) return;
-  
+
   if (currentStep < 0 || currentStep >= INSTALL_STEPS.length) {
     spinner.text = message;
     return;
   }
-  
+
   const completedWeight = INSTALL_STEPS.slice(0, currentStep + 1).reduce((sum, s) => sum + s.weight, 0);
   const percent = Math.round((completedWeight / TOTAL_WEIGHT) * 100);
-  
+
   spinner.text = `${message} (${percent}%)`;
 }
 
@@ -631,10 +631,10 @@ async function copyCoreTemplates(opts: CopyOptions): Promise<number> {
   for (const file of files) {
     const srcPath = path.join(actualSrc, file);
     const destPath = path.join(opts.workspaceDir, file);
-    
+
     // 验证目标路径安全
     validateWorkspacePath(destPath, opts.workspaceDir);
-    
+
     if (existsSync(destPath) && opts.mode === 'smart') {
       await fse.copy(srcPath, `${destPath}.update`, { overwrite: true });
     } else {
@@ -648,12 +648,12 @@ async function copyCoreTemplates(opts: CopyOptions): Promise<number> {
 
 async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
   let count = 0;
-  
+
   // 根据语言选择源目录
   const langPrinciplesSrc = path.join(opts.pluginDir, 'templates', 'langs', opts.language, 'principles');
   const defaultPrinciplesSrc = path.join(opts.pluginDir, 'templates', 'workspace', '.principles');
   const actualPrinciplesSrc = existsSync(langPrinciplesSrc) ? langPrinciplesSrc : defaultPrinciplesSrc;
-  
+
   const principlesDest = path.join(opts.workspaceDir, '.principles');
 
   if (!existsSync(actualPrinciplesSrc)) return 0;

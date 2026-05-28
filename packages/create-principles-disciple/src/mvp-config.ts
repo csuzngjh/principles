@@ -321,7 +321,7 @@ export function getNpmGlobalBinDir(): string | null {
 export function getGlobalShimPaths(): string[] {
   const globalBin = getNpmGlobalBinDir();
   if (!globalBin) return [];
-  
+
   if (isWindows()) {
     return [
       path.join(globalBin, 'pd.cmd'),
