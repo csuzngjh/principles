@@ -27,6 +27,7 @@ import type {
   RuleHostRequireApprovalEventData,
   RuleHostAutoCorrectProposedEventData,
   RuleHostAutoCorrectAppliedEventData,
+  RuntimeV2PromptActivationsInjectedEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -202,6 +203,10 @@ export class EventLog {
 
   recordRuleHostAutoCorrectApplied(data: RuleHostAutoCorrectAppliedEventData): void {
     this.record('rulehost_auto_correct_applied', 'auto_correct', undefined, data);
+  }
+
+  recordRuntimeV2ActivationsInjected(data: RuntimeV2PromptActivationsInjectedEventData): void {
+    this.record('runtime_v2_prompt_activations_injected', 'injected', data.sessionId, data);
   }
 
   private record(

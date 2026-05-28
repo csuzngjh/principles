@@ -705,6 +705,8 @@ ${heartbeatChecklist}
 
   let runtimeV2PrinciplesContent = '';
   const runtimeV2PrincipleIds = new Set<string>();
+  // Hoisted so the owner_approved_behavior_directives section can access them
+  let dedupedV2: Array<{ principleId: string; text: string; artifactId: string; activationId: string }> = [];
   try {
     const reader = new PromptActivationReader(wctx.workspaceDir, { logger });
     const v2Result = await reader.readActivatedPrinciples();
@@ -727,7 +729,7 @@ ${heartbeatChecklist}
       // best-effort dedup
     }
 
-    const dedupedV2 = v2Result.principles.filter((p) => !legacyActiveIds.has(p.principleId));
+    dedupedV2 = v2Result.principles.filter((p) => !legacyActiveIds.has(p.principleId));
 
     if (dedupedV2.length > 0) {
       let remaining = RUNTIME_V2_PRINCIPLE_BUDGET;
@@ -746,6 +748,34 @@ ${heartbeatChecklist}
         runtimeV2PrincipleIds.add(p.principleId);
       }
       runtimeV2PrinciplesContent = lines.join('\n');
+    }
+
+    // ── Emit structured observability event ──
+    try {
+      const eventLog = wctx.eventLog;
+      eventLog.recordRuntimeV2ActivationsInjected({
+        sessionId: sessionId ?? 'unknown',
+        workspaceDir: wctx.workspaceDir,
+        principleIds: [...runtimeV2PrincipleIds],
+        activationIds: dedupedV2.map((p) => p.activationId),
+        artifactIds: dedupedV2.map((p) => p.artifactId),
+        injectedCount: runtimeV2PrincipleIds.size,
+        skippedWarnings: v2Result.warnings,
+        injectedCharCount: runtimeV2PrinciplesContent.length,
+        budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+        ...(runtimeV2PrincipleIds.size === 0
+          ? {
+              skipReason: v2Result.principles.length === 0
+                ? 'no_validated_activations'
+                : 'all_deduped_against_legacy',
+              nextAction: v2Result.principles.length === 0
+                ? 'check activations table for prompt channel rows with validated artifacts'
+                : 'legacy evolution reducer already contains these principle IDs',
+            }
+          : {}),
+      });
+    } catch (logErr) {
+      logger?.warn?.(`[PD:RuntimeV2] Failed to emit activation observability event: ${String(logErr)}`);
     }
   } catch (e) {
     logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);
@@ -779,10 +809,30 @@ ${empathySilenceConstraint}
     appendParts.push(`<thinking_os>\n${thinkingOsContent}\n</thinking_os>`);
   }
 
-  // 3. Evolution Loop principles (active/probation + Runtime V2 activated)
-  const combinedEvolutionContent = [evolutionPrinciplesContent, runtimeV2PrinciplesContent].filter(Boolean).join('\n');
-  if (combinedEvolutionContent) {
-    appendParts.push(`<evolution_principles>\n${combinedEvolutionContent}\n</evolution_principles>`);
+  // 3. Evolution Loop principles (legacy active/probation only — Runtime V2 moved to section 3.5)
+  if (evolutionPrinciplesContent) {
+    appendParts.push(`<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`);
+  }
+
+  // 3.5. Owner-Approved Behavior Directives (Runtime V2 activated principles)
+  // Separated from evolution_principles for stronger operational framing.
+  // These are owner-reviewed, validated behavior constraints — not background context.
+  if (runtimeV2PrincipleIds.size > 0) {
+    const directiveLines: string[] = [];
+    directiveLines.push('Owner-approved behavior directives are active operating constraints learned from prior owner corrections.');
+    directiveLines.push('These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.');
+    directiveLines.push('For ambiguous coding or file-changing tasks, follow these directives before using mutating tools.');
+    directiveLines.push('');
+    for (const p of dedupedV2) {
+      if (!runtimeV2PrincipleIds.has(p.principleId)) continue;
+      directiveLines.push(`<directive id="${escapeXml(p.principleId)}" source="runtime_v2_activation">`);
+      directiveLines.push(`MANDATORY: ${escapeXml(p.text)}`);
+      directiveLines.push('Apply this as an active behavior constraint. Do not treat this as background context.');
+      directiveLines.push('</directive>');
+      directiveLines.push('');
+    }
+    directiveLines.push('Note: These directives do not override safety, security, or core system policy.');
+    appendParts.push(`<owner_approved_behavior_directives>\n${directiveLines.join('\n')}\n</owner_approved_behavior_directives>`);
   }
 
   // Routing Guidance (section 5 — injected between evolution principles and core principles)
@@ -913,6 +963,7 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 - \`<reflection_log>\` - Past lessons (inform your approach)
 - \`<thinking_os>\` - Thinking models (guide your reasoning)
 - \`<evolution_principles>\` - Newly learned principles (active + probation)
+- \`<owner_approved_behavior_directives>\` - Owner-approved mandatory behavior constraints (MUST follow unless safety conflict)
 - \`<routing_guidance>\` - Delegation suggestions (non-authoritative, best-effort)
 - \`<core_principles>\` - Core rules (NON-NEGOTIABLE, highest priority)
 
@@ -932,7 +983,7 @@ ${attitudeDirective}
     appendSystemContext,
     {
       diagnosticianMode: pendingDiagTaskCount > 0,
-      blocks: { projectContextContent, thinkingOsContent, evolutionPrinciplesContent: combinedEvolutionContent || evolutionPrinciplesContent },
+      blocks: { projectContextContent, thinkingOsContent, evolutionPrinciplesContent },
     }
   );
 

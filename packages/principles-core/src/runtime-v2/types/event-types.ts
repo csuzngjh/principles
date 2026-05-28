@@ -33,7 +33,8 @@ export type EventType =
       | 'rulehost_blocked'
       | 'rulehost_requireApproval'
       | 'rulehost_auto_correct_proposed'
-      | 'rulehost_auto_correct_applied';
+      | 'rulehost_auto_correct_applied'
+      | 'runtime_v2_prompt_activations_injected';
 
 export const EventTypeSchema = Type.Union([
   Type.Literal('tool_call'),
@@ -61,6 +62,7 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('rulehost_requireApproval'),
   Type.Literal('rulehost_auto_correct_proposed'),
   Type.Literal('rulehost_auto_correct_applied'),
+  Type.Literal('runtime_v2_prompt_activations_injected'),
 ]);
 
 export type EventCategory =
@@ -636,6 +638,42 @@ export const RuleHostAutoCorrectAppliedEventDataSchema = Type.Object({
   })),
 });
 export type RuleHostAutoCorrectAppliedEventDataStatic = Static<typeof RuleHostAutoCorrectAppliedEventDataSchema>;
+
+// ============== Runtime V2 Prompt Activation Observability ==============
+
+/**
+ * runtime_v2_prompt_activations_injected — Runtime V2 prompt activations were read and injected.
+ * Emitted from prompt.ts after readActivatedPrinciples() completes.
+ */
+export interface RuntimeV2PromptActivationsInjectedEventData {
+  sessionId: string;
+  workspaceDir: string;
+  principleIds: string[];
+  activationIds: string[];
+  artifactIds: string[];
+  injectedCount: number;
+  skippedWarnings: string[];
+  injectedCharCount: number;
+  budget: number;
+  /** Present when no principles were injected */
+  skipReason?: string;
+  nextAction?: string;
+}
+
+export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
+  sessionId: Type.String(),
+  workspaceDir: Type.String(),
+  principleIds: Type.Array(Type.String()),
+  activationIds: Type.Array(Type.String()),
+  artifactIds: Type.Array(Type.String()),
+  injectedCount: Type.Number(),
+  skippedWarnings: Type.Array(Type.String()),
+  injectedCharCount: Type.Number(),
+  budget: Type.Number(),
+  skipReason: Type.Optional(Type.String()),
+  nextAction: Type.Optional(Type.String()),
+});
+export type RuntimeV2PromptActivationsInjectedEventDataStatic = Static<typeof RuntimeV2PromptActivationsInjectedEventDataSchema>;
 
 // ============== Daily Statistics ==============
 

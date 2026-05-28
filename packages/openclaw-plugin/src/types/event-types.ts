@@ -25,6 +25,7 @@ export type {
   RuleHostRequireApprovalEventData,
   RuleHostAutoCorrectProposedEventData,
   RuleHostAutoCorrectAppliedEventData,
+  RuntimeV2PromptActivationsInjectedEventData,
   ToolCallStats,
   ErrorStats,
   PainStats,
