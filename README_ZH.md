@@ -1,11 +1,17 @@
-<p align="center">
+﻿<p align="center">
   <img src="assets/banner.png" width="100%" alt="Principles Disciple Banner">
+</p>
+
+<p align="center">
+  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/promo.mp4">
+    <img src="https://img.shields.io/badge/▶_观看演示-FF6B35?style=for-the-badge" alt="Watch Demo Video">
+  </a>
 </p>
 
 <h1 align="center">Principles Disciple (原则门徒)</h1>
 
 <p align="center">
-  <strong>燃烧痛苦，驱动进化。</strong>
+  <strong>燃烧痛苦，协同进化。</strong>
 </p>
 
 <p align="center">

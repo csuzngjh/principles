@@ -1,11 +1,17 @@
-<p align="center">
+﻿<p align="center">
   <img src="assets/banner.png" width="100%" alt="Principles Disciple Banner">
+</p>
+
+<p align="center">
+  <a href="https://github.com/csuzngjh/principles/tree/main/packages/website/public/promo-en.mp4">
+    <img src="https://img.shields.io/badge/▶_Watch_Demo-FF6B35?style=for-the-badge" alt="Watch Demo Video">
+  </a>
 </p>
 
 <h1 align="center">Principles Disciple</h1>
 
 <p align="center">
-  <strong>Transform Your AI Agent From Tool to Teammate</strong>
+  <strong>Burn pain, co-evolve.</strong>
 </p>
 
 <p align="center">
