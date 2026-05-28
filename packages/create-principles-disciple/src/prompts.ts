@@ -3,39 +3,40 @@ import * as path from 'path';
 import * as os from 'os';
 import { detectWorkspace, type WorkspaceInfo } from './utils/env.js';
 import { MVP_CHANNELS, type MvpChannel } from './mvp-config.js';
+import { setLanguage, getLanguage, t, type Language } from './i18n.js';
 
 export interface InstallOptions {
-  language: 'zh' | 'en';
+  language: Language;
   mode: 'smart' | 'force';
   workspaceDir: string;
   channels: MvpChannel[];
   overwriteConfig: boolean;
 }
 
-async function promptLanguage(): Promise<'zh' | 'en'> {
+async function promptLanguage(): Promise<Language> {
   return await select({
     message: 'Select language / 选择语言',
     choices: [
       { name: 'English', value: 'en' as const },
       { name: '中文', value: 'zh' as const },
     ],
-    default: 'en',
+    default: 'zh',
   });
 }
 
 async function promptInstallMode(defaultMode: 'smart' | 'force' = 'smart'): Promise<'smart' | 'force'> {
   return await select({
-    message: 'Select install mode',
+    message: t('install_mode'),
     choices: [
       {
-        name: 'Smart merge — generate .update files to protect your changes',
+        name: t('smart_merge') + ' — ' + t('smart_mode_desc'),
         value: 'smart' as const,
-        description: 'Recommended for updates: preserves your customizations',
+        description: t('smart_mode_desc'),
       },
       {
-        name: 'Force overwrite — replace all files to match template',
+        name: t('force_overwrite') + ' — ' + t('force_mode_desc'),
         value: 'force' as const,
-        description: 'For first install or reset: overwrites existing files',
+        description: t('force_mode_desc'),
       },
     ],
     default: defaultMode,
@@ -45,27 +46,27 @@ async function promptInstallMode(defaultMode: 'smart' | 'force' = 'smart'): Prom
 async function promptWorkspace(workspaceInfo: WorkspaceInfo): Promise<string> {
   const choices = [
     {
-      name: `Use detected directory: ${workspaceInfo.detectedPath}`,
+      name: `${t('use_detected')}: ${workspaceInfo.detectedPath}`,
       value: 'detected' as const,
     },
     {
-      name: 'Custom directory',
+      name: t('custom_dir'),
       value: 'custom' as const,
     },
   ];
 
   const selection = await select({
-    message: `Workspace directory ${workspaceInfo.hasPrinciples ? '(Principles detected)' : ''}`,
+    message: `${t('workspace_dir')} ${workspaceInfo.hasPrinciples ? '(Principles detected)' : ''}`,
     choices,
     default: 'detected',
   });
 
   if (selection === 'custom') {
     return await input({
-      message: 'Enter workspace path',
+      message: t('enter_path'),
       default: path.join(os.homedir(), 'clawd'),
       validate: (value) => {
-        if (!value.trim()) return 'Path cannot be empty';
+        if (!value.trim()) return t('path_empty_error');
         return true;
       },
     });
@@ -75,27 +76,27 @@ async function promptWorkspace(workspaceInfo: WorkspaceInfo): Promise<string> {
 }
 
 function showMvpCoreChannels(): void {
-  console.log('\nMVP-Core activation channels (always enabled, cannot be disabled):');
+  console.log(`\n${t('mvp_channels')}`);
   for (const ch of MVP_CHANNELS) {
-    const labels: Record<string, string> = {
-      prompt: 'soft principle injection',
-      code_tool_hook: 'RuleHost hard enforcement',
-      defer_archive: 'graceful deferral',
+    const labels: Record<string, Record<Language, string>> = {
+      prompt: { en: 'soft principle injection', zh: '软原则注入' },
+      code_tool_hook: { en: 'Rule Host hard enforcement', zh: 'Rule Host 强制约束' },
+      defer_archive: { en: 'graceful deferral', zh: '优雅延迟' },
     };
-    console.log(`  ${ch} — ${labels[ch] ?? ''}`);
+    console.log(`  ${ch} — ${labels[ch]?.[getLanguage()] ?? labels[ch]?.en ?? ''}`);
   }
   console.log();
 }
 
 async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean> {
-  console.log('\nInstall configuration:');
-  console.log(`  Language: ${options.language}`);
-  console.log(`  Mode: ${options.mode === 'force' ? 'force overwrite' : 'smart merge'}`);
-  console.log(`  Workspace: ${options.workspaceDir}`);
-  console.log(`  MVP-Core channels: ${MVP_CHANNELS.join(', ')} (always enabled)`);
+  console.log(`\n${t('install_config')}`);
+  console.log(`  ${t('language')}: ${options.language}`);
+  console.log(`  ${t('mode')}: ${options.mode === 'force' ? t('force_overwrite') : t('smart_merge')}`);
+  console.log(`  ${t('workspace')}: ${options.workspaceDir}`);
+  console.log(`  ${t('mvp_channels_enabled')}: ${MVP_CHANNELS.join(', ')}`);
 
   return await confirm({
-    message: 'Confirm install?',
+    message: t('confirm_install'),
     default: true,
   });
 }
@@ -107,14 +108,15 @@ export async function runPrompts(
   const wsInfo = workspaceInfo || detectWorkspace();
 
   const language = cliOptions.language ?? await promptLanguage();
+  setLanguage(language);
 
   let { mode } = cliOptions;
   if (!mode) {
     const defaultMode = wsInfo.isFirstInstall ? 'force' : 'smart';
 
     if (!wsInfo.isFirstInstall && wsInfo.coreFiles && wsInfo.coreFiles.length > 0) {
-      console.log(`\nExisting core files detected: ${wsInfo.coreFiles.join(', ')}`);
-      console.log('  Smart merge mode recommended to protect your changes\n');
+      console.log(`\n${t('existing_core_files')} ${wsInfo.coreFiles.join(', ')}`);
+      console.log(`  ${t('smart_mode_desc')}\n`);
     }
 
     mode = await promptInstallMode(defaultMode);
@@ -134,6 +136,7 @@ export async function runPrompts(
 
   const confirmed = await promptConfirm(options);
   if (!confirmed) {
+    console.log(`\n${t('cancel_install')}\n`);
     return null;
   }
 

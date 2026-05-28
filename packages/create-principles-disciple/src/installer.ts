@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as http from 'http';
 import { execSync, execFileSync, spawn, type ChildProcess } from 'child_process';
 import type { ExecSyncOptions } from 'child_process';
-import ora from 'ora';
+import ora, { type Ora } from 'ora';
 import { logger } from './utils/logger.js';
 import type { InstallOptions } from './prompts.js';
 import {
@@ -23,6 +23,134 @@ import {
 } from './mvp-config.js';
 
 const INSTALL_TIMEOUT_MS = parseInt(process.env.PD_INSTALL_TIMEOUT_MS || '300000', 10);
+
+// 超时常量
+const PD_CLI_VERIFICATION_TIMEOUT_MS = 10_000;
+const STORY_A_VERIFICATION_TIMEOUT_MS = 30_000;
+const CONSOLE_HEALTH_CHECK_TIMEOUT_MS = 8_000;
+const CONSOLE_WARMUP_TIME_MS = 6_000;
+
+// 端口范围常量
+const CONSOLE_PORT_RANGE_MIN = 3100;
+const CONSOLE_PORT_RANGE_MAX = 3199;
+
+// 允许的原生模块白名单
+const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
+
+/**
+ * 执行 npm install 并提供友好的错误提示
+ */
+async function runNpmInstall(cwd: string, componentName: string = 'npm'): Promise<void> {
+  const execOpts = getCapturingExecOptions(cwd);
+  try {
+    execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
+  } catch (e) {
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    let hint = '';
+
+    // 动态导入 i18n 以避免循环依赖
+    const { t, getLanguage } = await import('./i18n.js');
+    const lang = getLanguage();
+
+    if (errorMsg.includes('ETIMEDOUT') || errorMsg.includes('network') || errorMsg.includes('timeout')) {
+      hint = '\n\n' + t('npm_hint_network_timeout').replace('{path}', cwd);
+    } else if (errorMsg.includes('EACCES') || errorMsg.includes('permission') || errorMsg.includes('EPERM')) {
+      hint = '\n\n' + t('npm_hint_permission_denied');
+    } else if (errorMsg.includes('ENOSPC')) {
+      hint = '\n\n' + t('npm_hint_disk_space');
+    } else {
+      hint = '\n\n' + t('npm_hint_manual_fix').replace('{path}', cwd);
+    }
+
+    throw new Error(`${componentName} npm install failed: ${errorMsg}${hint}`, { cause: e });
+  }
+}
+
+/**
+ * 重建原生模块
+ */
+async function rebuildNativeModules(cwd: string, componentName: string): Promise<void> {
+  for (const mod of ALLOWED_NATIVE_MODULES) {
+    const modPath = path.join(cwd, 'node_modules', mod);
+    if (!existsSync(modPath)) continue;
+
+    try {
+      execSync(`npm rebuild ${mod}`, getCapturingExecOptions(cwd));
+    } catch (e) {
+      throw new Error(`${componentName} native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${cwd} && npm rebuild ${mod}`, { cause: e });
+    }
+  }
+}
+
+/**
+ * 验证原生模块
+ */
+function verifyNativeModules(cwd: string, componentName: string): void {
+  for (const nativeMod of ALLOWED_NATIVE_MODULES) {
+    const nativeModPath = path.join(cwd, 'node_modules', nativeMod);
+    if (!existsSync(nativeModPath)) continue;
+
+    try {
+      execFileSync(process.execPath, ['-e', `require('${nativeMod}')`], { cwd, stdio: 'pipe' });
+    } catch {
+      throw new Error(`${componentName} native module ${nativeMod} verification failed after rebuild. The install cannot proceed.`);
+    }
+  }
+}
+
+/**
+ * 验证路径是否在工作区目录内，防止路径遍历攻击
+ */
+function validateWorkspacePath(targetPath: string, workspaceDir: string): void {
+  const resolved = path.resolve(targetPath);
+  const workspace = path.resolve(workspaceDir);
+
+  if (!resolved.startsWith(workspace + path.sep) && resolved !== workspace) {
+    throw new Error(`Security error: Path "${targetPath}" is outside workspace directory "${workspaceDir}"`);
+  }
+}
+
+interface InstallStep {
+  name: string;
+  weight: number;
+}
+
+const INSTALL_STEPS: InstallStep[] = [
+  { name: 'Checking built plugin', weight: 3 },
+  { name: 'Backing up existing install', weight: 3 },
+  { name: 'Installing bundled @principles/core', weight: 8 },
+  { name: 'Installing plugin', weight: 10 },
+  { name: 'Pre-filling @principles/core for plugin', weight: 3 },
+  { name: 'Installing plugin dependencies', weight: 20 },
+  { name: 'Installing pd CLI', weight: 8 },
+  { name: 'Pre-filling @principles/core for pd-cli', weight: 3 },
+  { name: 'Verifying pd CLI', weight: 3 },
+  { name: 'Installing pd-console', weight: 8 },
+  { name: 'Pre-filling @principles/core for console', weight: 3 },
+  { name: 'Installing console dependencies', weight: 10 },
+  { name: 'Verifying pd-console', weight: 3 },
+  { name: 'Copying templates', weight: 3 },
+  { name: 'Generating feature flags', weight: 2 },
+  { name: 'Creating config', weight: 2 },
+  { name: 'Verifying pd demo story-a', weight: 5 },
+  { name: 'Updating OpenClaw config', weight: 3 },
+];
+
+const TOTAL_WEIGHT = INSTALL_STEPS.reduce((sum, step) => sum + step.weight, 0);
+
+function updateProgress(spinner: Ora | null, currentStep: number, message: string): void {
+  if (!spinner) return;
+
+  if (currentStep < 0 || currentStep >= INSTALL_STEPS.length) {
+    spinner.text = message;
+    return;
+  }
+
+  const completedWeight = INSTALL_STEPS.slice(0, currentStep + 1).reduce((sum, s) => sum + s.weight, 0);
+  const percent = Math.round((completedWeight / TOTAL_WEIGHT) * 100);
+
+  spinner.text = `${message} (${percent}%)`;
+}
 
 function getCapturingExecOptions(cwd: string, timeoutOverride?: number): ExecSyncOptions {
   return {
@@ -217,35 +345,11 @@ async function installPluginDependencies(): Promise<void> {
   }
 
   if (needsInstall) {
-    const execOpts = getCapturingExecOptions(extDir);
-    try {
-      execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
-    } catch (e) {
-      throw new Error(`npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm install --ignore-scripts`, { cause: e });
-    }
+    await runNpmInstall(extDir, 'Plugin');
   }
 
-  const nativeModules = ['better-sqlite3'];
-  const execOpts = getCapturingExecOptions(extDir);
-  for (const mod of nativeModules) {
-    const modPath = path.join(extDir, 'node_modules', mod);
-    if (!existsSync(modPath)) continue;
-    try {
-      execSync(`npm rebuild ${mod}`, execOpts);
-    } catch (e) {
-      throw new Error(`Native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${extDir} && npm rebuild ${mod}`, { cause: e });
-    }
-  }
-
-  for (const nativeMod of nativeModules) {
-    const nativeModPath = path.join(extDir, 'node_modules', nativeMod);
-    if (!existsSync(nativeModPath)) continue;
-    try {
-      execSync('node -e "require(\'' + nativeMod + '\')"', { cwd: extDir, stdio: 'pipe' });
-    } catch {
-      throw new Error(`Native module ${nativeMod} verification failed after rebuild. The install cannot proceed.`);
-    }
-  }
+  await rebuildNativeModules(extDir, 'Plugin');
+  verifyNativeModules(extDir, 'Plugin');
 }
 
 function getNpmGlobalBinDir(): string | null {
@@ -340,16 +444,16 @@ function verifyPdCliShim(): { localOk: boolean; globalOk: boolean; localPath: st
   let localOk = false;
   try {
     const installedEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
-    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: 10_000 });
+    execFileSync(process.execPath, [installedEntry, '--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
     localOk = true;
   } catch { /* local entry failed */ }
 
   const globalOk = (() => {
     try {
       if (isWindows()) {
-        execSync('pd --version', { stdio: 'pipe', timeout: 10_000, shell: 'cmd' });
+        execSync('pd --version', { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS, shell: 'cmd' });
       } else {
-        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: 10_000 });
+        execFileSync('pd', ['--version'], { stdio: 'pipe', timeout: PD_CLI_VERIFICATION_TIMEOUT_MS });
       }
       return true;
     } catch {
@@ -418,23 +522,8 @@ async function installConsoleDependencies(): Promise<void> {
     throw new Error('Console package.json not found after copy — install is corrupted');
   }
 
-  const execOpts = getCapturingExecOptions(consoleDest);
-  try {
-    execSync('npm install --ignore-scripts --legacy-peer-deps', execOpts);
-  } catch (e) {
-    throw new Error(`Console npm install failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${consoleDest} && npm install --ignore-scripts --legacy-peer-deps`, { cause: e });
-  }
-
-  const nativeModules = ['better-sqlite3'];
-  for (const mod of nativeModules) {
-    const modPath = path.join(consoleDest, 'node_modules', mod);
-    if (!existsSync(modPath)) continue;
-    try {
-      execSync(`npm rebuild ${mod}`, getCapturingExecOptions(consoleDest));
-    } catch (e) {
-      throw new Error(`Console native module ${mod} rebuild failed: ${e instanceof Error ? e.message : String(e)}. Try manually: cd ${consoleDest} && npm rebuild ${mod}`, { cause: e });
-    }
-  }
+  await runNpmInstall(consoleDest, 'Console');
+  await rebuildNativeModules(consoleDest, 'Console');
 }
 
 async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null; reason?: string }> {
@@ -445,7 +534,7 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
     return { ok: false, url: '', process: null, reason: 'Console server entry not found' };
   }
 
-  const port = 3100 + Math.floor(Math.random() * 100);
+  const port = CONSOLE_PORT_RANGE_MIN + Math.floor(Math.random() * (CONSOLE_PORT_RANGE_MAX - CONSOLE_PORT_RANGE_MIN + 1));
   const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth', '--host', '127.0.0.1'], {
     stdio: 'pipe',
     env: { ...process.env },
@@ -467,7 +556,7 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
     childStdout += chunk.toString();
   });
 
-  await new Promise<void>((resolve) => { setTimeout(resolve, 6000); });
+  await new Promise<void>((resolve) => { setTimeout(resolve, CONSOLE_WARMUP_TIME_MS); });
 
   if (childExited) {
     const stderrHint = childStderr.slice(0, 500);
@@ -487,7 +576,7 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
         });
       });
       req.on('error', reject);
-      req.setTimeout(8000, () => { req.destroy(); reject(new Error('health check timeout')); });
+      req.setTimeout(CONSOLE_HEALTH_CHECK_TIMEOUT_MS, () => { req.destroy(); reject(new Error('health check timeout')); });
     });
 
     if (result.statusCode !== 200) {
@@ -542,6 +631,10 @@ async function copyCoreTemplates(opts: CopyOptions): Promise<number> {
   for (const file of files) {
     const srcPath = path.join(actualSrc, file);
     const destPath = path.join(opts.workspaceDir, file);
+
+    // 验证目标路径安全
+    validateWorkspacePath(destPath, opts.workspaceDir);
+
     if (existsSync(destPath) && opts.mode === 'smart') {
       await fse.copy(srcPath, `${destPath}.update`, { overwrite: true });
     } else {
@@ -555,21 +648,25 @@ async function copyCoreTemplates(opts: CopyOptions): Promise<number> {
 
 async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
   let count = 0;
-  const principlesSrc = path.join(opts.pluginDir, 'templates', 'workspace', '.principles');
+
+  // 根据语言选择源目录
+  const langPrinciplesSrc = path.join(opts.pluginDir, 'templates', 'langs', opts.language, 'principles');
+  const defaultPrinciplesSrc = path.join(opts.pluginDir, 'templates', 'workspace', '.principles');
+  const actualPrinciplesSrc = existsSync(langPrinciplesSrc) ? langPrinciplesSrc : defaultPrinciplesSrc;
+
   const principlesDest = path.join(opts.workspaceDir, '.principles');
 
-  if (!existsSync(principlesSrc)) return 0;
+  if (!existsSync(actualPrinciplesSrc)) return 0;
 
-  const files = readdirSync(principlesSrc);
-  const langThinkingOsSrc = path.join(opts.pluginDir, 'templates', 'langs', opts.language, 'principles', 'THINKING_OS.md');
+  const files = readdirSync(actualPrinciplesSrc);
 
   for (const file of files) {
-    let srcPath = path.join(principlesSrc, file);
-    if (file === 'THINKING_OS.md' && existsSync(langThinkingOsSrc)) {
-      srcPath = langThinkingOsSrc;
-    }
+    const srcPath = path.join(actualPrinciplesSrc, file);
     const destPath = path.join(principlesDest, file);
     if (statSync(srcPath).isDirectory()) continue;
+
+    // 验证目标路径安全
+    validateWorkspacePath(destPath, opts.workspaceDir);
 
     if (existsSync(destPath) && opts.mode === 'smart') {
       await fse.copy(srcPath, `${destPath}.update`, { overwrite: true });
@@ -580,7 +677,7 @@ async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
     count++;
   }
 
-  const modelsSrc = path.join(principlesSrc, 'models');
+  const modelsSrc = path.join(actualPrinciplesSrc, 'models');
   const modelsDest = path.join(principlesDest, 'models');
   if (existsSync(modelsSrc)) {
     await fse.ensureDir(modelsDest);
@@ -655,6 +752,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
   const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
   let consoleProcess: ChildProcess | null = null;
+  let stepIndex = 0;
 
   const killConsoleChild = () => {
     if (consoleProcess) {
@@ -665,34 +763,42 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
   };
 
   try {
-    if (spinner) spinner.text = 'Checking built plugin...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Checking built plugin...');
     await checkBuiltPlugin(pluginDir);
     verification.manifestActivation = 'verified';
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Backing up existing install...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Backing up existing install...');
     const { backupDir: backupDirFromResult } = backupExistingInstall();
     backupDir = backupDirFromResult;
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing bundled @principles/core...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/core...');
     installBundledCore(pluginDir);
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing plugin...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
     await installPluginToStaging(pluginDir);
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Pre-filling @principles/core for plugin...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for plugin...');
     ensureCoreDependency(getPluginExtDir());
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing plugin dependencies...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin dependencies...');
     await installPluginDependencies();
     components.plugin = 'verified';
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing pd CLI...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing pd CLI...');
     syncPdCli(pluginDir);
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Pre-filling @principles/core for pd-cli...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for pd-cli...');
     ensureCoreDependency(getInstalledPdCliDir());
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Verifying pd CLI...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd CLI...');
     const cliVerify = verifyPdCliShim();
     if (!cliVerify.localOk) {
       throw new Error('PD CLI verification failed — local shim is not executable after install. Check Node.js and PATH configuration.');
@@ -704,17 +810,21 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       components.cliLocalPath = cliVerify.localPath;
       logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" or add ${getInstalledBinDir()} to PATH.`);
     }
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing pd-console...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing pd-console...');
     installConsole(pluginDir);
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Pre-filling @principles/core for console...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Pre-filling @principles/core for console...');
     ensureCoreDependency(getInstalledConsoleDir());
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Installing console dependencies...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing console dependencies...');
     await installConsoleDependencies();
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Verifying pd-console...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd-console...');
     const consoleVerify = await verifyConsole(options.workspaceDir);
     if (consoleVerify.ok) {
       components.console = 'configured';
@@ -723,8 +833,9 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     } else {
       throw new Error(`Console verification failed: ${consoleVerify.reason ?? 'unknown'}. Installation rolled back — plugin and CLI are not activated.`);
     }
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Copying templates...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Copying templates...');
     const templatesCount = await copyCoreTemplates({
       pluginDir,
       language: options.language,
@@ -737,27 +848,31 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
       workspaceDir: options.workspaceDir,
       mode: options.mode,
     });
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Generating feature flags...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Generating feature flags...');
     const featureFlagsPath = await generateFeatureFlagsConfig(options.workspaceDir, options.channels);
     verification.features = 'passed';
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Creating config...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Creating config...');
     await createConfigFile(options.workspaceDir, options.channels);
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Verifying pd demo story-a...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd demo story-a...');
     try {
       const installedPdCliEntry = path.join(getInstalledPdCliDir(), 'dist', 'index.js');
       execFileSync(process.execPath, [installedPdCliEntry, 'demo', 'story-a', '--json', '--workspace', options.workspaceDir], {
         stdio: 'pipe',
-        timeout: 30_000,
+        timeout: STORY_A_VERIFICATION_TIMEOUT_MS,
       });
       verification.storyA = 'passed';
     } catch (e) {
       throw new Error(`Story A demo verification failed: ${e instanceof Error ? e.message : String(e)}. Installation rolled back — plugin and CLI are not activated.`, { cause: e });
     }
+    stepIndex++;
 
-    if (spinner) spinner.text = 'Updating OpenClaw config...';
+    if (spinner) updateProgress(spinner, stepIndex, 'Updating OpenClaw config...');
     await updateOpenClawConfig();
 
     cleanupBackup(backupDir);

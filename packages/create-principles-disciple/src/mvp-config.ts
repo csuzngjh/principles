@@ -1,6 +1,7 @@
 import * as yaml from 'js-yaml';
 import * as path from 'path';
 import { existsSync, readFileSync } from 'fs';
+import { execSync } from 'child_process';
 
 export const MVP_CHANNELS = ['prompt', 'code_tool_hook', 'defer_archive'] as const;
 export type MvpChannel = (typeof MVP_CHANNELS)[number];
@@ -299,4 +300,34 @@ export function readEnabledChannelsFromDisk(workspaceDir: string): string[] {
     }
   }
   return enabled;
+}
+
+/**
+ * 获取 npm global bin 目录路径
+ */
+export function getNpmGlobalBinDir(): string | null {
+  try {
+    const prefix = execSync('npm prefix -g', { encoding: 'utf-8', stdio: 'pipe' }).trim();
+    if (!prefix) return null;
+    return isWindows() ? prefix : path.join(prefix, 'bin');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 获取所有可能的全局 pd shim 文件路径
+ */
+export function getGlobalShimPaths(): string[] {
+  const globalBin = getNpmGlobalBinDir();
+  if (!globalBin) return [];
+
+  if (isWindows()) {
+    return [
+      path.join(globalBin, 'pd.cmd'),
+      path.join(globalBin, 'pd.ps1'),
+    ];
+  } else {
+    return [path.join(globalBin, 'pd')];
+  }
 }

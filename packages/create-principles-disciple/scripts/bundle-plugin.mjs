@@ -3,7 +3,6 @@
 import { existsSync, mkdirSync, rmSync, cpSync, copyFileSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,25 +16,6 @@ const CONSOLE_SRC = join(ROOT_DIR, 'packages', 'pd-console');
 const CONSOLE_DEST = join(__dirname, '..', 'console');
 const CORE_SRC = join(ROOT_DIR, 'packages', 'principles-core');
 const CORE_DEST = join(__dirname, '..', 'core');
-
-function buildConsole() {
-  const serverJs = join(CONSOLE_SRC, 'dist', 'server.js');
-  const webIndex = join(CONSOLE_SRC, 'dist', 'web', 'index.html');
-
-  console.log('  🔨 Building pd-console (always rebuild before bundling)...');
-  try {
-    execSync('npm run build', { cwd: CONSOLE_SRC, stdio: 'inherit', timeout: 120_000 });
-  } catch (e) {
-    console.error('❌ Failed to build pd-console. Cannot bundle without it.');
-    process.exit(1);
-  }
-
-  if (!existsSync(serverJs) || !existsSync(webIndex)) {
-    console.error('❌ pd-console build completed but dist artifacts still missing.');
-    process.exit(1);
-  }
-  console.log('  ✅ pd-console build succeeded');
-}
 
 const PLUGIN_REQUIRED = [
   'dist',
@@ -70,9 +50,6 @@ const CORE_REQUIRED = [
 ];
 
 console.log('📦 Bundling plugin + pd-cli for npm publish...\n');
-
-console.log('🔍 Building pd-console before bundling...');
-buildConsole();
 
 for (const item of PLUGIN_REQUIRED) {
   const src = join(PLUGIN_SRC, item);
