@@ -11,7 +11,7 @@ import {
   MVP_CHANNELS,
   buildFailureOutput,
 } from './mvp-config.js';
-import { setLanguage, t, getLanguage, isLanguage, type Language } from './i18n.js';
+import { setLanguage, t, getLanguage, isLanguage } from './i18n.js';
 
 export { isLanguage } from './i18n.js';
 
