@@ -33,7 +33,10 @@ export type EventType =
       | 'rulehost_blocked'
       | 'rulehost_requireApproval'
       | 'rulehost_auto_correct_proposed'
-      | 'rulehost_auto_correct_applied';
+      | 'rulehost_auto_correct_applied'
+      | 'runtime_v2_prompt_activations_injected'
+      | 'runtime_v2_confirm_first_gate_blocked'
+      | 'runtime_v2_confirm_first_gate_approved';
 
 export const EventTypeSchema = Type.Union([
   Type.Literal('tool_call'),
@@ -61,6 +64,9 @@ export const EventTypeSchema = Type.Union([
   Type.Literal('rulehost_requireApproval'),
   Type.Literal('rulehost_auto_correct_proposed'),
   Type.Literal('rulehost_auto_correct_applied'),
+  Type.Literal('runtime_v2_prompt_activations_injected'),
+  Type.Literal('runtime_v2_confirm_first_gate_blocked'),
+  Type.Literal('runtime_v2_confirm_first_gate_approved'),
 ]);
 
 export type EventCategory =
@@ -636,6 +642,65 @@ export const RuleHostAutoCorrectAppliedEventDataSchema = Type.Object({
   })),
 });
 export type RuleHostAutoCorrectAppliedEventDataStatic = Static<typeof RuleHostAutoCorrectAppliedEventDataSchema>;
+
+// ============== Runtime V2 Prompt Activation Observability ==============
+
+/**
+ * runtime_v2_prompt_activations_injected — Runtime V2 prompt activations were read and injected.
+ * Emitted from prompt.ts after readActivatedPrinciples() completes.
+ */
+export interface RuntimeV2PromptActivationsInjectedEventData {
+  sessionId: string;
+  workspaceDir: string;
+  principleIds: string[];
+  activationIds: string[];
+  artifactIds: string[];
+  injectedCount: number;
+  skippedWarnings: string[];
+  injectedCharCount: number;
+  budget: number;
+  /** Present when no principles were injected */
+  skipReason?: string;
+  nextAction?: string;
+}
+
+export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
+  sessionId: Type.String(),
+  workspaceDir: Type.String(),
+  principleIds: Type.Array(Type.String()),
+  activationIds: Type.Array(Type.String()),
+  artifactIds: Type.Array(Type.String()),
+  injectedCount: Type.Number(),
+  skippedWarnings: Type.Array(Type.String()),
+  injectedCharCount: Type.Number(),
+  budget: Type.Number(),
+  skipReason: Type.Optional(Type.String()),
+  nextAction: Type.Optional(Type.String()),
+});
+export type RuntimeV2PromptActivationsInjectedEventDataStatic = Static<typeof RuntimeV2PromptActivationsInjectedEventDataSchema>;
+
+/**
+ * runtime_v2_confirm_first_gate_blocked — Mutating tool blocked by confirm-first gate.
+ * Emitted from gate.ts when a mutating tool is blocked because owner approval is pending.
+ */
+export interface RuntimeV2ConfirmFirstGateEventData {
+  sessionId: string;
+  workspaceDir: string;
+  toolName: string;
+  reason: string;
+  principleId: string;
+  nextAction: string;
+}
+
+export const RuntimeV2ConfirmFirstGateEventDataSchema = Type.Object({
+  sessionId: Type.String(),
+  workspaceDir: Type.String(),
+  toolName: Type.String(),
+  reason: Type.String(),
+  principleId: Type.String(),
+  nextAction: Type.String(),
+});
+export type RuntimeV2ConfirmFirstGateEventDataStatic = Static<typeof RuntimeV2ConfirmFirstGateEventDataSchema>;
 
 // ============== Daily Statistics ==============
 
