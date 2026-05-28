@@ -42,15 +42,12 @@ function getInstalledConsoleDir(homeDir: string): string {
   return path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple', 'console');
 }
 
-let smokeAvailable = false;
-
 beforeAll(() => {
-  try {
-    const packOutput = npmExecSync(['pack', '--pack-destination', TMPDIR], {
-      cwd: INSTALLER_DIR,
-      stdio: 'pipe',
-      timeout: 120_000,
-    }).toString().trim();
+  const packOutput = npmExecSync(['pack', '--pack-destination', TMPDIR], {
+    cwd: INSTALLER_DIR,
+    stdio: 'pipe',
+    timeout: 120_000,
+  }).toString().trim();
 
   const lines = packOutput.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   const tarballName = lines[lines.length - 1];
@@ -68,10 +65,6 @@ beforeAll(() => {
   tempWorkspaceDir = path.join(TMPDIR, `pd-smoke-ws-${Date.now()}`);
   fs.mkdirSync(tempHomeDir, { recursive: true });
   fs.mkdirSync(tempWorkspaceDir, { recursive: true });
-  smokeAvailable = true;
-  } catch {
-    smokeAvailable = false;
-  }
 }, 180_000);
 
 afterAll(() => {
@@ -83,7 +76,7 @@ afterAll(() => {
 }, 30_000);
 
 describe('Real packaged install smoke test', () => {
-  it.skipIf(!smokeAvailable)('tarball contains core/ directory', () => {
+  it('tarball contains core/ directory', () => {
     const tarOutput = execSync(`tar -tf "${tarballPath}"`, {
       shell: true,
       stdio: 'pipe',
@@ -92,7 +85,7 @@ describe('Real packaged install smoke test', () => {
     expect(tarOutput).toContain('core/');
   }, 60_000);
 
-  it.skipIf(!smokeAvailable)('install to clean temp HOME succeeds', () => {
+  it('install to clean temp HOME succeeds', () => {
     npmInstallSync(tarballPath, tempHomeDir, {
       HOME: tempHomeDir,
       USERPROFILE: tempHomeDir,
@@ -110,7 +103,7 @@ describe('Real packaged install smoke test', () => {
     expect(pluginPkgJson.dependencies?.['@principles/core']).toBe('file:./core');
   }, 240_000);
 
-  it.skipIf(!smokeAvailable)('--json install produces parseable JSON with all components verified', () => {
+  it('--json install produces parseable JSON with all components verified', () => {
     const cliEntry = path.join(tempHomeDir, 'node_modules', 'create-principles-disciple', 'dist', 'index.js');
 
     let stdout = '';
@@ -162,7 +155,7 @@ describe('Real packaged install smoke test', () => {
     }
   }, 240_000);
 
-  it.skipIf(!smokeAvailable)('pd console starts and /api/health returns 200 on loopback', async () => {
+  it('pd console starts and /api/health returns 200 on loopback', async () => {
     const installedConsoleDir = getInstalledConsoleDir(tempHomeDir);
     const serverEntry = path.join(installedConsoleDir, 'dist', 'server.js');
     if (!fs.existsSync(serverEntry)) {
@@ -227,7 +220,7 @@ describe('Real packaged install smoke test', () => {
     expect(healthOk).toBe(true);
   }, 60_000);
 
-  it.skipIf(!smokeAvailable)('console refuses --no-auth with non-loopback host', () => {
+  it('console refuses --no-auth with non-loopback host', () => {
     const installedConsoleDir = getInstalledConsoleDir(tempHomeDir);
     const serverEntry = path.join(installedConsoleDir, 'dist', 'server.js');
     if (!fs.existsSync(serverEntry)) {
@@ -260,7 +253,7 @@ describe('Real packaged install smoke test', () => {
     expect(exitCode).not.toBe(0);
   });
 
-  it.skipIf(!smokeAvailable)('failure injection: missing console triggers rollback', () => {
+  it('failure injection: missing console triggers rollback', () => {
     const backupHomeDir = path.join(TMPDIR, `pd-smoke-rollback-${Date.now()}`);
     const backupWorkspaceDir = path.join(TMPDIR, `pd-smoke-rollback-ws-${Date.now()}`);
     fs.mkdirSync(backupHomeDir, { recursive: true });

@@ -1701,3 +1701,49 @@ describe('Shim ownership verification before deletion (P1 fix)', () => {
     expect(content).toContain('skippedGlobalShims');
   });
 });
+
+describe('--lang validation rejects invalid values (P2 fix)', () => {
+  it('index.ts has isLanguage type guard', () => {
+    const indexPath = path.resolve(__dirname, '..', 'src', 'index.ts');
+    const content = fs.readFileSync(indexPath, 'utf-8');
+    expect(content).toContain('function isLanguage');
+    expect(content).toContain("value === 'zh' || value === 'en'");
+  });
+
+  it('index.ts validates --lang before setLanguage call', () => {
+    const indexPath = path.resolve(__dirname, '..', 'src', 'index.ts');
+    const content = fs.readFileSync(indexPath, 'utf-8');
+    const langValidation = content.substring(content.indexOf('isLanguage'), content.indexOf('setLanguage(options.lang)'));
+    expect(langValidation).toContain('invalid_language');
+    expect(langValidation).toContain('process.exit(1)');
+  });
+
+  it('invalid --lang produces JSON output with reason and nextAction', () => {
+    const indexPath = path.resolve(__dirname, '..', 'src', 'index.ts');
+    const content = fs.readFileSync(indexPath, 'utf-8');
+    const invalidLangBlock = content.substring(content.indexOf('!isLanguage(options.lang)'), content.indexOf('setLanguage(options.lang)'));
+    expect(invalidLangBlock).toContain('buildFailureOutput');
+    expect(invalidLangBlock).toContain('invalid_language');
+  });
+
+  it('index.ts does not use as cast for options.lang', () => {
+    const indexPath = path.resolve(__dirname, '..', 'src', 'index.ts');
+    const content = fs.readFileSync(indexPath, 'utf-8');
+    expect(content).not.toContain("options.lang as 'zh'");
+    expect(content).not.toContain("options.lang as 'en'");
+  });
+
+  it('index.ts does not use as cast for options.workspace or options.force', () => {
+    const indexPath = path.resolve(__dirname, '..', 'src', 'index.ts');
+    const content = fs.readFileSync(indexPath, 'utf-8');
+    expect(content).not.toContain('options.workspace as string');
+    expect(content).not.toContain('options.force as boolean');
+  });
+
+  it('Commander registers --lang option', () => {
+    const indexPath = path.resolve(__dirname, '..', 'src', 'index.ts');
+    const content = fs.readFileSync(indexPath, 'utf-8');
+    expect(content).toContain('--lang <lang>');
+    expect(content).toContain("'zh'");
+  });
+});

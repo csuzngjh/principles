@@ -11,7 +11,11 @@ import {
   MVP_CHANNELS,
   buildFailureOutput,
 } from './mvp-config.js';
-import { setLanguage, t, getLanguage } from './i18n.js';
+import { setLanguage, t, getLanguage, type Language } from './i18n.js';
+
+function isLanguage(value: unknown): value is Language {
+  return value === 'zh' || value === 'en';
+}
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,8 +24,21 @@ const PLUGIN_DIR = path.resolve(__dirname, '..');
 async function runInstall(options: Record<string, unknown>): Promise<void> {
   const jsonMode = options.json === true;
 
-  // Set language early
-  setLanguage((options.lang as 'zh' | 'en') || 'zh');
+  if (!isLanguage(options.lang)) {
+    if (jsonMode) {
+      console.log(JSON.stringify(buildFailureOutput(
+        'invalid_language',
+        `--lang must be 'zh' or 'en', got: ${JSON.stringify(options.lang)}. Next: re-run with --lang zh or --lang en`,
+      ), null, 2));
+    } else {
+      logger.error(`--lang must be 'zh' or 'en', got: ${JSON.stringify(options.lang)}`);
+      logger.info(`${t('next_action')}: re-run with --lang zh or --lang en`);
+    }
+    process.exit(1);
+    return;
+  }
+
+  setLanguage(options.lang);
 
   if (jsonMode) {
     setQuietMode(true);
@@ -60,8 +77,8 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   const workspaceInfo = detectWorkspace();
 
   const cliOptions: Partial<InstallOptions> = {
-    language: options.lang as 'zh' | 'en',
-    workspaceDir: options.workspace as string,
+    language: options.lang,
+    workspaceDir: typeof options.workspace === 'string' ? options.workspace : undefined,
   };
 
   if (options.force) {
@@ -197,7 +214,7 @@ async function runUninstall(options: Record<string, unknown>): Promise<void> {
   logger.info('Preparing to uninstall Principles Disciple...\n');
 
   const result = await uninstall({
-    force: options.force as boolean,
+    force: options.force === true,
   });
 
   if (!result.success) {
