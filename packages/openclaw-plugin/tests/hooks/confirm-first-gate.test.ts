@@ -45,6 +45,23 @@ describe('Confirm-First Gate', () => {
       expect(detectApprovalMarker('hello world')).toBe(false);
       expect(detectApprovalMarker('')).toBe(false);
     });
+
+    it('rejects negated Chinese approval', () => {
+      expect(detectApprovalMarker('不同意')).toBe(false);
+      expect(detectApprovalMarker('不确认')).toBe(false);
+      expect(detectApprovalMarker('先不执行')).toBe(false);
+      expect(detectApprovalMarker('还没准备好确认')).toBe(false);
+      expect(detectApprovalMarker('暂不批准')).toBe(false);
+    });
+
+    it('rejects negated English approval', () => {
+      expect(detectApprovalMarker("don't proceed")).toBe(false);
+      expect(detectApprovalMarker("don't do it")).toBe(false);
+      expect(detectApprovalMarker("not ready to confirm")).toBe(false);
+      expect(detectApprovalMarker("can't approve yet")).toBe(false);
+      expect(detectApprovalMarker("won't proceed")).toBe(false);
+      expect(detectApprovalMarker("stop")).toBe(false);
+    });
   });
 
   describe('evaluateConfirmFirstGateSync', () => {
@@ -95,6 +112,12 @@ describe('Confirm-First Gate', () => {
     it('allows non-mutating exec when directive active and not approved', () => {
       setConfirmFirstDirective('session-1', true, 'princ-mvp-acceptance-confirm-first');
       const result = evaluateConfirmFirstGateSync('session-1', 'exec', { command: 'ls -la' });
+      expect(result.action).toBe('allow');
+    });
+
+    it('allows bash with undefined params when directive active', () => {
+      setConfirmFirstDirective('session-1', true, 'princ-mvp-acceptance-confirm-first');
+      const result = evaluateConfirmFirstGateSync('session-1', 'bash', undefined);
       expect(result.action).toBe('allow');
     });
 

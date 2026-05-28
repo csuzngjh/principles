@@ -294,6 +294,19 @@ export async function handleBeforePromptBuild(
       // If user sends approval language, mark session as approved for confirm-first gate
       if (sessionId && detectApprovalMarker(userText)) {
         setConfirmFirstApproval(sessionId);
+        // P2: Emit approval telemetry for observability (ERR-002)
+        try {
+          wctx.eventLog.recordConfirmFirstGateApproved({
+            sessionId,
+            workspaceDir: wctx.workspaceDir,
+            toolName: '(approval)',
+            reason: 'user_approval_detected',
+            principleId: 'confirm-first',
+            nextAction: 'mutating tools now permitted',
+          });
+        } catch (logErr) {
+          logger?.warn?.(`[PD:ConfirmFirst] Failed to emit approval event: ${String(logErr)}`);
+        }
       }
 
       // Use CorrectionCueLearner for detection — supports learned keywords, not just hardcoded list
@@ -788,23 +801,13 @@ ${heartbeatChecklist}
 
     // ── Set confirm-first directive state for gate enforcement ──
     if (sessionId) {
-      const hasConfirmFirst = dedupedV2.some(
+      const cfPrinciple = dedupedV2.find(
         (p) =>
           p.principleId === 'princ-mvp-acceptance-confirm-first' ||
           (p.text.toLowerCase().includes('confirm requirements') &&
            p.text.toLowerCase().includes('owner approval')),
       );
-      if (hasConfirmFirst) {
-        const cfPrinciple = dedupedV2.find(
-          (p) =>
-            p.principleId === 'princ-mvp-acceptance-confirm-first' ||
-            (p.text.toLowerCase().includes('confirm requirements') &&
-             p.text.toLowerCase().includes('owner approval')),
-        );
-        setConfirmFirstDirective(sessionId, true, cfPrinciple?.principleId);
-      } else {
-        setConfirmFirstDirective(sessionId, false);
-      }
+      setConfirmFirstDirective(sessionId, !!cfPrinciple, cfPrinciple?.principleId);
     }
   } catch (e) {
     logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);

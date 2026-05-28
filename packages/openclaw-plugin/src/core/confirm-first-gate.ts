@@ -14,6 +14,7 @@
  * 3. Gate hook (before_tool_call) checks cached state synchronously
  */
 
+import { LOW_RISK_WRITE_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 
 /** Per-session confirm-first state */
 interface ConfirmFirstSessionState {
@@ -21,8 +22,18 @@ interface ConfirmFirstSessionState {
   principleId?: string;
 }
 
+/** Size cap to prevent memory leaks from abandoned sessions */
+const MAX_SESSION_ENTRIES = 500;
+
 const sessionDirectiveState = new Map<string, ConfirmFirstSessionState>();
 const sessionApprovalState = new Map<string, boolean>();
+
+function evictOldestIfFull(map: Map<string, unknown>): void {
+  if (map.size >= MAX_SESSION_ENTRIES) {
+    const firstKey = map.keys().next().value;
+    if (firstKey !== undefined) map.delete(firstKey);
+  }
+}
 
 export interface ConfirmFirstGateResult {
   action: 'allow' | 'block' | 'skip';
@@ -36,27 +47,53 @@ export interface ConfirmFirstGateResult {
  */
 function isMutatingTool(toolName: string, params?: Record<string, unknown>): boolean {
   // Direct write/edit/delete tools are always mutating
-  if (WRITE_EDIT_DELETE_TOOLS.has(toolName)) return true;
+  if (WRITE_TOOLS.has(toolName)) return true;
 
   // For exec/bash, only mutating if the command content is mutating
-  if (EXEC_TOOLS.has(toolName)) {
+  if (BASH_TOOLS_SET.has(toolName)) {
     const command = String(params?.command || params?.args || '');
-    return />\s*|>>\s*|\brm\b|\bmv\b|\bmkdir\b|\btouch\b|\bcp\b|\bsed\s+-i|\bchmod\b|\bchown\b|\bdel\b|\bRemove-Item\b|\bSet-Content\b|\bOut-File\b|\bNew-Item\b/.test(command);
+    if (!command) return false;
+    return />\s*|>>\s*|\brm\b|\bmv\b|\bmkdir\b|\btouch\b|\bcp\s|\bsed\s+-i|\bchmod\b|\bchown\b|\bdel\s|\bRemove-Item\b|\bSet-Content\b|\bOut-File\b|\bNew-Item\b/.test(command);
   }
 
   return false;
 }
 
-const WRITE_EDIT_DELETE_TOOLS = new Set(['write', 'write_file', 'edit', 'edit_file', 'replace', 'apply_patch', 'insert', 'patch', 'delete_file', 'move_file']);
-const EXEC_TOOLS = new Set(['bash', 'exec', 'execute', 'shell', 'cmd']);
-
 /**
  * Detect if user message contains clear approval language.
+ * Rejects negated forms (e.g., "don't proceed", "不同意", "确认一下").
  */
 export function detectApprovalMarker(message: string): boolean {
-  const zhMarkers = /确认|批准|按计划执行|可以执行|就这么做|去执行|开始执行|执行吧|同意|没问题.*执行|照.*做/;
-  const enMarkers = /\bapproved\b|\bgo\s*ahead\b|\bproceed\b|\bconfirm\b|\byes\b.*\b(do|execute|proceed)\b|\bdo\s*it\b|\blgtm\b/i;
-  return zhMarkers.test(message) || enMarkers.test(message);
+  const trimmed = message.trim();
+
+  // Negation prefixes — reject if present before approval keywords
+  const zhNegation = /不|别|暂不|先不|无法|不能|没准备好|还没|尚未/;
+  const enNegation = /don'?t|not\s+ready|can'?t|won'?t|stop|hold|cannot|isn'?t|aren'?t|haven'?t|shouldn'?t/i;
+
+  // Single-word Chinese markers require exact match (the word alone, not embedded in a sentence)
+  const zhExactMarkers = /^(?:确认|批准|同意|执行吧|开始执行)$/;
+  // Multi-word Chinese markers
+  const zhPhraseMarkers = /按计划执行|可以执行|就这么做|去执行|照.*做|没问题.*执行/;
+
+  // English markers — single-word approvals
+  const enMarkers = /\bapproved\b|\bgo\s*ahead\b|\bproceed\b|\bconfirm\b|\blgtm\b/i;
+  // English phrase markers that are unambiguous
+  const enPhraseMarkers = /\byes,?\s*(do\s+it|proceed|execute)\b|\bdo\s+it\b/i;
+
+  // Check Chinese
+  if (zhExactMarkers.test(trimmed) || zhPhraseMarkers.test(trimmed)) {
+    // Reject if negation prefix present
+    if (zhNegation.test(trimmed)) return false;
+    return true;
+  }
+
+  // Check English
+  if (enMarkers.test(trimmed) || enPhraseMarkers.test(trimmed)) {
+    if (enNegation.test(trimmed)) return false;
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -67,6 +104,7 @@ export function setConfirmFirstDirective(
   active: boolean,
   principleId?: string,
 ): void {
+  evictOldestIfFull(sessionDirectiveState);
   sessionDirectiveState.set(sessionId, { active, principleId });
 }
 
@@ -74,6 +112,7 @@ export function setConfirmFirstDirective(
  * Mark a session as approved (called from prompt hook when approval detected).
  */
 export function setConfirmFirstApproval(sessionId: string): void {
+  evictOldestIfFull(sessionApprovalState);
   sessionApprovalState.set(sessionId, true);
 }
 

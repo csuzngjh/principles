@@ -60,10 +60,3 @@ export const WRITE_TOOLS = new Set<string>([
   'move_file',
 ]);
 
-/** Tools that mutate the filesystem or execute mutating commands */
-export const MUTATING_TOOLS = new Set<string>([
-  ...LOW_RISK_WRITE_TOOL_NAMES,
-  'delete_file',
-  'move_file',
-  ...BASH_TOOL_NAMES,
-]);
