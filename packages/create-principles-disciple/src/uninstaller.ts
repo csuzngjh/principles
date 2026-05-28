@@ -70,7 +70,7 @@ export function checkInstallStatus(): {
  * 检查 shim 文件是否由 Principles Disciple 创建
  * 通过读取文件内容，确认其目标指向 PD 安装目录
  */
-function isPdOwnedShim(shimPath: string): boolean {
+export function isPdOwnedShim(shimPath: string): boolean {
   try {
     const content = readFileSync(shimPath, 'utf-8');
     const pdBinDir = getInstalledBinDir();

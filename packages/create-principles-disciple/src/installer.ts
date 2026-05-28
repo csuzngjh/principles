@@ -74,7 +74,7 @@ async function runNpmInstall(cwd: string, componentName = 'npm'): Promise<void> 
 /**
  * 重建原生模块
  */
-async function rebuildNativeModules(cwd: string, componentName: string): Promise<void> {
+export async function rebuildNativeModules(cwd: string, componentName: string): Promise<void> {
   for (const mod of ALLOWED_NATIVE_MODULES) {
     const modPath = path.join(cwd, 'node_modules', mod);
     if (!existsSync(modPath)) continue;
@@ -90,7 +90,7 @@ async function rebuildNativeModules(cwd: string, componentName: string): Promise
 /**
  * 验证原生模块
  */
-function verifyNativeModules(cwd: string, componentName: string): void {
+export function verifyNativeModules(cwd: string, componentName: string): void {
   for (const nativeMod of ALLOWED_NATIVE_MODULES) {
     const nativeModPath = path.join(cwd, 'node_modules', nativeMod);
     if (!existsSync(nativeModPath)) continue;
@@ -106,7 +106,7 @@ function verifyNativeModules(cwd: string, componentName: string): void {
 /**
  * 验证路径是否在工作区目录内，防止路径遍历攻击
  */
-function validateWorkspacePath(targetPath: string, workspaceDir: string): void {
+export function validateWorkspacePath(targetPath: string, workspaceDir: string): void {
   const resolved = path.resolve(targetPath);
   const workspace = path.resolve(workspaceDir);
 
@@ -202,7 +202,7 @@ function cleanupBackup(backupDir: string | null): void {
   }
 }
 
-async function checkBuiltPlugin(pluginDir: string): Promise<void> {
+export async function checkBuiltPlugin(pluginDir: string): Promise<void> {
   const distDir = path.join(pluginDir, 'plugin', 'dist');
   const pluginJson = path.join(pluginDir, 'plugin', 'openclaw.plugin.json');
 
