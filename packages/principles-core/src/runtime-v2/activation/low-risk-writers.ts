@@ -1,5 +1,9 @@
 import type { PIArtifactSnapshot, CanActivateResult, ChannelWriter, WriterInput, WriterResult } from './activation-types.js';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function extractPrincipleId(artifact: PIArtifactSnapshot): string | null {
   if (typeof artifact.sourcePrincipleId === 'string') {
     const sourceId = artifact.sourcePrincipleId.trim();
@@ -12,6 +16,12 @@ function extractPrincipleId(artifact: PIArtifactSnapshot): string | null {
     }
     if (typeof parsed.sourcePrincipleId === 'string' && parsed.sourcePrincipleId.trim() !== '') {
       return parsed.sourcePrincipleId.trim();
+    }
+    if (isRecord(parsed.principleDraft)) {
+      const draft = parsed.principleDraft;
+      if (typeof draft.title === 'string' && draft.title.trim() !== '') {
+        return draft.title.trim();
+      }
     }
   } catch {
     return null;

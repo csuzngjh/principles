@@ -5,15 +5,21 @@ import type {
   ApprovalListResult,
   ApprovalDecisionResult,
   ApprovalRecord,
+  ApprovalStatus,
 } from '@principles/core/runtime-v2';
 import {
   SqliteConnection,
   SqliteApprovalQueueStore,
+  SqliteActivationStateStore,
+  SqlitePIArtifactStore,
+  ActivationDispatcher,
+  PromptWriter,
+  DeferArchiveWriter,
   ApprovalQueue,
   mapConfidenceToLabel,
   MVP_CHANNELS,
 } from '@principles/core/runtime-v2';
-import type { ApprovalWithContext } from '@principles/core/runtime-v2';
+import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
@@ -26,6 +32,12 @@ function isMissingTableError(err: unknown): boolean {
 
 type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; channel: string };
 type ChannelGuardedDecisionResult = ApprovalDecisionResult | UnsupportedChannelResult;
+
+export type ApproveWithActivationResult =
+  | { ok: true; record: ApprovalRecord; activation?: ActivationDecision }
+  | { ok: false; error: 'already_decided'; status: ApprovalStatus }
+  | { ok: false; error: 'not_found' }
+  | { ok: false; error: 'unsupported_channel'; channel: string };
 
 function stateDbExists(workspaceDir: string): boolean {
   return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
@@ -58,6 +70,13 @@ export class ApprovalsConsoleModel {
       this.writeQueue = new ApprovalQueue(store);
     }
     return this.writeQueue;
+  }
+
+  private getWriteConnection(): SqliteConnection {
+    this.getWriteQueue();
+    const conn = this.writeConnection;
+    if (!conn) throw new Error('writeConnection not initialized');
+    return conn;
   }
 
   async listApprovals(filter?: ApprovalListFilter): Promise<ApprovalListResult> {
@@ -104,7 +123,7 @@ export class ApprovalsConsoleModel {
     };
   }
 
-  async approve(approvalId: string, decidedBy: string, note?: string): Promise<ChannelGuardedDecisionResult> {
+  async approve(approvalId: string, decidedBy: string, note?: string): Promise<ApproveWithActivationResult> {
     if (!stateDbExists(this.workspaceDir)) {
       return { ok: false, error: 'not_found' };
     }
@@ -113,7 +132,62 @@ export class ApprovalsConsoleModel {
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
     }
-    return this.getWriteQueue().approve(approvalId, decidedBy, note);
+    const approvalResult = await this.getWriteQueue().approve(approvalId, decidedBy, note);
+    if (!approvalResult.ok) {
+      if (approvalResult.error === 'already_decided') {
+        return { ok: false, error: 'already_decided', status: approvalResult.status };
+      }
+      return { ok: false, error: 'not_found' };
+    }
+
+    const activation = await this.dispatchActivationAfterApproval(existing, decidedBy);
+
+    return { ok: true, record: approvalResult.record, activation };
+  }
+
+  private async dispatchActivationAfterApproval(
+    existing: ApprovalRecord,
+    decidedBy: string,
+  ): Promise<ActivationDecision | undefined> {
+    try {
+      const conn = this.getWriteConnection();
+      const piArtifactStore = new SqlitePIArtifactStore(conn);
+      const artifactReadModel = {
+        getArtifactById: async (id: string): Promise<PIArtifactSnapshot | null> => {
+          const rec = await piArtifactStore.getArtifactById(id);
+          if (!rec) return null;
+          return {
+            artifactId: rec.artifactId,
+            artifactKind: rec.artifactKind,
+            sourceTaskId: rec.sourceTaskId,
+            sourcePrincipleId: rec.sourcePrincipleId,
+            sourceRuleId: rec.sourceRuleId,
+            lineageArtifactIds: rec.lineageArtifactIds,
+            validationStatus: rec.validationStatus,
+            contentJson: rec.contentJson,
+            createdAt: rec.createdAt,
+            updatedAt: rec.updatedAt,
+          };
+        },
+      };
+      const activationStateStore = new SqliteActivationStateStore(conn);
+      const approvalQueueStore = new SqliteApprovalQueueStore(conn);
+      const dispatcher = new ActivationDispatcher(
+        artifactReadModel,
+        activationStateStore,
+        { writers: [new PromptWriter(), new DeferArchiveWriter()], approvalQueueStore },
+      );
+      return await dispatcher.dispatch({
+        artifactId: existing.artifactId,
+        channel: existing.channel,
+        rolloutDecision: 'auto_activate',
+        actor: { kind: 'human', userId: decidedBy },
+        now: new Date().toISOString(),
+        confirm: true,
+      });
+    } catch {
+      return undefined;
+    }
   }
 
   async reject(approvalId: string, decidedBy: string, reason: string): Promise<ChannelGuardedDecisionResult> {

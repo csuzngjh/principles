@@ -436,6 +436,22 @@ export class EvaluatorRunner {
     }
 
     const resultRef = `evaluator://${ctx.runId}`;
+
+    if (ctx.output.evaluation.decision === 'approved' && ctx.output.sourceArtificerArtifactId) {
+      try {
+        await this.artifactStore.updateValidationStatus(
+          ctx.output.sourceArtificerArtifactId,
+          'validated',
+        );
+      } catch (updateErr) {
+        this.emitEvaluatorEvent('evaluator_source_validation_update_failed', ctx.taskId, {
+          runId: ctx.runId,
+          sourceArtifactId: ctx.output.sourceArtificerArtifactId,
+          errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
+        });
+      }
+    }
+
     try {
       await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
     } catch (stateErr) {
