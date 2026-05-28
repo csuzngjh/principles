@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/banner.png" width="100%" alt="Principles Disciple Banner">
+  <video src="packages/website/public/promo.mp4" width="100%" controls poster="assets/banner.png"></video>
 </p>
 
 <h1 align="center">Principles Disciple (原则门徒)</h1>
 
 <p align="center">
-  <strong>燃烧痛苦，驱动进化。</strong>
+  <strong>燃烧痛苦，协同进化。</strong>
 </p>
 
 <p align="center">
