@@ -31,12 +31,13 @@ const ROOT = resolve(__dirname, '..');
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const opts = { trap: null, workspace: null, runId: null, timeout: 600, help: false };
+  const opts = { trap: null, workspace: null, runId: null, timeout: 600, model: null, help: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--trap') opts.trap = args[++i];
     else if (args[i] === '--workspace' || args[i] === '-w') opts.workspace = args[++i];
     else if (args[i] === '--run-id') opts.runId = args[++i];
     else if (args[i] === '--timeout') opts.timeout = parseInt(args[++i], 10);
+    else if (args[i] === '--model' || args[i] === '-m') opts.model = args[++i];
     else if (args[i] === '--help' || args[i] === '-h') opts.help = true;
   }
   if (!opts.runId) opts.runId = `e2e-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -176,10 +177,11 @@ function phase2(ws) {
 // Phase 3: Drive the trap task
 // ---------------------------------------------------------------------------
 
-function phase3(trap, runId, timeoutSec, ws) {
+function phase3(trap, runId, timeoutSec, ws, model) {
   const sessionKey = `agent:e2e:${runId}`;
   const prompt = trap.promptTemplate(ws);
-  const cmd = `openclaw agent --session-key "${sessionKey}" --message "${prompt.replace(/"/g, '\\"')}" --timeout ${timeoutSec} --json`;
+  const modelFlag = model ? ` --model "${model}"` : '';
+  const cmd = `openclaw agent --session-key "${sessionKey}"${modelFlag} --message "${prompt.replace(/"/g, '\\"')}" --timeout ${timeoutSec} --json`;
 
   log('3', `Driving trap with session: ${sessionKey}`);
   const raw = sh(cmd, { timeout: (timeoutSec + 30) * 1000 });
@@ -436,6 +438,7 @@ Options:
   --workspace, -w   Override e2e workspace path (default: tests/e2e-workspace/<runId>)
   --run-id <id>     Custom run ID (default: auto-generated)
   --timeout <sec>   Agent timeout in seconds (default: 600)
+  --model, -m       Model override (e.g. lmstudio/qwen3.6-27b-mtp)
   --help, -h        Show this help
 
 Traps:
@@ -493,8 +496,8 @@ Traps:
   pass('2', `Canary=${phase2R.canary?.overallStatus}, Integrity=${phase2R.integrity?.overallStatus}, Queue candidates=${phase2R.candidateCount}`);
 
   // Phase 3
-  log('3', `Driving trap task (${trap.name})...`);
-  const phase3R = phase3(trap, runId, opts.timeout, phase0R.ws);
+  log('3', `Driving trap task (${trap.name})${opts.model ? ` [model: ${opts.model}]` : ''}...`);
+  const phase3R = phase3(trap, runId, opts.timeout, phase0R.ws, opts.model);
   if (!phase3R.agentResponded) {
     fail('3', 'Agent did not respond');
   } else {
