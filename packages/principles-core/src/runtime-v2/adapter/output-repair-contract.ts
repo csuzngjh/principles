@@ -110,6 +110,16 @@ export function preserveLineageFields(
   return result;
 }
 
+export function stripLineageFields(
+  obj: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...obj };
+  for (const field of LINEAGE_FIELDS) {
+    delete result[field];
+  }
+  return result;
+}
+
 export function formatValidationErrorEntry(
   path: string,
   message: string,

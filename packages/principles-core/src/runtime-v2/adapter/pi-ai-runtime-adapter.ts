@@ -32,7 +32,7 @@ import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair, deriveSchemaSummary } from './structured-output-repair.js';
 import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-repair-contract.js';
-import { formatValidationErrorEntry, safeStringifyPreview } from './output-repair-contract.js';
+import { formatValidationErrorEntry, safeStringifyPreview, stripLineageFields } from './output-repair-contract.js';
 import { RECORD_DIAGNOSIS_V1_TOOL } from './tools/diagnostician-tool.js';
 import type {
   PDRuntimeAdapter,
@@ -886,8 +886,15 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         return { success: false, fallbackReason: 'tool_call_schema_invalid' };
       }
 
-      return { success: true, output: toolArgs };
+      const protectedArgs = typeof toolArgs === 'object' && toolArgs !== null
+        ? stripLineageFields(toolArgs)
+        : toolArgs;
+
+      return { success: true, output: protectedArgs };
     } catch (err) {
+      if (err instanceof PDRuntimeError && (err.category === 'timeout' || err.category === 'runtime_unavailable')) {
+        throw err;
+      }
       const reason = err instanceof PDRuntimeError && err.category === 'output_invalid'
         ? 'tool_call_extraction_failed'
         : 'provider_no_tool_use';
@@ -942,8 +949,15 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         return { success: false, fallbackReason: 'json_schema_invalid' };
       }
 
-      return { success: true, output: parsed };
+      const protectedParsed = typeof parsed === 'object' && parsed !== null
+        ? stripLineageFields(parsed)
+        : parsed;
+
+      return { success: true, output: protectedParsed };
     } catch (err) {
+      if (err instanceof PDRuntimeError && (err.category === 'timeout' || err.category === 'runtime_unavailable')) {
+        throw err;
+      }
       if (err instanceof PDRuntimeError && err.category === 'output_invalid') {
         return { success: false, fallbackReason: 'json_parse_failed' };
       }
