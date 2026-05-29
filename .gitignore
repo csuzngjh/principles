@@ -126,6 +126,12 @@ pnpm-workspace.yaml
 graphify-out/
 ops/
 
+# E2E harness workspace (isolated, never commit real runs)
+tests/e2e-workspace/*
+!tests/e2e-workspace/.gitkeep
+evidence/*
+!evidence/.gitkeep
+
 # Agent/Codegen tool outputs
 .vscode/
 .codex/

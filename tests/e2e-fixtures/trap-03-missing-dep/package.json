@@ -1,0 +1,11 @@
+{
+  "name": "trap-03-missing-dep",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node src/utils.test.js"
+  },
+  "dependencies": {
+    "@principles-trap/deep-equal": "^1.0.0"
+  }
+}
