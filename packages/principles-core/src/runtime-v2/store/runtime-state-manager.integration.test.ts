@@ -27,6 +27,7 @@ function makeTaskInput(taskId: string, overrides: Partial<Omit<TaskRecord, 'crea
 
 describe('RuntimeStateManager task/run truth alignment', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-rsm-test-${process.pid}-${Date.now()}`);
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let mgr: RuntimeStateManager;
 
   beforeEach(async () => {
@@ -53,28 +54,35 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     expect(leased.attemptCount).toBe(1);
     const runs = await mgr.getRunsByTask('task-attempt-1');
     expect(runs).toHaveLength(1);
-    expect(runs[0]!.attemptNumber).toBe(1);
-    expect(runs[0]!.executionStatus).toBe('running');
-    expect(runs[0]!.endedAt).toBeUndefined();
+    const [run0] = runs;
+    if (!run0) return;
+    expect(run0.attemptNumber).toBe(1);
+    expect(run0.executionStatus).toBe('running');
+    expect(run0.endedAt).toBeUndefined();
   });
 
   it('second acquireLease (after expired lease) sets task.attemptCount=2 and run.attemptNumber=2', async () => {
     await mgr.createTask(makeTaskInput('task-attempt-2'));
     await mgr.acquireLease({ taskId: 'task-attempt-2', owner: 'agent-1', runtimeKind: 'openclaw' });
-    expect((await mgr.getTask('task-attempt-2'))!.attemptCount).toBe(1);
-    // Simulate worker crash: directly expire the lease (past date) so recovery picks it up
+    const taskAfter1 = await mgr.getTask('task-attempt-2');
+    if (!taskAfter1) return;
+    expect(taskAfter1.attemptCount).toBe(1);
     await mgr.updateTask('task-attempt-2', { leaseExpiresAt: new Date(Date.now() - 60_000).toISOString() });
     const sweep = await mgr.runRecoverySweep();
     expect(sweep.recovered).toBe(1);
-    expect((await mgr.getTask('task-attempt-2'))!.status).toBe('retry_wait');
+    const taskAfterSweep = await mgr.getTask('task-attempt-2');
+    if (!taskAfterSweep) return;
+    expect(taskAfterSweep.status).toBe('retry_wait');
 
     const second = await mgr.acquireLease({ taskId: 'task-attempt-2', owner: 'agent-2', runtimeKind: 'openclaw' });
     expect(second.attemptCount).toBe(2);
     const runs = await mgr.getRunsByTask('task-attempt-2');
     expect(runs).toHaveLength(2);
-    expect(runs[0]!.attemptNumber).toBe(1);
-    expect(runs[1]!.attemptNumber).toBe(2);
-    expect(runs[1]!.executionStatus).toBe('running');
+    const [r0, r1] = runs;
+    if (!r0 || !r1) return;
+    expect(r0.attemptNumber).toBe(1);
+    expect(r1.attemptNumber).toBe(2);
+    expect(r1.executionStatus).toBe('running');
   });
 
   // ── markTaskSucceeded updates run to terminal state ──────────────────────────
@@ -85,13 +93,16 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     await mgr.markTaskSucceeded('task-succeeded', 'output-ref-abc');
     const runs = await mgr.getRunsByTask('task-succeeded');
     expect(runs).toHaveLength(1);
-    expect(runs[0]!.executionStatus).toBe('succeeded');
-    expect(runs[0]!.endedAt).toBeTruthy();
-    expect(runs[0]!.reason).toBe('task_completed');
-    expect(runs[0]!.outputRef).toBe('output-ref-abc');
+    const [run0] = runs;
+    if (!run0) return;
+    expect(run0.executionStatus).toBe('succeeded');
+    expect(run0.endedAt).toBeTruthy();
+    expect(run0.reason).toBe('task_completed');
+    expect(run0.outputRef).toBe('output-ref-abc');
     const task = await mgr.getTask('task-succeeded');
-    expect(task!.status).toBe('succeeded');
-    expect(task!.resultRef).toBe('output-ref-abc');
+    if (!task) return;
+    expect(task.status).toBe('succeeded');
+    expect(task.resultRef).toBe('output-ref-abc');
   });
 
   // ── markTaskFailed updates run to terminal state ─────────────────────────────
@@ -102,13 +113,16 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     await mgr.markTaskFailed('task-failed', 'lease_conflict');
     const runs = await mgr.getRunsByTask('task-failed');
     expect(runs).toHaveLength(1);
-    expect(runs[0]!.executionStatus).toBe('failed');
-    expect(runs[0]!.endedAt).toBeTruthy();
-    expect(runs[0]!.reason).toBe('task_failed');
-    expect(runs[0]!.errorCategory).toBe('lease_conflict');
+    const [run0] = runs;
+    if (!run0) return;
+    expect(run0.executionStatus).toBe('failed');
+    expect(run0.endedAt).toBeTruthy();
+    expect(run0.reason).toBe('task_failed');
+    expect(run0.errorCategory).toBe('lease_conflict');
     const task = await mgr.getTask('task-failed');
-    expect(task!.status).toBe('failed');
-    expect(task!.lastError).toBe('lease_conflict');
+    if (!task) return;
+    expect(task.status).toBe('failed');
+    expect(task.lastError).toBe('lease_conflict');
   });
 
   // ── attemptCount + maxAttempts enforcement ───────────────────────────────────
@@ -117,33 +131,40 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     // maxAttempts=3: after 3 lease expirations, recovery moves to failed
     await mgr.createTask(makeTaskInput('task-max-attempts', { attemptCount: 0, maxAttempts: 3 }));
 
-    // Attempt 1: acquire → expire lease → recovery → retry_wait
     await mgr.acquireLease({ taskId: 'task-max-attempts', owner: 'agent-1', runtimeKind: 'openclaw' });
-    expect((await mgr.getTask('task-max-attempts'))!.attemptCount).toBe(1);
+    let task = await mgr.getTask('task-max-attempts');
+    if (!task) return;
+    expect(task.attemptCount).toBe(1);
     await mgr.updateTask('task-max-attempts', { leaseExpiresAt: new Date(Date.now() - 60_000).toISOString() });
     let sweep = await mgr.runRecoverySweep();
     expect(sweep.recovered).toBe(1);
-    expect((await mgr.getTask('task-max-attempts'))!.status).toBe('retry_wait');
+    task = await mgr.getTask('task-max-attempts');
+    if (!task) return;
+    expect(task.status).toBe('retry_wait');
 
-    // Attempt 2: re-acquire → expire lease → recovery → retry_wait
     await mgr.acquireLease({ taskId: 'task-max-attempts', owner: 'agent-2', runtimeKind: 'openclaw' });
-    expect((await mgr.getTask('task-max-attempts'))!.attemptCount).toBe(2);
+    task = await mgr.getTask('task-max-attempts');
+    if (!task) return;
+    expect(task.attemptCount).toBe(2);
     await mgr.updateTask('task-max-attempts', { leaseExpiresAt: new Date(Date.now() - 60_000).toISOString() });
     sweep = await mgr.runRecoverySweep();
     expect(sweep.recovered).toBe(1);
-    expect((await mgr.getTask('task-max-attempts'))!.status).toBe('retry_wait');
+    task = await mgr.getTask('task-max-attempts');
+    if (!task) return;
+    expect(task.status).toBe('retry_wait');
 
-    // Attempt 3: re-acquire → expire lease → recovery → FAILED (maxAttempts reached)
     await mgr.acquireLease({ taskId: 'task-max-attempts', owner: 'agent-3', runtimeKind: 'openclaw' });
-    expect((await mgr.getTask('task-max-attempts'))!.attemptCount).toBe(3);
+    task = await mgr.getTask('task-max-attempts');
+    if (!task) return;
+    expect(task.attemptCount).toBe(3);
     await mgr.updateTask('task-max-attempts', { leaseExpiresAt: new Date(Date.now() - 60_000).toISOString() });
     sweep = await mgr.runRecoverySweep();
     expect(sweep.recovered).toBe(1);
 
-    // task.attemptCount=3, maxAttempts=3 → shouldRetry=false → task goes to failed
-    const task = await mgr.getTask('task-max-attempts');
-    expect(task!.status).toBe('failed');
-    expect(task!.lastError).toBe('max_attempts_exceeded');
+    task = await mgr.getTask('task-max-attempts');
+    if (!task) return;
+    expect(task.status).toBe('failed');
+    expect(task.lastError).toBe('max_attempts_exceeded');
     const runs = await mgr.getRunsByTask('task-max-attempts');
     expect(runs).toHaveLength(3);
   });
@@ -158,13 +179,14 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     await mgr.runRecoverySweep();
 
     let task = await mgr.getTask('task-retry-preserve');
-    expect(task!.status).toBe('retry_wait');
-    expect(task!.attemptCount).toBe(1);
+    if (!task) return;
+    expect(task.status).toBe('retry_wait');
+    expect(task.attemptCount).toBe(1);
 
-    // Acquire again — attemptCount should become 2
     await mgr.acquireLease({ taskId: 'task-retry-preserve', owner: 'agent-2', runtimeKind: 'openclaw' });
     task = await mgr.getTask('task-retry-preserve');
-    expect(task!.attemptCount).toBe(2);
-    expect(task!.status).toBe('leased');
+    if (!task) return;
+    expect(task.attemptCount).toBe(2);
+    expect(task.status).toBe('leased');
   });
 });

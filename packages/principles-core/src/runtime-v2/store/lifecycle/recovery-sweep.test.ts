@@ -27,11 +27,13 @@ function makeTaskInput(taskId: string, overrides: Partial<Omit<TaskRecord, 'crea
 
 describe('DefaultRecoverySweep', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-test-${process.pid}-${Date.now()}`);
+  /* eslint-disable @typescript-eslint/init-declarations */
   let conn: SqliteConnection;
   let taskStore: SqliteTaskStore;
   let leaseManager: DefaultLeaseManager;
   let retryPolicy: DefaultRetryPolicy;
   let recoverySweep: DefaultRecoverySweep;
+  /* eslint-enable @typescript-eslint/init-declarations */
 
   beforeEach(() => {
     const testDir = path.join(tmpDir, `test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -45,6 +47,7 @@ describe('DefaultRecoverySweep', () => {
       updateRun: async () => { throw new Error('not implemented'); },
       listRunsByTask: async () => [],
       deleteRun: async () => false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
     leaseManager = new DefaultLeaseManager(taskStore, runStore, conn);
     retryPolicy = new DefaultRetryPolicy({
@@ -137,11 +140,12 @@ describe('DefaultRecoverySweep', () => {
       });
       const result = await recoverySweep.recoverTask('retry-task');
       expect(result).not.toBeNull();
-      expect(result!.newStatus).toBe('retry_wait');
-      expect(result!.wasLeaseExpired).toBe(true);
-      // Verify task was actually updated
+      if (!result) return;
+      expect(result.newStatus).toBe('retry_wait');
+      expect(result.wasLeaseExpired).toBe(true);
       const updated = await taskStore.getTask('retry-task');
-      expect(updated!.status).toBe('retry_wait');
+      if (!updated) return;
+      expect(updated.status).toBe('retry_wait');
     });
 
     it('recovers to failed when maxAttempts exceeded', async () => {
@@ -153,8 +157,9 @@ describe('DefaultRecoverySweep', () => {
       });
       const result = await recoverySweep.recoverTask('fail-task');
       expect(result).not.toBeNull();
-      expect(result!.newStatus).toBe('failed');
-      expect(result!.wasLeaseExpired).toBe(true);
+      if (!result) return;
+      expect(result.newStatus).toBe('failed');
+      expect(result.wasLeaseExpired).toBe(true);
     });
 
     it('clears leaseOwner and sets retry_wait expiry on recovery', async () => {
@@ -166,10 +171,10 @@ describe('DefaultRecoverySweep', () => {
       });
       await recoverySweep.recoverTask('clear-lease-task');
       const updated = await taskStore.getTask('clear-lease-task');
-      expect(updated!.leaseOwner).toBeUndefined();
-      // retry_wait state has a backoff expiry, not undefined
-      expect(updated!.leaseExpiresAt).toBeTruthy();
-      expect(updated!.status).toBe('retry_wait');
+      if (!updated) return;
+      expect(updated.leaseOwner).toBeUndefined();
+      expect(updated.leaseExpiresAt).toBeTruthy();
+      expect(updated.status).toBe('retry_wait');
     });
   });
 
@@ -249,14 +254,15 @@ describe('DefaultRecoverySweep', () => {
       const result = await recoverySweep.recoverTask('dirty-stalled-task');
 
       expect(result).not.toBeNull();
-      expect(result!.newStatus).toBe('needs_human_review');
-      expect(result!.wasLeaseExpired).toBe(true);
+      if (!result) return;
+      expect(result.newStatus).toBe('needs_human_review');
+      expect(result.wasLeaseExpired).toBe(true);
 
-      // Verify task was updated to needs_human_review
       const updated = await taskStore.getTask('dirty-stalled-task');
-      expect(updated!.status).toBe('needs_human_review');
-      expect(updated!.leaseOwner).toBeUndefined();
-      expect(updated!.leaseExpiresAt).toBeUndefined();
+      if (!updated) return;
+      expect(updated.status).toBe('needs_human_review');
+      expect(updated.leaseOwner).toBeUndefined();
+      expect(updated.leaseExpiresAt).toBeUndefined();
     });
 
     it('clean stalled attempt (no workspace_dirty) -> follows existing retry behavior', async () => {
@@ -276,9 +282,11 @@ describe('DefaultRecoverySweep', () => {
       const result = await recoverySweep.recoverTask('clean-stalled-task');
 
       expect(result).not.toBeNull();
-      expect(result!.newStatus).toBe('retry_wait');
+      if (!result) return;
+      expect(result.newStatus).toBe('retry_wait');
       const updated = await taskStore.getTask('clean-stalled-task');
-      expect(updated!.status).toBe('retry_wait');
+      if (!updated) return;
+      expect(updated.status).toBe('retry_wait');
     });
 
     it('dirty workspace with maxAttempts exceeded -> goes to failed not retry_wait', async () => {
@@ -299,9 +307,9 @@ describe('DefaultRecoverySweep', () => {
 
       const result = await recoverySweep.recoverTask('dirty-max-task');
 
-      // Even with workspace_dirty, if max attempts exceeded -> failed
       expect(result).not.toBeNull();
-      expect(result!.newStatus).toBe('failed');
+      if (!result) return;
+      expect(result.newStatus).toBe('failed');
     });
 
     it('needs_human_review task is not recovered by recoverAll (idempotent)', async () => {
@@ -324,7 +332,8 @@ describe('DefaultRecoverySweep', () => {
 
       // Task should remain in needs_human_review
       const updated = await taskStore.getTask('already-review-task');
-      expect(updated!.status).toBe('needs_human_review');
+      if (!updated) return;
+      expect(updated.status).toBe('needs_human_review');
     });
   });
 });

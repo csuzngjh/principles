@@ -29,7 +29,7 @@ export interface SchemaValidationError {
 
 /** Configuration for the repair loop. */
 export interface RepairConfig {
-  /** Maximum repair attempts. Default: 1. */
+  /** Maximum repair attempts. Default: 3. */
   readonly maxRepairAttempts?: number;
   /** Maximum number of errors to include in repair prompt. Default: 10. */
   readonly maxErrorsInPrompt?: number;
@@ -41,11 +41,15 @@ export interface RepairConfig {
   readonly schemaRef?: string;
   /** Original output with lineage fields to preserve during repair (PRI-200). */
   readonly originalOutput?: Record<string, unknown>;
+  /** Human-readable schema summary to include in repair prompt (PRI-271 A2). */
+  readonly schemaSummary?: string;
+  /** Internal override for jitter between repair attempts (PRI-271 A3). Set to 0 to disable. */
+  readonly _testJitterMs?: number;
 }
 
 /** Sensible defaults for repair configuration. */
-export const DEFAULT_REPAIR_CONFIG: Required<Omit<RepairConfig, 'schemaRef' | 'originalOutput'>> = {
-  maxRepairAttempts: 1,
+export const DEFAULT_REPAIR_CONFIG: Required<Omit<RepairConfig, 'schemaRef' | 'originalOutput' | 'schemaSummary' | '_testJitterMs'>> = {
+  maxRepairAttempts: 3,
   maxErrorsInPrompt: 10,
   maxErrorChars: 200,
   maxRawOutputChars: 2000,
@@ -79,6 +83,65 @@ export interface RepairCallbacks {
 // Re-export from json-extractor so callers can use a single import path
 export { extractJsonObject } from './json-extractor.js';
 import { extractJsonObject } from './json-extractor.js';
+import type { TSchema } from '@sinclair/typebox';
+
+/**
+ * Derive a human-readable schema summary from a TypeBox schema (PRI-271 A2).
+ *
+ * Produces a compact text description of field names, types, required status,
+ * and enum values — suitable for inclusion in repair prompts so the LLM knows
+ * the target schema structure without needing the full JSON Schema.
+ */
+export function deriveSchemaSummary(schema: TSchema): string {
+  if (!schema || typeof schema !== 'object') return '(unknown schema)';
+
+  // Handle Object schemas
+  if (schema.type === 'object' && schema.properties) {
+    const required = Array.isArray(schema.required) ? new Set(schema.required as string[]) : new Set<string>();
+    const lines: string[] = [];
+    const props = schema.properties as Record<string, TSchema>;
+
+    for (const [key, propSchema] of Object.entries(props)) {
+      if (typeof propSchema !== 'object' || propSchema === null) continue;
+      const isReq = required.has(key);
+      const reqMark = isReq ? ' (required)' : ' (optional)';
+
+      if (propSchema.type === 'array') {
+        const items = propSchema.items as TSchema | undefined;
+        const itemType = items?.type ?? 'unknown';
+        lines.push(`  ${key}: ${itemType}[]${reqMark}`);
+      } else if (propSchema.enum) {
+        const values = (propSchema.enum as unknown[]).map(String).join(' | ');
+        lines.push(`  ${key}: enum(${values})${reqMark}`);
+      } else if (propSchema.type) {
+        const typeStr = typeof propSchema.type === 'string' ? propSchema.type : 'unknown';
+        const constraints: string[] = [];
+        if (typeof propSchema.minimum === 'number') constraints.push(`min: ${propSchema.minimum}`);
+        if (typeof propSchema.maximum === 'number') constraints.push(`max: ${propSchema.maximum}`);
+        if (typeof propSchema.minLength === 'number') constraints.push(`minLength: ${propSchema.minLength}`);
+        const constraintStr = constraints.length > 0 ? ` {${constraints.join(', ')}}` : '';
+        lines.push(`  ${key}: ${typeStr}${constraintStr}${reqMark}`);
+      } else if (propSchema.anyOf || propSchema.allOf || propSchema.oneOf) {
+        lines.push(`  ${key}: union${reqMark}`);
+      }
+    }
+    return lines.join('\n');
+  }
+
+  // Fallback for non-object schemas
+  if (schema.type) return `type: ${schema.type}`;
+  return '(complex schema)';
+}
+
+/**
+ * Compute jitter delay for repair attempt backoff (PRI-271 A3).
+ * Returns delay in milliseconds: 200-500ms random jitter.
+ * Overridable via config._testJitterMs for deterministic tests.
+ */
+function computeJitterDelay(config: RepairConfig): number {
+  if (config._testJitterMs !== undefined) return config._testJitterMs;
+  return 200 + Math.random() * 300;
+}
 
 /**
  * Format TypeBox schema errors into a bounded, human-readable repair prompt.
@@ -113,10 +176,15 @@ export function formatRepairPrompt(
     ? [`SCHEMA REF: ${cfg.schemaRef}`, '']
     : [];
 
+  const schemaSummaryBlock = cfg.schemaSummary
+    ? ['EXPECTED SCHEMA:', cfg.schemaSummary, '']
+    : [];
+
   return [
     'This is a schema validation repair loop. Your previous JSON output still has errors. Fix ALL remaining errors and return the complete corrected JSON object.',
     '',
     ...schemaRefLine,
+    ...schemaSummaryBlock,
     'PREVIOUS OUTPUT:',
     rawJson,
     '',
@@ -139,7 +207,7 @@ function buildValidationErrorEntries(
  * the LLM with specific validation errors.
  *
  * Returns RepairResult<T> — either repaired+validated output or null.
- * Bounded by maxRepairAttempts (default 1).
+ * Bounded by maxRepairAttempts (default 3).
  *
  * PRI-200: Returns repairAttempts[] for evidence pack, protects lineage fields.
  */
@@ -257,6 +325,12 @@ export async function attemptStructuredOutputRepair<T>(
 
     invalidOutput = candidateWithLineage;
     currentErrors = nextErrors;
+
+    // PRI-271 A3: Jitter between repair attempts to avoid provider rate limits
+    if (attempt < cfg.maxRepairAttempts - 1) {
+      const jitterMs = computeJitterDelay(cfg);
+      await new Promise(r => setTimeout(r, jitterMs));
+    }
   }
 
   return {

@@ -71,7 +71,7 @@ describe('evaluateIdleTrigger edge cases', () => {
 
   describe('idle duration edge cases', () => {
     it('idleForMs exactly at idleThresholdMs boundary triggers', () => {
-      const idleThresholdMs = DEFAULT_IDLE_TRIGGER_CONFIG.idleThresholdMs;
+      const { idleThresholdMs } = DEFAULT_IDLE_TRIGGER_CONFIG;
       const input = makeInput({
         lastActivityAt: new Date(NOW_MS - idleThresholdMs).toISOString(),
         queue: { readyCount: 1, pendingCount: 0, retryWaitCount: 0 },
@@ -81,7 +81,7 @@ describe('evaluateIdleTrigger edge cases', () => {
     });
 
     it('idleForMs just below idleThresholdMs returns skip not_idle_enough', () => {
-      const idleThresholdMs = DEFAULT_IDLE_TRIGGER_CONFIG.idleThresholdMs;
+      const { idleThresholdMs } = DEFAULT_IDLE_TRIGGER_CONFIG;
       const input = makeInput({
         lastActivityAt: new Date(NOW_MS - idleThresholdMs + 1).toISOString(),
         queue: { readyCount: 1, pendingCount: 0, retryWaitCount: 0 },
@@ -114,7 +114,7 @@ describe('evaluateIdleTrigger edge cases', () => {
 
   describe('activityCooldown boundary conditions', () => {
     it('idleForMs exactly at activityCooldownMs returns skip not_idle_enough', () => {
-      const activityCooldownMs = DEFAULT_IDLE_TRIGGER_CONFIG.activityCooldownMs;
+      const { activityCooldownMs } = DEFAULT_IDLE_TRIGGER_CONFIG;
       const input = makeInput({
         config: { ...DEFAULT_IDLE_TRIGGER_CONFIG },
         lastActivityAt: new Date(NOW_MS - activityCooldownMs).toISOString(),
