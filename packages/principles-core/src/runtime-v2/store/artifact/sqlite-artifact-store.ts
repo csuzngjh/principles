@@ -4,6 +4,7 @@
 import type { SqliteConnection } from '../sqlite-connection.js';
 import type { CandidateRecord } from '../candidate/candidate-store.js';
 import type { ArtifactRecord, ArtifactWithCandidates, ArtifactStore } from './artifact-store.js';
+import { resolveRecommendationKind } from '../candidate/recommendation-kind-resolver.js';
 
 export class SqliteArtifactStore implements ArtifactStore {
   constructor(private readonly connection: SqliteConnection) {}
@@ -44,7 +45,7 @@ export class SqliteArtifactStore implements ArtifactStore {
       description: r.description,
       confidence: r.confidence,
       sourceRecommendationJson: r.source_recommendation_json,
-      recommendationKind: (r.recommendation_kind as CandidateRecord['recommendationKind']) ?? 'principle',
+      recommendationKind: resolveRecommendationKind(r.recommendation_kind),
       status: r.status as CandidateRecord['status'],
       createdAt: r.created_at,
     }));

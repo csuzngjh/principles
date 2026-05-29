@@ -1,15 +1,6 @@
 import type { SqliteConnection } from '../sqlite-connection.js';
 import type { CandidateRecord, CandidateStore } from './candidate-store.js';
-import type { RecommendationKind } from '../../diagnostician-output.js';
-
-const VALID_RECOMMENDATION_KINDS = new Set<string>(['principle', 'rule', 'implementation', 'prompt', 'defer']);
-
-function resolveRecommendationKind(raw: unknown): RecommendationKind {
-  if (typeof raw === 'string' && VALID_RECOMMENDATION_KINDS.has(raw)) {
-    return raw as RecommendationKind;
-  }
-  return 'principle';
-}
+import { resolveRecommendationKind } from './recommendation-kind-resolver.js';
 
 interface CandidateRow {
   candidate_id: string;
