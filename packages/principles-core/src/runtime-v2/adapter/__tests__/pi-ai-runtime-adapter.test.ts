@@ -36,7 +36,6 @@ const mockEmitTelemetry = storeEmitter.emitTelemetry as ReturnType<typeof vi.fn>
 const VALID_DIAGNOSIS = {
   valid: true,
   diagnosisId: 'diag-test-1',
-  taskId: 'task-test-1',
   summary: 'Test summary',
   rootCause: 'Test root cause',
   violatedPrinciples: [],
@@ -599,7 +598,6 @@ describe('PiAiRuntimeAdapter', () => {
       expect(output?.payload).toMatchObject({
         valid: true,
         diagnosisId: 'diag-test-1',
-        taskId: 'task-test-1',
       });
     });
 
@@ -1016,7 +1014,7 @@ describe('PiAiRuntimeAdapter', () => {
       }));
 
       const output = await adapter.fetchOutput(handle.runId);
-      expect(output?.payload).toMatchObject({ valid: true, taskId: 'task-dreamer-1' });
+      expect(output?.payload).toMatchObject({ valid: true });
     });
 
     it('rejects invalid dreamer output with output_invalid', async () => {
@@ -1040,7 +1038,7 @@ describe('PiAiRuntimeAdapter', () => {
       }));
 
       const output = await adapter.fetchOutput(handle.runId);
-      expect(output?.payload).toMatchObject({ taskId: 'task-philosopher-1', thesis: 'Error handling is essential for reliability' });
+      expect(output?.payload).toMatchObject({ thesis: 'Error handling is essential for reliability' });
     });
 
     it('rejects invalid philosopher output with output_invalid', async () => {
@@ -1111,7 +1109,7 @@ describe('PiAiRuntimeAdapter', () => {
 
       expect(mockComplete).toHaveBeenCalledTimes(2);
       const output = await adapter.fetchOutput(handle.runId);
-      expect(output?.payload).toMatchObject({ valid: true, taskId: 'task-dreamer-1' });
+      expect(output?.payload).toMatchObject({ valid: true });
     });
   });
 
@@ -1280,7 +1278,9 @@ describe('PiAiRuntimeAdapter', () => {
 
       const output = await adapter.fetchOutput(handle.runId);
       const payload = output?.payload as Record<string, unknown>;
-      expect(payload.taskId).toBe('task-original-1');
+      // taskId is a lineage field — it must be stripped from output (PRI-272).
+      // Downstream consumers get taskId from RunnerContext/TaskRecord.
+      expect(payload.taskId).toBeUndefined();
     });
 
     it('9. provider/model/rawOutputPreview are present in evidence pack', async () => {

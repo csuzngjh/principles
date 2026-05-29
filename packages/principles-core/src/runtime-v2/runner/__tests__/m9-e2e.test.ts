@@ -63,11 +63,10 @@ function makeAssistantMessage(text: string, overrides: Record<string, unknown> =
   };
 }
 
-function makeDiagnosticianOutputWithCandidates(taskId: string): DiagnosticianOutputV1 {
+function makeDiagnosticianOutputWithCandidates(_taskId: string): DiagnosticianOutputV1 {
   return {
     valid: true,
     diagnosisId: `diag-m9-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    taskId,
     summary: 'E2E m9-04 full chain test diagnosis summary',
     rootCause: 'E2E m9-04 full chain root cause — missing validation before tool call',
     violatedPrinciples: [],

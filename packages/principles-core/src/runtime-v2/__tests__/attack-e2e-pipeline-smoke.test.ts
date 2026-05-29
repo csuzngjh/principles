@@ -131,7 +131,6 @@ function makeDiagnosticianOutput(overrides?: Partial<DiagnosticianOutputV1>): Di
   return {
     valid: true,
     diagnosisId: `diag-attack-${Date.now()}`,
-    taskId: 'task_attack',
     summary: 'Attack test diagnosis',
     rootCause: 'Attack test root cause',
     violatedPrinciples: [],

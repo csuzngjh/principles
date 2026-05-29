@@ -1,14 +1,18 @@
 /**
  * DefaultDiagnosticianValidator — full schema + semantic validation of DiagnosticianOutputV1.
  *
- * Validates across 7 requirement areas (REQ-2.3a through REQ-2.3g):
+ * Validates across 6 requirement areas (REQ-2.3a through REQ-2.3g, excluding REQ-2.3c):
  *   REQ-2.3a — TypeBox schema correctness
  *   REQ-2.3b — Non-empty summary and rootCause
- *   REQ-2.3c — Task identity match (output.taskId === expected taskId)
  *   REQ-2.3d — Evidence array bounded shape (each entry has non-empty sourceRef + note)
  *   REQ-2.3e — Recommendations shape (valid kind union + non-empty description)
  *   REQ-2.3f — Confidence in [0, 1] closed interval
  *   REQ-2.3g — Evidence sourceRef back-check (standard=format, verbose=existence)
+ *
+ * REQ-2.3c (task identity match) was removed in PRI-272 because taskId is
+ * lineage data owned by the runner, not LLM output. The adapter strips
+ * lineage fields before validation; downstream consumers get taskId from
+ * RunnerContext/TaskRecord.
  *
  * Validation order: semantic checks run BEFORE schema validation so that
  * human-readable error messages (with actual values) are returned first.
@@ -55,7 +59,7 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   async validate(
     output: DiagnosticianOutputV1,
-    taskId: string,
+    _taskId: string,
     options?: DiagnosticianValidateOptions,
   ): Promise<DiagnosticianValidationResult> {
     // ── Step 1: Guard ──────────────────────────────────────────────────────────
@@ -70,14 +74,7 @@ export class DefaultDiagnosticianValidator implements DiagnosticianValidator {
 
     // ── Step 2: Semantic checks FIRST (better error messages with actual values) ──
 
-    // 2a: Task identity
-    if (output.taskId !== taskId) {
-      const msg = `taskId mismatch: output.taskId "${output.taskId}" does not match expected "${taskId}"`;
-      if (!isVerbose) return buildResult(false, '1 field invalid: taskId', [msg]);
-      detailErrors.push(msg);
-    }
-
-    // 2b: Confidence boundary [0, 1]
+    // 2a: Confidence boundary [0, 1]
     if (output.confidence < 0 || output.confidence > 1) {
       const msg = `confidence ${output.confidence} outside [0, 1] closed interval`;
       if (!isVerbose) return buildResult(false, '1 field invalid: confidence', [msg]);

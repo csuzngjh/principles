@@ -334,17 +334,17 @@ describe('DiagnosticianRunner telemetry emission', () => {
 
   it('emits lineage_strip_contract_violation when output contains taskId after adapter strip', async () => {
     const mocks = createMocks();
-    const outputWithTaskId: DiagnosticianOutputV1 = {
+    const outputWithTaskId = {
       valid: true,
       diagnosisId: 'diag-lineage-001',
-      taskId: 'LLM-FABRICATED-TASK-ID',
       summary: 'Test diagnosis with unstripped taskId',
       rootCause: 'Test root cause',
       violatedPrinciples: [],
       evidence: [],
       recommendations: [],
       confidence: 0.9,
-    };
+      taskId: 'should-not-be-here',
+    } as unknown as DiagnosticianOutputV1;
     mocks._runtimeAdapter.fetchOutput.mockResolvedValue({ runId: RUN_ID, payload: outputWithTaskId });
 
     const runner = createRunner(mocks);

@@ -64,7 +64,6 @@ describe('SqliteDiagnosticianCommitter', () => {
     return {
       valid: true,
       diagnosisId: 'diag-1',
-      taskId: 'task-1',
       summary: 'Test diagnosis',
       rootCause: 'Test root cause',
       violatedPrinciples: [],

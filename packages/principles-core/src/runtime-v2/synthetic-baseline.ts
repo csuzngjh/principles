@@ -96,7 +96,6 @@ export function makeDeterministicDiagnosticianOutput(painId: string): Diagnostic
   return {
     valid: true,
     diagnosisId: `synth-diag-${painId}`,
-    taskId: `diagnosis_${painId}`,
     summary: 'Synthetic baseline: deterministic diagnostician output',
     rootCause: 'Synthetic baseline: tool failure pattern detected',
     violatedPrinciples: [],

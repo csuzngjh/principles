@@ -194,11 +194,10 @@ class _SlowStubRuntimeAdapter extends StubRuntimeAdapter {
  * The artifact.contentJson format is:
  *   { recommendation: { title, text, triggerPattern, action } }
  */
-function makeDiagnosticianOutputWithCandidates(taskId: string): DiagnosticianOutputV1 {
+function makeDiagnosticianOutputWithCandidates(_taskId: string): DiagnosticianOutputV1 {
   return {
     valid: true,
     diagnosisId: `diag-m8e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    taskId,
     summary: 'E2E m8-02 test diagnosis summary',
     rootCause: 'E2E m8-02 root cause — missing validation before tool call',
     violatedPrinciples: [],

@@ -309,8 +309,7 @@ describe('DiagnosticianRunner Integration', () => {
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(result.contextHash!.length).toBeGreaterThan(0);
     expect(result.output).toBeDefined();
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    expect(result.output!.taskId).toBe(taskId);
+     
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(result.output!.valid).toBe(true);
 

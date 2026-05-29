@@ -657,7 +657,17 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           }
         }
 
-        validatedOutput = parsedOutput;
+        // Lineage fields (taskId/sourcePainId/sourceTaskId/etc.) are
+        // intentionally stripped from LLM output. Downstream consumers
+        // (DiagnosticianRunner, committer) MUST get these values from
+        // RunnerContext / TaskRecord, never from validated output.
+        // This prevents LLM-supplied lineage from poisoning downstream
+        // commits (ERR-008 family). See PRI-272.
+        const protectedFreeForm = typeof parsedOutput === 'object' && parsedOutput !== null
+          ? stripLineageFields(parsedOutput)
+          : parsedOutput;
+
+        validatedOutput = protectedFreeForm;
         this.emitOutputPathTelemetry({ runId, input, path: 'free_form_with_repair', fallbackReason: null });
       }
 
