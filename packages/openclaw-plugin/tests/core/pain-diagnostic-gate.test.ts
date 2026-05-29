@@ -268,6 +268,20 @@ describe('PainDiagnosticGate', () => {
     });
   });
 
+  it('diagnoses llm_paralysis with score 45 (new config default, PRI-274)', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'llm_paralysis',
+      score: 45,
+      currentGfi: 0,
+      sessionId: 's1',
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: true,
+      reason: 'llm_paralysis',
+    });
+  });
+
   it('cooldownMs=0 disables cooldown (allows re-diagnosis)', () => {
     const input = {
       source: 'tool_failure',
@@ -424,11 +438,41 @@ describe('PainDiagnosticGate', () => {
     });
   });
 
-  it('gate_block source falls through to below_gate when no other condition met', () => {
+  it('gate_block source falls through to below_gate when score below painTrigger', () => {
     const decision = evaluatePainDiagnosticGate({
       source: 'gate_blocked',
       score: 10,
       currentGfi: 5,
+      consecutiveErrors: 0,
+      sessionId: 's1',
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: false,
+      reason: 'below_gate',
+    });
+  });
+
+  it('diagnoses gate_blocked when score >= painTrigger (PRI-274)', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'gate_blocked',
+      score: 45,
+      currentGfi: 0,
+      consecutiveErrors: 0,
+      sessionId: 's1',
+    });
+
+    expect(decision).toMatchObject({
+      shouldDiagnose: true,
+      reason: 'gate_blocked',
+    });
+  });
+
+  it('skips gate_blocked when score < painTrigger', () => {
+    const decision = evaluatePainDiagnosticGate({
+      source: 'gate_blocked',
+      score: 39,
+      currentGfi: 0,
       consecutiveErrors: 0,
       sessionId: 's1',
     });
