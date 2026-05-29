@@ -886,6 +886,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         return { success: false, fallbackReason: 'tool_call_schema_invalid' };
       }
 
+      // Lineage fields (taskId/sourcePainId/sourceTaskId/etc.) are
+      // intentionally stripped from LLM output. Downstream consumers
+      // (DiagnosticianRunner, committer) MUST get these values from
+      // RunnerContext / TaskRecord, never from validated output.
+      // This prevents LLM-supplied lineage from poisoning downstream
+      // commits (ERR-008 family). See PRI-271 D4 in PR description.
       const protectedArgs = typeof toolArgs === 'object' && toolArgs !== null
         ? stripLineageFields(toolArgs)
         : toolArgs;
@@ -949,6 +955,12 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         return { success: false, fallbackReason: 'json_schema_invalid' };
       }
 
+      // Lineage fields (taskId/sourcePainId/sourceTaskId/etc.) are
+      // intentionally stripped from LLM output. Downstream consumers
+      // (DiagnosticianRunner, committer) MUST get these values from
+      // RunnerContext / TaskRecord, never from validated output.
+      // This prevents LLM-supplied lineage from poisoning downstream
+      // commits (ERR-008 family). See PRI-271 D4 in PR description.
       const protectedParsed = typeof parsed === 'object' && parsed !== null
         ? stripLineageFields(parsed)
         : parsed;
