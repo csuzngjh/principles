@@ -1,0 +1,12 @@
+{
+  "name": "trap-01-circular-dep",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "node dist/c.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
