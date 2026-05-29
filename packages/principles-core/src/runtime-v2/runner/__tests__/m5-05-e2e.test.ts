@@ -42,11 +42,10 @@ const PENDING_STATUS: CandidateRecord['status'] = 'pending';
  * Create DiagnosticianOutputV1 with >= 2 principle recommendations.
  * Per D-07 and E2EV-01 specific: output.recommendations includes >= 2 kind='principle' items.
  */
-function makeDiagnosticianOutputWithCandidates(taskId: string): DiagnosticianOutputV1 {
+function makeDiagnosticianOutputWithCandidates(_taskId: string): DiagnosticianOutputV1 {
   return {
     valid: true,
     diagnosisId: `diag-m5e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    taskId,
     summary: 'E2E m5-05 test diagnosis summary',
     rootCause: 'E2E m5-05 root cause — missing validation before tool call',
     violatedPrinciples: [],
@@ -61,11 +60,10 @@ function makeDiagnosticianOutputWithCandidates(taskId: string): DiagnosticianOut
 }
 
 /** Standard output without principle candidates (for failure injection scenarios). */
-function _makeDiagnosticianOutput(taskId: string): DiagnosticianOutputV1 {
+function _makeDiagnosticianOutput(_taskId: string): DiagnosticianOutputV1 {
   return {
     valid: true,
     diagnosisId: `diag-m5e2e-std-${Date.now()}`,
-    taskId,
     summary: 'Standard E2E test diagnosis summary',
     rootCause: 'Test root cause analysis',
     violatedPrinciples: [],

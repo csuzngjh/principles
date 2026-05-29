@@ -18,7 +18,6 @@ const makeInput = (overrides: Partial<AdmissionGateInput> = {}): AdmissionGateIn
 const makeDiagnosticianOutput = (overrides: Partial<DiagnosticianOutputV1> = {}): DiagnosticianOutputV1 => ({
   valid: true,
   diagnosisId: 'diag-001',
-  taskId: 'task-001',
   summary: 'Test diagnosis',
   rootCause: 'Test root cause',
   violatedPrinciples: [],
