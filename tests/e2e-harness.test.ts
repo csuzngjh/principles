@@ -17,6 +17,7 @@ import { tmpdir } from 'os';
 function computeVerdict(params: {
   phase0Ok: boolean;
   phase1Ok: boolean;
+  phase1Error?: string;
   agentResponded: boolean;
   painCount: number;
   provenance: string | null;
@@ -27,7 +28,7 @@ function computeVerdict(params: {
   needsEvidenceCount: number;
 }): { verdict: string; notes: string[] } {
   const {
-    phase0Ok, phase1Ok, agentResponded,
+    phase0Ok, phase1Ok, phase1Error, agentResponded,
     painCount, provenance,
     taskCount, candidateCount,
     admittedCount, deferredCount, needsEvidenceCount,
@@ -36,14 +37,20 @@ function computeVerdict(params: {
   const notes: string[] = [];
 
   if (!phase0Ok) return { verdict: 'failed:phase0:workspace_error', notes };
-  if (!phase1Ok) return { verdict: 'skipped:phase1:environment_unavailable', notes };
+  if (!phase1Ok) return { verdict: `failed:phase1:${phase1Error ?? 'environment_unavailable'}`, notes };
   if (!agentResponded) return { verdict: 'failed:phase3:agent_no_response', notes };
   if (painCount === 0) return { verdict: 'failed:phase4:no_pain_emitted', notes };
   if (provenance !== 'openclaw_context_bound') {
     return { verdict: `failed:phase4:wrong_provenance:${provenance}`, notes };
   }
   if (taskCount === 0) return { verdict: 'failed:phase5:no_tasks_created', notes };
-  if (candidateCount === 0) return { verdict: 'failed:phase5:no_candidates', notes };
+  if (candidateCount === 0) {
+    if (needsEvidenceCount > 0) {
+      notes.push('Context-bound pain but diagnosis was evidence-incomplete → needs_evidence is correct');
+      return { verdict: 'gate_quarantined_expected', notes };
+    }
+    return { verdict: 'failed:phase5:no_candidates', notes };
+  }
 
   if (admittedCount > 0 || deferredCount > 0) {
     notes.push(`${admittedCount} admitted, ${deferredCount} deferred, ${needsEvidenceCount} needs_evidence`);
@@ -108,7 +115,7 @@ describe('e2e harness verdict computation', () => {
       taskCount: 0, candidateCount: 0,
       admittedCount: 0, deferredCount: 0, needsEvidenceCount: 0,
     });
-    expect(result.verdict).toBe('skipped:phase1:environment_unavailable');
+    expect(result.verdict).toBe('failed:phase1:environment_unavailable');
   });
 
   it('returns failed:phase0 when workspace setup fails', () => {
@@ -149,6 +156,27 @@ describe('e2e harness verdict computation', () => {
       admittedCount: 0, deferredCount: 0, needsEvidenceCount: 0,
     });
     expect(result.verdict).toBe('failed:phase5:no_tasks_created');
+  });
+
+  it('returns gate_quarantined_expected when candidateCount=0 but needsEvidenceCount>0', () => {
+    const result = computeVerdict({
+      phase0Ok: true, phase1Ok: true, agentResponded: true,
+      painCount: 1, provenance: 'openclaw_context_bound',
+      taskCount: 1, candidateCount: 0,
+      admittedCount: 0, deferredCount: 0, needsEvidenceCount: 1,
+    });
+    expect(result.verdict).toBe('gate_quarantined_expected');
+    expect(result.notes[0]).toContain('evidence-incomplete');
+  });
+
+  it('returns failed:phase1 with custom error message', () => {
+    const result = computeVerdict({
+      phase0Ok: true, phase1Ok: false, phase1Error: 'gateway_timeout', agentResponded: false,
+      painCount: 0, provenance: null,
+      taskCount: 0, candidateCount: 0,
+      admittedCount: 0, deferredCount: 0, needsEvidenceCount: 0,
+    });
+    expect(result.verdict).toBe('failed:phase1:gateway_timeout');
   });
 });
 
@@ -226,9 +254,8 @@ describe('trap definitions', () => {
   it('trap-03 fixture directory exists with required files', () => {
     const trap03 = join(fixturesDir, 'trap-03-missing-dep');
     expect(existsSync(join(trap03, 'package.json'))).toBe(true);
-    expect(existsSync(join(trap03, 'tsconfig.json'))).toBe(true);
-    expect(existsSync(join(trap03, 'src', 'utils.ts'))).toBe(true);
-    expect(existsSync(join(trap03, 'src', 'utils.test.ts'))).toBe(true);
+    expect(existsSync(join(trap03, 'src', 'utils.js'))).toBe(true);
+    expect(existsSync(join(trap03, 'src', 'utils.test.js'))).toBe(true);
   });
 
   it('trap-01 has circular dependency between a.ts and b.ts', () => {
@@ -240,8 +267,7 @@ describe('trap definitions', () => {
 
   it('trap-03 has missing dependency declaration', () => {
     const pkg = JSON.parse(readFileSync(join(fixturesDir, 'trap-03-missing-dep', 'package.json'), 'utf-8'));
-    expect(pkg.dependencies).toHaveProperty('fast-deep-equal');
-    // The key: node_modules is NOT installed, so the dep is missing
+    expect(pkg.dependencies).toHaveProperty('@principles-trap/deep-equal');
     expect(existsSync(join(fixturesDir, 'trap-03-missing-dep', 'node_modules'))).toBe(false);
   });
 });
