@@ -1,6 +1,8 @@
 /**
  * CandidateStore — abstract interface for principle candidate queries.
  */
+import type { RecommendationKind } from '../../diagnostician-output.js';
+
 export interface CandidateRecord {
   candidateId: string;
   artifactId: string;
@@ -10,6 +12,7 @@ export interface CandidateRecord {
   description: string;
   confidence: number | null;
   sourceRecommendationJson: string;
+  recommendationKind: RecommendationKind;
   status: 'pending' | 'consumed' | 'expired';
   createdAt: string;
 }

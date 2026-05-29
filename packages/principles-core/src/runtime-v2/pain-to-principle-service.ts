@@ -49,13 +49,18 @@ export interface PainToPrincipleInput {
 }
 
 export interface PainToPrincipleOutput {
-  status: 'succeeded' | 'skipped' | 'failed' | 'retried';
+  status: 'succeeded' | 'skipped' | 'failed' | 'retried' | 'degraded';
   painId: string;
   taskId: string;
   runId?: string;
   artifactId?: string;
   candidateIds: string[];
   ledgerEntryIds: string[];
+  admissionResults?: {
+    candidateId: string;
+    recommendationKind: string;
+    admission: { decision: string; reason: string; nextAction: string; evidenceStatus: string };
+  }[];
   message?: string;
   observabilityWarnings: string[];
   failureCategory?: FailureCategory;
@@ -144,6 +149,7 @@ export class PainToPrincipleService {
         artifactId: bridgeResult.artifactId,
         candidateIds: bridgeResult.candidateIds,
         ledgerEntryIds: bridgeResult.ledgerEntryIds,
+        admissionResults: bridgeResult.admissionResults,
         message: bridgeResult.message,
         observabilityWarnings,
         failureCategory: classifyFromBridge(bridgeResult),

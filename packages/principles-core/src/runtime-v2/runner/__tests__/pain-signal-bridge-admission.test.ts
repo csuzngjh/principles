@@ -1,0 +1,350 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { describe, it, expect } from 'vitest';
+import { PainSignalBridge } from '../../pain-signal-bridge.js';
+import type { RuntimeStateManager, CandidateRecord } from '../../store/runtime-state-manager.js';
+import type { CandidateIntakeService } from '../../candidate-intake-service.js';
+import type { LedgerAdapter, LedgerPrincipleEntry } from '../../candidate-intake.js';
+import type { RunnerResult } from '../runner-result.js';
+import type { DiagnosticianOutputV1 } from '../../diagnostician-output.js';
+
+const PAIN_ID = 'manual_1779766506353_uotlzvdu';
+const TASK_ID = `diagnosis_${PAIN_ID}`;
+
+function makeCandidate(id: string, kind: CandidateRecord['recommendationKind']): CandidateRecord {
+  return {
+    candidateId: id,
+    taskId: TASK_ID,
+    artifactId: `artifact-${id}`,
+    sourceRunId: `run-${id}`,
+    title: `Candidate ${id}`,
+    description: `Description for ${id}`,
+    confidence: 0.35,
+    sourceRecommendationJson: '{}',
+    recommendationKind: kind,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function makeLedgerEntry(candidateId: string): LedgerPrincipleEntry {
+  return {
+    id: `ledger-${candidateId}`,
+    status: 'probation',
+    createdAt: new Date().toISOString(),
+    text: `Principle text for ${candidateId}`,
+    sourceRef: `candidate://${candidateId}`,
+    title: `Principle ${candidateId}`,
+    evaluability: 'weak_heuristic',
+  };
+}
+
+function makeLowConfidenceOutput(): DiagnosticianOutputV1 {
+  return {
+    valid: true,
+    diagnosisId: 'diag-001',
+    taskId: TASK_ID,
+    summary: 'Conversation entries with empty text content prevent root cause analysis',
+    rootCause: 'No other evidence available; only ambiguity note indicates empty content',
+    violatedPrinciples: [],
+    evidence: [],
+    recommendations: [
+      { kind: 'principle', description: 'Ensure conversation entries have text content' },
+      { kind: 'rule', description: 'Validate input before diagnosis' },
+      { kind: 'implementation', description: 'Add input validation' },
+      { kind: 'prompt', description: 'Prompt for evidence' },
+      { kind: 'defer', description: 'Defer until evidence available' },
+    ],
+    confidence: 0.35,
+    ambiguityNotes: ['No other evidence available; only ambiguity note indicates empty content'],
+  };
+}
+
+function makeHighConfidenceOutput(): DiagnosticianOutputV1 {
+  return {
+    valid: true,
+    diagnosisId: 'diag-002',
+    taskId: TASK_ID,
+    summary: 'Valid diagnosis with sufficient evidence',
+    rootCause: 'Identified root cause from session trace',
+    violatedPrinciples: [],
+    evidence: [{ sourceRef: 'session-trace-1', note: 'Owner confirmed behavior' }],
+    recommendations: [
+      { kind: 'principle', description: 'Valid principle from evidence' },
+    ],
+    confidence: 0.85,
+  };
+}
+
+function makeBridgeDeps(overrides: {
+  candidates?: CandidateRecord[];
+  output?: DiagnosticianOutputV1;
+  intakeResults?: Map<string, { id: string }>;
+}) {
+  const intakeResults = overrides.intakeResults ?? new Map<string, { id: string }>();
+  const telemetryEvents: Record<string, unknown>[] = [];
+
+  const stateManager: RuntimeStateManager = {
+    getTask: async () => null,
+    createTask: async () => { return; },
+    updateTask: async () => { return; },
+    getCandidatesByTaskId: async () => overrides.candidates ?? [],
+    getRunsByTask: async () => [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }],
+    updateCandidateStatus: async () => { return; },
+  } as unknown as RuntimeStateManager;
+
+  const runner = {
+    run: async (): Promise<RunnerResult> => ({
+      status: 'succeeded',
+      taskId: TASK_ID,
+      attemptCount: 1,
+      output: overrides.output ?? makeLowConfidenceOutput(),
+    }),
+  };
+
+  const intakeService: CandidateIntakeService = {
+    intake: async (candidateId: string) => {
+      const result = intakeResults.get(candidateId);
+      if (result) return result;
+      const entry = { id: `ledger-${candidateId}` };
+      intakeResults.set(candidateId, entry);
+      return entry;
+    },
+  } as unknown as CandidateIntakeService;
+
+  const ledgerAdapter: LedgerAdapter = {
+    existsForCandidate: (candidateId: string) => {
+      const entry = intakeResults.get(candidateId);
+      if (entry) return makeLedgerEntry(candidateId);
+      return null;
+    },
+  } as unknown as LedgerAdapter;
+
+  const eventEmitter = {
+    emitTelemetry: (event: Record<string, unknown>) => {
+      telemetryEvents.push(event);
+    },
+  };
+
+  return { stateManager, runner, intakeService, ledgerAdapter, eventEmitter, telemetryEvents };
+}
+
+describe('PainSignalBridge admission gate integration', () => {
+  it('evidence-incomplete diagnosis produces no ledger intake', async () => {
+    const candidates = [
+      makeCandidate('c-1', 'principle'),
+      makeCandidate('c-2', 'rule'),
+      makeCandidate('c-3', 'implementation'),
+      makeCandidate('c-4', 'prompt'),
+      makeCandidate('c-5', 'defer'),
+    ];
+    const deps = makeBridgeDeps({
+      candidates,
+      output: makeLowConfidenceOutput(),
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner as any,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    const result = await bridge.onPainDetected({
+      painId: PAIN_ID,
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'Test reason',
+      provenance: 'owner_reported_no_host_trace',
+    });
+
+    expect(result.ledgerEntryIds).toHaveLength(0);
+    expect(result.status).toBe('degraded');
+    expect(result.admissionResults).toBeDefined();
+    const admitted = result.admissionResults?.filter((a) => a.admission.decision === 'admitted') ?? [];
+    expect(admitted).toHaveLength(0);
+  });
+
+  it('admitted diagnosis creates expected candidate/ledger evidence', async () => {
+    const candidates = [makeCandidate('c-admit', 'principle')];
+    const deps = makeBridgeDeps({
+      candidates,
+      output: makeHighConfidenceOutput(),
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner as any,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    const result = await bridge.onPainDetected({
+      painId: 'pain-ok',
+      painType: 'tool_failure',
+      source: 'openclaw',
+      reason: 'Valid reason',
+      sessionId: 'session-123',
+      provenance: 'openclaw_context_bound',
+    });
+
+    expect(result.status).toBe('succeeded');
+    expect(result.ledgerEntryIds).toHaveLength(1);
+    expect(result.admissionResults).toBeDefined();
+    const firstAdmission = result.admissionResults?.find((a) => a.candidateId === 'c-admit');
+    expect(firstAdmission?.admission.decision).toBe('admitted');
+  });
+
+  it('defer recommendation is not treated as activation candidate', async () => {
+    const candidates = [makeCandidate('c-defer', 'defer')];
+    const deps = makeBridgeDeps({
+      candidates,
+      output: makeHighConfidenceOutput(),
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner as any,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    const result = await bridge.onPainDetected({
+      painId: 'pain-defer',
+      painType: 'user_frustration',
+      source: 'openclaw',
+      reason: 'Test',
+      sessionId: 'session-456',
+      provenance: 'openclaw_context_bound',
+    });
+
+    expect(result.ledgerEntryIds).toHaveLength(0);
+    expect(result.admissionResults).toBeDefined();
+    const deferResult = result.admissionResults?.find((a) => a.candidateId === 'c-defer');
+    expect(deferResult?.admission.decision).toBe('deferred');
+    expect(deferResult?.admission.reason).toBe('recommendation_kind_defer_not_actionable');
+  });
+
+  it('emits structured telemetry for gated candidates', async () => {
+    const candidates = [makeCandidate('c-gated', 'principle')];
+    const deps = makeBridgeDeps({
+      candidates,
+      output: makeLowConfidenceOutput(),
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner as any,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    await bridge.onPainDetected({
+      painId: PAIN_ID,
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'Test',
+      provenance: 'owner_reported_no_host_trace',
+    });
+
+    expect(deps.telemetryEvents.length).toBeGreaterThan(0);
+    const [event] = deps.telemetryEvents;
+    expect(event?.eventType).toBe('candidate_admission_decision');
+    expect(event?.payload).toHaveProperty('decision');
+    expect(event?.payload).toHaveProperty('reason');
+    expect(event?.payload).toHaveProperty('nextAction');
+  });
+
+  it('partial admission: some admitted, some gated', async () => {
+    const candidates = [
+      makeCandidate('c-ok', 'principle'),
+      makeCandidate('c-defer', 'defer'),
+    ];
+    const deps = makeBridgeDeps({
+      candidates,
+      output: makeHighConfidenceOutput(),
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner as any,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    const result = await bridge.onPainDetected({
+      painId: 'pain-mixed',
+      painType: 'tool_failure',
+      source: 'openclaw',
+      reason: 'Mixed',
+      sessionId: 'session-789',
+      provenance: 'openclaw_context_bound',
+    });
+
+    expect(result.status).toBe('degraded');
+    expect(result.ledgerEntryIds).toHaveLength(1);
+    expect(result.message).toContain('partial_admission');
+  });
+
+  it('admission result JSON has stable reason and nextAction string literals', async () => {
+    const candidates = [makeCandidate('c-json', 'principle')];
+    const deps = makeBridgeDeps({
+      candidates,
+      output: makeLowConfidenceOutput(),
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner as any,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    const result = await bridge.onPainDetected({
+      painId: PAIN_ID,
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'Test',
+      provenance: 'owner_reported_no_host_trace',
+    });
+
+    const admission = result.admissionResults?.find((a) => a.candidateId === 'c-json')?.admission;
+    expect(typeof admission?.reason).toBe('string');
+    expect(typeof admission?.nextAction).toBe('string');
+    expect(admission?.reason).not.toMatch(/[\u4e00-\u9fff]/);
+    expect(admission?.nextAction).not.toMatch(/[\u4e00-\u9fff]/);
+  });
+
+  it('inferProvenance: manual source without session produces owner_reported_no_host_trace', async () => {
+    const candidates = [makeCandidate('c-prov', 'principle')];
+    const deps = makeBridgeDeps({
+      candidates,
+      output: makeLowConfidenceOutput(),
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner as any,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    const result = await bridge.onPainDetected({
+      painId: PAIN_ID,
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'Owner reported issue',
+    });
+
+    expect(result.admissionResults).toBeDefined();
+    const gated = result.admissionResults?.filter((a) => a.admission.decision === 'needs_evidence') ?? [];
+    expect(gated.length).toBeGreaterThan(0);
+    expect(gated[0]?.admission.evidenceStatus).toBe('owner_reported_no_host_trace');
+  });
+});
