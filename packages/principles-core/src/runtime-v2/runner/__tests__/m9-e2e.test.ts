@@ -71,7 +71,7 @@ function makeDiagnosticianOutputWithCandidates(taskId: string): DiagnosticianOut
     summary: 'E2E m9-04 full chain test diagnosis summary',
     rootCause: 'E2E m9-04 full chain root cause — missing validation before tool call',
     violatedPrinciples: [],
-    evidence: [],
+    evidence: [{ sourceRef: 'test', note: 'E2E test evidence' }],
     recommendations: [
       { kind: 'principle', description: 'Always validate tool arguments before execution to prevent silent failures' },
       { kind: 'principle', description: 'Log all tool invocations with argument summaries for traceability' },
@@ -132,7 +132,7 @@ describe('E2E m9 — PainSignalBridge + PiAiRuntimeAdapter full chain', () => {
   }
 
   function makePiAiAdapter(): PiAiRuntimeAdapter {
-    return new PiAiRuntimeAdapter({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4', apiKeyEnv: 'TEST_API_KEY', maxRetries: 0, timeoutMs: 60_000 });
+    return new PiAiRuntimeAdapter({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4', apiKeyEnv: 'TEST_API_KEY', maxRetries: 0, timeoutMs: 60_000, outputPathStrategy: 'free_form_only' });
   }
 
   // TEST 1: Full chain

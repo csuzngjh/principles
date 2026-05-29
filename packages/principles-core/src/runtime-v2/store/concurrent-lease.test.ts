@@ -8,10 +8,15 @@ import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { DefaultLeaseManager } from './lifecycle/lease-manager.js';
 
 describe('ConcurrentLeaseConflict', () => {
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let tmpdir: string;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let connection: SqliteConnection;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let taskStore: SqliteTaskStore;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let runStore: SqliteRunStore;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let leaseManager: DefaultLeaseManager;
 
   beforeEach(() => {
@@ -110,7 +115,7 @@ describe('ConcurrentLeaseConflict', () => {
 
     const renewed = await leaseManager.renewLease('task-4', 'runtime-A', 120_000);
     expect(renewed.leaseExpiresAt).not.toBe(original.leaseExpiresAt);
-    expect(new Date(renewed.leaseExpiresAt!) > new Date(original.leaseExpiresAt!)).toBe(true);
+    expect(renewed.leaseExpiresAt && original.leaseExpiresAt && new Date(renewed.leaseExpiresAt) > new Date(original.leaseExpiresAt)).toBe(true);
   });
 
   it('concurrent acquireLease from two runtimes — only one succeeds', async () => {

@@ -46,7 +46,7 @@ export interface OutputEvidencePack {
 
 export const REPAIR_PROMPT_VERSION = '1';
 
-export const MAX_REPAIR_ATTEMPTS = 2;
+export const MAX_REPAIR_ATTEMPTS = 3;
 
 export function normalizeMaxRepairAttempts(raw: number | undefined, defaultVal: number): number {
   if (raw === undefined) return defaultVal;

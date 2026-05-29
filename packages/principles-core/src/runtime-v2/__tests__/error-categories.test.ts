@@ -68,7 +68,7 @@ describe('isPDErrorCategory', () => {
 
 describe('FAILURE_CATEGORY_MAP', () => {
   it('maps workspace_dirty to artifact_missing (critical for PRI-137)', () => {
-    expect(FAILURE_CATEGORY_MAP['workspace_dirty']).toBe('artifact_missing');
+    expect(FAILURE_CATEGORY_MAP.workspace_dirty).toBe('artifact_missing');
   });
 
   it('maps all PD_ERROR_CATEGORIES to failure categories', () => {
@@ -79,30 +79,30 @@ describe('FAILURE_CATEGORY_MAP', () => {
   });
 
   it('maps runtime_unavailable errors correctly', () => {
-    expect(FAILURE_CATEGORY_MAP['runtime_unavailable']).toBe('runtime_unavailable');
-    expect(FAILURE_CATEGORY_MAP['lease_conflict']).toBe('runtime_unavailable');
-    expect(FAILURE_CATEGORY_MAP['lease_expired']).toBe('runtime_unavailable');
-    expect(FAILURE_CATEGORY_MAP['execution_failed']).toBe('runtime_unavailable');
-    expect(FAILURE_CATEGORY_MAP['history_not_found']).toBe('runtime_unavailable');
-    expect(FAILURE_CATEGORY_MAP['trajectory_ambiguous']).toBe('runtime_unavailable');
-    expect(FAILURE_CATEGORY_MAP['context_assembly_failed']).toBe('runtime_unavailable');
-    expect(FAILURE_CATEGORY_MAP['query_invalid']).toBe('runtime_unavailable');
+    expect(FAILURE_CATEGORY_MAP.runtime_unavailable).toBe('runtime_unavailable');
+    expect(FAILURE_CATEGORY_MAP.lease_conflict).toBe('runtime_unavailable');
+    expect(FAILURE_CATEGORY_MAP.lease_expired).toBe('runtime_unavailable');
+    expect(FAILURE_CATEGORY_MAP.execution_failed).toBe('runtime_unavailable');
+    expect(FAILURE_CATEGORY_MAP.history_not_found).toBe('runtime_unavailable');
+    expect(FAILURE_CATEGORY_MAP.trajectory_ambiguous).toBe('runtime_unavailable');
+    expect(FAILURE_CATEGORY_MAP.context_assembly_failed).toBe('runtime_unavailable');
+    expect(FAILURE_CATEGORY_MAP.query_invalid).toBe('runtime_unavailable');
   });
 
   it('maps timeout errors correctly', () => {
-    expect(FAILURE_CATEGORY_MAP['timeout']).toBe('runtime_timeout');
-    expect(FAILURE_CATEGORY_MAP['cancelled']).toBe('runtime_timeout');
-    expect(FAILURE_CATEGORY_MAP['max_attempts_exceeded']).toBe('runtime_timeout');
+    expect(FAILURE_CATEGORY_MAP.timeout).toBe('runtime_timeout');
+    expect(FAILURE_CATEGORY_MAP.cancelled).toBe('runtime_timeout');
+    expect(FAILURE_CATEGORY_MAP.max_attempts_exceeded).toBe('runtime_timeout');
   });
 
   it('maps config errors correctly', () => {
-    expect(FAILURE_CATEGORY_MAP['capability_missing']).toBe('config_missing');
-    expect(FAILURE_CATEGORY_MAP['input_invalid']).toBe('config_missing');
-    expect(FAILURE_CATEGORY_MAP['workspace_invalid']).toBe('config_missing');
+    expect(FAILURE_CATEGORY_MAP.capability_missing).toBe('config_missing');
+    expect(FAILURE_CATEGORY_MAP.input_invalid).toBe('config_missing');
+    expect(FAILURE_CATEGORY_MAP.workspace_invalid).toBe('config_missing');
   });
 
   it('maps ledger errors correctly', () => {
-    expect(FAILURE_CATEGORY_MAP['storage_unavailable']).toBe('ledger_write_failed');
+    expect(FAILURE_CATEGORY_MAP.storage_unavailable).toBe('ledger_write_failed');
   });
 });
 

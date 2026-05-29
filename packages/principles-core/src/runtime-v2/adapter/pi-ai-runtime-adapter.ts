@@ -30,9 +30,10 @@ import { RolloutReviewerOutputV1Schema } from '../internalization/rollout-review
 import { TrainerOutputV1Schema } from '../internalization/trainer-output.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
-import { attemptStructuredOutputRepair } from './structured-output-repair.js';
+import { attemptStructuredOutputRepair, deriveSchemaSummary } from './structured-output-repair.js';
 import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-repair-contract.js';
 import { formatValidationErrorEntry, safeStringifyPreview } from './output-repair-contract.js';
+import { RECORD_DIAGNOSIS_V1_TOOL } from './tools/diagnostician-tool.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -44,6 +45,12 @@ import type {
   StructuredRunOutput,
   RuntimeArtifactRef,
 } from '../runtime-protocol.js';
+
+/** Output path strategy for structured output (PRI-271 B3). */
+export type OutputPathStrategy = 'tool_call_first' | 'json_mode_first' | 'free_form_only';
+
+/** Result of a specific output path attempt (PRI-271 B3). */
+export type OutputPathLabel = 'tool_call' | 'json_object_mode' | 'free_form_with_repair';
 
 /**
  * Configuration for PiAiRuntimeAdapter.
@@ -70,6 +77,15 @@ export interface PiAiRuntimeAdapterConfig {
   eventEmitter?: StoreEventEmitter;
   /** Reasoning/thinking level. Set to false to disable thinking for models that enable it by default. Default: undefined (use model default). */
   reasoning?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | false;
+  /**
+   * Output path strategy for structured output (PRI-271 B3).
+   * - 'tool_call_first': Try tool calling → JSON mode → free-form + repair (default)
+   * - 'json_mode_first': Try JSON mode → free-form + repair (skip tool calling)
+   * - 'free_form_only': Only use current free-form + repair path
+   */
+  outputPathStrategy?: OutputPathStrategy;
+  /** Maximum repair attempts for structured output repair loop (PRI-271 A1). Default: 3. */
+  maxRepairAttempts?: number;
   /** Internal override for the retry delay backoff, primarily for fast unit testing. */
   _testBackoffDelayMs?: number;
 }
@@ -479,123 +495,74 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     });
 
     try {
-      // Call LLM with retry — pass effectiveTimeoutMs so provider request uses runner timeout
-      const response = await this.completeWithRetry(model, context, { signal, apiKey, effectiveTimeoutMs, timeoutSource, input, runId });
-
-      // extractAssistantTextOrThrow normalizes resolved-error responses
-      // (e.g., stopReason:'error' + errorMessage:'401 Unauthorized')
-      // into proper PDRuntimeError — prevents misclassifying API errors as output_invalid
-      const text = extractAssistantTextOrThrow(response, signal);
-
-      // Parse response — handles prose-wrapped and code-fenced JSON
-      let validatedOutput: unknown = extractJsonObject(text);
-      if (!validatedOutput) {
-        this.eventEmitter.emitTelemetry({
-          eventType: 'output_extraction_failed',
-          traceId: input.taskRef?.taskId ?? runId,
-          timestamp: new Date().toISOString(),
-          sessionId: 'pi-ai-adapter',
-          agentId: 'pi-ai-adapter',
-          payload: {
-            runId,
-            runtimeKind: 'pi-ai',
-            provider: this.config.provider,
-            model: this.config.model,
-            outputSchemaRef: input.outputSchemaRef ?? 'unknown',
-            rawOutputPreview: text.slice(0, 500),
-          },
-        });
-        throw new PDRuntimeError('output_invalid', 'No valid JSON found in LLM response');
-      }
-
+      // PRI-271 B3: Three-path fallback chain for structured output
       const schemaRef = input.outputSchemaRef;
       const schema = schemaRef ? OUTPUT_SCHEMA_REGISTRY.get(schemaRef) : undefined;
+      const strategy = this.config.outputPathStrategy ?? 'tool_call_first';
 
-      if (schema && !Value.Check(schema, validatedOutput)) {
-        const schemaErrors = [...Value.Errors(schema, validatedOutput)]
-          .map(e => ({ path: e.path, message: e.message, value: e.value }));
+      let validatedOutput: unknown = undefined;
+      const schemaSummary = (schema && schemaRef) ? deriveSchemaSummary(schema) : undefined;
 
-        if (schemaErrors.length === 0) {
-          throw new PDRuntimeError(
-            'output_invalid',
-            `LLM output does not match ${schemaRef ?? 'unknown'} schema (no specific errors enumerated)`,
-          );
+      // ── Path 1: Tool calling (PRI-271 B2) ──
+      if (strategy === 'tool_call_first' && schema && schemaRef) {
+        const toolResult = await this.tryToolCallPath({ model, baseContext: context, schemaRef, schema, signal, apiKey, effectiveTimeoutMs, input, runId });
+        if (toolResult.success && toolResult.output !== undefined) {
+          validatedOutput = toolResult.output;
+          this.emitOutputPathTelemetry({ runId, input, path: 'tool_call', fallbackReason: null });
+        } else {
+          this.emitOutputPathTelemetry({ runId, input, path: null, fallbackReason: toolResult.fallbackReason ?? 'provider_no_tool_use' });
+        }
+      }
+
+      // ── Path 2: JSON mode (PRI-271 B1) ──
+      if (!validatedOutput && (strategy === 'tool_call_first' || strategy === 'json_mode_first') && schema && schemaRef) {
+        const jsonResult = await this.tryJsonModePath({ model, baseContext: context, schemaRef, schema, signal, apiKey, effectiveTimeoutMs, input, runId });
+        if (jsonResult.success && jsonResult.output !== undefined) {
+          validatedOutput = jsonResult.output;
+          this.emitOutputPathTelemetry({ runId, input, path: 'json_object_mode', fallbackReason: null });
+        } else {
+          this.emitOutputPathTelemetry({ runId, input, path: null, fallbackReason: jsonResult.fallbackReason ?? 'json_parse_failed' });
+        }
+      }
+
+      // ── Path 3: Free-form + repair (current behavior, enhanced) ──
+      if (!validatedOutput) {
+        const response = await this.completeWithRetry(model, context, { signal, apiKey, effectiveTimeoutMs, timeoutSource, input, runId });
+        const text = extractAssistantTextOrThrow(response, signal);
+        let parsedOutput = extractJsonObject(text);
+
+        if (!parsedOutput) {
+          this.eventEmitter.emitTelemetry({
+            eventType: 'output_extraction_failed',
+            traceId: input.taskRef?.taskId ?? runId,
+            timestamp: new Date().toISOString(),
+            sessionId: 'pi-ai-adapter',
+            agentId: 'pi-ai-adapter',
+            payload: {
+              runId,
+              runtimeKind: 'pi-ai',
+              provider: this.config.provider,
+              model: this.config.model,
+              outputSchemaRef: input.outputSchemaRef ?? 'unknown',
+              rawOutputPreview: text.slice(0, 500),
+            },
+          });
+          throw new PDRuntimeError('output_invalid', 'No valid JSON found in LLM response');
         }
 
-        const validationErrorEntries: OutputValidationErrorEntry[] = schemaErrors
-          .slice(0, 10)
-          .map(e => formatValidationErrorEntry(e.path, e.message, e.value));
+        if (schema && !Value.Check(schema, parsedOutput)) {
+          // Schema validation failed — attempt repair with enhanced config (PRI-271 A1/A2/A3)
+          const schemaErrors = [...Value.Errors(schema, parsedOutput)]
+            .map(e => ({ path: e.path, message: e.message, value: e.value }));
 
-        const rawOutputPreview = safeStringifyPreview(validatedOutput);
+          const validationErrorEntries: OutputValidationErrorEntry[] = schemaErrors
+            .slice(0, 10)
+            .map(e => formatValidationErrorEntry(e.path, e.message, e.value));
 
-        this.eventEmitter.emitTelemetry({
-          eventType: 'output_schema_invalid',
-          traceId: input.taskRef?.taskId ?? runId,
-          timestamp: new Date().toISOString(),
-          sessionId: 'pi-ai-adapter',
-          agentId: 'pi-ai-adapter',
-          payload: {
-            runId,
-            runtimeKind: 'pi-ai',
-            outputSchemaRef: schemaRef ?? 'unknown',
-            provider: this.config.provider,
-            model: this.config.model,
-            rawOutputPreview,
-            validationErrors: validationErrorEntries,
-          },
-        });
-
-        const originalOutput = typeof validatedOutput === 'object' && validatedOutput !== null
-          ? validatedOutput as Record<string, unknown>
-          : undefined;
-
-        const repairResult = await attemptStructuredOutputRepair<Record<string, unknown>>(
-          validatedOutput,
-          schemaErrors,
-          {
-            llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey }),
-            schemaCheck: (value: unknown) => Value.Check(schema, value),
-            schemaErrors: (value: unknown) =>
-              [...Value.Errors(schema, value)].map(e => ({ path: e.path, message: e.message, value: e.value })),
-          },
-          {
-            schemaRef: schemaRef ?? 'unknown',
-            originalOutput,
-          },
-        );
-
-        this.eventEmitter.emitTelemetry({
-          eventType: 'output_repair_attempted',
-          traceId: input.taskRef?.taskId ?? runId,
-          timestamp: new Date().toISOString(),
-          sessionId: 'pi-ai-adapter',
-          agentId: 'pi-ai-adapter',
-          payload: {
-            runId,
-            runtimeKind: 'pi-ai',
-            outputSchemaRef: schemaRef ?? 'unknown',
-            repaired: repairResult.repaired,
-            attemptsUsed: repairResult.attemptsUsed,
-            repairSummary: repairResult.repairSummary,
-            repairAttempts: repairResult.repairAttempts,
-          },
-        });
-
-        if (repairResult.repaired && repairResult.output) {
-          validatedOutput = repairResult.output;
-        } else {
-          const evidencePack: OutputEvidencePack = {
-            schemaRef: schemaRef ?? 'unknown',
-            provider: this.config.provider,
-            model: this.config.model,
-            rawOutputPreview,
-            validationErrors: validationErrorEntries,
-            repairAttempts: repairResult.repairAttempts,
-            finalFailureReason: 'repair_exhausted',
-          };
+          const rawOutputPreview = safeStringifyPreview(parsedOutput);
 
           this.eventEmitter.emitTelemetry({
-            eventType: 'output_repair_exhausted',
+            eventType: 'output_schema_invalid',
             traceId: input.taskRef?.taskId ?? runId,
             timestamp: new Date().toISOString(),
             sessionId: 'pi-ai-adapter',
@@ -608,17 +575,90 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               model: this.config.model,
               rawOutputPreview,
               validationErrors: validationErrorEntries,
-              repairAttempts: evidencePack.repairAttempts,
-              finalFailureReason: evidencePack.finalFailureReason,
             },
           });
 
-          throw new PDRuntimeError(
-            'output_invalid',
-            `LLM output does not match ${schemaRef ?? 'unknown'} schema`,
-            { evidencePack },
+          const originalOutput = typeof parsedOutput === 'object' && parsedOutput !== null
+            ? parsedOutput as Record<string, unknown>
+            : undefined;
+
+          const repairResult = await attemptStructuredOutputRepair<Record<string, unknown>>(
+            parsedOutput,
+            schemaErrors,
+            {
+              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey }),
+              schemaCheck: (value: unknown) => Value.Check(schema, value),
+              schemaErrors: (value: unknown) =>
+                [...Value.Errors(schema, value)].map(e => ({ path: e.path, message: e.message, value: e.value })),
+            },
+            {
+              schemaRef: schemaRef ?? 'unknown',
+              originalOutput,
+              schemaSummary,
+              maxRepairAttempts: this.config.maxRepairAttempts,
+            },
           );
+
+          this.eventEmitter.emitTelemetry({
+            eventType: 'output_repair_attempted',
+            traceId: input.taskRef?.taskId ?? runId,
+            timestamp: new Date().toISOString(),
+            sessionId: 'pi-ai-adapter',
+            agentId: 'pi-ai-adapter',
+            payload: {
+              runId,
+              runtimeKind: 'pi-ai',
+              outputSchemaRef: schemaRef ?? 'unknown',
+              repaired: repairResult.repaired,
+              attemptsUsed: repairResult.attemptsUsed,
+              repairSummary: repairResult.repairSummary,
+              repairAttempts: repairResult.repairAttempts,
+              outputPath: 'free_form_with_repair',
+            },
+          });
+
+          if (repairResult.repaired && repairResult.output) {
+            parsedOutput = repairResult.output;
+          } else {
+            const evidencePack: OutputEvidencePack = {
+              schemaRef: schemaRef ?? 'unknown',
+              provider: this.config.provider,
+              model: this.config.model,
+              rawOutputPreview,
+              validationErrors: validationErrorEntries,
+              repairAttempts: repairResult.repairAttempts,
+              finalFailureReason: 'repair_exhausted',
+            };
+
+            this.eventEmitter.emitTelemetry({
+              eventType: 'output_repair_exhausted',
+              traceId: input.taskRef?.taskId ?? runId,
+              timestamp: new Date().toISOString(),
+              sessionId: 'pi-ai-adapter',
+              agentId: 'pi-ai-adapter',
+              payload: {
+                runId,
+                runtimeKind: 'pi-ai',
+                outputSchemaRef: schemaRef ?? 'unknown',
+                provider: this.config.provider,
+                model: this.config.model,
+                rawOutputPreview,
+                validationErrors: validationErrorEntries,
+                repairAttempts: evidencePack.repairAttempts,
+                finalFailureReason: evidencePack.finalFailureReason,
+              },
+            });
+
+            throw new PDRuntimeError(
+              'output_invalid',
+              `LLM output does not match ${schemaRef ?? 'unknown'} schema`,
+              { evidencePack },
+            );
+          }
         }
+
+        validatedOutput = parsedOutput;
+        this.emitOutputPathTelemetry({ runId, input, path: 'free_form_with_repair', fallbackReason: null });
       }
 
       // Update run state to succeeded
@@ -780,6 +820,168 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   }
 
   // ── Private helpers ──
+
+  // ── PRI-271: Three-path output extraction ──
+
+  /**
+   * Path 1: Tool calling (PRI-271 B2).
+   *
+   * Passes `RECORD_DIAGNOSIS_V1_TOOL` via context.tools and injects
+   * `tool_choice: 'required'` via onPayload. If the provider supports tool
+   * calling, the response contains ToolCall content blocks with pre-parsed
+   * arguments that we validate against the schema.
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- stateless helper; kept as private method for cohesion
+  private async tryToolCallPath(
+    params: {
+      model: ReturnType<typeof resolveModel>;
+      baseContext: Context;
+      schemaRef: string;
+      schema: TSchema;
+      signal: AbortSignal;
+      apiKey: string;
+      effectiveTimeoutMs: number;
+      input: StartRunInput;
+      runId: string;
+    },
+  ): Promise<{ success: boolean; output?: unknown; fallbackReason?: string }> {
+    try {
+      const toolContext: Context = {
+        ...params.baseContext,
+        tools: [RECORD_DIAGNOSIS_V1_TOOL],
+      };
+
+      const completeOptions: SimpleStreamOptions = {
+        signal: params.signal,
+        apiKey: params.apiKey,
+        timeoutMs: params.effectiveTimeoutMs,
+        maxRetries: 0,
+        onPayload: (payload: unknown) => {
+          if (typeof payload === 'object' && payload !== null) {
+            const p = payload as Record<string, unknown>;
+            p.tool_choice = 'required';
+          }
+          return payload;
+        },
+      };
+
+      const response = await completeSimple(params.model, toolContext, completeOptions);
+
+      if (response.stopReason !== 'toolUse') {
+        return { success: false, fallbackReason: 'provider_no_tool_use' };
+      }
+
+      const toolCallBlock = response.content.find(
+        (block): block is { type: 'toolCall'; id: string; name: string; arguments: Record<string, unknown> } =>
+          typeof block === 'object' && block !== null && 'type' in block && block.type === 'toolCall',
+      );
+
+      if (!toolCallBlock) {
+        return { success: false, fallbackReason: 'tool_call_extraction_failed' };
+      }
+
+      const toolArgs = toolCallBlock.arguments;
+
+      if (!Value.Check(params.schema, toolArgs)) {
+        return { success: false, fallbackReason: 'tool_call_schema_invalid' };
+      }
+
+      return { success: true, output: toolArgs };
+    } catch (err) {
+      const reason = err instanceof PDRuntimeError && err.category === 'output_invalid'
+        ? 'tool_call_extraction_failed'
+        : 'provider_no_tool_use';
+      return { success: false, fallbackReason: reason };
+    }
+  }
+
+  /**
+   * Path 2: JSON mode (PRI-271 B1).
+   *
+   * Injects `response_format: { type: 'json_object' }` via onPayload
+   * to force the provider to output valid JSON. Then parses and validates.
+   */
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- stateless helper; kept as private method for cohesion
+  private async tryJsonModePath(
+    params: {
+      model: ReturnType<typeof resolveModel>;
+      baseContext: Context;
+      schemaRef: string;
+      schema: TSchema;
+      signal: AbortSignal;
+      apiKey: string;
+      effectiveTimeoutMs: number;
+      input: StartRunInput;
+      runId: string;
+    },
+  ): Promise<{ success: boolean; output?: unknown; fallbackReason?: string }> {
+    try {
+      const completeOptions: SimpleStreamOptions = {
+        signal: params.signal,
+        apiKey: params.apiKey,
+        timeoutMs: params.effectiveTimeoutMs,
+        maxRetries: 0,
+        onPayload: (payload: unknown) => {
+          if (typeof payload === 'object' && payload !== null) {
+            const p = payload as Record<string, unknown>;
+            p.response_format = { type: 'json_object' };
+          }
+          return payload;
+        },
+      };
+
+      const response = await completeSimple(params.model, params.baseContext, completeOptions);
+      const text = extractAssistantTextOrThrow(response, params.signal);
+
+      const parsed = extractJsonObject(text);
+      if (!parsed) {
+        return { success: false, fallbackReason: 'json_parse_failed' };
+      }
+
+      if (!Value.Check(params.schema, parsed)) {
+        return { success: false, fallbackReason: 'json_schema_invalid' };
+      }
+
+      return { success: true, output: parsed };
+    } catch (err) {
+      if (err instanceof PDRuntimeError && err.category === 'output_invalid') {
+        return { success: false, fallbackReason: 'json_parse_failed' };
+      }
+      return { success: false, fallbackReason: 'provider_no_json_mode' };
+    }
+  }
+
+  /**
+   * Emit output_path_chosen telemetry (PRI-271 B3).
+   *
+   * Every path selection and fallback emits structured telemetry.
+   * `path` is set when a path succeeds; null when recording a fallback reason.
+   */
+  private emitOutputPathTelemetry(
+    params: {
+      runId: string;
+      input: StartRunInput;
+      path: OutputPathLabel | null;
+      fallbackReason: string | null;
+    },
+  ): void {
+    this.eventEmitter.emitTelemetry({
+      eventType: params.path ? 'output_path_chosen' : 'output_path_fallback',
+      traceId: params.input.taskRef?.taskId ?? params.runId,
+      timestamp: new Date().toISOString(),
+      sessionId: 'pi-ai-adapter',
+      agentId: 'pi-ai-adapter',
+      payload: {
+        runId: params.runId,
+        runtimeKind: 'pi-ai',
+        provider: this.config.provider,
+        model: this.config.model,
+        outputSchemaRef: params.input.outputSchemaRef ?? 'unknown',
+        outputPath: params.path,
+        fallbackReason: params.fallbackReason,
+      },
+    });
+  }
 
   /**
    * Make a single LLM call for output repair (PRI-71).
