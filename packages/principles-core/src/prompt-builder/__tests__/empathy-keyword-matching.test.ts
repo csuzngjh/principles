@@ -394,7 +394,8 @@ describe('Empathy Keyword Matching (core)', () => {
       const term = '垃圾';
       const entry = store.terms[term];
       expect(entry).toBeDefined();
-      const expectedWeight = entry!.weight * (1 - entry!.falsePositiveRate);
+      if (!entry) return;
+      const expectedWeight = entry.weight * (1 - entry.falsePositiveRate);
 
       const result = matchEmpathyKeywords(term, store);
 

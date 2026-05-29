@@ -74,6 +74,10 @@ export interface FunnelPolicy {
   maxRetries?: number;
   /** Custom base URL for OpenAI-compatible providers not in pi-ai's built-in registry. */
   baseUrl?: string;
+  /** Maximum repair attempts for structured output repair loop (PRI-271 A1). Default: 3. */
+  maxRepairAttempts?: number;
+  /** Output path strategy for structured output (PRI-271 B3). Default: 'tool_call_first'. */
+  outputPathStrategy?: 'tool_call_first' | 'json_mode_first' | 'free_form_only';
 }
 
 /**

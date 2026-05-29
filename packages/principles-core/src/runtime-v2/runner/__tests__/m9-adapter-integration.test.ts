@@ -61,7 +61,7 @@ function makeDiagnosticianOutputWithCandidates(taskId: string): DiagnosticianOut
     summary: 'E2E m9-04 adapter integration test diagnosis summary',
     rootCause: 'E2E m9-04 root cause — adapter integration test',
     violatedPrinciples: [],
-    evidence: [],
+    evidence: [{ sourceRef: 'test', note: 'E2E test evidence' }],
     recommendations: [
       { kind: 'principle', description: 'Always validate tool arguments before execution to prevent silent failures' },
       { kind: 'principle', description: 'Log all tool invocations with argument summaries for traceability' },
@@ -78,7 +78,7 @@ const VALID_DIAGNOSIS = {
   summary: 'Adapter integration test summary',
   rootCause: 'Adapter integration root cause',
   violatedPrinciples: [],
-  evidence: [],
+  evidence: [{ sourceRef: 'test', note: 'E2E test evidence' }],
   recommendations: [],
   confidence: 0.9,
 };
@@ -177,6 +177,7 @@ describe('E2E m9-adapter-integration — PiAiRuntimeAdapter + DiagnosticianRunne
       apiKeyEnv: 'TEST_API_KEY',
       maxRetries: 0,
       timeoutMs: 60_000,
+      outputPathStrategy: 'free_form_only',
     });
 
     const runner = createRunner(adapter);

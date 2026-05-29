@@ -26,10 +26,12 @@ function makeTaskInput(taskId: string, overrides: Partial<Omit<TaskRecord, 'crea
 
 describe('DefaultLeaseManager', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-test-${process.pid}-${Date.now()}`);
+  /* eslint-disable @typescript-eslint/init-declarations */
   let conn: SqliteConnection;
   let taskStore: SqliteTaskStore;
   let runStore: SqliteRunStore;
   let leaseManager: DefaultLeaseManager;
+  /* eslint-enable @typescript-eslint/init-declarations */
 
   beforeEach(() => {
     const testDir = path.join(tmpDir, `test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -126,8 +128,10 @@ describe('DefaultLeaseManager', () => {
       });
       const runs = await runStore.listRunsByTask('lease-with-run');
       expect(runs).toHaveLength(1);
-      expect(runs[0]!.executionStatus).toBe('running');
-      expect(runs[0]!.attemptNumber).toBe(1);
+      const [run0] = runs;
+      if (!run0) return;
+      expect(run0.executionStatus).toBe('running');
+      expect(run0.attemptNumber).toBe(1);
     });
 
     it('increments attempt number on re-lease', async () => {
@@ -148,7 +152,9 @@ describe('DefaultLeaseManager', () => {
       });
       const runs = await runStore.listRunsByTask('lease-retry-count');
       expect(runs).toHaveLength(2);
-      expect(runs[1]!.attemptNumber).toBe(2);
+      const [, run1] = runs;
+      if (!run1) return;
+      expect(run1.attemptNumber).toBe(2);
     });
   });
 
@@ -198,8 +204,9 @@ describe('DefaultLeaseManager', () => {
       });
       const result = await leaseManager.renewLease('renew-task-1', 'agent-renew', 120_000);
       expect(result.leaseExpiresAt).toBeTruthy();
-      // New expiry should be approximately 120s from now
-      const expiry = new Date(result.leaseExpiresAt!).getTime();
+      const { leaseExpiresAt } = result;
+      if (!leaseExpiresAt) return;
+      const expiry = new Date(leaseExpiresAt).getTime();
       const now = Date.now();
       expect(expiry - now).toBeGreaterThan(100_000);
     });

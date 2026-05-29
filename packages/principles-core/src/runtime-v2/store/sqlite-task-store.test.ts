@@ -10,7 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { SqliteConnection } from './sqlite-connection.js';
 import { SqliteTaskStore } from './task/sqlite-task-store.js';
-import type { TaskRecord, PDTaskStatus } from '../task-status.js';
+import type { TaskRecord } from '../task-status.js';
 
 function makeTaskInput(overrides: Partial<Omit<TaskRecord, 'createdAt' | 'updatedAt'>> = {}): Omit<TaskRecord, 'createdAt' | 'updatedAt'> {
   return {
@@ -29,8 +29,10 @@ function makeTaskInput(overrides: Partial<Omit<TaskRecord, 'createdAt' | 'update
 
 describe('SqliteTaskStore', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-test-${process.pid}-${Date.now()}`);
+  /* eslint-disable @typescript-eslint/init-declarations */
   let connection: SqliteConnection;
   let store: SqliteTaskStore;
+  /* eslint-enable @typescript-eslint/init-declarations */
 
   beforeEach(() => {
     const testDir = path.join(tmpDir, `test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -161,7 +163,10 @@ describe('SqliteTaskStore', () => {
       const page2 = await store.listTasks({ limit: 2, offset: 2 });
       expect(page1.length).toBe(2);
       expect(page2.length).toBe(2);
-      expect(page1[0]!.taskId).not.toBe(page2[0]!.taskId);
+      const [p1] = page1;
+      const [p2] = page2;
+      if (!p1 || !p2) return;
+      expect(p1.taskId).not.toBe(p2.taskId);
     });
   });
 

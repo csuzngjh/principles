@@ -46,7 +46,7 @@ export interface OutputEvidencePack {
 
 export const REPAIR_PROMPT_VERSION = '1';
 
-export const MAX_REPAIR_ATTEMPTS = 2;
+export const MAX_REPAIR_ATTEMPTS = 3;
 
 export function normalizeMaxRepairAttempts(raw: number | undefined, defaultVal: number): number {
   if (raw === undefined) return defaultVal;
@@ -106,6 +106,16 @@ export function preserveLineageFields(
     if (Object.hasOwn(original, field)) {
       result[field] = original[field];
     }
+  }
+  return result;
+}
+
+export function stripLineageFields(
+  obj: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...obj };
+  for (const field of LINEAGE_FIELDS) {
+    delete result[field];
   }
   return result;
 }

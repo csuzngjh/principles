@@ -301,6 +301,18 @@ export class DiagnosticianRunner {
   }
 
   private async succeedTask(ctx: SucceedContext): Promise<RunnerResult> {
+    // Lineage strip contract invariant: adapter should have stripped lineage
+    // fields (taskId, sourcePainId, etc.) from LLM output. If they survive,
+    // the adapter violated its contract — emit telemetry but don't crash.
+    const outputRecord = ctx.output as unknown as Record<string, unknown>;
+    if (typeof outputRecord === 'object' && outputRecord !== null &&
+        Object.hasOwn(outputRecord, 'taskId')) {
+      this.emitDiagnosticianEvent('lineage_strip_contract_violation', ctx.taskId, {
+        reason: 'output_contained_taskId_after_strip',
+        expectedAdapter: 'pi-ai-runtime-adapter',
+      });
+    }
+
     // Store output before commit so run record reflects output on disk
     try {
       await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));

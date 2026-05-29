@@ -135,6 +135,7 @@ describe('attemptStructuredOutputRepair', () => {
       SAMPLE_INVALID_JSON,
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck },
+      { maxRepairAttempts: 1, _testJitterMs: 0 },
     );
 
     expect(result.repaired).toBe(false);
@@ -149,6 +150,7 @@ describe('attemptStructuredOutputRepair', () => {
       SAMPLE_INVALID_JSON,
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck: () => true },
+      { maxRepairAttempts: 1, _testJitterMs: 0 },
     );
 
     expect(result.repaired).toBe(false);
@@ -185,7 +187,7 @@ describe('attemptStructuredOutputRepair', () => {
     expect(callerInvoked).toBe(false);
   });
 
-  it('uses default maxRepairAttempts=1 (single attempt)', async () => {
+  it('uses default maxRepairAttempts=3 (three attempts)', async () => {
     let callCount = 0;
     const llmCaller: RepairLLMCaller = async () => { callCount++; return JSON.stringify(SAMPLE_INVALID_JSON); };
 
@@ -193,9 +195,10 @@ describe('attemptStructuredOutputRepair', () => {
       SAMPLE_INVALID_JSON,
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck: () => false },
+      { _testJitterMs: 0 },
     );
 
-    expect(callCount).toBe(1);
+    expect(callCount).toBe(3);
   });
 
   it('repairSummary contains bounded error information', async () => {
@@ -295,7 +298,7 @@ describe('attemptStructuredOutputRepair', () => {
       SAMPLE_INVALID_JSON,
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck },
-      { schemaRef: 'diagnostician-output-v1' },
+      { schemaRef: 'diagnostician-output-v1', maxRepairAttempts: 1, _testJitterMs: 0 },
     );
 
     expect(result.repairAttempts).toHaveLength(1);
@@ -309,6 +312,7 @@ describe('attemptStructuredOutputRepair', () => {
       SAMPLE_INVALID_JSON,
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck: () => false },
+      { maxRepairAttempts: 1, _testJitterMs: 0 },
     );
 
     expect(result.repairAttempts).toHaveLength(1);
@@ -599,7 +603,7 @@ describe('attemptStructuredOutputRepair', () => {
 
 describe('DEFAULT_REPAIR_CONFIG', () => {
   it('has sensible defaults', () => {
-    expect(DEFAULT_REPAIR_CONFIG.maxRepairAttempts).toBe(1);
+    expect(DEFAULT_REPAIR_CONFIG.maxRepairAttempts).toBe(3);
     expect(DEFAULT_REPAIR_CONFIG.maxErrorsInPrompt).toBe(10);
     expect(DEFAULT_REPAIR_CONFIG.maxErrorChars).toBe(200);
     expect(DEFAULT_REPAIR_CONFIG.maxRawOutputChars).toBe(2000);
@@ -609,7 +613,7 @@ describe('DEFAULT_REPAIR_CONFIG', () => {
 // ── PRI-200 Finding 1: Bounded repair attempts ──
 
 describe('PRI-200 Finding 1: maxRepairAttempts hard cap', () => {
-  it('maxRepairAttempts: 999 only calls llmCaller 2 times (clamped to MAX_REPAIR_ATTEMPTS)', async () => {
+  it('maxRepairAttempts: 999 only calls llmCaller 3 times (clamped to MAX_REPAIR_ATTEMPTS)', async () => {
     let callCount = 0;
     const llmCaller: RepairLLMCaller = async () => {
       callCount++;
@@ -620,15 +624,15 @@ describe('PRI-200 Finding 1: maxRepairAttempts hard cap', () => {
       SAMPLE_INVALID_JSON,
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck: () => false },
-      { maxRepairAttempts: 999 },
+      { maxRepairAttempts: 999, _testJitterMs: 0 },
     );
 
     expect(result.repaired).toBe(false);
-    expect(callCount).toBe(2);
-    expect(result.attemptsUsed).toBe(2);
+    expect(callCount).toBe(3);
+    expect(result.attemptsUsed).toBe(3);
   });
 
-  it('maxRepairAttempts: Infinity falls back to default (1)', async () => {
+  it('maxRepairAttempts: Infinity falls back to default (3)', async () => {
     let callCount = 0;
     const llmCaller: RepairLLMCaller = async () => {
       callCount++;
@@ -639,15 +643,15 @@ describe('PRI-200 Finding 1: maxRepairAttempts hard cap', () => {
       SAMPLE_INVALID_JSON,
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck: () => false },
-      { maxRepairAttempts: Infinity },
+      { maxRepairAttempts: Infinity, _testJitterMs: 0 },
     );
 
     expect(result.repaired).toBe(false);
-    expect(callCount).toBe(1);
-    expect(result.attemptsUsed).toBe(1);
+    expect(callCount).toBe(3);
+    expect(result.attemptsUsed).toBe(3);
   });
 
-  it('maxRepairAttempts: NaN falls back to default (1)', async () => {
+  it('maxRepairAttempts: NaN falls back to default (3)', async () => {
     let callCount = 0;
     const llmCaller: RepairLLMCaller = async () => {
       callCount++;
@@ -658,12 +662,12 @@ describe('PRI-200 Finding 1: maxRepairAttempts hard cap', () => {
       SAMPLE_INVALID_JSON,
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck: () => false },
-      { maxRepairAttempts: NaN },
+      { maxRepairAttempts: NaN, _testJitterMs: 0 },
     );
 
     expect(result.repaired).toBe(false);
-    expect(callCount).toBe(1);
-    expect(result.attemptsUsed).toBe(1);
+    expect(callCount).toBe(3);
+    expect(result.attemptsUsed).toBe(3);
   });
 
   it('maxRepairAttempts: -1 skips repair entirely', async () => {
@@ -715,6 +719,7 @@ describe('PRI-200 Finding 2: safe preview serialization in repair loop', () => {
       circular,
       [{ path: '/confidence', message: 'Expected number', value: '85%' }],
       { llmCaller, schemaCheck: () => false },
+      { _testJitterMs: 0 },
     );
 
     expect(result.repaired).toBe(false);

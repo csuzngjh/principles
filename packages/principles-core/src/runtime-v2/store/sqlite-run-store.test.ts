@@ -39,9 +39,11 @@ function makeRunInput(taskId: string, attemptNumber = 1): Omit<RunRecord, 'creat
 
 describe('SqliteRunStore', () => {
   const tmpDir = path.join(os.tmpdir(), `pd-test-${process.pid}-${Date.now()}`);
+  /* eslint-disable @typescript-eslint/init-declarations */
   let conn: SqliteConnection;
   let taskStore: SqliteTaskStore;
   let runStore: SqliteRunStore;
+  /* eslint-enable @typescript-eslint/init-declarations */
 
   beforeEach(() => {
     const testDir = path.join(tmpDir, `test-${Date.now()}-${Math.random().toString(36).slice(2)}`);

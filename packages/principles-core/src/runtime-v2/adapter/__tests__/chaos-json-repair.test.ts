@@ -252,6 +252,7 @@ describe('Chaos 8: Schema-invalid JSON that repair still fails', () => {
       { confidence: 'high', summary: 'test' },
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck },
+      { maxRepairAttempts: 1 },
     );
 
     expect(result.repaired).toBe(false);
@@ -270,6 +271,7 @@ describe('Chaos 8: Schema-invalid JSON that repair still fails', () => {
       { confidence: 'high', summary: 'test' },
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck },
+      { maxRepairAttempts: 1 },
     );
 
     expect(result.repaired).toBe(false);
@@ -284,6 +286,7 @@ describe('Chaos 8: Schema-invalid JSON that repair still fails', () => {
       { confidence: 'high' },
       SAMPLE_ERRORS,
       { llmCaller, schemaCheck: () => false },
+      { maxRepairAttempts: 1 },
     );
 
     expect(result.repaired).toBe(false);
@@ -552,7 +555,7 @@ describe('Chaos 11: maxRepairAttempts bounded', () => {
   it('11a: normalizeMaxRepairAttempts with absurd values', () => {
     expect(normalizeMaxRepairAttempts(1e10, 1)).toBe(MAX_REPAIR_ATTEMPTS);
     expect(normalizeMaxRepairAttempts(Number.MAX_VALUE, 1)).toBe(MAX_REPAIR_ATTEMPTS); // finite → clamped
-    expect(normalizeMaxRepairAttempts(7.999999999, 1)).toBe(2); // floors to 2, cap at 2
+    expect(normalizeMaxRepairAttempts(7.999999999, 1)).toBe(3); // floors to 7, cap at MAX_REPAIR_ATTEMPTS=3
     expect(normalizeMaxRepairAttempts(-0, 1)).toBe(-0); // -0 is not < 0, so it passes through
   });
 
@@ -586,6 +589,7 @@ describe('Chaos 12: Telemetry and evidence pack completeness', () => {
       { confidence: 'high' },
       [{ path: '/confidence', message: 'Expected number', value: 'high' }],
       { llmCaller, schemaCheck: () => false },
+      { maxRepairAttempts: 1 },
     );
 
     expect(result.repairAttempts).toHaveLength(1);
@@ -600,7 +604,7 @@ describe('Chaos 12: Telemetry and evidence pack completeness', () => {
       { confidence: 'high' },
       [{ path: '/confidence', message: 'Expected number', value: 'high' }],
       { llmCaller, schemaCheck: () => false },
-      { schemaRef: 'chaos-test-output-v1' },
+      { schemaRef: 'chaos-test-output-v1', maxRepairAttempts: 1 },
     );
 
     expect(result.repairAttempts).toHaveLength(1);
@@ -645,6 +649,7 @@ describe('Chaos 12: Telemetry and evidence pack completeness', () => {
       { confidence: 'high' },
       [{ path: '/confidence', message: 'Expected number', value: 'high' }],
       { llmCaller, schemaCheck: () => false },
+      { maxRepairAttempts: 1 },
     );
 
     expect(result.repairAttempts).toHaveLength(1);

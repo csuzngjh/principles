@@ -202,7 +202,7 @@ function makeDiagnosticianOutputWithCandidates(taskId: string): DiagnosticianOut
     summary: 'E2E m8-02 test diagnosis summary',
     rootCause: 'E2E m8-02 root cause — missing validation before tool call',
     violatedPrinciples: [],
-    evidence: [],
+    evidence: [{ sourceRef: 'test', note: 'E2E test evidence' }],
     recommendations: [
       {
         kind: 'principle',
