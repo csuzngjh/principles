@@ -36,7 +36,9 @@ function cleanup(filePath: string): void {
   try {
     const dir = path.dirname(filePath);
     fs.rmSync(dir, { recursive: true, force: true });
-  } catch {}
+  } catch {
+    // expected on some platforms — cleanup is best-effort
+  }
 }
 
 function getLockPath(filePath: string): string {
