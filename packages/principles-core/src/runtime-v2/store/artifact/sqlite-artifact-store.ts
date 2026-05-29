@@ -31,10 +31,10 @@ export class SqliteArtifactStore implements ArtifactStore {
     const db = this.connection.getDb();
     const candidateRows = db.prepare(`
       SELECT candidate_id, artifact_id, task_id, source_run_id, title, description,
-             confidence, source_recommendation_json, status, created_at
+             confidence, source_recommendation_json, recommendation_kind, status, created_at
       FROM principle_candidates WHERE artifact_id = ?
       ORDER BY created_at DESC
-    `).all(artifactId) as { candidate_id: string; artifact_id: string; task_id: string; source_run_id: string; title: string; description: string; confidence: number | null; source_recommendation_json: string; status: string; created_at: string }[];
+    `).all(artifactId) as { candidate_id: string; artifact_id: string; task_id: string; source_run_id: string; title: string; description: string; confidence: number | null; source_recommendation_json: string; recommendation_kind: string; status: string; created_at: string }[];
     const candidates: CandidateRecord[] = candidateRows.map((r) => ({
       candidateId: r.candidate_id,
       artifactId: r.artifact_id,
@@ -44,6 +44,7 @@ export class SqliteArtifactStore implements ArtifactStore {
       description: r.description,
       confidence: r.confidence,
       sourceRecommendationJson: r.source_recommendation_json,
+      recommendationKind: (r.recommendation_kind as CandidateRecord['recommendationKind']) ?? 'principle',
       status: r.status as CandidateRecord['status'],
       createdAt: r.created_at,
     }));
