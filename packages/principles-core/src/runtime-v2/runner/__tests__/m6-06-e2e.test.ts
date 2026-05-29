@@ -70,11 +70,10 @@ function makeFakeCliOutput(
  * Create DiagnosticianOutputV1 with >= 2 kind='principle' recommendations.
  * Schema-valid (passes Value.Check(DiagnosticianOutputV1Schema, output)).
  */
-function makeDiagnosticianOutputWithCandidates(taskId: string): DiagnosticianOutputV1 {
+function makeDiagnosticianOutputWithCandidates(_taskId: string): DiagnosticianOutputV1 {
   return {
     valid: true,
     diagnosisId: `diag-m6e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    taskId,
     summary: 'E2E m6-06 test diagnosis summary',
     rootCause: 'E2E m6-06 root cause — missing validation before tool call',
     violatedPrinciples: [],

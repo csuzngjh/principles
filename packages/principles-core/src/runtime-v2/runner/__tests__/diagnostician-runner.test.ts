@@ -83,7 +83,6 @@ function makeDiagnosticianOutput(overrides: Partial<DiagnosticianOutputV1> = {})
   return {
     valid: true,
     diagnosisId: 'diag-001',
-    taskId: TASK_ID,
     summary: 'Test diagnosis summary',
     rootCause: 'Test root cause',
     violatedPrinciples: [],

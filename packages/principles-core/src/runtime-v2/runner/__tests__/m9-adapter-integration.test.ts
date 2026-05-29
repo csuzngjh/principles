@@ -53,11 +53,10 @@ function makeAssistantMessage(text: string, overrides: Record<string, unknown> =
   };
 }
 
-function makeDiagnosticianOutputWithCandidates(taskId: string): DiagnosticianOutputV1 {
+function makeDiagnosticianOutputWithCandidates(_taskId: string): DiagnosticianOutputV1 {
   return {
     valid: true,
     diagnosisId: `diag-m9-adapter-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    taskId,
     summary: 'E2E m9-04 adapter integration test diagnosis summary',
     rootCause: 'E2E m9-04 root cause — adapter integration test',
     violatedPrinciples: [],

@@ -15,7 +15,6 @@ function makeValidOutput(overrides: Partial<DiagnosticianOutputV1> = {}): Diagno
   return {
     valid: true,
     diagnosisId: 'diag-001',
-    taskId: 'task-001',
     summary: 'Root cause identified',
     rootCause: 'Missing error handling in X module',
     violatedPrinciples: [],
@@ -135,31 +134,6 @@ describe('non-empty fields', () => {
     const result = await validator.validate(makeValidOutput({ rootCause: '  \n' }), 'task-001');
     assertInvalid(result, 'output_invalid', 1);
     expect(result.errors.some((e) => e.includes('rootCause'))).toBe(true);
-  });
-});
-
-// ── REQ-2.3c: Task identity match ─────────────────────────────────────────────
-
-describe('task identity', () => {
-  it('matching taskId passes', async () => {
-    const validator = new DefaultDiagnosticianValidator();
-    const result = await validator.validate(makeValidOutput({ taskId: 'task-001' }), 'task-001');
-    assertValid(result);
-  });
-
-  it('mismatched taskId fails with exact values in error', async () => {
-    const validator = new DefaultDiagnosticianValidator();
-    const result = await validator.validate(makeValidOutput({ taskId: 'task-001' }), 'task-002');
-    assertInvalid(result, 'output_invalid', 1);
-    expect(result.errors[1]).toContain('task-001');
-    expect(result.errors[1]).toContain('task-002');
-    expect(result.errors[1]).toContain('taskId mismatch');
-  });
-
-  it('different taskId fails even with valid schema', async () => {
-    const validator = new DefaultDiagnosticianValidator();
-    const result = await validator.validate(makeValidOutput({ taskId: 'other-task' }), 'task-001');
-    assertInvalid(result, 'output_invalid', 1);
   });
 });
 
@@ -639,50 +613,49 @@ describe('fail-fast vs verbose', () => {
   it('standard mode: returns single error (first encountered)', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
-      makeValidOutput({ taskId: 'wrong-id', confidence: -0.5 }),
+      makeValidOutput({ confidence: -0.5 }),
       'task-001',
     );
-    // Should fail on first error: taskId mismatch (checked before confidence)
+    // First error is confidence boundary (checked first after REQ-2.3c removal)
     assertInvalid(result, 'output_invalid', 1);
     expect(result.errors).toHaveLength(2); // summary + one detail
-    expect(result.errors[1]).toContain('taskId mismatch');
+    expect(result.errors[1]).toContain('confidence');
   });
 
   it('verbose mode: returns all errors collected', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
-      makeValidOutput({ taskId: 'wrong-id', confidence: -0.5 }),
+      makeValidOutput({ confidence: -0.5, summary: '' }),
       'task-001',
       { verbose: true },
     );
     assertInvalid(result, 'output_invalid', 2);
     // Multiple errors should be present
     expect(result.errors.length).toBeGreaterThan(2);
-    expect(result.errors.some((e) => e.includes('taskId mismatch'))).toBe(true);
     expect(result.errors.some((e) => e.includes('confidence'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('summary'))).toBe(true);
   });
 
   it('standard mode with multiple errors: first error only', async () => {
     const validator = new DefaultDiagnosticianValidator();
-    // Multiple errors: taskId mismatch, confidence out of range, empty summary
+    // Multiple errors: confidence out of range, empty summary
     const result = await validator.validate(
-      makeValidOutput({ taskId: 'wrong', confidence: 2, summary: '' }),
+      makeValidOutput({ confidence: 2, summary: '' }),
       'task-001',
     );
     assertInvalid(result, 'output_invalid', 1);
-    // Only first error
-    expect(result.errors[1]).toContain('taskId mismatch');
+    // Only first error: confidence (checked before summary)
+    expect(result.errors[1]).toContain('confidence');
   });
 
   it('verbose mode with multiple errors across all checks: all collected', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
-      makeValidOutput({ taskId: 'wrong', confidence: 2, summary: '', rootCause: '' }),
+      makeValidOutput({ confidence: 2, summary: '', rootCause: '' }),
       'task-001',
       { verbose: true },
     );
-    assertInvalid(result, 'output_invalid', 4);
-    expect(result.errors.some((e) => e.includes('taskId mismatch'))).toBe(true);
+    assertInvalid(result, 'output_invalid', 3);
     expect(result.errors.some((e) => e.includes('confidence'))).toBe(true);
     expect(result.errors.some((e) => e.includes('summary'))).toBe(true);
     expect(result.errors.some((e) => e.includes('rootCause'))).toBe(true);
@@ -694,16 +667,16 @@ describe('fail-fast vs verbose', () => {
 describe('error array format', () => {
   it('errors[0] contains aggregate summary with count', async () => {
     const validator = new DefaultDiagnosticianValidator();
-    const result = await validator.validate(makeValidOutput({ taskId: 'wrong' }), 'task-001');
+    const result = await validator.validate(makeValidOutput({ confidence: -0.5 }), 'task-001');
     expect(result.errors[0]).toMatch(/^\d+ field/);
-    expect(result.errors[0]).toMatch(/taskId|invalid/i);
+    expect(result.errors[0]).toMatch(/confidence|invalid/i);
   });
 
   it('errors[1..N] contain per-field detail messages', async () => {
     const validator = new DefaultDiagnosticianValidator();
-    const result = await validator.validate(makeValidOutput({ taskId: 'wrong' }), 'task-001');
+    const result = await validator.validate(makeValidOutput({ confidence: -0.5 }), 'task-001');
     expect(result.errors.length).toBeGreaterThanOrEqual(2);
-    expect(result.errors[1]).toContain('taskId');
+    expect(result.errors[1]).toContain('confidence');
   });
 
   it('when no errors: errors array is empty and valid=true', async () => {
@@ -716,13 +689,13 @@ describe('error array format', () => {
   it('verbose mode: errors[0] aggregate reflects total error count', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
-      makeValidOutput({ taskId: 'wrong', rootCause: 'valid root cause' }),
+      makeValidOutput({ confidence: -0.5 }),
       'task-001',
       { verbose: true },
     );
-    // Only taskId mismatch → 1 semantic error (no schema errors)
-    expect(result.errors[0]).toMatch(/1 field invalid/);
-    expect(result.errors).toHaveLength(2); // summary + 1 detail
+    // Confidence error → 1 semantic error + 1 schema error (confidence also fails TypeBox min/max)
+    expect(result.errors[0]).toMatch(/2 fields invalid/);
+    expect(result.errors).toHaveLength(3); // summary + 2 details
   });
 });
 
@@ -732,7 +705,6 @@ describe('errorCategory', () => {
   it('all failures have errorCategory=output_invalid', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const cases: DiagnosticianOutputV1[] = [
-      makeValidOutput({ taskId: 'wrong' }),
       makeValidOutput({ confidence: -0.1 }),
       makeValidOutput({ summary: '' }),
       makeValidOutput({ evidence: [{ sourceRef: '', note: 'x' }] }),
@@ -754,7 +726,7 @@ describe('errorCategory', () => {
   it('verbose mode failures also have output_invalid category', async () => {
     const validator = new DefaultDiagnosticianValidator();
     const result = await validator.validate(
-      makeValidOutput({ taskId: 'wrong', confidence: -0.1 }),
+      makeValidOutput({ confidence: -0.1 }),
       'task-001',
       { verbose: true },
     );
