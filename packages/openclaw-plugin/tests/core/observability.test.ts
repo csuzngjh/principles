@@ -187,7 +187,6 @@ describe('calculateBaselines', () => {
 
     // Create a trajectory DB with pain events
     const dbPath = path.join(tmpDir, 'trajectory.db');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Database = require('better-sqlite3');
     const db = new Database(dbPath);
     db.exec(`

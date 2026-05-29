@@ -21,6 +21,7 @@
     "ai-sprint:test": "node --test packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/test/*.mjs",
     "release": "semantic-release",
     "release:dry-run": "semantic-release --dry-run",
+    "e2e:story-a": "node scripts/e2e-story-a.mjs",
     "version:patch": "cd packages/openclaw-plugin && npm version patch",
     "version:minor": "cd packages/openclaw-plugin && npm version minor",
     "version:major": "cd packages/openclaw-plugin && npm version major"
