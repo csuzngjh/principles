@@ -16,6 +16,7 @@ function makeActivationRecord(overrides: Partial<ActivationStatusRecord> = {}): 
 }
 
 describe('MemoryActivationStateStore', () => {
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let store: MemoryActivationStateStore;
 
   beforeEach(() => {
@@ -133,6 +134,7 @@ describe('MemoryActivationStateStore', () => {
 });
 
 describe('MemoryArtifactReadModel', () => {
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let model: MemoryArtifactReadModel;
 
   beforeEach(() => {

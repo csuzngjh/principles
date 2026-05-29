@@ -7,12 +7,19 @@ import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { DefaultRecoverySweep } from './lifecycle/recovery-sweep.js';
 import { DefaultRetryPolicy } from './lifecycle/retry-policy.js';
+import type { TaskRecord } from '../task-status.js';
+import type { LeaseManager } from './lifecycle/lease-manager.js';
 
 describe('IdempotentStateTransitions', () => {
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let tmpdir: string;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let connection: SqliteConnection;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let taskStore: SqliteTaskStore;
-  let runStore: SqliteRunStore;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+  let _runStore: SqliteRunStore;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let retryPolicy: DefaultRetryPolicy;
 
   beforeEach(() => {
@@ -20,7 +27,7 @@ describe('IdempotentStateTransitions', () => {
     fs.mkdirSync(tmpdir, { recursive: true });
     connection = new SqliteConnection(tmpdir);
     taskStore = new SqliteTaskStore(connection);
-    runStore = new SqliteRunStore(connection);
+    _runStore = new SqliteRunStore(connection);
     retryPolicy = new DefaultRetryPolicy();
   });
 
@@ -31,8 +38,8 @@ describe('IdempotentStateTransitions', () => {
 
   async function createLeasedTask(taskId: string, expired = false) {
     const expiresAt = expired
-      ? new Date(Date.now() - 60_000).toISOString() // expired 1 min ago
-      : new Date(Date.now() + 300_000).toISOString(); // expires in 5 min
+      ? new Date(Date.now() - 60_000).toISOString()
+      : new Date(Date.now() + 300_000).toISOString();
     await taskStore.createTask({
       taskId,
       taskKind: 'test',
@@ -55,7 +62,7 @@ describe('IdempotentStateTransitions', () => {
 
     const sweep = new DefaultRecoverySweep(taskStore, {
       isLeaseExpired: () => false,
-    } as any, retryPolicy, connection);
+    } as unknown as LeaseManager, retryPolicy, connection);
 
     const result = await sweep.recoverTask('task-pending');
     expect(result).toBeNull();
@@ -66,7 +73,7 @@ describe('IdempotentStateTransitions', () => {
 
     const sweep = new DefaultRecoverySweep(taskStore, {
       isLeaseExpired: () => false,
-    } as any, retryPolicy, connection);
+    } as unknown as LeaseManager, retryPolicy, connection);
 
     const result = await sweep.recoverTask('task-not-expired');
     expect(result).toBeNull();
@@ -76,13 +83,15 @@ describe('IdempotentStateTransitions', () => {
     await createLeasedTask('task-expired', true);
 
     const sweep = new DefaultRecoverySweep(taskStore, {
-      isLeaseExpired: (task: any) => task.taskId === 'task-expired',
-    } as any, retryPolicy, connection);
+      isLeaseExpired: (task: TaskRecord) => task.taskId === 'task-expired',
+    } as unknown as LeaseManager, retryPolicy, connection);
 
     const result = await sweep.recoverTask('task-expired');
     expect(result).not.toBeNull();
-    expect(result!.newStatus).toBe('retry_wait');
-    expect(result!.previousStatus).toBe('leased');
+    if (result) {
+      expect(result.newStatus).toBe('retry_wait');
+      expect(result.previousStatus).toBe('leased');
+    }
   });
 
   it('recoverTask on expired lease with maxAttempts reached transitions to failed', async () => {
@@ -91,45 +100,44 @@ describe('IdempotentStateTransitions', () => {
       taskKind: 'test',
       status: 'leased',
       attemptCount: 3,
-      maxAttempts: 3, // already at max
+      maxAttempts: 3,
       leaseOwner: 'test-owner',
       leaseExpiresAt: new Date(Date.now() - 60_000).toISOString(),
     });
 
     const sweep = new DefaultRecoverySweep(taskStore, {
-      isLeaseExpired: (task: any) => true,
-    } as any, retryPolicy, connection);
+      isLeaseExpired: (_task: TaskRecord) => true,
+    } as unknown as LeaseManager, retryPolicy, connection);
 
     const result = await sweep.recoverTask('task-max-attempts');
     expect(result).not.toBeNull();
-    expect(result!.newStatus).toBe('failed');
-    expect(result!.wasLeaseExpired).toBe(true);
+    if (result) {
+      expect(result.newStatus).toBe('failed');
+      expect(result.wasLeaseExpired).toBe(true);
+    }
   });
 
   it('recoverTask can be called multiple times safely (idempotent)', async () => {
     await createLeasedTask('task-idempotent', true);
 
     const sweep = new DefaultRecoverySweep(taskStore, {
-      // Only expired for tasks in 'leased' status (matches real LeaseManager.isLeaseExpired)
-      isLeaseExpired: (task: any) => task.status === 'leased' && task.taskId === 'task-idempotent',
-    } as any, retryPolicy, connection);
+      isLeaseExpired: (task: TaskRecord) => task.status === 'leased' && task.taskId === 'task-idempotent',
+    } as unknown as LeaseManager, retryPolicy, connection);
 
-    // First call: transitions to retry_wait
     const first = await sweep.recoverTask('task-idempotent');
     expect(first).not.toBeNull();
-    expect(first!.newStatus).toBe('retry_wait');
+    if (first) {
+      expect(first.newStatus).toBe('retry_wait');
+    }
 
-    // Second call: task is now retry_wait (status !== 'leased'), so returns null
     const second = await sweep.recoverTask('task-idempotent');
     expect(second).toBeNull();
 
-    // Third call: still null
     const third = await sweep.recoverTask('task-idempotent');
     expect(third).toBeNull();
   });
 
   it('recoverAll skips already-recovered tasks without error', async () => {
-    // Set up two expired tasks
     await taskStore.createTask({
       taskId: 'task-a',
       taskKind: 'test',
@@ -150,22 +158,19 @@ describe('IdempotentStateTransitions', () => {
     });
 
     const sweep = new DefaultRecoverySweep(taskStore, {
-      isLeaseExpired: (task: any) => true,
-    } as any, retryPolicy, connection);
+      isLeaseExpired: (_task: TaskRecord) => true,
+    } as unknown as LeaseManager, retryPolicy, connection);
 
-    // First recoverAll: recovers both
     const firstRun = await sweep.recoverAll();
     expect(firstRun.recovered).toBe(2);
     expect(firstRun.errors).toHaveLength(0);
 
-    // Second recoverAll: no tasks to recover (both are retry_wait now)
     const secondRun = await sweep.recoverAll();
     expect(secondRun.recovered).toBe(0);
     expect(secondRun.errors).toHaveLength(0);
   });
 
   it('transition from retry_wait back to leased preserves attemptCount', async () => {
-    // Create a task in retry_wait (recovered from expired lease)
     await taskStore.createTask({
       taskId: 'task-retry',
       taskKind: 'test',
@@ -173,10 +178,9 @@ describe('IdempotentStateTransitions', () => {
       attemptCount: 1,
       maxAttempts: 3,
       lastError: 'lease_expired',
-      leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(), // retry_wait has backoff expiry
+      leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(),
     });
 
-    // Simulate re-acquiring lease (treat as new attempt)
     await taskStore.updateTask('task-retry', {
       status: 'leased',
       leaseOwner: 'runtime-A',
@@ -184,8 +188,10 @@ describe('IdempotentStateTransitions', () => {
     });
 
     const task = await taskStore.getTask('task-retry');
-    expect(task!.status).toBe('leased');
-    expect(task!.leaseOwner).toBe('runtime-A');
-    // attemptCount stays at 1 (will be incremented when Run is created)
+    expect(task).not.toBeNull();
+    if (task) {
+      expect(task.status).toBe('leased');
+      expect(task.leaseOwner).toBe('runtime-A');
+    }
   });
 });

@@ -239,6 +239,7 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'schema/migrations/001-init-trajectory.ts',
 
   // ── I/O Boundary ────────────────────────────────────────────────────────
+  'confirm-first-gate.ts',
   'trajectory.ts',
   'evolution-reducer.ts',
   'promotion-gate.ts',
@@ -332,7 +333,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(95);
   });
 });
 

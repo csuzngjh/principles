@@ -135,7 +135,7 @@ function makeDiagnosticianOutput(overrides?: Partial<DiagnosticianOutputV1>): Di
     summary: 'Attack test diagnosis',
     rootCause: 'Attack test root cause',
     violatedPrinciples: [],
-    evidence: [],
+    evidence: [{ sourceRef: 'test', note: 'Attack test evidence' }],
     recommendations: [
       { kind: 'principle', description: 'Always validate inputs before processing' },
     ],

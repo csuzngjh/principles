@@ -72,14 +72,13 @@ function makeDiagnosticianOutput(): DiagnosticianOutputV1 {
   return {
     valid: true,
     diagnosisId: 'diag-telem-001',
-    taskId: TASK_ID,
     summary: 'Test diagnosis summary',
     rootCause: 'Test root cause',
     violatedPrinciples: [],
     evidence: [],
     recommendations: [],
     confidence: 0.9,
-  };
+  } as unknown as DiagnosticianOutputV1;
 }
 
 // ── Mock factory ───────────────────────────────────────────────────────────────
@@ -331,5 +330,35 @@ describe('DiagnosticianRunner telemetry emission', () => {
     expect(lastCall).toBeDefined();
     const lastEvent = (lastCall as unknown[])[0] as { eventType: string; payload: { errorCategory: string } };
     expect(lastEvent.payload.errorCategory).toBe('workspace_invalid');
+  });
+
+  it('emits lineage_strip_contract_violation when output contains taskId after adapter strip', async () => {
+    const mocks = createMocks();
+    const outputWithTaskId: DiagnosticianOutputV1 = {
+      valid: true,
+      diagnosisId: 'diag-lineage-001',
+      taskId: 'LLM-FABRICATED-TASK-ID',
+      summary: 'Test diagnosis with unstripped taskId',
+      rootCause: 'Test root cause',
+      violatedPrinciples: [],
+      evidence: [],
+      recommendations: [],
+      confidence: 0.9,
+    };
+    mocks._runtimeAdapter.fetchOutput.mockResolvedValue({ runId: RUN_ID, payload: outputWithTaskId });
+
+    const runner = createRunner(mocks);
+    const result = await runner.run(TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    const eventTypes = extractEventTypes(mocks._eventEmitter.emitTelemetry);
+    expect(eventTypes).toContain('lineage_strip_contract_violation');
+    const violationCall = mocks._eventEmitter.emitTelemetry.mock.calls.find(
+      (call: unknown[]) => (call[0] as { eventType: string }).eventType === 'lineage_strip_contract_violation',
+    );
+    expect(violationCall).toBeDefined();
+    const violationEvent = (violationCall as unknown[])[0] as { payload: { reason: string; expectedAdapter: string } };
+    expect(violationEvent.payload.reason).toBe('output_contained_taskId_after_strip');
+    expect(violationEvent.payload.expectedAdapter).toBe('pi-ai-runtime-adapter');
   });
 });

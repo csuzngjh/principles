@@ -94,6 +94,7 @@ function makeAdapter(overrides: Record<string, unknown> = {}) {
     model: 'anthropic/claude-sonnet-4',
     apiKeyEnv: 'TEST_API_KEY',
     _testBackoffDelayMs: 0,
+    outputPathStrategy: 'free_form_only', // Default to free_form for existing tests
     ...overrides,
   });
 }
@@ -520,6 +521,8 @@ describe('PiAiRuntimeAdapter', () => {
       mockComplete.mockReset();
       mockComplete
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ valid: true })))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ valid: true })))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ valid: true })))
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify({ valid: true })));
 
       const adapter = makeAdapter({ maxRetries: 3 });
@@ -527,8 +530,8 @@ describe('PiAiRuntimeAdapter', () => {
       await expect(adapter.startRun(makeStartRunInput({
         outputSchemaRef: 'diagnostician-output-v1',
       }))).rejects.toThrow(PDRuntimeError);
-      // 1 original + 1 repair attempt = 2 calls (not 3+ retries)
-      expect(mockComplete).toHaveBeenCalledTimes(2);
+      // 1 original + 3 repair attempts = 4 calls (not infinite retries)
+      expect(mockComplete).toHaveBeenCalledTimes(4);
     });
 
     it('does not retry on PDRuntimeError (runtime_unavailable)', async () => {
@@ -789,13 +792,16 @@ describe('PiAiRuntimeAdapter', () => {
     it('repair fails — still throws output_invalid after repair attempt', async () => {
       mockComplete
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)));
 
       const adapter = makeAdapter();
       await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
         category: 'output_invalid',
       });
-      expect(mockComplete).toHaveBeenCalledTimes(2);
+      // 1 original + 3 repair attempts = 4 calls
+      expect(mockComplete).toHaveBeenCalledTimes(4);
     });
 
     it('skips repair for unknown outputSchemaRef (not in registry)', async () => {
@@ -854,6 +860,8 @@ describe('PiAiRuntimeAdapter', () => {
     it('emits output_repair_attempted with repaired=false on failure', async () => {
       mockComplete
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)));
 
       const adapter = makeAdapter();
@@ -895,8 +903,10 @@ describe('PiAiRuntimeAdapter', () => {
       expect(repairMessage).toContain('confidence');
     });
 
-    it('repair budget exhausted — maxRepairAttempts=1, no infinite loop', async () => {
+    it('repair budget exhausted — default maxRepairAttempts=3, no infinite loop', async () => {
       mockComplete
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)))
         .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(INVALID_DIAGNOSIS)));
 
@@ -904,8 +914,8 @@ describe('PiAiRuntimeAdapter', () => {
       await expect(adapter.startRun(makeDiagnosticianInput())).rejects.toMatchObject({
         category: 'output_invalid',
       });
-      // 1 original + 1 repair = 2 calls total (not infinite)
-      expect(mockComplete).toHaveBeenCalledTimes(2);
+      // 1 original + 3 repair attempts = 4 calls total (not infinite)
+      expect(mockComplete).toHaveBeenCalledTimes(4);
     });
 
     it('repairs evaluator-output-v1 with prose-wrapped JSON', async () => {
@@ -1229,8 +1239,8 @@ describe('PiAiRuntimeAdapter', () => {
         category: 'output_invalid',
       });
 
-      // 1 original + 1 repair (default maxRepairAttempts=1) = 2 calls total
-      expect(mockComplete).toHaveBeenCalledTimes(2);
+      // 1 original + 3 repair (default maxRepairAttempts=3) = 4 calls total
+      expect(mockComplete).toHaveBeenCalledTimes(4);
     });
 
     it('7. repair prompt includes schemaRef and error paths', async () => {

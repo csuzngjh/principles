@@ -73,6 +73,7 @@ describe('DefaultRetryPolicy', () => {
       // NaN is not a valid number, but shouldRetry safely returns true (allow retry)
       // JavaScript: typeof NaN === 'number' is true, but NaN comparisons are all false
       // so task.attemptCount < NaN is false... but our guard handles this
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const nanTask = { ...makeTask(0, 1), maxAttempts: NaN as any };
       expect(policy.shouldRetry(nanTask)).toBe(true);
     });

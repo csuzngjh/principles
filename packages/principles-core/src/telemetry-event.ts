@@ -104,6 +104,9 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('output_extraction_failed'),
   Type.Literal('output_schema_invalid'),
   Type.Literal('output_repair_exhausted'),
+  // PRI-271: Weak-model output path events
+  Type.Literal('output_path_chosen'),
+  Type.Literal('output_path_fallback'),
   // PRI-67: Dreamer runner events
   Type.Literal('dreamer_task_leased'),
   Type.Literal('dreamer_context_built'),
