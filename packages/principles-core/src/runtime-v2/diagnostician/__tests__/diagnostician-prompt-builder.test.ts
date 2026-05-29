@@ -319,7 +319,6 @@ describe('DiagnosticianPromptBuilder', () => {
       expect(example).toHaveProperty('valid');
       expect(typeof example.valid).toBe('boolean');
       expect(example).toHaveProperty('diagnosisId');
-      expect(example).toHaveProperty('taskId');
       expect(example).toHaveProperty('summary');
       expect(example).toHaveProperty('rootCause');
       expect(example).toHaveProperty('violatedPrinciples');

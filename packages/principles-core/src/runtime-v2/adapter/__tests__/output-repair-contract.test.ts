@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   preserveLineageFields,
+  stripLineageFields,
   isLineageField,
   truncatePreview,
   formatValidationErrorEntry,
@@ -94,6 +95,93 @@ describe('output-repair-contract', () => {
       for (const field of LINEAGE_FIELDS) {
         expect(result[field]).toBe(`original-${field}`);
       }
+    });
+  });
+
+  describe('stripLineageFields', () => {
+    it('strips taskId from LLM output with wrong taskId (PRI-272)', () => {
+      const llmOutput: Record<string, unknown> = {
+        valid: true,
+        diagnosisId: 'diag-001',
+        taskId: 'WRONG-task-id-from-llm',
+        summary: 'Something broke',
+        confidence: 0.8,
+      };
+
+      const result = stripLineageFields(llmOutput);
+
+      expect(Object.hasOwn(result, 'taskId')).toBe(false);
+      expect(result.valid).toBe(true);
+      expect(result.diagnosisId).toBe('diag-001');
+      expect(result.summary).toBe('Something broke');
+    });
+
+    it('preserves all non-lineage fields when taskId is absent (PRI-272)', () => {
+      const llmOutput: Record<string, unknown> = {
+        valid: true,
+        diagnosisId: 'diag-002',
+        summary: 'No taskId in output',
+        confidence: 0.9,
+      };
+
+      const result = stripLineageFields(llmOutput);
+
+      expect(Object.hasOwn(result, 'taskId')).toBe(false);
+      expect(result.valid).toBe(true);
+      expect(result.diagnosisId).toBe('diag-002');
+      expect(result.summary).toBe('No taskId in output');
+      expect(result.confidence).toBe(0.9);
+    });
+
+    it('strips taskId set to undefined (PRI-272)', () => {
+      const llmOutput: Record<string, unknown> = {
+        valid: true,
+        diagnosisId: 'diag-003',
+        taskId: undefined,
+        summary: 'Undefined taskId',
+        confidence: 0.7,
+      };
+
+      const result = stripLineageFields(llmOutput);
+
+      expect(Object.hasOwn(result, 'taskId')).toBe(false);
+      expect(result.valid).toBe(true);
+    });
+
+    it('strips all lineage fields, not just taskId (PRI-272)', () => {
+      const llmOutput: Record<string, unknown> = {
+        valid: true,
+        diagnosisId: 'diag-004',
+        taskId: 'wrong-task',
+        sourcePainId: 'wrong-pain',
+        sourceTaskId: 'wrong-source',
+        sourceRunIds: ['wrong-run'],
+        sourceArtifactId: 'wrong-artifact',
+        sourceRefs: ['wrong-ref'],
+        summary: 'All lineage wrong',
+        confidence: 0.6,
+      };
+
+      const result = stripLineageFields(llmOutput);
+
+      for (const field of LINEAGE_FIELDS) {
+        expect(Object.hasOwn(result, field)).toBe(false);
+      }
+      expect(result.valid).toBe(true);
+      expect(result.summary).toBe('All lineage wrong');
+    });
+
+    it('does not mutate the original object (PRI-272)', () => {
+      const llmOutput: Record<string, unknown> = {
+        taskId: 'task-1',
+        summary: 'test',
+      };
+
+      const result = stripLineageFields(llmOutput);
+
+      expect(Object.hasOwn(llmOutput, 'taskId')).toBe(true);
+      expect(llmOutput.taskId).toBe('task-1');
+      expect(Object.hasOwn(result, 'taskId')).toBe(false);
     });
   });
 

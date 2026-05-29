@@ -42,7 +42,6 @@ function makeLowConfidenceOutput(): DiagnosticianOutputV1 {
   return {
     valid: true,
     diagnosisId: 'diag-001',
-    taskId: TASK_ID,
     summary: 'Conversation entries with empty text content prevent root cause analysis',
     rootCause: 'No other evidence available; only ambiguity note indicates empty content',
     violatedPrinciples: [],
@@ -63,7 +62,6 @@ function makeHighConfidenceOutput(): DiagnosticianOutputV1 {
   return {
     valid: true,
     diagnosisId: 'diag-002',
-    taskId: TASK_ID,
     summary: 'Valid diagnosis with sufficient evidence',
     rootCause: 'Identified root cause from session trace',
     violatedPrinciples: [],

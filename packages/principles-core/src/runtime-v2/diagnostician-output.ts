@@ -55,7 +55,6 @@ export type DiagnosticianRecommendation = Static<typeof DiagnosticianRecommendat
 export const DiagnosticianOutputV1Schema = Type.Object({
   valid: Type.Boolean(),
   diagnosisId: Type.String({ minLength: 1 }),
-  taskId: Type.String({ minLength: 1 }),
   summary: Type.String({ minLength: 1 }),
   rootCause: Type.String({ minLength: 1 }),
   violatedPrinciples: Type.Array(DiagnosticianViolatedPrincipleSchema),
