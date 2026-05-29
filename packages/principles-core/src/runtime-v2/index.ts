@@ -249,7 +249,6 @@ export type {
   /** @deprecated Use PainToPrincipleServiceOptions instead */
   PainSignalBridgeOptions,
   PainDetectedData,
-  PainProvenance,
   /** @deprecated Use PainToPrincipleOutput instead */
   PainSignalBridgeResult,
   /** @deprecated Internal — use PainToPrincipleOutput.status */
@@ -264,6 +263,10 @@ export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfi
 // Pain-to-Principle service facade (PRI-12)
 export { PainToPrincipleService } from './pain-to-principle-service.js';
 export type { PainToPrincipleServiceOptions, PainToPrincipleInput, PainToPrincipleOutput, FailureCategory } from './pain-to-principle-service.js';
+
+// Admission gate (PRI-256)
+export { evaluateAdmission, evaluateCandidateAdmissions, ADMISSION_CONFIDENCE_THRESHOLD } from './admission-gate.js';
+export type { AdmissionDecision, AdmissionGateInput, AdmissionGateResult, CandidateAdmissionResult, PainProvenance } from './admission-gate.js';
 
 // Pain-chain read model (PRI-14)
 export { PainChainReadModel } from './pain-chain-read-model.js';

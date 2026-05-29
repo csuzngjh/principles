@@ -1,30 +1,13 @@
-/**
- * PainSignalBridge — bridges openclaw-plugin pain_detected events to the runtime-v2 diagnostician pipeline.
- *
- * M8 single-path architecture:
- *   pain_detected event → PainSignalBridge → DiagnosticianRunner → SqliteDiagnosticianCommitter
- *   → CandidateIntakeService → PrincipleTreeLedger probation entry
- *
- * Lives in principles-core. Does NOT import PainFlagData/PainDetectedData from openclaw-plugin.
- * Receives pain events via callback from the plugin, which owns the EvolutionReducer.
- *
- * M8 success endpoint (HG-1): PrincipleTreeLedger probation entry created.
- * Candidate intake is happy path (HG-2).
- */
-
 import type { RuntimeStateManager, CandidateRecord } from './store/runtime-state-manager.js';
 import type { DiagnosticianRunner } from './runner/diagnostician-runner.js';
 import type { CandidateIntakeService } from './candidate-intake-service.js';
 import type { LedgerAdapter } from './candidate-intake.js';
 import type { RunnerResultStatus } from './runner/runner-result.js';
 import type { PDErrorCategory } from './error-categories.js';
+import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
+import { evaluateCandidateAdmissions } from './admission-gate.js';
 
-// ── Input type (defined here — not imported from openclaw-plugin) ───────────────
-
-export type PainProvenance =
-  | 'openclaw_context_bound'
-  | 'owner_reported_no_host_trace'
-  | 'automatic_hook';
+export type { PainProvenance };
 
 export interface PainDetectedData {
   painId: string;
@@ -39,7 +22,7 @@ export interface PainDetectedData {
   provenance?: PainProvenance;
 }
 
-export type PainSignalBridgeStatus = 'succeeded' | 'skipped' | 'failed' | 'retried';
+export type PainSignalBridgeStatus = 'succeeded' | 'skipped' | 'failed' | 'retried' | 'degraded';
 
 export interface PainSignalBridgeResult {
   status: PainSignalBridgeStatus;
@@ -50,32 +33,26 @@ export interface PainSignalBridgeResult {
   artifactId?: string;
   candidateIds: string[];
   ledgerEntryIds: string[];
+  admissionResults?: CandidateAdmissionResult[];
   errorCategory?: PDErrorCategory;
   message?: string;
 }
-
-// ── Bridge options ─────────────────────────────────────────────────────────────
 
 export interface PainSignalBridgeOptions {
   stateManager: RuntimeStateManager;
   runner: DiagnosticianRunner;
   intakeService: CandidateIntakeService;
   ledgerAdapter: LedgerAdapter;
-  /** Owner tag passed to DiagnosticianRunner (default: 'pain-signal-bridge') */
   owner?: string;
-  /**
-   * When true (default), CandidateIntakeService.intake() is called after runner succeeds.
-   * When false, intake is skipped — chain still runs but probation entry is not created.
-   * HG-4: Debug mode.
-   */
   autoIntakeEnabled?: boolean;
+  eventEmitter?: {
+    emitTelemetry: (event: { eventType: string; traceId: string; timestamp: string; payload: Record<string, unknown> }) => void;
+  };
 }
 
 export function createDiagnosticianTaskId(painId: string): string {
   return `diagnosis_${painId}`;
 }
-
-// ── Bridge ───────────────────────────────────────────────────────────────────
 
 function severityFromScore(score: number | undefined): string {
   if (score === undefined) return 'moderate';
@@ -126,6 +103,7 @@ export class PainSignalBridge {
   private readonly ledgerAdapter: LedgerAdapter;
   private readonly owner: string;
   private readonly autoIntakeEnabled: boolean;
+  private readonly eventEmitter?: PainSignalBridgeOptions['eventEmitter'];
 
   constructor(opts: PainSignalBridgeOptions) {
     this.stateManager = opts.stateManager;
@@ -134,38 +112,37 @@ export class PainSignalBridge {
     this.ledgerAdapter = opts.ledgerAdapter;
     this.owner = opts.owner ?? 'pain-signal-bridge';
     this.autoIntakeEnabled = opts.autoIntakeEnabled ?? true;
+    this.eventEmitter = opts.eventEmitter;
   }
 
-  /**
-   * Handle a pain_detected event from openclaw-plugin.
-   *
-   * Flow:
-   *  1. Idempotent upsert: derive a diagnostician taskId from the source painId,
-   *     check existing task by taskId, route by status
-   *     - succeeded → NO-OP; leased → SKIP; failed/retry_wait/pending → reset + re-run
-   *  2. Invoke DiagnosticianRunner.run(taskId) — runner internally acquires lease (DO NOT call createRun)
-   *  3. After runner succeeds, query real candidateIds via stateManager.getCandidatesByTaskId()
-   *  4. Call intakeService.intake(candidateId) for each candidate → ledger probation entry
-   *
-   * @returns Structured result for the pain → task → candidate → ledger chain.
-   */
+  private emitAdmissionEvent(
+    candidateId: string,
+    admission: { decision: AdmissionDecision; reason: string; nextAction: string },
+  ): void {
+    if (!this.eventEmitter) return;
+    this.eventEmitter.emitTelemetry({
+      eventType: 'candidate_admission_decision',
+      traceId: candidateId,
+      timestamp: new Date().toISOString(),
+      payload: { decision: admission.decision, reason: admission.reason, nextAction: admission.nextAction },
+    });
+  }
+
   async onPainDetected(data: PainDetectedData): Promise<PainSignalBridgeResult> {
     const { painId } = data;
     const taskId = data.taskId ?? createDiagnosticianTaskId(painId);
+    const provenance = data.provenance ?? inferProvenance(data);
 
-    // Step 1: Idempotent upsert — check existing task state before creating or re-running.
-    // painId is provenance; taskId is the executable Runtime v2 task identity.
     const existingTask = await this.stateManager.getTask(taskId);
 
     if (existingTask) {
       const { status, leaseExpiresAt } = existingTask;
-      const LEASE_TTL_MS = 300_000; // 5 minutes, matches DiagnosticianRunner timeoutMs
+      const LEASE_TTL_MS = 300_000;
       const leaseExpired = leaseExpiresAt && (Date.now() - new Date(leaseExpiresAt).getTime()) > LEASE_TTL_MS;
       if (status === 'succeeded') {
         return this.buildExistingResult({ painId, taskId });
       }
       if (status === 'leased' && !leaseExpired) {
-        // Rule b: another run is genuinely in progress — SKIP
         return {
           status: 'skipped',
           painId,
@@ -175,11 +152,9 @@ export class PainSignalBridge {
           message: 'Task is already leased',
         };
       }
-      // lease expired or status is not leased — fall through to reset + re-run
       if (status === 'leased' && leaseExpired) {
-        // Lease expired — treat as stale, fall through to reset + re-run
+        // fall through
       } else {
-        // Rule c: failed / retry_wait / pending — allow re-run.
         await this.stateManager.updateTask(taskId, {
           status: 'pending',
           attemptCount: 0,
@@ -188,10 +163,6 @@ export class PainSignalBridge {
         });
       }
     } else {
-      // Rule d: no existing task — create new.
-      // PRI-255: Persist pain evidence into diagnosticJson so that
-      // SqliteContextAssembler can reconstruct reasonSummary, source,
-      // severity, sourcePainId, sessionIdHint, agentIdHint, and provenance.
       const diagnosticJson = buildDiagnosticJson(data);
       await this.stateManager.createTask({
         taskId,
@@ -204,12 +175,9 @@ export class PainSignalBridge {
       });
     }
 
-    // Step 2: Invoke DiagnosticianRunner — runner manages run lifecycle via acquireLease
-    // Bridge does NOT call stateManager.createRun() — doing so would create a duplicate run.
     const result = await this.runner.run(taskId);
 
     if (result.status !== 'succeeded') {
-      // Runner failed — task stays in whatever status the runner set
       return {
         status: result.status === 'retried' ? 'retried' : 'failed',
         painId,
@@ -222,13 +190,34 @@ export class PainSignalBridge {
       };
     }
 
-    // Step 3: Query real candidateIds from state store (not synthetic IDs)
     const candidates: CandidateRecord[] = await this.stateManager.getCandidatesByTaskId(taskId);
     const ledgerEntryIds: string[] = [];
 
-    // Step 4: Intake each candidate → PrincipleTreeLedger probation entry
+    const diagnosticianOutput = result.output;
+    const admissionResults = diagnosticianOutput
+      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, provenance)
+      : candidates.map((c) => ({
+          candidateId: c.candidateId,
+          recommendationKind: c.recommendationKind,
+          admission: {
+            decision: 'needs_evidence' as const,
+            reason: 'diagnostician_output_unavailable',
+            nextAction: 're_run_diagnosis_or_manual_review',
+            evidenceStatus: provenance,
+          },
+        }));
+
     if (this.autoIntakeEnabled) {
-      for (const candidate of candidates) {
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i];
+        const admission = admissionResults[i];
+        if (!candidate || !admission) continue;
+
+        if (admission.admission.decision !== 'admitted') {
+          this.emitAdmissionEvent(candidate.candidateId, admission.admission);
+          continue;
+        }
+
         const intakeResult = await this.intakeService.intake(candidate.candidateId);
         ledgerEntryIds.push(intakeResult.id);
         if (candidate.status !== 'consumed') {
@@ -236,8 +225,6 @@ export class PainSignalBridge {
         }
       }
     }
-    // HG-4: When autoIntakeEnabled=false, chain runs but intake is skipped
-    // This allows verifying the full chain without creating ledger entries
 
     const runs = await this.stateManager.getRunsByTask(taskId);
     const latestRun = runs.at(-1);
@@ -253,10 +240,15 @@ export class PainSignalBridge {
         runId: latestRun?.runId,
         candidateIds,
         ledgerEntryIds,
+        admissionResults,
         message: 'Diagnostician succeeded but produced no principle candidates',
       };
     }
-    if (this.autoIntakeEnabled && ledgerEntryIds.length === 0) {
+
+    const admittedCount = admissionResults.filter((a) => a.admission.decision === 'admitted').length;
+    const nonAdmittedCount = admissionResults.length - admittedCount;
+
+    if (this.autoIntakeEnabled && admittedCount > 0 && ledgerEntryIds.length === 0) {
       return {
         status: 'failed',
         painId,
@@ -266,7 +258,38 @@ export class PainSignalBridge {
         artifactId: firstCandidate?.artifactId,
         candidateIds,
         ledgerEntryIds,
+        admissionResults,
         message: 'Candidate intake did not produce a ledger entry',
+      };
+    }
+
+    if (nonAdmittedCount > 0 && admittedCount === 0) {
+      return {
+        status: 'degraded',
+        painId,
+        taskId,
+        runnerStatus: result.status,
+        runId: latestRun?.runId,
+        artifactId: firstCandidate?.artifactId,
+        candidateIds,
+        ledgerEntryIds,
+        admissionResults,
+        message: `all_candidates_gated:${admissionResults.map((a) => `${a.candidateId}=${a.admission.decision}`).join(',')}`,
+      };
+    }
+
+    if (nonAdmittedCount > 0 && admittedCount > 0) {
+      return {
+        status: 'degraded',
+        painId,
+        taskId,
+        runnerStatus: result.status,
+        runId: latestRun?.runId,
+        artifactId: firstCandidate?.artifactId,
+        candidateIds,
+        ledgerEntryIds,
+        admissionResults,
+        message: `partial_admission:${admittedCount}_admitted_${nonAdmittedCount}_gated`,
       };
     }
 
@@ -279,6 +302,7 @@ export class PainSignalBridge {
       artifactId: firstCandidate?.artifactId,
       candidateIds,
       ledgerEntryIds,
+      admissionResults,
     };
   }
 
@@ -290,8 +314,6 @@ export class PainSignalBridge {
     const firstCandidate = candidates.at(0);
     const ledgerEntryIds: string[] = [];
 
-    // P8 (LOCKED): succeeded requires candidates. Without candidates the task
-    // produced no output — this is a partial/silent failure, not a success.
     if (candidateIds.length === 0) {
       return {
         status: 'failed',
@@ -304,7 +326,6 @@ export class PainSignalBridge {
       };
     }
 
-    // HG-4: When autoIntakeEnabled=true, succeeded also requires ledger entries.
     if (this.autoIntakeEnabled) {
       for (const candidate of candidates) {
         const ledgerEntry = this.ledgerAdapter.existsForCandidate(candidate.candidateId);
