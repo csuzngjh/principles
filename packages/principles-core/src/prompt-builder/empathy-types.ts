@@ -91,6 +91,25 @@ export const EMPATHY_SEED_KEYWORDS: SeedKeywordEntry[] = [
   { term: 'are you sure', weight: 0.7, category: 'escalation', initialFalsePositiveRate: 0.15 },
   { term: 'did you even read', weight: 0.8, category: 'escalation', initialFalsePositiveRate: 0.1 },
   { term: 'what are you doing', weight: 0.8, category: 'escalation', initialFalsePositiveRate: 0.1 },
+
+  // Soft frustration (PRI-274: previously missed by keyword matcher)
+  { term: '怎么又', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.25 },
+  { term: '算了', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.3 },
+  { term: '说了N次', weight: 0.6, category: 'disappointment', initialFalsePositiveRate: 0.2 },
+  { term: '说了好几次', weight: 0.6, category: 'disappointment', initialFalsePositiveRate: 0.2 },
+  { term: '每次都这样', weight: 0.6, category: 'disappointment', initialFalsePositiveRate: 0.2 },
+  { term: '每次这样', weight: 0.6, category: 'disappointment', initialFalsePositiveRate: 0.2 },
+  { term: '我再试试', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.25 },
+  { term: '我自己来', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.3 },
+  { term: '不是这个意思', weight: 0.6, category: 'negation', initialFalsePositiveRate: 0.2 },
+  { term: '不是让你', weight: 0.6, category: 'negation', initialFalsePositiveRate: 0.2 },
+  { term: 'again?', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.25 },
+  { term: 'never mind', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.3 },
+  { term: 'told you', weight: 0.6, category: 'disappointment', initialFalsePositiveRate: 0.2 },
+  { term: 'every time', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.25 },
+  { term: "i'll do it myself", weight: 0.6, category: 'disappointment', initialFalsePositiveRate: 0.2 },
+  { term: "that's not what i meant", weight: 0.6, category: 'negation', initialFalsePositiveRate: 0.2 },
+  { term: "i didn't ask you to", weight: 0.6, category: 'negation', initialFalsePositiveRate: 0.2 },
 ];
 
 export interface EmpathyKeywordConfig {

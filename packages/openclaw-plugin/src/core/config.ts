@@ -123,7 +123,7 @@ export const DEFAULT_SETTINGS: PainSettings = {
         promotion_similarity_threshold: 0.8
     },
     scores: {
-        paralysis: 30, // Reduced from 40
+        paralysis: 45, // Must be >= pain_trigger (40) so llm_paralysis can trigger diagnosis (PRI-274)
         default_confusion: 30,
         default_loop: 40,
         tool_failure_friction: 15, // Reduced from 30. A failing tool shouldn't instantly cripple the AI

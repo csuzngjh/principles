@@ -103,7 +103,7 @@ export function recordGateBlockAndReturn(
   // 5. Record gate block pain context. Runtime V2 diagnosis is gated by GFI
   // so one mild block does not start a long diagnostician run.
   if (sessionId) {
-    const GATE_BLOCK_PAIN_SCORE = 30;
+    const GATE_BLOCK_PAIN_SCORE = 45; // Must be >= pain_trigger (40) so single gate block can trigger diagnosis (PRI-274)
     // Record to trajectory (fire-and-forget, no .pain_flag file needed)
     wctx.trajectory?.recordPainEvent?.({
       sessionId,

@@ -381,6 +381,45 @@ describe('Empathy Keyword Matching (core)', () => {
       expect(result.score).toBe(0);
     });
 
+    it('detects soft Chinese frustration expressions (PRI-274)', () => {
+      const store = createDefaultKeywordStore('zh');
+      const softCases = [
+        '怎么又出错了',
+        '算了我自己来吧',
+        '我说了N次了',
+        '说了好几次你还是不对',
+        '每次都这样',
+        '每次这样搞',
+        '我再试试看吧',
+        '我自己来吧',
+        '不是这个意思啊',
+        '不是让你这样做',
+      ];
+
+      for (const text of softCases) {
+        const result = matchEmpathyKeywords(text, store);
+        expect(result.matched).toBe(true);
+      }
+    });
+
+    it('detects soft English frustration expressions (PRI-274)', () => {
+      const store = createDefaultKeywordStore('en');
+      const softCases = [
+        'this broke again?',
+        'never mind, I will fix it',
+        'I told you this already',
+        'every time you do this',
+        "I'll do it myself",
+        "that's not what I meant at all",
+        "I didn't ask you to change that",
+      ];
+
+      for (const text of softCases) {
+        const result = matchEmpathyKeywords(text, store);
+        expect(result.matched).toBe(true);
+      }
+    });
+
     it('maxTermsPerMessage limits matched terms', () => {
       const store = createDefaultKeywordStore('zh');
       const config = { ...DEFAULT_EMPATHY_KEYWORD_CONFIG, maxTermsPerMessage: 2 };
