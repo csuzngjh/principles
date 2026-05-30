@@ -338,6 +338,20 @@ export class SqliteConnection {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_activations_idempotency ON activations(idempotency_key);
     `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS confirm_first_state (
+        session_id TEXT PRIMARY KEY,
+        directive_active INTEGER NOT NULL DEFAULT 0,
+        directive_principle_id TEXT,
+        directive_set_at TEXT NOT NULL,
+        approval_active INTEGER NOT NULL DEFAULT 0,
+        approval_set_at TEXT,
+        last_seen_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_confirm_first_state_last_seen
+        ON confirm_first_state(last_seen_at);
+    `);
   }
 
   private migrateSchema(): void {

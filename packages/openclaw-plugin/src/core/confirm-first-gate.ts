@@ -15,6 +15,7 @@
  */
 
 import { BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
+import { SqliteConfirmFirstStateStore } from '@principles/core/runtime-v2';
 
 /** Per-session confirm-first state */
 interface ConfirmFirstSessionState {
@@ -25,8 +26,16 @@ interface ConfirmFirstSessionState {
 /** Size cap to prevent memory leaks from abandoned sessions */
 const MAX_SESSION_ENTRIES = 500;
 
+// TODO(PRI-268): stale directive cleanup
 const sessionDirectiveState = new Map<string, ConfirmFirstSessionState>();
+// TODO(PRI-267): per-task approval scope
 const sessionApprovalState = new Map<string, boolean>();
+
+let confirmFirstStore: SqliteConfirmFirstStateStore | null = null;
+
+export function setConfirmFirstStore(store: SqliteConfirmFirstStateStore | null): void {
+  confirmFirstStore = store;
+}
 
 function evictOldestIfFull(map: Map<string, unknown>): void {
   if (map.size >= MAX_SESSION_ENTRIES) {
@@ -106,6 +115,13 @@ export function setConfirmFirstDirective(
 ): void {
   evictOldestIfFull(sessionDirectiveState);
   sessionDirectiveState.set(sessionId, { active, principleId });
+  if (confirmFirstStore) {
+    try {
+      confirmFirstStore.upsertDirective(sessionId, active, principleId ?? null);
+    } catch (storeErr) {
+      console.warn(`[PD:ConfirmFirst] Store write failed for directive (session=${sessionId}), degraded to cache-only: ${String(storeErr)}`);
+    }
+  }
 }
 
 /**
@@ -114,6 +130,13 @@ export function setConfirmFirstDirective(
 export function setConfirmFirstApproval(sessionId: string): void {
   evictOldestIfFull(sessionApprovalState);
   sessionApprovalState.set(sessionId, true);
+  if (confirmFirstStore) {
+    try {
+      confirmFirstStore.upsertApproval(sessionId);
+    } catch (storeErr) {
+      console.warn(`[PD:ConfirmFirst] Store write failed for approval (session=${sessionId}), degraded to cache-only: ${String(storeErr)}`);
+    }
+  }
 }
 
 /**
@@ -159,6 +182,13 @@ export function evaluateConfirmFirstGateSync(
 export function resetConfirmFirst(sessionId: string): void {
   sessionDirectiveState.delete(sessionId);
   sessionApprovalState.delete(sessionId);
+  if (confirmFirstStore) {
+    try {
+      confirmFirstStore.deleteState(sessionId);
+    } catch (storeErr) {
+      console.warn(`[PD:ConfirmFirst] Store delete failed for session=${sessionId}: ${String(storeErr)}`);
+    }
+  }
 }
 
 /**
@@ -181,4 +211,45 @@ export function hasActiveDirective(sessionId: string): boolean {
 export function clearAllConfirmFirstState(): void {
   sessionDirectiveState.clear();
   sessionApprovalState.clear();
+  if (confirmFirstStore) {
+    try {
+      confirmFirstStore.deleteAllState();
+    } catch (storeErr) {
+      console.warn(`[PD:ConfirmFirst] Store clearAll failed: ${String(storeErr)}`);
+    }
+  }
 }
+
+export function hydrateFromStore(sessionId: string): void {
+  if (!confirmFirstStore) return;
+  if (sessionDirectiveState.has(sessionId)) return;
+
+  try {
+    const record = confirmFirstStore.getState(sessionId);
+    if (!record) return;
+
+    evictOldestIfFull(sessionDirectiveState);
+    sessionDirectiveState.set(sessionId, {
+      active: record.directiveActive,
+      principleId: record.directivePrincipleId ?? undefined,
+    });
+
+    if (record.approvalActive) {
+      evictOldestIfFull(sessionApprovalState);
+      sessionApprovalState.set(sessionId, true);
+    }
+  } catch (storeErr) {
+    console.warn(`[PD:ConfirmFirst] Store hydration failed for session=${sessionId}: ${String(storeErr)}`);
+  }
+}
+
+export function pruneStoreStaleRows(): number {
+  if (!confirmFirstStore) return 0;
+  try {
+    return confirmFirstStore.pruneStaleRows();
+  } catch (storeErr) {
+    console.warn(`[PD:ConfirmFirst] Store pruning failed: ${String(storeErr)}`);
+    return 0;
+  }
+}
+
