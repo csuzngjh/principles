@@ -172,25 +172,6 @@ function AgentNode({
   );
 }
 
-function TrinityGroup() {
-  const dreamer = FLOW_NODES.find((n) => n.id === "trinity-dreamer")!;
-  const scribe = FLOW_NODES.find((n) => n.id === "trinity-scribe")!;
-  const pad = 12;
-  return (
-    <rect
-      x={dreamer.x - pad}
-      y={dreamer.y - pad}
-      width={dreamer.w + pad * 2}
-      height={scribe.y + scribe.h - dreamer.y + pad * 2}
-      rx={8}
-      fill="none"
-      stroke="var(--color-border, hsl(220 14% 78%))"
-      strokeWidth={1}
-      strokeDasharray="6 3"
-    />
-  );
-}
-
 function FlowEdgeLine({ from, to }: { from: FlowNode; to: FlowNode }) {
   const d = getEdgePath(from, to);
   return (
@@ -256,8 +237,6 @@ function AgentFlowMap({
             const toNode = FLOW_NODES.find((n) => n.id === edge.to)!;
             return <FlowEdgeLine key={`${edge.from}-${edge.to}`} from={fromNode} to={toNode} />;
           })}
-
-          <TrinityGroup />
 
           {FLOW_NODES.map((node) => (
             <AgentNode
