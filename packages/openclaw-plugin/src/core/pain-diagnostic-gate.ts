@@ -21,6 +21,7 @@ export type PainDiagnosticGateReason =
   | 'llm_paralysis'
   | 'risky_high_score'
   | 'subagent_error'
+  | 'gate_blocked'
   | 'cooldown'
   | 'below_gate';
 
@@ -122,6 +123,10 @@ export function evaluatePainDiagnosticGate(input: PainDiagnosticGateInput): Pain
 
   if (source === 'llm_paralysis' && score >= painTrigger) {
     return approve('llm_paralysis', `llm paralysis score ${score} >= ${painTrigger}`);
+  }
+
+  if (source === 'gate_blocked' && score >= painTrigger) {
+    return approve('gate_blocked', `gate blocked score ${score} >= ${painTrigger}`);
   }
 
   if ((source === 'user_empathy' || source === 'semantic') && score >= semanticPain) {
