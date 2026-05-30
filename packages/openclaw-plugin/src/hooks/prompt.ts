@@ -12,7 +12,7 @@ import { detectApprovalMarker, setConfirmFirstApproval, setConfirmFirstDirective
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../core/runtime-v2-prompt-activation-reader.js';
 import {
@@ -457,13 +457,9 @@ The empathy observer subagent handles pain detection independently.
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
 
-  // LEGACY PATH GUARD: empathy subagent spawning is disabled by default.
-  // Set PD_LEGACY_EMPATHY_SUBAGENT_ENABLED=true to re-enable.
-  const legacyEmpathyEnabled = process.env.PD_LEGACY_EMPATHY_SUBAGENT_ENABLED === 'true';
-  const empathyEnabled = legacyEmpathyEnabled && wctx.config.get('empathy_engine.enabled') !== false;
-  if (!legacyEmpathyEnabled) {
-    logger?.debug?.('[PD:Prompt] Legacy empathy subagent DISABLED (PD_LEGACY_EMPATHY_SUBAGENT_ENABLED != true)');
-  }
+  // Empathy Observer: keyword fast-path + optional LLM deep analysis (zero latency async dispatch)
+  const empathyEnabled = wctx.config.get('empathy_engine.enabled') !== false;
+
   logger?.info?.(`[PD:Empathy] Conditions: enabled=${empathyEnabled}, isUser=${isUserInteraction}, sessionId=${!!sessionId}, api=${!!api}, !agentToAgent=${!isAgentToAgent}, workspaceDir=${!!workspaceDir}, hasMessage=${!!latestUserMessage}`);
 
   // Track if we should inject behavioral constraints (will be added to appendSystemContext later)
@@ -492,7 +488,6 @@ The empathy observer subagent handles pain detection independently.
         _empathyTurnCounter++;
         const turnCount = _empathyTurnCounter;
 
-
         if (matchResult.matched) {
           const penalty = severityToPenalty(matchResult.severity, DEFAULT_EMPATHY_KEYWORD_CONFIG);
           // trackFriction signature: (sessionId, deltaF: number, hash: string, workspaceDir?, options?)
@@ -500,7 +495,7 @@ The empathy observer subagent handles pain detection independently.
             source: 'user_empathy',
           });
 
-          logger?.info?.(`[PD:Empathy] MATCH: "${matchResult.matchedTerms.join(', ')}" → severity=${matchResult.severity}, score=${matchResult.score.toFixed(2)}, penalty=${penalty}, ''`);
+          logger?.info?.(`[PD:Empathy] MATCH: "${matchResult.matchedTerms.join(', ')}" → severity=${matchResult.severity}, score=${matchResult.score.toFixed(2)}, penalty=${penalty}`);
 
           const currentSession = getSession(sessionId);
           const currentGfi = currentSession?.currentGfi ?? 0;
@@ -560,6 +555,118 @@ The empathy observer subagent handles pain detection independently.
               logger?.info?.(`[PD:Empathy] GFI-triggered gate rejected: ${gate.detail}`);
             }
           }
+
+          // Trigger asynchronous background Empathy Observer deep analysis (Zero Latency)
+          const observer = resolveEmpathyObserver(wctx, logger);
+          if (observer) {
+            const scheduler = new AgentScheduler();
+            scheduler.register({
+              agentId: 'empathy-observer',
+              mode: 'realtime',
+              runner: observer,
+            });
+
+            logger?.info?.(`[PD:Empathy] Triggering background Empathy Observer deep analysis for message: "${msgPreview}"`);
+            
+            void scheduler.dispatch('empathy-observer', { userMessage: latestUserMessage })
+              .then(async (result) => {
+                if (result.damageDetected) {
+                  logger?.info?.(`[PD:Empathy] Background Empathy Observer detected damage. Severity: ${result.severity}, Reason: ${result.reason}`);
+
+                  // ── Persistence Contract ──
+                  const painScore = scoreFromSeverityForSpec(result.severity, wctx);
+                  
+                  trackFriction(
+                    sessionId,
+                    painScore,
+                    `observer_empathy_${result.severity}`,
+                    workspaceDir,
+                    { source: 'user_empathy' }
+                  );
+
+                  const eventId = `emp_obs_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+                  wctx.eventLog.recordPainSignal(sessionId, {
+                    score: painScore,
+                    source: 'user_empathy',
+                    reason: result.reason || 'Empathy observer detected likely user frustration.',
+                    isRisky: false,
+                    origin: 'system_infer',
+                    severity: result.severity,
+                    confidence: result.confidence,
+                    detection_mode: 'structured',
+                    deduped: false,
+                    trigger_text_excerpt: latestUserMessage.substring(0, 120),
+                    raw_score: painScore,
+                    calibrated_score: painScore,
+                    eventId,
+                  });
+
+                  try {
+                    wctx.trajectory?.recordPainEvent?.({
+                      sessionId,
+                      source: 'user_empathy',
+                      score: painScore,
+                      reason: result.reason || 'Empathy observer detected likely user frustration.',
+                      severity: result.severity,
+                      origin: 'system_infer',
+                      confidence: result.confidence,
+                      text: latestUserMessage,
+                    });
+                  } catch (error) {
+                    logger?.warn?.(`[PD:Empathy] Failed to persist trajectory: ${String(error)}`);
+                  }
+
+                  // Check if GFI triggers a pain event post-LLM validation
+                  const freshSession = getSession(sessionId);
+                  const freshGfi = freshSession?.currentGfi ?? 0;
+                  if (freshGfi >= highGfiThreshold) {
+                    const freshGfiPainScore = Math.min(Math.round(freshGfi), 60);
+                    const gate = evaluatePainDiagnosticGate({
+                      source: 'user_empathy',
+                      score: freshGfiPainScore,
+                      currentGfi: freshGfi,
+                      consecutiveErrors: freshSession?.consecutiveErrors ?? 0,
+                      sessionId,
+                      errorHash: 'empathy_gfi_threshold',
+                      thresholds: {
+                        painTrigger,
+                        highSeverity: wctx.config.get('severity_thresholds.high') || 70,
+                        semanticPain: Math.max(painTrigger, 60),
+                      },
+                    });
+
+                    if (gate.shouldDiagnose) {
+                      logger?.info?.(`[PD:Empathy] GFI threshold crossed after background observer. Emitting pain signal...`);
+                      try {
+                        const evidence = buildTrajectoryEvidence(wctx, sessionId);
+                        await emitPainDetectedEvent(wctx, {
+                          ts: new Date().toISOString(),
+                          type: 'pain_detected',
+                          data: {
+                            painId: `empathy_gfi_${Date.now()}`,
+                            painType: 'user_frustration',
+                            source: 'user_empathy',
+                            reason: `Accumulated GFI (${freshGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Verified by Empathy Observer.`,
+                            score: freshGfiPainScore,
+                            sessionId,
+                            agentId: 'main',
+                            provenance: 'openclaw_context_bound',
+                            evidence,
+                          },
+                        });
+                      } catch (emitErr) {
+                        logger?.error?.(`[PD:Empathy] FAILED to emit observer-triggered pain event: ${String(emitErr)}`);
+                      }
+                    }
+                  }
+                } else {
+                  logger?.info?.(`[PD:Empathy] Background Empathy Observer did not detect any damage.`);
+                }
+              })
+              .catch((err) => {
+                logger?.warn?.(`[PD:Empathy] Background analysis failed or rejected: ${String(err)}`);
+              });
+          }
         } else {
           // Log unmatched messages periodically for coverage analysis
           if (turnCount > 0 && turnCount % 50 === 0) {
@@ -575,9 +682,7 @@ The empathy observer subagent handles pain detection independently.
           logger?.info?.(`[PD:Empathy] SUMMARY(turn=${turnCount}): terms=${s.totalTerms}, hits=${keywordStore.stats.totalHits}, zero_hit=${s.totalTerms - (s.seedTerms + s.discoveredTerms)}, high_fp=[${highFP}]`);
         }
 
-        // Save keyword store on every match to prevent data loss on restart.
-        // Previously used turnCount % 50 gate which caused hitCount loss because
-        // module-level state resets on plugin reload before reaching turn 50.
+        // Save keyword store on every match
         if (matchResult.matched) {
           saveKeywordStore(wctx.stateDir, keywordStore);
           const {totalHits} = keywordStore.stats;
@@ -1106,4 +1211,55 @@ ${attitudeDirective}
     prependContext,
     appendSystemContext
   };
+}
+
+// ── Empathy Observer Hybrid Deep Analysis Helpers (Unified SDK Migration) ──
+
+function scoreFromSeverityForSpec(severity: string | undefined, wctx: WorkspaceContext): number {
+  if (severity === 'severe') return Number(wctx.config.get('empathy_engine.penalties.severe') ?? 40);
+  if (severity === 'moderate') return Number(wctx.config.get('empathy_engine.penalties.moderate') ?? 25);
+  return Number(wctx.config.get('empathy_engine.penalties.mild') ?? 10);
+}
+
+function resolveEmpathyObserver(wctx: WorkspaceContext, logger?: Pick<PluginLogger, 'info' | 'warn' | 'error' | 'debug'>): EmpathyObserver | null {
+  try {
+    const loader = new WorkflowFunnelLoader(wctx.stateDir);
+    const funnel = loader.getFunnel('pd-empathy-observer');
+    const policy = funnel?.policy;
+    if (!policy || policy.runtimeKind !== 'pi-ai') {
+      logger?.debug?.('[PD:Empathy] workflows.yaml pd-empathy-observer policy not found. Falling back to environment variables.');
+      const provider = process.env.PD_EMPATHY_PROVIDER || 'anthropic';
+      const model = process.env.PD_EMPATHY_MODEL || 'anthropic/claude-3-5-sonnet';
+      const apiKeyEnv = process.env.PD_EMPATHY_API_KEY_ENV || 'ANTHROPIC_API_KEY';
+      const baseUrl = process.env.PD_EMPATHY_BASE_URL;
+
+      if (!process.env[apiKeyEnv]) {
+        logger?.debug?.(`[PD:Empathy] Empathy observer API key env ${apiKeyEnv} is not set. Background analysis disabled.`);
+        return null;
+      }
+
+      const adapter = new PiAiRuntimeAdapter({
+        provider,
+        model,
+        apiKeyEnv,
+        baseUrl,
+        workspace: wctx.workspaceDir,
+      });
+      return new EmpathyObserver({ runtimeAdapter: adapter });
+    }
+
+    const adapter = new PiAiRuntimeAdapter({
+      provider: String(policy.provider),
+      model: String(policy.model),
+      apiKeyEnv: String(policy.apiKeyEnv),
+      maxRetries: policy.maxRetries,
+      timeoutMs: policy.timeoutMs ?? 30_000,
+      baseUrl: policy.baseUrl,
+      workspace: wctx.workspaceDir,
+    });
+    return new EmpathyObserver({ runtimeAdapter: adapter }, { timeoutMs: policy.timeoutMs });
+  } catch (err) {
+    logger?.warn?.(`[PD:Empathy] Failed to resolve EmpathyObserver: ${String(err)}`);
+    return null;
+  }
 }
