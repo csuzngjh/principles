@@ -6,6 +6,17 @@ import type { RunnerResultStatus } from './runner/runner-result.js';
 import type { PDErrorCategory } from './error-categories.js';
 import type { CandidateAdmissionResult, AdmissionDecision, PainProvenance } from './admission-gate.js';
 import { evaluateCandidateAdmissions } from './admission-gate.js';
+import { seedIntakeTask, ROUTE_CHANNEL_MAP, MVP_ENABLED_CHANNELS } from './internalization/intake-to-internalization-bridge.js';
+import type { IntakeToInternalizationBridgeInput } from './internalization/intake-to-internalization-bridge.js';
+import type { InternalizationRouteKind } from './internalization/internalization-route.js';
+
+const CANDIDATE_KIND_TO_ROUTE: Record<string, InternalizationRouteKind> = {
+  principle: 'principle-ledger',
+  rule: 'rule-candidate',
+  implementation: 'implementation-candidate',
+  prompt: 'prompt-injection-candidate',
+  defer: 'deferred',
+};
 
 export type { PainProvenance };
 
@@ -230,6 +241,46 @@ export class PainSignalBridge {
 
         const intakeResult = await this.intakeService.intake(candidate.candidateId);
         ledgerEntryIds.push(intakeResult.id);
+
+        try {
+          const route = CANDIDATE_KIND_TO_ROUTE[candidate.recommendationKind ?? ''] ?? (`${candidate.recommendationKind}-candidate` as InternalizationRouteKind);
+          const channel = ROUTE_CHANNEL_MAP[route];
+          const bridgeInput: IntakeToInternalizationBridgeInput = {
+            candidateId: candidate.candidateId,
+            recommendationKind: candidate.recommendationKind ?? 'unknown',
+            route,
+            ready: !!channel && MVP_ENABLED_CHANNELS.has(channel),
+            sourcePainId: painId,
+          };
+          const seedResult = await seedIntakeTask(bridgeInput, {
+            getTask: (id) => this.stateManager.getTask(id),
+            createTask: (input) => this.stateManager.createTask({
+              taskId: input.taskId,
+              taskKind: input.taskKind,
+              inputRef: '',
+              status: input.status as 'pending',
+              attemptCount: input.attemptCount,
+              maxAttempts: input.maxAttempts,
+              diagnosticJson: input.diagnosticJson,
+            }),
+          });
+          if (seedResult.decision === 'seeded') {
+            this.eventEmitter?.emitTelemetry({
+              eventType: 'candidate_dreamer_task_seeded',
+              traceId: candidate.candidateId,
+              timestamp: new Date().toISOString(),
+              payload: { taskId: seedResult.taskId, channel: seedResult.channel },
+            });
+          }
+        } catch (seedErr) {
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'candidate_dreamer_task_seed_failed',
+            traceId: candidate.candidateId,
+            timestamp: new Date().toISOString(),
+            payload: { error: String(seedErr) },
+          });
+        }
+
         if (candidate.status !== 'consumed') {
           await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }

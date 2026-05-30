@@ -4,6 +4,7 @@ import {
   buildDreamerTaskSeed,
   seedIntakeTask,
   ROUTE_CHANNEL_MAP,
+  MVP_ENABLED_CHANNELS,
 } from '../internalization/intake-to-internalization-bridge.js';
 import type {
   IntakeToInternalizationBridgeInput,
@@ -325,6 +326,19 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
 
     it('does not map deferred route', () => {
       expect(ROUTE_CHANNEL_MAP.deferred).toBeUndefined();
+    });
+  });
+
+  describe('MVP_ENABLED_CHANNELS', () => {
+    it('contains prompt, code_tool_hook, defer_archive', () => {
+      expect(MVP_ENABLED_CHANNELS.has('prompt')).toBe(true);
+      expect(MVP_ENABLED_CHANNELS.has('code_tool_hook')).toBe(true);
+      expect(MVP_ENABLED_CHANNELS.has('defer_archive')).toBe(true);
+    });
+
+    it('does not contain skill or model_training', () => {
+      expect(MVP_ENABLED_CHANNELS.has('skill')).toBe(false);
+      expect(MVP_ENABLED_CHANNELS.has('model_training')).toBe(false);
     });
   });
 });

@@ -18,6 +18,12 @@ export type BridgeDecision =
   | { decision: 'not_internalizable'; reason: string }
   | { decision: 'invalid_candidate'; reason: string };
 
+export const MVP_ENABLED_CHANNELS: ReadonlySet<InternalizationChannel> = new Set<InternalizationChannel>([
+  'prompt',
+  'code_tool_hook',
+  'defer_archive',
+]);
+
 export const ROUTE_CHANNEL_MAP: Record<string, InternalizationChannel> = {
   'principle-ledger': 'prompt',
   'rule-candidate': 'code_tool_hook',

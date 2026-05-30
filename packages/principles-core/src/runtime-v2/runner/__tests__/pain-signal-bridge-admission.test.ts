@@ -346,3 +346,188 @@ describe('PainSignalBridge admission gate integration', () => {
     expect(gated[0]?.admission.evidenceStatus).toBe('owner_reported_no_host_trace');
   });
 });
+
+describe('PainSignalBridge dreamer task seeding', () => {
+  const PAIN_ID_DREAMER = 'pain-dreamer-001';
+  const TASK_ID_DREAMER = `diagnosis_${PAIN_ID_DREAMER}`;
+
+  function makeDreamerCandidate(id: string, kind: CandidateRecord['recommendationKind']): CandidateRecord {
+    return {
+      candidateId: id,
+      taskId: TASK_ID_DREAMER,
+      artifactId: `artifact-${id}`,
+      sourceRunId: `run-${id}`,
+      title: `Candidate ${id}`,
+      description: `Description for ${id}`,
+      confidence: 0.85,
+      sourceRecommendationJson: '{}',
+      recommendationKind: kind,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  function makeDreamerDeps(overrides: {
+    candidates: CandidateRecord[];
+    createTaskFn?: (input: any) => Promise<any>;
+    getTaskFn?: (taskId: string) => Promise<any>;
+  }) {
+    const telemetryEvents: Record<string, unknown>[] = [];
+    const createTaskCalls: any[] = [];
+    const createTaskMock = async (input: any) => {
+      createTaskCalls.push(input);
+      if (overrides.createTaskFn) return overrides.createTaskFn(input);
+      return { taskId: 'mock-task' };
+    };
+    const getTaskMock = overrides.getTaskFn ?? (async () => null);
+    const updateCandidateStatusCalls: { candidateId: string; patch: any }[] = [];
+    const updateCandidateStatusMock = async (candidateId: string, patch: any) => {
+      updateCandidateStatusCalls.push({ candidateId, patch });
+    };
+
+    const stateManager = {
+      getTask: getTaskMock,
+      createTask: createTaskMock,
+      updateTask: async () => { return; },
+      getCandidatesByTaskId: async () => overrides.candidates,
+      getRunsByTask: async () => [{ runId: 'run-1', taskId: TASK_ID_DREAMER, status: 'succeeded' }],
+      updateCandidateStatus: updateCandidateStatusMock,
+    } as unknown as RuntimeStateManager;
+
+    const runner = {
+      run: async (): Promise<RunnerResult> => ({
+        status: 'succeeded',
+        taskId: TASK_ID_DREAMER,
+        attemptCount: 1,
+        output: makeHighConfidenceOutput(),
+      }),
+    };
+
+    const intakeService: CandidateIntakeService = {
+      intake: async (candidateId: string) => ({ id: `ledger-${candidateId}` }),
+    } as unknown as CandidateIntakeService;
+
+    const ledgerAdapter: LedgerAdapter = {
+      existsForCandidate: (candidateId: string) => makeLedgerEntry(candidateId),
+    } as unknown as LedgerAdapter;
+
+    const eventEmitter = {
+      emitTelemetry: (event: Record<string, unknown>) => {
+        telemetryEvents.push(event);
+      },
+    };
+
+    return {
+      stateManager,
+      runner,
+      intakeService,
+      ledgerAdapter,
+      eventEmitter,
+      telemetryEvents,
+      createTaskCalls,
+      updateCandidateStatusCalls,
+    };
+  }
+
+  it('admitted candidate with MVP-enabled channel seeds dreamer task', async () => {
+    const deps = makeDreamerDeps({
+      candidates: [makeDreamerCandidate('c-seed1', 'principle')],
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner as any,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    const result = await bridge.onPainDetected({
+      painId: PAIN_ID_DREAMER,
+      painType: 'tool_failure',
+      source: 'openclaw',
+      reason: 'Test dreamer seeding',
+      sessionId: 'session-dreamer',
+      provenance: 'openclaw_context_bound',
+    });
+
+    expect(result.status).toBe('succeeded');
+    const dreamerCall = deps.createTaskCalls.find((c) => c?.taskKind === 'dreamer');
+    expect(dreamerCall).toBeDefined();
+    expect(dreamerCall.taskKind).toBe('dreamer');
+    expect(dreamerCall.taskId).toContain('dreamer-c-seed1');
+
+    const seededEvent = deps.telemetryEvents.find((e) => e.eventType === 'candidate_dreamer_task_seeded');
+    expect(seededEvent).toBeDefined();
+    expect((seededEvent as any).payload.taskId).toContain('dreamer-c-seed1');
+    expect((seededEvent as any).payload.channel).toBe('prompt');
+  });
+
+  it('non-MVP channel candidate does not create dreamer task', async () => {
+    const deps = makeDreamerDeps({
+      candidates: [makeDreamerCandidate('c-impl', 'implementation')],
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner as any,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    const result = await bridge.onPainDetected({
+      painId: 'pain-impl-001',
+      painType: 'tool_failure',
+      source: 'openclaw',
+      reason: 'Test non-MVP channel',
+      sessionId: 'session-impl',
+      provenance: 'openclaw_context_bound',
+    });
+
+    expect(result.status).toBe('succeeded');
+    const dreamerCall = deps.createTaskCalls.find((c) => c?.taskKind === 'dreamer');
+    expect(dreamerCall).toBeUndefined();
+
+    const seededEvent = deps.telemetryEvents.find((e) => e.eventType === 'candidate_dreamer_task_seeded');
+    expect(seededEvent).toBeUndefined();
+  });
+
+  it('seedIntakeTask failure degrades gracefully — candidate still consumed', async () => {
+    const deps = makeDreamerDeps({
+      candidates: [makeDreamerCandidate('c-fail', 'principle')],
+      createTaskFn: async (input: any) => {
+        if (input?.taskKind === 'dreamer') throw new Error('DB write failed');
+        return { taskId: input?.taskId ?? 'mock-task' };
+      },
+    });
+
+    const bridge = new PainSignalBridge({
+      stateManager: deps.stateManager,
+      runner: deps.runner as any,
+      intakeService: deps.intakeService,
+      ledgerAdapter: deps.ledgerAdapter,
+      eventEmitter: deps.eventEmitter,
+    });
+
+    const result = await bridge.onPainDetected({
+      painId: 'pain-fail-001',
+      painType: 'tool_failure',
+      source: 'openclaw',
+      reason: 'Test seed failure',
+      sessionId: 'session-fail',
+      provenance: 'openclaw_context_bound',
+    });
+
+    expect(result.status).toBe('succeeded');
+    const consumedCall = deps.updateCandidateStatusCalls.find((c) => c.candidateId === 'c-fail');
+    expect(consumedCall).toBeDefined();
+    if (consumedCall) {
+      expect(consumedCall.patch).toEqual({ status: 'consumed' });
+    }
+
+    const failedEvent = deps.telemetryEvents.find((e) => e.eventType === 'candidate_dreamer_task_seed_failed');
+    expect(failedEvent).toBeDefined();
+    expect((failedEvent as any).payload.error).toContain('DB write failed');
+  });
+});
