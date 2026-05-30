@@ -42,7 +42,6 @@ import { handleRuntimeInternalizationIntegrityRepair } from './commands/runtime-
 import { handleRuntimeInternalizationEnqueueSuccessors } from './commands/runtime-internalization-enqueue-successors.js';
 import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-export.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
-import { handleRuntimeIdleTriggerEvaluate } from './commands/runtime-idle-trigger.js';
 import { handleRuntimeActivationDispatch } from './commands/runtime-activation.js';
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
@@ -544,32 +543,6 @@ internalizationCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeInternalizationEnqueueSuccessors({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, json: opts.json });
-  });
-
-const idleTriggerCmd = runtimeCmd
-  .command('idle-trigger')
-  .description('Idle trigger decision model (read-only)');
-
-idleTriggerCmd
-  .command('evaluate')
-  .description('Evaluate whether idle trigger should fire (read-only, no mutations)')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--json', 'Output raw JSON')
-  .option('--enabled <boolean>', 'Override config enabled', v => v === 'true')
-  .option('--idle-threshold-ms <number>', 'Override idle threshold in ms', parseInt)
-  .option('--jitter-max-ms <number>', 'Override jitter max in ms', parseInt)
-  .option('--activity-cooldown-ms <number>', 'Override activity cooldown in ms', parseInt)
-  .option('--jitter-seed <string>', 'Jitter seed for deterministic evaluation')
-  .action(async (opts) => {
-    await handleRuntimeIdleTriggerEvaluate({
-      workspace: opts.workspace,
-      json: opts.json,
-      enabled: opts.enabled,
-      idleThresholdMs: opts.idleThresholdMs,
-      jitterMaxMs: opts.jitterMaxMs,
-      activityCooldownMs: opts.activityCooldownMs,
-      jitterSeed: opts.jitterSeed,
-    });
   });
 
 const activationCmd = runtimeCmd

@@ -56,8 +56,6 @@ export interface ContinuityMatrixEntry {
   entryPoint: string;
   expectedObservable: string;
   testCommand: string;
-  dependsOnNocturnal: boolean;
-  dependsOnIdleTrigger: boolean;
   dependsOnPluginDiscovery: boolean;
   pri119ReuseEvidence: string;
   pri230ReuseEvidence: string;
@@ -502,8 +500,6 @@ export function generateContinuityMatrix(): ContinuityMatrixEntry[] {
       entryPoint: 'ActivationDispatcher.dispatch → PromptWriter.canActivate → PromptWriter.activate',
       expectedObservable: 'decision=would_activate, activationId=act_prompt_{principleId}, action=prompt_activate, targetRef=ledger://{principleId}',
       testCommand: 'npx vitest run packages/principles-core/src/runtime-v2/__tests__/proven-channel-baseline.test.ts',
-      dependsOnNocturnal: false,
-      dependsOnIdleTrigger: false,
       dependsOnPluginDiscovery: false,
       pri119ReuseEvidence: 'ActivationDispatcher.dispatch → PromptWriter contract; activationId/action/targetRef shape',
       pri230ReuseEvidence: 'prompt channel risk level (low) and auto-activation path via dispatcher',
@@ -513,8 +509,6 @@ export function generateContinuityMatrix(): ContinuityMatrixEntry[] {
       entryPoint: 'ActivationDispatcher.dispatch → RuleHostWriter.canActivate → evaluateRefinerRuleHostGate → RuleHostWriter.activate',
       expectedObservable: 'decision=would_activate|queued_for_approval, activationId=act_code_{ruleId}, action=code_tool_hook_shadow_activate, targetRef=impl://{ruleId}',
       testCommand: 'npx vitest run packages/principles-core/src/runtime-v2/__tests__/proven-channel-baseline.test.ts',
-      dependsOnNocturnal: false,
-      dependsOnIdleTrigger: false,
       dependsOnPluginDiscovery: false,
       pri119ReuseEvidence: 'ActivationDispatcher.dispatch → RuleHostWriter gate decision contract; goldenTrace validation path',
       pri230ReuseEvidence: 'code_tool_hook risk level (high) and approval queue path via dispatcher',
@@ -524,8 +518,6 @@ export function generateContinuityMatrix(): ContinuityMatrixEntry[] {
       entryPoint: 'ActivationDispatcher.dispatch → DeferArchiveWriter.canActivate → DeferArchiveWriter.activate',
       expectedObservable: 'decision=would_activate, activationId=act_archive_{principleId}, action=defer_archive, targetRef=ledger://{principleId}#archived',
       testCommand: 'npx vitest run packages/principles-core/src/runtime-v2/__tests__/proven-channel-baseline.test.ts',
-      dependsOnNocturnal: false,
-      dependsOnIdleTrigger: false,
       dependsOnPluginDiscovery: false,
       pri119ReuseEvidence: 'ActivationDispatcher.dispatch → DeferArchiveWriter contract; activationId/action/targetRef shape',
       pri230ReuseEvidence: 'defer_archive channel risk level (low) and auto-activation path via dispatcher',

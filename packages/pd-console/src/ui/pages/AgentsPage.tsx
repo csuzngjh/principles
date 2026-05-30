@@ -74,21 +74,13 @@ const FLOW_NODES: FlowNode[] = [
   { id: "pain-diagnostic-gate", x: 280, y: 40, w: 170, h: 52, nameZh: "PainDiagnosticGate", icon: "SearchCheck" },
   { id: "diagnostician", x: 520, y: 40, w: 150, h: 52, nameZh: "诊断者", icon: "Stethoscope" },
   { id: "evolution-worker", x: 60, y: 180, w: 170, h: 52, nameZh: "Evolution Worker", icon: "Cpu" },
-  { id: "nocturnal-reflection", x: 310, y: 180, w: 170, h: 52, nameZh: "夜间反思", icon: "Moon" },
-  { id: "trinity-dreamer", x: 560, y: 140, w: 130, h: 44, nameZh: "Dreamer", icon: "Sparkles", small: true },
-  { id: "trinity-philosopher", x: 560, y: 192, w: 130, h: 44, nameZh: "Philosopher", icon: "Scale", small: true },
-  { id: "trinity-scribe", x: 560, y: 244, w: 130, h: 44, nameZh: "Scribe", icon: "PenTool", small: true },
-  { id: "correction-observer", x: 310, y: 320, w: 170, h: 52, nameZh: "纠正观察者", icon: "SearchCheck" },
-  { id: "detection-funnel", x: 60, y: 320, w: 150, h: 44, nameZh: "Detection Funnel", icon: "Cpu", small: true },
+  { id: "correction-observer", x: 310, y: 180, w: 170, h: 52, nameZh: "纠正观察者", icon: "SearchCheck" },
+  { id: "detection-funnel", x: 560, y: 180, w: 150, h: 44, nameZh: "Detection Funnel", icon: "Cpu", small: true },
 ];
 
 const FLOW_EDGES: FlowEdge[] = [
   { from: "after_tool_call", to: "pain-diagnostic-gate" },
   { from: "pain-diagnostic-gate", to: "diagnostician" },
-  { from: "evolution-worker", to: "nocturnal-reflection" },
-  { from: "nocturnal-reflection", to: "trinity-dreamer" },
-  { from: "nocturnal-reflection", to: "trinity-philosopher" },
-  { from: "nocturnal-reflection", to: "trinity-scribe" },
   { from: "evolution-worker", to: "correction-observer" },
   { from: "evolution-worker", to: "detection-funnel" },
 ];

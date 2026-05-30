@@ -53,8 +53,6 @@ function formatTextOutput(summary: ProvenChannelBaselineSummary): string {
     lines.push(`  ${entry.channel}:`);
     lines.push(`    entryPoint: ${entry.entryPoint}`);
     lines.push(`    expected: ${entry.expectedObservable}`);
-    lines.push(`    dependsOnNocturnal: ${entry.dependsOnNocturnal}`);
-    lines.push(`    dependsOnIdleTrigger: ${entry.dependsOnIdleTrigger}`);
     lines.push(`    dependsOnPluginDiscovery: ${entry.dependsOnPluginDiscovery}`);
   }
 
