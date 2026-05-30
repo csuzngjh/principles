@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
+import { MVP_ENABLED_CHANNELS, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 
 export interface BrokenLink {
   type: string;
@@ -211,9 +212,15 @@ export class InternalizationChainIntegrityReadModel {
       const philosopherTasks = allTasks.filter(t => t.task_kind === 'philosopher');
 
       for (const candidate of consumedCandidates) {
-        // Deferred (and other non-internalizable) candidates never enter the pipeline
-        // and correctly have no dreamer task. Skip them to avoid false positives.
         if (candidate.recommendation_kind && NON_INTERNALIZABLE_KINDS.has(candidate.recommendation_kind)) {
+          continue;
+        }
+
+        const mappedRoute = candidate.recommendation_kind
+          ? CANDIDATE_KIND_TO_ROUTE[candidate.recommendation_kind]
+          : undefined;
+        const mappedChannel = mappedRoute ? ROUTE_CHANNEL_MAP[mappedRoute] : undefined;
+        if (mappedChannel && !MVP_ENABLED_CHANNELS.has(mappedChannel)) {
           continue;
         }
 
