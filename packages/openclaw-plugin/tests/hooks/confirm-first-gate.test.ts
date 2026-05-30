@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs';
 import {
   evaluateConfirmFirstGateSync,
   detectApprovalMarker,
@@ -8,7 +11,11 @@ import {
   isSessionApproved,
   hasActiveDirective,
   clearAllConfirmFirstState,
+  setConfirmFirstStore,
+  hydrateFromStore,
 } from '../../src/core/confirm-first-gate.js';
+import { SqliteConnection } from '@principles/core/runtime-v2';
+import { SqliteConfirmFirstStateStore } from '@principles/core/runtime-v2';
 
 describe('Confirm-First Gate', () => {
   beforeEach(() => {
@@ -158,7 +165,6 @@ describe('Confirm-First Gate', () => {
 
     it('blocks apply_patch with no path when directive active', () => {
       setConfirmFirstDirective('session-1', true, 'princ-mvp-acceptance-confirm-first');
-      // apply_patch with patch body but no path/file_path
       const result = evaluateConfirmFirstGateSync('session-1', 'apply_patch', { patch: '@@ -1 +1 @@\n-old\n+new' });
       expect(result.action).toBe('block');
       expect(result.reason).toBe('confirm_first_required');
@@ -180,5 +186,103 @@ describe('Confirm-First Gate', () => {
       expect(isSessionApproved('session-1')).toBe(false);
       expect(evaluateConfirmFirstGateSync('session-1', 'write', {}).action).toBe('skip');
     });
+  });
+});
+
+describe('Cross-restart persistence', () => {
+  let tmpDir: string;
+  let connection: SqliteConnection;
+  let store: SqliteConfirmFirstStateStore;
+
+  beforeEach(() => {
+    clearAllConfirmFirstState();
+    setConfirmFirstStore(null);
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cf-test-'));
+    connection = new SqliteConnection(tmpDir);
+    store = new SqliteConfirmFirstStateStore(connection);
+  });
+
+  afterEach(() => {
+    setConfirmFirstStore(null);
+    clearAllConfirmFirstState();
+    try {
+      connection.close();
+    } catch {}
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it('directive + approval survive restart', () => {
+    setConfirmFirstStore(store);
+    setConfirmFirstDirective('sess-restart', true, 'princ-123');
+    setConfirmFirstApproval('sess-restart');
+
+    expect(evaluateConfirmFirstGateSync('sess-restart', 'write', {}).action).toBe('allow');
+
+    setConfirmFirstStore(null);
+    clearAllConfirmFirstState();
+    setConfirmFirstStore(store);
+    hydrateFromStore('sess-restart');
+
+    expect(evaluateConfirmFirstGateSync('sess-restart', 'write', {}).action).toBe('allow');
+    expect(hasActiveDirective('sess-restart')).toBe(true);
+    expect(isSessionApproved('sess-restart')).toBe(true);
+  });
+
+  it('directive without approval survives restart', () => {
+    setConfirmFirstStore(store);
+    setConfirmFirstDirective('sess-restart', true, 'princ-456');
+
+    expect(evaluateConfirmFirstGateSync('sess-restart', 'write', {}).action).toBe('block');
+
+    setConfirmFirstStore(null);
+    clearAllConfirmFirstState();
+    setConfirmFirstStore(store);
+    hydrateFromStore('sess-restart');
+
+    expect(evaluateConfirmFirstGateSync('sess-restart', 'write', {}).action).toBe('block');
+    expect(hasActiveDirective('sess-restart')).toBe(true);
+    expect(isSessionApproved('sess-restart')).toBe(false);
+  });
+
+  it('no directive survives restart', () => {
+    setConfirmFirstStore(store);
+
+    setConfirmFirstStore(null);
+    clearAllConfirmFirstState();
+    setConfirmFirstStore(store);
+    hydrateFromStore('sess-noexist');
+
+    expect(evaluateConfirmFirstGateSync('sess-noexist', 'write', {}).action).toBe('skip');
+    expect(hasActiveDirective('sess-noexist')).toBe(false);
+  });
+});
+
+describe('Store degradation (ERR-002)', () => {
+  afterEach(() => {
+    setConfirmFirstStore(null);
+    clearAllConfirmFirstState();
+  });
+
+  it('store write failure degrades gracefully to cache-only', () => {
+    const throwingStore = {
+      upsertDirective: () => { throw new Error('DB unavailable'); },
+      upsertApproval: () => { throw new Error('DB unavailable'); },
+      getState: () => null,
+      deleteState: () => { throw new Error('DB unavailable'); },
+      deleteAllState: () => { throw new Error('DB unavailable'); },
+      pruneStaleRows: () => 0,
+      getAllState: () => [],
+    } as unknown as SqliteConfirmFirstStateStore;
+
+    setConfirmFirstStore(throwingStore);
+    setConfirmFirstDirective('sess-degrade', true, 'princ-123');
+
+    expect(hasActiveDirective('sess-degrade')).toBe(true);
+
+    setConfirmFirstApproval('sess-degrade');
+    expect(isSessionApproved('sess-degrade')).toBe(true);
+    expect(evaluateConfirmFirstGateSync('sess-degrade', 'write', {}).action).toBe('allow');
   });
 });

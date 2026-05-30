@@ -28,6 +28,8 @@ import { ArtificerOutputV1Schema } from '../internalization/artificer-output.js'
 import { EvaluatorOutputV1Schema } from '../internalization/evaluator-output.js';
 import { RolloutReviewerOutputV1Schema } from '../internalization/rollout-reviewer-output.js';
 import { TrainerOutputV1Schema } from '../internalization/trainer-output.js';
+import { EmpathyObserverOutputV1Schema } from '../observer/empathy-observer.js';
+import { CorrectionObserverOutputV1Schema } from '../observer/correction-observer.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair, deriveSchemaSummary } from './structured-output-repair.js';
@@ -295,6 +297,8 @@ const OUTPUT_SCHEMA_REGISTRY = new Map<string, TSchema>([
   ['evaluator-output-v1', EvaluatorOutputV1Schema],
   ['rollout-reviewer-output-v1', RolloutReviewerOutputV1Schema],
   ['trainer-output-v1', TrainerOutputV1Schema],
+  ['empathy-observer-output-v1', EmpathyObserverOutputV1Schema],
+  ['correction-observer-output-v1', CorrectionObserverOutputV1Schema],
 ]);
 
 export class PiAiRuntimeAdapter implements PDRuntimeAdapter {

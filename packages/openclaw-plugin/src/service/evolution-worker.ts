@@ -22,6 +22,14 @@ export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock
 export { EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './queue-io.js';
 import { saveEvolutionQueue, requireQueueLock } from './queue-io.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
+import {
+    WorkflowFunnelLoader,
+    PiAiRuntimeAdapter,
+    CorrectionObserver,
+    AgentScheduler,
+} from '@principles/core/runtime-v2';
+import { KeywordOptimizationService } from './keyword-optimization-service.js';
+import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 
 import { PrincipleCompiler } from '../core/principle-compiler/index.js';
 import { loadLedger, updatePrinciple } from '../core/principle-tree-ledger.js';
@@ -624,6 +632,49 @@ async function processEvolutionQueueWithResult(
     return { queue: queueResult, errors };
 }
 
+function resolveCorrectionObserver(wctx: WorkspaceContext, logger?: Pick<PluginLogger, 'info' | 'warn' | 'error' | 'debug'>): CorrectionObserver | null {
+  try {
+    const loader = new WorkflowFunnelLoader(wctx.stateDir);
+    const funnel = loader.getFunnel('pd-correction-observer');
+    const policy = funnel?.policy;
+    if (!policy || policy.runtimeKind !== 'pi-ai') {
+      logger?.debug?.('[PD:Correction] workflows.yaml pd-correction-observer policy not found. Falling back to environment variables.');
+      const provider = process.env.PD_CORRECTION_PROVIDER || 'anthropic';
+      const model = process.env.PD_CORRECTION_MODEL || 'anthropic/claude-3-5-sonnet';
+      const apiKeyEnv = process.env.PD_CORRECTION_API_KEY_ENV || 'ANTHROPIC_API_KEY';
+      const baseUrl = process.env.PD_CORRECTION_BASE_URL;
+
+      if (!process.env[apiKeyEnv]) {
+        logger?.debug?.(`[PD:Correction] Correction observer API key env ${apiKeyEnv} is not set. Periodic optimization disabled.`);
+        return null;
+      }
+
+      const adapter = new PiAiRuntimeAdapter({
+        provider,
+        model,
+        apiKeyEnv,
+        baseUrl,
+        workspace: wctx.workspaceDir,
+      });
+      return new CorrectionObserver({ runtimeAdapter: adapter });
+    }
+
+    const adapter = new PiAiRuntimeAdapter({
+      provider: String(policy.provider),
+      model: String(policy.model),
+      apiKeyEnv: String(policy.apiKeyEnv),
+      maxRetries: policy.maxRetries,
+      timeoutMs: policy.timeoutMs ?? 30_000,
+      baseUrl: policy.baseUrl,
+      workspace: wctx.workspaceDir,
+    });
+    return new CorrectionObserver({ runtimeAdapter: adapter }, { timeoutMs: policy.timeoutMs });
+  } catch (err) {
+    logger?.warn?.(`[PD:Correction] Failed to resolve CorrectionObserver: ${String(err)}`);
+    return null;
+  }
+}
+
 export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     id: 'principles-evolution-worker',
     api: null,
@@ -708,6 +759,78 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
                 // processPromotion removed (D-06) — promotion via PAIN_CANDIDATES no longer needed
+
+                // ── Correction Observer: periodic keyword optimization (D-40-08 / H-1) ──
+                try {
+                    const observer = resolveCorrectionObserver(wctx, logger);
+                    if (observer) {
+                        logger?.info?.('[PD:EvolutionWorker] Correction Observer resolved. Initiating periodic optimization...');
+                        const db = TrajectoryRegistry.get(wctx.workspaceDir);
+                        const recentSessions = db.listRecentSessions({ limit: 20 });
+                        const recentSessionIds = recentSessions.map(s => s.sessionId);
+
+                        if (recentSessionIds.length > 0) {
+                            const recentMessages: string[] = [];
+                            for (const sId of recentSessionIds.slice(0, 5)) {
+                                try {
+                                    const turns = db.listUserTurnsForSession(sId);
+                                    for (const t of turns) {
+                                        if (t.rawExcerpt) {
+                                            recentMessages.push(t.rawExcerpt);
+                                        }
+                                    }
+                                } catch (turnErr) {
+                                    logger?.warn?.(`[PD:EvolutionWorker] Failed to load user turns for session ${sId}: ${String(turnErr)}`);
+                                }
+                            }
+
+                            const learner = CorrectionCueLearner.get(wctx.stateDir);
+                            const keywords = learner.getStore().keywords;
+                            const keywordStoreSummary = {
+                                totalKeywords: keywords.length,
+                                terms: keywords.map(k => ({
+                                    term: k.term,
+                                    weight: k.weight,
+                                    hitCount: k.hitCount ?? 0,
+                                    truePositiveCount: k.truePositiveCount ?? 0,
+                                    falsePositiveCount: k.falsePositiveCount ?? 0,
+                                })),
+                            };
+
+                            const optimizationService = KeywordOptimizationService.get(wctx.stateDir, wctx.workspaceDir, logger);
+                            const trajectoryHistory = await optimizationService.buildTrajectoryHistory(recentSessionIds);
+
+                            const payload = {
+                                parentSessionId: 'evolution-worker',
+                                workspaceDir: wctx.workspaceDir,
+                                keywordStoreSummary,
+                                recentMessages,
+                                trajectoryHistory,
+                            };
+
+                            const scheduler = new AgentScheduler();
+                            scheduler.register({
+                                agentId: 'correction-observer',
+                                mode: 'realtime',
+                                runner: observer,
+                            });
+
+                            logger?.info?.(`[PD:EvolutionWorker] Dispatching correction-observer with ${trajectoryHistory.length} trajectory events, ${recentMessages.length} recent messages.`);
+                            const result = await scheduler.dispatch('correction-observer', payload);
+                            logger?.info?.(`[PD:EvolutionWorker] Correction-observer completed: updated=${result.updated}, summary="${result.summary}"`);
+                            
+                            if (result.updated) {
+                                optimizationService.applyResult(result);
+                            }
+                        } else {
+                            logger?.info?.('[PD:EvolutionWorker] No recent sessions found. Skipping correction optimization.');
+                        }
+                    }
+                } catch (corrErr) {
+                    const corrErrMsg = `Correction observer execution failed: ${String(corrErr)}`;
+                    cycleResult.errors.push(corrErrMsg);
+                    logger?.warn?.(`[PD:EvolutionWorker] ${corrErrMsg}`);
+                }
 
                 try {
                     const subagentRuntime = api?.runtime?.subagent;
