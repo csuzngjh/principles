@@ -8,7 +8,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
-import { detectApprovalMarker, setConfirmFirstApproval, setConfirmFirstDirective, hydrateFromStore, pruneStoreStaleRows, setConfirmFirstStore } from '../core/confirm-first-gate.js';
+import { detectApprovalMarker, setConfirmFirstApproval, setConfirmFirstDirective, hydrateFromStore, pruneStoreStaleRows, setConfirmFirstStore, resetConfirmFirst } from '../core/confirm-first-gate.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
@@ -1003,6 +1003,9 @@ ${heartbeatChecklist}
     }
   } catch (e) {
     logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);
+    if (sessionId) {
+      resetConfirmFirst(sessionId);
+    }
   }
 
   // Build appendSystemContext with recency effect
