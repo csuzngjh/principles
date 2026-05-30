@@ -152,7 +152,7 @@ export function severityToPenalty(
 
 export function normalizeSeverity(input?: string): 'mild' | 'moderate' | 'severe' {
   const normalized = (input || '').toLowerCase();
-  if (normalized === 'severe' || normalized === 'high') return 'severe';
+  if (normalized === 'severe' || normalized === 'high' || normalized === 'critical') return 'severe';
   if (normalized === 'moderate' || normalized === 'medium') return 'moderate';
   return 'mild';
 }
