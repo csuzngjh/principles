@@ -931,6 +931,7 @@ export type {
   ApprovalListResult,
   ApprovalWithContext,
   ConfidenceLabel,
+  ConfirmFirstStateRecord,
 } from './activation/index.js';
 
 export {
@@ -953,6 +954,7 @@ export {
   decideAutoPromotion,
   MemoryApprovalQueueStore,
   SqliteApprovalQueueStore,
+  SqliteConfirmFirstStateStore,
   mapConfidenceToLabel,
 } from './activation/index.js';
 
