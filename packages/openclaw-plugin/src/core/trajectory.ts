@@ -861,12 +861,13 @@ export class TrajectoryDatabase {
   listUserTurnsForSession(sessionId: string): {
     id: number;
     turnIndex: number;
+    rawExcerpt: string;
     correctionDetected: boolean;
     correctionCue: string | null;
     createdAt: string;
   }[] {
     const rows = this.db.prepare(`
-      SELECT id, turn_index, correction_detected, correction_cue, created_at
+      SELECT id, turn_index, raw_excerpt, correction_detected, correction_cue, created_at
       FROM user_turns
       WHERE session_id = ?
       ORDER BY turn_index ASC
@@ -875,6 +876,7 @@ export class TrajectoryDatabase {
     return rows.map((row) => ({
       id: Number(row.id),
       turnIndex: Number(row.turn_index),
+      rawExcerpt: String(row.raw_excerpt ?? ''),
       correctionDetected: Boolean(row.correction_detected),
       correctionCue: row.correction_cue ? String(row.correction_cue) : null,
       createdAt: String(row.created_at),

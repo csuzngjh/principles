@@ -88,6 +88,10 @@ export const DiagnosticianTaskRecordSchema = Type.Intersect([
       Type.Literal('automatic_hook'),
     ])),
     provenanceReason: Type.Optional(Type.String()),
+    evidence: Type.Optional(Type.Array(Type.Object({
+      sourceRef: Type.String({ minLength: 1 }),
+      note: Type.String({ minLength: 1, maxLength: 200 }),
+    }))),
   }),
 ]);
 export type DiagnosticianTaskRecord = Static<typeof DiagnosticianTaskRecordSchema>;

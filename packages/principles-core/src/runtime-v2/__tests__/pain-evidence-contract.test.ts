@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { PainSignalBridge, createDiagnosticianTaskId } from '../pain-signal-bridge.js';
-import type { PainDetectedData } from '../pain-signal-bridge.js';
+import { PainSignalBridge, createDiagnosticianTaskId, MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '../pain-signal-bridge.js';
+import type { PainDetectedData, PainEvidenceEntry } from '../pain-signal-bridge.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { LedgerAdapter } from '../candidate-intake.js';
 import type { RunnerResult } from '../runner/runner-result.js';
@@ -264,5 +264,122 @@ describe('PainSignalBridge evidence persistence (PRI-255)', () => {
       const dj = getDiagnosticJson(capturedTasks, painId);
       expect(dj.severity).toBe(expectedSeverity);
     }
+  });
+});
+
+describe('PainSignalBridge evidence field (PRI-277)', () => {
+  it('persists evidence entries into diagnosticJson', async () => {
+    const capturedTasks = new Map<string, TaskRecord>();
+    const stateManager = makeMockStateManager(capturedTasks);
+    const ledgerAdapter = makeMockLedgerAdapter();
+    const runner = makeMockRunner();
+
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner: runner as never,
+      intakeService: undefined as never,
+      ledgerAdapter,
+      autoIntakeEnabled: false,
+    });
+
+    const evidence: PainEvidenceEntry[] = [
+      { sourceRef: 'owner_message:2026-05-30T12:00:00Z', note: '错了，重写' },
+      { sourceRef: 'agent_turn:2026-05-30T12:00:05Z', note: 'I will modify the config file' },
+    ];
+
+    const painData: PainDetectedData = {
+      painId: 'pain_evidence_test',
+      painType: 'tool_failure',
+      source: 'write',
+      reason: 'Tool write failed on config.ts',
+      score: 60,
+      sessionId: 'sess-evidence',
+      provenance: 'automatic_hook',
+      evidence,
+    };
+
+    await bridge.onPainDetected(painData);
+
+    const dj = getDiagnosticJson(capturedTasks, painData.painId);
+    expect(Array.isArray(dj.evidence)).toBe(true);
+    const ev = dj.evidence as PainEvidenceEntry[];
+    expect(ev).toHaveLength(2);
+    expect(ev[0]?.sourceRef).toBe('owner_message:2026-05-30T12:00:00Z');
+    expect(ev[0]?.note).toBe('错了，重写');
+    expect(ev[1]?.sourceRef).toBe('agent_turn:2026-05-30T12:00:05Z');
+  });
+
+  it('defaults evidence to empty array when not provided', async () => {
+    const capturedTasks = new Map<string, TaskRecord>();
+    const stateManager = makeMockStateManager(capturedTasks);
+    const ledgerAdapter = makeMockLedgerAdapter();
+    const runner = makeMockRunner();
+
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner: runner as never,
+      intakeService: undefined as never,
+      ledgerAdapter,
+      autoIntakeEnabled: false,
+    });
+
+    const painData: PainDetectedData = {
+      painId: 'pain_no_evidence',
+      painType: 'tool_failure',
+      source: 'write',
+      reason: 'No evidence test',
+      score: 40,
+      sessionId: 'sess-noev',
+    };
+
+    await bridge.onPainDetected(painData);
+
+    const dj = getDiagnosticJson(capturedTasks, painData.painId);
+    expect(Array.isArray(dj.evidence)).toBe(true);
+    expect((dj.evidence as unknown[]).length).toBe(0);
+  });
+
+  it('respects MAX_EVIDENCE_ENTRIES constant', () => {
+    expect(MAX_EVIDENCE_ENTRIES).toBe(4);
+  });
+
+  it('respects MAX_EVIDENCE_NOTE_CHARS constant', () => {
+    expect(MAX_EVIDENCE_NOTE_CHARS).toBe(200);
+  });
+
+  it('evidence entries have correct shape', async () => {
+    const capturedTasks = new Map<string, TaskRecord>();
+    const stateManager = makeMockStateManager(capturedTasks);
+    const ledgerAdapter = makeMockLedgerAdapter();
+    const runner = makeMockRunner();
+
+    const bridge = new PainSignalBridge({
+      stateManager,
+      runner: runner as never,
+      intakeService: undefined as never,
+      ledgerAdapter,
+      autoIntakeEnabled: false,
+    });
+
+    const longNote = 'A'.repeat(300);
+    const evidence: PainEvidenceEntry[] = [
+      { sourceRef: 'owner_message:2026-05-30T12:00:00Z', note: longNote },
+    ];
+
+    const painData: PainDetectedData = {
+      painId: 'pain_long_note',
+      painType: 'user_frustration',
+      source: 'manual',
+      reason: 'Long note test',
+      score: 80,
+      sessionId: 'sess-long',
+      evidence,
+    };
+
+    await bridge.onPainDetected(painData);
+
+    const dj = getDiagnosticJson(capturedTasks, painData.painId);
+    const ev = dj.evidence as PainEvidenceEntry[];
+    expect(ev[0]?.note).toBe(longNote);
   });
 });
