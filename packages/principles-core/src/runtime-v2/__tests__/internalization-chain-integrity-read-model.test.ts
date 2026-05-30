@@ -218,7 +218,6 @@ describe('InternalizationChainIntegrityReadModel', () => {
   });
 
   it('DOES report missing_dreamer_task for consumed actionable candidate without dreamer (PRI-253)', () => {
-    // Non-defer candidates (principle, rule, prompt, implementation) MUST have dreamer tasks
     mockDb.prepare.mockImplementation((sql: string) => {
       if (sql.includes('principle_candidates')) {
         return {
@@ -238,6 +237,72 @@ describe('InternalizationChainIntegrityReadModel', () => {
     const result = model.check();
 
     expect(result.brokenLinks.some(l => l.type === 'missing_dreamer_task' && l.candidateId === 'c-action')).toBe(true);
+  });
+
+  it('does NOT report missing_dreamer_task for consumed candidate mapped to skill channel (MVP-quiet)', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return {
+          all: vi.fn(() => [{
+            candidate_id: 'c-impl',
+            task_id: 'diag-impl',
+            source_run_id: 'r-impl',
+            recommendation_kind: 'implementation',
+          }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'missing_dreamer_task' && l.candidateId === 'c-impl')).toBe(false);
+  });
+
+  it('DOES report missing_dreamer_task for consumed candidate mapped to prompt channel', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return {
+          all: vi.fn(() => [{
+            candidate_id: 'c-prompt',
+            task_id: 'diag-prompt',
+            source_run_id: 'r-prompt',
+            recommendation_kind: 'prompt',
+          }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'missing_dreamer_task' && l.candidateId === 'c-prompt')).toBe(true);
+  });
+
+  it('DOES report missing_dreamer_task for consumed candidate mapped to code_tool_hook channel', () => {
+    mockDb.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('principle_candidates')) {
+        return {
+          all: vi.fn(() => [{
+            candidate_id: 'c-rule',
+            task_id: 'diag-rule',
+            source_run_id: 'r-rule',
+            recommendation_kind: 'rule',
+          }]),
+          get: vi.fn(() => undefined),
+        };
+      }
+      return { all: vi.fn(() => []), get: vi.fn(() => undefined) };
+    });
+
+    const model = new InternalizationChainIntegrityReadModel({ workspaceDir: WS });
+    const result = model.check();
+
+    expect(result.brokenLinks.some(l => l.type === 'missing_dreamer_task' && l.candidateId === 'c-rule')).toBe(true);
   });
 
   it('includes generatedAt in output', () => {

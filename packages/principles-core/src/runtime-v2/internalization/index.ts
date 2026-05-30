@@ -434,6 +434,8 @@ export type {
 
 export {
   ROUTE_CHANNEL_MAP,
+  MVP_ENABLED_CHANNELS,
+  CANDIDATE_KIND_TO_ROUTE,
   computeBridgeDecision,
   buildDreamerTaskSeed,
   seedIntakeTask,
