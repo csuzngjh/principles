@@ -249,11 +249,13 @@ export type {
   /** @deprecated Use PainToPrincipleServiceOptions instead */
   PainSignalBridgeOptions,
   PainDetectedData,
+  PainEvidenceEntry,
   /** @deprecated Use PainToPrincipleOutput instead */
   PainSignalBridgeResult,
   /** @deprecated Internal — use PainToPrincipleOutput.status */
   PainSignalBridgeStatus,
 } from './pain-signal-bridge.js';
+export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bridge.js';
 /** @deprecated Internal implementation detail — observability is handled by PainToPrincipleService */
 export { recordPainSignalObservability } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
