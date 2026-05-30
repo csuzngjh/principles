@@ -7,7 +7,7 @@
  */
 
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
-import type { CorrectionObserverResult } from './subagent-workflow/correction-observer-types.js';
+import type { CorrectionObserverOutputV1 as CorrectionObserverResult } from '@principles/core/runtime-v2';
 import type { PluginLogger } from '../openclaw-sdk.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 
@@ -83,8 +83,8 @@ export class KeywordOptimizationService {
       const MAX_FP_TERMS = 20;
       const normalizedFpTerms = [...new Set(
         result.fpTerms
-          .map(t => t.trim().toLowerCase())
-          .filter(t => t.length > 0)
+          .map((t: string) => t.trim().toLowerCase())
+          .filter((t: string) => t.length > 0)
       )].slice(0, MAX_FP_TERMS);
 
       for (const term of normalizedFpTerms) {
@@ -166,4 +166,4 @@ export type TrajectoryHistoryEntry = {
 };
 
 /** Re-export CorrectionObserverPayload for convenience */
-export type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
+export type { CorrectionObserverPayload } from '@principles/core/runtime-v2';

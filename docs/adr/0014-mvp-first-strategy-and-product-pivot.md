@@ -221,3 +221,19 @@ v2.0 引入的 R4 Attribution Loop / R5 Conflict Detection / PRRR 北极星指�
 - ADR-0006 (5-channel activation, 优先级被本 ADR 调整)
 - ADR-0013 (Attribution Pipeline, 被本 ADR superseded)
 - ADR-0012 (Runtime V2-only, 仍生效；Nocturnal 退役继续)
+
+---
+
+## Amendment (2026-05-30): Promotion of Empathy Observer & Correction Observer to MVP-Core
+
+### Context & Justification
+During real-world execution testing of MVP Story A', it was observed that **deterministic programmatic pain signals (such as simple command failures or hard exceptions) are extremely hard to trigger in regular user-assistant conversational scenarios**. This sparse trigger rate makes behavior internalization slow to manifest, creating an observation gap for the initial MVP evaluation.
+
+To resolve this bottleneck, we have promoted the **Empathy Observer** (previously classified as MVP-Quiet) and **Correction Observer** (previously part of the retired nocturnal pipeline, now re-designed as an active SDK-level periodic optimizer) to **MVP-Core**.
+
+- **Empathy Observer**: Uses LLM semantic analysis in the background of conversational prompts to extract high-quality emotional friction and frustration keywords from user messages. This reactively captures frustration patterns that traditional programmatic error-catchers miss completely.
+- **Correction Observer**: Periodically reviews SQLite trajectory history on worker heartbeat to automatically adjust keyword weights and decay false positives, ensuring trigger accuracy continuously remains self-correcting.
+
+### Reclassified Items
+1. **Empathy Observer**: Reclassified from **MVP-Quiet** to **MVP-Core** (wired asynchronously in the prompt build hook).
+2. **Correction Observer**: Reclassified from **MVP-Gone** (as nocturnal workflow) to **MVP-Core** (as a lightweight SDK-level observer triggered on evolution heartbeat).

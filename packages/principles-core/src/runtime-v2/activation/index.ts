@@ -55,6 +55,9 @@ export {
 
 export { SqliteActivationStateStore } from './sqlite-activation-state-store.js';
 
+export { SqliteConfirmFirstStateStore } from './sqlite-confirm-first-state-store.js';
+export type { ConfirmFirstStateRecord } from './sqlite-confirm-first-state-store.js';
+
 export { ApprovalQueue, decideAutoPromotion } from './approval-queue.js';
 
 export { MemoryApprovalQueueStore } from './memory-approval-store.js';

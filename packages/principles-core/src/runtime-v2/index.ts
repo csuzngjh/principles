@@ -931,6 +931,7 @@ export type {
   ApprovalListResult,
   ApprovalWithContext,
   ConfidenceLabel,
+  ConfirmFirstStateRecord,
 } from './activation/index.js';
 
 export {
@@ -953,6 +954,7 @@ export {
   decideAutoPromotion,
   MemoryApprovalQueueStore,
   SqliteApprovalQueueStore,
+  SqliteConfirmFirstStateStore,
   mapConfidenceToLabel,
 } from './activation/index.js';
 
@@ -1394,4 +1396,41 @@ export {
   isEvolutionTaskEventEntry,
   isEmpathyRollbackEventEntry,
 } from './types/event-payload.js';
+
+// ── Empathy and Correction Observers (Unified SDK Migration) ──
+export {
+  EmpathyObserverInputSchema,
+  EmpathyObserverOutputV1Schema,
+  EmpathyObserver,
+} from './observer/empathy-observer.js';
+export type {
+  EmpathyObserverInput,
+  EmpathyObserverOutputV1,
+  EmpathyObserverDeps,
+  EmpathyObserverOptions,
+} from './observer/empathy-observer.js';
+
+export {
+  CorrectionObserverPayloadSchema,
+  CorrectionObserverOutputV1Schema,
+  CorrectionObserver,
+} from './observer/correction-observer.js';
+export type {
+  CorrectionObserverPayload,
+  CorrectionObserverOutputV1,
+  CorrectionObserverDeps,
+  CorrectionObserverOptions,
+} from './observer/correction-observer.js';
+
+export {
+  AgentScheduler,
+} from './observer/agent-scheduler.js';
+export type {
+  AgentTypeMap,
+  AgentScheduleMode,
+  ScheduledAgent,
+} from './observer/agent-scheduler.js';
+
+export { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
+
 

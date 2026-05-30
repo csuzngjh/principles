@@ -97,6 +97,8 @@ export const AGENT_IDS = {
   ARTIFICER: 'artificer',
   REPLAY_JUDGE: 'replay-judge',
   RULE_AUTHOR: 'rule-author',
+  EMPATHY_OBSERVER: 'empathy-observer',
+  CORRECTION_OBSERVER: 'correction-observer',
 } as const;
 
 export type WellKnownAgentId = (typeof AGENT_IDS)[keyof typeof AGENT_IDS];
