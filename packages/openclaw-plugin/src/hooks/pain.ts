@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, trackPrincipleValue } from '../core/pain.js';
@@ -32,14 +33,33 @@ interface ToolParams {
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
 function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleService {
-  const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
+  // Use main workspace for diagnostician pipeline (not subdirectory workspaces).
+  // The queue API checks the main workspace's state.db, so tasks must be created there.
+  // If workspaceDir is a subdirectory (e.g. .../workspace/e2e), derive the main workspace.
+  const mainWorkspaceDir = deriveMainWorkspace(wctx.workspaceDir);
+  const mainStateDir = path.join(mainWorkspaceDir, '.state');
+  const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: mainStateDir });
   return new PainToPrincipleService({
-    workspaceDir: wctx.workspaceDir,
-    stateDir: wctx.stateDir,
+    workspaceDir: mainWorkspaceDir,
+    stateDir: mainStateDir,
     ledgerAdapter,
     owner: 'openclaw-plugin',
     autoIntakeEnabled: true,
   });
+}
+
+/**
+ * Derive the main OpenClaw workspace directory from a potentially nested workspace.
+ * If the workspace has a parent with a .pd/state.db, use that (it's the main workspace).
+ * Otherwise, use the workspace itself.
+ */
+function deriveMainWorkspace(workspaceDir: string): string {
+  const parentDir = path.dirname(workspaceDir);
+  const parentPdDb = path.join(parentDir, '.pd', 'state.db');
+  if (fs.existsSync(parentPdDb)) {
+    return parentDir;
+  }
+  return workspaceDir;
 }
 
 function shouldAttributePrincipleToTool(principle: { contextTags: string[]; trigger: string; }, toolName: string): boolean {
@@ -47,6 +67,7 @@ function shouldAttributePrincipleToTool(principle: { contextTags: string[]; trig
 }
 
 export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoopEvent): Promise<void> {
+  SystemLogger.log(wctx.workspaceDir, 'EMIT_PAIN_START', `event.type=${event.type}, event.data?.painId=${(event as { data?: { painId?: string } }).data?.painId ?? 'N/A'}`);
   try {
     wctx.evolutionReducer.emitSync(event);
   } catch (e) {
@@ -70,6 +91,15 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
         provenance: painData.provenance,
         recordObservability: true,
       });
+      SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_RESULT', JSON.stringify({
+        status: result.status,
+        painId: result.painId,
+        taskId: result.taskId,
+        failureCategory: result.failureCategory,
+        latencyMs: result.latencyMs,
+        message: result.message,
+        candidateCount: result.candidateIds?.length ?? 0,
+      }));
       if (result.status === 'failed' && result.failureCategory) {
         SystemLogger.log(wctx.workspaceDir, 'PAIN_SERVICE_FAILED', JSON.stringify({
           painId: result.painId,

@@ -236,6 +236,17 @@ export function handleLlmOutput(
     // If a semantic pain threshold is crossed, only valuable episodes enter Runtime v2.
     // Lower-signal detections remain in the event log/GFI layer for accumulation.
     const painTriggerThreshold = config.get('thresholds.pain_trigger') || 30;
+
+    // GFI-triggered pain: when accumulated friction (from empathy keywords, tool failures, etc.)
+    // crosses the highGfi threshold, emit a pain signal even if L1 detection didn't fire.
+    // This closes the loop: empathy keyword match → GFI accumulation → pain signal.
+    const highGfiThreshold = Math.max(config.get('severity_thresholds.high') || 70, painTriggerThreshold + 30);
+    if (state.currentGfi >= highGfiThreshold && painScore < painTriggerThreshold) {
+        painScore = Math.min(state.currentGfi, 60); // Cap at 60 to avoid auto-admission
+        source = 'user_empathy';
+        matchedReason = `Accumulated GFI (${state.currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Source: empathy keyword friction.`;
+    }
+
     if (painScore >= painTriggerThreshold) {
         const gate = evaluatePainDiagnosticGate({
             source: source === 'llm_paralysis' ? 'llm_paralysis' : 'semantic',

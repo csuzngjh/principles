@@ -42,7 +42,22 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
       return store;
     }
 
-    return parsed as EmpathyKeywordStore;
+    // Merge missing seed terms into existing store (PRI-274)
+    const store = parsed as EmpathyKeywordStore;
+    const defaultStore = createDefaultKeywordStore(language);
+    let addedCount = 0;
+    for (const [term, entry] of Object.entries(defaultStore.terms)) {
+      if (!store.terms[term]) {
+        store.terms[term] = { ...entry };
+        addedCount++;
+      }
+    }
+    if (addedCount > 0) {
+      console.warn(`[PD:Empathy] Merged ${addedCount} new seed terms into existing store`);
+      saveKeywordStore(stateDir, store);
+    }
+
+    return store;
   } catch (e) {
     console.warn(`[PD:Empathy] Failed to load keyword store: ${e}`);
     const store = createDefaultKeywordStore(language);
