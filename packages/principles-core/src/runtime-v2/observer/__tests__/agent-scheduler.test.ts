@@ -37,4 +37,24 @@ describe('AgentScheduler', () => {
       scheduler.dispatch('empathy-observer', { userMessage: 'test' })
     ).rejects.toThrow('Agent empathy-observer is not registered in AgentScheduler');
   });
+
+  it('allows overriding an existing agent registration (Map.set override)', async () => {
+    const scheduler = new AgentScheduler();
+    const runner1 = { run: vi.fn().mockResolvedValue({ damageDetected: false, severity: 'mild' as const, confidence: 0.1, reason: 'r1' }) };
+    const runner2 = { run: vi.fn().mockResolvedValue({ damageDetected: true, severity: 'severe' as const, confidence: 0.9, reason: 'r2' }) };
+
+    scheduler.register({ agentId: 'empathy-observer', mode: 'realtime', runner: runner1 });
+    scheduler.register({ agentId: 'empathy-observer', mode: 'realtime', runner: runner2 });
+
+    const result = await scheduler.dispatch('empathy-observer', { userMessage: 'test' });
+    expect(runner1.run).not.toHaveBeenCalled();
+    expect(runner2.run).toHaveBeenCalledWith({ userMessage: 'test' });
+    expect(result.damageDetected).toBe(true);
+    expect(result.severity).toBe('severe');
+  });
+
+  it('returns empty array when no agents are registered', () => {
+    const scheduler = new AgentScheduler();
+    expect(scheduler.getRegisteredAgents()).toEqual([]);
+  });
 });

@@ -30,7 +30,7 @@ export class AgentScheduler {
 
   /**
    * Dispatch execution to the registered runner with 100% type-safe input/output contracts.
-   * Guarantees zero "as" casts in the caller boundary.
+   * Guarantees zero "as" casts in the public caller boundary (internal engine uses safe covariance casts).
    */
   async dispatch<K extends keyof AgentTypeMap>(
     agentId: K,
