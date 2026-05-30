@@ -46,7 +46,7 @@ describe('PainConfig', () => {
 
         // Check some defaults
         expect(config.get('thresholds.pain_trigger')).toBe(40);
-        expect(config.get('scores.paralysis')).toBe(30);
+        expect(config.get('scores.paralysis')).toBe(45); // PRI-274: must be >= pain_trigger (40)
     });
 
     it('should return nested values using dot notation', () => {
