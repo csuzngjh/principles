@@ -19,6 +19,7 @@ import {
   type DiagnosticianContextPayload,
   type DiagnosisTarget,
   type FullTracePayloadV2,
+  type PainEvidenceEntry,
   DiagnosticianContextPayloadSchema,
   validateFullTracePayload,
   sanitizeFullTracePayload,
@@ -28,6 +29,7 @@ import {
 import type { TaskRecord, DiagnosticianTaskRecord } from '../../task-status.js';
 import type { RunRecord } from '../../runtime-protocol.js';
 import { PDRuntimeError } from '../../error-categories.js';
+import { MAX_EVIDENCE_ENTRIES } from '../../pain-signal-bridge.js';
 
 const PAIN_PROVENANCE_VALUES = ['openclaw_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'] as const;
 
@@ -95,6 +97,7 @@ export class SqliteContextAssembler implements ContextAssembler {
       sessionIdHint: dt.sessionIdHint || undefined,
       provenance: dt.provenance || undefined,
       provenanceReason: dt.provenanceReason || undefined,
+      evidence: dt.evidence,
     };
 
     const convAmbiguityNotes = SqliteContextAssembler.buildAmbiguityNotes(
@@ -151,12 +154,14 @@ export class SqliteContextAssembler implements ContextAssembler {
       }
     }
 
+    const evidenceSourceRefs = dt.evidence?.map(e => e.sourceRef) ?? [];
+
     const payload: DiagnosticianContextPayload = {
       contextId,
       contextHash,
       taskId,
       workspaceDir: dt.workspaceDir,
-      sourceRefs: [taskId, ...runIds],
+      sourceRefs: [taskId, ...runIds, ...evidenceSourceRefs],
       diagnosisTarget,
       conversationWindow: historyResult.entries,
       ambiguityNotes: ambiguityNotes.length > 0 ? ambiguityNotes : undefined,
@@ -295,6 +300,17 @@ export class SqliteContextAssembler implements ContextAssembler {
     return obj[key];
   }
 
+  private static extractEvidence(parsed: Record<string, unknown>): PainEvidenceEntry[] | undefined {
+    if (!Object.hasOwn(parsed, 'evidence') || !Array.isArray(parsed.evidence)) return undefined;
+    return (parsed.evidence as unknown[])
+      .filter((e: unknown): e is PainEvidenceEntry =>
+        typeof e === 'object' && e !== null &&
+        typeof (e as Record<string, unknown>).sourceRef === 'string' &&
+        typeof (e as Record<string, unknown>).note === 'string'
+      )
+      .slice(0, MAX_EVIDENCE_ENTRIES);
+  }
+
   /**
    * Reconstruct a DiagnosticianTaskRecord from a base TaskRecord by decoding
    * the diagnostic_json column (if present).
@@ -320,6 +336,7 @@ export class SqliteContextAssembler implements ContextAssembler {
             workspaceDir: SqliteContextAssembler.extractStringField(parsed, 'workspaceDir'),
             provenance: Object.hasOwn(parsed, 'provenance') && isPainProvenance(parsed.provenance) ? parsed.provenance : undefined,
             provenanceReason: SqliteContextAssembler.extractStringField(parsed, 'provenanceReason'),
+            evidence: SqliteContextAssembler.extractEvidence(parsed),
           };
         } else {
           ambiguityNotes.push(
@@ -345,6 +362,7 @@ export class SqliteContextAssembler implements ContextAssembler {
       agentIdHint: extra.agentIdHint ?? (base as DiagnosticianTaskRecord).agentIdHint,
       provenance: extra.provenance,
       provenanceReason: extra.provenanceReason,
+      evidence: extra.evidence,
     };
   }
 }

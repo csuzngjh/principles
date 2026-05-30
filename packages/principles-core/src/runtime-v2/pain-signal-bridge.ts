@@ -9,6 +9,14 @@ import { evaluateCandidateAdmissions } from './admission-gate.js';
 
 export type { PainProvenance };
 
+export const MAX_EVIDENCE_ENTRIES = 4;
+export const MAX_EVIDENCE_NOTE_CHARS = 200;
+
+export interface PainEvidenceEntry {
+  sourceRef: string;
+  note: string;
+}
+
 export interface PainDetectedData {
   painId: string;
   painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
@@ -20,6 +28,7 @@ export interface PainDetectedData {
   taskId?: string;
   traceId?: string;
   provenance?: PainProvenance;
+  evidence?: PainEvidenceEntry[];
 }
 
 export type PainSignalBridgeStatus = 'succeeded' | 'skipped' | 'failed' | 'retried' | 'degraded';
@@ -93,6 +102,7 @@ function buildDiagnosticJson(data: PainDetectedData): string {
     agentIdHint: data.agentId ?? null,
     provenance,
     provenanceReason: provenanceReason(provenance),
+    evidence: data.evidence ?? [],
   });
 }
 

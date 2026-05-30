@@ -111,6 +111,13 @@ export interface TraceUnavailableDetail {
   nextAction: string;
 }
 
+export const PainEvidenceEntrySchema = Type.Object({
+  sourceRef: Type.String({ minLength: 1 }),
+  note: Type.String({ minLength: 1, maxLength: 200 }),
+});
+
+export type PainEvidenceEntry = Static<typeof PainEvidenceEntrySchema>;
+
 export const DiagnosisTargetSchema = Type.Object({
   reasonSummary: Type.Optional(Type.String()),
   source: Type.Optional(Type.String()),
@@ -132,6 +139,7 @@ export const DiagnosisTargetSchema = Type.Object({
     reason: Type.String(),
     nextAction: Type.String(),
   })),
+  evidence: Type.Optional(Type.Array(PainEvidenceEntrySchema)),
 });
 
 export type DiagnosisTarget = Static<typeof DiagnosisTargetSchema>;

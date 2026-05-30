@@ -8,6 +8,7 @@
  * - 5级成长路径：Seed → Forest
  */
 import { Type, type Static } from '@sinclair/typebox';
+import type { PainEvidenceEntry } from '../pain-signal-bridge.js';
 
 // ===== 等级定义 =====
 
@@ -312,6 +313,7 @@ export interface EvolutionPainDetectedData {
   taskId?: string;
   traceId?: string;
   provenance?: 'openclaw_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
+  evidence?: PainEvidenceEntry[];
 }
 
 export interface CandidateCreatedData {

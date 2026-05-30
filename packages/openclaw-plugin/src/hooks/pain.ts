@@ -11,8 +11,9 @@ import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolutio
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js';
-import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData } from '@principles/core/runtime-v2';
+import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData, type PainEvidenceEntry, MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
+import { sanitizeAssistantText } from './message-sanitize.js';
 
 /**
  * Interface for tool parameters to avoid 'any'
@@ -42,6 +43,53 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
   });
 }
 
+function buildTrajectoryEvidence(wctx: WorkspaceContext, sessionId: string): PainEvidenceEntry[] {
+  const evidence: PainEvidenceEntry[] = [];
+
+  try {
+    const userTurns = wctx.trajectory?.listUserTurnsForSession?.(sessionId) ?? [];
+    const lastCorrectionTurn = [...userTurns].reverse().find(t => t.correctionDetected);
+    if (lastCorrectionTurn) {
+      const sanitizedOwnerMessage = sanitizeAssistantText(
+        (lastCorrectionTurn.rawExcerpt ?? '').slice(0, MAX_EVIDENCE_NOTE_CHARS)
+      );
+      evidence.push({
+        sourceRef: `owner_message:${lastCorrectionTurn.createdAt}`,
+        note: sanitizedOwnerMessage,
+      });
+    }
+  } catch (e) {
+    evidence.push({
+      sourceRef: 'owner_message:unavailable',
+      note: `trajectory_user_turns_unavailable: ${String(e).slice(0, 100)}`,
+    });
+  }
+
+  try {
+    const assistantTurns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
+    const recentAssistant = assistantTurns.slice(-3);
+    for (const turn of recentAssistant) {
+      if (evidence.length >= MAX_EVIDENCE_ENTRIES) break;
+      const sanitizedNote = sanitizeAssistantText(
+        (turn.sanitizedText ?? '').slice(0, MAX_EVIDENCE_NOTE_CHARS)
+      );
+      evidence.push({
+        sourceRef: `agent_turn:${turn.createdAt}`,
+        note: sanitizedNote,
+      });
+    }
+  } catch (e) {
+    if (evidence.length < MAX_EVIDENCE_ENTRIES) {
+      evidence.push({
+        sourceRef: 'agent_turn:unavailable',
+        note: `trajectory_assistant_turns_unavailable: ${String(e).slice(0, 100)}`,
+      });
+    }
+  }
+
+  return evidence.slice(0, MAX_EVIDENCE_ENTRIES);
+}
+
 function shouldAttributePrincipleToTool(principle: { contextTags: string[]; trigger: string; }, toolName: string): boolean {
   return principle.contextTags.includes(toolName) || principle.trigger.includes(toolName);
 }
@@ -68,6 +116,7 @@ export async function emitPainDetectedEvent(wctx: WorkspaceContext, event: Evolu
         taskId: painData.taskId,
         traceId: painData.traceId,
         provenance: painData.provenance,
+        evidence: painData.evidence,
         recordObservability: true,
       });
       if (result.status === 'failed' && result.failureCategory) {
@@ -219,6 +268,7 @@ export function handleAfterToolCall(
         traceId,
         agentId: ctx.agentId,
         provenance: (sessionId && sessionId !== 'unknown') ? 'openclaw_context_bound' : 'owner_reported_no_host_trace',
+        evidence: buildTrajectoryEvidence(wctx, sessionId),
       },
     });
     return;
@@ -529,6 +579,7 @@ export function handleAfterToolCall(
       traceId,
       agentId: ctx.agentId,
       provenance: 'automatic_hook',
+      evidence: buildTrajectoryEvidence(wctx, sessionId),
     },
   });
 }
