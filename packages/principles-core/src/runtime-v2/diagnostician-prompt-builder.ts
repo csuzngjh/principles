@@ -113,10 +113,12 @@ export interface PromptBuildResult {
 export const DIAGNOSTIC_PROTOCOL_INSTRUCTION = `You are a root cause analysis expert. Follow this protocol:
 
 PHASE 1 — Evidence Review:
-Review the provided sourceRefs, conversationWindow entries, and eventSummaries
-from the context payload. Do NOT read any files or call any tools.
+Review the provided sourceRefs, diagnosisTarget.evidence entries, conversationWindow
+entries, and eventSummaries from the context payload. Do NOT read any files or call any tools.
 Record all evidence by referencing the sourceRef identifiers and conversation
 entries already present in the context. Each evidence item must cite its source.
+Pay special attention to diagnosisTarget.evidence — these are the primary behavioral
+evidence (owner messages and agent actions) that the root cause analysis must address.
 
 PHASE 2 — Causal Chain (5 Whys):
 Build a Why-1 through Why-5 causal chain. Each Why MUST have evidence from Phase 1.
@@ -160,6 +162,9 @@ CONSTRAINTS:
 - "principle" kind: MUST include abstractedPrinciple (<=200 chars)
 - "rule" kind: MUST include triggerPattern AND action
 - All evidence must reference sourceRef identifiers or conversationWindow entries from the context payload
+- The root cause MUST describe an agent behavior or decision, not a system monitoring or diagnostic mechanism.
+  If the evidence only describes internal metrics (GFI, friction scores, threshold crossings) with no
+  owner message or agent action context, return confidence < 0.3 and kind="defer".
 `;
 
 /**
