@@ -286,3 +286,48 @@ describe('Store degradation (ERR-002)', () => {
     expect(evaluateConfirmFirstGateSync('sess-degrade', 'write', {}).action).toBe('allow');
   });
 });
+
+describe('Stale directive cleared on reset (PRI-266)', () => {
+  beforeEach(() => {
+    clearAllConfirmFirstState();
+  });
+
+  it('resetConfirmFirst clears directive and approval from cache and store', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cf-stale-'));
+    try {
+      const connection = new SqliteConnection(tmpDir);
+      const store = new SqliteConfirmFirstStateStore(connection);
+      setConfirmFirstStore(store);
+
+      setConfirmFirstDirective('sess-stale', true, 'princ-stale');
+      setConfirmFirstApproval('sess-stale');
+
+      expect(hasActiveDirective('sess-stale')).toBe(true);
+      expect(isSessionApproved('sess-stale')).toBe(true);
+
+      resetConfirmFirst('sess-stale');
+
+      expect(hasActiveDirective('sess-stale')).toBe(false);
+      expect(isSessionApproved('sess-stale')).toBe(false);
+      expect(evaluateConfirmFirstGateSync('sess-stale', 'write', {}).action).toBe('skip');
+
+      connection.close();
+    } finally {
+      setConfirmFirstStore(null);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('resetConfirmFirst without store clears in-memory cache only', () => {
+    setConfirmFirstDirective('sess-nostore', true, 'princ-nostore');
+    setConfirmFirstApproval('sess-nostore');
+
+    expect(hasActiveDirective('sess-nostore')).toBe(true);
+    expect(isSessionApproved('sess-nostore')).toBe(true);
+
+    resetConfirmFirst('sess-nostore');
+
+    expect(hasActiveDirective('sess-nostore')).toBe(false);
+    expect(isSessionApproved('sess-nostore')).toBe(false);
+  });
+});
