@@ -8,11 +8,11 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
-import { detectApprovalMarker, setConfirmFirstApproval, setConfirmFirstDirective } from '../core/confirm-first-gate.js';
+import { detectApprovalMarker, setConfirmFirstApproval, setConfirmFirstDirective, hydrateFromStore, pruneStoreStaleRows, setConfirmFirstStore } from '../core/confirm-first-gate.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler, SqliteConfirmFirstStateStore, SqliteConnection } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../core/runtime-v2-prompt-activation-reader.js';
 import {
@@ -77,6 +77,7 @@ function cachedReadFile(filePath: string): string {
 // Module-level empathy state — shared across calls to avoid per-turn I/O
 let _empathyTurnCounter = 0;
 let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null = null;
+let _confirmFirstHydrationCounter = 0;
 
 /**
  * Model configuration with primary model and optional fallback models
@@ -264,6 +265,19 @@ export function getDiagnosticianModel(api: PromptHookApi | null, logger?: Plugin
  */
 
 
+function ensureConfirmFirstStore(workspaceDir: string): void {
+  if (!_confirmFirstStoreInitialized) {
+    try {
+      const connection = new SqliteConnection({ workspaceDir, readonly: false });
+      setConfirmFirstStore(new SqliteConfirmFirstStateStore(connection));
+      _confirmFirstStoreInitialized = true;
+    } catch (err) {
+      console.warn(`[PD:ConfirmFirst] Failed to initialize store: ${String(err)}`);
+    }
+  }
+}
+let _confirmFirstStoreInitialized = false;
+
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi }
@@ -281,6 +295,18 @@ export async function handleBeforePromptBuild(
   const api = ctx.api;
   if (sessionId) {
     wctx.trajectory?.recordSession?.({ sessionId });
+  }
+
+  if (sessionId) {
+    ensureConfirmFirstStore(workspaceDir);
+    hydrateFromStore(sessionId);
+    _confirmFirstHydrationCounter++;
+    if (_confirmFirstHydrationCounter % 100 === 0) {
+      const pruned = pruneStoreStaleRows();
+      if (pruned > 0) {
+        logger?.info?.(`[PD:ConfirmFirst] Pruned ${pruned} stale rows from confirm_first_state`);
+      }
+    }
   }
 
   if (sessionId && trigger === 'user' && Array.isArray(event.messages) && event.messages.length > 0) {
