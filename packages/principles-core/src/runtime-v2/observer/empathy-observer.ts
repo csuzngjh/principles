@@ -90,12 +90,13 @@ export class EmpathyObserver {
     }
 
     if (!terminal) {
+      let cancelReason = '';
       try {
         await this.runtimeAdapter.cancelRun(runHandle.runId);
-      } catch {
-        // Safe degrade
+      } catch (cancelErr) {
+        cancelReason = ` | cancelFailed: ${String(cancelErr)}`;
       }
-      throw new Error(`EmpathyObserver run timed out after ${this.timeoutMs}ms`);
+      throw new Error(`EmpathyObserver run timed out after ${this.timeoutMs}ms${cancelReason}`);
     }
 
     // Fetch and parse output
@@ -115,9 +116,14 @@ export class EmpathyObserver {
       payload.confidence > 1 ||
       typeof payload.reason !== 'string'
     ) {
-      throw new Error(`EmpathyObserver output validation failed: ${JSON.stringify(payload)}`);
+      throw new Error(`EmpathyObserver output validation failed: ${JSON.stringify(payload).substring(0, 200)}`);
     }
 
-    return payload as EmpathyObserverOutputV1;
+    return {
+      damageDetected: payload.damageDetected,
+      severity: payload.severity as 'mild' | 'moderate' | 'severe',
+      confidence: payload.confidence,
+      reason: payload.reason,
+    } satisfies EmpathyObserverOutputV1;
   }
 }

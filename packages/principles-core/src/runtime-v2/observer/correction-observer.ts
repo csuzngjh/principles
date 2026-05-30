@@ -150,12 +150,13 @@ export class CorrectionObserver {
     }
 
     if (!terminal) {
+      let cancelReason = '';
       try {
         await this.runtimeAdapter.cancelRun(runHandle.runId);
-      } catch {
-        // Safe degrade
+      } catch (cancelErr) {
+        cancelReason = ` | cancelFailed: ${String(cancelErr)}`;
       }
-      throw new Error(`CorrectionObserver run timed out after ${this.timeoutMs}ms`);
+      throw new Error(`CorrectionObserver run timed out after ${this.timeoutMs}ms${cancelReason}`);
     }
 
     // Fetch and parse output
@@ -173,7 +174,7 @@ export class CorrectionObserver {
       typeof payload.updated !== 'boolean' ||
       typeof payload.summary !== 'string'
     ) {
-      throw new Error(`CorrectionObserver output validation failed: ${JSON.stringify(payload)}`);
+      throw new Error(`CorrectionObserver output validation failed: ${JSON.stringify(payload).substring(0, 200)}`);
     }
 
     if (payload.updates !== undefined && payload.updates !== null) {

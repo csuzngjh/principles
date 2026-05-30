@@ -107,7 +107,7 @@ export class SqliteConfirmFirstStateStore {
   pruneStaleRows(): number {
     const db = this.connection.getDb();
     const staleResult = db.prepare(
-      `DELETE FROM confirm_first_state WHERE last_seen_at < datetime('now', '-${STALE_ROW_DAYS} days')`
+      `DELETE FROM confirm_first_state WHERE datetime(last_seen_at) < datetime('now', '-${STALE_ROW_DAYS} days')`
     ).run();
     let pruned = staleResult.changes;
 
