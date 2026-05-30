@@ -46,8 +46,16 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
 function buildTrajectoryEvidence(wctx: WorkspaceContext, sessionId: string): PainEvidenceEntry[] {
   const evidence: PainEvidenceEntry[] = [];
 
+  if (!wctx.trajectory || sessionId === 'unknown') {
+    evidence.push({
+      sourceRef: 'owner_message:unavailable',
+      note: `trajectory_unavailable: ${!wctx.trajectory ? 'no_trajectory_db' : 'unknown_session'}`,
+    });
+    return evidence.slice(0, MAX_EVIDENCE_ENTRIES);
+  }
+
   try {
-    const userTurns = wctx.trajectory?.listUserTurnsForSession?.(sessionId) ?? [];
+    const userTurns = wctx.trajectory.listUserTurnsForSession(sessionId) ?? [];
     const lastCorrectionTurn = [...userTurns].reverse().find(t => t.correctionDetected);
     if (lastCorrectionTurn) {
       const sanitizedOwnerMessage = sanitizeAssistantText(
@@ -66,7 +74,7 @@ function buildTrajectoryEvidence(wctx: WorkspaceContext, sessionId: string): Pai
   }
 
   try {
-    const assistantTurns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
+    const assistantTurns = wctx.trajectory.listAssistantTurns(sessionId) ?? [];
     const recentAssistant = assistantTurns.slice(-3);
     for (const turn of recentAssistant) {
       if (evidence.length >= MAX_EVIDENCE_ENTRIES) break;

@@ -29,7 +29,7 @@ import {
 import type { TaskRecord, DiagnosticianTaskRecord } from '../../task-status.js';
 import type { RunRecord } from '../../runtime-protocol.js';
 import { PDRuntimeError } from '../../error-categories.js';
-import { MAX_EVIDENCE_ENTRIES } from '../../pain-signal-bridge.js';
+import { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '../../pain-signal-bridge.js';
 
 const PAIN_PROVENANCE_VALUES = ['openclaw_context_bound', 'owner_reported_no_host_trace', 'automatic_hook'] as const;
 
@@ -308,6 +308,10 @@ export class SqliteContextAssembler implements ContextAssembler {
         typeof (e as Record<string, unknown>).sourceRef === 'string' &&
         typeof (e as Record<string, unknown>).note === 'string'
       )
+      .map((e) => ({
+        sourceRef: e.sourceRef,
+        note: e.note.slice(0, MAX_EVIDENCE_NOTE_CHARS),
+      }))
       .slice(0, MAX_EVIDENCE_ENTRIES);
   }
 
