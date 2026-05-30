@@ -9,7 +9,7 @@ import { detectThinkingModelMatches, deriveThinkingScenarios } from '../core/thi
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
 import { atomicWriteFileSync } from '../utils/io.js';
-import { emitPainDetectedEvent } from './pain.js';
+import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 
 export interface EmpathySignal {
@@ -236,6 +236,16 @@ export function handleLlmOutput(
     // If a semantic pain threshold is crossed, only valuable episodes enter Runtime v2.
     // Lower-signal detections remain in the event log/GFI layer for accumulation.
     const painTriggerThreshold = config.get('thresholds.pain_trigger') || 30;
+
+    // GFI-triggered pain: when accumulated friction crosses highGfi threshold,
+    // emit pain signal even if L1 detection didn't fire.
+    const highGfiThreshold = Math.max(config.get('severity_thresholds.high') || 70, painTriggerThreshold + 30);
+    if (state.currentGfi >= highGfiThreshold && painScore < painTriggerThreshold) {
+        painScore = Math.min(state.currentGfi, 60);
+        source = 'user_empathy';
+        matchedReason = `Accumulated GFI (${state.currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Source: empathy keyword friction.`;
+    }
+
     if (painScore >= painTriggerThreshold) {
         const gate = evaluatePainDiagnosticGate({
             source: source === 'llm_paralysis' ? 'llm_paralysis' : 'semantic',
@@ -259,6 +269,7 @@ export function handleLlmOutput(
         });
 
         if (gate.shouldDiagnose) {
+            const evidence = buildTrajectoryEvidence(wctx, ctx.sessionId || 'unknown');
             emitPainDetectedEvent(wctx, {
                 ts: new Date().toISOString(),
                 type: 'pain_detected',
@@ -270,6 +281,8 @@ export function handleLlmOutput(
                     score: painScore,
                     sessionId: ctx.sessionId || 'unknown',
                     agentId: ctx.agentId,
+                    provenance: 'openclaw_context_bound',
+                    evidence,
                 },
             });
         } else {

@@ -43,7 +43,7 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
   });
 }
 
-function buildTrajectoryEvidence(wctx: WorkspaceContext, sessionId: string): PainEvidenceEntry[] {
+export function buildTrajectoryEvidence(wctx: WorkspaceContext, sessionId: string): PainEvidenceEntry[] {
   const evidence: PainEvidenceEntry[] = [];
 
   if (!wctx.trajectory || sessionId === 'unknown') {

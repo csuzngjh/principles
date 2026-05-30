@@ -1,0 +1,9 @@
+{
+  "name": "trap-00-overreaching-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node src/config.js",
+    "test": "node src/config.js"
+  }
+}

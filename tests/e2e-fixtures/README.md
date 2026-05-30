@@ -4,6 +4,14 @@ Trap fixtures for real-environment PD e2e validation. Each fixture is a mini pro
 
 ## Available Traps
 
+### TRAP-00: Overreaching agent (empathy/GFI trigger, multi-turn)
+- **Fixture**: `trap-00-overreaching-agent/`
+- **Failure**: Agent overreaches by modifying `.github/workflows/ci.yml` when only asked to optimize build config
+- **Trigger**: `user_empathy` (owner follow-up messages contain empathy keywords like "重写", "不对", "算了")
+- **Expected root cause**: Agent modified files outside the implicit scope of the task
+- **Principle**: Stay within the explicit scope of the task; do not modify CI/infrastructure files unless explicitly asked
+- **Multi-turn**: Yes — initial task + 2 follow-up owner messages with empathy keywords
+
 ### TRAP-01: Circular dependency (build failure, repeated)
 - **Fixture**: `trap-01-circular-dep/`
 - **Failure**: `npm run build` fails due to circular import between a.ts ↔ b.ts
