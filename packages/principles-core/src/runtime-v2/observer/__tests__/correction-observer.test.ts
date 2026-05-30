@@ -61,7 +61,7 @@ describe('CorrectionObserver', () => {
       onFetchOutput: (runId) => ({
         runId,
         payload: {
-          updated: 'not-a-boolean', // Fail validation
+          updated: 'not-a-boolean',
           summary: 123,
         },
       }),
@@ -70,6 +70,103 @@ describe('CorrectionObserver', () => {
     const observer = new CorrectionObserver({ runtimeAdapter: adapter });
     await expect(observer.run(mockPayload)).rejects.toThrow(
       'CorrectionObserver output validation failed'
+    );
+  });
+
+  it('throws error when updates record has invalid action', async () => {
+    const adapter = new TestDoubleRuntimeAdapter({
+      onFetchOutput: (runId) => ({
+        runId,
+        payload: {
+          updated: true,
+          updates: {
+            wrong: {
+              action: 'invalid-action',
+              reasoning: 'test',
+            },
+          },
+          summary: 'Test',
+        },
+      }),
+    });
+
+    const observer = new CorrectionObserver({ runtimeAdapter: adapter });
+    await expect(observer.run(mockPayload)).rejects.toThrow(
+      'updates["wrong"].action must be add|update|remove'
+    );
+  });
+
+  it('throws error when updates entry has non-string reasoning', async () => {
+    const adapter = new TestDoubleRuntimeAdapter({
+      onFetchOutput: (runId) => ({
+        runId,
+        payload: {
+          updated: true,
+          updates: {
+            wrong: {
+              action: 'update',
+              reasoning: 42,
+            },
+          },
+          summary: 'Test',
+        },
+      }),
+    });
+
+    const observer = new CorrectionObserver({ runtimeAdapter: adapter });
+    await expect(observer.run(mockPayload)).rejects.toThrow(
+      'updates["wrong"].reasoning must be a string'
+    );
+  });
+
+  it('throws error when fpTerms contains non-string', async () => {
+    const adapter = new TestDoubleRuntimeAdapter({
+      onFetchOutput: (runId) => ({
+        runId,
+        payload: {
+          updated: false,
+          fpTerms: [123],
+          summary: 'Test',
+        },
+      }),
+    });
+
+    const observer = new CorrectionObserver({ runtimeAdapter: adapter });
+    await expect(observer.run(mockPayload)).rejects.toThrow(
+      'fpTerms[0] must be a string'
+    );
+  });
+
+  it('throws error when fpAnalysisStatus is invalid', async () => {
+    const adapter = new TestDoubleRuntimeAdapter({
+      onFetchOutput: (runId) => ({
+        runId,
+        payload: {
+          updated: false,
+          fpAnalysisStatus: 'unknown',
+          summary: 'Test',
+        },
+      }),
+    });
+
+    const observer = new CorrectionObserver({ runtimeAdapter: adapter });
+    await expect(observer.run(mockPayload)).rejects.toThrow(
+      'fpAnalysisStatus must be completed|skipped'
+    );
+  });
+
+  it('throws error when run times out', async () => {
+    const adapter = new TestDoubleRuntimeAdapter({
+      onPollRun: (runId) => ({
+        runId,
+        status: 'running' as const,
+        startedAt: new Date().toISOString(),
+      }),
+    });
+
+    const observer = new CorrectionObserver({ runtimeAdapter: adapter }, { timeoutMs: 50 });
+    await expect(observer.run(mockPayload)).rejects.toThrow(
+      'CorrectionObserver run timed out after 50ms'
     );
   });
 });

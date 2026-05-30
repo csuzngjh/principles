@@ -66,4 +66,38 @@ describe('EmpathyObserver', () => {
       'EmpathyObserver run failed: failed'
     );
   });
+
+  it('throws error when run times out', async () => {
+    const adapter = new TestDoubleRuntimeAdapter({
+      onPollRun: (runId) => ({
+        runId,
+        status: 'running' as const,
+        startedAt: new Date().toISOString(),
+      }),
+    });
+
+    const observer = new EmpathyObserver({ runtimeAdapter: adapter }, { timeoutMs: 50 });
+    await expect(observer.run({ userMessage: 'I am frustrated' })).rejects.toThrow(
+      'EmpathyObserver run timed out after 50ms'
+    );
+  });
+
+  it('throws error when confidence is out of range', async () => {
+    const adapter = new TestDoubleRuntimeAdapter({
+      onFetchOutput: (runId) => ({
+        runId,
+        payload: {
+          damageDetected: true,
+          severity: 'moderate',
+          confidence: 5.0,
+          reason: 'Out of range confidence',
+        },
+      }),
+    });
+
+    const observer = new EmpathyObserver({ runtimeAdapter: adapter });
+    await expect(observer.run({ userMessage: 'I am frustrated' })).rejects.toThrow(
+      'EmpathyObserver output validation failed'
+    );
+  });
 });

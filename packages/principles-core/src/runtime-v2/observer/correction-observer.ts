@@ -167,11 +167,48 @@ export class CorrectionObserver {
     const payload = outputResult.payload as Record<string, unknown>;
 
     // Strict runtime schema verification
+    const VALID_ACTIONS = new Set(['add', 'update', 'remove']);
+
     if (
       typeof payload.updated !== 'boolean' ||
       typeof payload.summary !== 'string'
     ) {
       throw new Error(`CorrectionObserver output validation failed: ${JSON.stringify(payload)}`);
+    }
+
+    if (payload.updates !== undefined && payload.updates !== null) {
+      if (typeof payload.updates !== 'object' || Array.isArray(payload.updates)) {
+        throw new Error(`CorrectionObserver output validation failed: updates must be a record, got ${typeof payload.updates}`);
+      }
+      for (const [key, val] of Object.entries(payload.updates as Record<string, unknown>)) {
+        if (typeof val !== 'object' || val === null || Array.isArray(val)) {
+          throw new Error(`CorrectionObserver output validation failed: updates["${key}"] must be an object, got ${typeof val}`);
+        }
+        const entry = val as Record<string, unknown>;
+        if (!VALID_ACTIONS.has(entry.action as string)) {
+          throw new Error(`CorrectionObserver output validation failed: updates["${key}"].action must be add|update|remove, got "${String(entry.action)}"`);
+        }
+        if (typeof entry.reasoning !== 'string') {
+          throw new Error(`CorrectionObserver output validation failed: updates["${key}"].reasoning must be a string, got ${typeof entry.reasoning}`);
+        }
+      }
+    }
+
+    if (payload.fpTerms !== undefined && payload.fpTerms !== null) {
+      if (!Array.isArray(payload.fpTerms)) {
+        throw new Error(`CorrectionObserver output validation failed: fpTerms must be an array, got ${typeof payload.fpTerms}`);
+      }
+      for (let i = 0; i < payload.fpTerms.length; i++) {
+        if (typeof payload.fpTerms[i] !== 'string') {
+          throw new Error(`CorrectionObserver output validation failed: fpTerms[${i}] must be a string, got ${typeof payload.fpTerms[i]}`);
+        }
+      }
+    }
+
+    if (payload.fpAnalysisStatus !== undefined && payload.fpAnalysisStatus !== null) {
+      if (payload.fpAnalysisStatus !== 'completed' && payload.fpAnalysisStatus !== 'skipped') {
+        throw new Error(`CorrectionObserver output validation failed: fpAnalysisStatus must be completed|skipped, got "${String(payload.fpAnalysisStatus)}"`);
+      }
     }
 
     return payload as CorrectionObserverOutputV1;

@@ -111,6 +111,8 @@ export class EmpathyObserver {
       typeof payload.damageDetected !== 'boolean' ||
       !['mild', 'moderate', 'severe'].includes(payload.severity as string) ||
       typeof payload.confidence !== 'number' ||
+      payload.confidence < 0 ||
+      payload.confidence > 1 ||
       typeof payload.reason !== 'string'
     ) {
       throw new Error(`EmpathyObserver output validation failed: ${JSON.stringify(payload)}`);
