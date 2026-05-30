@@ -314,6 +314,7 @@ describe('Empathy Keyword Matching (core)', () => {
     it('normalizeSeverity should map severity aliases', () => {
       expect(normalizeSeverity('severe')).toBe('severe');
       expect(normalizeSeverity('high')).toBe('severe');
+      expect(normalizeSeverity('critical')).toBe('severe');
       expect(normalizeSeverity('moderate')).toBe('moderate');
       expect(normalizeSeverity('medium')).toBe('moderate');
       expect(normalizeSeverity('mild')).toBe('mild');
@@ -328,6 +329,7 @@ describe('Empathy Keyword Matching (core)', () => {
     it('normalizeSeverity should be case-insensitive', () => {
       expect(normalizeSeverity('SEVERE')).toBe('severe');
       expect(normalizeSeverity('High')).toBe('severe');
+      expect(normalizeSeverity('CRITICAL')).toBe('severe');
       expect(normalizeSeverity('MODERATE')).toBe('moderate');
     });
   });
