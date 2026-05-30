@@ -22,6 +22,8 @@ import {
   getKeywordStoreSummary,
 } from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
+import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
+import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import {
   buildAttitudeDirective,
@@ -499,6 +501,65 @@ The empathy observer subagent handles pain detection independently.
           });
 
           logger?.info?.(`[PD:Empathy] MATCH: "${matchResult.matchedTerms.join(', ')}" → severity=${matchResult.severity}, score=${matchResult.score.toFixed(2)}, penalty=${penalty}, ''`);
+
+          const currentSession = getSession(sessionId);
+          const currentGfi = currentSession?.currentGfi ?? 0;
+          const painTrigger = wctx.config.get('thresholds.pain_trigger') || 40;
+          const highGfiThreshold = Math.max(wctx.config.get('severity_thresholds.high') || 70, painTrigger + 30);
+
+          if (currentGfi >= highGfiThreshold) {
+            const gfiPainScore = Math.min(Math.round(currentGfi), 60);
+            logger?.info?.(`[PD:Empathy] GFI-TRIGGERED: currentGfi=${currentGfi.toFixed(1)} >= highGfi=${highGfiThreshold}, emitting pain signal (score=${gfiPainScore})`);
+
+            const gate = evaluatePainDiagnosticGate({
+              source: 'user_empathy',
+              score: gfiPainScore,
+              currentGfi,
+              consecutiveErrors: currentSession?.consecutiveErrors ?? 0,
+              sessionId,
+              errorHash: 'empathy_gfi_threshold',
+              thresholds: {
+                painTrigger,
+                highSeverity: wctx.config.get('severity_thresholds.high') || 70,
+                semanticPain: Math.max(painTrigger, 60),
+              },
+            });
+
+            wctx.eventLog.recordPainSignal(sessionId, {
+              score: gfiPainScore,
+              source: 'user_empathy',
+              reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
+              isRisky: false,
+            });
+
+            if (gate.shouldDiagnose) {
+              logger?.info?.(`[PD:Empathy] Gate approved, calling emitPainDetectedEvent...`);
+              try {
+                const evidence = buildTrajectoryEvidence(wctx, sessionId);
+                await emitPainDetectedEvent(wctx, {
+                  ts: new Date().toISOString(),
+                  type: 'pain_detected',
+                  data: {
+                    painId: `empathy_gfi_${Date.now()}`,
+                    painType: 'user_frustration',
+                    source: 'user_empathy',
+                    reason: `Accumulated GFI (${currentGfi.toFixed(1)}) crossed highGfi threshold (${highGfiThreshold}). Matched: ${matchResult.matchedTerms.join(', ')}`,
+                    score: gfiPainScore,
+                    sessionId,
+                    agentId: 'main',
+                    provenance: 'openclaw_context_bound',
+                    evidence,
+                  },
+                });
+                logger?.info?.(`[PD:Empathy] emitPainDetectedEvent completed (GFI-triggered)`);
+              } catch (emitErr) {
+                console.error(`[PD:Empathy] FAILED to emit GFI-triggered pain event: ${String(emitErr)}`);
+                logger?.warn?.(`[PD:Empathy] Failed to emit GFI-triggered pain event: ${String(emitErr)}`);
+              }
+            } else {
+              logger?.info?.(`[PD:Empathy] GFI-triggered gate rejected: ${gate.detail}`);
+            }
+          }
         } else {
           // Log unmatched messages periodically for coverage analysis
           if (turnCount > 0 && turnCount % 50 === 0) {
