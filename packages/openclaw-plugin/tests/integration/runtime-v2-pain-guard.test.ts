@@ -81,16 +81,16 @@ describe('Runtime V2 pain entrypoint guard', () => {
   });
 
   // PRI-29: emitPainDetectedEvent → PainToPrincipleService service contract guards
-  it('pain.ts constructs PainToPrincipleService with workspaceDir and stateDir from wctx', () => {
+  it('pain.ts constructs PainToPrincipleService with derived main workspace', () => {
     const source = read('packages/openclaw-plugin/src/hooks/pain.ts');
 
-    // Must construct PrincipleTreeLedgerAdapter with wctx.stateDir
-    expect(source).toMatch(/new PrincipleTreeLedgerAdapter\(\{\s*stateDir:\s*wctx\.stateDir\s*\}\)/);
+    // Must construct PrincipleTreeLedgerAdapter with mainStateDir
+    expect(source).toMatch(/new PrincipleTreeLedgerAdapter\(\{\s*stateDir:\s*mainStateDir\s*\}\)/);
 
-    // Must construct PainToPrincipleService with wctx properties
+    // Must construct PainToPrincipleService with derived main workspace
     expect(source).toMatch(/new PainToPrincipleService\(\{/);
-    expect(source).toMatch(/workspaceDir:\s*wctx\.workspaceDir/);
-    expect(source).toMatch(/stateDir:\s*wctx\.stateDir/);
+    expect(source).toMatch(/workspaceDir:\s*mainWorkspaceDir/);
+    expect(source).toMatch(/stateDir:\s*mainStateDir/);
     expect(source).toMatch(/owner:\s*['"]openclaw-plugin['"]/);
     expect(source).toMatch(/autoIntakeEnabled:\s*true/);
   });
