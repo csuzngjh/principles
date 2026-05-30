@@ -269,7 +269,7 @@ describe('InternalizationChainIntegrityReadModel', () => {
             candidate_id: 'c-prompt',
             task_id: 'diag-prompt',
             source_run_id: 'r-prompt',
-            recommendation_kind: 'prompt-injection',
+            recommendation_kind: 'prompt',
           }]),
           get: vi.fn(() => undefined),
         };

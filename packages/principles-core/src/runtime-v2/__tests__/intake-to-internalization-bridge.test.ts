@@ -5,6 +5,7 @@ import {
   seedIntakeTask,
   ROUTE_CHANNEL_MAP,
   MVP_ENABLED_CHANNELS,
+  CANDIDATE_KIND_TO_ROUTE,
 } from '../internalization/intake-to-internalization-bridge.js';
 import type {
   IntakeToInternalizationBridgeInput,
@@ -93,16 +94,16 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
       }
     });
 
-    it('implementation-candidate route maps to skill channel', () => {
+    it('implementation-candidate route returns not_internalizable (skill channel is MVP-disabled)', () => {
       const result = computeBridgeDecision({
         candidateId: 'cand-impl',
         recommendationKind: 'implementation',
         route: 'implementation-candidate',
         ready: true,
       });
-      expect(result.decision).toBe('seeded');
-      if (result.decision === 'seeded') {
-        expect(result.channel).toBe('skill');
+      expect(result.decision).toBe('not_internalizable');
+      if (result.decision === 'not_internalizable') {
+        expect(result.reason).toContain('MVP-disabled');
       }
     });
 
@@ -339,6 +340,35 @@ describe('IntakeToInternalizationBridge (PRI-142)', () => {
     it('does not contain skill or model_training', () => {
       expect(MVP_ENABLED_CHANNELS.has('skill')).toBe(false);
       expect(MVP_ENABLED_CHANNELS.has('model_training')).toBe(false);
+    });
+  });
+
+  describe('CANDIDATE_KIND_TO_ROUTE', () => {
+    it('maps principle to principle-ledger', () => {
+      expect(CANDIDATE_KIND_TO_ROUTE.principle).toBe('principle-ledger');
+    });
+
+    it('maps rule to rule-candidate', () => {
+      expect(CANDIDATE_KIND_TO_ROUTE.rule).toBe('rule-candidate');
+    });
+
+    it('maps implementation to implementation-candidate', () => {
+      expect(CANDIDATE_KIND_TO_ROUTE.implementation).toBe('implementation-candidate');
+    });
+
+    it('maps prompt to prompt-injection-candidate', () => {
+      expect(CANDIDATE_KIND_TO_ROUTE.prompt).toBe('prompt-injection-candidate');
+    });
+
+    it('maps defer to deferred', () => {
+      expect(CANDIDATE_KIND_TO_ROUTE.defer).toBe('deferred');
+    });
+
+    it('every mapped route exists in ROUTE_CHANNEL_MAP or is deferred', () => {
+      for (const [_kind, route] of Object.entries(CANDIDATE_KIND_TO_ROUTE)) {
+        if (route === 'deferred') continue;
+        expect(ROUTE_CHANNEL_MAP[route]).toBeDefined();
+      }
     });
   });
 });

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from 'better-sqlite3';
-import { MVP_ENABLED_CHANNELS, ROUTE_CHANNEL_MAP } from './internalization/intake-to-internalization-bridge.js';
+import { MVP_ENABLED_CHANNELS, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 
 export interface BrokenLink {
   type: string;
@@ -216,9 +216,10 @@ export class InternalizationChainIntegrityReadModel {
           continue;
         }
 
-        const mappedChannel = candidate.recommendation_kind
-          ? ROUTE_CHANNEL_MAP[`${candidate.recommendation_kind}-candidate`] ?? ROUTE_CHANNEL_MAP[candidate.recommendation_kind]
+        const mappedRoute = candidate.recommendation_kind
+          ? CANDIDATE_KIND_TO_ROUTE[candidate.recommendation_kind]
           : undefined;
+        const mappedChannel = mappedRoute ? ROUTE_CHANNEL_MAP[mappedRoute] : undefined;
         if (mappedChannel && !MVP_ENABLED_CHANNELS.has(mappedChannel)) {
           continue;
         }

@@ -24,6 +24,14 @@ export const MVP_ENABLED_CHANNELS: ReadonlySet<InternalizationChannel> = new Set
   'defer_archive',
 ]);
 
+export const CANDIDATE_KIND_TO_ROUTE: Record<string, InternalizationRouteKind> = {
+  principle: 'principle-ledger',
+  rule: 'rule-candidate',
+  implementation: 'implementation-candidate',
+  prompt: 'prompt-injection-candidate',
+  defer: 'deferred',
+};
+
 export const ROUTE_CHANNEL_MAP: Record<string, InternalizationChannel> = {
   'principle-ledger': 'prompt',
   'rule-candidate': 'code_tool_hook',
@@ -49,6 +57,10 @@ export function computeBridgeDecision(
   const channel = ROUTE_CHANNEL_MAP[input.route];
   if (!channel) {
     return { decision: 'not_internalizable', reason: `Route "${input.route}" has no channel mapping — not internalizable` };
+  }
+
+  if (!MVP_ENABLED_CHANNELS.has(channel)) {
+    return { decision: 'not_internalizable', reason: `Channel "${channel}" for route "${input.route}" is MVP-disabled — not internalizable in current stage` };
   }
 
   const taskId = `dreamer-${input.candidateId}-${channel}`;
@@ -103,7 +115,7 @@ export interface BridgeTaskStore {
   createTask(input: {
     taskId: string;
     taskKind: string;
-    status: string;
+    status: 'pending';
     attemptCount: number;
     maxAttempts: number;
     diagnosticJson: string;

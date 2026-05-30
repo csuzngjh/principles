@@ -493,7 +493,7 @@ describe('PainSignalBridge dreamer task seeding', () => {
     expect(seededEvent).toBeUndefined();
   });
 
-  it('seedIntakeTask failure degrades gracefully — candidate still consumed', async () => {
+  it('seedIntakeTask failure degrades gracefully — candidate still consumed, result includes seed failure note', async () => {
     const deps = makeDreamerDeps({
       candidates: [makeDreamerCandidate('c-fail', 'principle')],
       createTaskFn: async (input: any) => {
@@ -519,7 +519,8 @@ describe('PainSignalBridge dreamer task seeding', () => {
       provenance: 'openclaw_context_bound',
     });
 
-    expect(result.status).toBe('succeeded');
+    expect(result.status).toBe('degraded');
+    expect(result.message).toContain('dreamer_seed_failed:c-fail');
     const consumedCall = deps.updateCandidateStatusCalls.find((c) => c.candidateId === 'c-fail');
     expect(consumedCall).toBeDefined();
     if (consumedCall) {
