@@ -1,5 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { checkForUpdates, fetchChangelog } from '../src/updater.js';
+import { checkForUpdates, fetchChangelog, applyUpdate } from '../src/updater.js';
+
+// Module-level mocks (hoisted to top by vitest)
+vi.mock('fs', () => ({
+  existsSync: vi.fn().mockReturnValue(true),
+  readFileSync: vi.fn().mockReturnValue(JSON.stringify({ version: '1.0.0' })),
+  writeFileSync: vi.fn(),
+  mkdirSync: vi.fn(),
+  copyFileSync: vi.fn(),
+  unlinkSync: vi.fn(),
+  rmSync: vi.fn(),
+  readdirSync: vi.fn().mockReturnValue([]),
+}));
+
+vi.mock('child_process', () => ({
+  execSync: vi.fn(),
+}));
 
 describe('checkForUpdates', () => {
   beforeEach(() => {
@@ -56,6 +72,87 @@ describe('checkForUpdates', () => {
     const result = await checkForUpdates('1.73.0');
     expect(result.hasUpdate).toBe(false);
     expect(result.error).toContain('missing version');
+  });
+});
+
+describe('applyUpdate', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+
+    // Reconfigure fs mocks to defaults after clearAllMocks
+    const fs = await import('fs');
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0' }));
+    vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+
+    // Mock fetch for network calls (fetchLatestPackageInfo + downloadPackage)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        version: '1.74.0',
+        dist: { tarball: 'https://registry.npmjs.org/create-principles-disciple/-/create-principles-disciple-1.74.0.tgz' },
+      }),
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+  });
+
+  it('should apply update with smart merge strategy', async () => {
+    const result = await applyUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+      mergeStrategy: 'smart',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should apply update with overwrite strategy', async () => {
+    const result = await applyUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+      mergeStrategy: 'overwrite',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should apply update with keep strategy', async () => {
+    const result = await applyUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+      mergeStrategy: 'keep',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should include updated files in result on success', async () => {
+    const result = await applyUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+      mergeStrategy: 'overwrite',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.updatedFiles).toBeDefined();
+    expect(Array.isArray(result.updatedFiles)).toBe(true);
+  });
+
+  it('should return error when fetch fails', async () => {
+    // Override fetch mock for this test
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    }));
+
+    const result = await applyUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+      mergeStrategy: 'smart',
+    });
+
+    expect(result.success).toBe(false);
   });
 });
 
