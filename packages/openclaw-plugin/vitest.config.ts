@@ -23,15 +23,10 @@ const integrationTests = [
   // Core DB tests
   'tests/core/control-ui-db.test.ts',
   'tests/core/evolution-logger.test.ts',
-  'tests/core/nocturnal-e2e.test.ts',
-  'tests/core/nocturnal-trajectory-extractor.test.ts',
   'tests/core/replay-engine.test.ts',
   'tests/core/trajectory.test.ts',
   'tests/core/workspace-context.test.ts',
   // Service tests with DB dependencies
-  'tests/service/nocturnal-service-code-candidate.test.ts',
-  'tests/service/nocturnal-target-selector.test.ts',
-  'tests/service/evolution-worker.nocturnal.test.ts',
   'tests/service/evolution-worker.timeout.test.ts',
   'tests/service/keyword-optimization-service.test.ts',
   // Hook tests with DB dependencies

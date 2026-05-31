@@ -99,7 +99,6 @@
       "noToken": "No authentication token configured",
       "checkingAuth": "Checking authentication…",
       "agentDiagnostician": "Diagnostician",
-      "agentNocturnalReflection": "Nocturnal Reflection",
       "agentCorrectionObserver": "Correction Observer",
       "secondsAgo": "{{count}}s ago",
       "minutesAgo": "{{count}}m ago",

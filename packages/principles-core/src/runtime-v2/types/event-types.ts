@@ -454,65 +454,6 @@ export const RuleEnforcedEventDataSchema = Type.Object({
 });
 export type RuleEnforcedEventDataStatic = Static<typeof RuleEnforcedEventDataSchema>;
 
-// ============== Nocturnal Funnel Events (PD-FUNNEL-2.3) ==============
-
-/**
- * nocturnal_dreamer_completed — Trinity Dreamer stage completed.
- * Emitted from nocturnal-workflow-manager.ts after Trinity chain success.
- */
-export interface NocturnalDreamerCompletedEventData {
-  workflowId: string;
-  principleId: string;
-  sessionId: string;
-  candidateCount: number;
-  chainMode: 'trinity' | 'single-reflector';
-}
-
-export const NocturnalDreamerCompletedEventDataSchema = Type.Object({
-  workflowId: Type.String(),
-  principleId: Type.String(),
-  sessionId: Type.String(),
-  candidateCount: Type.Number(),
-  chainMode: Type.Union([Type.Literal('trinity'), Type.Literal('single-reflector')]),
-});
-export type NocturnalDreamerCompletedEventDataStatic = Static<typeof NocturnalDreamerCompletedEventDataSchema>;
-
-/**
- * nocturnal_artifact_persisted — Artifact saved to .state/nocturnal/samples/.
- * Emitted from persistArtifact() after atomicWriteFileSync.
- */
-export interface NocturnalArtifactPersistedEventData {
-  artifactId: string;
-  principleId: string;
-  persistedPath: string;
-}
-
-export const NocturnalArtifactPersistedEventDataSchema = Type.Object({
-  artifactId: Type.String(),
-  principleId: Type.String(),
-  persistedPath: Type.String(),
-});
-export type NocturnalArtifactPersistedEventDataStatic = Static<typeof NocturnalArtifactPersistedEventDataSchema>;
-
-/**
- * nocturnal_code_candidate_created — Rule implementation candidate persisted.
- * Emitted from persistCodeCandidate() after successful creation.
- */
-export interface NocturnalCodeCandidateCreatedEventData {
-  implementationId: string;
-  artifactId: string;
-  ruleId: string;
-  persistedPath: string;
-}
-
-export const NocturnalCodeCandidateCreatedEventDataSchema = Type.Object({
-  implementationId: Type.String(),
-  artifactId: Type.String(),
-  ruleId: Type.String(),
-  persistedPath: Type.String(),
-});
-export type NocturnalCodeCandidateCreatedEventDataStatic = Static<typeof NocturnalCodeCandidateCreatedEventDataSchema>;
-
 // ============== RuleHost Funnel Events (PD-FUNNEL-2.4) ==============
 
 /**

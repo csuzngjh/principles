@@ -525,7 +525,6 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
               principle_candidate_intake: '原则候选录入',
               dreamer: '深度反思',
               keyword_optimization: '关键词优化',
-              sleep_reflection: '夜间反思',
             };
             return {
               id: t.taskId,
