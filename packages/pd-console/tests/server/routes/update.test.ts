@@ -303,6 +303,71 @@ describe('handleUpdateRoute', () => {
     });
   });
 
+  // ── Edge cases ──────────────────────────────────────────────────────
+
+  describe('Edge cases', () => {
+    it('GET /check should handle fetch rejection gracefully', async () => {
+      vi.mocked(fetch).mockRejectedValue(new Error('Network timeout'));
+
+      const req = createMockRequest('GET');
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/check');
+
+      // doCheckForUpdates catches the error and returns hasUpdate:false with error message
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; data: { hasUpdate: boolean; error: string } }>(res);
+      expect(body.success).toBe(true);
+      expect(body.data.hasUpdate).toBe(false);
+      expect(body.data.error).toContain('Network timeout');
+    });
+
+    it('POST /apply should return failure when fetch returns non-ok status', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      } as Response);
+
+      const targetDir = path.join(tmpDir, 'target-non-ok');
+      fs.mkdirSync(targetDir, { recursive: true });
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+
+      const req = createMockRequest('POST', {
+        targetDir,
+        mergeStrategy: 'smart',
+      });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; data: { success: boolean; message: string } }>(res);
+      expect(body.success).toBe(true);
+      expect(body.data.success).toBe(false);
+      expect(body.data.message).toContain('HTTP 503');
+    });
+
+    it('POST /rollback should return failure when backup directory does not exist', async () => {
+      const targetDir = path.join(tmpDir, 'target-no-backup');
+      const backupDir = path.join(tmpDir, 'nonexistent-backup');
+      fs.mkdirSync(targetDir, { recursive: true });
+      fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+      // Intentionally do NOT create backupDir
+
+      const req = createMockRequest('POST', { targetDir, backupDir });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/rollback');
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; data: { success: boolean; message: string } }>(res);
+      expect(body.success).toBe(true);
+      expect(body.data.success).toBe(false);
+      expect(body.data.message).toBe('Backup not found');
+    });
+  });
+
   // ── Unknown sub-path ────────────────────────────────────────────────
 
   describe('Unknown sub-path', () => {
