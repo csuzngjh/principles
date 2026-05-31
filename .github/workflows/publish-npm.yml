@@ -10,6 +10,8 @@ on:
         type: choice
         options:
           - principles-disciple
+          - '@principles/core'
+          - '@principles/pd-cli'
           - create-principles-disciple
       version_bump:
         description: 'Version bump type (auto-detected from commits if not specified)'
@@ -31,31 +33,60 @@ on:
       - closed
     paths:
       - 'packages/openclaw-plugin/**'
+      - 'packages/principles-core/**'
+      - 'packages/pd-cli/**'
       - 'packages/create-principles-disciple/**'
 
 jobs:
+  resolve-package:
+    name: Resolve Package Info
+    runs-on: ubuntu-latest
+    outputs:
+      pkg_dir: ${{ steps.resolve.outputs.pkg_dir }}
+      npm_name: ${{ steps.resolve.outputs.npm_name }}
+    steps:
+      - name: Resolve package directory and npm name
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            INPUT="${{ github.event.inputs.package }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            INPUT="principles-disciple"
+          else
+            INPUT="principles-disciple"
+          fi
+
+          case "$INPUT" in
+            "principles-disciple")
+              echo "pkg_dir=openclaw-plugin" >> $GITHUB_OUTPUT
+              echo "npm_name=principles-disciple" >> $GITHUB_OUTPUT
+              ;;
+            "@principles/core")
+              echo "pkg_dir=principles-core" >> $GITHUB_OUTPUT
+              echo "npm_name=@principles/core" >> $GITHUB_OUTPUT
+              ;;
+            "@principles/pd-cli")
+              echo "pkg_dir=pd-cli" >> $GITHUB_OUTPUT
+              echo "npm_name=@principles/pd-cli" >> $GITHUB_OUTPUT
+              ;;
+            "create-principles-disciple")
+              echo "pkg_dir=create-principles-disciple" >> $GITHUB_OUTPUT
+              echo "npm_name=create-principles-disciple" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "Unknown package: $INPUT"
+              exit 1
+              ;;
+          esac
+
   publish-dry-run:
     name: Publish Build Parity Gate
+    needs: resolve-package
     if: (github.event_name == 'pull_request' && github.event.pull_request.merged == true) || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Determine package
-        id: package
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ github.event.inputs.package }}" = "principles-disciple" ]; then
-              echo "pkg=openclaw-plugin" >> $GITHUB_OUTPUT
-            else
-              echo "pkg=create-principles-disciple" >> $GITHUB_OUTPUT
-            fi
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "pkg=openclaw-plugin" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "pkg=openclaw-plugin" >> $GITHUB_OUTPUT
-          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -65,17 +96,25 @@ jobs:
       - name: Install dependencies (workspace root)
         run: npm ci --ignore-scripts
 
-      - name: Build workspace (core then plugin)
-        if: steps.package.outputs.pkg == 'openclaw-plugin'
-        run: npm run build
+      - name: Build core (dependency for plugin/cli)
+        if: needs.resolve-package.outputs.pkg_dir != 'create-principles-disciple'
+        run: npm run build --workspace=@principles/core
 
-      - name: Build package (standalone)
-        if: steps.package.outputs.pkg == 'create-principles-disciple'
-        working-directory: packages/create-principles-disciple
-        run: npm ci && npm run build
+      - name: Build target package
+        run: |
+          PKG_DIR="${{ needs.resolve-package.outputs.pkg_dir }}"
+          if [ "$PKG_DIR" = "openclaw-plugin" ]; then
+            npm run build --workspace=principles-disciple
+          elif [ "$PKG_DIR" = "pd-cli" ]; then
+            npm run build --workspace=@principles/pd-cli
+          elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
+            cd packages/create-principles-disciple && npm ci && npm run build
+          else
+            echo "Core already built above"
+          fi
 
       - name: Verify package dry-run
-        working-directory: packages/${{ steps.package.outputs.pkg }}
+        working-directory: packages/${{ needs.resolve-package.outputs.pkg_dir }}
         run: |
           set -o pipefail
           npm pack --dry-run 2>&1 | head -50
@@ -86,13 +125,14 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Package | \`${{ steps.package.outputs.pkg }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | \`${{ needs.resolve-package.outputs.npm_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Directory | \`packages/${{ needs.resolve-package.outputs.pkg_dir }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Trigger | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Result | Build parity verified (no publish) |" >> $GITHUB_STEP_SUMMARY
 
   release:
     name: Publish to npm
-    needs: publish-dry-run
+    needs: [resolve-package, publish-dry-run]
     if: (github.event_name == 'pull_request' && github.event.pull_request.merged == true) || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -104,27 +144,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine package
-        id: package
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ github.event.inputs.package }}" = "principles-disciple" ]; then
-              echo "pkg=openclaw-plugin" >> $GITHUB_OUTPUT
-            else
-              echo "pkg=create-principles-disciple" >> $GITHUB_OUTPUT
-            fi
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "pkg=openclaw-plugin" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "pkg=openclaw-plugin" >> $GITHUB_OUTPUT
-          fi
-
       - name: Get npm latest version
         id: npm-version
         run: |
-          NPM_VERSION=$(npm view principles-disciple version 2>/dev/null || echo "0.0.0")
+          NPM_NAME="${{ needs.resolve-package.outputs.npm_name }}"
+          NPM_VERSION=$(npm view "$NPM_NAME" version 2>/dev/null || echo "0.0.0")
           echo "npm_version=$NPM_VERSION" >> $GITHUB_OUTPUT
-          echo "Latest npm version: $NPM_VERSION"
+          echo "Latest npm version of $NPM_NAME: $NPM_VERSION"
 
       - name: Analyze commits for version bump
         id: analyze
@@ -164,17 +190,25 @@ jobs:
       - name: Install dependencies (workspace root)
         run: npm ci --ignore-scripts
 
-      - name: Build workspace (core then plugin)
-        if: steps.package.outputs.pkg == 'openclaw-plugin'
-        run: npm run build
+      - name: Build core (dependency for plugin/cli)
+        if: needs.resolve-package.outputs.pkg_dir != 'create-principles-disciple'
+        run: npm run build --workspace=@principles/core
 
-      - name: Build package (standalone)
-        if: steps.package.outputs.pkg == 'create-principles-disciple'
-        working-directory: packages/create-principles-disciple
-        run: npm ci && npm run build
+      - name: Build target package
+        run: |
+          PKG_DIR="${{ needs.resolve-package.outputs.pkg_dir }}"
+          if [ "$PKG_DIR" = "openclaw-plugin" ]; then
+            npm run build --workspace=principles-disciple
+          elif [ "$PKG_DIR" = "pd-cli" ]; then
+            npm run build --workspace=@principles/pd-cli
+          elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
+            cd packages/create-principles-disciple && npm ci && npm run build
+          else
+            echo "Core already built above"
+          fi
 
       - name: Run tests
-        if: steps.package.outputs.pkg == 'openclaw-plugin'
+        if: needs.resolve-package.outputs.pkg_dir == 'openclaw-plugin'
         working-directory: packages/openclaw-plugin
         timeout-minutes: 3
         continue-on-error: true
@@ -193,10 +227,10 @@ jobs:
             echo "type=patch" >> $GITHUB_OUTPUT
           fi
 
-      - name: Bump version and sync all files
+      - name: Bump version
         id: version
         if: steps.bump.outputs.type != 'none'
-        working-directory: packages/${{ steps.package.outputs.pkg }}
+        working-directory: packages/${{ needs.resolve-package.outputs.pkg_dir }}
         run: |
           BUMP="${{ steps.bump.outputs.type }}"
           NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
@@ -221,6 +255,7 @@ jobs:
           echo "Bumped: $NPM_VERSION -> $NEW_VERSION"
 
       - name: Sync version to all files
+        if: needs.resolve-package.outputs.pkg_dir == 'openclaw-plugin' && steps.bump.outputs.type != 'none'
         run: |
           VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
           echo "Syncing version $VERSION to all files..."
@@ -295,13 +330,13 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Publish to npm
-        working-directory: packages/${{ steps.package.outputs.pkg }}
+        working-directory: packages/${{ needs.resolve-package.outputs.pkg_dir }}
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create Git tag
-        if: steps.bump.outputs.type != 'none'
+        if: needs.resolve-package.outputs.pkg_dir == 'openclaw-plugin' && steps.bump.outputs.type != 'none'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           OLD_VERSION="${{ steps.version.outputs.old_version }}"
@@ -316,7 +351,7 @@ jobs:
           echo "Created and pushed tag: v$VERSION (from npm v$OLD_VERSION)"
 
       - name: Create GitHub Release
-        if: steps.bump.outputs.type != 'none'
+        if: needs.resolve-package.outputs.pkg_dir == 'openclaw-plugin' && steps.bump.outputs.type != 'none'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.version.outputs.version }}
@@ -333,7 +368,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Package | \`${{ steps.package.outputs.pkg }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | \`${{ needs.resolve-package.outputs.npm_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Directory | \`packages/${{ needs.resolve-package.outputs.pkg_dir }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Version | \`v${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Bump Type | \`${{ steps.bump.outputs.type }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Trigger | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
