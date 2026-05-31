@@ -374,20 +374,6 @@ describe('Proven Channel Baseline (PRI-240)', () => {
       }
     });
 
-    it('no channel depends on Nocturnal', () => {
-      const matrix = generateContinuityMatrix();
-      for (const entry of matrix) {
-        expect(entry.dependsOnNocturnal).toBe(false);
-      }
-    });
-
-    it('no channel depends on idle-trigger', () => {
-      const matrix = generateContinuityMatrix();
-      for (const entry of matrix) {
-        expect(entry.dependsOnIdleTrigger).toBe(false);
-      }
-    });
-
     it('no channel depends on plugin discovery', () => {
       const matrix = generateContinuityMatrix();
       for (const entry of matrix) {

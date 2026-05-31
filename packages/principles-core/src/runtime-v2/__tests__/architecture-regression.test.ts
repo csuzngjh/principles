@@ -101,12 +101,6 @@ const REQUIRED_SOURCE_FILES = [
   // Phase 2 migration: correction types
   'correction/correction-types.ts',
   'correction/index.ts',
-  // Phase 2 migration: nocturnal trinity types + pure computation
-  'nocturnal/trinity-types.ts',
-  'nocturnal/candidate-scoring.ts',
-  'nocturnal/snapshot-contract.ts',
-  'nocturnal/nocturnal-compliance.ts',
-  'nocturnal/index.ts',
   // Phase 2 migration: types directory
   'types/queue-types.ts',
   'types/hygiene-types.ts',
@@ -126,11 +120,6 @@ const REQUIRED_SOURCE_FILES = [
   'l1-hard-cap.ts',
   // PRI-142
   'internalization/intake-to-internalization-bridge.ts',
-  // PRI-143
-  'idle-trigger/idle-trigger-types.ts',
-  'idle-trigger/idle-trigger-policy.ts',
-  'idle-trigger/idle-trigger-decision.ts',
-  'idle-trigger/index.ts',
   // PRI-144
   'activation/activation-types.ts',
   'activation/activation-dispatcher.ts',
@@ -379,8 +368,6 @@ const REQUIRED_TEST_FILES = [
   'l1-hard-cap.test.ts',
   // PRI-142
   'intake-to-internalization-bridge.test.ts',
-  // PRI-143
-  '../idle-trigger/__tests__/idle-trigger-decision.test.ts',
   // PRI-144
   '../activation/__tests__/activation-dispatcher.test.ts',
   // PRI-145
@@ -2677,55 +2664,6 @@ describe('Phase 2.2 correction types migration', () => {
   });
 });
 
-// ── Phase 2 Migration: Nocturnal Trinity Types ────────────────────────────────
-
-describe('Phase 2.3 nocturnal trinity types migration', () => {
-  const CORE_FILES = [
-    'nocturnal/trinity-types.ts',
-    'nocturnal/candidate-scoring.ts',
-    'nocturnal/snapshot-contract.ts',
-    'nocturnal/index.ts',
-  ];
-
-  for (const file of CORE_FILES) {
-    it(`core ${file} has zero infrastructure imports`, async () => {
-      const { readFileSync } = await import('node:fs');
-      const { resolve } = await import('node:path');
-      const src = readFileSync(resolve(__dirname, '..', file), 'utf-8');
-      expect(src).not.toContain('node:fs');
-      expect(src).not.toContain('node:path');
-      expect(src).not.toContain('openclaw-plugin');
-    });
-  }
-
-  it('core barrel exports TrinityDreamerCandidate, TrinityDreamerOutput, TrinityResult', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('TrinityDreamerCandidate');
-    expect(src).toContain('TrinityDreamerOutput');
-    expect(src).toContain('TrinityResult');
-    expect(src).toContain("from './nocturnal/index.js'");
-  });
-
-  it('core barrel exports rankCandidates, runTournament, scoreCandidate', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('rankCandidates');
-    expect(src).toContain('runTournament');
-    expect(src).toContain('scoreCandidate');
-  });
-
-  it('core barrel exports validateNocturnalSnapshotIngress, NocturnalSessionSnapshot', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('validateNocturnalSnapshotIngress');
-    expect(src).toContain('NocturnalSessionSnapshot');
-  });
-});
-
 // ── Phase 2 Migration: Types Directory (queue, hygiene, runtime-summary, events) ──
 
 describe('Phase 2.4 types directory migration', () => {
@@ -3038,64 +2976,6 @@ describe('PRI-142 IntakeToInternalizationBridge', () => {
     expect(src).toContain('BridgeDecision');
     expect(src).toContain('BridgeTaskSeed');
     expect(src).toContain('BridgeTaskStore');
-  });
-});
-
-// ── PRI-143: IdleTrigger Decision Model ──────────────────────────────────────
-
-describe('PRI-143 IdleTrigger Decision Model', () => {
-  it('core barrel exports evaluateIdleTriggerDecision, evaluateIdleTrigger, computeJitterMs, DEFAULT_IDLE_TRIGGER_CONFIG, resolveIdleTriggerConfig', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('evaluateIdleTriggerDecision');
-    expect(src).toContain('evaluateIdleTrigger');
-    expect(src).toContain('computeJitterMs');
-    expect(src).toContain('DEFAULT_IDLE_TRIGGER_CONFIG');
-    expect(src).toContain('resolveIdleTriggerConfig');
-  });
-
-  it('core barrel exports IdleTriggerConfig, IdleTriggerQueueSnapshot, IdleTriggerInput, IdleTriggerResult types', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
-    expect(src).toContain('IdleTriggerConfig');
-    expect(src).toContain('IdleTriggerQueueSnapshot');
-    expect(src).toContain('IdleTriggerInput');
-    expect(src).toContain('IdleTriggerResult');
-  });
-
-  it('idle-trigger core files have zero infrastructure imports', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const files = [
-      resolve(__dirname, '..', 'idle-trigger', 'idle-trigger-types.ts'),
-      resolve(__dirname, '..', 'idle-trigger', 'idle-trigger-policy.ts'),
-      resolve(__dirname, '..', 'idle-trigger', 'idle-trigger-decision.ts'),
-      resolve(__dirname, '..', 'idle-trigger', 'index.ts'),
-    ];
-    for (const file of files) {
-      const src = readFileSync(file, 'utf-8');
-      expect(src).not.toContain('node:fs');
-      expect(src).not.toContain('node:path');
-      expect(src).not.toContain('node:process');
-      expect(src).not.toContain('openclaw-plugin');
-    }
-  });
-
-  it('idle-trigger/index.ts exports all public symbols', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '..', 'idle-trigger', 'index.ts'), 'utf-8');
-    expect(src).toContain('IdleTriggerConfig');
-    expect(src).toContain('IdleTriggerQueueSnapshot');
-    expect(src).toContain('IdleTriggerInput');
-    expect(src).toContain('IdleTriggerResult');
-    expect(src).toContain('DEFAULT_IDLE_TRIGGER_CONFIG');
-    expect(src).toContain('resolveIdleTriggerConfig');
-    expect(src).toContain('computeJitterMs');
-    expect(src).toContain('evaluateIdleTrigger');
-    expect(src).toContain('evaluateIdleTriggerDecision');
   });
 });
 

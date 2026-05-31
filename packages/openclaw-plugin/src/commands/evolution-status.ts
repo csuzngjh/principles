@@ -78,7 +78,7 @@ function buildEnglishOutput(
     `- Phase 3: ready ${summary.phase3.phase3ShadowEligible ? 'yes' : 'no'}, queueTruthReady ${summary.phase3.queueTruthReady ? 'yes' : 'no'}, eligible ${summary.phase3.evolutionEligible}, reference_only ${summary.phase3.evolutionReferenceOnly}, rejected ${summary.phase3.evolutionRejected}${summary.phase3.evolutionReferenceOnlyReasons.length > 0 ? ` (reference ${summary.phase3.evolutionReferenceOnlyReasons.slice(0, 2).join(', ')})` : ''}${summary.phase3.evolutionRejectedReasons.length > 0 ? ` (${summary.phase3.evolutionRejectedReasons.slice(0, 3).join(', ')})` : ''}`,
     `- Phase 3 Legacy Directive File: ${summary.phase3.directiveStatus} (${summary.phase3.directiveIgnoredReason})`,
     '',
-    // D: Heartbeat Diagnostician chain — separated from evolution/nocturnal
+    // D: Heartbeat Diagnostician chain
     'Heartbeat Diagnostician (Pain → Principle)',
     `- Pending tasks: ${summary.runtimeDiagnosis.pendingTasks}`,
     `- Tasks written today: ${summary.runtimeDiagnosis.tasksWrittenToday}`,
@@ -150,7 +150,7 @@ function buildChineseOutput(
     `- Phase 3: ready ${summary.phase3.phase3ShadowEligible ? 'yes' : 'no'}，queueTruthReady ${summary.phase3.queueTruthReady ? 'yes' : 'no'}，eligible ${summary.phase3.evolutionEligible}，reference_only ${summary.phase3.evolutionReferenceOnly}，rejected ${summary.phase3.evolutionRejected}${summary.phase3.evolutionReferenceOnlyReasons.length > 0 ? ` (reference ${summary.phase3.evolutionReferenceOnlyReasons.slice(0, 2).join(', ')})` : ''}${summary.phase3.evolutionRejectedReasons.length > 0 ? ` (${summary.phase3.evolutionRejectedReasons.slice(0, 3).join(', ')})` : ''}`,
     `- Phase 3 Legacy Directive File: ${summary.phase3.directiveStatus} (${summary.phase3.directiveIgnoredReason})`,
     '',
-    // D: Heartbeat Diagnostician chain — separated from evolution/nocturnal
+    // D: Heartbeat Diagnostician chain
     '心跳诊断链路（Pain → 原则）',
     `- 等待处理: ${summary.runtimeDiagnosis.pendingTasks}`,
     `- 今日写入任务: ${summary.runtimeDiagnosis.tasksWrittenToday}`,
