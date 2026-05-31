@@ -240,19 +240,26 @@ jobs:
           echo "  - npm latest: $NPM_VERSION"
           echo "  - local: $LOCAL_VERSION"
 
-          if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
-            echo "Local version ($LOCAL_VERSION) differs from npm ($NPM_VERSION)"
-            echo "Will bump from npm version: $NPM_VERSION"
+          if [ "$NPM_VERSION" = "0.0.0" ]; then
+            echo "Package not yet published on npm — using local version $LOCAL_VERSION"
+            echo "version=$LOCAL_VERSION" >> $GITHUB_OUTPUT
+            echo "old_version=$NPM_VERSION" >> $GITHUB_OUTPUT
+            echo "Bumped: new package at $LOCAL_VERSION"
+          else
+            if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
+              echo "Local version ($LOCAL_VERSION) differs from npm ($NPM_VERSION)"
+              echo "Will bump from npm version: $NPM_VERSION"
+            fi
+
+            npm version $NPM_VERSION --no-git-tag-version
+            npm version $BUMP -m "chore(release): %s [skip ci]"
+
+            NEW_VERSION=$(node -p "require('./package.json').version")
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "old_version=$NPM_VERSION" >> $GITHUB_OUTPUT
+
+            echo "Bumped: $NPM_VERSION -> $NEW_VERSION"
           fi
-
-          npm version $NPM_VERSION --no-git-tag-version
-          npm version $BUMP -m "chore(release): %s [skip ci]"
-
-          NEW_VERSION=$(node -p "require('./package.json').version")
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "old_version=$NPM_VERSION" >> $GITHUB_OUTPUT
-
-          echo "Bumped: $NPM_VERSION -> $NEW_VERSION"
 
       - name: Sync version to all files
         if: needs.resolve-package.outputs.pkg_dir == 'openclaw-plugin' && steps.bump.outputs.type != 'none'
