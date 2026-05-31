@@ -189,45 +189,13 @@ function main() {
   // SECTION 5: Shell Injection Safety
   // ═══════════════════════════════════════════════
   console.log('\n── 5. Shell Injection Safety ──');
-
-  const seedScript = join(__dirname, '..', 'scripts', 'seed-nocturnal-scenarios.mjs');
-  const diagnoseScript = join(__dirname, '..', 'scripts', 'diagnose-nocturnal.mjs');
-
-  if (existsSync(seedScript)) {
-    const seedContent = readFileSync(seedScript, 'utf-8');
-    const execSyncCalls = (seedContent.match(/execSync\s*\(/g) || []).length;
-    const execFileCalls = (seedContent.match(/execFileSync\s*\(/g) || []).length;
-    assert(execSyncCalls === 0 || seedContent.includes("execSync('git") || seedContent.includes('execSync("git'), 
-           'Seed script: no sqlite3 in execSync', 
-           `found ${execSyncCalls} execSync calls`);
-    assert(execFileCalls > 0, 'Seed script: uses execFileSync', `found ${execFileCalls} calls`);
-    
-    // 5.1 Pre-flight check
-    assert(seedContent.includes('ensureSqlite3') || seedContent.includes('sqlite3 --version'), 'Seed script: sqlite3 pre-flight check');
-  }
-
-  if (existsSync(diagnoseScript)) {
-    const diagContent = readFileSync(diagnoseScript, 'utf-8');
-    // 5.2 Diagnose script uses execFileSync for sqlite3
-    const diagExecFileCalls = (diagContent.match(/execFileSync\s*\(\s*['"]sqlite3/g) || []).length;
-    assert(diagExecFileCalls > 0, 'Diagnose script: uses execFileSync for sqlite3', `found ${diagExecFileCalls} calls`);
-
-    // 5.3 No shell-interpolated sqlite3 calls
-    const shellSqliteCalls = (diagContent.match(/execSync\s*\(\s*['"]sqlite3/g) || []).length;
-    assert(shellSqliteCalls === 0, 'Diagnose script: no sqlite3 in execSync', `found ${shellSqliteCalls} unsafe calls`);
-  }
+  // (Nocturnal scripts removed in PRI-231 — section retained for future script checks)
 
   // ═══════════════════════════════════════════════
   // SECTION 6: Pending Review Warning Fix
   // ═══════════════════════════════════════════════
   console.log('\n── 6. Pending Review Warning Fix ──');
-
-  if (existsSync(diagnoseScript)) {
-    const diagContent = readFileSync(diagnoseScript, 'utf-8');
-    // 6.1 Pending case returns warn object
-    const pendingWarnPattern = /if\s*\(\s*pending\s*>\s*0\s*\)\s*\{[\s\S]*?status:\s*['"]warn['"]/;
-    assert(pendingWarnPattern.test(diagContent), 'Pending review returns {status:"warn"} object');
-  }
+  // (Nocturnal scripts removed in PRI-231 — section retained for future checks)
 
   // ═══════════════════════════════════════════════
   // SECTION 7: Path Resolver Fallback

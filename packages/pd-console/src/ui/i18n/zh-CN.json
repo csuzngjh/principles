@@ -99,7 +99,6 @@
       "noToken": "未配置认证令牌",
       "checkingAuth": "验证认证中…",
       "agentDiagnostician": "诊断者",
-      "agentNocturnalReflection": "夜间反思",
       "agentCorrectionObserver": "纠正观察者",
       "secondsAgo": "{{count}}秒前",
       "minutesAgo": "{{count}}分钟前",

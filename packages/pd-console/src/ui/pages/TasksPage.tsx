@@ -30,7 +30,6 @@ const ZONE_CONFIG = [
 
 const TASK_KIND_AGENT: Record<string, { id: string; i18nKey: string }> = {
   diagnostician: { id: 'diagnostician', i18nKey: 'pages:tasks.agentDiagnostician' },
-  sleep_reflection: { id: 'nocturnal-reflection', i18nKey: 'pages:tasks.agentNocturnalReflection' },
   keyword_optimization: { id: 'correction-observer', i18nKey: 'pages:tasks.agentCorrectionObserver' },
   principle_candidate_intake: { id: 'diagnostician', i18nKey: 'pages:tasks.agentDiagnostician' },
 };

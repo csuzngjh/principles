@@ -488,7 +488,7 @@ export class RuntimeSummaryService {
         lastSignal: lastPainSignal,
       },
       gate: gateStats,
-      // D: Heartbeat Diagnostician chain — separate from evolution/nocturnal
+      // D: Heartbeat Diagnostician chain
       runtimeDiagnosis,
       ...(workflowFunnelsOutput && { workflowFunnels: workflowFunnelsOutput }),
       metadata: {

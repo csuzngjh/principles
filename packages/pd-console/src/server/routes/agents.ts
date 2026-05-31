@@ -17,7 +17,7 @@ const AGENT_REGISTRY = [
     taskKind: null,
     prompt: 'N/A - Heartbeat-driven scheduler, no LLM prompt',
     tools: ['processCompilationBackfill', 'processEvolutionQueue', 'processDetectionQueue', 'sweepExpiredWorkflows', 'runWorkflowWatchdog'],
-    subAgents: ['nocturnal-reflection', 'correction-observer'],
+    subAgents: ['correction-observer'],
   },
   {
     id: 'diagnostician',
@@ -30,58 +30,6 @@ const AGENT_REGISTRY = [
     taskKind: 'diagnostician',
     prompt: '## Diagnostic Protocol (5 Whys)\nPhase 1 - Evidence Gathering\nPhase 2 - Causal Chain (5 Whys)\nPhase 3 - Root Cause Classification\nPhase 4 - Principle Extraction',
     tools: ['PainSignalBridge', 'DiagnosticianRunner', 'SqliteContextAssembler'],
-    subAgents: [],
-  },
-  {
-    id: 'nocturnal-reflection',
-    name: 'Nocturnal Reflection',
-    nameZh: '夜间反思',
-    description: 'Deep reflection pipeline that runs Trinity (Dreamer→Philosopher→Scribe) to generate high-quality decision alternatives',
-    descriptionZh: '深度反思管线，运行 Trinity（梦想家→哲学家→书记员）生成高质量决策替代方案',
-    icon: 'Moon',
-    category: 'reflector',
-    taskKind: 'sleep_reflection',
-    prompt: 'Nocturnal Dreamer — Candidate Generation\nNocturnal Philosopher — 6D Scoring & Risk Ranking\nNocturnal Scribe — Tournament Selection & Comparative Analysis',
-    tools: ['NocturnalTargetSelector', 'NocturnalTrajectoryExtractor', 'TrinityRunner', 'NocturnalArbiter', 'NocturnalExecutability', 'NocturnalArtificer'],
-    subAgents: ['trinity-dreamer', 'trinity-philosopher', 'trinity-scribe'],
-  },
-  {
-    id: 'trinity-dreamer',
-    name: 'Trinity Dreamer',
-    nameZh: 'Trinity 梦想家',
-    description: 'Generates 2-3 candidate correction alternatives from session trajectory analysis',
-    descriptionZh: '从会话轨迹分析中生成 2-3 个候选纠正方案',
-    icon: 'Sparkles',
-    category: 'sub-process',
-    taskKind: null,
-    prompt: 'You are a principles analyst specializing in identifying decision alternatives.\nYour task is to analyze a session trajectory and generate 2-3 candidate corrections.\nOutput: {"valid": true, "candidates": [...]}',
-    tools: ['runEmbeddedPiAgent'],
-    subAgents: [],
-  },
-  {
-    id: 'trinity-philosopher',
-    name: 'Trinity Philosopher',
-    nameZh: 'Trinity 哲学家',
-    description: 'Evaluates and ranks candidates using 6-dimensional scoring and risk assessment',
-    descriptionZh: '使用 6 维评分和风险评估对候选方案进行评估和排名',
-    icon: 'Scale',
-    category: 'sub-process',
-    taskKind: null,
-    prompt: 'You are a principles philosopher.\nEvaluate candidates against existing principles.\nScore each on 6 dimensions: correctness, specificity, actionability, non-redundancy, safety, generalizability.',
-    tools: ['runEmbeddedPiAgent'],
-    subAgents: [],
-  },
-  {
-    id: 'trinity-scribe',
-    name: 'Trinity Scribe',
-    nameZh: 'Trinity 书记员',
-    description: 'Performs tournament selection and produces the final structured artifact draft',
-    descriptionZh: '执行锦标赛选择，产出最终结构化 artifact 草稿',
-    icon: 'PenTool',
-    category: 'sub-process',
-    taskKind: null,
-    prompt: 'You are a principles scribe.\nPerform tournament selection among ranked candidates.\nProduce a final structured artifact with comparative analysis.',
-    tools: ['runEmbeddedPiAgent'],
     subAgents: [],
   },
   {
@@ -341,69 +289,10 @@ class AgentConsoleModel {
     }
   }
 
-  private getTrinitySubAgentStatus(agentId: string, workflows: WorkflowRow[]): { status: AgentStatus; lastRunAt: string | null } {
-    const stageMap: Record<string, string> = {
-      'trinity-dreamer': 'dreamer',
-      'trinity-philosopher': 'philosopher',
-      'trinity-scribe': 'scribe',
-    };
-    const stage = stageMap[agentId];
-    if (!stage) return { status: 'unknown', lastRunAt: null };
-
-    const stageOrder = ['dreamer', 'philosopher', 'scribe'];
-    const stageIndex = stageOrder.indexOf(stage);
-
-    for (const wf of workflows) {
-      if (wf.workflow_type !== 'nocturnal') continue;
-
-      const eventStates = this.getStageEvents(wf.workflow_id);
-      const stageEvent = eventStates[stage];
-
-      if (stageEvent === 'failed') {
-        return { status: 'failed', lastRunAt: new Date(wf.updated_at).toISOString() };
-      }
-      if (stageEvent === 'completed') {
-        return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
-      }
-
-      for (let i = stageOrder.length - 1; i >= 0; i--) {
-        const s = stageOrder[i];
-        if (eventStates[s] === 'completed') {
-          if (i === stageIndex) return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
-          if (i > stageIndex) return { status: 'running', lastRunAt: new Date(wf.updated_at).toISOString() };
-          return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
-        }
-        if (eventStates[s] === 'running' || eventStates[s] === 'started') {
-          if (i === stageIndex) return { status: 'running', lastRunAt: new Date(wf.updated_at).toISOString() };
-          if (i < stageIndex) return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
-          return { status: 'running', lastRunAt: new Date(wf.updated_at).toISOString() };
-        }
-      }
-
-      if (wf.state === 'active' || wf.state === 'pending') {
-        if (stageIndex === 0) return { status: 'running', lastRunAt: new Date(wf.updated_at).toISOString() };
-        return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
-      }
-      if (wf.state === 'completed') {
-        return { status: 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
-      }
-      if (wf.state === 'terminal_error') {
-        if (eventStates.dreamer === 'failed') {
-          return { status: stageIndex === 0 ? 'failed' : 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
-        }
-        if (eventStates.philosopher === 'failed') {
-          return { status: stageIndex <= 1 ? (stageIndex === 1 ? 'failed' : 'idle') : 'idle', lastRunAt: new Date(wf.updated_at).toISOString() };
-        }
-        return { status: 'failed', lastRunAt: new Date(wf.updated_at).toISOString() };
-      }
-    }
-    return { status: 'unknown', lastRunAt: null };
-  }
-
   private async buildAgentInfo(
     agent: typeof AGENT_REGISTRY[number],
     allTasks: Awaited<ReturnType<RuntimeStateManager['listTasks']>>,
-    workflows: WorkflowRow[],
+    _workflows: WorkflowRow[],
   ): Promise<AgentInfo> {
     let status: AgentStatus = 'unknown';
     let lastRunAt: string | null = null;
@@ -416,7 +305,7 @@ class AgentConsoleModel {
       const workerStatus = this.getEvolutionWorkerStatus();
       ({ status, lastRunAt } = workerStatus);
       const queueTasks = allTasks.filter(t =>
-        t.taskKind === 'diagnostician' || t.taskKind === 'sleep_reflection' || t.taskKind === 'keyword_optimization',
+        t.taskKind === 'diagnostician' || t.taskKind === 'keyword_optimization',
       );
       recentTaskCount = queueTasks.length;
       failedTaskCount = queueTasks.filter(t => t.status === 'failed').length;
@@ -442,9 +331,6 @@ class AgentConsoleModel {
       } else {
         status = 'idle';
       }
-    } else if (agent.id === 'trinity-dreamer' || agent.id === 'trinity-philosopher' || agent.id === 'trinity-scribe') {
-      const subStatus = this.getTrinitySubAgentStatus(agent.id, workflows);
-      ({ status, lastRunAt } = subStatus);
     } else if (agent.id === 'pain-diagnostic-gate') {
       status = 'idle';
     }

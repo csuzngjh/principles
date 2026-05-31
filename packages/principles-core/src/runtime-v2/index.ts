@@ -45,7 +45,7 @@ export { PersistenceActionSchema, HygieneStatsSchema } from './types/hygiene-typ
 // Runtime summary types schemas
 export { RuntimeTruthSchema, AnalyticsTruthSchema, TrendMetricsSchema } from './types/runtime-summary-types.js';
 // Event types schemas
-export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RuleMatchEventDataSchema, RulePromotionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, PlanApprovalEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, NocturnalDreamerCompletedEventDataSchema, NocturnalArtifactPersistedEventDataSchema, NocturnalCodeCandidateCreatedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimeV2PromptActivationsInjectedEventDataSchema, RuntimeV2ConfirmFirstGateEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, PainStatsSchema, EmpathyEventStatsSchema, GfiStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
+export { EventTypeSchema, EventCategorySchema, EventLogEntrySchema, ToolCallEventDataSchema, PainSignalEventDataSchema, RuleMatchEventDataSchema, RulePromotionEventDataSchema, HookExecutionEventDataSchema, GateBlockEventDataSchema, GateBypassEventDataSchema, PlanApprovalEventDataSchema, EvolutionTaskEventDataSchema, EmpathyRollbackEventDataSchema, HeartbeatDiagnosisEventDataSchema, DiagnosisTaskEventDataSchema, DiagnosticianReportEventDataSchema, PrincipleCandidateEventDataSchema, RuleEnforcedEventDataSchema, RuleHostEvaluatedEventDataSchema, RuleHostBlockedEventDataSchema, RuleHostRequireApprovalEventDataSchema, RuleHostAutoCorrectProposedEventDataSchema, RuleHostAutoCorrectAppliedEventDataSchema, RuntimeV2PromptActivationsInjectedEventDataSchema, RuntimeV2ConfirmFirstGateEventDataSchema, ToolCallStatsSchema, ErrorStatsSchema, PainStatsSchema, EmpathyEventStatsSchema, GfiStatsSchema, EventEvolutionStatsSchema, HookStatsSchema, DailyStatsSchema } from './types/event-types.js';
 // Event payload discriminated union schemas
 export { DiscriminatedEventLogEntrySchema } from './types/event-payload.js';
 
@@ -887,23 +887,6 @@ export type { RecoverySweepService, RecoverySweepServiceHandle } from './recover
 export { createRuntimeStateHandle } from './runtime-state-handle.js';
 export type { RuntimeStateHandle } from './runtime-state-handle.js';
 
-// ── Idle Trigger Decision Model (PRI-143) ──────────────────────────────────
-
-export type {
-  IdleTriggerConfig,
-  IdleTriggerQueueSnapshot,
-  IdleTriggerInput,
-  IdleTriggerResult,
-} from './idle-trigger/index.js';
-
-export {
-  DEFAULT_IDLE_TRIGGER_CONFIG,
-  resolveIdleTriggerConfig,
-  computeJitterMs,
-  evaluateIdleTrigger,
-  evaluateIdleTriggerDecision,
-} from './idle-trigger/index.js';
-
 // ── Activation Dispatcher (PRI-144) ──────────────────────────────────────
 
 export type {
@@ -1169,125 +1152,6 @@ export type {
   RefinerRuleHostGateDeps,
 } from './internalization/refiner-rulehost-gate.js';
 
-// ── Nocturnal Trinity Types (migrated from openclaw-plugin) ────────────────
-
-export type {
-  ArtificerTargetRuleScore,
-  ArtificerTargetRuleResolution,
-  TrinityArtificerContext,
-  TrinityDreamerCandidate,
-  TrinityDreamerOutput,
-  PhilosopherRiskAssessment,
-  Philosopher6DScores,
-  PhilosopherJudgment,
-  PhilosopherOutput,
-  TrinityTournamentTraceEntry,
-  RejectedAnalysis,
-  ChosenJustification,
-  ContrastiveAnalysis,
-  TrinityTelemetry,
-  TrinityStageFailure,
-  TrinityResult,
-  TrinityDraftArtifact,
-} from './nocturnal/index.js';
-
-export {
-  ArtificerTargetRuleScoreSchema,
-  ArtificerTargetRuleResolutionSchema,
-  TrinityArtificerContextSchema,
-  TrinityDreamerCandidateSchema,
-  TrinityDreamerOutputSchema,
-  PhilosopherRiskAssessmentSchema,
-  Philosopher6DScoresSchema,
-  PhilosopherJudgmentSchema,
-  PhilosopherOutputSchema,
-  TrinityTournamentTraceEntrySchema,
-  RejectedAnalysisSchema,
-  ChosenJustificationSchema,
-  ContrastiveAnalysisSchema,
-  TrinityTelemetrySchema,
-  TrinityStageFailureSchema,
-  TrinityResultSchema,
-  TrinityDraftArtifactSchema,
-} from './nocturnal/index.js';
-
-// ── Nocturnal Candidate Scoring (migrated from openclaw-plugin) ────────────
-
-export type {
-  ThresholdValues,
-  CandidateScores,
-  ScoredCandidate,
-  CandidateTournamentResult,
-  CandidateTournamentTraceEntry,
-  ScoringWeights,
-  DiversityValidationResult,
-  RankCandidatesOptions,
-  RunTournamentOptions,
-} from './nocturnal/index.js';
-
-export {
-  DEFAULT_SCORING_WEIGHTS,
-  scoreCandidate,
-  checkThresholds,
-  validateCandidateDiversity,
-  rankCandidates,
-  runTournament,
-  ThresholdValuesSchema,
-  CandidateScoresSchema,
-  ScoredCandidateSchema,
-  CandidateTournamentResultSchema,
-  CandidateTournamentTraceEntrySchema,
-  ScoringWeightsSchema,
-  DiversityValidationResultSchema,
-} from './nocturnal/index.js';
-
-// ── Nocturnal Snapshot Contract (migrated from openclaw-plugin) ────────────
-
-export type {
-  NocturnalAssistantTurn,
-  NocturnalUserTurn,
-  NocturnalToolCall,
-  NocturnalPainEvent,
-  NocturnalGateBlock,
-  NocturnalUserCorrection,
-  NocturnalSessionSnapshot,
-  NocturnalSnapshotContractResult,
-} from './nocturnal/index.js';
-
-export {
-  validateNocturnalSnapshotIngress,
-  NocturnalAssistantTurnSchema,
-  NocturnalUserTurnSchema,
-  NocturnalToolCallSchema,
-  NocturnalPainEventSchema,
-  NocturnalGateBlockSchema,
-  NocturnalUserCorrectionSchema,
-  NocturnalSessionSnapshotSchema,
-  NocturnalSnapshotContractResultSchema,
-} from './nocturnal/index.js';
-
-// ── Nocturnal Compliance (migrated from openclaw-plugin) ────────────────────
-
-export type {
-  SessionEvents,
-  ToolCallRecord,
-  PainSignalRecord,
-  GateBlockRecord,
-  UserCorrectionRecord,
-  PlanApprovalRecord,
-  ComplianceResult,
-  RawEventEntry,
-} from './nocturnal/index.js';
-
-export {
-  detectOpportunity,
-  detectViolation,
-  computeCompliance,
-  computeAllCompliance,
-  groupEventsIntoSessions,
-} from './nocturnal/index.js';
-
-
 // ── Correction Cue Keyword Types (migrated from openclaw-plugin) ──────────
 
 export {
@@ -1356,9 +1220,6 @@ export type {
   DiagnosticianReportEventData,
   PrincipleCandidateEventData,
   RuleEnforcedEventData,
-  NocturnalDreamerCompletedEventData,
-  NocturnalArtifactPersistedEventData,
-  NocturnalCodeCandidateCreatedEventData,
   RuleHostEvaluatedEventData,
   RuleHostBlockedEventData,
   RuleHostRequireApprovalEventData,
