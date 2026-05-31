@@ -415,16 +415,16 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
         return;
       }
 
+      // GET /api/update/history (MUST be before update catch-all)
+      if (urlPath === '/api/update/history') {
+        asyncHandler(() => handleUpdateHistoryRoute(req, res, services.workspaceDir, ''))(req, res);
+        return;
+      }
+
       // Update routes: GET /api/update/check, POST /api/update/apply, GET /api/update/status, POST /api/update/rollback
       if (urlPath === '/api/update' || urlPath.startsWith('/api/update/')) {
         const subPath = urlPath.slice('/api/update'.length);
         asyncHandler(() => handleUpdateRoute(req, res, services.workspaceDir, subPath))(req, res);
-        return;
-      }
-
-      // GET /api/update/history
-      if (urlPath === '/api/update/history') {
-        asyncHandler(() => handleUpdateHistoryRoute(req, res, services.workspaceDir, ''))(req, res);
         return;
       }
 

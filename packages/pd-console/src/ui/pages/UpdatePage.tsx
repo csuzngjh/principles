@@ -69,7 +69,6 @@ export function UpdatePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          targetDir: "", // Will be resolved server-side from workspaceDir
           mergeStrategy,
           createBackup,
         }),
@@ -100,7 +99,6 @@ export function UpdatePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          targetDir: "", // Will be resolved server-side
           backupDir: lastBackupPath || "",
         }),
       });

@@ -190,20 +190,23 @@ async function doApplyUpdate(
   options: {
     targetDir: string;
     mergeStrategy: 'smart' | 'overwrite' | 'keep';
-    createBackup?: boolean;
+    createBackup: boolean;
   },
   workspaceDir: string,
 ) {
   const { targetDir, mergeStrategy, createBackup } = options;
   try {
+    // 0. Save current version BEFORE any changes
+    const fromVersion = readCurrentVersion(targetDir) ?? 'unknown';
+
     // 1. Fetch latest package info
     const response = await fetch(NPM_REGISTRY_LATEST);
     if (!response.ok) return { success: false, message: `Failed to fetch package info: HTTP ${response.status}` };
     const rawData: unknown = await response.json();
     if (typeof rawData !== 'object' || rawData === null) return { success: false, message: 'Invalid registry response' };
     const data = rawData as Record<string, unknown>;
-    const version = typeof data.version === 'string' ? data.version : undefined;
-    if (!version) return { success: false, message: 'Missing version in registry response' };
+    const toVersion = typeof data.version === 'string' ? data.version : undefined;
+    if (!toVersion) return { success: false, message: 'Missing version in registry response' };
     const dist = typeof data.dist === 'object' && data.dist !== null ? (data.dist as Record<string, unknown>) : null;
     const tarball = dist && typeof dist.tarball === 'string' ? dist.tarball : undefined;
     if (!tarball) return { success: false, message: 'Missing tarball URL in registry response' };
@@ -274,7 +277,7 @@ async function doApplyUpdate(
     if (fs.existsSync(pkgPath)) {
       const rawPkg: unknown = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
       if (typeof rawPkg === 'object' && rawPkg !== null) {
-        const pkg = { ...(rawPkg as Record<string, unknown>), version };
+        const pkg = { ...(rawPkg as Record<string, unknown>), version: toVersion };
         fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
       }
     }
@@ -282,11 +285,10 @@ async function doApplyUpdate(
     // 6. Cleanup temp dir
     if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
 
-    // 7. Record update history
-    const currentVersion = readCurrentVersion(targetDir) ?? 'unknown';
+    // 7. Record update history (fromVersion is the OLD version saved before changes)
     appendUpdateHistory(workspaceDir, {
-      fromVersion: currentVersion,
-      toVersion: version,
+      fromVersion,
+      toVersion,
       success: true,
       backupPath,
     });
@@ -296,7 +298,7 @@ async function doApplyUpdate(
       message: 'Update applied successfully',
       updatedFiles,
       backupPath,
-      newVersion: version,
+      newVersion: toVersion,
     };
   } catch (error) {
     return {
@@ -374,17 +376,17 @@ export async function handleUpdateRoute(
       }
       const body = rawBody as Record<string, unknown>;
 
-      const { targetDir } = body;
-      if (!isString(targetDir) || targetDir.length === 0) {
-        sendBadRequest(res, 'Missing or invalid field: targetDir');
-        return;
-      }
+      // targetDir is optional — if not provided, resolve from workspaceDir
+      const targetDir = isString(body.targetDir) && body.targetDir.length > 0
+        ? body.targetDir
+        : pluginDir;
       const { mergeStrategy } = body;
       if (!isValidMergeStrategy(mergeStrategy)) {
         sendBadRequest(res, 'Missing or invalid field: mergeStrategy');
         return;
       }
-      const { backupDir } = body;
+      // createBackup is a boolean (default false)
+      const createBackup = typeof body.createBackup === 'boolean' ? body.createBackup : false;
 
       // Path traversal validation
       if (!validatePathInWorkspace(targetDir, workspaceDir)) {
@@ -395,7 +397,7 @@ export async function handleUpdateRoute(
       const result = await doApplyUpdate({
         targetDir,
         mergeStrategy,
-        createBackup: isString(backupDir),
+        createBackup,
       }, workspaceDir);
       sendSuccess(res, result);
     } catch (err) {
@@ -424,11 +426,10 @@ export async function handleUpdateRoute(
       }
       const body = rawBody as Record<string, unknown>;
 
-      const { targetDir } = body;
-      if (!isString(targetDir) || targetDir.length === 0) {
-        sendBadRequest(res, 'Missing or invalid field: targetDir');
-        return;
-      }
+      // targetDir is optional — if not provided, resolve from workspaceDir
+      const targetDir = isString(body.targetDir) && body.targetDir.length > 0
+        ? body.targetDir
+        : pluginDir;
       const { backupDir } = body;
       if (!isString(backupDir) || backupDir.length === 0) {
         sendBadRequest(res, 'Missing or invalid field: backupDir');

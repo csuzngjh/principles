@@ -172,7 +172,7 @@ describe('handleUpdateRoute', () => {
   // ── POST /apply ─────────────────────────────────────────────────────
 
   describe('POST /apply', () => {
-    it('should apply update and return result', async () => {
+    it('should apply update with explicit targetDir', async () => {
       const { execSync: execSyncMock } = await import('child_process');
 
       // Mock fetch for multi-call: registry info then tarball download
@@ -210,15 +210,17 @@ describe('handleUpdateRoute', () => {
       const req = createMockRequest('POST', {
         targetDir,
         mergeStrategy: 'smart',
+        createBackup: false,
       });
       const res = createMockResponse();
 
       await handleUpdateRoute(req, res, workspaceDir, '/apply');
 
       expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
-      const body = parseResponseBody<{ success: boolean; data: { success: boolean; message: string } }>(res);
+      const body = parseResponseBody<{ success: boolean; data: { success: boolean; message: string; newVersion: string } }>(res);
       expect(body.success).toBe(true);
       expect(body.data.success).toBe(true);
+      expect(body.data.newVersion).toBe('2.0.0');
     });
 
     it('should return 405 for non-POST method', async () => {
@@ -230,15 +232,90 @@ describe('handleUpdateRoute', () => {
       expect(res.writeHead).toHaveBeenCalledWith(405, expect.any(Object));
     });
 
-    it('should return 400 for missing targetDir', async () => {
-      const req = createMockRequest('POST', { mergeStrategy: 'smart' });
+    it('should apply update without targetDir (server resolves pluginDir)', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('registry.npmjs.org')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(0),
+        } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // No targetDir — server should resolve to pluginDir
+      const req = createMockRequest('POST', {
+        mergeStrategy: 'smart',
+        createBackup: false,
+      });
       const res = createMockResponse();
 
       await handleUpdateRoute(req, res, workspaceDir, '/apply');
 
-      expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
-      const body = parseResponseBody<{ success: boolean; message: string }>(res);
-      expect(body.message).toContain('targetDir');
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; data: { success: boolean; message: string; newVersion: string } }>(res);
+      expect(body.success).toBe(true);
+      expect(body.data.success).toBe(true);
+      expect(body.data.newVersion).toBe('2.0.0');
+    });
+
+    it('should apply update with createBackup: true', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('registry.npmjs.org')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(0),
+        } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      const req = createMockRequest('POST', {
+        mergeStrategy: 'overwrite',
+        createBackup: true,
+      });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; data: { success: boolean; backupPath?: string } }>(res);
+      expect(body.data.success).toBe(true);
+      expect(body.data.backupPath).toBeDefined();
     });
 
     it('should return 400 for invalid mergeStrategy', async () => {
@@ -326,17 +403,8 @@ describe('handleUpdateRoute', () => {
       expect(res.writeHead).toHaveBeenCalledWith(405, expect.any(Object));
     });
 
-    it('should return 400 for missing targetDir', async () => {
-      const req = createMockRequest('POST', { backupDir: '/some/backup' });
-      const res = createMockResponse();
-
-      await handleUpdateRoute(req, res, workspaceDir, '/rollback');
-
-      expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
-    });
-
     it('should return 400 for missing backupDir', async () => {
-      const req = createMockRequest('POST', { targetDir: '/some/target' });
+      const req = createMockRequest('POST', {});
       const res = createMockResponse();
 
       await handleUpdateRoute(req, res, workspaceDir, '/rollback');
@@ -409,6 +477,7 @@ describe('handleUpdateRoute', () => {
       const req = createMockRequest('POST', {
         targetDir,
         mergeStrategy: 'smart',
+        createBackup: false,
       });
       const res = createMockResponse();
 
@@ -438,6 +507,79 @@ describe('handleUpdateRoute', () => {
       expect(body.success).toBe(true);
       expect(body.data.success).toBe(false);
       expect(body.data.message).toBe('Backup not found');
+    });
+  });
+
+  // ── Update History ──────────────────────────────────────────────────
+
+  describe('GET /history', () => {
+    it('should return 200 with history array', async () => {
+      const { handleUpdateHistoryRoute } = await import('../../../src/server/routes/update-history.js');
+      const req = createMockRequest('GET');
+      const res = createMockResponse();
+
+      await handleUpdateHistoryRoute(req, res, workspaceDir, '');
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; data: unknown[] }>(res);
+      expect(body.success).toBe(true);
+      expect(Array.isArray(body.data)).toBe(true);
+    });
+  });
+
+  // ── fromVersion tracking ────────────────────────────────────────────
+
+  describe('fromVersion tracking', () => {
+    it('should record old version as fromVersion in history', async () => {
+      const { execSync: execSyncMock } = await import('child_process');
+      const { handleUpdateHistoryRoute } = await import('../../../src/server/routes/update-history.js');
+
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('registry.npmjs.org')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '3.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(0),
+        } as Response);
+      }) as unknown as typeof fetch);
+
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '3.0.0', name: 'test' }));
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // pluginDir has version 1.0.0 (set in beforeEach)
+      const req = createMockRequest('POST', {
+        mergeStrategy: 'overwrite',
+        createBackup: false,
+      });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+      const applyBody = parseResponseBody<{ success: boolean; data: { success: boolean; newVersion: string } }>(res);
+      expect(applyBody.data.success).toBe(true);
+      expect(applyBody.data.newVersion).toBe('3.0.0');
+
+      // Check history — fromVersion should be 1.0.0 (the OLD version)
+      const histReq = createMockRequest('GET');
+      const histRes = createMockResponse();
+      await handleUpdateHistoryRoute(histReq, histRes, workspaceDir, '');
+      const histBody = parseResponseBody<{ success: boolean; data: Array<{ fromVersion: string; toVersion: string }> }>(histRes);
+      expect(histBody.data.length).toBeGreaterThan(0);
+      const lastEntry = histBody.data[histBody.data.length - 1];
+      expect(lastEntry.fromVersion).toBe('1.0.0');
+      expect(lastEntry.toVersion).toBe('3.0.0');
     });
   });
 
