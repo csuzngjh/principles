@@ -9,8 +9,6 @@
  * 2. Rule Host: Dynamic principle-based evaluation (sole gate)
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
 import { normalizePath } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
