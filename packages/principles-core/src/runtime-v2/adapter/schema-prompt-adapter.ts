@@ -71,11 +71,11 @@ function generateValueForSchema(schema: TSchema): unknown {
 
 function isRecommendationArraySchema(schema: TSchema): boolean {
   if (schema.type !== 'object' || !schema.properties) return false;
-  const recsProp = (schema.properties as Record<string, TSchema>)['recommendations'];
+  const recsProp = (schema.properties as Record<string, TSchema>).recommendations;
   if (!recsProp || recsProp.type !== 'array') return false;
   const items = recsProp.items as TSchema | undefined;
   if (!items || typeof items !== 'object') return false;
-  const kindProp = (items.properties as Record<string, TSchema> | undefined)?.['kind'];
+  const kindProp = (items.properties as Record<string, TSchema> | undefined)?.kind;
   if (!kindProp) return false;
   const anyOf = kindProp.anyOf as TSchema[] | undefined;
   if (!anyOf || !Array.isArray(anyOf)) return false;
@@ -115,22 +115,18 @@ function generateDiagnosticianExample(schema: TSchema): unknown {
 }
 
 export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   generateExample(schema: TSchema): string {
-    let example: unknown;
+    const example = isRecommendationArraySchema(schema)
+      ? generateDiagnosticianExample(schema)
+      : generateValueForSchema(schema);
 
-    if (isRecommendationArraySchema(schema)) {
-      example = generateDiagnosticianExample(schema);
-    } else {
-      example = generateValueForSchema(schema);
-    }
+    const checked = Value.Check(schema, example) ? example : Value.Cast(schema, example);
 
-    if (!Value.Check(schema, example)) {
-      example = Value.Cast(schema, example);
-    }
-
-    return JSON.stringify(example, null, 2);
+    return JSON.stringify(checked, null, 2);
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   generateConstraints(schema: TSchema): string {
     if (!schema || typeof schema !== 'object') return '(unknown schema)';
 
@@ -166,7 +162,7 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
               if (iv.anyOf && Array.isArray(iv.anyOf)) {
                 const constValues = (iv.anyOf as TSchema[])
                   .filter(s => typeof s === 'object' && s !== null && s.const !== undefined)
-                  .map(s => String((s as TSchema).const));
+                  .map(s => String(s.const));
                 if (constValues.length > 0) {
                   ikConstraints.push(`enum: ${constValues.join(' | ')}`);
                 }
@@ -179,7 +175,7 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
               const ikConstraintStr = ikConstraints.length > 0 ? ` {${ikConstraints.join(', ')}}` : '';
               lines.push(`    .${ik}: ${ikType}${ikConstraintStr}${ikReq}`);
             }
-            if (Object.hasOwn(itemProps, 'kind') && (itemProps['kind'] as TSchema)?.anyOf) {
+            if (Object.hasOwn(itemProps, 'kind') && (itemProps.kind as TSchema)?.anyOf) {
               lines.push('    Conditional: "rule" kind → triggerPattern and action are required');
               lines.push('    Conditional: "principle" kind → abstractedPrinciple is required');
             }
@@ -206,6 +202,7 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
     return '(complex schema)';
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   generateSchemaSummary(schema: TSchema): string {
     return deriveSchemaSummary(schema);
   }
