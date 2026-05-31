@@ -1,351 +1,470 @@
-# ADR-0015: Pain Signal Model Unification
+# ADR-0015: Pain Evidence Ingestion and Admission Model
 
-> **状态**: Proposed
-> **日期**: 2026-05-30
-> **相关**: ADR-0010 (GAP), ADR-0014 (MVP Pivot), DOMAIN_MODEL.md, Series 03 (Biological Forward Pass)
+> **Status**: Proposed
+> **Date**: 2026-05-30
+> **Related**: ADR-0010 (GAP, deferred by ADR-0014), ADR-0014 (MVP Pivot), PRODUCT_IDENTITY.md, DOMAIN_MODEL.md, Series 03 (Biological Forward Pass)
 
-## 1. 背景与痛点
+## 1. Context
 
-PD 系统的痛苦信号机制存在以下问题：
+PD's value depends on a steady stream of owner-relevant behavioral evidence entering the internalization pipeline:
 
-### 1.1 业务模型缺失
-
-博文连载三定义了清晰的三层痛觉分级体系：
-
-- **底层（HUMAN）**：人类痛感的投影 — 开发者显式表达挫败感
-- **中层（FRICTION）**：系统摩擦的量化 — Agent 原地打转、无效操作
-- **高层（GOAL）**：目标偏离的虚无感 — 勤奋但偏离目标
-
-但代码中 `painType` 只有 3 个值（`tool_failure | subagent_error | user_frustration`），6 种不同 source 被压扁到 `user_frustration`，三层痛觉的业务模型在类型系统中完全没有表达。
-
-### 1.2 代码分散与重复
-
-- **两套 PainSignal Schema**：core 层和 runtime-v2 层各有一套，字段约束不同
-- **Score 计算分散**：硬编码/可配置/动态计算/累积，无统一策略
-- **Severity 分级不一致**：`low/medium/high/critical` vs `mild/moderate/severe`，`normalizeSeverity('critical')` 错误返回 `'mild'`
-- **3 个手动入口**：`pain` 工具(score=100)、`/pd-pain`(score=90)、`pd pain record`(score=80)，做同一件事但行为不一致
-
-### 1.3 Hook 层越权
-
-每个信号源在 Hook 层做了 3-4 次重复写入（eventLog、trajectory、evoLogger），然后 `emitPainDetectedEvent` 内部通过 `PainToPrincipleService.recordPain()` 再写一次。Gate 检查也散落在各 Hook 文件中。`subagent_error` 甚至不走 `recordPain()`，只调用 `emitSync`。
-
-### 1.4 根因
-
-这些问题是 openclaw-plugin → principles-core 重构的过渡态产物。原来所有逻辑都在 Hook 层，重构到 SDK 后旧代码没删干净，导致同一件事做了两遍。
-
-## 2. 决策详情
-
-### 2.1 核心类型系统
-
-定义在 `packages/principles-core/src/pain-signal-model.ts`（新文件，单一权威来源）。
-
-#### PainLayer — 三层痛觉
-
-```typescript
-export const PainLayer = {
-  GOAL: 1,      // 高层痛觉：目标偏离的虚无感
-  HUMAN: 2,     // 底层痛觉：人类痛感的投影
-  FRICTION: 3,  // 中层痛觉：系统摩擦的量化
-} as const;
-
-export type PainLayer = typeof PainLayer[keyof typeof PainLayer];
+```text
+behavior evidence -> diagnosis -> principle proposal -> owner review
+-> reversible activation -> observable later behavior
 ```
 
-层级用数字 1/2/3，有天然优先级顺序。命名用业务语义（GOAL/HUMAN/FRICTION）而非抽象编号（L1/L2/L3）。
+The current pain mechanism proves that the pipeline can be triggered, but it does not yet make the signal sources durable enough for post-MVP use:
 
-#### PainSignalKind — 信号种类
+- `painType` compresses several different sources into `tool_failure | subagent_error | user_frustration`.
+- Hook code mixes raw event capture, scoring, observability writes, gate checks, and diagnostic task creation.
+- Low-value technical friction and high-value owner feedback are both represented as a single `score`.
+- Multiple weak observations cannot reliably aggregate into one behavior-pattern signal.
+- There is no first-class admission decision explaining why an observation was rejected, stored as evidence only, or allowed to trigger diagnosis.
+- There is no quality feedback loop showing which signal sources produce approved principles versus noise.
 
-```typescript
-export const PAIN_SIGNAL_KINDS = {
-  // Layer 1: GOAL — 预留，post-MVP 实施
-  GOAL_DRIFT:           'goal_drift',
-  MISSION_STALLED:      'mission_stalled',
-  DECISION_SKIPPED:     'decision_skipped',
-  REWORK_LOOP:          'rework_loop',
+The design goal is not simply to add more `PainSignalKind` values. It is to make pain intake a governed evidence system: diverse inputs should flow in, but only validated, explainable, owner-relevant evidence should become diagnostic work.
 
-  // Layer 2: HUMAN
-  USER_REPORTED:        'user_reported',
+### 1.1 Scope Boundary
 
-  // Layer 3: FRICTION
-  TOOL_FAILURE:         'tool_failure',
-  DISPATCH_ERROR:       'dispatch_error',
-  SUBAGENT_ERROR:       'subagent_error',
-  LLM_PARALYSIS:        'llm_paralysis',
-  GATE_BLOCKED:         'gate_blocked',
-  EMPATHY_INFERRED:     'empathy_inferred',
-  SEMANTIC:             'semantic',
-  INTERCEPT_EXTRACTION: 'intercept_extraction',
-} as const;
+This ADR does **not** implement ADR-0010 GAP expansion. `GAPSignalGenerator`, Objective/KeyResult/Mission tables, and goal-driven Layer 1 generation remain post-MVP conditional work under ADR-0014.
 
-export type PainSignalKind = typeof PAIN_SIGNAL_KINDS[keyof typeof PAIN_SIGNAL_KINDS];
+This ADR may still use the words "goal", "owner relevance", and "behavioral scope" as classification dimensions for current evidence. Those dimensions must not require an OKR subsystem or MissionScheduler.
+
+### 1.2 Relevant Error Handbook Entries
+
+- **ERR-001 / ERR-005 / ERR-009**: Raw observations, parsed JSON, LLM output, and artifact metadata must enter as `unknown` and be validated field-by-field. Malformed required fields fail loud.
+- **ERR-002**: Admission rejection and graceful degradation must carry structured reasons. Silent fallback is a bug.
+- **ERR-024 / ERR-025 / ERR-048**: Tests must exercise the production intake and consumption path, not only isolated helpers.
+- **ERR-014 / ERR-017**: Evidence previews must be bounded and safely serialized.
+
+## 2. Decision
+
+Introduce a four-stage evidence model:
+
+```text
+RawObservation
+  -> PainEvidence
+  -> PainSignal
+  -> PainEpisode
 ```
 
-Layer 1 的 4 种 kind 在枚举中预留但不注册 Descriptor，等 ADR-0010 GAP 实施时启用。
+The existing `PainToPrincipleService.recordPain()` remains the public service entry point for current callers, but internally it becomes an intake orchestrator rather than a monolithic scorer/writer. The service records structured admission decisions and delegates validation, assessment, correlation, persistence, and triggering to smaller units.
 
-3 个手动入口合并为 1 种 kind `user_reported`，provenance 字段区分上下文丰富度。
+Pain evidence is the input fact layer for the full PD loop. It is not merely a trigger for Diagnostician:
 
-#### ScoreStrategy — Score 计算策略
-
-```typescript
-export const ScoreStrategy = {
-  FIXED:           'fixed',           // 硬编码分数
-  COMPUTED:        'computed',        // 动态计算（如 computePainScore）
-  ACCUMULATIVE:    'accumulative',    // 累积性（如 GFI 溢出）
-  DETECTED:        'detected',        // 由检测器产出（如 DetectionService）
-  PROVENANCE_BASED: 'provenance_based', // score 取决于 provenance
-} as const;
-
-export type ScoreStrategy = typeof ScoreStrategy[keyof typeof ScoreStrategy];
+```text
+PainEvidence / PainEpisode
+  -> Diagnostician explains the behavior pattern
+  -> Dreamer/Scribe/Artificer form a candidate principle
+  -> owner reviews the evidence-backed candidate
+  -> activation changes prompt / RuleHost / defer_archive state
+  -> later observations produce outcome verdicts
+  -> verdicts calibrate source quality and trigger policy
 ```
 
-#### ProvenanceType — 信号来源可信度
+This ADR therefore optimizes pain intake for three system-level jobs:
+
+1. **Fact capture**: preserve enough validated context to explain what happened.
+2. **Lineage anchor**: connect evidence to diagnosis, candidate, approval, activation, and later observation.
+3. **Source calibration**: learn which sources produce useful owner-approved behavior changes and which produce noise.
+
+## 3. Domain Model
+
+### 3.1 RawObservation
+
+`RawObservation` is an untrusted event from a source adapter. It may come from a hook, CLI command, review integration, RuleHost event, owner message, or agent self-report.
 
 ```typescript
-export const ProvenanceType = {
-  OPENCLAW_CONTEXT_BOUND:  'openclaw_context_bound',
-  OWNER_REPORTED:          'owner_reported_no_host_trace',
-  SYSTEM_OBSERVED:         'system_observed',
-} as const;
-
-export type ProvenanceType = typeof ProvenanceType[keyof typeof ProvenanceType];
+interface RawObservation {
+  sourceKind: RawObservationSourceKind;
+  observedAt: string;
+  workspaceId?: string;
+  sessionId?: string;
+  traceId?: string;
+  payload: unknown;
+}
 ```
 
-新增 `SYSTEM_OBSERVED`，用于系统自动检测的信号（当前代码中这类信号没有显式 provenance）。
+Rules:
 
-#### PainSignalDescriptor — 信号描述符
+- `payload` is always `unknown`.
+- Source adapters validate only enough to identify the source and capture bounded context.
+- No raw observation directly creates a diagnostic task.
+
+### 3.2 PainEvidence
+
+`PainEvidence` is a validated, sanitized, bounded evidence record. It can be stored without triggering diagnosis.
 
 ```typescript
-export interface PainSignalDescriptor {
-  kind: PainSignalKind;
-  layer: PainLayer;
-  scoreStrategy: ScoreStrategy;
-  defaultScore?: number;
-  provenanceScores?: Record<ProvenanceType, number>;  // provenance_based 策略用
-  canTriggerDiagnostic: boolean;
-  provenance: ProvenanceType;
+interface PainEvidence {
+  evidenceId: string;
+  sourceKind: PainEvidenceSourceKind;
+  provenance: PainProvenance;
+  sourceClass: PainSourceClass;
+  behavioralScope: BehavioralScope;
+  pdResponsibility: PdResponsibility;
+  summary: string;
+  detailsPreview?: string;
+  subjectRef?: string;
+  errorHash?: string;
+  ownerQuoteRef?: string;
+  lineageRefs: PainLineageRefs;
+  observedAt: string;
+  validationNotes: string[];
+}
+```
+
+`detailsPreview` must use safe bounded serialization. Full raw payloads are not stored by default.
+
+### 3.3 PainSignal
+
+`PainSignal` is admitted evidence that is strong enough to enter the diagnosis candidate set directly or as part of an episode.
+
+```typescript
+interface PainSignal {
+  painId: string;
+  kind: ActivePainSignalKind;
+  assessment: PainAssessment;
+  evidenceIds: string[];
+  admission: AdmissionDecision;
+  lineageRefs: PainLineageRefs;
+  createdAt: string;
+}
+```
+
+`PainSignal.kind` contains only active, processable values. Deferred GAP kinds are not part of the production schema until their restart conditions are met.
+
+### 3.4 PainEpisode
+
+`PainEpisode` groups related evidence and signals into one behavior-pattern instance.
+
+```typescript
+interface PainEpisode {
+  episodeId: string;
+  episodeKind: PainEpisodeKind;
+  evidenceIds: string[];
+  signalIds: string[];
+  assessment: PainAssessment;
+  triggerDecision: TriggerDecision;
+  lineageRefs: PainLineageRefs;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+Episodes are the preferred bridge from low-level friction to PD's core value: identifying repeated, owner-relevant behavior patterns rather than reacting to every isolated failure.
+
+### 3.5 Lineage References
+
+Pain records must be usable as the stable anchor for the whole PD data pipeline:
+
+```typescript
+interface PainLineageRefs {
+  sessionId?: string;
+  traceId?: string;
+  toolCallId?: string;
+  reviewCommentId?: string;
+  gateDecisionId?: string;
+  diagnosticTaskId?: string;
+  candidateId?: string;
+  principleId?: string;
+  activationId?: string;
+  laterObservationIds?: string[];
+}
+```
+
+Lineage fields are optional because not every source has every reference. When present, each field must come from the same source context as the evidence, not from a later inferred substitute.
+
+## 4. Classification Dimensions
+
+### 4.1 Source Class
+
+```typescript
+type PainSourceClass =
+  | 'owner_reported'
+  | 'review_observed'
+  | 'system_observed'
+  | 'agent_self_reported';
+```
+
+This answers "who or what observed the problem?"
+
+### 4.2 Provenance
+
+```typescript
+type PainProvenance =
+  | 'owner_explicit_cli'
+  | 'owner_explicit_chat'
+  | 'agent_recorded_on_owner_request'
+  | 'reviewer_reported'
+  | 'rulehost_observed'
+  | 'hook_observed'
+  | 'llm_inferred';
+```
+
+This answers "how trustworthy and context-bound is the observation?" Manual entry points may share a signal kind, but they must preserve provenance.
+
+### 4.3 Behavioral Scope
+
+```typescript
+type BehavioralScope =
+  | 'single_event'
+  | 'repeated_pattern'
+  | 'workflow_breakdown'
+  | 'owner_alignment';
+```
+
+This answers "does this describe a one-off failure or a behavior pattern worth internalizing?"
+
+### 4.4 PD Responsibility
+
+```typescript
+type PdResponsibility =
+  | 'owner_alignment'
+  | 'behavior_internalization'
+  | 'tool_repair_noise'
+  | 'unclear';
+```
+
+This answers "why is this PD's job?" Technical severity alone is insufficient. Evidence classified as `tool_repair_noise` may still be stored for context, but it should not drive principle generation without additional owner-relevant evidence.
+
+### 4.5 Assessment
+
+A single score is retained only as a derived value. Internal admission uses explicit components:
+
+```typescript
+interface PainAssessment {
+  impact: number;         // 0-100
+  confidence: number;     // 0-100
+  recurrence: number;     // 0-100
+  ownerRelevance: number; // 0-100
+  finalScore: number;     // derived, used for sorting and thresholds
+  reasons: string[];
+}
+```
+
+`ownerRelevance` is first-class because PD does not own general tool repair. A severe technical error with no owner-relevant behavior pattern may remain evidence-only.
+
+## 5. Active Signal Kinds
+
+The active schema should prioritize behavior evidence that can plausibly become an owner-reviewed principle:
+
+| Kind | Typical source | Default trigger posture |
+|------|----------------|-------------------------|
+| `owner_reported` | explicit owner complaint or correction | direct |
+| `review_finding` | PR/code review finding about agent behavior | direct |
+| `repeated_intervention` | owner repeatedly interrupts or redirects same behavior | aggregate |
+| `ignored_instruction` | agent ignores explicit project/user constraint | aggregate or direct |
+| `scope_drift` | agent expands work beyond request | aggregate |
+| `unsafe_action_attempt` | attempted irreversible/high-risk action without proper confirmation | direct |
+| `near_miss_blocked` | RuleHost or gate prevented a risky action | evidence or aggregate |
+| `stale_context_use` | agent relies on outdated context after fresher context exists | aggregate |
+| `tool_failure` | command/tool failure | evidence or aggregate |
+| `dispatch_error` | runner/subagent dispatch failure | evidence or aggregate |
+| `subagent_error` | subagent workflow failure | aggregate unless owner-visible |
+| `empathy_inferred` | inferred frustration from language model or keyword observer | owner confirmation or aggregate |
+
+Deferred GAP kinds such as `goal_drift` and `mission_stalled` remain documented in ADR-0010 and the post-MVP roadmap, not in the active runtime schema.
+
+## 6. Descriptor Registry
+
+Replace a pure `scoreStrategy` registry with an admission descriptor registry:
+
+```typescript
+interface PainEvidenceDescriptor {
+  kind: ActivePainSignalKind;
+  sourceClass: PainSourceClass;
+  acceptedProvenance: PainProvenance[];
+  behavioralScope: BehavioralScope;
+  evidenceSchema: EvidenceSchema;
+  assessmentPolicy: AssessmentPolicy;
+  admissionPolicy: AdmissionPolicy;
+  triggerPolicy: TriggerPolicy;
   description: string;
 }
 ```
 
-### 2.2 PainSignalRegistry 注册表
+Descriptor invariants:
+
+- Every active signal kind has exactly one descriptor.
+- Descriptors are declarative policy, not hidden business logic.
+- Production schema accepts only active kinds with descriptors.
+- Unknown or malformed source observations return a structured rejection reason.
+
+## 7. Admission and Trigger Policies
+
+### 7.1 AdmissionDecision
 
 ```typescript
-export class PainSignalRegistry {
-  private descriptors = new Map<PainSignalKind, PainSignalDescriptor>();
-
-  register(descriptor: PainSignalDescriptor): void;
-  get(kind: PainSignalKind): PainSignalDescriptor;
-  getByLayer(layer: PainLayer): PainSignalDescriptor[];
-  getAll(): PainSignalDescriptor[];
-}
+type AdmissionDecision =
+  | { action: 'reject'; reason: string; nextAction?: string }
+  | { action: 'store_evidence_only'; reason: string }
+  | { action: 'store_signal'; reason: string }
+  | { action: 'aggregate_into_episode'; reason: string; episodeKey: string };
 ```
 
-内置 `defaultPainSignalRegistry` 实例，注册当前所有 9 种活跃信号（Layer 1 预留不注册）：
+Admission is separate from triggering. A valid observation can be valuable evidence without deserving immediate diagnosis.
 
-| kind | layer | scoreStrategy | defaultScore | provenance |
-|------|-------|--------------|-------------|-----------|
-| `user_reported` | HUMAN(2) | provenance_based | — | openclaw_context_bound:100, owner_reported:80 |
-| `tool_failure` | FRICTION(3) | computed | — | system_observed |
-| `dispatch_error` | FRICTION(3) | computed | — | system_observed |
-| `subagent_error` | FRICTION(3) | fixed | 60 | system_observed |
-| `llm_paralysis` | FRICTION(3) | fixed | 45 | system_observed |
-| `gate_blocked` | FRICTION(3) | fixed | 45 | system_observed |
-| `empathy_inferred` | FRICTION(3) | accumulative | — | system_observed |
-| `semantic` | FRICTION(3) | detected | — | system_observed |
-| `intercept_extraction` | FRICTION(3) | fixed | 100 | system_observed |
-
-所有 Descriptor 的 `canTriggerDiagnostic` 当前为 `true`（仅做类型抽象，不改变 Gate 行为）。未来 GAP 实施时，Layer 3 的改为 `false`。
-
-### 2.3 统一 PainSignal Schema
-
-替代现有的两套 Schema，定义在 `pain-signal-model.ts`：
+### 7.2 TriggerPolicy
 
 ```typescript
-export const PainSignalSchema = Type.Object({
-  painId: Type.String({ minLength: 1 }),
-  kind: Type.Union([/* 13 种 literal */]),
-  layer: Type.Union([Type.Literal(1), Type.Literal(2), Type.Literal(3)]),
-  score: Type.Number({ minimum: 0, maximum: 100 }),
-  source: Type.String({ minLength: 1 }),
-  reason: Type.String({ minLength: 1 }),
-  sessionId: Type.Optional(Type.String()),
-  agentId: Type.Optional(Type.String()),
-  traceId: Type.Optional(Type.String()),
-  provenance: Type.Union([/* 3 种 literal */]),
-  evidence: Type.Optional(Type.Any()),
-  createdAt: Type.String({ format: 'date-time' }),
-});
-
-export type PainSignal = Static<typeof PainSignalSchema>;
+type TriggerPolicy =
+  | { mode: 'direct' }
+  | { mode: 'aggregate_only'; window: string; threshold: number }
+  | { mode: 'evidence_only' }
+  | { mode: 'owner_confirmation_required' };
 ```
 
-关键变更：
-- `kind` 替代 `painType`，值域从 3 扩展到 13
-- 新增 `layer` 字段
-- `sessionId`/`agentId`/`traceId` 统一为可选，由 `recordPain()` 填充默认值
-- 新增 `createdAt`
+Examples:
 
-### 2.4 统一 Severity 分级
+- `owner_reported`: `direct`
+- `review_finding`: `direct`
+- `tool_failure`: `aggregate_only`
+- `near_miss_blocked`: `evidence_only` or `aggregate_only`
+- `empathy_inferred`: `owner_confirmation_required` or `aggregate_only`
 
-保持两套体系并存（SDK 对外 vs 内部管道），但修复 bug 并消除歧义：
+This replaces a coarse `canTriggerDiagnostic` boolean.
 
-**SDK 层（对外契约）**：
-```typescript
-export const PAIN_SEVERITY = {
-  LOW:      { min: 0,  max: 39 },
-  MEDIUM:   { min: 40, max: 69 },
-  HIGH:     { min: 70, max: 89 },
-  CRITICAL: { min: 90, max: 100 },
-} as const;
+## 8. Intake Pipeline
 
-export type PainSeverity = 'low' | 'medium' | 'high' | 'critical';
-
-export function deriveSeverity(score: number): PainSeverity;
+```text
+1. Capture RawObservation from hook, CLI, review, RuleHost, or observer.
+2. Validate and sanitize into PainEvidence.
+3. Classify PD responsibility and behavioral scope.
+4. Assess impact, confidence, recurrence, and owner relevance.
+5. Deduplicate and correlate against recent evidence.
+6. Apply AdmissionPolicy.
+7. Persist admission decision, evidence, and optional signal.
+8. Apply TriggerPolicy.
+9. Create or update PainEpisode when weak signals accumulate.
+10. Create diagnostic task only when policy allows.
+11. Carry evidence lineage into candidate, owner review, and activation records.
+12. Later record outcome verdict for source calibration.
 ```
 
-**内部管道层**：
-```typescript
-export type InternalSeverity = 'mild' | 'moderate' | 'severe';
+`PainToPrincipleService.recordPain()` remains the stable facade for existing callers, but the internal flow should be decomposed into testable units:
 
-export function toInternalSeverity(severity: PainSeverity): InternalSeverity {
-  switch (severity) {
-    case 'low': return 'mild';
-    case 'medium': return 'moderate';
-    case 'high':
-    case 'critical': return 'severe';  // 修复：critical → severe（原来错误地映射到 mild）
-  }
-}
-```
+- `ObservationNormalizer`
+- `EvidenceValidator`
+- `PainAssessor`
+- `EvidenceCorrelator`
+- `AdmissionController`
+- `PainEvidenceStore`
+- `TriggerController`
+- `PainSourceCalibrator`
 
-**删除**：
-- `painSeverityLabel()` 中的 `info` 级别（无任何消费者识别）
-- `normalizeSeverity()` 被 `toInternalSeverity()` 替代
+The facade must return enough structured information for operators and tests to distinguish rejected, evidence-only, signal-created, episode-updated, and diagnosis-created outcomes.
 
-**不修改**：DB 中已持久化的 `mild/moderate/severe` 值，避免数据迁移。
+## 9. Downstream Lineage Contract
 
-### 2.5 统一管道：PainToPrincipleService.recordPain()
+Pain evidence must remain visible beyond intake. Each downstream stage has a minimum contract:
 
-所有信号源统一走一条管道。Hook 层只负责采集原始事件和提取 payload。
+| Stage | Required relationship to pain evidence |
+|-------|----------------------------------------|
+| Diagnostician | Reads admitted signals or episodes, not raw observations |
+| Candidate formation | Records source `evidenceIds` / `episodeId` in candidate lineage |
+| Owner review | Presents the evidence summary and why PD cares |
+| Activation | Preserves source candidate/principle linkage |
+| Later observation | Can reference the principle or activation being evaluated |
+| Calibration | Uses owner verdict and later outcomes to score source quality |
 
-#### RecordPainInput
+This prevents the pipeline from becoming "pain triggered a task" followed by detached artifacts. A principle should be explainable from its source evidence, and a source should be evaluable from the principle's eventual outcome.
+
+## 10. Source Calibration
+
+Every signal or episode should eventually receive a verdict:
 
 ```typescript
-interface RecordPainInput {
-  kind: PainSignalKind;
-  source: string;
-  reason: string;
-  score?: number;
-  sessionId?: string;
-  agentId?: string;
-  traceId?: string;
-  provenance?: ProvenanceType;
-  evidence?: unknown;
-  errorHash?: string;
-  consecutiveErrors?: number;
-  currentGfi?: number;
-}
+type PainSignalVerdict =
+  | 'led_to_approved_principle'
+  | 'led_to_rejected_candidate'
+  | 'led_to_activated_principle'
+  | 'later_behavior_improved'
+  | 'later_behavior_unchanged'
+  | 'dismissed_noise'
+  | 'duplicate'
+  | 'false_positive'
+  | 'deferred_insufficient_evidence';
 ```
 
-#### recordPain() 内部流程
+Track source quality by kind and provenance:
 
-```
-1. 从 Registry 获取 Descriptor
-2. 计算 score（根据 scoreStrategy）
-3. 填充默认值（sessionId, agentId, traceId, createdAt）
-4. 更新 GFI（如果 Descriptor.scoreStrategy 需要）
-5. PainDiagnosticGate 检查（统一 cooldown）
-6. 写入 pain_events 表（只写一次）
-7. 创建诊断任务（如果 Gate 通过）
-8. 返回结果
-```
+- admitted observations
+- rejected observations
+- evidence-only rate
+- diagnostic trigger rate
+- candidate creation rate
+- owner approval rate
+- duplicate rate
+- false-positive rate
 
-### 2.6 手动入口简化
+These metrics let PD tune signal sources after MVP without guessing which observers are valuable.
 
-**删除**：
-- `pain` 自定义工具（OpenClaw skill 定义）
-- `/pd-pain` 斜杆命令（`handlePainReportCommand`）
-- Hook 层的 `if (event.toolName === 'pain')` 特殊分支
+## 11. Manual Entry Semantics
 
-**保留**：
-- `pd pain record` CLI — 唯一的手动痛苦信号入口
+Manual entry points may converge on the same service path, but they must not lose provenance:
 
-**迁移路径**：用户告诉智能体"帮我记录一个痛苦信号"，智能体通过 bash 调用 `pd pain record`。
+- `owner_explicit_cli`: owner ran `pd pain record`.
+- `owner_explicit_chat`: owner directly expressed correction/frustration in chat.
+- `agent_recorded_on_owner_request`: agent recorded a pain signal because the owner asked.
 
-### 2.7 Hook 层简化
+These are all owner-adjacent, but their confidence and context differ. The admission model should preserve that difference even if they share the `owner_reported` kind.
 
-每个 Hook 文件的职责从"做 6 件事"简化为"提取 payload + 调用 recordPain"。
+This ADR does not require deleting existing manual entry points. Removing an entry point is a product behavior change and must be decided separately.
 
-**移入 recordPain() 内部**：
-- `trackFriction()` — GFI 更新
-- `evaluatePainDiagnosticGate()` — Gate 检查
-- `trajectory.recordPainEvent()` — 只写一次
-- `eventLog.recordPainSignal()` — 只写一次
-- `evoLogger.logPainDetected()` — 只写一次
+## 12. Observability and Data Safety
 
-**保留在 Hook 层**（不是痛苦信号逻辑，是通用工具调用记录）：
-- `eventLog.recordToolCall()` — 记录工具调用本身
-- `trajectory.recordToolCall()` — 同上
-- `recordEvolutionFailure()` / `recordEvolutionSuccess()` — Trust Engine 统计
-- `trackPrincipleValue()` — 原则价值观察
-- Probation 反馈 — 原则试用机制
+- Every rejected or degraded path records a structured reason.
+- Evidence previews are bounded and safe to serialize.
+- Unknown payload fields are not copied wholesale into durable records.
+- PII-sensitive evidence must pass the existing sanitization boundary before durable storage.
+- Diagnostic tasks must reference evidence IDs, not unbounded raw payloads.
+- Owner review surfaces should show why the evidence is considered PD-relevant, not only the raw reason text.
 
-### 2.8 subagent_error 修复
+## 13. Invariants
 
-从 `emitSync`（只触发 evolutionReducer 事件监听器）改为 `recordPain()`，获得：
-- ✅ 写入 pain_events 表
-- ✅ Gate cooldown 保护
-- ✅ 创建诊断任务
-- ✅ 与其他信号源行为一致
+- `PEA-1`: Raw observations never directly create diagnostic tasks.
+- `PEA-2`: Active runtime schemas accept only active signal kinds with registered descriptors.
+- `PEA-3`: Admission and triggering are separate decisions.
+- `PEA-4`: Every rejection, evidence-only admission, and degraded path has a structured reason.
+- `PEA-5`: Low-level friction may accumulate into an episode, but isolated technical friction does not automatically imply a principle-worthy behavior defect.
+- `PEA-6`: Owner-relevance is explicit in assessment and cannot be inferred from technical severity alone.
+- `PEA-7`: Deferred GAP concepts do not enter production kind unions until ADR-0014 restart conditions are met.
+- `PEA-8`: Every diagnostic task, candidate, approval, and activation derived from pain evidence preserves evidence lineage.
+- `PEA-9`: Source calibration uses downstream owner and activation outcomes, not admission-time confidence alone.
 
-### 2.9 删除的文件/代码
+## 14. Consequences
 
-| 文件 | 删除内容 | 原因 |
-|------|---------|------|
-| `principles-core/src/pain-signal.ts` | 整个文件 | 合并到 `pain-signal-model.ts` |
-| `principles-core/src/runtime-v2/types/pain-signal.ts` | 整个文件 | 合并到 `pain-signal-model.ts` |
-| `openclaw-plugin/src/core/pain-signal.ts` | 整个文件 | 直接从 `@principles/core` 导入 |
-| `principles-core/src/pain-signal-adapter.ts` | 整个文件 | 被 Registry 替代 |
-| `openclaw-plugin/src/core/pain-signal-adapter.ts` | 整个文件 | 被 Registry 替代 |
-| 3 个 adapter 实现 | openclaw/code-review/writing | 被 Registry 的 scoreStrategy 替代 |
-| `openclaw-plugin/src/commands/pain.ts` | `handlePainReportCommand()` | `/pd-pain` 删除 |
-| `openclaw-plugin/src/hooks/pain.ts` | `emitPainDetectedEvent()` 函数 | 直接调用 recordPain |
-| `openclaw-plugin/src/hooks/subagent.ts` | `emitSubagentPainEvent()` 函数 | 改为调用 recordPain |
-| 各 Hook 文件 | `eventLog.recordPainSignal()` 调用 | 重复，recordPain 内部已写 |
-| 各 Hook 文件 | `trajectory.recordPainEvent()` 调用 | 重复 |
-| 各 Hook 文件 | `evoLogger.logPainDetected()` 调用 | 重复 |
-| 各 Hook 文件 | `evaluatePainDiagnosticGate()` 调用 | 移入 recordPain |
+### Positive
 
-## 3. 不变量约束
+- Supports stable, diverse signal intake without flooding Diagnostician.
+- Keeps PD focused on owner-reviewed behavior internalization rather than generic tool repair.
+- Makes weak-signal aggregation explicit through episodes.
+- Preserves provenance differences across manual, hook, review, RuleHost, and inferred sources.
+- Provides a calibration loop so post-MVP signal quality can improve from real outcomes.
+- Makes pain evidence the traceable anchor from observation to activation outcome.
+- Avoids making ADR-0010/GAP a hidden dependency.
 
-- `PSM-1`：所有痛苦信号必须通过 `PainToPrincipleService.recordPain()` 创建，Hook 层不得直接写入 pain_events 表。
-- `PSM-2`：每种 PainSignalKind 必须在 `defaultPainSignalRegistry` 中注册对应的 PainSignalDescriptor。
-- `PSM-3`：PainSignal.kind 的值域由 PainSignalKind 枚举约束，不得使用字符串字面量。
-- `PSM-4`：Gate 检查（cooldown）在 `recordPain()` 内部统一执行，Hook 层不得自行调用 `evaluatePainDiagnosticGate()`。
-- `PSM-5`：Layer 1 的 kind 在枚举中预留但不注册 Descriptor，直到 ADR-0010 GAP 实施时启用。
+### Negative / Costs
 
-## 4. 架构收益
+- More model concepts than a single `PainSignal` schema.
+- Requires careful UI/CLI/operator wording so "evidence only" is not mistaken for failure.
+- Needs migration discipline to avoid duplicating old pain writes while adding evidence records.
+- Source calibration only becomes useful after enough real owner verdicts exist.
 
-### 积极影响
+### Risks and Mitigations
 
-- **业务模型在代码中表达**：三层痛觉不再是博文中的概念，而是类型系统中的 `PainLayer`
-- **单一管道**：所有信号走 `recordPain()`，消除重复写入和 Hook 层越权
-- **声明式 Score 策略**：从散落的硬编码变为 Descriptor 中的 scoreStrategy
-- **统一 Severity**：`critical` 不再被错误映射为 `mild`
-- **手动入口简化**：3 个入口合并为 1 个
-- **可扩展**：新增信号类型只需注册 Descriptor，不需要改生产代码
-- **GAP 预留**：`canTriggerDiagnostic` 字段为 ADR-0010 的 Layer 3 门控预留无成本切换点
+| Risk | Mitigation |
+|------|------------|
+| Evidence model becomes over-abstract | Keep descriptors limited to active sources and require production tests for every descriptor |
+| Weak signals still flood storage | Apply dedupe, bounded previews, retention policy, and episode correlation |
+| High-value owner feedback is delayed by aggregation | Use `direct` trigger policy for explicit owner/report review signals |
+| Inferred empathy creates false positives | Default to confirmation or aggregate-only, track false-positive verdicts |
+| Existing callers depend on `recordPain()` behavior | Preserve facade shape while expanding returned structured outcome |
+| Evidence lineage becomes inconsistent across stages | Require same-source lineage fields and add chain-integrity tests |
 
-### 潜在风险与缓解
+## 15. Relationship to ADR-0010
 
-| 风险 | 缓解 |
-|------|------|
-| 大爆炸切换可能引入回归 | 迁移前确保所有现有 pain 信号路径有集成测试覆盖 |
-| `subagent_error` 改走 `recordPain` 后行为变化（会创建诊断任务了） | 这是 bug 修复而非行为变更，`subagent_error` 本应走完整管道 |
-| `pain` 工具删除后用户需要适应新入口 | `pd pain record` 已可用，skill 定义中引导智能体使用 CLI |
-| DB 中已有的 `painType` 值（`user_frustration`）与新 `kind` 不兼容 | 保留 `painType` 列为 legacy，新增 `kind` 列，读取时优先用 `kind` |
+ADR-0010 remains deferred except for already-existing pain capture used by the MVP. This ADR does not add goal-driven signal generation, mission tables, OKR models, or Layer 1 GAP kinds to runtime schemas.
 
-## 5. 与 ADR-0010 的关系
-
-本 ADR 是 ADR-0010 (GAP) 的**前置条件**。ADR-0010 要求 Layer 3 禁止独立触发诊断，但当前代码中连 Layer 的概念都没有。本 ADR 建立了三层痛觉的类型系统，ADR-0010 的 GAP 门控只需将 Layer 3 的 `canTriggerDiagnostic` 改为 `false` 即可实施。
-
-ADR-0010 中 Layer 1 的 `GAPSignalGenerator` 和 Objectives/KeyResults 表仍为 post-MVP conditional work，不在本 ADR 范围内。
+If ADR-0010 restart conditions are later met, GAP can add new source adapters and descriptors to this evidence model. It should not require changing the core admission principle that raw observations first become validated evidence before triggering diagnosis.
