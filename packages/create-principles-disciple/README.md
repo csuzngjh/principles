@@ -94,6 +94,30 @@ If an update fails, the installer automatically restores the previous working in
 
 If the installer cannot restore the backup (rare), re-run the installer with `--force`.
 
+## Updating
+
+PD supports updating through the Web UI:
+
+1. Open PD Console (http://localhost:3100)
+2. Navigate to Settings → Update
+3. Check for updates and review version info
+4. Click "Update Now" to apply
+
+### Update Options
+
+- **Merge Strategy**: How to handle workspace file changes
+  - `smart`: Generate .update files for manual merge
+  - `overwrite`: Force overwrite workspace files
+  - `keep`: Keep existing workspace files unchanged
+- **Backup**: Create backup before update (recommended for rollback support)
+
+### API Endpoints
+
+- `GET /api/update/check` — Check for available updates
+- `POST /api/update/apply` — Apply an update
+- `GET /api/update/status` — Get current update status
+- `POST /api/update/rollback` — Rollback to previous version
+
 ## Commands
 
 - `install` — Install PD (default command)
