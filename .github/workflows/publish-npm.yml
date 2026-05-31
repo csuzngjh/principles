@@ -189,6 +189,7 @@ jobs:
           elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
             npm run build --workspace=principles-disciple
             npm run build --workspace=@principles/pd-cli
+            npm run build --workspace=@principles/pd-console
             cd packages/create-principles-disciple && npm ci && npm run build
           fi
 
