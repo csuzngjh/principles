@@ -31,6 +31,7 @@ import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
 import { handleAgentsRoute, disposeAgentModels } from './routes/agents.js';
 import { handleUpdateRoute } from './routes/update.js';
+import { handleUpdateHistoryRoute } from './routes/update-history.js';
 import { handleStateRoute } from './routes/state.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
 import { 
@@ -418,6 +419,12 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/update' || urlPath.startsWith('/api/update/')) {
         const subPath = urlPath.slice('/api/update'.length);
         asyncHandler(() => handleUpdateRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // GET /api/update/history
+      if (urlPath === '/api/update/history') {
+        asyncHandler(() => handleUpdateHistoryRoute(req, res, services.workspaceDir, ''))(req, res);
         return;
       }
 
