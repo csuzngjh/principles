@@ -32,6 +32,10 @@ import type {
   HistoryQueryEntry,
   DiagnosisTarget,
 } from './context-payload.js';
+import type { TSchema } from '@sinclair/typebox';
+import type { SchemaPromptAdapter } from './adapter/schema-prompt-adapter.js';
+import { DefaultSchemaPromptAdapter } from './adapter/schema-prompt-adapter.js';
+import { DiagnosticianOutputV1Schema } from './diagnostician-output.js';
 
 /**
  * PromptInput — the JSON message sent to openclaw agent via --message flag.
@@ -110,7 +114,14 @@ export interface PromptBuildResult {
  * The 5-phase protocol is embedded directly in the prompt so the LLM follows it
  * regardless of whether OpenClaw loads SKILL.md as the agent system prompt.
  */
-export const DIAGNOSTIC_PROTOCOL_INSTRUCTION = `You are a root cause analysis expert. Follow this protocol:
+export function buildDiagnosticProtocolInstruction(
+  adapter: SchemaPromptAdapter = new DefaultSchemaPromptAdapter(),
+  schema: TSchema = DiagnosticianOutputV1Schema,
+): string {
+  const example = adapter.generateExample(schema);
+  const constraints = adapter.generateConstraints(schema);
+
+  return `You are a root cause analysis expert. Follow this protocol:
 
 PHASE 1 — Evidence Review:
 Review the provided sourceRefs, diagnosisTarget.evidence entries, conversationWindow
@@ -149,23 +160,15 @@ TAXONOMY DEFINITIONS:
 CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):
-{"valid":true,"diagnosisId":"diag-550e8400-e29b-41d4-a716-446655440000","summary":"Missing input validation caused null pointer exception in handler","rootCause":"Design: No null check on input parameter before processing","violatedPrinciples":[{"rationale":"The defensive programming principle was violated by not validating inputs at the boundary"}],"evidence":[{"sourceRef":"src:handler.ts:L42","note":"Null dereference without guard check"},{"sourceRef":"log:error-trace","note":"NullPointerException at handler.process()"}],"recommendations":[{"kind":"rule","description":"Add null check at handler entry point","triggerPattern":"function process(","action":"Insert null guard returning error response"},{"kind":"principle","description":"Validate all external inputs at system boundaries","abstractedPrinciple":"Never trust external data without validation at entry points"},{"kind":"implementation","description":"Add input validation middleware before handler"},{"kind":"prompt","description":"Add defensive validation step to agent workflow"},{"kind":"defer","description":"Upstream caller validation status unclear from available logs"}],"confidence":0.82,"ambiguityNotes":["Stack trace may indicate upstream caller also missing validation"]}
+${example}
 
 IMPORTANT: The example above is ILLUSTRATIVE ONLY. Your recommendations MUST be based on the actual root cause analysis and evidence in this context — do not copy the example text verbatim.
 
 CONSTRAINTS:
 - Output ONLY valid JSON — no markdown, no explanatory text, no code fences, no prose before or after
 - Do NOT read files, call tools, or write to any database
-- rootCause MUST include category prefix: "Design: ..." or "People: ..." etc.
-- confidence MUST be a number between 0.0 and 1.0 (NOT a string, NOT a percentage)
-- kind MUST be one of: "principle", "rule", "implementation", "prompt", "defer" (lowercase only)
-- "principle" kind: MUST include abstractedPrinciple (<=200 chars)
-- "rule" kind: MUST include triggerPattern AND action
-- All evidence must reference sourceRef identifiers or conversationWindow entries from the context payload
-- The root cause MUST describe an agent behavior or decision, not a system monitoring or diagnostic mechanism.
-  If the evidence only describes internal metrics (GFI, friction scores, threshold crossings) with no
-  owner message or agent action context, return confidence < 0.3 and kind="defer".
-`;
+${constraints}`;
+}
 
 /**
  * Summarizes a conversation window for inclusion in the prompt.
@@ -181,6 +184,17 @@ export function summarizeConversationWindow(
 }
 
 export class DiagnosticianPromptBuilder {
+  private readonly adapter: SchemaPromptAdapter;
+  private readonly schema: TSchema;
+
+  constructor(
+    adapter: SchemaPromptAdapter = new DefaultSchemaPromptAdapter(),
+    schema: TSchema = DiagnosticianOutputV1Schema,
+  ) {
+    this.adapter = adapter;
+    this.schema = schema;
+  }
+
   /**
    * Transform DiagnosticianContextPayload into a PromptInput object,
    * then serialize to JSON for the --message argument.
@@ -228,6 +242,8 @@ export class DiagnosticianPromptBuilder {
       conversationWindow,
     };
 
+    const diagnosticInstruction = buildDiagnosticProtocolInstruction(this.adapter, this.schema);
+
     // DPB-04: Explicit top-level fields at the prompt level
     const promptInput: PromptInput = {
       taskId: payload.taskId,
@@ -236,7 +252,7 @@ export class DiagnosticianPromptBuilder {
       conversationWindow,
       sourceRefs: payload.sourceRefs,
       context: compactContext,
-      diagnosticInstruction: DIAGNOSTIC_PROTOCOL_INSTRUCTION,
+      diagnosticInstruction,
       ...(truncationWarnings.length > 0 ? { truncationWarnings } : {}),
     };
 
@@ -247,7 +263,7 @@ export class DiagnosticianPromptBuilder {
     // If message exceeds maxMessageChars, truncate the diagnostic instruction
     if (message.length > limits.maxMessageChars) {
       const surplus = message.length - limits.maxMessageChars;
-      const instruction = DIAGNOSTIC_PROTOCOL_INSTRUCTION;
+      const instruction = diagnosticInstruction;
       // Keep at least the first 200 chars of the instruction + a note
       const keepLength = Math.max(200, instruction.length - surplus - 100);
       const truncatedInstruction = instruction.slice(0, keepLength) +
