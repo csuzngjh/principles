@@ -343,3 +343,45 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<ApplyUpd
     };
   }
 }
+
+export interface RollbackUpdateOptions {
+  targetDir: string;
+  backupDir: string;
+}
+
+export interface RollbackUpdateResult {
+  success: boolean;
+  message: string;
+}
+
+export async function rollbackUpdate(options: RollbackUpdateOptions): Promise<RollbackUpdateResult> {
+  const { targetDir, backupDir } = options;
+
+  try {
+    // Check if backup exists
+    if (!fs.existsSync(backupDir)) {
+      return {
+        success: false,
+        message: 'Backup not found',
+      };
+    }
+
+    // Remove current target directory
+    if (fs.existsSync(targetDir)) {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+    }
+
+    // Restore from backup
+    await backupDirectory(backupDir, targetDir);
+
+    return {
+      success: true,
+      message: 'Rollback completed successfully',
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
