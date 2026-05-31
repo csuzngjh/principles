@@ -15,27 +15,25 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/openclaw/openclaw">
-    <img src="https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35" alt="OpenClaw Plugin">
-  </a>
+  <img src="https://img.shields.io/badge/Runtime-OpenClaw%20Adapter-FF6B35" alt="OpenClaw Adapter">
+  <img src="https://img.shields.io/badge/Next-Codex%20CLI-blue" alt="Codex CLI Planned">
   <img src="https://img.shields.io/github/v/release/csuzngjh/principles?style=flat-square&color=5865F2" alt="Release">
-  <img src="https://img.shields.io/npm/dt/principles-disciple?style=flat-square&color=green" alt="Downloads">
 </p>
 
 ---
 
-> Owner-governed behavior internalization for AI agents.
-> Human-supervised. Locally stored. Pain-driven.
+> Principles Disciple (PD) is a local, agent-first governance and feedback layer for AI agents.
+> Its first practical domain is agentic development: coding agents, terminal agents, and project-operation agents.
+> It helps owners, operators, and maintainers turn repeated agent failures, risky actions, user corrections, and workflow mismatches
+> into structured pain signals, reviewed principles, decision logs, and owner-controlled guardrails.
 
-Principles Disciple is an OpenClaw plugin that helps owners turn repeated, meaningful agent behavior evidence into reviewed, reversible principles that can shape future behavior.
-
-**Canonical product definition:** [PRODUCT_IDENTITY.md](PRODUCT_IDENTITY.md)
-
-> **MVP status (2026-05-24):** the validation path focuses on pain capture, diagnosis, internalization, and three reviewed activation outcomes: prompt guidance, RuleHost enforcement, and defer/archive. Broader learning and agent-lifecycle expansions are deferred until seed-customer evidence exists.
+PD currently ships with an OpenClaw adapter as its first runtime integration. The architecture is designed around a runtime adapter layer so that PD can connect with different agent runtimes and task environments — OpenClaw today, Codex CLI next for agentic development — without being hard-coded to a single agent tool or task domain.
 
 It is built for agents first.
 Agents are the daily users.
 Humans are the operators, supervisors, and risk owners.
+
+**Canonical product definition:** [PRODUCT_IDENTITY.md](PRODUCT_IDENTITY.md)
 
 [English](README.md) | [中文](README_ZH.md)
 
@@ -79,6 +77,14 @@ Install Principles Disciple if you want to:
 
 ---
 
+## Runtime Adapters: OpenClaw Now, Codex Next
+
+PD is designed with a runtime adapter layer rather than being tied to a single agent runtime or task domain. The first validated domain is agentic development, where agent behavior is observable through tool calls, file edits, command execution, failures, user corrections, and review events. The adapter layer lets PD observe and govern different agent runtimes through a shared local feedback model: pain-signal capture, decision logs, principle review, and maintainer-approved guardrails.
+
+**OpenClaw adapter (implemented).** The first concrete runtime integration, validated through agentic development workflows. PD works as an OpenClaw plugin for capturing agent behavior — tool failures, risky edits, user corrections, blocked operations — and enforcing local development guardrails through prompt guidance, RuleHost enforcement, and defer/archive outcomes.
+
+**Codex CLI adapter (planned).** The next adapter target within the agentic development domain. The goal is to let Codex-style coding agents feed task trajectories, risky edits, repeated failures, and user corrections into PD, so maintainers can review behavior changes before they become durable rules. This would give Codex users the same local-first, maintainer-reviewed governance layer that OpenClaw users have today.
+
 ## What it does
 
 ### 1. Workspace guardrails
@@ -102,7 +108,7 @@ It should:
 4. retry the operation
 ```
 
-### 2. Pain signal capture
+### 2. Pain-signal capture
 
 Tool failures, repeated confusion, user corrections, blocked edits, risky near-misses, and recurring work-style mismatches can be recorded as structured pain signals.
 
@@ -112,15 +118,13 @@ Pain is owner-relevant behavior evidence, not a claim that every task failure sh
 
 The agent uses these signals to understand where its behavior needs to improve.
 
-### 3. Reviewed behavior activation
+### 3. Decision logs and reviewed behavior activation
 
-Reviewed principles can currently result in prompt guidance, RuleHost enforcement, or a deliberate defer/archive outcome. Operators remain responsible for reviewing and enabling behavior changes.
+Every significant agent decision — approvals, blocks, corrections, pain events — is recorded locally as a structured decision log. Reviewed principles can currently result in prompt guidance, RuleHost enforcement, or a deliberate defer/archive outcome. Operators remain responsible for reviewing and enabling behavior changes.
 
 ### 4. Principle internalization
 
-Repeated failures can become candidate principles or rule implementations.
-
-Operators can inspect, evaluate, promote, disable, archive, or roll back these implementations with commands such as:
+Repeated failures can become candidate principles or rule implementations through a replay-based review workflow. Operators can inspect, evaluate, promote, disable, archive, or roll back these implementations with commands such as:
 
 ```text
 /pd-evolution-status
@@ -137,7 +141,11 @@ A principle should not become active just because it sounds good.
 
 It should survive evidence, replay, and operator review.
 
-### 5. Local console
+### 5. Behavior-regression checks
+
+PD includes replay-based validation for rule implementations: before a new principle or rule is activated, it can be tested against recorded agent trajectories to verify that the behavior change actually addresses the pain it was derived from — and doesn't regress other working behavior.
+
+### 6. Local console
 
 Principles Console provides a local web UI for observing agent health and evolution activity.
 
@@ -158,6 +166,19 @@ The console can show:
 
 State is stored locally.
 
+## Using Codex / OpenAI with PD
+
+PD is designed to complement coding agents such as Codex CLI rather than replace them. Future Codex / OpenAI integration will focus on OSS maintainer workflows:
+
+- **Codex-assisted PR review and change summarization** — using Codex to summarize what changed and why, feeding results into PD's decision log.
+- **Issue triage and test generation** — Codex processes issue context, PD records the outcome as structured evidence.
+- **Failure replay from previous agent runs** — replaying past failures through PD's trajectory system to verify that behavior changes actually resolved the original pain.
+- **Behavior-regression checks before activating new principles or guardrails** — validating that candidate rules don't break existing working behavior.
+- **Review of new principle / rule candidates generated from repeated failures** — Codex assists in drafting, PD enforces the review-and-approve workflow.
+- **Release-note generation for maintainer workflows** — summarizing principle activations, guardrail changes, and behavior shifts since the last release.
+
+The long-term goal is to connect powerful coding agents with a local, inspectable, maintainer-reviewed governance layer — so that agent autonomy and human oversight coexist without one blocking the other.
+
 ## What this is not
 
 Principles Disciple is not:
@@ -171,18 +192,18 @@ Principles Disciple is not:
 - a chatbot;
 - a magic self-improvement button.
 
-It is an owner-governed behavior internalization layer for OpenClaw coding agents.
+It is a local-first, owner-governed behavior internalization layer for AI agents, currently validated through agentic development workflows and integrated first with OpenClaw.
 
 ## Current status
 
-Principles Disciple is an early experimental project.
+Principles Disciple is an early-stage, actively maintained project.
 
 Already useful:
 
 - workspace guardrails;
 - agent-first installation flow;
 - reviewed prompt / RuleHost / defer-archive activation paths;
-- pain and friction tracking;
+- pain-signal capture and decision logging;
 - evolution status commands;
 - local console;
 - replay-based review workflow for rule implementations.
@@ -193,11 +214,23 @@ Still evolving:
 - automatic rule generation quality;
 - adaptive thresholds;
 - long-term learning reliability;
-- multi-workspace evolution patterns.
+- multi-workspace evolution patterns;
+- Codex CLI runtime adapter.
 
-Expect bugs.  
-Review promoted behavior carefully.  
+Expect bugs.
+Review promoted behavior carefully.
 Do not use it blindly on critical production workspaces.
+
+## Roadmap
+
+- [x] OpenClaw runtime adapter
+- [x] Local pain-signal capture and decision logging
+- [x] Replay-based review workflow for rule implementations
+- [ ] Codex CLI runtime adapter
+- [ ] Failure replay workflow for agent trajectories
+- [ ] Behavior-regression checks for new principles/rules
+- [ ] Codex / OpenAI-assisted PR review and release workflow experiments
+- [ ] General agent-runtime adapter interface documentation
 
 ## Core idea
 

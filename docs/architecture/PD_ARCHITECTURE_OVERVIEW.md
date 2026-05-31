@@ -375,7 +375,7 @@ LedgerWriter.deprecate() / archive()
 - `PruningAction` 至今**未实现**，等待独立 issue 推进
 - 任何对 active 原则的状态变更必须可回滚
 
-详见 `PRUNING_PIPELINE.md`（待建）和 `DOMAIN_MODEL.md` §4。
+详见 `PRUNING_PIPELINE.md` 和 `DOMAIN_MODEL.md` §4。
 
 ---
 
@@ -405,7 +405,7 @@ LedgerWriter.deprecate() / archive()
 | Internalization Pipeline | `INTERNALIZATION_PIPELINE.md` §3-4 | ADR-0003, ADR-0005 |
 | Activation Pipeline | `ACTIVATION_CHANNELS.md` | ADR-0006 |
 | Operations Pipeline | `COMPONENTS.md` + 各 ReadModel | ADR-0007 |
-| Pruning Pipeline | `DOMAIN_MODEL.md` §4 | （待建） |
+| Pruning Pipeline | `PRUNING_PIPELINE.md` | — |
 
 ### 5.3 战略层 vs 执行层
 

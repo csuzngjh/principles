@@ -232,7 +232,7 @@
 | Pain Signal | `DOMAIN_MODEL.md` §4 + `GLOSSARY.md` §1 | LOCKED |
 | Internalization Channel（5 通道）| `DOMAIN_MODEL.md` §3 + `ACTIVATION_CHANNELS.md` §3 | LOCKED |
 | L1 / L2 / L3 | `DOMAIN_MODEL.md` §3 + `PD_System_Dynamics_Model.md` §4 | LOCKED |
-| Pruning Signal | `DOMAIN_MODEL.md` §4 | LOCKED |
+| Pruning Signal | `DOMAIN_MODEL.md` §4 + `PRUNING_PIPELINE.md` §2 | LOCKED |
 | Approval | `DOMAIN_MODEL.md` §5.4 + `ACTIVATION_CHANNELS.md` §2.3 | Active |
 | PIArtifact | `DOMAIN_MODEL.md` §5.5 + `INTERNALIZATION_PIPELINE.md` §3.6 | Active |
 | Peer Runner | `GLOSSARY.md` §2 + `INTERNALIZATION_PIPELINE.md` §3.4 | Active |
