@@ -5,13 +5,19 @@
  * When an owner-approved activation requires confirmation before coding,
  * this gate blocks mutating tools until the session has explicit owner approval.
  *
+ * IMPORTANT (PRI-286): This gate is DISABLED BY DEFAULT via feature flag
+ * `confirm_first_gate` (quiet category, enabled: false).
+ * It only activates when:
+ *   1. The workspace feature-flags.yaml explicitly enables `confirm_first_gate`, AND
+ *   2. A Runtime V2 prompt principle matches the confirm-first pattern.
+ *
  * This is NOT a replacement for prompt injection — it's a hard fallback
  * for models that don't follow system prompt behavioral directives.
  *
  * Flow:
  * 1. Prompt hook (before_prompt_build) detects confirm-first directive and caches state
  * 2. Prompt hook detects user approval language and marks session approved
- * 3. Gate hook (before_tool_call) checks cached state synchronously
+ * 3. Gate hook (before_tool_call) checks feature flag, then cached state synchronously
  */
 
 import { BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
@@ -32,6 +38,20 @@ const sessionDirectiveState = new Map<string, ConfirmFirstSessionState>();
 const sessionApprovalState = new Map<string, boolean>();
 
 let confirmFirstStore: SqliteConfirmFirstStateStore | null = null;
+
+/**
+ * Feature flag gate — default OFF (PRI-286).
+ * Set from prompt hook after reading workspace feature flags.
+ */
+let confirmFirstGateEnabled = false;
+
+export function setConfirmFirstGateEnabled(enabled: boolean): void {
+  confirmFirstGateEnabled = enabled;
+}
+
+export function isConfirmFirstGateEnabled(): boolean {
+  return confirmFirstGateEnabled;
+}
 
 export function setConfirmFirstStore(store: SqliteConfirmFirstStateStore | null): void {
   confirmFirstStore = store;
@@ -140,8 +160,13 @@ export function setConfirmFirstApproval(sessionId: string): void {
 }
 
 /**
- * Synchronous gate evaluation — checks cached state only.
+ * Synchronous gate evaluation — checks feature flag, then cached state.
  * Called from before_tool_call hook (must be synchronous).
+ *
+ * PRI-286: Feature flag `confirm_first_gate` defaults to OFF.
+ * When OFF, the gate always returns 'skip' — no blocking occurs.
+ * When ON, the gate blocks mutating tools unless the session is approved.
+ * PLAN.md writes are NEVER blocked (self-unblock path).
  */
 export function evaluateConfirmFirstGateSync(
   sessionId: string | undefined,
@@ -149,6 +174,11 @@ export function evaluateConfirmFirstGateSync(
   params: Record<string, unknown> | undefined,
 ): ConfirmFirstGateResult {
   if (!sessionId) return { action: 'skip' };
+
+  // PRI-286: Feature flag gate — default OFF
+  if (!confirmFirstGateEnabled) {
+    return { action: 'skip' };
+  }
 
   // 1. Check if session is already approved
   if (sessionApprovalState.get(sessionId)) {
@@ -164,6 +194,24 @@ export function evaluateConfirmFirstGateSync(
   // 3. Check if tool is mutating
   if (!isMutatingTool(toolName, params)) {
     return { action: 'allow' };
+  }
+
+  // 3.5. PRI-286: PLAN.md self-unblock — never block writes to PLAN.md
+  // to prevent deadlock where the gate tells the agent to create PLAN.md
+  // but PLAN.md creation is also blocked.
+  const targetPath = params?.file_path || params?.path || params?.file || params?.target;
+  if (typeof targetPath === 'string') {
+    const normalized = targetPath.replace(/\\/g, '/').toLowerCase();
+    if (normalized.endsWith('plan.md') || normalized.includes('/plan.md')) {
+      return { action: 'allow' };
+    }
+  }
+  // Also check for bash commands targeting PLAN.md
+  if (BASH_TOOLS_SET.has(toolName)) {
+    const command = String(params?.command || params?.args || '');
+    if (/\bPLAN\.md\b/i.test(command)) {
+      return { action: 'allow' };
+    }
   }
 
   // 4. Block: mutating tool with active confirm-first and no approval

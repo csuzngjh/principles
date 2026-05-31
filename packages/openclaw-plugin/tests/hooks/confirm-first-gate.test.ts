@@ -13,6 +13,8 @@ import {
   clearAllConfirmFirstState,
   setConfirmFirstStore,
   hydrateFromStore,
+  setConfirmFirstGateEnabled,
+  isConfirmFirstGateEnabled,
 } from '../../src/core/confirm-first-gate.js';
 import { SqliteConnection } from '@principles/core/runtime-v2';
 import { SqliteConfirmFirstStateStore } from '@principles/core/runtime-v2';
@@ -20,6 +22,11 @@ import { SqliteConfirmFirstStateStore } from '@principles/core/runtime-v2';
 describe('Confirm-First Gate', () => {
   beforeEach(() => {
     clearAllConfirmFirstState();
+    setConfirmFirstGateEnabled(false); // Default OFF (PRI-286)
+  });
+
+  afterEach(() => {
+    setConfirmFirstGateEnabled(false);
   });
 
   describe('detectApprovalMarker', () => {
@@ -83,7 +90,74 @@ describe('Confirm-First Gate', () => {
     });
   });
 
-  describe('evaluateConfirmFirstGateSync', () => {
+  // ── PRI-286: Feature flag gate ──
+  describe('Feature flag gate (PRI-286)', () => {
+    it('gate is OFF by default', () => {
+      expect(isConfirmFirstGateEnabled()).toBe(false);
+    });
+
+    it('gate skips ALL tool calls when feature flag is OFF', () => {
+      setConfirmFirstDirective('session-1', true, 'princ-mvp-acceptance-confirm-first');
+      // Even with active directive, gate skips because feature flag is OFF
+      const result = evaluateConfirmFirstGateSync('session-1', 'write', { path: 'test.json' });
+      expect(result.action).toBe('skip');
+    });
+
+    it('gate skips write tool when feature flag is OFF even with directive', () => {
+      setConfirmFirstDirective('session-1', true, 'princ-mvp-acceptance-confirm-first');
+      expect(evaluateConfirmFirstGateSync('session-1', 'write', {}).action).toBe('skip');
+      expect(evaluateConfirmFirstGateSync('session-1', 'edit', {}).action).toBe('skip');
+      expect(evaluateConfirmFirstGateSync('session-1', 'exec', { command: 'rm -rf /' }).action).toBe('skip');
+    });
+
+    it('gate can be enabled via setConfirmFirstGateEnabled', () => {
+      setConfirmFirstGateEnabled(true);
+      expect(isConfirmFirstGateEnabled()).toBe(true);
+    });
+  });
+
+  // ── PRI-286: PLAN.md self-unblock ──
+  describe('PLAN.md self-unblock (PRI-286)', () => {
+    beforeEach(() => {
+      setConfirmFirstGateEnabled(true);
+    });
+
+    it('never blocks writes to PLAN.md via write tool', () => {
+      setConfirmFirstDirective('session-1', true, 'princ-cf');
+      const result = evaluateConfirmFirstGateSync('session-1', 'write', { path: 'PLAN.md' });
+      expect(result.action).toBe('allow');
+    });
+
+    it('never blocks writes to PLAN.md via edit tool', () => {
+      setConfirmFirstDirective('session-1', true, 'princ-cf');
+      const result = evaluateConfirmFirstGateSync('session-1', 'edit', { file_path: 'PLAN.md' });
+      expect(result.action).toBe('allow');
+    });
+
+    it('never blocks writes to nested PLAN.md', () => {
+      setConfirmFirstDirective('session-1', true, 'princ-cf');
+      const result = evaluateConfirmFirstGateSync('session-1', 'write', { path: 'D:\\Code\\project\\PLAN.md' });
+      expect(result.action).toBe('allow');
+    });
+
+    it('never blocks bash commands targeting PLAN.md', () => {
+      setConfirmFirstDirective('session-1', true, 'princ-cf');
+      const result = evaluateConfirmFirstGateSync('session-1', 'exec', { command: 'echo "hello" > PLAN.md' });
+      expect(result.action).toBe('allow');
+    });
+
+    it('still blocks other .md files', () => {
+      setConfirmFirstDirective('session-1', true, 'princ-cf');
+      const result = evaluateConfirmFirstGateSync('session-1', 'write', { path: 'README.md' });
+      expect(result.action).toBe('block');
+    });
+  });
+
+  describe('evaluateConfirmFirstGateSync — when gate enabled', () => {
+    beforeEach(() => {
+      setConfirmFirstGateEnabled(true);
+    });
+
     it('skips when no sessionId', () => {
       const result = evaluateConfirmFirstGateSync(undefined, 'write', {});
       expect(result.action).toBe('skip');
@@ -197,12 +271,14 @@ describe('Cross-restart persistence', () => {
   beforeEach(() => {
     clearAllConfirmFirstState();
     setConfirmFirstStore(null);
+    setConfirmFirstGateEnabled(true); // Enable for persistence tests
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cf-test-'));
     connection = new SqliteConnection(tmpDir);
     store = new SqliteConfirmFirstStateStore(connection);
   });
 
   afterEach(() => {
+    setConfirmFirstGateEnabled(false);
     setConfirmFirstStore(null);
     clearAllConfirmFirstState();
     try {
@@ -257,15 +333,34 @@ describe('Cross-restart persistence', () => {
     expect(evaluateConfirmFirstGateSync('sess-noexist', 'write', {}).action).toBe('skip');
     expect(hasActiveDirective('sess-noexist')).toBe(false);
   });
+
+  it('stale state does not block after restart when feature flag is OFF (PRI-286)', () => {
+    setConfirmFirstStore(store);
+    setConfirmFirstDirective('sess-stale', true, 'princ-stale');
+    // State persisted with directive active
+
+    // Simulate restart: gate disabled by default
+    setConfirmFirstGateEnabled(false);
+    setConfirmFirstStore(null);
+    clearAllConfirmFirstState();
+    setConfirmFirstStore(store);
+    hydrateFromStore('sess-stale');
+
+    // Even though directive is active in store, gate is OFF → skip
+    expect(evaluateConfirmFirstGateSync('sess-stale', 'write', {}).action).toBe('skip');
+    expect(hasActiveDirective('sess-stale')).toBe(true); // directive IS active
+  });
 });
 
 describe('Store degradation (ERR-002)', () => {
   afterEach(() => {
+    setConfirmFirstGateEnabled(false);
     setConfirmFirstStore(null);
     clearAllConfirmFirstState();
   });
 
   it('store write failure degrades gracefully to cache-only', () => {
+    setConfirmFirstGateEnabled(true);
     const throwingStore = {
       upsertDirective: () => { throw new Error('DB unavailable'); },
       upsertApproval: () => { throw new Error('DB unavailable'); },
@@ -290,6 +385,11 @@ describe('Store degradation (ERR-002)', () => {
 describe('Stale directive cleared on reset (PRI-266)', () => {
   beforeEach(() => {
     clearAllConfirmFirstState();
+    setConfirmFirstGateEnabled(true);
+  });
+
+  afterEach(() => {
+    setConfirmFirstGateEnabled(false);
   });
 
   it('resetConfirmFirst clears directive and approval from cache and store', () => {

@@ -8,7 +8,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
-import { detectApprovalMarker, setConfirmFirstApproval, setConfirmFirstDirective, hydrateFromStore, pruneStoreStaleRows, setConfirmFirstStore, resetConfirmFirst } from '../core/confirm-first-gate.js';
+import { detectApprovalMarker, setConfirmFirstApproval, setConfirmFirstDirective, hydrateFromStore, pruneStoreStaleRows, setConfirmFirstStore, resetConfirmFirst, setConfirmFirstGateEnabled } from '../core/confirm-first-gate.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
@@ -278,6 +278,36 @@ function ensureConfirmFirstStore(workspaceDir: string): void {
 }
 let _confirmFirstStoreInitialized = false;
 
+/**
+ * PRI-286: Read confirm_first_gate feature flag from workspace config
+ * and propagate to the confirm-first-gate module.
+ * Uses cached read for performance — only re-reads when file changes.
+ */
+let _confirmFirstFlagCache: { enabled: boolean; mtime: number } | null = null;
+function _syncConfirmFirstFeatureFlag(workspaceDir: string): void {
+  const flagPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
+  try {
+    const stat = fs.statSync(flagPath);
+    const mtime = stat.mtimeMs;
+    // Use cached value if file hasn't changed
+    if (_confirmFirstFlagCache && _confirmFirstFlagCache.mtime === mtime) {
+      return;
+    }
+    const raw = fs.readFileSync(flagPath, 'utf8');
+    // Minimal YAML parsing for the confirm_first_gate flag
+    // Check for: confirm_first_gate:\n  enabled: true
+    const enabled = /\bconfirm_first_gate\b[\s\S]*?enabled:\s*true/i.test(raw);
+    _confirmFirstFlagCache = { enabled, mtime };
+    setConfirmFirstGateEnabled(enabled);
+  } catch {
+    // File doesn't exist or unreadable — use default (disabled)
+    if (_confirmFirstFlagCache?.enabled !== false) {
+      _confirmFirstFlagCache = { enabled: false, mtime: 0 };
+      setConfirmFirstGateEnabled(false);
+    }
+  }
+}
+
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi }
@@ -300,6 +330,9 @@ export async function handleBeforePromptBuild(
   if (sessionId) {
     ensureConfirmFirstStore(workspaceDir);
     hydrateFromStore(sessionId);
+    // PRI-286: Propagate confirm_first_gate feature flag state to gate module.
+    // Read the flag from workspace feature-flags.yaml (same path PromptActivationReader uses).
+    _syncConfirmFirstFeatureFlag(workspaceDir);
     _confirmFirstHydrationCounter++;
     if (_confirmFirstHydrationCounter % 100 === 0) {
       const pruned = pruneStoreStaleRows();

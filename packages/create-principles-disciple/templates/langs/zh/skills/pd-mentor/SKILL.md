@@ -185,7 +185,7 @@ disable-model-invocation: true
 
 | 场景 | 组合流程 |
 |------|----------|
-| 大型重构 | `/pd-evolve` → `plan-script` → `deductive-audit` → 执行 |
+| 大型重构 | `/pd-evolve` → `deductive-audit` → 执行 |
 | 系统优化 | `/pd-status` → `evolve-system` → `root-cause` |
 | 项目复盘 | `/pd-daily` → `/pd-okr` → `reflection-log` |
 
@@ -196,7 +196,6 @@ disable-model-invocation: true
 - `triage` - 问题分诊
 - `root-cause` - 根因分析
 - `deductive-audit` - 演绎审计
-- `plan-script` - 计划编排
 - `reflection` - 元认知反思
 - `reflection-log` - 反思落盘
 

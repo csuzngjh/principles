@@ -11,7 +11,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { normalizePath, planStatus } from '../utils/io.js';
+import { normalizePath } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
@@ -109,8 +109,8 @@ export function handleBeforeToolCall(
       },
       workspace: {
         isRiskPath: false, // Rule Host determines risk dynamically
-        planStatus: _getPlanStatus(ctx.workspaceDir),
-        hasPlanFile: _hasPlanFile(ctx.workspaceDir),
+        planStatus: 'NONE' as const,
+        hasPlanFile: false,
       },
       session: {
         sessionId: ctx.sessionId,
@@ -377,25 +377,6 @@ function _extractParamsSummary(params: Record<string, unknown>): Record<string, 
   return summary;
 }
 
-function _getPlanStatus(workspaceDir: string): 'NONE' | 'DRAFT' | 'READY' | 'UNKNOWN' {
-  try {
-    const status = planStatus(workspaceDir);
-    if (status === 'READY') return 'READY';
-    if (status === 'DRAFT') return 'DRAFT';
-    if (status === '') return 'NONE';
-    return 'UNKNOWN';
-  } catch {
-    return 'UNKNOWN';
-  }
-}
-
-function _hasPlanFile(workspaceDir: string): boolean {
-  try {
-    return fs.existsSync(path.join(workspaceDir, 'PLAN.md'));
-  } catch {
-    return false;
-  }
-}
 
 function _getCurrentGfi(sessionId?: string): number {
   if (!sessionId) return 0;

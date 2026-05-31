@@ -149,34 +149,61 @@ export function recordGateBlockAndReturn(
     }
   }
 
-  // 6. Return consistent block result with operator guidance
+  // 6. Return consistent block result with contextual operator guidance
+  const blockMessage = buildContextualBlockMessage(filePath, reason, toolName, blockSource);
+
   return {
     block: true,
-    blockReason: `[Principles Disciple] Security Gate Blocked this action.
+    blockReason: blockMessage,
+  };
+}
+
+/**
+ * Build contextual block message based on block source.
+ * PRI-286: Different block sources produce different guidance.
+ * - confirm-first-gate: approval-seeking guidance
+ * - rule-host: principle-based guidance
+ * - default/gate: generic security gate message
+ */
+function buildContextualBlockMessage(
+  filePath: string,
+  reason: string,
+  toolName: string,
+  blockSource?: string,
+): string {
+  const source = blockSource ?? 'gate';
+
+  if (source === 'confirm-first-gate') {
+    return `[Principles Disciple] Confirm-First Gate Blocked this action.
 File: ${filePath}
 Reason: ${reason}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📋 How to unblock this operation:
 
-1. Use the plan-script skill to create a PLAN.md:
-   → Invoke: skill:plan-script
+This session has a confirm-first behavioral directive active.
+Before making changes, you must:
 
-2. Fill in the plan with:
-   - Target Files: ${filePath}
-   - Steps: What you want to do (be specific)
-   - Metrics: How to verify success
-   - Active Mental Models: Select 2 relevant models from .principles/THINKING_OS.md
-   - Rollback: How to restore if it fails
+1. Summarize what you plan to do
+2. Explain why it is safe and appropriate
+3. Wait for explicit owner approval (e.g., "approved", "确认", "go ahead")
 
-3. After completing the plan, set STATUS: READY in PLAN.md
+After the owner approves, retry the operation.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+  }
 
-4. Retry the operation
+  // rule-host or generic gate blocks
+  return `[Principles Disciple] Security Gate Blocked this action.
+File: ${filePath}
+Reason: ${reason}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-This is a mandatory security gate. The operation was blocked because the modification exceeds the allowed threshold for your current evolution tier.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-  };
+📋 How to unblock this operation:
+
+This action was blocked by a Rule Host principle.
+If the blocked path is correct and safe, explain the reasoning to the owner
+and ask for explicit confirmation to proceed.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 }
 
 /**

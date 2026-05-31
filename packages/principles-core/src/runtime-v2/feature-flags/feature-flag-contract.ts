@@ -99,6 +99,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   // MVP-Quiet — default disabled, opt-in via config
   // Only flags with real consumption paths are registered (PRI-239 constraint)
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
+  { id: 'confirm_first_gate', category: 'quiet', enabled: false, since: '2026-05-31', description: 'Hard gate blocking mutating tools until owner approval — off by default (PRI-286)' },
 
   // MVP-Gone — permanently disabled, cannot be re-enabled
   { id: 'nocturnal', category: 'gone', enabled: false, since: '2026-05-24', description: 'Nocturnal trinity pipeline (retired)' },
