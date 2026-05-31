@@ -1,5 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { checkForUpdates, fetchChangelog } from '../src/updater.js';
+import { checkForUpdates, fetchVersionDescription, applyUpdate, computeDiff, rollbackUpdate, migrateDatabase } from '../src/updater.js';
+
+// Module-level mocks (hoisted to top by vitest)
+vi.mock('fs', () => ({
+  existsSync: vi.fn().mockReturnValue(true),
+  readFileSync: vi.fn().mockReturnValue(JSON.stringify({ version: '1.0.0' })),
+  writeFileSync: vi.fn(),
+  mkdirSync: vi.fn(),
+  copyFileSync: vi.fn(),
+  unlinkSync: vi.fn(),
+  rmSync: vi.fn(),
+  readdirSync: vi.fn().mockReturnValue([]),
+}));
+
+vi.mock('child_process', () => ({
+  execSync: vi.fn(),
+}));
+
+vi.mock('tar', () => ({
+  extract: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe('checkForUpdates', () => {
   beforeEach(() => {
@@ -59,7 +79,88 @@ describe('checkForUpdates', () => {
   });
 });
 
-describe('fetchChangelog', () => {
+describe('applyUpdate', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+
+    // Reconfigure fs mocks to defaults after clearAllMocks
+    const fs = await import('fs');
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0' }));
+    vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+
+    // Mock fetch for network calls (fetchLatestPackageInfo + downloadPackage)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        version: '1.74.0',
+        dist: { tarball: 'https://registry.npmjs.org/create-principles-disciple/-/create-principles-disciple-1.74.0.tgz' },
+      }),
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+  });
+
+  it('should apply update with smart merge strategy', async () => {
+    const result = await applyUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+      mergeStrategy: 'smart',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should apply update with overwrite strategy', async () => {
+    const result = await applyUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+      mergeStrategy: 'overwrite',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should apply update with keep strategy', async () => {
+    const result = await applyUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+      mergeStrategy: 'keep',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should include updated files in result on success', async () => {
+    const result = await applyUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+      mergeStrategy: 'overwrite',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.updatedFiles).toBeDefined();
+    expect(Array.isArray(result.updatedFiles)).toBe(true);
+  });
+
+  it('should return error when fetch fails', async () => {
+    // Override fetch mock for this test
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    }));
+
+    const result = await applyUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+      mergeStrategy: 'smart',
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('fetchVersionDescription', () => {
   it('should fetch changelog for a specific version', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -73,7 +174,7 @@ describe('fetchChangelog', () => {
       }),
     }));
 
-    const result = await fetchChangelog('1.74.0');
+    const result = await fetchVersionDescription('1.74.0');
     expect(result).toBe('Bug fixes and improvements');
   });
 
@@ -89,7 +190,187 @@ describe('fetchChangelog', () => {
       }),
     }));
 
-    const result = await fetchChangelog('1.74.0');
+    const result = await fetchVersionDescription('1.74.0');
     expect(result).toBeUndefined();
+  });
+});
+
+describe('computeDiff', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const fs = await import('fs');
+    vi.mocked(fs.readFileSync).mockReturnValue('');
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+  });
+
+  it('should detect modified files', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockImplementation(((dir: unknown) => {
+      const dirStr = String(dir);
+      if (dirStr.includes('current')) {
+        return [{ name: 'file1.txt', isDirectory: () => false }] as any;
+      }
+      if (dirStr.includes('new')) {
+        return [{ name: 'file1.txt', isDirectory: () => false }] as any;
+      }
+      return [] as any;
+    }) as any);
+
+    vi.mocked(fs.readFileSync)
+      .mockReturnValueOnce('old content')
+      .mockReturnValueOnce('new content');
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual(['file1.txt']);
+    expect(result.added).toEqual([]);
+    expect(result.deleted).toEqual([]);
+  });
+
+  it('should detect added files', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockImplementation(((dir: unknown) => {
+      const dirStr = String(dir);
+      if (dirStr.includes('current')) {
+        return [] as any;
+      }
+      if (dirStr.includes('new')) {
+        return [{ name: 'file2.txt', isDirectory: () => false }] as any;
+      }
+      return [] as any;
+    }) as any);
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual([]);
+    expect(result.added).toEqual(['file2.txt']);
+    expect(result.deleted).toEqual([]);
+  });
+
+  it('should detect deleted files', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockImplementation(((dir: unknown) => {
+      const dirStr = String(dir);
+      if (dirStr.includes('current')) {
+        return [{ name: 'old.txt', isDirectory: () => false }] as any;
+      }
+      if (dirStr.includes('new')) {
+        return [] as any;
+      }
+      return [] as any;
+    }) as any);
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual([]);
+    expect(result.added).toEqual([]);
+    expect(result.deleted).toEqual(['old.txt']);
+  });
+
+  it('should detect no changes when files are identical', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockImplementation(((dir: unknown) => {
+      const dirStr = String(dir);
+      if (dirStr.includes('current')) {
+        return [{ name: 'same.txt', isDirectory: () => false }] as any;
+      }
+      if (dirStr.includes('new')) {
+        return [{ name: 'same.txt', isDirectory: () => false }] as any;
+      }
+      return [] as any;
+    }) as any);
+
+    vi.mocked(fs.readFileSync)
+      .mockReturnValueOnce('identical content')
+      .mockReturnValueOnce('identical content');
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual([]);
+    expect(result.added).toEqual([]);
+    expect(result.deleted).toEqual([]);
+  });
+
+  it('should handle mixed changes', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockImplementation(((dir: unknown) => {
+      const dirStr = String(dir);
+      if (dirStr.includes('current')) {
+        return [
+          { name: 'same.txt', isDirectory: () => false },
+          { name: 'modified.txt', isDirectory: () => false },
+          { name: 'deleted.txt', isDirectory: () => false },
+        ] as any;
+      }
+      if (dirStr.includes('new')) {
+        return [
+          { name: 'same.txt', isDirectory: () => false },
+          { name: 'modified.txt', isDirectory: () => false },
+          { name: 'added.txt', isDirectory: () => false },
+        ] as any;
+      }
+      return [] as any;
+    }) as any);
+
+    vi.mocked(fs.readFileSync)
+      .mockReturnValueOnce('same content')   // current/same.txt
+      .mockReturnValueOnce('same content')   // new/same.txt
+      .mockReturnValueOnce('old version')    // current/modified.txt
+      .mockReturnValueOnce('new version');   // new/modified.txt
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual(['modified.txt']);
+    expect(result.added).toEqual(['added.txt']);
+    expect(result.deleted).toEqual(['deleted.txt']);
+  });
+
+  it('should handle empty directories', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual([]);
+    expect(result.added).toEqual([]);
+    expect(result.deleted).toEqual([]);
+  });
+});
+
+describe('rollbackUpdate', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+
+    // Reconfigure fs mocks to defaults after clearAllMocks
+    const fs = await import('fs');
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0' }));
+    vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+  });
+
+  it('should rollback to backup successfully', async () => {
+    const result = await rollbackUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.message).toBe('Rollback completed successfully');
+  });
+
+  it('should handle missing backup gracefully', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const result = await rollbackUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('Backup not found');
+  });
+});
+
+describe('migrateDatabase', () => {
+  it('should return success when no migrations needed', async () => {
+    const result = await migrateDatabase('/tmp/test.db', '1.0.0', '1.0.0');
+    expect(result.success).toBe(true);
+    expect(result.appliedMigrations).toEqual([]);
   });
 });
