@@ -7,6 +7,11 @@ import * as os from 'os';
 // Mock fetch globally
 vi.stubGlobal('fetch', vi.fn());
 
+// Mock child_process (used for tar extraction in doApplyUpdate)
+vi.mock('child_process', () => ({
+  execSync: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Test utilities
 // ---------------------------------------------------------------------------
@@ -168,14 +173,37 @@ describe('handleUpdateRoute', () => {
 
   describe('POST /apply', () => {
     it('should apply update and return result', async () => {
-      // Mock fetch for package info
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
-      } as Response);
+      const { execSync: execSyncMock } = await import('child_process');
 
-      // Create a real target dir with package.json
-      const targetDir = path.join(tmpDir, 'target');
+      // Mock fetch for multi-call: registry info then tarball download
+      vi.mocked(fetch).mockImplementation(((url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('registry.npmjs.org')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ version: '2.0.0', dist: { tarball: 'https://example.com/pkg.tgz' } }),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(0),
+        } as Response);
+      }) as unknown as typeof fetch);
+
+      // Mock execSync to simulate tar extraction by creating a file in tempDir
+      vi.mocked(execSyncMock).mockImplementation(((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('tar xzf')) {
+          const match = cmd.match(/-C\s+"([^"]+)"/);
+          if (match && match[1]) {
+            const dir = match[1];
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0', name: 'test' }));
+          }
+        }
+      }) as unknown as typeof execSyncMock);
+
+      // Create a real target dir within extensions (passes path validation)
+      const targetDir = path.join(tmpDir, 'extensions', 'target');
       fs.mkdirSync(targetDir, { recursive: true });
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
@@ -223,6 +251,20 @@ describe('handleUpdateRoute', () => {
       const body = parseResponseBody<{ success: boolean; message: string }>(res);
       expect(body.message).toContain('mergeStrategy');
     });
+
+    it('should reject targetDir outside workspace', async () => {
+      const req = createMockRequest('POST', {
+        targetDir: '/etc/passwd',
+        mergeStrategy: 'smart',
+      });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/apply');
+
+      expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; message: string }>(res);
+      expect(body.message).toContain('targetDir');
+    });
   });
 
   // ── GET /status ─────────────────────────────────────────────────────
@@ -256,9 +298,9 @@ describe('handleUpdateRoute', () => {
 
   describe('POST /rollback', () => {
     it('should rollback update and return result', async () => {
-      // Create real backup and target dirs
-      const targetDir = path.join(tmpDir, 'target');
-      const backupDir = path.join(tmpDir, 'backup');
+      // Create real backup and target dirs within extensions
+      const targetDir = path.join(tmpDir, 'extensions', 'target');
+      const backupDir = path.join(tmpDir, 'extensions', 'backup');
       fs.mkdirSync(targetDir, { recursive: true });
       fs.mkdirSync(backupDir, { recursive: true });
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
@@ -301,6 +343,37 @@ describe('handleUpdateRoute', () => {
 
       expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
     });
+
+    it('should reject targetDir outside workspace', async () => {
+      const req = createMockRequest('POST', {
+        targetDir: '/etc/evil',
+        backupDir: path.join(tmpDir, 'extensions', 'backup'),
+      });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/rollback');
+
+      expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; message: string }>(res);
+      expect(body.message).toContain('targetDir');
+    });
+
+    it('should reject backupDir outside workspace', async () => {
+      const targetDir = path.join(tmpDir, 'extensions', 'target2');
+      fs.mkdirSync(targetDir, { recursive: true });
+
+      const req = createMockRequest('POST', {
+        targetDir,
+        backupDir: '/etc/evil',
+      });
+      const res = createMockResponse();
+
+      await handleUpdateRoute(req, res, workspaceDir, '/rollback');
+
+      expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; message: string }>(res);
+      expect(body.message).toContain('backupDir');
+    });
   });
 
   // ── Edge cases ──────────────────────────────────────────────────────
@@ -329,7 +402,7 @@ describe('handleUpdateRoute', () => {
         json: async () => ({}),
       } as Response);
 
-      const targetDir = path.join(tmpDir, 'target-non-ok');
+      const targetDir = path.join(tmpDir, 'extensions', 'target-non-ok');
       fs.mkdirSync(targetDir, { recursive: true });
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '1.0.0' }));
 
@@ -349,8 +422,8 @@ describe('handleUpdateRoute', () => {
     });
 
     it('POST /rollback should return failure when backup directory does not exist', async () => {
-      const targetDir = path.join(tmpDir, 'target-no-backup');
-      const backupDir = path.join(tmpDir, 'nonexistent-backup');
+      const targetDir = path.join(tmpDir, 'extensions', 'target-no-backup');
+      const backupDir = path.join(tmpDir, 'extensions', 'nonexistent-backup');
       fs.mkdirSync(targetDir, { recursive: true });
       fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
       // Intentionally do NOT create backupDir

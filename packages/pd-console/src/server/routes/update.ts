@@ -10,6 +10,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import { execSync } from 'child_process';
 import semver from 'semver';
 import {
   sendSuccess,
@@ -18,6 +20,14 @@ import {
   sendBadRequest,
   sendNotFound,
 } from '../utils/response.js';
+import { appendUpdateHistory } from './update-history.js';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const NPM_REGISTRY_LATEST = 'https://registry.npmjs.org/create-principles-disciple/latest';
+const WORKSPACE_FILES = ['AGENTS.md', 'SOUL.md', 'USER.md', 'CLAUDE.md'];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,6 +68,15 @@ function isValidMergeStrategy(value: unknown): value is 'smart' | 'overwrite' | 
   return typeof value === 'string' && (value === 'smart' || value === 'overwrite' || value === 'keep');
 }
 
+function validatePathInWorkspace(target: string, workspaceDir: string): boolean {
+  const resolved = path.resolve(target);
+  const resolvedWorkspace = path.resolve(workspaceDir);
+  // Allow paths within workspace or within the extensions directory
+  const extensionsDir = path.resolve(path.join(path.dirname(workspaceDir), 'extensions'));
+  return resolved.startsWith(resolvedWorkspace + path.sep) || resolved === resolvedWorkspace
+    || resolved.startsWith(extensionsDir + path.sep) || resolved === extensionsDir;
+}
+
 // ---------------------------------------------------------------------------
 // Core update operations (inline to avoid cross-package import)
 // ---------------------------------------------------------------------------
@@ -76,13 +95,72 @@ function copyDirRecursive(src: string, dest: string): void {
   }
 }
 
+function isWorkspaceFile(filePath: string): boolean {
+  return WORKSPACE_FILES.some(f => filePath.endsWith(f));
+}
+
+function copyFileTo(src: string, dest: string): void {
+  const dir = path.dirname(dest);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(src, dest);
+}
+
+interface LocalDiffResult {
+  modified: string[];
+  added: string[];
+  deleted: string[];
+}
+
+function getAllFilesLocal(dir: string): string[] {
+  const result: string[] = [];
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const subFiles = getAllFilesLocal(fullPath);
+        result.push(...subFiles.map(f => path.join(entry.name, f)));
+      } else {
+        result.push(entry.name);
+      }
+    }
+  } catch { /* ignore */ }
+  return result;
+}
+
+function computeDiffLocal(currentDir: string, newDir: string): LocalDiffResult {
+  const modified: string[] = [];
+  const added: string[] = [];
+  const deleted: string[] = [];
+  const currentFiles = getAllFilesLocal(currentDir);
+  const newFiles = getAllFilesLocal(newDir);
+  const currentSet = new Set(currentFiles);
+  const newSet = new Set(newFiles);
+
+  for (const file of currentFiles) {
+    if (newSet.has(file)) {
+      try {
+        const cur = fs.readFileSync(path.join(currentDir, file), 'utf-8');
+        const nw = fs.readFileSync(path.join(newDir, file), 'utf-8');
+        if (cur !== nw) modified.push(file);
+      } catch { modified.push(file); }
+    } else {
+      deleted.push(file);
+    }
+  }
+  for (const file of newFiles) {
+    if (!currentSet.has(file)) added.push(file);
+  }
+  return { modified, added, deleted };
+}
+
 async function doCheckForUpdates(currentVersion: string) {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     let latestVersion = '';
     try {
-      const response = await fetch('https://registry.npmjs.org/create-principles-disciple/latest', {
+      const response = await fetch(NPM_REGISTRY_LATEST, {
         signal: controller.signal,
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -108,44 +186,117 @@ async function doCheckForUpdates(currentVersion: string) {
   }
 }
 
-async function doApplyUpdate(options: {
-  targetDir: string;
-  mergeStrategy: 'smart' | 'overwrite' | 'keep';
-  backupDir?: string;
-}) {
-  const { targetDir, mergeStrategy: _mergeStrategy, backupDir } = options;
-  void _mergeStrategy; // Will be used for full file merge in future iteration
+async function doApplyUpdate(
+  options: {
+    targetDir: string;
+    mergeStrategy: 'smart' | 'overwrite' | 'keep';
+    createBackup?: boolean;
+  },
+  workspaceDir: string,
+) {
+  const { targetDir, mergeStrategy, createBackup } = options;
   try {
-    // Fetch latest package info
-    const response = await fetch('https://registry.npmjs.org/create-principles-disciple/latest');
+    // 1. Fetch latest package info
+    const response = await fetch(NPM_REGISTRY_LATEST);
     if (!response.ok) return { success: false, message: `Failed to fetch package info: HTTP ${response.status}` };
     const rawData: unknown = await response.json();
     if (typeof rawData !== 'object' || rawData === null) return { success: false, message: 'Invalid registry response' };
     const data = rawData as Record<string, unknown>;
     const version = typeof data.version === 'string' ? data.version : undefined;
     if (!version) return { success: false, message: 'Missing version in registry response' };
+    const dist = typeof data.dist === 'object' && data.dist !== null ? (data.dist as Record<string, unknown>) : null;
+    const tarball = dist && typeof dist.tarball === 'string' ? dist.tarball : undefined;
+    if (!tarball) return { success: false, message: 'Missing tarball URL in registry response' };
 
+    // 2. Create backup if requested
     let backupPath: string | undefined = undefined;
-    if (backupDir) {
+    if (createBackup) {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       backupPath = path.join(path.dirname(targetDir), `.pd-backup-${timestamp}`);
-      fs.mkdirSync(backupPath, { recursive: true });
       copyDirRecursive(targetDir, backupPath);
     }
 
-    // Update package.json version
+    // 3. Download and extract new version
+    const tempDir = path.join(os.tmpdir(), `pd-update-${Date.now()}`);
+    fs.mkdirSync(tempDir, { recursive: true });
+    try {
+      const dlResponse = await fetch(tarball);
+      if (!dlResponse.ok) throw new Error(`Download failed: HTTP ${dlResponse.status}`);
+      const buffer = Buffer.from(await dlResponse.arrayBuffer());
+      const tarballPath = path.join(tempDir, 'package.tgz');
+      fs.writeFileSync(tarballPath, buffer);
+      execSync(`tar xzf "${tarballPath}" -C "${tempDir}" --strip-components=1`, { stdio: 'pipe' });
+      fs.unlinkSync(tarballPath);
+    } catch (dlError) {
+      // Clean up temp dir on download failure
+      if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+      throw dlError;
+    }
+
+    // 4. Compute diff and apply
+    const diff = computeDiffLocal(targetDir, tempDir);
+    const updatedFiles: string[] = [];
+
+    for (const file of diff.modified) {
+      if (isWorkspaceFile(file)) {
+        switch (mergeStrategy) {
+          case 'smart': {
+            const content = fs.readFileSync(path.join(tempDir, file), 'utf-8');
+            fs.writeFileSync(path.join(targetDir, `${file}.update`), content);
+            break;
+          }
+          case 'overwrite':
+            copyFileTo(path.join(tempDir, file), path.join(targetDir, file));
+            updatedFiles.push(file);
+            break;
+          case 'keep':
+            break;
+        }
+      } else {
+        copyFileTo(path.join(tempDir, file), path.join(targetDir, file));
+        updatedFiles.push(file);
+      }
+    }
+
+    for (const file of diff.added) {
+      copyFileTo(path.join(tempDir, file), path.join(targetDir, file));
+      updatedFiles.push(file);
+    }
+
+    for (const file of diff.deleted) {
+      const filePath = path.join(targetDir, file);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      updatedFiles.push(file);
+    }
+
+    // 5. Update package.json version
     const pkgPath = path.join(targetDir, 'package.json');
     if (fs.existsSync(pkgPath)) {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
-      pkg.version = version;
-      fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+      const rawPkg: unknown = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      if (typeof rawPkg === 'object' && rawPkg !== null) {
+        const pkg = { ...(rawPkg as Record<string, unknown>), version };
+        fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+      }
     }
+
+    // 6. Cleanup temp dir
+    if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+
+    // 7. Record update history
+    const currentVersion = readCurrentVersion(targetDir) ?? 'unknown';
+    appendUpdateHistory(workspaceDir, {
+      fromVersion: currentVersion,
+      toVersion: version,
+      success: true,
+      backupPath,
+    });
 
     return {
       success: true,
       message: 'Update applied successfully',
-      updatedFiles: ['package.json'],
+      updatedFiles,
       backupPath,
+      newVersion: version,
     };
   } catch (error) {
     return {
@@ -155,7 +306,7 @@ async function doApplyUpdate(options: {
   }
 }
 
-async function doRollbackUpdate(options: { targetDir: string; backupDir: string }) {
+async function doRollbackUpdate(options: { targetDir: string; backupDir: string }, workspaceDir: string) {
   const { targetDir, backupDir } = options;
   try {
     if (!fs.existsSync(backupDir)) {
@@ -165,6 +316,15 @@ async function doRollbackUpdate(options: { targetDir: string; backupDir: string 
       fs.rmSync(targetDir, { recursive: true, force: true });
     }
     copyDirRecursive(backupDir, targetDir);
+
+    // Record rollback history
+    appendUpdateHistory(workspaceDir, {
+      fromVersion: 'rolled-back',
+      toVersion: readCurrentVersion(targetDir) ?? 'unknown',
+      success: true,
+      backupPath: backupDir,
+    });
+
     return { success: true, message: 'Rollback completed successfully' };
   } catch (error) {
     return {
@@ -226,11 +386,17 @@ export async function handleUpdateRoute(
       }
       const { backupDir } = body;
 
+      // Path traversal validation
+      if (!validatePathInWorkspace(targetDir, workspaceDir)) {
+        sendBadRequest(res, 'targetDir must be within workspace or extensions directory');
+        return;
+      }
+
       const result = await doApplyUpdate({
         targetDir,
         mergeStrategy,
-        backupDir: isString(backupDir) ? backupDir : undefined,
-      });
+        createBackup: isString(backupDir),
+      }, workspaceDir);
       sendSuccess(res, result);
     } catch (err) {
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }
@@ -269,7 +435,17 @@ export async function handleUpdateRoute(
         return;
       }
 
-      const result = await doRollbackUpdate({ targetDir, backupDir });
+      // Path traversal validation
+      if (!validatePathInWorkspace(targetDir, workspaceDir)) {
+        sendBadRequest(res, 'targetDir must be within workspace or extensions directory');
+        return;
+      }
+      if (!validatePathInWorkspace(backupDir, workspaceDir)) {
+        sendBadRequest(res, 'backupDir must be within workspace or extensions directory');
+        return;
+      }
+
+      const result = await doRollbackUpdate({ targetDir, backupDir }, workspaceDir);
       sendSuccess(res, result);
     } catch (err) {
       if (err instanceof SyntaxError) { sendBadRequest(res, 'Invalid JSON body'); return; }

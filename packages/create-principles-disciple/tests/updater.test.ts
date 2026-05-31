@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { checkForUpdates, fetchChangelog, applyUpdate, computeDiff, rollbackUpdate, migrateDatabase } from '../src/updater.js';
+import { checkForUpdates, fetchVersionDescription, applyUpdate, computeDiff, rollbackUpdate, migrateDatabase } from '../src/updater.js';
 
 // Module-level mocks (hoisted to top by vitest)
 vi.mock('fs', () => ({
@@ -15,6 +15,10 @@ vi.mock('fs', () => ({
 
 vi.mock('child_process', () => ({
   execSync: vi.fn(),
+}));
+
+vi.mock('tar', () => ({
+  extract: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('checkForUpdates', () => {
@@ -156,7 +160,7 @@ describe('applyUpdate', () => {
   });
 });
 
-describe('fetchChangelog', () => {
+describe('fetchVersionDescription', () => {
   it('should fetch changelog for a specific version', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -170,7 +174,7 @@ describe('fetchChangelog', () => {
       }),
     }));
 
-    const result = await fetchChangelog('1.74.0');
+    const result = await fetchVersionDescription('1.74.0');
     expect(result).toBe('Bug fixes and improvements');
   });
 
@@ -186,7 +190,7 @@ describe('fetchChangelog', () => {
       }),
     }));
 
-    const result = await fetchChangelog('1.74.0');
+    const result = await fetchVersionDescription('1.74.0');
     expect(result).toBeUndefined();
   });
 });

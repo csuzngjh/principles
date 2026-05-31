@@ -21,7 +21,14 @@ function loadHistory(historyPath: string): UpdateHistoryEntry[] {
     try {
       const raw = fs.readFileSync(historyPath, 'utf-8');
       const parsed: unknown = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed as UpdateHistoryEntry[];
+      if (Array.isArray(parsed)) {
+        return parsed.filter((e): e is UpdateHistoryEntry =>
+          typeof e === 'object' && e !== null &&
+          typeof (e as Record<string, unknown>).fromVersion === 'string' &&
+          typeof (e as Record<string, unknown>).toVersion === 'string' &&
+          typeof (e as Record<string, unknown>).success === 'boolean'
+        );
+      }
     } catch {
       // Corrupted file — return empty
     }

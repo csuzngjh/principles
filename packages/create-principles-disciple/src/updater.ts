@@ -4,6 +4,9 @@ import * as path from 'path';
 import * as os from 'os';
 import * as tar from 'tar';
 
+const NPM_REGISTRY_URL = 'https://registry.npmjs.org/create-principles-disciple';
+const NPM_LATEST_URL = `${NPM_REGISTRY_URL}/latest`;
+
 export interface UpdateCheckResult {
   hasUpdate: boolean;
   currentVersion: string;
@@ -17,7 +20,7 @@ export async function checkForUpdates(currentVersion: string): Promise<UpdateChe
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     let latestVersion = '';
     try {
-      const response = await fetch('https://registry.npmjs.org/create-principles-disciple/latest', {
+      const response = await fetch(NPM_LATEST_URL, {
         signal: controller.signal,
       });
       if (!response.ok) {
@@ -53,9 +56,10 @@ export async function checkForUpdates(currentVersion: string): Promise<UpdateChe
   }
 }
 
-export async function fetchChangelog(version: string): Promise<string | undefined> {
+/** Fetch the version description from npm registry. Note: this is the package description, not a full changelog. */
+export async function fetchVersionDescription(version: string): Promise<string | undefined> {
   try {
-    const response = await fetch('https://registry.npmjs.org/create-principles-disciple');
+    const response = await fetch(NPM_REGISTRY_URL);
     if (!response.ok) {
       return undefined;
     }
@@ -148,13 +152,17 @@ export async function computeDiff(currentDir: string, newDir: string): Promise<C
 
 function getCurrentVersion(targetDir: string): string {
   const packageJsonPath = path.join(targetDir, 'package.json');
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-  return packageJson.version;
+  const raw: unknown = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+  if (typeof raw === 'object' && raw !== null && Object.hasOwn(raw, 'version')) {
+    const v = (raw as Record<string, unknown>).version;
+    if (typeof v === 'string') return v;
+  }
+  throw new Error('Invalid package.json: missing or invalid version field');
 }
 
 async function fetchLatestPackageInfo(): Promise<{ version: string; tarball: string } | null> {
   try {
-    const response = await fetch('https://registry.npmjs.org/create-principles-disciple/latest');
+    const response = await fetch(NPM_LATEST_URL);
     if (!response.ok) return null;
     const rawData: unknown = await response.json();
     if (typeof rawData !== 'object' || rawData === null) return null;
@@ -173,22 +181,16 @@ async function downloadPackage(tarballUrl: string): Promise<string> {
   const tempDir = path.join(os.tmpdir(), `pd-update-${Date.now()}`);
   fs.mkdirSync(tempDir, { recursive: true });
 
-  try {
-    const response = await fetch(tarballUrl);
-    if (!response.ok) throw new Error('Failed to download package');
+  const response = await fetch(tarballUrl);
+  if (!response.ok) throw new Error(`Failed to download package: HTTP ${response.status}`);
 
-    const buffer = Buffer.from(await response.arrayBuffer());
-    const tarballPath = path.join(tempDir, 'package.tgz');
-    fs.writeFileSync(tarballPath, buffer);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const tarballPath = path.join(tempDir, 'package.tgz');
+  fs.writeFileSync(tarballPath, buffer);
 
-    // Extract tarball
-    await tar.extract({ file: tarballPath, cwd: tempDir });
+  await tar.extract({ file: tarballPath, cwd: tempDir, strip: 1, preservePaths: false });
 
-    // Clean up tarball
-    fs.unlinkSync(tarballPath);
-  } catch {
-    // If download fails, return empty tempDir
-  }
+  fs.unlinkSync(tarballPath);
 
   return tempDir;
 }
@@ -198,9 +200,9 @@ function isWorkspaceFile(filePath: string): boolean {
   return workspaceFiles.some(f => filePath.endsWith(f));
 }
 
-async function generateUpdateFile(file: string, tempDir: string): Promise<void> {
+async function generateUpdateFile(file: string, tempDir: string, targetDir: string): Promise<void> {
   const content = fs.readFileSync(path.join(tempDir, file), 'utf-8');
-  const updatePath = path.join(process.cwd(), `${file}.update`);
+  const updatePath = path.join(targetDir, `${file}.update`);
   fs.writeFileSync(updatePath, content);
 }
 
@@ -220,8 +222,11 @@ async function deleteFile(filePath: string): Promise<void> {
 
 async function updatePackageJson(targetDir: string, latestInfo: { version: string }): Promise<void> {
   const packageJsonPath = path.join(targetDir, 'package.json');
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-  packageJson.version = latestInfo.version;
+  const raw: unknown = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('Invalid package.json: not an object');
+  }
+  const packageJson = { ...(raw as Record<string, unknown>), version: latestInfo.version };
   fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
 }
 
@@ -300,7 +305,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<ApplyUpd
       if (isWorkspaceFile(file)) {
         switch (mergeStrategy) {
           case 'smart':
-            await generateUpdateFile(file, tempDir);
+            await generateUpdateFile(file, tempDir, targetDir);
             break;
           case 'overwrite':
             await copyFile(path.join(tempDir, file), path.join(targetDir, file));
