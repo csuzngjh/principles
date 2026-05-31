@@ -35,7 +35,8 @@ import { storeEmitter } from '../store/event-emitter.js';
 import { attemptStructuredOutputRepair, deriveSchemaSummary } from './structured-output-repair.js';
 import type { OutputEvidencePack, OutputValidationErrorEntry } from './output-repair-contract.js';
 import { formatValidationErrorEntry, safeStringifyPreview, stripLineageFields } from './output-repair-contract.js';
-import { RECORD_DIAGNOSIS_V1_TOOL } from './tools/diagnostician-tool.js';
+import { buildRecordDiagnosisV1Tool } from './tools/diagnostician-tool.js';
+import { DefaultSchemaPromptAdapter } from './schema-prompt-adapter.js';
 import type {
   PDRuntimeAdapter,
   RuntimeKind,
@@ -840,7 +841,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   /**
    * Path 1: Tool calling (PRI-271 B2).
    *
-   * Passes `RECORD_DIAGNOSIS_V1_TOOL` via context.tools and injects
+   * Passes `buildRecordDiagnosisV1Tool()` via context.tools and injects
    * `tool_choice: 'required'` via onPayload. If the provider supports tool
    * calling, the response contains ToolCall content blocks with pre-parsed
    * arguments that we validate against the schema.
@@ -862,7 +863,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     try {
       const toolContext: Context = {
         ...params.baseContext,
-        tools: [RECORD_DIAGNOSIS_V1_TOOL],
+        tools: [buildRecordDiagnosisV1Tool(new DefaultSchemaPromptAdapter(), DiagnosticianOutputV1Schema)],
       };
 
       const completeOptions: SimpleStreamOptions = {
