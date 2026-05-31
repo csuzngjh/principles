@@ -15,7 +15,7 @@ import fse from 'fs-extra';
 import * as path from 'path';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
-import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';
+import { getOpenClawConfigDir, getPluginExtDir, checkOpenClawGateway } from './utils/env.js';
 import { getGlobalShimPaths, getInstalledBinDir, isWindows } from './mvp-config.js';
 import { setLanguage, t, getLanguage } from './i18n.js';
 
@@ -223,6 +223,23 @@ function cleanupOpenClawConfig(): { cleaned: boolean; error?: string } {
  *
  * @param options.force Skip confirmation prompt (dangerous, for scripts only)
  */
+const REMOVE_RETRY_ATTEMPTS = 3;
+const REMOVE_RETRY_DELAY_MS = 1000;
+
+async function removeWithRetry(targetPath: string, _type: 'dir' | 'file'): Promise<void> {
+  for (let attempt = 1; attempt <= REMOVE_RETRY_ATTEMPTS; attempt++) {
+    try {
+      await fse.remove(targetPath);
+      return;
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      const isLockError = errMsg.includes('EPERM') || errMsg.includes('EBUSY') || errMsg.includes('permission');
+      if (!isLockError || attempt === REMOVE_RETRY_ATTEMPTS) throw error;
+      await new Promise(r => setTimeout(r, REMOVE_RETRY_DELAY_MS * attempt));
+    }
+  }
+}
+
 export async function uninstall(
   options: {
     force?: boolean;
@@ -240,6 +257,17 @@ export async function uninstall(
   };
 
   try {
+    const gatewayStatus = await checkOpenClawGateway();
+    if (gatewayStatus.isRunning) {
+      const portInfo = gatewayStatus.port ? ` (port ${gatewayStatus.port})` : '';
+      const pidInfo = gatewayStatus.pid ? `, PID ${gatewayStatus.pid}` : '';
+      logger.warn(`OpenClaw gateway is running${portInfo}${pidInfo}.`);
+      logger.warn(isWindows()
+        ? '文件可能被占用导致删除失败。建议先关闭 OpenClaw（openclaw gateway stop），然后重新运行卸载。'
+        : 'Files may be locked. Stop OpenClaw first (openclaw gateway stop), then re-run uninstall.');
+      console.log('');
+    }
+
     // 1. Check install status
     const status = checkInstallStatus();
 
@@ -291,21 +319,30 @@ export async function uninstall(
     }
 
     // 5. Execute deletion (only plugin system files)
+    const deleteErrors: { name: string; error: string }[] = [];
     for (const p of status.paths) {
       if (!p.exists) continue;
 
       try {
+        await removeWithRetry(p.path, p.type);
         if (p.type === 'dir') {
-          await fse.remove(p.path);
           result.removedDirs.push(p.path);
-          logger.success(`${t('deleted')}: ${p.name}`);
         } else {
-          await fse.remove(p.path);
           result.removedFiles.push(p.path);
-          logger.success(`${t('deleted')}: ${p.name}`);
         }
+        logger.success(`${t('deleted')}: ${p.name}`);
       } catch (error) {
-        logger.error(`${t('delete_failed')}: ${p.name} - ${error instanceof Error ? error.message : String(error)}`);
+        const errMsg = error instanceof Error ? error.message : String(error);
+        const isPermError = errMsg.includes('EPERM') || errMsg.includes('permission') || errMsg.includes('access denied') || errMsg.includes('EBUSY');
+        if (isPermError) {
+          logger.error(`${t('delete_failed')}: ${p.name} - ${errMsg}`);
+          logger.warn(isWindows()
+            ? '文件被占用，请先关闭 OpenClaw（openclaw gateway stop），然后手动删除目录或重新运行卸载。'
+            : 'File is locked. Stop OpenClaw first (openclaw gateway stop), then re-run uninstall or delete manually.');
+        } else {
+          logger.error(`${t('delete_failed')}: ${p.name} - ${errMsg}`);
+        }
+        deleteErrors.push({ name: p.name, error: errMsg });
       }
     }
 
@@ -335,10 +372,17 @@ export async function uninstall(
       }
     }
 
-    result.success = true;
+    result.success = deleteErrors.length === 0;
+    if (deleteErrors.length > 0) {
+      result.error = deleteErrors.map(e => `${e.name}: ${e.error}`).join('; ');
+    }
 
     console.log('\n');
-    logger.success(t('uninstall_complete'));
+    if (deleteErrors.length > 0) {
+      logger.warn(t('uninstall_partial') || '卸载部分完成 — 部分文件未能删除，请按上方提示处理。');
+    } else {
+      logger.success(t('uninstall_complete'));
+    }
     console.log('\n');
 
     if (result.preservedPaths.length > 0) {
