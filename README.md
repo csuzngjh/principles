@@ -232,8 +232,6 @@ Do not use it blindly on critical production workspaces.
 - [ ] Codex / OpenAI-assisted PR review and release workflow experiments
 - [ ] General agent-runtime adapter interface documentation
 
-Detailed planning is tracked in Linear; this README keeps a public roadmap snapshot for reviewers, users, and contributors.
-
 ## Core idea
 
 A coding agent should not only complete tasks.
