@@ -80,9 +80,12 @@ code-concise/
 .trae
 
 # Docs (removed from git tracking - kept locally only)
-docs/
+docs/*
 # Exception: AI assistant handbook must be committed
 !docs/ERROR_EXPERIENCE_HANDBOOK.md
+# Exception: architecture docs must be committed
+!docs/architecture/
+!docs/architecture/**
 # Exception: website docs must be committed
 !packages/website/docs/
 !packages/website/zh/docs/
