@@ -359,10 +359,10 @@ async function installPluginDependencies(): Promise<void> {
   }
   const pkg = packageJsonRaw as Record<string, unknown>;
   const deps = (typeof pkg.dependencies === 'object' && pkg.dependencies !== null && !Array.isArray(pkg.dependencies))
-    ? Object.keys(pkg.dependencies as Record<string, unknown>)
+    ? Object.keys(pkg.dependencies)
     : [];
   const devDeps = (typeof pkg.devDependencies === 'object' && pkg.devDependencies !== null && !Array.isArray(pkg.devDependencies))
-    ? Object.keys(pkg.devDependencies as Record<string, unknown>)
+    ? Object.keys(pkg.devDependencies)
     : [];
   const allDeps = [...deps, ...devDeps];
 
