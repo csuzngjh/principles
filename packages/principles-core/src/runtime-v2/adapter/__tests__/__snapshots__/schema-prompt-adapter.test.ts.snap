@@ -5,7 +5,7 @@ exports[`DefaultSchemaPromptAdapter > generateExample() > generateExample matche
   "valid": true,
   "diagnosisId": "diag-001",
   "summary": "Example diagnosis summary",
-  "rootCause": "Example root cause",
+  "rootCause": "Design: Example root cause",
   "violatedPrinciples": [
     {
       "rationale": "Example principle violation rationale"

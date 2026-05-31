@@ -157,6 +157,11 @@ TAXONOMY DEFINITIONS:
 4. "prompt": Context/Skill injection. Use to influence the agent's workflow habits.
 5. "defer": Insufficient evidence. Use for network timeouts or noise.
 
+EVIDENCE SCOPE GUARD:
+- The root cause MUST describe an agent behavior or decision, not a system monitoring or diagnostic mechanism.
+- If the evidence only describes internal metrics (GFI, friction scores, threshold crossings) with no
+  owner message or agent action context, return confidence < 0.3 and kind="defer".
+
 CRITICAL: Your ENTIRE response must be ONLY the JSON object below. Do NOT include any text before or after the JSON. Do NOT wrap the JSON in markdown code fences. Do NOT add explanatory prose. Output the raw JSON object and nothing else.
 
 COMPLETE EXAMPLE OUTPUT (follow this exact structure):

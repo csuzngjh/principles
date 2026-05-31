@@ -98,12 +98,16 @@ function generateRecommendationExample(kind: string): Record<string, unknown> {
 }
 
 function generateDiagnosticianExample(schema: TSchema): unknown {
-  const base = generateValueForSchema(schema) as Record<string, unknown>;
+  const rawBase = generateValueForSchema(schema);
+  if (typeof rawBase !== 'object' || rawBase === null || Array.isArray(rawBase)) {
+    throw new Error('generateValueForSchema must return an object for diagnostician schema');
+  }
+  const base = rawBase as Record<string, unknown>;
   base.recommendations = RECOMMENDATION_KINDS.map(generateRecommendationExample);
   base.valid = true;
   base.diagnosisId = 'diag-001';
   base.summary = 'Example diagnosis summary';
-  base.rootCause = 'Example root cause';
+  base.rootCause = 'Design: Example root cause';
   base.confidence = 0.85;
   base.violatedPrinciples = [
     { rationale: 'Example principle violation rationale' },
