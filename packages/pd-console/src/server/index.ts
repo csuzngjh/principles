@@ -30,6 +30,7 @@ import { handlePrinciplesRoute, disposePrinciplesModels } from './routes/princip
 import { createWorkspacesRoutes } from './routes/workspaces.js';
 import { createCentralRoutes } from './routes/central.js';
 import { handleAgentsRoute, disposeAgentModels } from './routes/agents.js';
+import { handleUpdateRoute } from './routes/update.js';
 import { handleStateRoute } from './routes/state.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
 import { 
@@ -410,6 +411,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/agents' || urlPath.startsWith('/api/agents/')) {
         const subPath = urlPath.slice('/api/agents'.length);
         asyncHandler(() => handleAgentsRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // Update routes: GET /api/update/check, POST /api/update/apply, GET /api/update/status, POST /api/update/rollback
+      if (urlPath === '/api/update' || urlPath.startsWith('/api/update/')) {
+        const subPath = urlPath.slice('/api/update'.length);
+        asyncHandler(() => handleUpdateRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 

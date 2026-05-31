@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { checkForUpdates, fetchChangelog, applyUpdate, computeDiff } from '../src/updater.js';
+import { checkForUpdates, fetchChangelog, applyUpdate, computeDiff, rollbackUpdate } from '../src/updater.js';
 
 // Module-level mocks (hoisted to top by vitest)
 vi.mock('fs', () => ({
@@ -324,5 +324,41 @@ describe('computeDiff', () => {
     expect(result.modified).toEqual([]);
     expect(result.added).toEqual([]);
     expect(result.deleted).toEqual([]);
+  });
+});
+
+describe('rollbackUpdate', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+
+    // Reconfigure fs mocks to defaults after clearAllMocks
+    const fs = await import('fs');
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.0.0' }));
+    vi.mocked(fs.readdirSync).mockReturnValue([] as any);
+  });
+
+  it('should rollback to backup successfully', async () => {
+    const result = await rollbackUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.message).toBe('Rollback completed successfully');
+  });
+
+  it('should handle missing backup gracefully', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const result = await rollbackUpdate({
+      targetDir: '/tmp/target',
+      backupDir: '/tmp/backup',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('Backup not found');
   });
 });
