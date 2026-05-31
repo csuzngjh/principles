@@ -47,12 +47,16 @@ import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
 
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json') as { version: string };
+
 const program = new Command();
 
 program
   .name('pd')
   .description('PD CLI — Pain recording, sample management, and evolution tasks')
-  .version('0.1.0');
+  .version(pkg.version);
 
 const painCmd = program
   .command('pain')

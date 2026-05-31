@@ -6,6 +6,7 @@ import { execSync, execFileSync, spawn, type ChildProcess } from 'child_process'
 import type { ExecSyncOptions } from 'child_process';
 import ora, { type Ora } from 'ora';
 import { logger } from './utils/logger.js';
+import { checkOpenClawGateway } from './utils/env.js';
 import type { InstallOptions } from './prompts.js';
 import {
   generateFeatureFlagsYamlContent,
@@ -359,10 +360,10 @@ async function installPluginDependencies(): Promise<void> {
   }
   const pkg = packageJsonRaw as Record<string, unknown>;
   const deps = (typeof pkg.dependencies === 'object' && pkg.dependencies !== null && !Array.isArray(pkg.dependencies))
-    ? Object.keys(pkg.dependencies)
+    ? Object.keys(pkg.dependencies as Record<string, unknown>)
     : [];
   const devDeps = (typeof pkg.devDependencies === 'object' && pkg.devDependencies !== null && !Array.isArray(pkg.devDependencies))
-    ? Object.keys(pkg.devDependencies)
+    ? Object.keys(pkg.devDependencies as Record<string, unknown>)
     : [];
   const allDeps = [...deps, ...devDeps];
 
@@ -424,6 +425,69 @@ function installGlobalPdShim(): boolean {
   }
 }
 
+function tryUpgradePdCliFromNpm(installedPdCliDir: string): void {
+  try {
+    const npmVersion = execSync('npm view @principles/pd-cli version', {
+      encoding: 'utf-8',
+      timeout: 15_000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    if (!npmVersion || !/^\d+\.\d+\.\d+/.test(npmVersion)) return;
+
+    const localPkgPath = path.join(installedPdCliDir, 'package.json');
+    const localPkg = JSON.parse(readFileSync(localPkgPath, 'utf-8')) as { version: string };
+    const localVersion = localPkg.version;
+
+    if (npmVersion === localVersion) return;
+
+    logger.info(`Upgrading pd-cli from bundled v${localVersion} to npm v${npmVersion}...`);
+
+    const tmpDir = path.join(installedPdCliDir, '__npm_upgrade_tmp');
+    try {
+      mkdirSync(tmpDir, { recursive: true });
+      execSync(`npm pack @principles/pd-cli@${npmVersion} --pack-destination "${tmpDir}"`, {
+        encoding: 'utf-8',
+        timeout: 30_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      const tgzFiles = readdirSync(tmpDir).filter(f => f.endsWith('.tgz'));
+      if (tgzFiles.length === 0) {
+        logger.info('No npm tarball found, keeping bundled version.');
+        return;
+      }
+
+      const extractDir = path.join(tmpDir, 'extracted');
+      mkdirSync(extractDir, { recursive: true });
+      execSync(`tar -xzf "${path.join(tmpDir, tgzFiles[0])}" -C "${extractDir}"`, {
+        encoding: 'utf-8',
+        timeout: 15_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      const packageDir = path.join(extractDir, 'package');
+      if (!existsSync(path.join(packageDir, 'dist', 'index.js'))) {
+        logger.info('Npm package structure unexpected, keeping bundled version.');
+        return;
+      }
+
+      rmSync(path.join(installedPdCliDir, 'dist'), { recursive: true, force: true });
+      cpSync(path.join(packageDir, 'dist'), path.join(installedPdCliDir, 'dist'), { recursive: true });
+      if (existsSync(path.join(packageDir, 'package.json'))) {
+        copyFileSync(path.join(packageDir, 'package.json'), localPkgPath);
+      }
+
+      logger.success(`pd-cli upgraded to v${npmVersion}`);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger.info(`pd-cli npm upgrade skipped (${msg}). Bundled version is functional.`);
+  }
+}
+
 function syncPdCli(pluginDir: string): boolean {
   const pdCliSourceDir = path.join(pluginDir, 'pd-cli');
   const distDir = path.join(pdCliSourceDir, 'dist');
@@ -437,6 +501,8 @@ function syncPdCli(pluginDir: string): boolean {
   mkdirSync(installedPdCliDir, { recursive: true });
   cpSync(distDir, path.join(installedPdCliDir, 'dist'), { recursive: true });
   copyFileSync(path.join(pdCliSourceDir, 'package.json'), path.join(installedPdCliDir, 'package.json'));
+
+  tryUpgradePdCliFromNpm(installedPdCliDir);
 
   const installedBinDir = getInstalledBinDir();
   mkdirSync(installedBinDir, { recursive: true });
@@ -796,6 +862,16 @@ export interface InstallResult {
 }
 
 export async function install(options: InstallOptions, pluginDir: string, quiet = false): Promise<InstallResult> {
+  const gatewayStatus = await checkOpenClawGateway();
+  if (gatewayStatus.isRunning) {
+    const portInfo = gatewayStatus.port ? ` (port ${gatewayStatus.port})` : '';
+    const pidInfo = gatewayStatus.pid ? `, PID ${gatewayStatus.pid}` : '';
+    logger.warn(`OpenClaw gateway is running${portInfo}${pidInfo}.`);
+    logger.warn('This may cause file lock issues during installation (EPERM on native modules).');
+    logger.warn('Recommendation: stop OpenClaw first with "openclaw gateway stop", then re-run the installer.');
+    logger.warn('Proceeding anyway — if installation fails, stop OpenClaw and retry.\n');
+  }
+
   const spinner = quiet ? null : ora('Installing...').start();
   let backupDir: string | null = null;
   const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };

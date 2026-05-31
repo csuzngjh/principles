@@ -5,6 +5,7 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as net from 'net';
 
 export interface EnvCheckResult {
   hasOpenClaw: boolean;
@@ -151,4 +152,63 @@ export function getOpenClawConfigDir(): string {
  */
 export function getPluginExtDir(): string {
   return path.join(getOpenClawConfigDir(), 'extensions', 'principles-disciple');
+}
+
+export interface OpenClawGatewayStatus {
+  isRunning: boolean;
+  port?: number;
+  pid?: number;
+}
+
+function readOpenClawPort(): number | null {
+  const configPath = path.join(getOpenClawConfigDir(), 'openclaw.json');
+  if (!fs.existsSync(configPath)) return null;
+  try {
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const config: unknown = JSON.parse(raw);
+    if (config && typeof config === 'object' && !Array.isArray(config)) {
+      const { gateway } = config as Record<string, unknown>;
+      if (gateway && typeof gateway === 'object' && !Array.isArray(gateway)) {
+        const { port } = gateway as Record<string, unknown>;
+        if (typeof port === 'number' && port > 0 && port < 65536) return port;
+      }
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function checkPortListening(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    const timeout = 2000;
+    socket.setTimeout(timeout);
+    socket.on('connect', () => { socket.destroy(); resolve(true); });
+    socket.on('error', () => { socket.destroy(); resolve(false); });
+    socket.on('timeout', () => { socket.destroy(); resolve(false); });
+    socket.connect(port, '127.0.0.1');
+  });
+}
+
+export async function checkOpenClawGateway(): Promise<OpenClawGatewayStatus> {
+  const port = readOpenClawPort();
+  if (!port) return { isRunning: false };
+
+  const listening = await checkPortListening(port);
+  if (!listening) return { isRunning: false };
+
+  let pid: number | undefined = undefined;
+  try {
+    if (process.platform === 'win32') {
+      const output = execSync(
+        `powershell -NoProfile -Command "(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue).OwningProcess"`,
+        { encoding: 'utf-8', timeout: 5000 }
+      ).trim();
+      if (output) pid = parseInt(output.split('\n')[0].trim(), 10);
+    } else {
+      const output = execSync(`lsof -i :${port} -t -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf-8', timeout: 5000 }).trim();
+      if (output) pid = parseInt(output.split('\n')[0].trim(), 10);
+    }
+  } catch { /* ignore */ }
+
+  return { isRunning: true, port, pid };
 }
