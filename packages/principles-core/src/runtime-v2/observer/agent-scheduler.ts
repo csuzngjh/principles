@@ -40,7 +40,7 @@ export class AgentScheduler {
     if (!agent) {
       throw new Error(`Agent ${agentId} is not registered in AgentScheduler`);
     }
-    return agent.runner.run(input);
+    return agent.runner.run(input) as Promise<AgentTypeMap[K]['output']>;
   }
 
   /**
