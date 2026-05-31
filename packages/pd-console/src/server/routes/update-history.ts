@@ -29,8 +29,8 @@ function loadHistory(historyPath: string): UpdateHistoryEntry[] {
           typeof (e as Record<string, unknown>).success === 'boolean'
         );
       }
-    } catch {
-      // Corrupted file — return empty
+    } catch (err) {
+      console.warn(`[update-history] Failed to parse update history file (${historyPath}):`, err instanceof Error ? err.message : err);
     }
   }
   return [];

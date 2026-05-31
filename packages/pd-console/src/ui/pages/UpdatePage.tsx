@@ -17,6 +17,18 @@ interface UpdateInfo {
 
 type MergeStrategy = "smart" | "overwrite" | "keep";
 
+function isValidUpdateInfo(data: unknown): data is UpdateInfo {
+  if (typeof data !== "object" || data === null) return false;
+  const obj = data as Record<string, unknown>;
+  return typeof obj.hasUpdate === "boolean" && typeof obj.currentVersion === "string";
+}
+
+function isApiResponse(value: unknown): value is { success: boolean; data?: unknown; error?: string } {
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return typeof obj.success === "boolean";
+}
+
 const MERGE_STRATEGY_DESCRIPTIONS: Record<MergeStrategy, string> = {
   smart: "生成 .update 文件供手动合并",
   overwrite: "直接覆盖用户文件",
@@ -43,12 +55,16 @@ export function UpdatePage() {
     setChecking(true);
     try {
       const response = await fetch("/api/update/check");
-      const result = await response.json();
-      if (result.success) {
-        setUpdateInfo(result.data as UpdateInfo);
+      const result: unknown = await response.json();
+      if (!isApiResponse(result)) {
+        console.error("[UpdatePage] Invalid response shape from /api/update/check:", result);
+        return;
       }
-    } catch {
-      // Will show as no update available
+      if (result.success && isValidUpdateInfo(result.data)) {
+        setUpdateInfo(result.data);
+      }
+    } catch (err) {
+      console.error("[UpdatePage] Failed to check for updates:", err);
     } finally {
       setChecking(false);
     }
@@ -73,11 +89,18 @@ export function UpdatePage() {
           createBackup,
         }),
       });
-      const result = await response.json();
+      const result: unknown = await response.json();
 
-      if (result.success && result.data?.success) {
-        if (result.data.backupPath) {
-          setLastBackupPath(result.data.backupPath);
+      if (!isApiResponse(result)) {
+        setDialogStatus("failed");
+        setDialogError("Invalid response from server");
+        return;
+      }
+
+      const data = result.data as Record<string, unknown> | undefined;
+      if (result.success && data && data.success === true) {
+        if (typeof data.backupPath === "string") {
+          setLastBackupPath(data.backupPath);
         }
         setDialogStatus("applying");
         await new Promise((r) => setTimeout(r, 600));
@@ -85,7 +108,9 @@ export function UpdatePage() {
         setUpdateCompleted(true);
       } else {
         setDialogStatus("failed");
-        setDialogError(result.data?.message || result.error || "Unknown error");
+        const message = (data && typeof data.message === "string") ? data.message
+          : (typeof result.error === "string" ? result.error : "Unknown error");
+        setDialogError(message);
       }
     } catch (err) {
       setDialogStatus("failed");
@@ -102,14 +127,21 @@ export function UpdatePage() {
           backupDir: lastBackupPath || "",
         }),
       });
-      const result = await response.json();
-      if (result.success) {
+      const result: unknown = await response.json();
+      if (isApiResponse(result) && result.success) {
         setDialogOpen(false);
         setUpdateCompleted(false);
         checkForUpdates();
+      } else {
+        const msg = (result && typeof result === "object" && Object.hasOwn(result, "error"))
+          ? (result as Record<string, unknown>).error : "Rollback failed";
+        setDialogError(typeof msg === "string" ? msg : "Rollback failed");
+        setDialogStatus("failed");
       }
-    } catch {
-      // Silently fail — user can retry
+    } catch (err) {
+      console.error("[UpdatePage] Rollback failed:", err);
+      setDialogError(err instanceof Error ? err.message : "Rollback network error");
+      setDialogStatus("failed");
     }
   }
 
@@ -139,18 +171,22 @@ export function UpdatePage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">当前版本</span>
+              <span className="text-sm text-muted-foreground">
+                {t("pages:update.currentVersion", { defaultValue: "当前版本" })}
+              </span>
               <Badge variant="outline">{updateInfo?.currentVersion ?? "—"}</Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">最新版本</span>
+              <span className="text-sm text-muted-foreground">
+                {t("pages:update.latestVersion", { defaultValue: "最新版本" })}
+              </span>
               <Badge variant={updateInfo?.hasUpdate ? "default" : "outline"}>
                 {updateInfo?.latestVersion ?? "—"}
               </Badge>
             </div>
             {updateInfo?.hasUpdate && (
               <div className="rounded-md bg-primary/5 p-3 text-sm text-primary">
-                有新版本可用！
+                {t("pages:update.updateAvailable", { defaultValue: "有新版本可用！" })}
               </div>
             )}
             <Button
@@ -160,7 +196,9 @@ export function UpdatePage() {
               disabled={checking}
             >
               <RefreshCw className={`mr-2 h-3 w-3 ${checking ? "animate-spin" : ""}`} />
-              {checking ? "检查中..." : "检查更新"}
+              {checking
+                ? t("pages:update.checking", { defaultValue: "检查中..." })
+                : t("pages:update.checkForUpdates", { defaultValue: "检查更新" })}
             </Button>
           </CardContent>
         </Card>
@@ -173,7 +211,7 @@ export function UpdatePage() {
               {t("pages:update.settings", { defaultValue: "更新设置" })}
             </CardTitle>
             <CardDescription>
-              配置更新行为和文件处理策略
+              {t("pages:update.settingsDescription", { defaultValue: "配置更新行为和文件处理策略" })}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -186,8 +224,12 @@ export function UpdatePage() {
                 className="h-4 w-4 rounded border-input"
               />
               <div>
-                <span className="text-sm font-medium">更新前创建备份</span>
-                <p className="text-xs text-muted-foreground">允许在更新失败时回滚</p>
+                <span className="text-sm font-medium">
+                  {t("pages:update.createBackup", { defaultValue: "更新前创建备份" })}
+                </span>
+                <p className="text-xs text-muted-foreground">
+                  {t("pages:update.createBackupHint", { defaultValue: "允许在更新失败时回滚" })}
+                </p>
               </div>
             </label>
 
@@ -195,7 +237,9 @@ export function UpdatePage() {
 
             {/* Merge strategy */}
             <div>
-              <p className="text-sm font-medium mb-3">工作区文件处理</p>
+              <p className="text-sm font-medium mb-3">
+                {t("pages:update.workspaceFileHandling", { defaultValue: "工作区文件处理" })}
+              </p>
               <div className="space-y-2">
                 {(Object.entries(MERGE_STRATEGY_DESCRIPTIONS) as [MergeStrategy, string][]).map(
                   ([strategy, description]) => (
@@ -217,7 +261,9 @@ export function UpdatePage() {
                       />
                       <div>
                         <span className="text-sm font-medium capitalize">{strategy}</span>
-                        <p className="text-xs text-muted-foreground">{description}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {t(`pages:update.merge.${strategy}`, { defaultValue: description })}
+                        </p>
                       </div>
                     </label>
                   ),
@@ -238,8 +284,8 @@ export function UpdatePage() {
             >
               <Download className="mr-2 h-4 w-4" />
               {updateInfo?.hasUpdate
-                ? `更新到 v${updateInfo.latestVersion}`
-                : "已是最新版本"}
+                ? t("pages:update.updateTo", { version: updateInfo.latestVersion, defaultValue: `更新到 v${updateInfo.latestVersion}` })
+                : t("pages:update.upToDate", { defaultValue: "已是最新版本" })}
             </Button>
           </CardContent>
         </Card>

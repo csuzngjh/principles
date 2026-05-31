@@ -267,6 +267,10 @@ async function doApplyUpdate(
     }
 
     for (const file of diff.deleted) {
+      // Only delete non-workspace files, or workspace files when strategy is overwrite
+      if (isWorkspaceFile(file) && mergeStrategy !== 'overwrite') {
+        continue;
+      }
       const filePath = path.join(targetDir, file);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       updatedFiles.push(file);

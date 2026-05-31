@@ -19,12 +19,24 @@ export function UpdateBanner() {
     async function check() {
       try {
         const response = await fetch("/api/update/check");
-        const result = await response.json();
-        if (result.success) {
-          setUpdateInfo(result.data as UpdateInfo);
+        const result: unknown = await response.json();
+        if (
+          typeof result === "object" && result !== null &&
+          Object.hasOwn(result, "success") && (result as Record<string, unknown>).success === true
+        ) {
+          const data = (result as Record<string, unknown>).data;
+          if (
+            typeof data === "object" && data !== null &&
+            typeof (data as Record<string, unknown>).hasUpdate === "boolean" &&
+            typeof (data as Record<string, unknown>).currentVersion === "string"
+          ) {
+            setUpdateInfo(data as unknown as UpdateInfo);
+          } else {
+            console.error("[UpdateBanner] Invalid data shape from /api/update/check:", data);
+          }
         }
-      } catch {
-        // Silently ignore — banner is non-critical
+      } catch (err) {
+        console.error("[UpdateBanner] Failed to check for updates:", err);
       }
     }
     check();

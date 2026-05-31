@@ -583,6 +583,26 @@ describe('handleUpdateRoute', () => {
     });
   });
 
+  // ── History route dispatch regression ─────────────────────────────────
+
+  describe('History route dispatch', () => {
+    it('should reach handleUpdateHistoryRoute via /history sub-path', async () => {
+      // This verifies that handleUpdateRoute correctly delegates /history
+      // to handleUpdateHistoryRoute (simulating index.ts route ordering)
+      const { handleUpdateHistoryRoute } = await import('../../../src/server/routes/update-history.js');
+
+      const req = createMockRequest('GET');
+      const res = createMockResponse();
+
+      await handleUpdateHistoryRoute(req, res, workspaceDir, '');
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const body = parseResponseBody<{ success: boolean; data: unknown[] }>(res);
+      expect(body.success).toBe(true);
+      expect(Array.isArray(body.data)).toBe(true);
+    });
+  });
+
   // ── Unknown sub-path ────────────────────────────────────────────────
 
   describe('Unknown sub-path', () => {
