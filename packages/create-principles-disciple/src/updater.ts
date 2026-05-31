@@ -2,7 +2,7 @@ import semver from 'semver';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as zlib from 'zlib';
+import * as tar from 'tar';
 
 export interface UpdateCheckResult {
   hasUpdate: boolean;
@@ -110,7 +110,7 @@ async function getAllFiles(dir: string): Promise<string[]> {
   return result;
 }
 
-async function computeDiff(currentDir: string, newDir: string): Promise<ComputeDiffResult> {
+export async function computeDiff(currentDir: string, newDir: string): Promise<ComputeDiffResult> {
   const modified: string[] = [];
   const added: string[] = [];
   const deleted: string[] = [];
@@ -178,13 +178,14 @@ async function downloadPackage(tarballUrl: string): Promise<string> {
     if (!response.ok) throw new Error('Failed to download package');
 
     const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > 0) {
-      try {
-        zlib.gunzipSync(buffer);
-      } catch {
-        // Extraction will be handled properly in production
-      }
-    }
+    const tarballPath = path.join(tempDir, 'package.tgz');
+    fs.writeFileSync(tarballPath, buffer);
+
+    // Extract tarball
+    await tar.extract({ file: tarballPath, cwd: tempDir });
+
+    // Clean up tarball
+    fs.unlinkSync(tarballPath);
   } catch {
     // If download fails, return empty tempDir
   }
@@ -251,6 +252,14 @@ async function backupDirectory(source: string, destination: string): Promise<voi
   }
 }
 
+async function createBackup(targetDir: string): Promise<string> {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const parentDir = path.dirname(targetDir);
+  const backupDir = path.join(parentDir, `.pd-backup-${timestamp}`);
+  await backupDirectory(targetDir, backupDir);
+  return backupDir;
+}
+
 export interface ApplyUpdateOptions {
   targetDir: string;
   backupDir?: string;
@@ -278,8 +287,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<ApplyUpd
 
     let backupPath: string | undefined = undefined;
     if (backupDir) {
-      backupPath = path.join(targetDir, '.backup');
-      await backupDirectory(targetDir, backupPath);
+      backupPath = await createBackup(targetDir);
     }
 
     const tempDir = await downloadPackage(latestInfo.tarball);

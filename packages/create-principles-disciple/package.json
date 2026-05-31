@@ -40,13 +40,15 @@
     "js-yaml": "^4.1.1",
     "ora": "^9.4.0",
     "picocolors": "^1.0.0",
-    "semver": "^7.7.2"
+    "semver": "^7.7.2",
+    "tar": "^7.5.15"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.6.2",
     "@types/semver": "^7.7.0",
+    "@types/tar": "^6.1.13",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
   },

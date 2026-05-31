@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { checkForUpdates, fetchChangelog, applyUpdate } from '../src/updater.js';
+import { checkForUpdates, fetchChangelog, applyUpdate, computeDiff } from '../src/updater.js';
 
 // Module-level mocks (hoisted to top by vitest)
 vi.mock('fs', () => ({
@@ -188,5 +188,141 @@ describe('fetchChangelog', () => {
 
     const result = await fetchChangelog('1.74.0');
     expect(result).toBeUndefined();
+  });
+});
+
+describe('computeDiff', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const fs = await import('fs');
+    vi.mocked(fs.readFileSync).mockReturnValue('');
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+  });
+
+  it('should detect modified files', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockImplementation(((dir: unknown) => {
+      const dirStr = String(dir);
+      if (dirStr.includes('current')) {
+        return [{ name: 'file1.txt', isDirectory: () => false }] as any;
+      }
+      if (dirStr.includes('new')) {
+        return [{ name: 'file1.txt', isDirectory: () => false }] as any;
+      }
+      return [] as any;
+    }) as any);
+
+    vi.mocked(fs.readFileSync)
+      .mockReturnValueOnce('old content')
+      .mockReturnValueOnce('new content');
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual(['file1.txt']);
+    expect(result.added).toEqual([]);
+    expect(result.deleted).toEqual([]);
+  });
+
+  it('should detect added files', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockImplementation(((dir: unknown) => {
+      const dirStr = String(dir);
+      if (dirStr.includes('current')) {
+        return [] as any;
+      }
+      if (dirStr.includes('new')) {
+        return [{ name: 'file2.txt', isDirectory: () => false }] as any;
+      }
+      return [] as any;
+    }) as any);
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual([]);
+    expect(result.added).toEqual(['file2.txt']);
+    expect(result.deleted).toEqual([]);
+  });
+
+  it('should detect deleted files', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockImplementation(((dir: unknown) => {
+      const dirStr = String(dir);
+      if (dirStr.includes('current')) {
+        return [{ name: 'old.txt', isDirectory: () => false }] as any;
+      }
+      if (dirStr.includes('new')) {
+        return [] as any;
+      }
+      return [] as any;
+    }) as any);
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual([]);
+    expect(result.added).toEqual([]);
+    expect(result.deleted).toEqual(['old.txt']);
+  });
+
+  it('should detect no changes when files are identical', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockImplementation(((dir: unknown) => {
+      const dirStr = String(dir);
+      if (dirStr.includes('current')) {
+        return [{ name: 'same.txt', isDirectory: () => false }] as any;
+      }
+      if (dirStr.includes('new')) {
+        return [{ name: 'same.txt', isDirectory: () => false }] as any;
+      }
+      return [] as any;
+    }) as any);
+
+    vi.mocked(fs.readFileSync)
+      .mockReturnValueOnce('identical content')
+      .mockReturnValueOnce('identical content');
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual([]);
+    expect(result.added).toEqual([]);
+    expect(result.deleted).toEqual([]);
+  });
+
+  it('should handle mixed changes', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockImplementation(((dir: unknown) => {
+      const dirStr = String(dir);
+      if (dirStr.includes('current')) {
+        return [
+          { name: 'same.txt', isDirectory: () => false },
+          { name: 'modified.txt', isDirectory: () => false },
+          { name: 'deleted.txt', isDirectory: () => false },
+        ] as any;
+      }
+      if (dirStr.includes('new')) {
+        return [
+          { name: 'same.txt', isDirectory: () => false },
+          { name: 'modified.txt', isDirectory: () => false },
+          { name: 'added.txt', isDirectory: () => false },
+        ] as any;
+      }
+      return [] as any;
+    }) as any);
+
+    vi.mocked(fs.readFileSync)
+      .mockReturnValueOnce('same content')   // current/same.txt
+      .mockReturnValueOnce('same content')   // new/same.txt
+      .mockReturnValueOnce('old version')    // current/modified.txt
+      .mockReturnValueOnce('new version');   // new/modified.txt
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual(['modified.txt']);
+    expect(result.added).toEqual(['added.txt']);
+    expect(result.deleted).toEqual(['deleted.txt']);
+  });
+
+  it('should handle empty directories', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const result = await computeDiff('/tmp/current', '/tmp/new');
+    expect(result.modified).toEqual([]);
+    expect(result.added).toEqual([]);
+    expect(result.deleted).toEqual([]);
   });
 });
