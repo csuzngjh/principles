@@ -1,0 +1,71 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`DefaultSchemaPromptAdapter > generateExample() > generateExample matches snapshot 1`] = `
+"{
+  "valid": true,
+  "diagnosisId": "diag-001",
+  "summary": "Example diagnosis summary",
+  "rootCause": "Design: Example root cause",
+  "violatedPrinciples": [
+    {
+      "rationale": "Example principle violation rationale"
+    }
+  ],
+  "evidence": [
+    {
+      "sourceRef": "source-ref-1",
+      "note": "Example evidence note"
+    }
+  ],
+  "recommendations": [
+    {
+      "kind": "principle",
+      "description": "Example principle recommendation",
+      "abstractedPrinciple": "Abstracted principle text (max 200 chars)"
+    },
+    {
+      "kind": "rule",
+      "description": "Example rule recommendation",
+      "triggerPattern": "pattern-to-match",
+      "action": "action-to-take"
+    },
+    {
+      "kind": "implementation",
+      "description": "Example implementation recommendation"
+    },
+    {
+      "kind": "prompt",
+      "description": "Example prompt recommendation"
+    },
+    {
+      "kind": "defer",
+      "description": "Example defer recommendation"
+    }
+  ],
+  "confidence": 0.85
+}"
+`;
+
+exports[`generateConstraints() > generateConstraints matches snapshot 1`] = `
+"  valid: boolean (required)
+  diagnosisId: string {minLength: 1} (required)
+  summary: string {minLength: 1} (required)
+  rootCause: string {description: MUST include category prefix: "Design: ..." or "People: ..." or "Assumption: ..." or "Tooling: ...", minLength: 1} (required)
+  violatedPrinciples: object[] (required)
+    .principleId: string {minLength: 1} (optional)
+    .title: string (optional)
+    .rationale: string {minLength: 1} (required)
+  evidence: object[] (required)
+    .sourceRef: string {minLength: 1} (required)
+    .note: string {minLength: 1} (required)
+  recommendations: object[] (required)
+    .kind: union {enum: principle | rule | implementation | prompt | defer} (required)
+    .description: string {minLength: 1} (required)
+    .triggerPattern: string {description: Required when kind is "rule". Regex or keyword pattern for interception.} (optional)
+    .action: string {description: Required when kind is "rule". Action to take when pattern matches.} (optional)
+    .abstractedPrinciple: string {description: Required when kind is "principle". Highly abstracted, reusable wisdom (≤200 chars).} (optional)
+    Conditional: "rule" kind → triggerPattern and action are required
+    Conditional: "principle" kind → abstractedPrinciple is required
+  confidence: number {description: A number between 0.0 and 1.0 (NOT a string, NOT a percentage), min: 0, max: 1} (required)
+  ambiguityNotes: string[] (optional)"
+`;
