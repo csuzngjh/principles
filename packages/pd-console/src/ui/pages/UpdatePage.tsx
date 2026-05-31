@@ -33,6 +33,7 @@ export function UpdatePage() {
   const [dialogStatus, setDialogStatus] = useState<UpdateStatus>("checking");
   const [dialogError, setDialogError] = useState<string | undefined>();
   const [updateCompleted, setUpdateCompleted] = useState(false);
+  const [lastBackupPath, setLastBackupPath] = useState<string | undefined>();
 
   useEffect(() => {
     checkForUpdates();
@@ -68,13 +69,17 @@ export function UpdatePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          targetDir: "", // Will be resolved server-side from workspaceDir
           mergeStrategy,
-          backup: createBackup,
+          createBackup,
         }),
       });
       const result = await response.json();
 
       if (result.success && result.data?.success) {
+        if (result.data.backupPath) {
+          setLastBackupPath(result.data.backupPath);
+        }
         setDialogStatus("applying");
         await new Promise((r) => setTimeout(r, 600));
         setDialogStatus("completed");
@@ -94,7 +99,10 @@ export function UpdatePage() {
       const response = await fetch("/api/update/rollback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          targetDir: "", // Will be resolved server-side
+          backupDir: lastBackupPath || "",
+        }),
       });
       const result = await response.json();
       if (result.success) {
