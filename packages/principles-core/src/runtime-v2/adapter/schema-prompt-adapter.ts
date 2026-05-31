@@ -8,10 +8,32 @@ export interface SchemaPromptAdapter {
   generateSchemaSummary(schema: TSchema): string;
 }
 
+export const MAX_SCHEMA_PROMPT_DEPTH = 8;
+
 const RECOMMENDATION_KINDS = ['principle', 'rule', 'implementation', 'prompt', 'defer'] as const;
 
-function generateValueForSchema(schema: TSchema): unknown {
-  if (!schema || typeof schema !== 'object') return null;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getProperties(schema: Record<string, unknown>): Record<string, unknown> | null {
+  if (!isRecord(schema.properties)) return null;
+  return schema.properties;
+}
+
+function getArrayItems(schema: Record<string, unknown>): Record<string, unknown> | null {
+  if (!isRecord(schema.items)) return null;
+  return schema.items;
+}
+
+function getUnionSchemas(schema: Record<string, unknown>, key: 'anyOf' | 'oneOf' | 'allOf'): Record<string, unknown>[] | null {
+  const arr = schema[key];
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  return arr.filter((s): s is Record<string, unknown> => isRecord(s));
+}
+
+function generateValueForSchema(schema: Record<string, unknown>, depth = 0): unknown {
+  if (depth > MAX_SCHEMA_PROMPT_DEPTH) return null;
 
   if (schema.type === 'boolean') return true;
   if (schema.type === 'number') {
@@ -27,21 +49,22 @@ function generateValueForSchema(schema: TSchema): unknown {
 
   if (schema.const !== undefined) return schema.const;
 
-  if (schema.enum && Array.isArray(schema.enum) && schema.enum.length > 0) {
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
     return schema.enum[0];
   }
 
-  if (schema.anyOf && Array.isArray(schema.anyOf) && schema.anyOf.length > 0) {
-    return generateValueForSchema(schema.anyOf[0] as TSchema);
-  }
-  if (schema.oneOf && Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
-    return generateValueForSchema(schema.oneOf[0] as TSchema);
-  }
-  if (schema.allOf && Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+  const anyOf = getUnionSchemas(schema, 'anyOf');
+  if (anyOf && anyOf[0]) return generateValueForSchema(anyOf[0], depth + 1);
+
+  const oneOf = getUnionSchemas(schema, 'oneOf');
+  if (oneOf && oneOf[0]) return generateValueForSchema(oneOf[0], depth + 1);
+
+  const allOf = getUnionSchemas(schema, 'allOf');
+  if (allOf) {
     const merged: Record<string, unknown> = {};
-    for (const sub of schema.allOf as TSchema[]) {
-      const val = generateValueForSchema(sub);
-      if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+    for (const sub of allOf) {
+      const val = generateValueForSchema(sub, depth + 1);
+      if (isRecord(val)) {
         Object.assign(merged, val);
       }
     }
@@ -49,19 +72,21 @@ function generateValueForSchema(schema: TSchema): unknown {
   }
 
   if (schema.type === 'array') {
-    const items = schema.items as TSchema | undefined;
+    const items = getArrayItems(schema);
     if (!items) return [];
-    return [generateValueForSchema(items)];
+    return [generateValueForSchema(items, depth + 1)];
   }
 
-  if (schema.type === 'object' && schema.properties) {
-    const required = Array.isArray(schema.required) ? new Set(schema.required as string[]) : new Set<string>();
+  if (schema.type === 'object') {
+    const props = getProperties(schema);
+    if (!props) return null;
+    const required = Array.isArray(schema.required) ? new Set(schema.required) : new Set<string>();
     const result: Record<string, unknown> = {};
-    const props = schema.properties as Record<string, TSchema>;
 
     for (const [key, propSchema] of Object.entries(props)) {
+      if (!isRecord(propSchema)) continue;
       if (!required.has(key)) continue;
-      result[key] = generateValueForSchema(propSchema);
+      result[key] = generateValueForSchema(propSchema, depth + 1);
     }
     return result;
   }
@@ -69,17 +94,28 @@ function generateValueForSchema(schema: TSchema): unknown {
   return null;
 }
 
-function isRecommendationArraySchema(schema: TSchema): boolean {
-  if (schema.type !== 'object' || !schema.properties) return false;
-  const recsProp = (schema.properties as Record<string, TSchema>).recommendations;
-  if (!recsProp || recsProp.type !== 'array') return false;
-  const items = recsProp.items as TSchema | undefined;
-  if (!items || typeof items !== 'object') return false;
-  const kindProp = (items.properties as Record<string, TSchema> | undefined)?.kind;
-  if (!kindProp) return false;
-  const anyOf = kindProp.anyOf as TSchema[] | undefined;
-  if (!anyOf || !Array.isArray(anyOf)) return false;
-  return anyOf.some(s => s.const === 'principle');
+function isRecommendationArraySchema(schema: Record<string, unknown>): boolean {
+  if (schema.type !== 'object') return false;
+
+  const props = getProperties(schema);
+  if (!props) return false;
+
+  const recsProp = props.recommendations;
+  if (!isRecord(recsProp) || recsProp.type !== 'array') return false;
+
+  const items = getArrayItems(recsProp);
+  if (!items) return false;
+
+  const itemProps = getProperties(items);
+  if (!itemProps) return false;
+
+  const kindProp = itemProps.kind;
+  if (!isRecord(kindProp)) return false;
+
+  const anyOf = getUnionSchemas(kindProp, 'anyOf');
+  if (!anyOf) return false;
+
+  return anyOf.some(s => isRecord(s) && s.const === 'principle');
 }
 
 function generateRecommendationExample(kind: string): Record<string, unknown> {
@@ -97,12 +133,25 @@ function generateRecommendationExample(kind: string): Record<string, unknown> {
   return base;
 }
 
-function generateDiagnosticianExample(schema: TSchema): unknown {
+function generateDiagnosticianExample(schema: Record<string, unknown>): unknown {
   const rawBase = generateValueForSchema(schema);
-  if (typeof rawBase !== 'object' || rawBase === null || Array.isArray(rawBase)) {
-    throw new Error('generateValueForSchema must return an object for diagnostician schema');
+  if (!isRecord(rawBase)) {
+    return {
+      valid: true,
+      diagnosisId: 'diag-001',
+      summary: 'Example diagnosis summary',
+      rootCause: 'Design: Example root cause',
+      confidence: 0.85,
+      violatedPrinciples: [{ rationale: 'Example principle violation rationale' }],
+      evidence: [{ sourceRef: 'source-ref-1', note: 'Example evidence note' }],
+      recommendations: RECOMMENDATION_KINDS.map(generateRecommendationExample),
+    };
   }
-  const base = rawBase as Record<string, unknown>;
+
+  const base: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rawBase)) {
+    base[k] = v;
+  }
   base.recommendations = RECOMMENDATION_KINDS.map(generateRecommendationExample);
   base.valid = true;
   base.diagnosisId = 'diag-001';
@@ -118,29 +167,42 @@ function generateDiagnosticianExample(schema: TSchema): unknown {
   return base;
 }
 
+function toRecord(schema: TSchema): Record<string, unknown> | null {
+  return isRecord(schema) ? schema : null;
+}
+
 export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   generateExample(schema: TSchema): string {
-    const example = isRecommendationArraySchema(schema)
-      ? generateDiagnosticianExample(schema)
-      : generateValueForSchema(schema);
+    const rec = toRecord(schema);
+    const example = rec && isRecommendationArraySchema(rec)
+      ? generateDiagnosticianExample(rec)
+      : rec
+        ? generateValueForSchema(rec)
+        : null;
 
-    const checked = Value.Check(schema, example) ? example : Value.Cast(schema, example);
-
-    return JSON.stringify(checked, null, 2);
+    try {
+      const checked = Value.Check(schema, example) ? example : Value.Cast(schema, example);
+      return JSON.stringify(checked, null, 2);
+    } catch {
+      return JSON.stringify(example, null, 2);
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   generateConstraints(schema: TSchema): string {
-    if (!schema || typeof schema !== 'object') return '(unknown schema)';
+    const rec = toRecord(schema);
+    if (!rec) return '(unknown schema)';
 
-    if (schema.type === 'object' && schema.properties) {
-      const required = Array.isArray(schema.required) ? new Set(schema.required as string[]) : new Set<string>();
+    if (rec.type === 'object') {
+      const props = getProperties(rec);
+      if (!props) return '(object schema without properties)';
+
+      const required = Array.isArray(rec.required) ? new Set(rec.required) : new Set<string>();
       const lines: string[] = [];
-      const props = schema.properties as Record<string, TSchema>;
 
       for (const [key, propSchema] of Object.entries(props)) {
-        if (typeof propSchema !== 'object' || propSchema === null) continue;
+        if (!isRecord(propSchema)) continue;
         const isReq = required.has(key);
         const reqMark = isReq ? ' (required)' : ' (optional)';
         const constraints: string[] = [];
@@ -150,45 +212,48 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
         }
 
         if (propSchema.type === 'array') {
-          const items = propSchema.items as TSchema | undefined;
-          const itemType = items?.type ?? 'unknown';
+          const items = getArrayItems(propSchema);
+          const itemType = isRecord(items) ? items.type ?? 'unknown' : 'unknown';
           lines.push(`  ${key}: ${itemType}[]${reqMark}`);
-          if (items && typeof items === 'object' && items.properties) {
-            const itemProps = items.properties as Record<string, TSchema>;
-            const itemRequired = Array.isArray(items.required) ? new Set(items.required as string[]) : new Set<string>();
-            for (const [ik, iv] of Object.entries(itemProps)) {
-              if (typeof iv !== 'object' || iv === null) continue;
-              const ikReq = itemRequired.has(ik) ? ' (required)' : ' (optional)';
-              const ikConstraints: string[] = [];
-              if (iv.enum && Array.isArray(iv.enum)) {
-                ikConstraints.push(`enum: ${(iv.enum as unknown[]).map(String).join(' | ')}`);
-              }
-              if (iv.anyOf && Array.isArray(iv.anyOf)) {
-                const constValues = (iv.anyOf as TSchema[])
-                  .filter(s => typeof s === 'object' && s !== null && s.const !== undefined)
-                  .map(s => String(s.const));
-                if (constValues.length > 0) {
-                  ikConstraints.push(`enum: ${constValues.join(' | ')}`);
+          if (items) {
+            const itemProps = getProperties(items);
+            if (itemProps) {
+              const itemRequired = Array.isArray(items.required) ? new Set(items.required) : new Set<string>();
+              for (const [ik, iv] of Object.entries(itemProps)) {
+                if (!isRecord(iv)) continue;
+                const ikReq = itemRequired.has(ik) ? ' (required)' : ' (optional)';
+                const ikConstraints: string[] = [];
+                if (Array.isArray(iv.enum)) {
+                  ikConstraints.push(`enum: ${iv.enum.map(String).join(' | ')}`);
                 }
+                const anyOf = getUnionSchemas(iv, 'anyOf');
+                if (anyOf) {
+                  const constValues = anyOf
+                    .filter(s => s.const !== undefined)
+                    .map(s => String(s.const));
+                  if (constValues.length > 0) {
+                    ikConstraints.push(`enum: ${constValues.join(' | ')}`);
+                  }
+                }
+                if (typeof iv.minimum === 'number') ikConstraints.push(`min: ${iv.minimum}`);
+                if (typeof iv.maximum === 'number') ikConstraints.push(`max: ${iv.maximum}`);
+                if (typeof iv.minLength === 'number') ikConstraints.push(`minLength: ${iv.minLength}`);
+                if (typeof iv.description === 'string') ikConstraints.push(`description: ${iv.description}`);
+                const ikType = iv.type ?? (iv.anyOf ? 'union' : 'unknown');
+                const ikConstraintStr = ikConstraints.length > 0 ? ` {${ikConstraints.join(', ')}}` : '';
+                lines.push(`    .${ik}: ${ikType}${ikConstraintStr}${ikReq}`);
               }
-              if (typeof iv.minimum === 'number') ikConstraints.push(`min: ${iv.minimum}`);
-              if (typeof iv.maximum === 'number') ikConstraints.push(`max: ${iv.maximum}`);
-              if (typeof iv.minLength === 'number') ikConstraints.push(`minLength: ${iv.minLength}`);
-              if (typeof iv.description === 'string') ikConstraints.push(`description: ${iv.description}`);
-              const ikType = iv.type ?? (iv.anyOf ? 'union' : 'unknown');
-              const ikConstraintStr = ikConstraints.length > 0 ? ` {${ikConstraints.join(', ')}}` : '';
-              lines.push(`    .${ik}: ${ikType}${ikConstraintStr}${ikReq}`);
-            }
-            if (Object.hasOwn(itemProps, 'kind') && (itemProps.kind as TSchema)?.anyOf) {
-              lines.push('    Conditional: "rule" kind → triggerPattern and action are required');
-              lines.push('    Conditional: "principle" kind → abstractedPrinciple is required');
+              if (Object.hasOwn(itemProps, 'kind') && isRecord(itemProps.kind) && itemProps.kind.anyOf) {
+                lines.push('    Conditional: "rule" kind → triggerPattern and action are required');
+                lines.push('    Conditional: "principle" kind → abstractedPrinciple is required');
+              }
             }
           }
           continue;
         }
 
-        if (propSchema.enum && Array.isArray(propSchema.enum)) {
-          constraints.push(`enum: ${(propSchema.enum as unknown[]).map(String).join(' | ')}`);
+        if (Array.isArray(propSchema.enum)) {
+          constraints.push(`enum: ${propSchema.enum.map(String).join(' | ')}`);
         }
         if (typeof propSchema.minimum === 'number') constraints.push(`min: ${propSchema.minimum}`);
         if (typeof propSchema.maximum === 'number') constraints.push(`max: ${propSchema.maximum}`);
@@ -202,7 +267,7 @@ export class DefaultSchemaPromptAdapter implements SchemaPromptAdapter {
       return lines.join('\n');
     }
 
-    if (schema.type) return `type: ${schema.type}`;
+    if (rec.type) return `type: ${rec.type}`;
     return '(complex schema)';
   }
 

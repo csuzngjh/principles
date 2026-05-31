@@ -189,3 +189,123 @@ describe('buildRecordDiagnosisV1Tool()', () => {
     expect(tool.parameters).toBe(DiagnosticianOutputV1Schema);
   });
 });
+
+describe('runtime safety hardening', () => {
+  const adapter = new DefaultSchemaPromptAdapter();
+
+  describe('deep schema recursion', () => {
+    it('does not stack overflow on deeply nested schema', () => {
+      let deep: Record<string, unknown> = { type: 'string' };
+      for (let i = 0; i < 20; i++) {
+        deep = { type: 'object', properties: { nested: deep as TSchema }, required: ['nested'] };
+      }
+      const result = adapter.generateExample(deep as TSchema);
+      expect(typeof result).toBe('string');
+      expect(() => JSON.parse(result)).not.toThrow();
+    });
+
+    it('does not stack overflow on deeply nested anyOf', () => {
+      let deep: Record<string, unknown> = { type: 'string' };
+      for (let i = 0; i < 20; i++) {
+        deep = { anyOf: [deep as TSchema] };
+      }
+      const result = adapter.generateExample(deep as TSchema);
+      expect(typeof result).toBe('string');
+    });
+
+    it('does not stack overflow on deeply nested array items', () => {
+      let deep: Record<string, unknown> = { type: 'string' };
+      for (let i = 0; i < 20; i++) {
+        deep = { type: 'array', items: deep as TSchema };
+      }
+      const result = adapter.generateExample(deep as TSchema);
+      expect(typeof result).toBe('string');
+    });
+  });
+
+  describe('malformed schema shapes', () => {
+    it('returns fallback for null schema', () => {
+      const result = adapter.generateConstraints(null as unknown as TSchema);
+      expect(result).toBe('(unknown schema)');
+    });
+
+    it('returns fallback for non-object schema', () => {
+      const result = adapter.generateConstraints('string' as unknown as TSchema);
+      expect(result).toBe('(unknown schema)');
+    });
+
+    it('returns fallback for object schema without properties', () => {
+      const result = adapter.generateConstraints({ type: 'object' } as unknown as TSchema);
+      expect(result).toBe('(object schema without properties)');
+    });
+
+    it('returns fallback for empty schema', () => {
+      const result = adapter.generateExample({} as unknown as TSchema);
+      expect(typeof result).toBe('string');
+      expect(result).toBe('null');
+    });
+
+    it('generateConstraints returns type info for non-object schema', () => {
+      const result = adapter.generateConstraints({ type: 'string' } as unknown as TSchema);
+      expect(result).toBe('type: string');
+    });
+
+    it('generateConstraints returns fallback for schema with no type', () => {
+      const result = adapter.generateConstraints({ anyOf: [] } as unknown as TSchema);
+      expect(result).toBe('(complex schema)');
+    });
+
+    it('handles schema with properties containing non-object values', () => {
+      const schema = {
+        type: 'object',
+        properties: {
+          valid: { type: 'boolean' },
+          bad: null,
+          alsoBad: 42,
+        },
+        required: ['valid'],
+      } as unknown as TSchema;
+      const result = adapter.generateConstraints(schema);
+      expect(result).toContain('valid: boolean');
+      expect(result).not.toContain('bad');
+    });
+  });
+
+  describe('diagnostician schema 5 recommendation kinds', () => {
+    it('generates all 5 recommendation kinds even when generateValueForSchema returns non-record', () => {
+      const minimalSchema = {
+        type: 'object',
+        properties: {
+          recommendations: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                kind: {
+                  anyOf: [
+                    { const: 'principle' },
+                    { const: 'rule' },
+                    { const: 'implementation' },
+                    { const: 'prompt' },
+                    { const: 'defer' },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        required: ['recommendations'],
+      } as unknown as TSchema;
+
+      const example = adapter.generateExample(minimalSchema);
+      const parsed = JSON.parse(example);
+      expect(Array.isArray(parsed.recommendations)).toBe(true);
+      const kinds = (parsed.recommendations as Record<string, unknown>[]).map(r => r.kind);
+      expect(kinds).toContain('principle');
+      expect(kinds).toContain('rule');
+      expect(kinds).toContain('implementation');
+      expect(kinds).toContain('prompt');
+      expect(kinds).toContain('defer');
+    });
+  });
+});
