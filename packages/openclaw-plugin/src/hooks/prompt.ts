@@ -2,6 +2,7 @@
  
 import * as fs from 'fs';
 import * as path from 'path';
+import * as yaml from 'js-yaml';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, trackFriction, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -12,7 +13,7 @@ import { detectApprovalMarker, setConfirmFirstApproval, setConfirmFirstDirective
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler, SqliteConfirmFirstStateStore, SqliteConnection } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler, SqliteConfirmFirstStateStore, SqliteConnection, computeEffectiveFlags, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../core/runtime-v2-prompt-activation-reader.js';
 import {
@@ -282,6 +283,8 @@ let _confirmFirstStoreInitialized = false;
  * PRI-286: Read confirm_first_gate feature flag from workspace config
  * and propagate to the confirm-first-gate module.
  * Uses cached read for performance — only re-reads when file changes.
+ * Uses yaml.load + computeEffectiveFlags for correct YAML block-scoped parsing
+ * (a hand-rolled regex could match enabled: true from a different flag block).
  */
 let _confirmFirstFlagCache: { enabled: boolean; mtime: number } | null = null;
 function _syncConfirmFirstFeatureFlag(workspaceDir: string): void {
@@ -294,9 +297,16 @@ function _syncConfirmFirstFeatureFlag(workspaceDir: string): void {
       return;
     }
     const raw = fs.readFileSync(flagPath, 'utf8');
-    // Minimal YAML parsing for the confirm_first_gate flag
-    // Check for: confirm_first_gate:\n  enabled: true
-    const enabled = /\bconfirm_first_gate\b[\s\S]*?enabled:\s*true/i.test(raw);
+    const parsed: unknown = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+    if (parsed === null || parsed === undefined || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      // Not a valid YAML mapping — use default (disabled)
+      _confirmFirstFlagCache = { enabled: false, mtime };
+      setConfirmFirstGateEnabled(false);
+      return;
+    }
+    const effective = computeEffectiveFlags(parsed as Record<string, unknown>, DEFAULT_FEATURE_FLAGS, flagPath);
+    const cfFlag = effective.flags['confirm_first_gate'];
+    const enabled = cfFlag?.enabled === true;
     _confirmFirstFlagCache = { enabled, mtime };
     setConfirmFirstGateEnabled(enabled);
   } catch {
