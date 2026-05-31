@@ -11,24 +11,16 @@
  *   D4: Lineage fields protected via preserveLineageFields() after extraction
  */
 import type { Tool } from '@mariozechner/pi-ai';
-import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
+import type { TSchema } from '@sinclair/typebox';
+import type { SchemaPromptAdapter } from '../schema-prompt-adapter.js';
 
-/**
- * Tool definition for diagnostician structured output via function calling.
- *
- * The `parameters` field uses the canonical TypeBox schema so the provider
- * receives the same schema that PD validates against — single source of truth.
- */
-export const RECORD_DIAGNOSIS_V1_TOOL: Tool = {
-  name: 'record_diagnosis_v1',
-  description:
-    'Record a root cause analysis diagnosis result. ' +
-    'Call this tool with the complete diagnosis output including: ' +
-    'summary, rootCause (with category prefix like "Design:" or "People:"), ' +
-    'violatedPrinciples, evidence (with sourceRef and note), ' +
-    'recommendations (kind must be one of: principle, rule, implementation, prompt, defer), ' +
-    'and confidence (0.0-1.0). ' +
-    'All recommendations of kind "principle" must include abstractedPrinciple. ' +
-    'All recommendations of kind "rule" must include triggerPattern and action.',
-  parameters: DiagnosticianOutputV1Schema,
-};
+export function buildRecordDiagnosisV1Tool(
+  adapter: SchemaPromptAdapter,
+  schema: TSchema,
+): Tool {
+  return {
+    name: 'record_diagnosis_v1',
+    description: `Record a root cause analysis diagnosis result. ${adapter.generateConstraints(schema)}`,
+    parameters: schema,
+  };
+}

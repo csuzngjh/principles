@@ -40,14 +40,9 @@ export type RecommendationKind = Static<typeof RecommendationKindSchema>;
 export const DiagnosticianRecommendationSchema = Type.Object({
   kind: RecommendationKindSchema,
   description: Type.String({ minLength: 1 }),
-  /** Trigger pattern (regex/keywords) — required when kind is 'rule' */
-  triggerPattern: Type.Optional(Type.String()),
-  /** Action to take when pattern matches — required when kind is 'rule' */
-  action: Type.Optional(Type.String()),
-  /** Highly abstracted principle (≤200 chars) — required when kind is 'principle'
-   * @see MAX_ABSTRACTED_PRINCIPLE_CHARS in runner/default-validator.ts
-   */
-  abstractedPrinciple: Type.Optional(Type.String()),
+  triggerPattern: Type.Optional(Type.String({ description: 'Required when kind is "rule". Regex or keyword pattern for interception.' })),
+  action: Type.Optional(Type.String({ description: 'Required when kind is "rule". Action to take when pattern matches.' })),
+  abstractedPrinciple: Type.Optional(Type.String({ description: 'Required when kind is "principle". Highly abstracted, reusable wisdom (≤200 chars).' })),
 });
  
 export type DiagnosticianRecommendation = Static<typeof DiagnosticianRecommendationSchema>;
@@ -56,11 +51,11 @@ export const DiagnosticianOutputV1Schema = Type.Object({
   valid: Type.Boolean(),
   diagnosisId: Type.String({ minLength: 1 }),
   summary: Type.String({ minLength: 1 }),
-  rootCause: Type.String({ minLength: 1 }),
+  rootCause: Type.String({ minLength: 1, description: 'MUST include category prefix: "Design: ..." or "People: ..." or "Assumption: ..." or "Tooling: ..."' }),
   violatedPrinciples: Type.Array(DiagnosticianViolatedPrincipleSchema),
   evidence: Type.Array(DiagnosticianEvidenceSchema),
   recommendations: Type.Array(DiagnosticianRecommendationSchema),
-  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  confidence: Type.Number({ minimum: 0, maximum: 1, description: 'A number between 0.0 and 1.0 (NOT a string, NOT a percentage)' }),
   ambiguityNotes: Type.Optional(Type.Array(Type.String())),
 });
  
