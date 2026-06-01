@@ -11,7 +11,7 @@ import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler, SqliteConnection } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../core/runtime-v2-prompt-activation-reader.js';
 import {

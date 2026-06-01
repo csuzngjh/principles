@@ -1,6 +1,5 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { resolvePdPath } from '../core/paths.js';
 
 /**
  * Atomic file write — write to temp then rename to prevent partial writes on crash.

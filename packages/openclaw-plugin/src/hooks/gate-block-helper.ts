@@ -166,8 +166,8 @@ export function recordGateBlockAndReturn(
 function buildContextualBlockMessage(
   filePath: string,
   reason: string,
-  toolName: string,
-  blockSource?: string,
+  _toolName: string,
+  _blockSource?: string,
 ): string {
   // rule-host or generic gate blocks
   return `[Principles Disciple] Security Gate Blocked this action.
