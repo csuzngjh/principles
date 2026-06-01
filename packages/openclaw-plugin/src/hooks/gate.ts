@@ -55,6 +55,12 @@ export function handleBeforeToolCall(
     }
   }
 
+  // Write tools without a file path must still go through RuleHost evaluation.
+  // Use a synthetic path so RuleHost can evaluate and potentially block.
+  if (!filePath && isWriteTool) {
+    filePath = `<tool:${event.toolName}>`;
+  }
+
   if (typeof filePath !== 'string') return;
 
   const relPath = normalizePath(filePath, ctx.workspaceDir);
