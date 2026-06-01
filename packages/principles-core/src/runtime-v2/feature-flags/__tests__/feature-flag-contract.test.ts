@@ -208,6 +208,8 @@ describe('computeEffectiveFlags', () => {
     const result = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
     const quietFlags = Object.values(result.flags).filter(f => f.category === 'quiet');
     for (const flag of quietFlags) {
+      // feedback_channel is a quiet flag that defaults on (MVP seed channel)
+      if (flag.id === 'feedback_channel') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
@@ -268,6 +270,15 @@ describe('DEFAULT_FEATURE_FLAGS', () => {
     if (flag) {
       expect(flag.category).toBe('quiet');
       expect(flag.enabled).toBe(false);
+    }
+  });
+
+  it('contains feedback_channel quiet flag (default on)', () => {
+    const flag = DEFAULT_FEATURE_FLAGS.find(f => f.id === 'feedback_channel');
+    expect(flag).toBeDefined();
+    if (flag) {
+      expect(flag.category).toBe('quiet');
+      expect(flag.enabled).toBe(true);
     }
   });
 

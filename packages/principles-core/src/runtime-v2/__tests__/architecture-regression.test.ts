@@ -150,6 +150,18 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-239
   'feature-flags/feature-flag-contract.ts',
   'feature-flags/index.ts',
+  // PRI-285: MVP seed feedback channel — privacy-preserving report contract.
+  // Pure logic only; no I/O. Server I/O lives in pd-console under
+  // <workspace>/.pd/feedback/drafts/. No automatic upload.
+  'feedback/feedback-types.ts',
+  'feedback/internal-guards.ts',
+  'feedback/redact-sensitive.ts',
+  'feedback/render-markdown.ts',
+  'feedback/render-github-url.ts',
+  'feedback/privacy-preview.ts',
+  'feedback/create-report.ts',
+  'feedback/safe-stringify.ts',
+  'feedback/index.ts',
 ] as const;
 
 // ── PRI-212: Plugin core anti-growth guard ────────────────────────────────────
