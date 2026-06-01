@@ -62,6 +62,7 @@ import { computeRuntimeShadowTaskFingerprint, PD_LOCAL_PROFILES } from './utils/
 import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { resolveWorkspaceDirFromApi } from './core/path-resolver.js';
+import { checkSurfaceGuard } from './core/surface-guard.js';
 
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
@@ -189,6 +190,19 @@ const plugin = {
       }
     }, 1000);
     healthCheckTimer.unref(); // Don't keep process alive for health check
+
+    // ── MVP Surface Guard (PRI-289): Verify surface classification ──
+    const surfaceGuard = checkSurfaceGuard();
+    if (!surfaceGuard.passed) {
+      for (const violation of surfaceGuard.violations) {
+        api.logger.error(`[PD:surface-guard] VIOLATION: ${violation}`);
+      }
+    }
+    api.logger.info(`[PD:surface-guard] Core surfaces: ${surfaceGuard.enabledCoreSurfaces.join(', ')}`);
+    api.logger.info(`[PD:surface-guard] Disabled non-core surfaces: ${surfaceGuard.disabledNonCoreSurfaces.length}`);
+    for (const warning of surfaceGuard.warnings) {
+      api.logger.warn(`[PD:surface-guard] ${warning}`);
+    }
 
     const language = (api.pluginConfig?.language as string) || 'en';
 

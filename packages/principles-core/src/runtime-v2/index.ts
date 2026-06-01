@@ -322,6 +322,26 @@ export type {
   ValidationResultErr as FeatureFlagValidationResultErr,
 } from './feature-flags/index.js';
 
+// Plugin Surface Registry (PRI-289) — MVP hook/service/startup surface guard
+
+export {
+  VALID_SURFACE_KINDS,
+  VALID_MVP_CATEGORIES,
+  PLUGIN_SURFACE_REGISTRY,
+  validateSurfaceRegistry,
+  getEnabledSurfaces,
+  getSurfacesByCategory,
+  getSurfacesByKind,
+  findUnclassifiedSurfaces,
+} from './feature-flags/index.js';
+
+export type {
+  SurfaceKind,
+  MvpCategory,
+  PluginSurfaceEntry,
+  SurfaceRegistryValidationResult,
+} from './feature-flags/index.js';
+
 // Proven channel baseline (PRI-240) — MVP activation continuity fixtures
 export {
   runPromptFixture,
