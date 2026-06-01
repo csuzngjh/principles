@@ -24,7 +24,7 @@ interface MigrationError {
 export interface MigrationResult {
     migratedFiles: string[];
     skippedFiles: string[];
-    errors: Array<MigrationError>;
+    errors: MigrationError[];
 }
 
 function readFileContent(filePath: string): string | null {
@@ -49,10 +49,15 @@ function writeBackup(filePath: string, content: string): boolean {
     }
 }
 
-function discoverSkillFiles(workspaceDir: string): string[] {
+interface DiscoverResult {
+    files: string[];
+    error?: MigrationError;
+}
+
+function discoverSkillFiles(workspaceDir: string): DiscoverResult {
     const skillsDir = path.join(workspaceDir, SKILLS_DIR);
     if (!fs.existsSync(skillsDir)) {
-        return [];
+        return { files: [] };
     }
     try {
         const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
@@ -65,13 +70,20 @@ function discoverSkillFiles(workspaceDir: string): string[] {
                 }
             }
         }
-        return skillFiles;
-    } catch {
-        return [];
+        return { files: skillFiles };
+    } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        return {
+            files: [],
+            error: {
+                file: SKILLS_DIR,
+                error: `Failed to enumerate skills directory: ${errMsg}`,
+            },
+        };
     }
 }
 
-function collectCandidateFiles(workspaceDir: string): string[] {
+function collectCandidateFiles(workspaceDir: string, result: MigrationResult): string[] {
     const candidates: string[] = [];
 
     for (const filename of WORKSPACE_GUIDANCE_FILES) {
@@ -82,8 +94,11 @@ function collectCandidateFiles(workspaceDir: string): string[] {
         candidates.push(path.join(workspaceDir, PRINCIPLES_DIR, filename));
     }
 
-    const skillFiles = discoverSkillFiles(workspaceDir);
-    candidates.push(...skillFiles);
+    const skillDiscovery = discoverSkillFiles(workspaceDir);
+    if (skillDiscovery.error) {
+        result.errors.push(skillDiscovery.error);
+    }
+    candidates.push(...skillDiscovery.files);
 
     return candidates;
 }
@@ -98,7 +113,7 @@ export function migrateStaleWorkspaceGuidance(
         errors: [],
     };
 
-    const candidates = collectCandidateFiles(workspaceDir);
+    const candidates = collectCandidateFiles(workspaceDir, result);
 
     for (const filePath of candidates) {
         const relativePath = path.relative(workspaceDir, filePath);

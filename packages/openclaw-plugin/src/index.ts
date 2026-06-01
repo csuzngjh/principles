@@ -60,9 +60,7 @@ import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { resolveWorkspaceDirFromApi } from './core/path-resolver.js';
 
-// Track initialization to avoid repeated calls
-let workspaceInitialized = false;
-// Track started evolution workers — one per workspace
+// Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
 
 const HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION =
@@ -114,20 +112,16 @@ const plugin = {
           return;
         }
         try {
-          if (!workspaceInitialized) {
+          if (!startedWorkspaces.has(workspaceDir)) {
+            startedWorkspaces.add(workspaceDir);
             migrateDirectoryStructure(api, workspaceDir);
             migrateStaleWorkspaceGuidance(api, workspaceDir);
             ensureWorkspaceTemplates(api, workspaceDir, language);
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
-            workspaceInitialized = true;
-          }
 
-          // ── Start EvolutionWorker for THIS workspace ──
-          // Each agent has its own heartbeat task. When before_prompt_build fires,
-          // it fires for the current agent's workspaceDir. Start one EvolutionWorker
-          // per workspace so each agent's pain signals are processed independently.
-          if (!startedWorkspaces.has(workspaceDir)) {
-            startedWorkspaces.add(workspaceDir);
+            // ── Start EvolutionWorker for THIS workspace ──
+            // One EvolutionWorker per workspace so each agent's pain signals
+            // are processed independently.
             EvolutionWorkerService.api = api;
             EvolutionWorkerService.start({
               config: api.config,
