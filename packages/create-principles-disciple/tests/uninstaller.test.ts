@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
+import * as fse from 'fs-extra';
 import { isPdOwnedShim, checkInstallStatus } from '../src/uninstaller.js';
 import { getInstalledBinDir, isWindows } from '../src/mvp-config.js';
 
 vi.mock('fs');
+vi.mock('fs-extra');
 vi.mock('../src/mvp-config.js', () => ({
   getInstalledBinDir: vi.fn(() => '/home/user/.openclaw/extensions/principles-disciple/bin'),
   isWindows: vi.fn(() => false),
@@ -27,7 +29,7 @@ describe('isPdOwnedShim security verification', () => {
   it('returns true for PD-owned shim (Unix)', () => {
     const pdBinDir = '/home/user/.openclaw/extensions/principles-disciple/bin';
     const shimPath = '/usr/local/bin/pd';
-    
+
     mockReadFileSync.mockReturnValue(`#!/usr/bin/env sh\nexec "${pdBinDir}/pd" "$@"\n`);
 
     expect(isPdOwnedShim(shimPath)).toBe(true);
@@ -36,7 +38,7 @@ describe('isPdOwnedShim security verification', () => {
   it('returns true for PD-owned shim (Windows cmd)', () => {
     const pdBinDir = 'C:\\Users\\user\\.openclaw\\extensions\\principles-disciple\\bin';
     const shimPath = 'C:\\Program Files\\npm\\bin\\pd.cmd';
-    
+
     mockGetInstalledBinDir.mockReturnValue(pdBinDir);
     mockIsWindows.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(`@echo off\r\ncall "${pdBinDir}\\pd.cmd" %*\r\n`);
@@ -46,7 +48,7 @@ describe('isPdOwnedShim security verification', () => {
 
   it('returns false for non-PD shim', () => {
     const shimPath = '/usr/local/bin/pd';
-    
+
     mockReadFileSync.mockReturnValue(`#!/usr/bin/env sh\nexec "/some/other/pd" "$@"\n`);
 
     expect(isPdOwnedShim(shimPath)).toBe(false);
@@ -54,7 +56,7 @@ describe('isPdOwnedShim security verification', () => {
 
   it('returns false when file read fails', () => {
     const shimPath = '/usr/local/bin/pd';
-    
+
     mockReadFileSync.mockImplementation(() => {
       throw new Error('Permission denied');
     });
@@ -64,7 +66,7 @@ describe('isPdOwnedShim security verification', () => {
 
   it('returns false for empty content', () => {
     const shimPath = '/usr/local/bin/pd';
-    
+
     mockReadFileSync.mockReturnValue('');
 
     expect(isPdOwnedShim(shimPath)).toBe(false);
@@ -86,7 +88,7 @@ describe('checkInstallStatus', () => {
     mockExistsSync.mockReturnValue(true);
 
     const result = checkInstallStatus();
-    
+
     expect(result.isInstalled).toBe(true);
     expect(result.paths.length).toBeGreaterThan(0);
   });
@@ -95,7 +97,7 @@ describe('checkInstallStatus', () => {
     mockExistsSync.mockReturnValue(false);
 
     const result = checkInstallStatus();
-    
+
     expect(result.isInstalled).toBe(false);
   });
 
@@ -105,7 +107,7 @@ describe('checkInstallStatus', () => {
     });
 
     const result = checkInstallStatus();
-    
+
     expect(result.paths.some(p => p.exists && p.path.includes('extension'))).toBe(true);
     expect(result.paths.some(p => !p.exists && p.path.includes('principles-disciple.json'))).toBe(true);
   });
