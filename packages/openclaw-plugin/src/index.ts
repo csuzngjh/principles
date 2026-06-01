@@ -51,6 +51,7 @@ import { PDTaskService } from './core/pd-task-service.js';
 import { CentralSyncService } from './service/central-sync-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
+import { migrateStaleWorkspaceGuidance } from './core/workspace-guidance-migrator.js';
 import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
 import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe } from './utils/workspace-resolver.js';
@@ -115,6 +116,7 @@ const plugin = {
         try {
           if (!workspaceInitialized) {
             migrateDirectoryStructure(api, workspaceDir);
+            migrateStaleWorkspaceGuidance(api, workspaceDir);
             ensureWorkspaceTemplates(api, workspaceDir, language);
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
             workspaceInitialized = true;

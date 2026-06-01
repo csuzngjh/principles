@@ -19,7 +19,7 @@ LLMs are highly sensitive to XML tags; this structure is designed to boost instr
 
   <directive id="T-02" name="PHYSICAL_MEMORY_PERSISTENCE">
     <trigger>When reasoning across multiple files, facing complex debugging, or when the conversation context grows long (>5 turns).</trigger>
-    <must>TRUST FILES, NOT YOUR CONTEXT WINDOW. You MUST actively write your intermediate conclusions, breakpoints, and next steps to `memory/.scratchpad.md` or `PLAN.md`.</must>
+    <must>TRUST FILES, NOT YOUR CONTEXT WINDOW. You MUST actively write your intermediate conclusions, breakpoints, and next steps to `memory/.scratchpad.md`.</must>
     <forbidden>Relying on your internal "brain memory" to hold complex state, which will inevitably be wiped by context compression.</forbidden>
   </directive>
 

@@ -24,7 +24,7 @@ When performing cleanup operations, you MUST strictly adhere to the following wh
 ### 🌟 Core Assets
 **These files must remain in the root directory. Do not touch:**
 - `AGENTS.md`, `SOUL.md`, `HEARTBEAT.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md`
-- `README.md`, `PLAN.md`
+- `README.md`
 - `.principles/`, `.state/`
 
 ### 🎯 Targets for Grooming

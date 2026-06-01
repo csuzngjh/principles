@@ -183,7 +183,7 @@ openclaw cron add --name "pd-grooming-daily" \
 openclaw cron add --name "health-check" \
   --every 4h \
   --session main \
-  --system-event '环境健康检查：验证核心工具（rg, node, python）是否可用，检查 PLAN.md 状态与实际进度是否一致。'
+  --system-event '环境健康检查：验证核心工具（rg, node, python）是否可用，检查工作区状态与实际进度是否一致。'
 ```
 
 ### 3. 战略对齐检查（每天上午 9 点）
