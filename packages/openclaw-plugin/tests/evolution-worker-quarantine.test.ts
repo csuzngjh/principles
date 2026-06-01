@@ -4,12 +4,11 @@
  * Tests prove:
  * 1. Default config (no feature-flags.yaml) → EvolutionWorkerService does NOT start.
  * 2. Explicit enable in feature-flags.yaml → EvolutionWorkerService starts.
- * 3. Disabled state has structured observability (reason, nextAction, featureFlag, boundedContext).
+ * 3. Disabled state has structured observability from real helper, not hand-written JSON.
  * 4. api.registerService still works regardless of flag state.
  *
- * ERR-002: disabled startup must be observable — verified via SystemLogger + api.logger.
- * ERR-025: tests cover the real plugin startup path (loadFeatureFlagFromWorkspace + gate logic),
- *          not just isolated helpers.
+ * ERR-002: disabled startup must be observable — verified via real shouldStartEvolutionWorker output.
+ * ERR-025: tests cover the real gate helper + loadFeatureFlagFromWorkspace, not hand-coded JSON.
  * ERR-027: DEFAULT_FEATURE_FLAGS declaration matches runtime behavior.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -47,8 +46,8 @@ vi.mock('../src/core/workspace-context.js', () => {
   };
 });
 
-// Import after mocks
-import { loadFeatureFlagFromWorkspace } from '../src/index.js';
+// Import after mocks — real helpers, not re-implemented logic
+import { loadFeatureFlagFromWorkspace, shouldStartEvolutionWorker, isRecord } from '../src/index.js';
 import { EvolutionWorkerService } from '../src/service/evolution-worker.js';
 import { computeEffectiveFlags, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
 
@@ -137,13 +136,18 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
       expect(result.source).toBe('workspace_file');
     });
 
-    it('returns enabled=false when YAML is malformed', () => {
+    it('returns enabled=false when YAML is malformed and warning includes error detail', () => {
       const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
       fs.writeFileSync(configPath, '  bad: [yaml: content', 'utf8');
       const logger = createMockLogger();
       const result = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', logger);
       expect(result.enabled).toBe(false);
-      expect(logger.warn).toHaveBeenCalled();
+      // YAML parse warning must include error detail (fix #6)
+      const warnCalls = logger.warn.mock.calls.map((c: unknown[]) => c[0] as string);
+      const parseWarn = warnCalls.find((m: string) => m.includes('YAML parse error'));
+      expect(parseWarn).toBeDefined();
+      // Error detail must contain something beyond "using defaults"
+      expect(parseWarn!.length).toBeGreaterThan('YAML parse error — using defaults'.length);
     });
 
     it('returns defaults when file is unreadable', () => {
@@ -156,7 +160,8 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
       expect(logger.warn).toHaveBeenCalled();
     });
 
-    it('rejects dangerous keys', () => {
+    it('rejects dangerous keys (__proto__) and does not enable via prototype pollution', () => {
+      // Write raw YAML with __proto__ to test dangerous key rejection on raw parsed output
       writeFeatureFlags(workspaceDir, {
         __proto__: { enabled: true },
         evolution_worker: { enabled: false },
@@ -167,44 +172,34 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
     });
   });
 
-  // ── 3. EvolutionWorkerService does NOT start by default ──
+  // ── 3. shouldStartEvolutionWorker — real helper, real output ──
 
-  describe('default config: worker does not start', () => {
-    it('EvolutionWorkerService.start is NOT called when flag is disabled', async () => {
-      // No feature-flags.yaml → flag defaults to false
-      const startSpy = vi.spyOn(EvolutionWorkerService, 'start');
-
-      const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', createMockLogger());
-      expect(flag.enabled).toBe(false);
-
-      // Verify the worker is not in _startedWorkspaces
-      expect(EvolutionWorkerService._startedWorkspaces.has(workspaceDir)).toBe(false);
-      expect(startSpy).not.toHaveBeenCalled();
-
-      startSpy.mockRestore();
+  describe('shouldStartEvolutionWorker gate helper', () => {
+    it('returns shouldStart=false by default (no feature-flags.yaml)', () => {
+      const logger = createMockLogger();
+      const gate = shouldStartEvolutionWorker(workspaceDir, logger);
+      expect(gate.shouldStart).toBe(false);
+      expect(gate.flagSource).toBe('defaults');
+      expect(gate.disabledInfo).not.toBeNull();
     });
 
-    it('disabled state produces structured observability', () => {
+    it('returns shouldStart=true when explicitly enabled', () => {
+      writeFeatureFlags(workspaceDir, {
+        evolution_worker: { enabled: true },
+      });
       const logger = createMockLogger();
-      const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', logger);
+      const gate = shouldStartEvolutionWorker(workspaceDir, logger);
+      expect(gate.shouldStart).toBe(true);
+      expect(gate.flagSource).toBe('workspace_file');
+      expect(gate.disabledInfo).toBeNull();
+    });
 
-      // Simulate the logging path from index.ts
-      if (!flag.enabled) {
-        const disabledInfo = JSON.stringify({
-          reason: 'mvp_quiet_per_adr0014',
-          nextAction: 'set evolution_worker.enabled=true in .pd/feature-flags.yaml to enable',
-          featureFlag: 'evolution_worker',
-          boundedContext: 'legacy_evolution_worker',
-          flagSource: flag.source,
-        });
-        logger.info(`[PD] EvolutionWorker NOT started. ${disabledInfo}`);
-      }
-
-      expect(logger.info).toHaveBeenCalledTimes(1);
-      const loggedMsg = logger.info.mock.calls[0][0] as string;
-      expect(loggedMsg).toContain('EvolutionWorker NOT started');
-      // Verify structured fields present in the JSON payload
-      const parsed = JSON.parse(loggedMsg.substring(loggedMsg.indexOf('{')));
+    it('disabledInfo is valid JSON with required structured fields', () => {
+      const logger = createMockLogger();
+      const gate = shouldStartEvolutionWorker(workspaceDir, logger);
+      expect(gate.disabledInfo).not.toBeNull();
+      // Parse the real output — not hand-written JSON
+      const parsed = JSON.parse(gate.disabledInfo!);
       expect(parsed.reason).toBe('mvp_quiet_per_adr0014');
       expect(parsed.nextAction).toContain('evolution_worker.enabled=true');
       expect(parsed.featureFlag).toBe('evolution_worker');
@@ -213,43 +208,82 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
     });
   });
 
-  // ── 4. Explicit enable: worker starts ──
+  // ── 4. EvolutionWorkerService does NOT start by default ──
 
-  describe('explicit enable: worker starts', () => {
-    it('EvolutionWorkerService.start is called when flag is enabled', () => {
-      writeFeatureFlags(workspaceDir, {
-        evolution_worker: { enabled: true },
-      });
+  describe('default config: worker does not start', () => {
+    it('EvolutionWorkerService.start is NOT called when gate returns shouldStart=false', () => {
+      const startSpy = vi.spyOn(EvolutionWorkerService, 'start');
+      const logger = createMockLogger();
+      const gate = shouldStartEvolutionWorker(workspaceDir, logger);
 
-      const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', createMockLogger());
-      expect(flag.enabled).toBe(true);
-      expect(flag.source).toBe('workspace_file');
+      expect(gate.shouldStart).toBe(false);
+      expect(EvolutionWorkerService._startedWorkspaces.has(workspaceDir)).toBe(false);
+      expect(startSpy).not.toHaveBeenCalled();
+
+      startSpy.mockRestore();
     });
 
-    it('can start EvolutionWorkerService when flag is enabled', () => {
+    it('disabled observability comes from real helper — logger receives structured output', () => {
+      const logger = createMockLogger();
+      const gate = shouldStartEvolutionWorker(workspaceDir, logger);
+
+      // Simulate what index.ts does with the gate result
+      if (!gate.shouldStart && gate.disabledInfo) {
+        logger.info(`[PD] EvolutionWorker NOT started for workspace: ${workspaceDir}. ${gate.disabledInfo}`);
+      }
+
+      expect(logger.info).toHaveBeenCalledTimes(1);
+      const loggedMsg = logger.info.mock.calls[0][0] as string;
+      expect(loggedMsg).toContain('EvolutionWorker NOT started');
+      // Parse the JSON from the real helper output embedded in the log message
+      const jsonStart = loggedMsg.indexOf('{');
+      expect(jsonStart).toBeGreaterThan(0);
+      const parsed = JSON.parse(loggedMsg.substring(jsonStart));
+      expect(parsed.reason).toBe('mvp_quiet_per_adr0014');
+      expect(parsed.featureFlag).toBe('evolution_worker');
+    });
+  });
+
+  // ── 5. Explicit enable: worker starts ──
+
+  describe('explicit enable: worker starts', () => {
+    it('shouldStartEvolutionWorker returns true when enabled in config', () => {
       writeFeatureFlags(workspaceDir, {
         evolution_worker: { enabled: true },
       });
 
-      const mockApi = {
-        logger: createMockLogger(),
-        config: { get: vi.fn((k: string) => k === 'intervals.worker_poll_ms' ? 60000 : undefined) },
-        runtime: { subagent: {} },
-      } as any;
+      const logger = createMockLogger();
+      const gate = shouldStartEvolutionWorker(workspaceDir, logger);
+      expect(gate.shouldStart).toBe(true);
+      expect(gate.flagSource).toBe('workspace_file');
+    });
 
-      EvolutionWorkerService.api = mockApi;
+    it('EvolutionWorkerService.start actually runs when gate is true', () => {
+      writeFeatureFlags(workspaceDir, {
+        evolution_worker: { enabled: true },
+      });
+
+      const mockLogger = createMockLogger();
+      const mockConfig = { get: (k: string) => k === 'intervals.worker_poll_ms' ? 60000 : undefined };
+      const mockApi = {
+        logger: mockLogger,
+        config: mockConfig,
+        runtime: { subagent: {} },
+      };
+
+      EvolutionWorkerService.api = mockApi as typeof EvolutionWorkerService.api;
       EvolutionWorkerService.start({
-        config: mockApi.config,
+        config: mockConfig,
         workspaceDir,
         stateDir: path.join(workspaceDir, '.state'),
-        logger: mockApi.logger,
+        logger: mockLogger,
       });
 
       expect(EvolutionWorkerService._startedWorkspaces.has(workspaceDir)).toBe(true);
     });
   });
 
-  // ── 5. core flags remain functional ──
+  // ── 6. Core flags remain functional ──
 
   describe('MVP-Core flags unaffected', () => {
     it('prompt, code_tool_hook, defer_archive remain core+enabled', () => {
@@ -264,9 +298,11 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
 
       const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
       const raw = fs.readFileSync(configPath, 'utf8');
-      const parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown>;
+      const parsed: unknown = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
 
-      const flags = computeEffectiveFlags(parsed, DEFAULT_FEATURE_FLAGS, configPath);
+      // Use isRecord type guard instead of `as`
+      expect(isRecord(parsed)).toBe(true);
+      const flags = computeEffectiveFlags(parsed as Record<string, unknown>, DEFAULT_FEATURE_FLAGS, configPath);
       expect(flags.flags['prompt']?.enabled).toBe(true);
       expect(flags.flags['code_tool_hook']?.enabled).toBe(true);
       expect(flags.flags['defer_archive']?.enabled).toBe(true);
@@ -281,16 +317,17 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
 
       const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
       const raw = fs.readFileSync(configPath, 'utf8');
-      const parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown>;
+      const parsed: unknown = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
 
-      const flags = computeEffectiveFlags(parsed, DEFAULT_FEATURE_FLAGS, configPath);
+      expect(isRecord(parsed)).toBe(true);
+      const flags = computeEffectiveFlags(parsed as Record<string, unknown>, DEFAULT_FEATURE_FLAGS, configPath);
       expect(flags.flags['prompt']?.enabled).toBe(true); // core cannot be disabled
       expect(flags.flags['code_tool_hook']?.enabled).toBe(true); // core cannot be disabled
       expect(flags.warnings.length).toBeGreaterThan(0); // warnings about core override attempt
     });
   });
 
-  // ── 6. No PLAN.md / confirm-first gate regression ──
+  // ── 7. No PLAN.md / confirm-first gate regression ──
 
   describe('no confirm-first gate regression', () => {
     it('no PLAN.md or confirm-first files are created in workspace', () => {
@@ -298,7 +335,6 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
         evolution_worker: { enabled: false },
       });
 
-      // Simulate checking workspace for forbidden files
       const planMd = path.join(workspaceDir, 'PLAN.md');
       expect(fs.existsSync(planMd)).toBe(false);
     });

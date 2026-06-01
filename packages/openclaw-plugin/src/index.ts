@@ -79,6 +79,10 @@ const pendingShadowObservations = new Map<string, string>();
 // Returns the flag definition with effective enabled state.
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function loadFeatureFlagFromWorkspace(
   workspaceDir: string,
   flagId: string,
@@ -106,31 +110,61 @@ function loadFeatureFlagFromWorkspace(
   let parsed: unknown;
   try {
     parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
-  } catch {
-    logger?.warn?.(`[PD:FeatureFlags] Feature flags YAML parse error — using defaults`);
+  } catch (e) {
+    const parseMsg = e instanceof Error ? e.message : String(e);
+    logger?.warn?.(`[PD:FeatureFlags] Feature flags YAML parse error: ${parseMsg} — using defaults`);
     const flags = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
     const flag = flags.flags[flagId];
     return { enabled: flag?.enabled ?? false, source: 'defaults' };
   }
 
-  if (parsed === null || parsed === undefined || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     logger?.warn?.(`[PD:FeatureFlags] Feature flags not a mapping — using defaults`);
     const flags = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
     const flag = flags.flags[flagId];
     return { enabled: flag?.enabled ?? false, source: 'defaults' };
   }
 
+  // parsed is now narrowed to Record<string, unknown> by isRecord guard
   const parsedRecord: Record<string, unknown> = Object.create(null);
-  for (const key of Object.keys(parsed as Record<string, unknown>)) {
+  for (const key of Object.keys(parsed)) {
     if (DANGEROUS_KEYS.has(key)) continue;
-    if (Object.hasOwn(parsed as Record<string, unknown>, key)) {
-      parsedRecord[key] = (parsed as Record<string, unknown>)[key];
+    if (Object.hasOwn(parsed, key)) {
+      parsedRecord[key] = parsed[key];
     }
   }
 
   const flags = computeEffectiveFlags(parsedRecord, DEFAULT_FEATURE_FLAGS, configPath);
   const flag = flags.flags[flagId];
   return { enabled: flag?.enabled ?? false, source: flags.source };
+}
+
+// ── Evolution Worker Startup Gate (shared between index.ts and tests) ───────
+// Determines whether the legacy evolution worker should start and produces
+// structured observability when disabled (ERR-002).
+
+export interface EvolutionWorkerGateResult {
+  shouldStart: boolean;
+  flagSource: string;
+  disabledInfo: string | null;
+}
+
+export function shouldStartEvolutionWorker(
+  workspaceDir: string,
+  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
+): EvolutionWorkerGateResult {
+  const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', logger);
+  if (flag.enabled) {
+    return { shouldStart: true, flagSource: flag.source, disabledInfo: null };
+  }
+  const disabledInfo = JSON.stringify({
+    reason: 'mvp_quiet_per_adr0014',
+    nextAction: 'set evolution_worker.enabled=true in .pd/feature-flags.yaml to enable',
+    featureFlag: 'evolution_worker',
+    boundedContext: 'legacy_evolution_worker',
+    flagSource: flag.source,
+  });
+  return { shouldStart: false, flagSource: flag.source, disabledInfo };
 }
 
 const plugin = {
@@ -183,8 +217,8 @@ const plugin = {
 
             // ── Start EvolutionWorker for THIS workspace ──
             // Gated behind evolution_worker feature flag (MVP-Quiet, default OFF per ADR-0014).
-            const evoFlag = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', api.logger);
-            if (evoFlag.enabled) {
+            const gate = shouldStartEvolutionWorker(workspaceDir, api.logger);
+            if (gate.shouldStart) {
               EvolutionWorkerService.api = api;
               EvolutionWorkerService.start({
                 config: api.config,
@@ -192,18 +226,11 @@ const plugin = {
                 stateDir: path.join(workspaceDir, '.state'),
                 logger: api.logger,
               });
-              api.logger.info(`[PD] EvolutionWorker started for workspace: ${workspaceDir} (flag source: ${evoFlag.source})`);
+              api.logger.info(`[PD] EvolutionWorker started for workspace: ${workspaceDir} (flag source: ${gate.flagSource})`);
             } else {
               // Structured observability per ERR-002: no silent skip
-              const disabledInfo = JSON.stringify({
-                reason: 'mvp_quiet_per_adr0014',
-                nextAction: 'set evolution_worker.enabled=true in .pd/feature-flags.yaml to enable',
-                featureFlag: 'evolution_worker',
-                boundedContext: 'legacy_evolution_worker',
-                flagSource: evoFlag.source,
-              });
-              api.logger.info(`[PD] EvolutionWorker NOT started for workspace: ${workspaceDir}. ${disabledInfo}`);
-              SystemLogger.log(workspaceDir, 'EVOLUTION_WORKER_DISABLED', disabledInfo);
+              api.logger.info(`[PD] EvolutionWorker NOT started for workspace: ${workspaceDir}. ${gate.disabledInfo}`);
+              SystemLogger.log(workspaceDir, 'EVOLUTION_WORKER_DISABLED', gate.disabledInfo ?? '');
             }
           }
 
@@ -833,7 +860,7 @@ const plugin = {
 };
 
 export { PrincipleTreeLedgerAdapter } from './core/principle-tree-ledger-adapter.js';
-/* istanbul ignore next — test export for loadFeatureFlagFromWorkspace */
-export { loadFeatureFlagFromWorkspace };
+/* istanbul ignore next — test exports for evolution worker gate */
+export { loadFeatureFlagFromWorkspace, isRecord };
 
 export default plugin;
