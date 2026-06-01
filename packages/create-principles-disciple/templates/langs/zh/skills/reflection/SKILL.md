@@ -12,7 +12,7 @@ disable-model-invocation: false
 请执行以下反思步骤：
 
 ## 1. 现状扫描 (Status Scan)
-- **Goal**: 我们最初的目标是什么？(Check `PLAN.md` or early conversation)
+- **Goal**: 我们最初的目标是什么？(检查早期对话上下文)
 - **Status**: 现在完成了多少？卡在哪里？
 - **Cost**: 我们消耗了大量 Token，产出是否匹配？
 
@@ -37,4 +37,4 @@ disable-model-invocation: false
 
 ## 5. 恢复计划 (Recovery)
 - 既然要压缩上下文，我们下一步该如何以“最干净”的状态继续？
-- 更新 `PLAN.md`，标记当前进度，确保压缩后能无缝衔接。
+- 更新 `memory/.scratchpad.md`，标记当前进度，确保压缩后能无缝衔接。

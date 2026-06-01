@@ -269,6 +269,7 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
 
   // ── Runtime V2 ──────────────────────────────────────────────────────────
   'runtime-v2-prompt-activation-reader.ts',
+  'workspace-guidance-migrator.ts',
 
   // ── Test Files ──────────────────────────────────────────────────────────
   '__tests__/focus-history.test.ts',
@@ -322,7 +323,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
     // PRI-286: Removed confirm-first-gate.ts (95 → 94)
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(95);
   });
 });
 
