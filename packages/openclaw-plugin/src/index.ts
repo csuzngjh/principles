@@ -18,6 +18,9 @@ import type {
   PluginHookSubagentContext,
 } from './openclaw-sdk.js';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as yaml from 'js-yaml';
+import { computeEffectiveFlags, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
 import { getCommandDescription } from './i18n/commands.js';
@@ -71,6 +74,99 @@ const HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION =
 // Used to complete shadow observations when subagent ends
 const pendingShadowObservations = new Map<string, string>();
 
+// ── Feature Flag Loader (plugin I/O boundary) ─────────────────────────────
+// Reads workspace feature-flags.yaml and checks a specific flag.
+// Returns the flag definition with effective enabled state.
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function loadFeatureFlagFromWorkspace(
+  workspaceDir: string,
+  flagId: string,
+  logger?: { warn?: (msg: string) => void; info?: (msg: string) => void },
+): { enabled: boolean; source: string } {
+  const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
+
+  if (!fs.existsSync(configPath)) {
+    const flags = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
+    const flag = flags.flags[flagId];
+    return { enabled: flag?.enabled ?? false, source: 'defaults' };
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf8');
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logger?.warn?.(`[PD:FeatureFlags] Feature flags unreadable: ${msg} — using defaults`);
+    const flags = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
+    const flag = flags.flags[flagId];
+    return { enabled: flag?.enabled ?? false, source: 'defaults' };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+  } catch (e) {
+    const parseMsg = e instanceof Error ? e.message : String(e);
+    logger?.warn?.(`[PD:FeatureFlags] Feature flags YAML parse error: ${parseMsg} — using defaults`);
+    const flags = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
+    const flag = flags.flags[flagId];
+    return { enabled: flag?.enabled ?? false, source: 'defaults' };
+  }
+
+  if (!isRecord(parsed)) {
+    logger?.warn?.(`[PD:FeatureFlags] Feature flags not a mapping — using defaults`);
+    const flags = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
+    const flag = flags.flags[flagId];
+    return { enabled: flag?.enabled ?? false, source: 'defaults' };
+  }
+
+  // parsed is now narrowed to Record<string, unknown> by isRecord guard
+  const parsedRecord: Record<string, unknown> = Object.create(null);
+  for (const key of Object.keys(parsed)) {
+    if (DANGEROUS_KEYS.has(key)) continue;
+    if (Object.hasOwn(parsed, key)) {
+      parsedRecord[key] = parsed[key];
+    }
+  }
+
+  const flags = computeEffectiveFlags(parsedRecord, DEFAULT_FEATURE_FLAGS, configPath);
+  const flag = flags.flags[flagId];
+  return { enabled: flag?.enabled ?? false, source: flags.source };
+}
+
+// ── Evolution Worker Startup Gate (shared between index.ts and tests) ───────
+// Determines whether the legacy evolution worker should start and produces
+// structured observability when disabled (ERR-002).
+
+export interface EvolutionWorkerGateResult {
+  shouldStart: boolean;
+  flagSource: string;
+  disabledInfo: string | null;
+}
+
+export function shouldStartEvolutionWorker(
+  workspaceDir: string,
+  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
+): EvolutionWorkerGateResult {
+  const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', logger);
+  if (flag.enabled) {
+    return { shouldStart: true, flagSource: flag.source, disabledInfo: null };
+  }
+  const disabledInfo = JSON.stringify({
+    reason: 'mvp_quiet_per_adr0014',
+    nextAction: 'set evolution_worker.enabled=true in .pd/feature-flags.yaml to enable',
+    featureFlag: 'evolution_worker',
+    boundedContext: 'legacy_evolution_worker',
+    flagSource: flag.source,
+  });
+  return { shouldStart: false, flagSource: flag.source, disabledInfo };
+}
+
 const plugin = {
   name: "Principles Disciple",
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
@@ -120,16 +216,22 @@ const plugin = {
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
 
             // ── Start EvolutionWorker for THIS workspace ──
-            // One EvolutionWorker per workspace so each agent's pain signals
-            // are processed independently.
-            EvolutionWorkerService.api = api;
-            EvolutionWorkerService.start({
-              config: api.config,
-              workspaceDir,
-              stateDir: path.join(workspaceDir, '.state'),
-              logger: api.logger,
-            });
-            api.logger.info(`[PD] EvolutionWorker started for workspace: ${workspaceDir}`);
+            // Gated behind evolution_worker feature flag (MVP-Quiet, default OFF per ADR-0014).
+            const gate = shouldStartEvolutionWorker(workspaceDir, api.logger);
+            if (gate.shouldStart) {
+              EvolutionWorkerService.api = api;
+              EvolutionWorkerService.start({
+                config: api.config,
+                workspaceDir,
+                stateDir: path.join(workspaceDir, '.state'),
+                logger: api.logger,
+              });
+              api.logger.info(`[PD] EvolutionWorker started for workspace: ${workspaceDir} (flag source: ${gate.flagSource})`);
+            } else {
+              // Structured observability per ERR-002: no silent skip
+              api.logger.info(`[PD] EvolutionWorker NOT started for workspace: ${workspaceDir}. ${gate.disabledInfo}`);
+              SystemLogger.log(workspaceDir, 'EVOLUTION_WORKER_DISABLED', gate.disabledInfo ?? '');
+            }
           }
 
           const result = await handleBeforePromptBuild(event, { ...ctx, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'], workspaceDir });
@@ -758,5 +860,7 @@ const plugin = {
 };
 
 export { PrincipleTreeLedgerAdapter } from './core/principle-tree-ledger-adapter.js';
+/* istanbul ignore next — test exports for evolution worker gate */
+export { loadFeatureFlagFromWorkspace, isRecord };
 
 export default plugin;
