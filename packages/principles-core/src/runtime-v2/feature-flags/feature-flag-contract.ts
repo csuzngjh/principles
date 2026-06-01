@@ -98,6 +98,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
 
   // MVP-Quiet — default disabled, opt-in via config
   // Only flags with real consumption paths are registered (PRI-239 constraint)
+  { id: 'feedback_channel', category: 'quiet', enabled: true, since: '2026-06-01', description: 'MVP seed feedback channel — privacy-preserving report drafts' },
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },
 
   // MVP-Gone — permanently disabled, cannot be re-enabled

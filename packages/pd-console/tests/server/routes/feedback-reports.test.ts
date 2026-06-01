@@ -258,4 +258,72 @@ describe('handleFeedbackReportsRoute', () => {
       expect(() => disposeFeedbackReportModels()).not.toThrow();
     });
   });
+
+  describe('feature flag gate', () => {
+    it('POST returns 403 when feedback_channel flag is disabled', async () => {
+      const req = createMockRequest('POST', {
+        input: {
+          type: 'bug',
+          title: 'Should be blocked',
+          description: 'This draft must not be written.',
+        },
+        diagnostics: {},
+      });
+      const res = createMockResponse();
+      await handleFeedbackReportsRoute(req, res, {
+        workspaceDir,
+        subPath: '',
+        featureFlags: { feedback_channel: { enabled: false } },
+      });
+
+      expect(res.statusCode).toBe(403);
+      const body = parseResponseBody<{ success: false; error: string; message: string }>(res);
+      expect(body.success).toBe(false);
+      expect(body.error).toContain('feedback_channel');
+      expect(body.message).toContain('feedback_channel');
+
+      // Verify no draft was written
+      const draftsDir = path.join(workspaceDir, '.pd', 'feedback', 'drafts');
+      const exists = fs.existsSync(draftsDir);
+      expect(exists).toBe(false);
+    });
+
+    it('GET list still works when feedback_channel flag is disabled', async () => {
+      const req = createMockRequest('GET');
+      const res = createMockResponse();
+      await handleFeedbackReportsRoute(req, res, {
+        workspaceDir,
+        subPath: '',
+        featureFlags: { feedback_channel: { enabled: false } },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const data = okEnvelope<{ drafts: unknown[] }>(res);
+      expect(data.drafts).toEqual([]);
+    });
+
+    it('DELETE still works when feedback_channel flag is disabled', async () => {
+      // First create a draft without flag restriction
+      const createReq = createMockRequest('POST', {
+        input: { type: 'bug', title: 'Temp', description: 'Delete me' },
+        diagnostics: {},
+      });
+      const createRes = createMockResponse();
+      await handleFeedbackReportsRoute(createReq, createRes, { workspaceDir, subPath: '' });
+      const created = okEnvelope<{ id: string }>(createRes);
+
+      // Now delete with flag disabled
+      const delReq = createMockRequest('DELETE');
+      const delRes = createMockResponse();
+      await handleFeedbackReportsRoute(delReq, delRes, {
+        workspaceDir,
+        subPath: `/${created.id}`,
+        featureFlags: { feedback_channel: { enabled: false } },
+      });
+
+      expect(delRes.statusCode).toBe(200);
+      const data = okEnvelope<{ deleted: boolean }>(delRes);
+      expect(data.deleted).toBe(true);
+    });
+  });
 });

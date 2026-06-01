@@ -116,7 +116,7 @@ export function ReportProblemPage() {
       if (expectedBehavior.trim()) input.expectedBehavior = expectedBehavior.trim();
       if (actualBehavior.trim()) input.actualBehavior = actualBehavior.trim();
       if (userSeverity) input.userSeverity = userSeverity;
-      if (sourceFromUrl) input.context = { source: sourceFromUrl, page: "/report-problem" };
+      input.context = { source: 'console', page: sourceFromUrl ? `/report-problem?source=${sourceFromUrl}` : '/report-problem' };
 
       const result: ApiResponse<FeedbackReportEnvelope> = await createFeedbackReport(input, {});
       if (result.success !== true || !result.data) {

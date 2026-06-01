@@ -264,7 +264,20 @@ export function createFeedbackReport(
   };
   // Surface the agent-attached evidence in the report so it propagates to
   // markdown, emailText, and any later consumer.
-  if (draft.agentDraft) report.agentDraft = draft.agentDraft;
+  // Redact sensitive values (paths/tokens/env) from agentDraft string fields.
+  if (draft.agentDraft) {
+    const ad = draft.agentDraft;
+    report.agentDraft = {
+      summary: redactEnvLikeValues(redactAbsolutePaths(redactTokenLikeValues(ad.summary))),
+    };
+    if (ad.observedFailure) {
+      report.agentDraft.observedFailure = redactEnvLikeValues(redactAbsolutePaths(redactTokenLikeValues(ad.observedFailure)));
+    }
+    if (ad.commandSummary) {
+      report.agentDraft.commandSummary = redactEnvLikeValues(redactAbsolutePaths(redactTokenLikeValues(ad.commandSummary)));
+    }
+    redactionNotes.push('agentDraft fields were redacted (paths/tokens/env values)');
+  }
   report.outputs.markdown = renderReportMarkdown(report);
   report.outputs.emailText = buildEmailText(report);
 

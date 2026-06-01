@@ -324,6 +324,60 @@ describe('createFeedbackReport', () => {
     expect(result.report.outputs.markdown).toContain('agent saw this');
   });
 
+  it('redacts absolute paths in agentDraft.summary', () => {
+    const input = validInput({
+      agentDraft: {
+        summary: 'Error at C:\\Users\\alice\\secret\\path.ts in this code',
+        observedFailure: 'Crash at C:\\Users\\bob\\secret\\file.ts',
+        commandSummary: 'ran from D:\\Projects\\internal\\tool.ts',
+      },
+    });
+    const result = createFeedbackReport(input, validDiagnostics());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const ad = result.report.agentDraft;
+    expect(ad).toBeDefined();
+    if (!ad) return;
+    // summary should have redacted paths
+    expect(ad.summary).toContain('<redacted-path>');
+    expect(ad.summary).not.toContain('C:\\Users\\alice\\secret');
+    // observedFailure should also be redacted
+    if (ad.observedFailure) {
+      expect(ad.observedFailure).not.toContain('C:\\Users\\bob\\secret');
+    }
+    // commandSummary should also be redacted
+    if (ad.commandSummary) {
+      expect(ad.commandSummary).not.toContain('D:\\Projects\\internal');
+    }
+  });
+
+  it('redacts token and env values in agentDraft fields', () => {
+    const input = validInput({
+      agentDraft: {
+        summary: 'Token sk-abcdefghijklmnopqrstuvwxyz0123456789 was exposed',
+        observedFailure: 'OPENAI_API_KEY=sk-abc123def456 found in output',
+        commandSummary: 'export AWS_SECRET_KEY=abc123xyz789 and ran npm test',
+      },
+    });
+    const result = createFeedbackReport(input, validDiagnostics());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const ad = result.report.agentDraft;
+    expect(ad).toBeDefined();
+    if (!ad) return;
+    // summary: token-like value should be redacted
+    expect(ad.summary).not.toContain('sk-abcdefghijklmnopqrstuvwxyz0123456789');
+    expect(ad.summary).toContain('[REDACTED]');
+    // observedFailure: env-like value should be redacted
+    if (ad.observedFailure) {
+      expect(ad.observedFailure).not.toContain('sk-abc123def456');
+    }
+    // commandSummary: env-like value should be redacted
+    if (ad.commandSummary) {
+      expect(ad.commandSummary).not.toContain('AWS_SECRET_KEY=abc123xyz789');
+    }
+  });
+
   it('handles BigInt in diagnostics without throwing (ERR-017)', () => {
     const diagnostics: Record<string, unknown> = {
       ...validDiagnostics(),

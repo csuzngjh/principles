@@ -81,7 +81,11 @@ function errorMessage(err: unknown): string {
  *   GET    /api/feedback/reports/:id    — fetch a single draft
  *   DELETE /api/feedback/reports/:id    — delete a draft
  */
-export type FeedbackReportsContext = { workspaceDir: string; subPath: string };
+export type FeedbackReportsContext = {
+  workspaceDir: string;
+  subPath: string;
+  featureFlags?: Record<string, { enabled: boolean }>;
+};
 
 export async function handleFeedbackReportsRoute(
   req: IncomingMessage,
@@ -108,6 +112,21 @@ export async function handleFeedbackReportsRoute(
       return;
     }
     if (method === 'POST') {
+      // Feature flag gate — feedback_channel must be enabled to create drafts
+      if (
+        ctx.featureFlags
+        && Object.hasOwn(ctx.featureFlags, 'feedback_channel')
+        && !ctx.featureFlags.feedback_channel.enabled
+      ) {
+        sendError(
+          res,
+          403,
+          'feedback_channel_disabled',
+          'feedback_channel feature flag is disabled. Enable feedback_channel in .pd/feature-flags.yaml to use feedback reports.',
+        );
+        return;
+      }
+
       const bodyResult = await readJsonBody(req);
       if (!bodyResult.ok) {
         sendBadRequest(res, bodyResult.error);

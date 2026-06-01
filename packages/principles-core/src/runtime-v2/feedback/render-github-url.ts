@@ -5,7 +5,7 @@
 
 import type { FeedbackType } from './feedback-types.js';
 import { isFeedbackType } from './feedback-types.js';
-import { redactAbsolutePaths, redactTokenLikeValues } from './redact-sensitive.js';
+import { redactAbsolutePaths, redactTokenLikeValues, redactEnvLikeValues } from './redact-sensitive.js';
 
 export const MAX_URL_BODY_LENGTH = 500;
 export const GITHUB_REPO = 'csuzngjh/principles';
@@ -47,14 +47,22 @@ export function buildGitHubIssueDraftUrl(
     };
   }
 
-  const safeTitle = redactAbsolutePaths(redactTokenLikeValues(title)).slice(0, 200);
+  // ERR-009/010: fail loud when shortSummary is not a string
+  if (typeof shortSummary !== 'string') {
+    return {
+      ok: false,
+      error: 'shortSummary must be a string',
+      nextAction: 'provide a string value for shortSummary',
+    };
+  }
+
+  const safeTitle = redactEnvLikeValues(redactAbsolutePaths(redactTokenLikeValues(title))).slice(0, 200);
   const issueTitle = `[${type}] ${safeTitle}`.trim();
 
   // The body must stay short and free of secrets — only the shortSummary
   // reaches the URL. We truncate to MAX_URL_BODY_LENGTH *before* URL-encoding
   // so the decoded body never exceeds the bound.
-  const summarySource = typeof shortSummary === 'string' ? shortSummary : '';
-  const bodySource = redactAbsolutePaths(redactTokenLikeValues(summarySource));
+  const bodySource = redactEnvLikeValues(redactAbsolutePaths(redactTokenLikeValues(shortSummary)));
   const body = truncateToMax(bodySource, MAX_URL_BODY_LENGTH);
 
   const encodedTitle = encodeURIComponent(issueTitle);

@@ -123,6 +123,16 @@ describe('parseDraftRecord', () => {
     expect(r?.diagnosticSummary.canary.status).toBe('unavailable');
     expect(r?.diagnosticSummary.canary.unavailableReason).toBeTruthy();
   });
+
+  it('accepts draft created from error boundary deep link (context.source is console)', () => {
+    const errorBoundaryDraft = {
+      ...VALID_DRAFT,
+      context: { source: 'console', page: '/report-problem?source=error' },
+    };
+    const result = parseDraftRecord(errorBoundaryDraft);
+    expect(result).not.toBeNull();
+    expect(result?.id).toBe('draft-001');
+  });
 });
 
 describe('parseDraftSummary', () => {

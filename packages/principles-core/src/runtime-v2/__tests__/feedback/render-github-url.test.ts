@@ -74,4 +74,44 @@ describe('buildGitHubIssueDraftUrl', () => {
     if (!result.ok) return;
     expect(result.url).toContain('https://github.com/');
   });
+
+  it('redacts env-like values in title (OPENAI_API_KEY=sk-... does not appear in URL)', () => {
+    const result = buildGitHubIssueDraftUrl(
+      'Crash with OPENAI_API_KEY=sk-abc1234567890123456789abcdef in env',
+      'bug',
+      'short summary',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The secret value must be redacted; the key name may remain but the token must not
+    expect(result.url).not.toContain('sk-abc1234567890123456789abcdef');
+    expect(result.url).toContain('%5BREDACTED%5D');
+  });
+
+  it('redacts env-like values in body (OPENAI_API_KEY=sk-... does not appear in URL)', () => {
+    const result = buildGitHubIssueDraftUrl(
+      'title',
+      'bug',
+      'details: OPENAI_API_KEY=sk-abc1234567890123456789abcdef leaked',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The secret value must be redacted; the key name may remain but the token must not
+    expect(result.url).not.toContain('sk-abc1234567890123456789abcdef');
+    expect(result.url).toContain('%5BREDACTED%5D');
+  });
+
+  it('returns structured error when shortSummary is not a string', () => {
+    const nullResult = buildGitHubIssueDraftUrl('title', 'bug', null as unknown as string);
+    expect(nullResult.ok).toBe(false);
+    if (nullResult.ok) return;
+    expect(nullResult.error).toBe('shortSummary must be a string');
+    expect(nullResult.nextAction).toBe('provide a string value for shortSummary');
+
+    const numResult = buildGitHubIssueDraftUrl('title', 'bug', 42 as unknown as string);
+    expect(numResult.ok).toBe(false);
+    if (numResult.ok) return;
+    expect(numResult.error).toBe('shortSummary must be a string');
+    expect(numResult.nextAction).toBe('provide a string value for shortSummary');
+  });
 });
