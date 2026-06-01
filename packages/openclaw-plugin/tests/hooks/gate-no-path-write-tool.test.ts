@@ -18,6 +18,10 @@ const { mockEvaluate, mockEventLog, mockEvolution } = vi.hoisted(() => {
     recordRuleEnforced: vi.fn(),
     recordRuleHostBlocked: vi.fn(),
     recordRuleHostRequireApproval: vi.fn(),
+    recordRuleHostAutoCorrectProposed: vi.fn(),
+    recordRuleHostAutoCorrectApplied: vi.fn(),
+    recordGateBlock: vi.fn(),
+    recordSession: vi.fn(),
   };
   const mockEvolution = {
     getTier: vi.fn().mockReturnValue(3),
