@@ -26,22 +26,27 @@ function read(relativePath: string): string {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 }
 
-interface HookRegistration {
+interface ApiOnRegistration {
   event: string;
-  surfaceId: string;
+  surfaceId: string | null;
+  rawLine: string;
   index: number;
 }
 
-function extractHookRegistrations(source: string): HookRegistration[] {
-  const registrations: HookRegistration[] = [];
-  const hookPattern = /guardHook\s*\(\s*['"]([^'"]+)['"]\s*,/g;
+function extractApiOnRegistrations(source: string): ApiOnRegistration[] {
+  const registrations: ApiOnRegistration[] = [];
+  const apiOnPattern = /api\.on\s*\(\s*['"]([^'"]+)['"]\s*,\s*/g;
   let match: RegExpExecArray | null;
-  let hookIndex = 0;
-  while ((match = hookPattern.exec(source)) !== null) {
+  let regIndex = 0;
+  while ((match = apiOnPattern.exec(source)) !== null) {
+    const event = match[1];
+    const afterMatch = source.slice(match.index + match[0].length);
+    const guardHookMatch = afterMatch.match(/^guardHook\s*\(\s*['"]([^'"]+)['"]\s*,/);
     registrations.push({
-      surfaceId: match[1],
-      event: match[1].replace(/^hook:/, '').replace(/\..+$/, ''),
-      index: hookIndex++,
+      event,
+      surfaceId: guardHookMatch ? guardHookMatch[1] : null,
+      rawLine: match[0],
+      index: regIndex++,
     });
   }
   return registrations;
@@ -106,66 +111,71 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
   });
 
-  describe('hook registration coverage — per-registration, not deduplicated', () => {
-    it('every guardHook() call in index.ts has a classified surface id', () => {
-      const source = read('packages/openclaw-plugin/src/index.ts');
-      const registrations = extractHookRegistrations(source);
+  describe('api.on() registration coverage — every hook must be guarded', () => {
+    const source = read('packages/openclaw-plugin/src/index.ts');
+    const registrations = extractApiOnRegistrations(source);
 
+    it('has at least one api.on registration', () => {
       expect(registrations.length).toBeGreaterThan(0);
+    });
 
-      const registeredIds = new Set(
-        PLUGIN_SURFACE_REGISTRY.filter(s => s.kind === 'hook').map(s => s.id),
-      );
+    it('every api.on() handler is wrapped with guardHook()', () => {
+      const unguarded = registrations.filter(r => r.surfaceId === null);
+      if (unguarded.length > 0) {
+        const details = unguarded.map(r => `api.on('${r.event}', ...) #${r.index} — NOT wrapped with guardHook`);
+        throw new Error(
+          `Found ${unguarded.length} unguarded api.on() registration(s):\n${details.join('\n')}\n` +
+          `Every api.on() handler MUST be wrapped with guardHook('<surfaceId>', api.logger, ...) per PRI-289.`,
+        );
+      }
+    });
 
+    it('every guardHook surface id exists in PLUGIN_SURFACE_REGISTRY', () => {
+      const guarded = registrations.filter(r => r.surfaceId !== null);
+      const registeredIds = new Set(PLUGIN_SURFACE_REGISTRY.map(s => s.id));
       const unclassified: string[] = [];
-      for (const reg of registrations) {
-        if (!registeredIds.has(reg.surfaceId)) {
-          unclassified.push(reg.surfaceId);
+      for (const reg of guarded) {
+        if (!registeredIds.has(reg.surfaceId!)) {
+          unclassified.push(reg.surfaceId!);
         }
       }
-
       expect(unclassified).toEqual([]);
     });
 
-    it('each individual hook registration is covered (no dedup by event name)', () => {
-      const source = read('packages/openclaw-plugin/src/index.ts');
-      const registrations = extractHookRegistrations(source);
-
-      const registeredIds = new Set(
-        PLUGIN_SURFACE_REGISTRY.filter(s => s.kind === 'hook').map(s => s.id),
-      );
-
-      for (const reg of registrations) {
-        expect(registeredIds.has(reg.surfaceId)).toBe(true);
+    it('each individual api.on registration is covered (no dedup by event name)', () => {
+      const guarded = registrations.filter(r => r.surfaceId !== null);
+      const registeredIds = new Set(PLUGIN_SURFACE_REGISTRY.map(s => s.id));
+      for (const reg of guarded) {
+        expect(registeredIds.has(reg.surfaceId!)).toBe(true);
       }
     });
 
     it('after_tool_call has two registrations: core + trajectory', () => {
-      const source = read('packages/openclaw-plugin/src/index.ts');
-      const registrations = extractHookRegistrations(source);
-
-      const afterToolCallRegs = registrations.filter(r => r.surfaceId.startsWith('hook:after_tool_call'));
+      const afterToolCallRegs = registrations.filter(r => r.event === 'after_tool_call');
       expect(afterToolCallRegs.length).toBe(2);
       expect(afterToolCallRegs[0].surfaceId).toBe('hook:after_tool_call');
       expect(afterToolCallRegs[1].surfaceId).toBe('hook:after_tool_call.trajectory');
     });
 
     it('llm_output has two registrations: core + trajectory', () => {
-      const source = read('packages/openclaw-plugin/src/index.ts');
-      const registrations = extractHookRegistrations(source);
-
-      const llmOutputRegs = registrations.filter(r => r.surfaceId.startsWith('hook:llm_output'));
+      const llmOutputRegs = registrations.filter(r => r.event === 'llm_output');
       expect(llmOutputRegs.length).toBe(2);
       expect(llmOutputRegs[0].surfaceId).toBe('hook:llm_output');
       expect(llmOutputRegs[1].surfaceId).toBe('hook:llm_output.trajectory');
     });
 
-    it('total hook registrations match expected count', () => {
-      const source = read('packages/openclaw-plugin/src/index.ts');
-      const registrations = extractHookRegistrations(source);
-
+    it('total api.on registrations with guardHook match registry hook count', () => {
+      const guarded = registrations.filter(r => r.surfaceId !== null);
       const registryHookCount = PLUGIN_SURFACE_REGISTRY.filter(s => s.kind === 'hook').length;
-      expect(registrations.length).toBe(registryHookCount);
+      expect(guarded.length).toBe(registryHookCount);
+    });
+
+    it('all guardHook calls pass api.logger as second argument', () => {
+      const guardHookWithLogger = /guardHook\s*\(\s*['"][^'"]+['"]\s*,\s*api\.logger\s*,/g;
+      const guardHookTotal = /guardHook\s*\(\s*['"][^'"]+['"]\s*,/g;
+      const withLoggerCount = (source.match(guardHookWithLogger) ?? []).length;
+      const totalCount = (source.match(guardHookTotal) ?? []).length;
+      expect(withLoggerCount).toBe(totalCount);
     });
   });
 
@@ -330,14 +340,14 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     it('guardHook returns original handler for core surfaces', async () => {
       const { guardHook } = await import('../../src/core/surface-guard.js');
       const handler = () => 'result';
-      const guarded = guardHook('hook:before_prompt_build', handler);
+      const guarded = guardHook('hook:before_prompt_build', undefined, handler);
       expect(guarded).toBe(handler);
     });
 
     it('guardHook returns no-op handler for quiet surfaces', async () => {
       const { guardHook } = await import('../../src/core/surface-guard.js');
       const handler = () => 'result';
-      const guarded = guardHook('hook:after_tool_call.trajectory', handler);
+      const guarded = guardHook('hook:after_tool_call.trajectory', undefined, handler);
       expect(guarded).not.toBe(handler);
       expect(guarded({} as never, {} as never)).toBeUndefined();
     });
@@ -345,8 +355,30 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     it('guardHook returns no-op handler for gone surfaces', async () => {
       const { guardHook } = await import('../../src/core/surface-guard.js');
       const handler = () => 'result';
-      const guarded = guardHook('prompt_section:message_sanitize', handler);
+      const guarded = guardHook('prompt_section:message_sanitize', undefined, handler);
       expect(guarded).not.toBe(handler);
+    });
+
+    it('guardHook logs disabled reason via logger for quiet surfaces', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+      const logs: string[] = [];
+      const logger = { info: (msg: string) => { logs.push(msg); } };
+      const handler = () => 'result';
+      const guarded = guardHook('hook:after_tool_call.trajectory', logger, handler);
+      guarded({} as never, {} as never);
+      expect(logs.length).toBe(1);
+      expect(logs[0]).toContain('[PD:surface-guard] SKIP');
+      expect(logs[0]).toContain('hook:after_tool_call.trajectory');
+    });
+
+    it('guardHook does not log for enabled surfaces', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+      const logs: string[] = [];
+      const logger = { info: (msg: string) => { logs.push(msg); } };
+      const handler = () => 'result';
+      const guarded = guardHook('hook:before_prompt_build', logger, handler);
+      guarded({} as never, {} as never);
+      expect(logs.length).toBe(0);
     });
 
     it('guardService returns null for evolution-worker (quiet, default off)', async () => {

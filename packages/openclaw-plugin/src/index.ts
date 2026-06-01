@@ -209,7 +209,7 @@ const plugin = {
     // ── Hook: Prompt Building ──
     api.on(
       'before_prompt_build',
-      guardHook('hook:before_prompt_build', async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
+      guardHook('hook:before_prompt_build', api.logger, async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_prompt_build');
         if (!workspaceDir) {
           api.logger.error(
@@ -271,7 +271,7 @@ const plugin = {
     // ── Hook: Security Gate ──
     api.on(
       'before_tool_call',
-      guardHook('hook:before_tool_call', (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
+      guardHook('hook:before_tool_call', api.logger, (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_tool_call');
         if (!workspaceDir) {
           api.logger.error(
@@ -306,7 +306,7 @@ const plugin = {
     // ── Hook: Pain & Trust ──
     api.on(
       'after_tool_call',
-      guardHook('hook:after_tool_call', (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
+      guardHook('hook:after_tool_call', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_tool_call');
         if (!workspaceDir) {
           api.logger.error(
@@ -339,7 +339,7 @@ const plugin = {
     // ── Hook: LLM Analysis ──
     api.on(
       'llm_output',
-      guardHook('hook:llm_output', (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
+      guardHook('hook:llm_output', api.logger, (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'llm_output');
         if (!workspaceDir) {
           api.logger.error(
@@ -373,7 +373,7 @@ const plugin = {
     // Note: after_tool_call and llm_output are safe to collect
     api.on(
       'after_tool_call',
-      guardHook('hook:after_tool_call.trajectory', (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
+      guardHook('hook:after_tool_call.trajectory', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         try {
           const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'trajectory.after_tool_call');
           if (!workspaceDir) return;
@@ -387,7 +387,7 @@ const plugin = {
 
     api.on(
       'llm_output',
-      guardHook('hook:llm_output.trajectory', (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
+      guardHook('hook:llm_output.trajectory', api.logger, (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         try {
           const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'trajectory.llm_output');
           if (!workspaceDir) return;
@@ -403,7 +403,7 @@ const plugin = {
     api.on(
       'subagent_spawning',
        
-      guardHook('hook:subagent_spawning', (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
+      guardHook('hook:subagent_spawning', api.logger, (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
         try {
           // FIX (B): Never fall back to '.' — fail-fast with ERROR log if workspaceDir cannot be resolved.
           // For subagent hooks, we use event.agentId as the target agent for workspace resolution.
@@ -447,7 +447,7 @@ const plugin = {
 
     api.on(
       'subagent_ended',
-      guardHook('hook:subagent_ended', (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
+      guardHook('hook:subagent_ended', api.logger, (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
         try {
           // FIX (B): Never fall back to '.' — fail-fast with ERROR log if workspaceDir cannot be resolved.
           const workspaceDir = resolveWorkspaceDirFromApi(api, undefined);
@@ -483,7 +483,7 @@ const plugin = {
     );
 
     // ── Hook: Lifecycle ──
-    api.on('before_reset', guardHook('hook:before_reset', (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
+    api.on('before_reset', guardHook('hook:before_reset', api.logger, (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_reset');
       if (!workspaceDir) {
         api.logger.error(
@@ -496,7 +496,7 @@ const plugin = {
       return handleBeforeReset(event, { ...ctx, workspaceDir });
     }));
     
-    api.on('before_compaction', guardHook('hook:before_compaction', (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
+    api.on('before_compaction', guardHook('hook:before_compaction', api.logger, (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_compaction');
       if (!workspaceDir) {
         api.logger.error(
@@ -509,7 +509,7 @@ const plugin = {
       return handleBeforeCompaction(event, { ...ctx, workspaceDir });
     }));
     
-    api.on('after_compaction', guardHook('hook:after_compaction', (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
+    api.on('after_compaction', guardHook('hook:after_compaction', api.logger, (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_compaction');
       if (!workspaceDir) {
         api.logger.error(

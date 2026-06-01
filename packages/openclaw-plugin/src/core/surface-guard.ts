@@ -98,8 +98,8 @@ export type HookHandler<E, C, R> = (event: E, ctx: C) => R | Promise<R>;
 
 export function guardHook<E, C, R>(
   surfaceId: string,
+  logger: { info?: (msg: string) => void; debug?: (msg: string) => void } | undefined,
   handler: HookHandler<E, C, R>,
-  logger?: { info?: (msg: string) => void; debug?: (msg: string) => void },
 ): HookHandler<E, C, R> {
   const check = isSurfaceEnabled(surfaceId);
   if (check.enabled) {
@@ -107,7 +107,7 @@ export function guardHook<E, C, R>(
   }
   const reason = check.reason ?? 'surface not enabled';
   return (_event: E, _ctx: C): R | Promise<R> => {
-    logger?.debug?.(`[PD:surface-guard] SKIP ${surfaceId}: ${reason}`);
+    logger?.info?.(`[PD:surface-guard] SKIP ${surfaceId}: ${reason}`);
     return undefined as R;
   };
 }
