@@ -642,6 +642,51 @@ async function rejectApproval(approvalId: string, reason: string): Promise<ApiRe
   });
 }
 
+// ── MVP seed feedback report drafts (PRI-285) ────────────────────────────────
+// The Console never auto-uploads. The helpers below create / list / get /
+// delete local drafts on the server's <workspace>/.pd/feedback/drafts/ folder.
+
+type FeedbackDraftSummary = {
+  id: string;
+  createdAt: string;
+  type: string;
+  title: string;
+};
+
+type FeedbackReportEnvelope = {
+  id: string;
+  createdAt: string;
+  report: Record<string, unknown>;
+};
+
+type FeedbackDraftsListEnvelope = { drafts: FeedbackDraftSummary[] };
+type FeedbackDraftEnvelope = { report: Record<string, unknown> };
+type FeedbackDeleteEnvelope = { deleted: boolean };
+
+async function createFeedbackReport(
+  input: unknown,
+  diagnostics: unknown,
+): Promise<ApiResponse<FeedbackReportEnvelope>> {
+  return request<FeedbackReportEnvelope>('/api/feedback/reports', {
+    method: 'POST',
+    body: JSON.stringify({ input, diagnostics }),
+  });
+}
+
+async function listFeedbackReports(): Promise<ApiResponse<FeedbackDraftsListEnvelope>> {
+  return request<FeedbackDraftsListEnvelope>('/api/feedback/reports');
+}
+
+async function getFeedbackReport(id: string): Promise<ApiResponse<FeedbackDraftEnvelope>> {
+  return request<FeedbackDraftEnvelope>('/api/feedback/reports/' + encodeURIComponent(id));
+}
+
+async function deleteFeedbackReport(id: string): Promise<ApiResponse<FeedbackDeleteEnvelope>> {
+  return request<FeedbackDeleteEnvelope>('/api/feedback/reports/' + encodeURIComponent(id), {
+    method: 'DELETE',
+  });
+}
+
 export {
   getToken,
   setToken,
@@ -689,11 +734,21 @@ export {
   fetchApprovalDetail,
   approveApproval,
   rejectApproval,
+  createFeedbackReport,
+  listFeedbackReports,
+  getFeedbackReport,
+  deleteFeedbackReport,
 };
 
 export type {
   OverviewData,
   OverviewHealth,
+  ApiResponse,
+  FeedbackDraftSummary,
+  FeedbackReportEnvelope,
+  FeedbackDraftsListEnvelope,
+  FeedbackDraftEnvelope,
+  FeedbackDeleteEnvelope,
   GateStats,
   FeedbackGfi,
   EmpathyEvent,
