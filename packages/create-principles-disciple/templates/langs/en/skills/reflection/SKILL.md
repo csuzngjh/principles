@@ -12,7 +12,7 @@ disable-model-invocation: false
 Please execute the following reflection steps:
 
 ## 1. Status Scan
-- **Goal**: What was our original objective? (Check `PLAN.md` or early conversation)
+- **Goal**: What was our original objective? (Check early conversation context)
 - **Status**: How much is completed now? Where are we stuck?
 - **Cost**: We've consumed significant tokens. Is the output matching the cost?
 
@@ -37,4 +37,4 @@ If pain detected, must execute:
 
 ## 5. Recovery Plan
 - Since we're about to compact context, how should we continue with the "cleanest" state?
-- Update `PLAN.md`, mark current progress, ensure seamless continuation after compaction.
+- Update `memory/.scratchpad.md`, mark current progress, ensure seamless continuation after compaction.

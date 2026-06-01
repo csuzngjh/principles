@@ -183,7 +183,7 @@ openclaw cron add --name "pd-grooming-daily" \
 openclaw cron add --name "health-check" \
   --every 4h \
   --session main \
-  --system-event 'Health check: Verify core tools (rg, node, python) are available. Check if PLAN.md state matches actual progress.'
+  --system-event 'Health check: Verify core tools (rg, node, python) are available. Check if workspace state matches actual progress.'
 ```
 
 ### 3. Strategy Alignment (Daily at 9 AM)
