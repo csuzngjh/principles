@@ -19,7 +19,7 @@
 
   <directive id="T-02" name="PHYSICAL_MEMORY_PERSISTENCE">
     <trigger>在跨越多个文件进行推理、面临复杂的 Debug、或当对话上下文变得很长（>5 轮）时。</trigger>
-    <must>信任文件，而不是你的上下文窗口。你必须主动将中间结论、断点和后续步骤写入 `memory/.scratchpad.md` 或 `PLAN.md`。</must>
+    <must>信任文件，而不是你的上下文窗口。你必须主动将中间结论、断点和后续步骤写入 `memory/.scratchpad.md`。</must>
     <forbidden>依赖你内部的“大脑记忆”来保持复杂状态，这些状态必然会被上下文压缩机制抹除。</forbidden>
   </directive>
 

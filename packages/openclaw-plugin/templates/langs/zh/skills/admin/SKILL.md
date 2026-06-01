@@ -15,7 +15,7 @@ disable-model-invocation: true
 ### 1. `diagnose` (系统诊断)
 **动作**: 检查“毛坯房”架构的完整性。
 - **核心组件**: 检查 `.claude/hooks/hook_runner.py` 是否存在且可执行。
-- **文档完整性**: 检查 `.principles/PROFILE.json`, `PLAN.md` 等是否存在。
+- **文档完整性**: 检查 `.principles/PROFILE.json` 等是否存在。
 - **工具感知**: 检查 `.state/SYSTEM_CAPABILITIES.json`。若缺失，提示用户："⚠️ 尚未进行工具链升级。建议运行 `/bootstrap-tools` 以大幅提升系统能力。"
 - **记忆挂载**: 检查 `CLAUDE.md` 是否包含 `System Integration` 章节。
 - **输出**: 生成一份健康报告，列出缺失或异常的项目。
@@ -23,7 +23,7 @@ disable-model-invocation: true
 ### 2. `repair` (系统修复)
 **动作**: 
 - **配置恢复**: 如果 `PROFILE.json` 缺失或损坏，尝试从 `.claude/templates/PROFILE.json` 恢复。
-- **结构补全**: 确保 `PLAN.md` 包含 `## Target Files` 标题。
+- **结构补全**: 确保工作区结构完整。
 - **强制清理**: 删除 `.pain_flag`, `.verdict.json`, `.user_verdict.json`, `.pending_reflection` 等临时标记。
 
 ### 3. `reset` (强制重置)

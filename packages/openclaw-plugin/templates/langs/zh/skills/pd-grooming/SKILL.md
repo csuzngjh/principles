@@ -24,7 +24,7 @@ description: 执行工作区"大扫除"，将散落的临时文件归档或清�
 ### 🌟 核心资产区 (Core Assets)
 **这些文件必须留在根目录，不可触碰：**
 - `AGENTS.md`, `SOUL.md`, `HEARTBEAT.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md`
-- `README.md`, `PLAN.md`
+- `README.md`
 - `.principles/`, `.state/`
 
 ### 🎯 可处理区 (Targets for Grooming)
