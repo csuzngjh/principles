@@ -2,7 +2,6 @@
 title: "Siege of Cyber Garbage and Humanity's Escape Pod"
 description: "Why Cognitive Exo-Brains Are Scarcer Than Code in the Era of Infinite AI Execution. The starting point of the Principles Disciple (PD) project."
 date: 2026-05-20
-author: Wesley
 lang: en
 ---
 
@@ -129,3 +128,7 @@ Of the ten commands you give to AI today, how many are asking "Is it worth doing
 If you are not satisfied with AI just doing the work for you, but hope AI forces you to become smarter; if you hold industry know-how but struggle with isolated trial and error—the next phase of the PD project is prepared for the first wave of trailblazers who dare to embrace constructive friction.
 
 ![Human + AI sailing](/images/7.png)
+
+---
+
+*— The Reed*
