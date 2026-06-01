@@ -109,15 +109,13 @@ function segmentsOfKey(key: string): string[] {
 
 function isSensitiveKey(key: string): boolean {
   const segs = segmentsOfKey(key);
-  // Require that EVERY segment of the key matches a sensitive segment for the
-  // composite key to be considered sensitive. This prevents "author" (segments
-  // = ["author"]) from being treated as a sensitive key, while still flagging
-  // "auth_token" (segments = ["auth", "token"]) and "api-key" (["api", "key"]).
   if (segs.length === 0) return false;
+  // A key is sensitive if ANY of its segments matches a sensitive segment.
+  // This catches composite names like "github_token" or "db_password".
   for (const seg of segs) {
-    if (!SENSITIVE_KEY_SEGMENTS.has(seg)) return false;
+    if (SENSITIVE_KEY_SEGMENTS.has(seg)) return true;
   }
-  return true;
+  return false;
 }
 
 export type RedactResult =
@@ -138,9 +136,15 @@ function redactInner(value: unknown, ctx: RedactContext): RedactResult {
   if (value === undefined) return { ok: true, value: undefined, notes: [] };
   const t = typeof value;
   if (t === 'string') {
-    const s = (value as string).length > REDACT_MAX_STRING
-      ? (value as string).slice(0, REDACT_MAX_STRING) + '…'
-      : (value as string);
+    let s = value as string;
+    // Run string through path/token/env redactors before truncation so
+    // secrets embedded in values (e.g. buildId, cwd) are cleaned regardless of key name.
+    s = redactAbsolutePaths(s);
+    s = redactTokenLikeValues(s);
+    s = redactEnvLikeValues(s);
+    if (s.length > REDACT_MAX_STRING) {
+      s = s.slice(0, REDACT_MAX_STRING) + '…';
+    }
     return { ok: true, value: s, notes: [] };
   }
   if (t === 'bigint') {

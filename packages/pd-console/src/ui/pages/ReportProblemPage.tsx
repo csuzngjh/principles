@@ -81,14 +81,20 @@ export function ReportProblemPage() {
   }, []);
 
   const refreshDrafts = async (): Promise<void> => {
-    const result: ApiResponse<FeedbackDraftsListEnvelope> = await listFeedbackReports();
-    if (result.success && result.data) {
-      const parsed: FeedbackDraftSummary[] = [];
-      for (const item of result.data.drafts) {
-        const p = parseDraftSummary(item);
-        if (p) parsed.push(p);
+    try {
+      const result: ApiResponse<FeedbackDraftsListEnvelope> = await listFeedbackReports();
+      if (result.success && result.data) {
+        const rawDrafts = result.data.drafts;
+        const items = Array.isArray(rawDrafts) ? rawDrafts : [];
+        const parsed: FeedbackDraftSummary[] = [];
+        for (const item of items) {
+          const p = parseDraftSummary(item);
+          if (p) parsed.push(p);
+        }
+        setDrafts(parsed);
       }
-      setDrafts(parsed);
+    } catch {
+      // Swallow — draft loading failure must not block the form.
     }
   };
 
@@ -110,7 +116,7 @@ export function ReportProblemPage() {
       if (expectedBehavior.trim()) input.expectedBehavior = expectedBehavior.trim();
       if (actualBehavior.trim()) input.actualBehavior = actualBehavior.trim();
       if (userSeverity) input.userSeverity = userSeverity;
-      if (sourceFromUrl) input.context = { source: "console", page: "/report-problem" };
+      if (sourceFromUrl) input.context = { source: sourceFromUrl, page: "/report-problem" };
 
       const result: ApiResponse<FeedbackReportEnvelope> = await createFeedbackReport(input, {});
       if (result.success !== true || !result.data) {

@@ -82,6 +82,16 @@ export function parseDraftRecord(value: unknown): DraftRecord | null {
     return null;
   }
   const diagnostic = asRecord(value.diagnosticSummary);
+  const rawCanary = diagnostic.canary;
+  const canaryRecord = isRecord(rawCanary) ? rawCanary : null;
+  let canaryStatus: 'available' | 'unavailable' | null = null;
+  if (canaryRecord && typeof canaryRecord.status === 'string' && (canaryRecord.status === 'available' || canaryRecord.status === 'unavailable')) {
+    canaryStatus = canaryRecord.status;
+  }
+  const validCanary = canaryStatus
+    ? { status: canaryStatus, summary: typeof canaryRecord?.summary === 'string' ? canaryRecord.summary : undefined, unavailableReason: typeof canaryRecord?.unavailableReason === 'string' ? canaryRecord.unavailableReason : undefined }
+    : null;
+
   return {
     id: value.id,
     createdAt: value.createdAt,
@@ -101,8 +111,8 @@ export function parseDraftRecord(value: unknown): DraftRecord | null {
       versions: asRecord(diagnostic.versions),
       platform: asRecord(diagnostic.platform),
       featureFlags: asRecord(diagnostic.featureFlags),
-      canary: { status: 'unavailable', unavailableReason: 'diagnostic summary unavailable' },
-      recentEvents: [],
+      canary: validCanary ?? { status: 'unavailable' as const, unavailableReason: 'diagnostic summary unavailable' },
+      recentEvents: Array.isArray(diagnostic.recentEvents) ? diagnostic.recentEvents : [],
     },
     privacy: {
       includedSections: privacy.includedSections,

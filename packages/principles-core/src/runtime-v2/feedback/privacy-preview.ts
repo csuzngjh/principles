@@ -95,9 +95,14 @@ export function buildEmailText(report: FeedbackReport): string {
   if (report.contextRefs.length > 0) {
     lines.push('');
     lines.push('— Context references —');
-    for (const r of report.contextRefs) {
+    const maxContextRefs = 12;
+    const shownRefs = report.contextRefs.slice(0, maxContextRefs);
+    for (const r of shownRefs) {
       const label = r.label ? ` — ${r.label}` : '';
       lines.push(`- ${r.kind}: ${r.id}${label}`);
+    }
+    if (report.contextRefs.length > maxContextRefs) {
+      lines.push(`- … and ${report.contextRefs.length - maxContextRefs} more`);
     }
   }
   lines.push('');
@@ -108,7 +113,12 @@ export function buildEmailText(report: FeedbackReport): string {
   for (const s of report.privacy.excludedByDefault) lines.push(`- ${s}`);
   if (report.privacy.redactionNotes.length > 0) {
     lines.push('Redaction notes:');
-    for (const n of report.privacy.redactionNotes) lines.push(`- ${n}`);
+    const maxNotes = 12;
+    const shownNotes = report.privacy.redactionNotes.slice(0, maxNotes);
+    for (const n of shownNotes) lines.push(`- ${n}`);
+    if (report.privacy.redactionNotes.length > maxNotes) {
+      lines.push(`- … and ${report.privacy.redactionNotes.length - maxNotes} more`);
+    }
   }
 
   // Defense-in-depth: scrub any absolute path / token / env value that slipped through.

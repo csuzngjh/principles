@@ -17,9 +17,12 @@ import type { FeedbackReport } from '@principles/core/runtime-v2/feedback';
  * Returns `String(err)` if no `.message` is present.
  */
 function errMsg(e: { code?: string } | undefined, err: unknown): string {
-  if (e && typeof e === 'object' && 'message' in e && typeof (e as { message?: unknown }).message === 'string') {
-    return (e as { message: string }).message;
+  // Check the unknown caught value (err) for a string message first.
+  if (err !== null && err !== undefined && typeof err === 'object' && 'message' in err) {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === 'string') return msg;
   }
+  if (typeof err === 'string') return err;
   return String(err);
 }
 
@@ -41,6 +44,7 @@ export type FeedbackReportGetResult = {
   ok: boolean;
   report?: FeedbackReport;
   error?: string;
+  errorCode?: 'NOT_FOUND' | 'INVALID_ID' | 'READ_ERROR';
   nextAction?: string;
 };
 
@@ -171,8 +175,10 @@ export class FeedbackReportConsoleModel {
               title: obj.title as string,
             });
           }
-        } catch {
-          // skip unreadable / malformed file
+        } catch (readErr) {
+          // Skip unreadable/malformed draft — but record diagnostics for observability.
+          const skipReason = readErr instanceof Error ? readErr.message : String(readErr);
+          console.warn(`[FeedbackReportConsoleModel] skipping unreadable draft "${f.name}": ${skipReason}`);
         }
       }
       drafts.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -195,6 +201,7 @@ export class FeedbackReportConsoleModel {
       return {
         ok: false,
         error: `Invalid feedback report id: ${JSON.stringify(id)}`,
+        errorCode: 'INVALID_ID',
         nextAction: 'pass a safe id matching /^[A-Za-z0-9._-]+$/ with length 1-256',
       };
     }
@@ -218,12 +225,14 @@ export class FeedbackReportConsoleModel {
         return {
           ok: false,
           error: `Feedback report not found: ${id}`,
+          errorCode: 'NOT_FOUND',
           nextAction: 'verify the report id is correct (use list() to enumerate drafts)',
         };
       }
       return {
         ok: false,
         error: `Failed to read feedback report at ${filePath}: ${errMsg(e, err)}`,
+        errorCode: 'READ_ERROR',
         nextAction: 'verify the file is readable and the workspace directory is intact',
       };
     }

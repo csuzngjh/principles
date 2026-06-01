@@ -4,6 +4,7 @@
 
 const MAX_SAFE_STRINGIFY_DEPTH = 8;
 const MAX_SAFE_STRINGIFY_KEYS = 50;
+const TRUNCATE_OUTPUT_LIMIT = 2000;
 
 function truncateString(s: string, max: number): string {
   if (s.length <= max) return s;
@@ -14,7 +15,11 @@ type StringifyCtx = { seen: WeakSet<object>; depth: number; out: { result: strin
 
 function safeStringifyValue(value: unknown, ctx: StringifyCtx): void {
   const { out } = ctx;
-  if (out.result === '<truncated>') return;
+  // Length-based early exit: stop appending once output exceeds the limit.
+  if (out.result.length >= TRUNCATE_OUTPUT_LIMIT) {
+    if (out.result !== '<truncated>') out.result = '<truncated>';
+    return;
+  }
   if (value === null) {
     out.result += 'null';
     return;

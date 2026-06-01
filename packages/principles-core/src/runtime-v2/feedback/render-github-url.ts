@@ -54,7 +54,8 @@ export function buildGitHubIssueDraftUrl(
   // reaches the URL. We truncate to MAX_URL_BODY_LENGTH *before* URL-encoding
   // so the decoded body never exceeds the bound.
   const summarySource = typeof shortSummary === 'string' ? shortSummary : '';
-  const body = truncateToMax(summarySource, MAX_URL_BODY_LENGTH);
+  const bodySource = redactAbsolutePaths(redactTokenLikeValues(summarySource));
+  const body = truncateToMax(bodySource, MAX_URL_BODY_LENGTH);
 
   const encodedTitle = encodeURIComponent(issueTitle);
   const encodedBody = encodeURIComponent(body);

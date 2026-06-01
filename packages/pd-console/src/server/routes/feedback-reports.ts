@@ -153,8 +153,7 @@ export async function handleFeedbackReportsRoute(
     try {
       const result = await model.get(id);
       if (!result.ok) {
-        const isMissing = (result.error ?? '').includes('not found');
-        if (isMissing) {
+        if (result.errorCode === 'NOT_FOUND') {
           sendNotFound(res, result.error);
         } else {
           sendError(res, 400, 'feedback_reports_get_failed', result.error);

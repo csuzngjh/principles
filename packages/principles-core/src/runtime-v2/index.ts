@@ -277,10 +277,6 @@ export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
 
-// Workspace guidance migration (PRI-286) — remove stale PLAN.md gate guidance from installed workspaces
-export { migrateWorkspaceGuidance, containsStalePlanMdGuidance, STALE_PLAN_MD_PATTERNS } from './workspace-guidance-migration.js';
-export type { MigrationResult as WorkspaceGuidanceMigrationResult } from './workspace-guidance-migration.js';
-
 // Ledger file utilities (for audit/consistency checks)
 export { loadLedger, saveLedger, getLedgerFilePathPublic, updatePrinciple } from '../principle-tree-ledger.js';
 
