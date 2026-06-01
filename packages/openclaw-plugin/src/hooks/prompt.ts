@@ -2,18 +2,16 @@
  
 import * as fs from 'fs';
 import * as path from 'path';
-import * as yaml from 'js-yaml';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, trackFriction, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
-import { detectApprovalMarker, setConfirmFirstApproval, setConfirmFirstDirective, hydrateFromStore, pruneStoreStaleRows, setConfirmFirstStore, resetConfirmFirst, setConfirmFirstGateEnabled } from '../core/confirm-first-gate.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler, SqliteConfirmFirstStateStore, SqliteConnection, computeEffectiveFlags, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler, SqliteConnection } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../core/runtime-v2-prompt-activation-reader.js';
 import {
@@ -78,7 +76,6 @@ function cachedReadFile(filePath: string): string {
 // Module-level empathy state — shared across calls to avoid per-turn I/O
 let _empathyTurnCounter = 0;
 let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null = null;
-let _confirmFirstHydrationCounter = 0;
 
 /**
  * Model configuration with primary model and optional fallback models
@@ -266,58 +263,6 @@ export function getDiagnosticianModel(api: PromptHookApi | null, logger?: Plugin
  */
 
 
-function ensureConfirmFirstStore(workspaceDir: string): void {
-  if (!_confirmFirstStoreInitialized) {
-    try {
-      const connection = new SqliteConnection({ workspaceDir, readonly: false });
-      setConfirmFirstStore(new SqliteConfirmFirstStateStore(connection));
-      _confirmFirstStoreInitialized = true;
-    } catch (err) {
-      console.warn(`[PD:ConfirmFirst] Failed to initialize store: ${String(err)}`);
-    }
-  }
-}
-let _confirmFirstStoreInitialized = false;
-
-/**
- * PRI-286: Read confirm_first_gate feature flag from workspace config
- * and propagate to the confirm-first-gate module.
- * Uses cached read for performance — only re-reads when file changes.
- * Uses yaml.load + computeEffectiveFlags for correct YAML block-scoped parsing
- * (a hand-rolled regex could match enabled: true from a different flag block).
- */
-let _confirmFirstFlagCache: { enabled: boolean; mtime: number } | null = null;
-function _syncConfirmFirstFeatureFlag(workspaceDir: string): void {
-  const flagPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
-  try {
-    const stat = fs.statSync(flagPath);
-    const mtime = stat.mtimeMs;
-    // Use cached value if file hasn't changed
-    if (_confirmFirstFlagCache && _confirmFirstFlagCache.mtime === mtime) {
-      return;
-    }
-    const raw = fs.readFileSync(flagPath, 'utf8');
-    const parsed: unknown = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
-    if (parsed === null || parsed === undefined || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      // Not a valid YAML mapping — use default (disabled)
-      _confirmFirstFlagCache = { enabled: false, mtime };
-      setConfirmFirstGateEnabled(false);
-      return;
-    }
-    const effective = computeEffectiveFlags(parsed as Record<string, unknown>, DEFAULT_FEATURE_FLAGS, flagPath);
-    const cfFlag = effective.flags['confirm_first_gate'];
-    const enabled = cfFlag?.enabled === true;
-    _confirmFirstFlagCache = { enabled, mtime };
-    setConfirmFirstGateEnabled(enabled);
-  } catch {
-    // File doesn't exist or unreadable — use default (disabled)
-    if (_confirmFirstFlagCache?.enabled !== false) {
-      _confirmFirstFlagCache = { enabled: false, mtime: 0 };
-      setConfirmFirstGateEnabled(false);
-    }
-  }
-}
-
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi }
@@ -338,18 +283,7 @@ export async function handleBeforePromptBuild(
   }
 
   if (sessionId) {
-    ensureConfirmFirstStore(workspaceDir);
-    hydrateFromStore(sessionId);
-    // PRI-286: Propagate confirm_first_gate feature flag state to gate module.
-    // Read the flag from workspace feature-flags.yaml (same path PromptActivationReader uses).
-    _syncConfirmFirstFeatureFlag(workspaceDir);
-    _confirmFirstHydrationCounter++;
-    if (_confirmFirstHydrationCounter % 100 === 0) {
-      const pruned = pruneStoreStaleRows();
-      if (pruned > 0) {
-        logger?.info?.(`[PD:ConfirmFirst] Pruned ${pruned} stale rows from confirm_first_state`);
-      }
-    }
+    wctx.trajectory?.recordSession?.({ sessionId });
   }
 
   if (sessionId && trigger === 'user' && Array.isArray(event.messages) && event.messages.length > 0) {
@@ -360,25 +294,6 @@ export async function handleBeforePromptBuild(
 
     if (latestUserIndex) {
       const userText = getTextContent(latestUserIndex.message);
-
-      // ── Confirm-first approval detection ──
-      // If user sends approval language, mark session as approved for confirm-first gate
-      if (sessionId && detectApprovalMarker(userText)) {
-        setConfirmFirstApproval(sessionId);
-        // P2: Emit approval telemetry for observability (ERR-002)
-        try {
-          wctx.eventLog.recordConfirmFirstGateApproved({
-            sessionId,
-            workspaceDir: wctx.workspaceDir,
-            toolName: '(approval)',
-            reason: 'user_approval_detected',
-            principleId: 'confirm-first',
-            nextAction: 'mutating tools now permitted',
-          });
-        } catch (logErr) {
-          logger?.warn?.(`[PD:ConfirmFirst] Failed to emit approval event: ${String(logErr)}`);
-        }
-      }
 
       // Use CorrectionCueLearner for detection — supports learned keywords, not just hardcoded list
       let correctionCue: string | null = null;
@@ -1033,22 +948,8 @@ ${heartbeatChecklist}
     } catch (logErr) {
       logger?.warn?.(`[PD:RuntimeV2] Failed to emit activation observability event: ${String(logErr)}`);
     }
-
-    // ── Set confirm-first directive state for gate enforcement ──
-    if (sessionId) {
-      const cfPrinciple = dedupedV2.find(
-        (p) =>
-          p.principleId === 'princ-mvp-acceptance-confirm-first' ||
-          (p.text.toLowerCase().includes('confirm requirements') &&
-           p.text.toLowerCase().includes('owner approval')),
-      );
-      setConfirmFirstDirective(sessionId, !!cfPrinciple, cfPrinciple?.principleId);
-    }
   } catch (e) {
     logger?.warn?.(`[PD:RuntimeV2] Failed to read Runtime V2 prompt activations: ${String(e)}`);
-    if (sessionId) {
-      resetConfirmFirst(sessionId);
-    }
   }
 
   // Build appendSystemContext with recency effect

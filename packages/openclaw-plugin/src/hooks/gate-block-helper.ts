@@ -160,8 +160,6 @@ export function recordGateBlockAndReturn(
 
 /**
  * Build contextual block message based on block source.
- * PRI-286: Different block sources produce different guidance.
- * - confirm-first-gate: approval-seeking guidance
  * - rule-host: principle-based guidance
  * - default/gate: generic security gate message
  */
@@ -171,27 +169,6 @@ function buildContextualBlockMessage(
   toolName: string,
   blockSource?: string,
 ): string {
-  const source = blockSource ?? 'gate';
-
-  if (source === 'confirm-first-gate') {
-    return `[Principles Disciple] Confirm-First Gate Blocked this action.
-File: ${filePath}
-Reason: ${reason}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 How to unblock this operation:
-
-This session has a confirm-first behavioral directive active.
-Before making changes, you must:
-
-1. Summarize what you plan to do
-2. Explain why it is safe and appropriate
-3. Wait for explicit owner approval (e.g., "approved", "确认", "go ahead")
-
-After the owner approves, retry the operation.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
-  }
-
   // rule-host or generic gate blocks
   return `[Principles Disciple] Security Gate Blocked this action.
 File: ${filePath}

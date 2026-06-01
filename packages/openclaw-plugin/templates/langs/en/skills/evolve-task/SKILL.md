@@ -51,7 +51,7 @@ Output:
 
 ## Step 6: Delegate Planner (Movie Script Plan)
 - Planner outputs Plan (steps/commands/metrics/rollback).
-- Write plan to PLAN.md (STATUS line must exist).
+- Write plan to a planning document for owner review.
 - **Task Sync**: 
   - If `CLAUDE_CODE_TASK_LIST_ID` is set, you must convert the Plan's core steps to Native Tasks (via natural language command "Add task..." or related tools).
   - If not set and in interactive mode, prompt user: "Recommend running `export CLAUDE_CODE_TASK_LIST_ID=task-$(date +%s)` to enable persistent task tracking."

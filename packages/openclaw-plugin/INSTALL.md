@@ -236,9 +236,7 @@ After installation, enable the PLAN whitelist feature:
 }
 ```
 
-2. Ensure `docs/PLAN.md` has `STATUS: READY`
-
-3. Restart your agent session
+2. Restart your agent session
 
 Now even Stage 1 agents can edit files when a READY plan exists!
 
