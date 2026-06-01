@@ -62,7 +62,7 @@ import { computeRuntimeShadowTaskFingerprint, PD_LOCAL_PROFILES } from './utils/
 import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { resolveWorkspaceDirFromApi } from './core/path-resolver.js';
-import { checkSurfaceGuard, guardHook, guardService, getSurfaceIdForHook, getSurfaceIdForService } from './core/surface-guard.js';
+import { checkSurfaceGuard, guardHook, guardService } from './core/surface-guard.js';
 
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();

@@ -106,7 +106,7 @@ export function guardHook<E, C, R>(
     return handler;
   }
   const reason = check.reason ?? 'surface not enabled';
-  return (event: E, ctx: C): R | Promise<R> => {
+  return (_event: E, _ctx: C): R | Promise<R> => {
     logger?.debug?.(`[PD:surface-guard] SKIP ${surfaceId}: ${reason}`);
     return undefined as R;
   };
