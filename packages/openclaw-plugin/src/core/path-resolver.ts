@@ -306,7 +306,6 @@ export class PathResolver {
             'THINKING_OS': workspacePath.join(workspace, '.principles', 'THINKING_OS.md'),
             'DECISION_POLICY': workspacePath.join(workspace, '.principles', 'DECISION_POLICY.json'),
             'MODELS_DIR': workspacePath.join(workspace, '.principles', 'models'),
-            'PLAN': workspacePath.join(workspace, 'PLAN.md'),
             'AGENT_SCORECARD': workspacePath.join(state, 'AGENT_SCORECARD.json'),
             'PAIN_FLAG': workspacePath.join(state, '.pain_flag'),
             'EVOLUTION_QUEUE': workspacePath.join(state, 'evolution_queue.json'),

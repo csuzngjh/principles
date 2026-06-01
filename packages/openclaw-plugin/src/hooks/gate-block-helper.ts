@@ -150,7 +150,7 @@ export function recordGateBlockAndReturn(
   }
 
   // 6. Return consistent block result with contextual operator guidance
-  const blockMessage = buildContextualBlockMessage(filePath, reason, toolName, blockSource);
+  const blockMessage = buildContextualBlockMessage({ filePath, reason });
 
   return {
     block: true,
@@ -163,12 +163,13 @@ export function recordGateBlockAndReturn(
  * - rule-host: principle-based guidance
  * - default/gate: generic security gate message
  */
-function buildContextualBlockMessage(
-  filePath: string,
-  reason: string,
-  _toolName: string,
-  _blockSource?: string,
-): string {
+function buildContextualBlockMessage({
+  filePath,
+  reason,
+}: {
+  filePath: string;
+  reason: string;
+}): string {
   // rule-host or generic gate blocks
   return `[Principles Disciple] Security Gate Blocked this action.
 File: ${filePath}

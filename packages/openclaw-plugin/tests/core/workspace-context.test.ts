@@ -65,8 +65,8 @@ describe('WorkspaceContext', () => {
         
         // PROFILE is at .principles/PROFILE.json
         expect(wctx.resolve('PROFILE')).toBe(path.join(workspaceDir, '.principles', 'PROFILE.json'));
-        // PLAN is at root
-        expect(wctx.resolve('PLAN')).toBe(path.join(workspaceDir, 'PLAN.md'));
+        // THINKING_OS is at .principles/THINKING_OS.md
+        expect(wctx.resolve('THINKING_OS')).toBe(path.join(workspaceDir, '.principles', 'THINKING_OS.md'));
     });
 
     it('should support explicit disposal from cache', () => {

@@ -8,6 +8,8 @@
  * 4. gate-block-helper does not output confirm-first specific block messages
  * 5. confirm_first_gate does not appear in DEFAULT_FEATURE_FLAGS
  * 6. Default PD installation does not block mutating tools due to PLAN.md absence
+ * 7. PLAN.md is not a canonical PD path (paths.ts, path-resolver.ts, env.ts, migration.ts)
+ * 8. confirm-first event types and state store are fully deleted
  */
 
 import { describe, it, expect } from 'vitest';
@@ -104,6 +106,68 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
         expect(content, `${file} should not require PLAN.md（状态：READY）`).not.toContain('PLAN.md`（状态：READY）');
       }
     }
+  });
+
+  // ── Round 2: Canonical PLAN.md path removal ──
+
+  it('paths.ts does not contain PLAN: entry', () => {
+    const source = fs.readFileSync(
+      path.join(ROOT, 'packages/openclaw-plugin/src/core/paths.ts'),
+      'utf8',
+    );
+    expect(source).not.toMatch(/PLAN:\s*'PLAN\.md'/);
+  });
+
+  it('path-resolver.ts does not contain PLAN key', () => {
+    const source = fs.readFileSync(
+      path.join(ROOT, 'packages/openclaw-plugin/src/core/path-resolver.ts'),
+      'utf8',
+    );
+    expect(source).not.toContain("'PLAN':");
+    expect(source).not.toContain('"PLAN":');
+  });
+
+  it('env.ts CORE_FILES does not contain PLAN.md', () => {
+    const source = fs.readFileSync(
+      path.join(ROOT, 'packages/create-principles-disciple/src/utils/env.ts'),
+      'utf8',
+    );
+    // Match 'PLAN.md' inside the CORE_FILES array — should not exist
+    expect(source).not.toMatch(/CORE_FILES\s*=\s*\[[\s\S]*?'PLAN\.md'/);
+  });
+
+  it('migration.ts does not migrate docs/PLAN.md', () => {
+    const source = fs.readFileSync(
+      path.join(ROOT, 'packages/openclaw-plugin/src/core/migration.ts'),
+      'utf8',
+    );
+    expect(source).not.toContain("'PLAN.md'");
+    expect(source).not.toContain("newKey: 'PLAN'");
+  });
+
+  // ── Round 2: Event type and state store full deletion ──
+
+  it('event-types.ts does not contain runtime_v2_confirm_first_gate', () => {
+    const source = fs.readFileSync(
+      path.join(ROOT, 'packages/principles-core/src/runtime-v2/types/event-types.ts'),
+      'utf8',
+    );
+    expect(source).not.toContain('runtime_v2_confirm_first_gate');
+    expect(source).not.toContain('RuntimeV2ConfirmFirstGate');
+  });
+
+  it('confirm-first state store source has been deleted', () => {
+    const storePath = path.join(
+      ROOT, 'packages/principles-core/src/runtime-v2/activation/sqlite-confirm-first-state-store.ts',
+    );
+    expect(fs.existsSync(storePath)).toBe(false);
+  });
+
+  it('confirm-first state store test has been deleted', () => {
+    const testPath = path.join(
+      ROOT, 'packages/principles-core/src/runtime-v2/__tests__/sqlite-confirm-first-state-store.test.ts',
+    );
+    expect(fs.existsSync(testPath)).toBe(false);
   });
 });
 

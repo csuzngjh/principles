@@ -18,25 +18,25 @@ describe('Directory Structure Migration', () => {
         vi.clearAllMocks();
     });
 
-    it('should move non-security files from docs/ to new locations', () => {
-        const legacyPlan = path.join(workspaceDir, 'docs', 'PLAN.md');
-        const newPlan = '/mock/workspace/PLAN.md';
+    it('should move THINKING_OS.md from docs/ to .principles/', () => {
+        const legacyThinkingOs = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
+        const newThinkingOs = '/mock/workspace/.principles/THINKING_OS.md';
 
         vi.mocked(fs.existsSync).mockImplementation((p) => {
             const pathStr = p.toString();
             if (pathStr === path.join(workspaceDir, 'docs')) return true;
-            if (pathStr === legacyPlan) return true;
+            if (pathStr === legacyThinkingOs) return true;
             // Destination directories don't exist yet
             if (pathStr === path.join(workspaceDir, '.principles')) return false;
             // Destination files don't exist yet
-            if (pathStr === newPlan) return false;
+            if (pathStr === newThinkingOs) return false;
             return false;
         });
 
         migrateDirectoryStructure(mockApi, workspaceDir);
 
-        // Verify it moved PLAN.md to root
-        expect(fs.renameSync).toHaveBeenCalledWith(legacyPlan, newPlan);
+        // Verify it moved THINKING_OS.md to .principles/
+        expect(fs.renameSync).toHaveBeenCalledWith(legacyThinkingOs, newThinkingOs);
 
         expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Successfully migrated'));
     });
