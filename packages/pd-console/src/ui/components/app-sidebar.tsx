@@ -14,6 +14,7 @@ import {
   FileText,
   Dna,
   Wrench,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
 import { isNavActive, type NavItem } from "../utils/navigation.js";
@@ -26,6 +27,7 @@ const mvpNavItems: NavItem[] = [
   { id: "pain", label: "Pain", icon: Flame, href: "/pain", alsoActive: ["/"] },
   { id: "principles", label: "Principle", icon: ScrollText, href: "/principles" },
   { id: "approvals", label: "Approval", icon: ShieldCheck, href: "/approvals" },
+  { id: "report-problem", label: "Report Problem", icon: MessageSquare, href: "/report-problem" },
 ];
 
 const diagnosticNavItems = [

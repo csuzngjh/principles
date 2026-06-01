@@ -19,6 +19,7 @@ import { WorkspaceService } from './models/WorkspaceService.js';
 import { handleOverviewRoute, disposeOverviewModels } from './routes/overview.js';
 import { handleGatesRoute, disposeGateModels } from './routes/gates.js';
 import { handleFeedbackRoute, disposeFeedbackModels } from './routes/feedback.js';
+import { handleFeedbackReportsRoute, disposeFeedbackReportModels } from './routes/feedback-reports.js';
 import { handleSamplesRoute, disposeSampleModels } from './routes/samples.js';
 import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals.js';
 import { handleEvolutionRoute, disposeEvolutionModels } from './routes/evolution.js';
@@ -281,6 +282,7 @@ async function closeServices(services: AppServices): Promise<void> {
   disposeOverviewModels();
   disposeGateModels();
   disposeFeedbackModels();
+  disposeFeedbackReportModels();
   disposeSampleModels();
   disposeApprovalsModels();
   disposeEvolutionModels();
@@ -349,6 +351,13 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/gate' || urlPath.startsWith('/api/gate/')) {
         const subPath = urlPath.slice('/api/gate'.length);
         asyncHandler(() => handleGatesRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // GET/POST /api/feedback/reports, /api/feedback/reports/:id — local MVP seed feedback drafts (PRI-285)
+      if (urlPath === '/api/feedback/reports' || urlPath.startsWith('/api/feedback/reports/')) {
+        const subPath = urlPath.slice('/api/feedback/reports'.length);
+        asyncHandler(() => handleFeedbackReportsRoute(req, res, { workspaceDir: services.workspaceDir, subPath }))(req, res);
         return;
       }
 

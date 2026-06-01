@@ -277,6 +277,10 @@ export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions
 // Migration bridge
 export { EvolutionQueueItemMigrator } from './store/task-migration.js';
 
+// Workspace guidance migration (PRI-286) — remove stale PLAN.md gate guidance from installed workspaces
+export { migrateWorkspaceGuidance, containsStalePlanMdGuidance, STALE_PLAN_MD_PATTERNS } from './workspace-guidance-migration.js';
+export type { MigrationResult as WorkspaceGuidanceMigrationResult } from './workspace-guidance-migration.js';
+
 // Ledger file utilities (for audit/consistency checks)
 export { loadLedger, saveLedger, getLedgerFilePathPublic, updatePrinciple } from '../principle-tree-ledger.js';
 
@@ -1291,4 +1295,58 @@ export type {
 
 export { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
 
+// ── Feedback Report Contract (PRI-285) ──────────────────────────────────────
+//
+// Pure logic only. No I/O, no fs, no process, no db, no network, no openclaw-plugin
+// imports. Server (pd-console) wraps this contract and adds draft storage under
+// <workspace>/.pd/feedback/drafts/. No automatic upload — agents and users must
+// copy or open the generated URL themselves.
+export {
+  isFeedbackType,
+  isUserSeverity,
+  isFeedbackSource,
+  isRecord,
+  isBoolean,
+  normalizeFeedbackDraftInput,
+  redactAbsolutePaths,
+  redactTokenLikeValues,
+  redactEnvLikeValues,
+  redactStackTrace,
+  redactSensitiveFields,
+  REDACTED_PATH,
+  REDACTED_VALUE,
+  NO_STACK,
+  renderReportMarkdown,
+  MAX_MARKDOWN_LENGTH,
+  buildGitHubIssueDraftUrl,
+  MAX_URL_BODY_LENGTH,
+  GITHUB_REPO,
+  buildPrivacyPreview,
+  buildEmailText,
+  DEFAULT_INCLUDED_SECTIONS,
+  DEFAULT_EXCLUDED_CATEGORIES,
+  createFeedbackReport,
+  safeStringifyPreview,
+} from './feedback/index.js';
+export type {
+  FeedbackType,
+  UserSeverity,
+  FeedbackSource,
+  FeedbackContext,
+  AgentDraft,
+  FeedbackUserText,
+  FeedbackDraftInput,
+  NormalizedDraft,
+  RecentEvent,
+  CanaryStatus,
+  DiagnosticSummary,
+  ContextRef,
+  PrivacyPreview,
+  FeedbackReport,
+  ValidationError,
+  NormalizeResult,
+  RedactResult,
+  GithubUrlResult,
+  CreateReportResult,
+} from './feedback/index.js';
 

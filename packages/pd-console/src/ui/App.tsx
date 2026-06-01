@@ -25,6 +25,7 @@ import { PrincipleDetailPage } from "./pages/PrincipleDetailPage.js";
 import { AgentsPage } from "./pages/AgentsPage.js";
 import { LoginPage } from "./pages/LoginPage.js";
 import { UpdatePage } from "./pages/UpdatePage.js";
+import { ReportProblemPage } from "./pages/ReportProblemPage.js";
 import { ErrorBoundary } from "./components/error-boundary.js";
 import { getToken, clearToken, checkAuth } from "./api.js";
 
@@ -127,6 +128,7 @@ export function App() {
                     <Route path="/thinking-models" element={<ThinkingModelsPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/settings/update" element={<UpdatePage />} />
+                    <Route path="/report-problem" element={<ReportProblemPage />} />
                   </Routes>
                 </ErrorBoundary>
               </main>
