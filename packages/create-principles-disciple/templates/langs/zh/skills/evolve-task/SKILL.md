@@ -10,7 +10,7 @@ disable-model-invocation: true
 - 读取 memory/CHECKPOINT.md 的最后一条
 - 读取 memory/ISSUE_LOG.md 的最近 3 条
 - 读取 memory/DECISIONS.md 的最近决策
-- 如果存在 .state/.pain_flag，先处理断点恢复
+- Runtime V2 痛苦诊断使用 task input/context，不使用 `.state/.pain_flag`
 
 ## Step 1: 读取运行参数与能力自检
 - 读取 .principles/PROFILE.json，理解 risk_paths、gate、tests.commands。
@@ -51,7 +51,7 @@ disable-model-invocation: true
 
 ## Step 6: 委派 Planner（电影剧本计划）
 - Planner 输出 Plan（步骤/命令/指标/回滚）。
-- 将计划写入 PLAN.md（STATUS 行必须存在）。
+- 将计划写入计划文档供 owner 审阅。
 - **任务同步 (Task Sync)**: 
   - 如果 `CLAUDE_CODE_TASK_LIST_ID` 已设置，你必须将上述 Plan 的核心步骤直接转化为 Native Tasks（通过自然语言指令"Add task..."或相关工具）。
   - 如果未设置且为交互模式，提示用户："建议运行 `export CLAUDE_CODE_TASK_LIST_ID=task-$(date +%s)` 以启用持久化任务追踪。"
@@ -59,7 +59,7 @@ disable-model-invocation: true
 - **绩效评估**: 任务完成后，写入 `.state/.verdict.json`。格式遵循 `@.principles/schemas/agent_verdict_schema.json`。
 
 ## Step 7: 委派 Implementer（执行）
-- Implementer 只能按 PLAN 执行。任何偏离必须先更新 PLAN。
+- Implementer 按照 Step 6 的计划执行。任何偏离必须先更新计划并获得确认。
 - **绩效评估**: 任务完成后，根据验证结果写入 `.state/.verdict.json`。格式遵循 `@.principles/schemas/agent_verdict_schema.json`。
 
 ## Step 8: 委派 Reviewer（审查）

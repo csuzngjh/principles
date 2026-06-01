@@ -74,7 +74,7 @@ PD is now watching for repeated mistakes and waiting for your review. No configu
 
 **Stuck?**
 
-- AI won't edit files? → Check `PLAN.md` needs `STATUS: READY`
+- AI won't edit files? → Check if a RuleHost rule is blocking the operation
 - Plugin won't load? → `cd ~/.openclaw/extensions/principles-disciple && npm install micromatch@^4.0.8 @sinclair/typebox@^0.34.48`
 - Check health anytime → `/pd-status`
 

@@ -1,6 +1,5 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { resolvePdPath } from '../core/paths.js';
 
 /**
  * Atomic file write — write to temp then rename to prevent partial writes on crash.
@@ -146,27 +145,6 @@ export function serializeKvLines(data: Record<string, any>): string {
     }
   }
   return lines.join('\n');
-}
-
-export function planStatus(projectDir: string): string {
-  const planPath = resolvePdPath(projectDir, 'PLAN');
-  try {
-    if (!fs.existsSync(planPath)) return '';
-    const content = fs.readFileSync(planPath, 'utf8');
-    const lines = content.split('\n');
-    for (const line of lines) {
-      if (line.startsWith('STATUS:')) {
-        const parts = line.split(':');
-        if (parts.length > 1) {
-           return parts[1].trim().split(/\s+/)[0] || '';
-        }
-      }
-    }
-  /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: Error is intentionally ignored for graceful degradation */
-  } catch (_e) {
-    // Ignore read errors
-  }
-  return '';
 }
 
 /**

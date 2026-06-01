@@ -185,7 +185,7 @@ For complex scenarios, combine multiple skills:
 
 | Scenario | Combined Flow |
 |----------|---------------|
-| Major refactor | `/pd-evolve` → `plan-script` → `deductive-audit` → execute |
+| Major refactor | `/pd-evolve` → `deductive-audit` → execute |
 | System optimization | `/pd-status` → `evolve-system` → `root-cause` |
 | Project review | `/pd-daily` → `/pd-okr` → `reflection-log` |
 
@@ -196,7 +196,6 @@ These skills are usually called automatically by the system, but advanced users 
 - `triage` - Issue triage
 - `root-cause` - Root cause analysis
 - `deductive-audit` - Deductive audit
-- `plan-script` - Plan orchestration
 - `reflection` - Metacognitive reflection
 - `reflection-log` - Reflection logging
 

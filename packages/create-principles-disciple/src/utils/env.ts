@@ -100,7 +100,6 @@ export function detectWorkspace(): WorkspaceInfo {
     'AGENTS.md',
     'SOUL.md',
     'USER.md',
-    'PLAN.md',
   ];
 
   for (const candidate of candidates) {

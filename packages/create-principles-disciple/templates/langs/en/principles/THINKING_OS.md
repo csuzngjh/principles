@@ -39,8 +39,9 @@ LLMs are highly sensitive to XML tags; this structure is designed to boost instr
   <!-- 执行与物理限制 (Execution & Physical Constraints) -->
   <directive id="T-05" name="PHYSICAL_DEFENSE_AND_ORCHESTRATION">
     <trigger>When asked to perform a major refactoring, multi-file change (>2 files), or an architectural shift.</trigger>
-    <must>Limit your blast radius. You MUST draft a `PLAN.md` (status: READY). After any code change, you MUST run canary tests (e.g., `npm test`, linters) to verify integrity.</must>
-    <forbidden>Executing large-scale unstructured changes directly without a plan, or skipping post-modification validation.</forbidden>
+    <should>For complex changes, describe your plan and get owner confirmation before executing.</should>
+    <must>Limit your blast radius. After any code change, you MUST run canary tests (e.g., `npm test`, linters) to verify integrity.</must>
+    <forbidden>Executing large-scale unstructured changes directly, or skipping post-modification validation.</forbidden>
   </directive>
 
   <directive id="T-06" name="OCCAMS_RAZOR_MVC">
