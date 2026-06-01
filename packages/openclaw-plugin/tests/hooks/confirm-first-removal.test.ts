@@ -105,6 +105,16 @@ describe('PRI-286: Confirm-first gate removal verification', () => {
       }
     }
   });
+
+  it('prompt.ts does not have duplicate recordSession calls', () => {
+    const promptSource = fs.readFileSync(
+      path.join(ROOT, 'packages/openclaw-plugin/src/hooks/prompt.ts'),
+      'utf8',
+    );
+    const regex = /wctx\.trajectory\?\.\s*recordSession\?\.\(\{\s*sessionId\s*\}\)/g;
+    const matches = promptSource.match(regex);
+    expect(matches, 'prompt.ts should have exactly one recordSession call, found: ' + (matches?.length ?? 0)).toHaveLength(1);
+  });
 });
 
 function findFiles(dir: string, filename: string): string[] {
