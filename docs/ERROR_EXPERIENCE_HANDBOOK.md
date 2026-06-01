@@ -92,6 +92,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-018 | repairAttempts records stale initialValidationErrors instead of per-attempt currentErrors | PRI-200 |
 | ERR-019 | schemaCheck failure branch writes next iteration's errors into current attempt's record | PRI-200 |
 | ERR-020 | Commander negated boolean `--no-intake` ignored — checking wrong property name | PRI-217 |
+| ERR-047 | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through to String(err) | PRI-285 |
 
 ---
 
@@ -124,6 +125,8 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ID | Summary | Source |
 |----|---------|--------|
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
+| ERR-045 | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys like github_token pass through unredacted | PRI-285 |
+| ERR-046 | Redaction pipeline truncates string values without running path/token/env redactors — secrets in values like buildId or cwd slip through | PRI-285 |
 
 ---
 
@@ -670,10 +673,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 43 |
-| Last updated | 2026-05-27 |
+| Total lessons | 47 |
+| Last updated | 2026-06-01 |
 | Top category | Schema & Type |
-| Recurring errors | 21 |
+| Recurring errors | 24 |
 
 ---
 
@@ -710,3 +713,39 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-247 / PR #721
 - **Date**: 2026-05-26
 - **Recurrence**: Same class as ERR-034
+
+---
+
+**[ERR-045]** | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys pass through unredacted
+
+- **What happened**: `isSensitiveKey()` required EVERY segment of a composite key to match `SENSITIVE_KEY_SEGMENTS`. This meant `github_token` (segments: `["github", "token"]`) was NOT flagged because "github" is not in the sensitive set. Only keys where ALL segments were sensitive (e.g., `auth_token` where both "auth" and "token" are in the set) were caught.
+- **Why it's wrong**: The privacy guarantee is that any key containing a sensitive segment should be redacted. Using ALL-segment logic inverts this — it only redacts when the entire key name is composed of sensitive words. This is a security vulnerability: `db_password`, `github_token`, `api_key`, `aws_secret` all pass through unredacted.
+- **Correct approach**: A key should be sensitive if ANY of its segments matches a sensitive segment. Change the logic from "all segments must match" to "at least one segment must match". Keep the empty-segment guard to avoid false positives on empty strings.
+- **How to prevent**: When implementing a membership check on composite keys, the safety-correct default is ANY-match (flag if any part is sensitive). Use ALL-match only when the requirement is explicitly "all parts must be sensitive" (which is almost never the right choice for security). Add tests with real composite key names (`github_token`, `db_password`, `aws_secret_key`).
+- **Source**: PRI-285 / PR #767
+- **Date**: 2026-06-01
+- **Recurrence**: Same class as ERR-024 (security check exists but is not wired into enforcement path)
+
+---
+
+**[ERR-046]** | Redaction pipeline truncates string values without running path/token/env redactors — secrets slip through
+
+- **What happened**: In `redactSensitiveFields()`, the `t === 'string'` branch only truncated strings to `REDACT_MAX_STRING` without running them through `redactAbsolutePaths()`, `redactTokenLikeValues()`, and `redactEnvLikeValues()`. Similarly, `render-github-url.ts` used `shortSummary` with only truncation but no redaction before putting it into the URL body.
+- **Why it's wrong**: The redaction pipeline has two layers: (1) key-based redaction (redact entire values for sensitive keys), and (2) value-based redaction (redact secrets embedded in any string value regardless of key name). Layer 2 was not applied to the string branch. This means secrets embedded in non-sensitive-key values (e.g., `buildId` containing a token, `cwd` containing an absolute path) slip through. Same class as ERR-014/ERR-016/ERR-017 (previews and serialization not bounded/safe).
+- **Correct approach**: Every string value that passes through the redaction pipeline must be run through the full set of string redactors (path, token, env) BEFORE truncation. Truncation should be the last step. The same applies to any renderer that embeds user-provided text into output (markdown, email, GitHub URL body).
+- **How to prevent**: When adding a new branch to a redaction pipeline, check that ALL existing string redactors are applied before any truncation. Add tests that verify secrets in values (not just in keys) are redacted.
+- **Source**: PRI-285 / PR #767
+- **Date**: 2026-06-01
+- **Recurrence**: Same class as ERR-014, ERR-016, ERR-017
+
+---
+
+**[ERR-047]** | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through
+
+- **What happened**: `errMsg(e: { code?: string } | undefined, err: unknown)` was designed to extract a readable message from caught errors. The first parameter `e` is a typed narrower (`err as { code?: string }`) used for `code === 'ENOENT'` checks. The second parameter `err` is the raw `unknown` caught value. But the function body checked `e` for a `.message` property — which `e` (typed as `{ code?: string }`) never has. This meant the function always fell through to `String(err)`, producing less useful error messages like `[object Object]`.
+- **Why it's wrong**: The parameter naming was confusing and led to checking the wrong variable. The typed narrower is for `code` checks (done by the caller before calling errMsg), not for message extraction. Message extraction should operate on the raw `unknown` value.
+- **Correct approach**: Check the `unknown` parameter (second argument) for `.message` property, not the typed narrower. Or better: restructure to a single-parameter function that takes `unknown` and extracts the message, since the typed narrower is only needed by the caller for `code` checks.
+- **How to prevent**: When a helper function takes two parameters with confusingly similar names (`e` and `err`), add a comment explaining what each is for. Use descriptive names like `typedNarrower` and `rawError` instead of single-letter names. Add unit tests that verify the function correctly extracts messages from Error objects, string errors, and non-Error objects.
+- **Source**: PRI-285 / PR #767
+- **Date**: 2026-06-01
+- **Recurrence**: Same class as ERR-001, ERR-005 (runtime type check operates on wrong value)
