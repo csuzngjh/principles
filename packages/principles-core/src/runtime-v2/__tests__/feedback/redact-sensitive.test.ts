@@ -201,4 +201,54 @@ describe('redactSensitiveFields', () => {
     expect(redacted.password).toBe(REDACTED_VALUE);
     expect(typeof redacted.count).toBe('string');
   });
+
+  it('records redaction note when string value contains token-like pattern', () => {
+    const input = { buildLog: 'Build started. API key sk-ant-1234567890abcdef1234567890 used.' };
+    const result = redactSensitiveFields(input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const redacted = result.value as Record<string, unknown>;
+    expect(redacted.buildLog).not.toContain('sk-ant-');
+    expect(result.notes.some((n: string) => n.includes('redacted'))).toBe(true);
+  });
+
+  it('records redaction note when string value contains absolute path', () => {
+    const input = { cwd: 'Working in C:\\Users\\alice\\secret-project\\src' };
+    const result = redactSensitiveFields(input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const redacted = result.value as Record<string, unknown>;
+    expect(redacted.cwd).not.toContain('alice');
+    expect(result.notes.some((n: string) => n.includes('redacted'))).toBe(true);
+  });
+
+  it('records redaction note when string value is truncated', () => {
+    const longValue = 'x'.repeat(3000);
+    const input = { bigField: longValue };
+    const result = redactSensitiveFields(input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const redacted = result.value as Record<string, unknown>;
+    expect((redacted.bigField as string).length).toBeLessThan(longValue.length);
+    expect(result.notes.some((n: string) => n.includes('truncated'))).toBe(true);
+  });
+
+  it('records redaction note when string value contains env-like assignment', () => {
+    const input = { envDump: 'DATABASE_URL=postgres://user:pass@host:5432/db' };
+    const result = redactSensitiveFields(input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const redacted = result.value as Record<string, unknown>;
+    expect(redacted.envDump).not.toContain('postgres://user:pass');
+    expect(result.notes.some((n: string) => n.includes('redacted'))).toBe(true);
+  });
+
+  it('does NOT record redaction note for clean string values', () => {
+    const input = { message: 'hello world', name: 'test' };
+    const result = redactSensitiveFields(input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.notes.some((n: string) => n.includes('string value redacted'))).toBe(false);
+    expect(result.notes.some((n: string) => n.includes('truncated'))).toBe(false);
+  });
 });

@@ -392,4 +392,28 @@ describe('createFeedbackReport', () => {
     }
     expect(thrown).toBeNull();
   });
+
+  it('records string redaction notes in privacy.redactionNotes when diagnostics contain token-like values', () => {
+    const diagnostics = {
+      ...validDiagnostics(),
+      versions: { buildLog: 'Key sk-ant-1234567890abcdef1234567890 injected here' },
+    };
+    const result = createFeedbackReport(validInput(), diagnostics);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The string redaction in redactInner should push a note when a token is found
+    // inside a string value of the diagnostic summary
+    expect(result.report.privacy.redactionNotes.some((n: string) => n.includes('redacted'))).toBe(true);
+  });
+
+  it('records string redaction notes when diagnostics contain absolute paths', () => {
+    const diagnostics = {
+      ...validDiagnostics(),
+      versions: { cwd: 'C:\\Users\\alice\\secret-project\\src' },
+    };
+    const result = createFeedbackReport(validInput(), diagnostics);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.report.privacy.redactionNotes.some((n: string) => n.includes('redacted'))).toBe(true);
+  });
 });

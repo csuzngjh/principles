@@ -96,7 +96,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'code_tool_hook', category: 'core', enabled: true, since: '2026-05-24', description: 'Code tool hook for rule host enforcement' },
   { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24', description: 'Defer/archive activation writer' },
 
-  // MVP-Quiet — default disabled, opt-in via config
+  // MVP-Quiet — opt-in or opt-out via config; enabled value varies per flag
   // Only flags with real consumption paths are registered (PRI-239 constraint)
   { id: 'feedback_channel', category: 'quiet', enabled: true, since: '2026-06-01', description: 'MVP seed feedback channel — privacy-preserving report drafts' },
   { id: 'gfi', category: 'quiet', enabled: false, since: '2026-05-24', description: 'Global Friction Index session scoring' },

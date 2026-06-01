@@ -137,15 +137,20 @@ function redactInner(value: unknown, ctx: RedactContext): RedactResult {
   const t = typeof value;
   if (t === 'string') {
     let s = value as string;
+    const original = s;
     // Run string through path/token/env redactors before truncation so
     // secrets embedded in values (e.g. buildId, cwd) are cleaned regardless of key name.
     s = redactAbsolutePaths(s);
     s = redactTokenLikeValues(s);
     s = redactEnvLikeValues(s);
+    if (s !== original) {
+      ctx.notes.push('string value redacted (path/token/env)');
+    }
     if (s.length > REDACT_MAX_STRING) {
       s = s.slice(0, REDACT_MAX_STRING) + '…';
+      ctx.notes.push(`string truncated to ${REDACT_MAX_STRING} chars`);
     }
-    return { ok: true, value: s, notes: [] };
+    return { ok: true, value: s, notes: ctx.notes };
   }
   if (t === 'bigint') {
     // BigInt-safe preview: encode as a string marker so JSON.stringify callers don't throw
