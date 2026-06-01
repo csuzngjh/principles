@@ -1,3 +1,10 @@
+---
+title: "Pain is the Signal: Hardcore Biological Revelations of Forward Evolution"
+description: "Breaking the myth of backpropagation, revealing how to build a forward evolution loop of 'pain-brake-review-crystallization' for silicon-based life in the PD architecture."
+date: 2026-05-25
+lang: en
+---
+
 # Series 3 | Pain is the Signal: The Hardcore Biological Epiphany of Forward Evolution
 
 **Subtitle**: From Prompt Injection Failure to the Birth of Silicon Pain Receptors
@@ -525,3 +532,7 @@ True wisdom must grow from the friction of forward actions, time and time again.
 ---
 
 *If you want to see how we compile philosophy into code, please look forward to Series 4: The Alchemy of Soft to Hard Rules.*
+
+---
+
+*— The Reed*

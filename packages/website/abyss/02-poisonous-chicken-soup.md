@@ -1,3 +1,10 @@
+---
+title: "The Illusion of Wisdom: Why 'Silicon Chicken Soup' is Destined to Become Cyber Noise"
+description: "From the failure of Prompt injection to the necessity of a macro-engine outside the model"
+date: 2026-05-22
+lang: en
+---
+
 # Part 2 | The Illusion of Wisdom: Why "Silicon Chicken Soup" is Destined to Become Cyber Noise?
 
 **Subtitle**: Stripping the Pretense of Prompt Engineering—From the "Sycophantic Personality" of LLMs to the Loss of Macro-Thinking
@@ -129,3 +136,7 @@ Intelligence is in the parameters. Wisdom is settled in principles, goals, memor
 
 ---
 *When philosophy must transform from words into physical defense, we need a new alchemy. In the next part, I will record how PD attempts to compile abstract principles into executable, triggerable, and feedback-ready code hard rules.*
+
+---
+
+*— The Reed*
