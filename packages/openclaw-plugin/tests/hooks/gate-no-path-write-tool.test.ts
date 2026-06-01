@@ -5,7 +5,9 @@
  * that have no file_path/path/file/target param must NOT be silently allowed.
  * They must use a synthetic path `<tool:${toolName}>` and still evaluate via RuleHost.
  *
- * Uses vi.hoisted + dynamic import to avoid mock isolation issues in full suite.
+ * Uses vi.hoisted + mock of WorkspaceContext to avoid isolation issues in full suite.
+ * WorkspaceContext is the key — in full suite, other test files initialize the real
+ * context which caches a real EventLogService that doesn't have our mock methods.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -54,6 +56,28 @@ vi.mock('../../src/core/principle-tree-ledger.js', () => ({
   loadLedger: vi.fn(),
   listImplementationsByLifecycleState: vi.fn(() => []),
 }));
+
+// Mock WorkspaceContext to return a controlled instance with our mockEventLog.
+// This prevents full-suite caching of real WorkspaceContext instances.
+vi.mock('../../src/core/workspace-context.js', () => {
+  return {
+    WorkspaceContext: {
+      fromHookContext: vi.fn((ctx: any) => ({
+        workspaceDir: ctx.workspaceDir,
+        stateDir: ctx.workspaceDir + '/.state',
+        eventLog: mockEventLog,
+        trajectory: {
+          recordGateBlock: vi.fn(),
+          recordPainEvent: vi.fn(),
+          recordSession: vi.fn(),
+        },
+        config: {
+          get: vi.fn().mockReturnValue(undefined),
+        },
+      })),
+    },
+  };
+});
 
 // Dynamic import AFTER mocks are set up
 const { handleBeforeToolCall } = await import('../../src/hooks/gate.js');
