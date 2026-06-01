@@ -154,6 +154,71 @@
       "origin": "Origin:",
       "gfiAfter": "GFI after:"
     },
+    "reportProblem": {
+      "title": "Report a Problem",
+      "description": "Generate a privacy-preserving local feedback draft. The Console never auto-uploads — you choose what to share, how to share it, and when.",
+      "deepLinked": "Deep-linked from {{source}}.",
+      "form": {
+        "title": "Describe what happened",
+        "description": "Only fields below are stored. Raw prompts, chat history, file contents, paths, env vars, and tokens are excluded by default.",
+        "type": "Type",
+        "severity": "Severity",
+        "severityNotSet": "Not set",
+        "severityLow": "Low",
+        "severityMedium": "Medium",
+        "severityHigh": "High",
+        "titleLabel": "Title",
+        "descriptionLabel": "Description",
+        "stepsLabel": "Steps to reproduce (optional)",
+        "expectedLabel": "Expected behavior (optional)",
+        "actualLabel": "Actual behavior (optional)",
+        "submit": "Save local draft",
+        "submitting": "Saving…",
+        "hidePreview": "Hide markdown preview",
+        "showPreview": "Show markdown preview",
+        "types": {
+          "bug": "Bug",
+          "confusing": "Confusing",
+          "privacy_concern": "Privacy concern",
+          "feature_request": "Feature request",
+          "other": "Other"
+        }
+      },
+      "privacy": {
+        "title": "Privacy boundary",
+        "description": "What this report will and will not include.",
+        "included": "Included",
+        "excluded": "Excluded by default",
+        "notes": "Redaction notes",
+        "submitFirst": "Save a draft to see exactly which sections are included.",
+        "guarantee": "No automatic upload. Drafts are stored at <workspace>/.pd/feedback/drafts/. You decide what to do with them."
+      },
+      "draft": {
+        "title": "Draft saved locally",
+        "savedAt": "id: {{id}} · saved at {{at}}",
+        "copyMarkdown": "Copy Markdown",
+        "copyEmail": "Copy email text",
+        "openGithub": "Open GitHub issue URL",
+        "delete": "Delete draft"
+      },
+      "saved": {
+        "title": "Saved drafts",
+        "load": "Load"
+      },
+      "toast": {
+        "draftCreated": "Draft saved locally",
+        "draftDeleted": "Draft deleted",
+        "markdownCopied": "Markdown copied to clipboard",
+        "emailCopied": "Email text copied to clipboard",
+        "copyFailed": "Copy failed",
+        "loadFailed": "Failed to load draft",
+        "deleteFailed": "Failed to delete draft"
+      },
+      "errors": {
+        "missingRequired": "Title and description are required.",
+        "createFailed": "Failed to create draft."
+      }
+    },
     "gates": {
       "title": "Gates",
       "description": "Manage Security Gates",
@@ -422,7 +487,8 @@
     "errorBoundary": {
       "title": "An Error Occurred",
       "description": "An error occurred while loading the page",
-      "retry": "Retry"
+      "retry": "Retry",
+      "reportAction": "Report this problem"
     },
     "zoneSection": {
       "empty": "No data",

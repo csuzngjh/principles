@@ -154,6 +154,71 @@
       "origin": "来源：",
       "gfiAfter": "GFI 之后："
     },
+    "reportProblem": {
+      "title": "报告问题",
+      "description": "生成本地隐私可控的反馈草稿。Console 不会自动上传——你决定分享什么、如何分享、何时分享。",
+      "deepLinked": "从 {{source}} 跳转而来。",
+      "form": {
+        "title": "描述发生了什么",
+        "description": "仅存储以下字段。原始 prompt、聊天记录、文件内容、路径、环境变量和令牌默认排除。",
+        "type": "类型",
+        "severity": "严重程度",
+        "severityNotSet": "未设置",
+        "severityLow": "低",
+        "severityMedium": "中",
+        "severityHigh": "高",
+        "titleLabel": "标题",
+        "descriptionLabel": "描述",
+        "stepsLabel": "复现步骤（可选）",
+        "expectedLabel": "预期行为（可选）",
+        "actualLabel": "实际行为（可选）",
+        "submit": "保存本地草稿",
+        "submitting": "保存中…",
+        "hidePreview": "隐藏 Markdown 预览",
+        "showPreview": "显示 Markdown 预览",
+        "types": {
+          "bug": "缺陷",
+          "confusing": "体验困惑",
+          "privacy_concern": "隐私问题",
+          "feature_request": "功能请求",
+          "other": "其他"
+        }
+      },
+      "privacy": {
+        "title": "隐私边界",
+        "description": "本报告将包含什么、不包含什么。",
+        "included": "已包含",
+        "excluded": "默认排除",
+        "notes": "脱敏说明",
+        "submitFirst": "保存一份草稿后可看到具体包含哪些部分。",
+        "guarantee": "不会自动上传。草稿保存在 <workspace>/.pd/feedback/drafts/。你可以自行决定如何使用。"
+      },
+      "draft": {
+        "title": "草稿已本地保存",
+        "savedAt": "id：{{id}} · 保存于 {{at}}",
+        "copyMarkdown": "复制 Markdown",
+        "copyEmail": "复制邮件文本",
+        "openGithub": "打开 GitHub issue 链接",
+        "delete": "删除草稿"
+      },
+      "saved": {
+        "title": "已保存的草稿",
+        "load": "加载"
+      },
+      "toast": {
+        "draftCreated": "草稿已本地保存",
+        "draftDeleted": "草稿已删除",
+        "markdownCopied": "Markdown 已复制到剪贴板",
+        "emailCopied": "邮件文本已复制到剪贴板",
+        "copyFailed": "复制失败",
+        "loadFailed": "加载草稿失败",
+        "deleteFailed": "删除草稿失败"
+      },
+      "errors": {
+        "missingRequired": "标题和描述为必填项。",
+        "createFailed": "创建草稿失败。"
+      }
+    },
     "gates": {
       "title": "门控",
       "description": "管理安全门控",
@@ -422,7 +487,8 @@
     "errorBoundary": {
       "title": "发生错误",
       "description": "页面加载时发生错误",
-      "retry": "重试"
+      "retry": "重试",
+      "reportAction": "报告此问题"
     },
     "zoneSection": {
       "empty": "暂无数据",
