@@ -10,6 +10,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #004 · 2026-05-28</div>
+  <a class="abyss-title" href="/zh/abyss/04-soft-to-hard-rules">04 | 软硬转换炼金术：从提示词到系统本能的内化之路</a>
+  <p class="abyss-desc">深入探讨原则内化的渠道、策略与陷阱。如何物理阻断低级错误，将高危底线硬化为编译拦截器（RuleHost），并建立规则退役元机制，释放模型注意力。</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #003 · 2026-05-25</div>
   <a class="abyss-title" href="/zh/abyss/03-biological-forward-pass">03 | 痛苦即信号：前向进化的生物学硬核启示</a>
   <p class="abyss-desc">打破反向传播的迷思，揭秘 PD 架构中如何为硅基生命体建立由“痛觉—刹车—复盘—沉淀”组成的前向进化循环。</p>

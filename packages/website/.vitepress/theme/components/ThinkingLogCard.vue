@@ -18,36 +18,36 @@
 
     <div class="journal-card pd-card">
       <div class="journal-thumb">
-        <img src="/images/abyss/03/abyss-03-cover.png" :alt="lang === 'zh-CN' ? '思考日志图' : 'Thinking Log Cover'" />
+        <img src="/images/abyss/04/abyss-04-cover.png" :alt="lang === 'zh-CN' ? '思考日志图' : 'Thinking Log Cover'" />
         <div class="thumb-overlay"></div>
       </div>
       
       <div class="journal-body">
         <div class="journal-meta">
-          <span class="journal-series">LOG #003</span>
+          <span class="journal-series">LOG #004</span>
           <span class="meta-dot">&middot;</span>
-          <span class="journal-date">2026-05-25</span>
+          <span class="journal-date">2026-05-28</span>
         </div>
         
         <h3 class="journal-title">
-          {{ lang === 'zh-CN' ? '痛苦即信号：前向进化的生物学硬核启示' : 'Pain is the Signal: Forward Evolution' }}
+          {{ lang === 'zh-CN' ? '软硬转换炼金术：从提示词到系统本能的内化之路' : 'The Alchemy of Soft to Hard Rules: Forward Internalization' }}
         </h3>
         
         <p class="journal-excerpt">
           {{ lang === 'zh-CN'
-            ? '打破反向传播的迷思。大模型没有生物痛觉，但我们可以用工程手段为它建立由“痛觉—刹车—复盘—沉淀”组成的前向进化循环，让原则从文字记忆长成坚硬的行为记忆。'
-            : 'Breaking the myth of backpropagation. LLMs have no biological pain, but we can engineer a forward evolution loop of "Pain — Brake — Debrief — Precipitate" to grow soft principles into defensive behavioral memory.'
+            ? '深入探讨原则内化的渠道、策略与陷阱。如何物理阻断低级错误，将高危底线硬化为编译拦截器（RuleHost），并建立规则退役元机制，释放模型注意力。'
+            : 'An in-depth study of the channels, strategies, and traps of principle internalization. How to physically intercept low-level errors by hardening high-risk bottom lines into the RuleHost runtime sandbox while adopting custom pruning policies.'
           }}
         </p>
 
         <div class="journal-tags">
-          <span class="j-tag">{{ lang === 'zh-CN' ? '硅基痛觉' : 'Silicon Pain' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '双环反思' : 'Double Reflection' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '突触修剪' : 'Synaptic Pruning' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? 'RuleHost 沙箱' : 'RuleHost Sandbox' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '注意力治理' : 'Context Debt' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '规则剪枝' : 'Rule Pruning' }}</span>
         </div>
 
         <div class="journal-action">
-          <a :href="lang === 'zh-CN' ? '/zh/abyss/03-biological-forward-pass' : '/abyss/03-biological-forward-pass'" class="read-link">
+          <a :href="lang === 'zh-CN' ? '/zh/abyss/04-soft-to-hard-rules' : '/abyss/04-soft-to-hard-rules'" class="read-link">
             <span>{{ lang === 'zh-CN' ? '凝视深渊' : 'Gaze into the Abyss' }}</span>
             <span class="arrow">&rarr;</span>
           </a>

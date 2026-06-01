@@ -14,6 +14,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #004 · 2026-05-28</div>
+  <a class="abyss-title" href="/abyss/04-soft-to-hard-rules">04 | The Alchemy of Soft to Hard Rules: The Internalization Path from Prompt to System Instinct</a>
+  <p class="abyss-desc">An in-depth study of the channels, strategies, and traps of principle internalization. How to physically intercept low-level errors by hardening high-risk bottom lines into the RuleHost runtime sandbox while adopting custom pruning policies.</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #003 · 2026-05-25</div>
   <a class="abyss-title" href="/abyss/03-biological-forward-pass">03 | Pain is the Signal: The Hardcore Biological Epiphany of Forward Evolution</a>
   <p class="abyss-desc">Breaking the myth of backpropagation, revealing how to build a forward evolution loop of "Pain — Brake — Debrief — Precipitate" for silicon lifeforms.</p>
