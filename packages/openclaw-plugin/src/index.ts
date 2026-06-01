@@ -62,7 +62,7 @@ import { computeRuntimeShadowTaskFingerprint, PD_LOCAL_PROFILES } from './utils/
 import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { resolveWorkspaceDirFromApi } from './core/path-resolver.js';
-import { checkSurfaceGuard } from './core/surface-guard.js';
+import { checkSurfaceGuard, guardHook, guardService, getSurfaceIdForHook, getSurfaceIdForService } from './core/surface-guard.js';
 
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
@@ -209,7 +209,7 @@ const plugin = {
     // ── Hook: Prompt Building ──
     api.on(
       'before_prompt_build',
-      async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
+      guardHook('hook:before_prompt_build', async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_prompt_build');
         if (!workspaceDir) {
           api.logger.error(
@@ -265,13 +265,13 @@ const plugin = {
           });
           api.logger.error(`[PD] Error in before_prompt_build: ${String(err)}`);
         }
-      }
+      })
     );
 
     // ── Hook: Security Gate ──
     api.on(
       'before_tool_call',
-      (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
+      guardHook('hook:before_tool_call', (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_tool_call');
         if (!workspaceDir) {
           api.logger.error(
@@ -300,13 +300,13 @@ const plugin = {
           }, { flushImmediately: true });
           api.logger.error(`[PD] Error in before_tool_call: ${String(err)}`);
         }
-      }
+      })
     );
 
     // ── Hook: Pain & Trust ──
     api.on(
       'after_tool_call',
-      (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
+      guardHook('hook:after_tool_call', (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_tool_call');
         if (!workspaceDir) {
           api.logger.error(
@@ -333,13 +333,13 @@ const plugin = {
           }, { flushImmediately: true });
           api.logger.error(`[PD:EmpathyObserver] Error in after_tool_call: ${String(err)}`);
         }
-      }
+      })
     );
 
     // ── Hook: LLM Analysis ──
     api.on(
       'llm_output',
-      (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
+      guardHook('hook:llm_output', (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'llm_output');
         if (!workspaceDir) {
           api.logger.error(
@@ -366,14 +366,14 @@ const plugin = {
           });
           api.logger.error(`[PD] Error in llm_output: ${String(err)}`);
         }
-      }
+      })
     );
 
     // ── Hook: Trajectory Collection (Behavior Evolution Phase 0) ──
     // Note: after_tool_call and llm_output are safe to collect
     api.on(
       'after_tool_call',
-      (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
+      guardHook('hook:after_tool_call.trajectory', (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         try {
           const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'trajectory.after_tool_call');
           if (!workspaceDir) return;
@@ -382,12 +382,12 @@ const plugin = {
         } catch (_err) {
           // Non-critical: don't log, just skip
         }
-      }
+      })
     );
 
     api.on(
       'llm_output',
-      (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
+      guardHook('hook:llm_output.trajectory', (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         try {
           const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'trajectory.llm_output');
           if (!workspaceDir) return;
@@ -396,14 +396,14 @@ const plugin = {
         } catch (_err) {
           // Non-critical: don't log, just skip
         }
-      }
+      })
     );
 
     // ── Hook: Subagent Loop Closure ──
     api.on(
       'subagent_spawning',
        
-      (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
+      guardHook('hook:subagent_spawning', (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
         try {
           // FIX (B): Never fall back to '.' — fail-fast with ERROR log if workspaceDir cannot be resolved.
           // For subagent hooks, we use event.agentId as the target agent for workspace resolution.
@@ -442,12 +442,12 @@ const plugin = {
           api.logger.error(`[PD] Error in subagent_spawning shadow routing: ${String(err)}`);
           return { status: 'ok' }; // Don't block spawn on shadow observation errors
         }
-      }
+      })
     );
 
     api.on(
       'subagent_ended',
-      (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
+      guardHook('hook:subagent_ended', (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
         try {
           // FIX (B): Never fall back to '.' — fail-fast with ERROR log if workspaceDir cannot be resolved.
           const workspaceDir = resolveWorkspaceDirFromApi(api, undefined);
@@ -479,11 +479,11 @@ const plugin = {
         } catch (err) {
           api.logger.error(`[PD] Error in subagent_ended: ${String(err)}`);
         }
-      }
+      })
     );
 
     // ── Hook: Lifecycle ──
-    api.on('before_reset', (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
+    api.on('before_reset', guardHook('hook:before_reset', (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_reset');
       if (!workspaceDir) {
         api.logger.error(
@@ -494,9 +494,9 @@ const plugin = {
         return;
       }
       return handleBeforeReset(event, { ...ctx, workspaceDir });
-    });
+    }));
     
-    api.on('before_compaction', (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
+    api.on('before_compaction', guardHook('hook:before_compaction', (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_compaction');
       if (!workspaceDir) {
         api.logger.error(
@@ -507,9 +507,9 @@ const plugin = {
         return;
       }
       return handleBeforeCompaction(event, { ...ctx, workspaceDir });
-    });
+    }));
     
-    api.on('after_compaction', (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
+    api.on('after_compaction', guardHook('hook:after_compaction', (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
       const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_compaction');
       if (!workspaceDir) {
         api.logger.error(
@@ -520,17 +520,21 @@ const plugin = {
         return;
       }
       return handleAfterCompaction(event, { ...ctx, workspaceDir });
-    });
+    }));
 
     // ── Service: Background Evolution Worker ──
     try {
       EvolutionWorkerService.api = api;
-      api.registerService(EvolutionWorkerService);
-      api.registerService(TrajectoryService);
-      api.registerService(PDTaskService);
-      api.registerService(CentralSyncService);
+      const guardedEvolutionWorker = guardService('service:evolution-worker', EvolutionWorkerService, api.logger);
+      if (guardedEvolutionWorker) api.registerService(guardedEvolutionWorker);
+      const guardedTrajectory = guardService('service:trajectory', TrajectoryService, api.logger);
+      if (guardedTrajectory) api.registerService(guardedTrajectory);
+      const guardedPdTask = guardService('service:pd-task', PDTaskService, api.logger);
+      if (guardedPdTask) api.registerService(guardedPdTask);
+      const guardedCentralSync = guardService('service:central-sync', CentralSyncService, api.logger);
+      if (guardedCentralSync) api.registerService(guardedCentralSync);
     } catch (err) {
-      api.logger.error(`[PD] Failed to register EvolutionWorkerService: ${String(err)}`);
+      api.logger.error(`[PD] Failed to register services: ${String(err)}`);
     }
 
     // ── Slash Commands ──

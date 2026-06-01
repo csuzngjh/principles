@@ -119,10 +119,11 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
   {
     id: 'service:evolution-worker',
     kind: 'service',
-    category: 'core',
-    enabledByDefault: true,
-    since: '2026-05-24',
-    description: 'Background evolution worker for pain processing',
+    category: 'quiet',
+    enabledByDefault: false,
+    since: '2026-06-01',
+    description: 'Background evolution worker for pain processing (MVP-Quiet per PRI-288/ADR-0014)',
+    disabledReason: 'MVP-Quiet: evolution worker gated behind evolution_worker feature flag (PRI-288); default off per ADR-0014 §2.5',
   },
   {
     id: 'service:trajectory',
@@ -162,10 +163,11 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
   {
     id: 'startup:evolution-worker',
     kind: 'startup',
-    category: 'core',
-    enabledByDefault: true,
-    since: '2026-05-24',
-    description: 'Evolution worker start on first prompt per workspace',
+    category: 'quiet',
+    enabledByDefault: false,
+    since: '2026-06-01',
+    description: 'Evolution worker start on first prompt per workspace (MVP-Quiet per PRI-288/ADR-0014)',
+    disabledReason: 'MVP-Quiet: evolution worker startup gated behind evolution_worker feature flag (PRI-288); default off per ADR-0014 §2.5',
   },
   {
     id: 'prompt_section:principles',

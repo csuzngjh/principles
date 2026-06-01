@@ -7,7 +7,6 @@ import {
   findUnclassifiedSurfaces,
   getSurfacesByCategory,
   getSurfacesByKind,
-  type PluginSurfaceEntry,
 } from '@principles/core/runtime-v2';
 
 function findRepoRoot(cwd: string): string {
@@ -27,44 +26,45 @@ function read(relativePath: string): string {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 }
 
-function extractHookRegistrations(source: string): string[] {
-  const hooks: string[] = [];
-  const hookPattern = /api\.on\s*\(\s*['"]([^'"]+)['"]/g;
+interface HookRegistration {
+  event: string;
+  surfaceId: string;
+  index: number;
+}
+
+function extractHookRegistrations(source: string): HookRegistration[] {
+  const registrations: HookRegistration[] = [];
+  const hookPattern = /guardHook\s*\(\s*['"]([^'"]+)['"]\s*,/g;
   let match: RegExpExecArray | null;
+  let hookIndex = 0;
   while ((match = hookPattern.exec(source)) !== null) {
-    hooks.push(match[1]);
+    registrations.push({
+      surfaceId: match[1],
+      event: match[1].replace(/^hook:/, '').replace(/\..+$/, ''),
+      index: hookIndex++,
+    });
   }
-  return hooks;
+  return registrations;
 }
 
-function extractServiceRegistrations(source: string): string[] {
-  const services: string[] = [];
-  const servicePattern = /api\.registerService\s*\(\s*(\w+)/g;
+interface ServiceRegistration {
+  surfaceId: string;
+  index: number;
+}
+
+function extractServiceRegistrations(source: string): ServiceRegistration[] {
+  const registrations: ServiceRegistration[] = [];
+  const servicePattern = /guardService\s*\(\s*['"]([^'"]+)['"]\s*,/g;
   let match: RegExpExecArray | null;
+  let serviceIndex = 0;
   while ((match = servicePattern.exec(source)) !== null) {
-    services.push(match[1]);
+    registrations.push({
+      surfaceId: match[1],
+      index: serviceIndex++,
+    });
   }
-  return services;
+  return registrations;
 }
-
-const SERVICE_NAME_MAP: Record<string, string> = {
-  EvolutionWorkerService: 'service:evolution-worker',
-  TrajectoryService: 'service:trajectory',
-  PDTaskService: 'service:pd-task',
-  CentralSyncService: 'service:central-sync',
-};
-
-const HOOK_LABEL_MAP: Record<string, string[]> = {
-  before_prompt_build: ['hook:before_prompt_build'],
-  before_tool_call: ['hook:before_tool_call'],
-  after_tool_call: ['hook:after_tool_call', 'hook:after_tool_call.trajectory'],
-  llm_output: ['hook:llm_output', 'hook:llm_output.trajectory'],
-  subagent_spawning: ['hook:subagent_spawning'],
-  subagent_ended: ['hook:subagent_ended'],
-  before_reset: ['hook:before_reset'],
-  before_compaction: ['hook:before_compaction'],
-  after_compaction: ['hook:after_compaction'],
-};
 
 describe('MVP Surface Registry Guard (PRI-289)', () => {
   describe('registry self-validation', () => {
@@ -106,61 +106,96 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
     });
   });
 
-  describe('hook registration coverage', () => {
-    it('every api.on() hook event in index.ts is classified in the registry', () => {
+  describe('hook registration coverage — per-registration, not deduplicated', () => {
+    it('every guardHook() call in index.ts has a classified surface id', () => {
       const source = read('packages/openclaw-plugin/src/index.ts');
-      const hookEvents = extractHookRegistrations(source);
-      const uniqueHookEvents = [...new Set(hookEvents)];
+      const registrations = extractHookRegistrations(source);
 
-      const registeredHookIds = new Set(
+      expect(registrations.length).toBeGreaterThan(0);
+
+      const registeredIds = new Set(
         PLUGIN_SURFACE_REGISTRY.filter(s => s.kind === 'hook').map(s => s.id),
       );
 
       const unclassified: string[] = [];
-      for (const event of uniqueHookEvents) {
-        const expectedIds = HOOK_LABEL_MAP[event];
-        if (!expectedIds) {
-          unclassified.push(event);
-          continue;
-        }
-        for (const expectedId of expectedIds) {
-          if (!registeredHookIds.has(expectedId)) {
-            unclassified.push(expectedId);
-          }
+      for (const reg of registrations) {
+        if (!registeredIds.has(reg.surfaceId)) {
+          unclassified.push(reg.surfaceId);
         }
       }
 
       expect(unclassified).toEqual([]);
     });
 
-    it('every api.registerService() in index.ts is classified in the registry', () => {
+    it('each individual hook registration is covered (no dedup by event name)', () => {
       const source = read('packages/openclaw-plugin/src/index.ts');
-      const serviceNames = extractServiceRegistrations(source);
+      const registrations = extractHookRegistrations(source);
 
-      const registeredServiceIds = new Set(
+      const registeredIds = new Set(
+        PLUGIN_SURFACE_REGISTRY.filter(s => s.kind === 'hook').map(s => s.id),
+      );
+
+      for (const reg of registrations) {
+        expect(registeredIds.has(reg.surfaceId)).toBe(true);
+      }
+    });
+
+    it('after_tool_call has two registrations: core + trajectory', () => {
+      const source = read('packages/openclaw-plugin/src/index.ts');
+      const registrations = extractHookRegistrations(source);
+
+      const afterToolCallRegs = registrations.filter(r => r.surfaceId.startsWith('hook:after_tool_call'));
+      expect(afterToolCallRegs.length).toBe(2);
+      expect(afterToolCallRegs[0].surfaceId).toBe('hook:after_tool_call');
+      expect(afterToolCallRegs[1].surfaceId).toBe('hook:after_tool_call.trajectory');
+    });
+
+    it('llm_output has two registrations: core + trajectory', () => {
+      const source = read('packages/openclaw-plugin/src/index.ts');
+      const registrations = extractHookRegistrations(source);
+
+      const llmOutputRegs = registrations.filter(r => r.surfaceId.startsWith('hook:llm_output'));
+      expect(llmOutputRegs.length).toBe(2);
+      expect(llmOutputRegs[0].surfaceId).toBe('hook:llm_output');
+      expect(llmOutputRegs[1].surfaceId).toBe('hook:llm_output.trajectory');
+    });
+
+    it('total hook registrations match expected count', () => {
+      const source = read('packages/openclaw-plugin/src/index.ts');
+      const registrations = extractHookRegistrations(source);
+
+      const registryHookCount = PLUGIN_SURFACE_REGISTRY.filter(s => s.kind === 'hook').length;
+      expect(registrations.length).toBe(registryHookCount);
+    });
+  });
+
+  describe('service registration coverage — per-registration', () => {
+    it('every guardService() call in index.ts has a classified surface id', () => {
+      const source = read('packages/openclaw-plugin/src/index.ts');
+      const registrations = extractServiceRegistrations(source);
+
+      expect(registrations.length).toBeGreaterThan(0);
+
+      const registeredIds = new Set(
         PLUGIN_SURFACE_REGISTRY.filter(s => s.kind === 'service').map(s => s.id),
       );
 
       const unclassified: string[] = [];
-      for (const name of serviceNames) {
-        const expectedId = SERVICE_NAME_MAP[name];
-        if (!expectedId) {
-          unclassified.push(name);
-          continue;
-        }
-        if (!registeredServiceIds.has(expectedId)) {
-          unclassified.push(expectedId);
+      for (const reg of registrations) {
+        if (!registeredIds.has(reg.surfaceId)) {
+          unclassified.push(reg.surfaceId);
         }
       }
 
       expect(unclassified).toEqual([]);
     });
 
-    it('findUnclassifiedSurfaces detects new unregistered surfaces', () => {
-      const registeredIds = PLUGIN_SURFACE_REGISTRY.map(s => s.id);
-      const actualIds = ['hook:before_prompt_build', 'hook:new_unregistered_hook'];
-      const unclassified = findUnclassifiedSurfaces(registeredIds, actualIds);
-      expect(unclassified).toEqual(['hook:new_unregistered_hook']);
+    it('total service registrations match expected count', () => {
+      const source = read('packages/openclaw-plugin/src/index.ts');
+      const registrations = extractServiceRegistrations(source);
+
+      const registryServiceCount = PLUGIN_SURFACE_REGISTRY.filter(s => s.kind === 'service').length;
+      expect(registrations.length).toBe(registryServiceCount);
     });
   });
 
@@ -181,6 +216,22 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(coreHooks).toContain('hook:before_tool_call');
       expect(coreHooks).toContain('hook:after_tool_call');
       expect(coreHooks).toContain('hook:llm_output');
+    });
+
+    it('evolution-worker service is MVP-Quiet (PRI-288/ADR-0014 alignment)', () => {
+      const ew = PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'service:evolution-worker');
+      expect(ew).toBeDefined();
+      expect(ew!.category).toBe('quiet');
+      expect(ew!.enabledByDefault).toBe(false);
+      expect(ew!.disabledReason).toContain('PRI-288');
+    });
+
+    it('evolution-worker startup is MVP-Quiet (PRI-288/ADR-0014 alignment)', () => {
+      const ew = PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'startup:evolution-worker');
+      expect(ew).toBeDefined();
+      expect(ew!.category).toBe('quiet');
+      expect(ew!.enabledByDefault).toBe(false);
+      expect(ew!.disabledReason).toContain('PRI-288');
     });
 
     it('trajectory hooks are MVP-Quiet (ADR-0014 §2.5)', () => {
@@ -274,6 +325,49 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       const { isSurfaceEnabled } = await import('../../src/core/surface-guard.js');
       const result = isSurfaceEnabled('hook:after_tool_call.trajectory', { 'hook:after_tool_call.trajectory': true });
       expect(result.enabled).toBe(true);
+    });
+
+    it('guardHook returns original handler for core surfaces', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+      const handler = () => 'result';
+      const guarded = guardHook('hook:before_prompt_build', handler);
+      expect(guarded).toBe(handler);
+    });
+
+    it('guardHook returns no-op handler for quiet surfaces', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+      const handler = () => 'result';
+      const guarded = guardHook('hook:after_tool_call.trajectory', handler);
+      expect(guarded).not.toBe(handler);
+      expect(guarded({} as never, {} as never)).toBeUndefined();
+    });
+
+    it('guardHook returns no-op handler for gone surfaces', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+      const handler = () => 'result';
+      const guarded = guardHook('prompt_section:message_sanitize', handler);
+      expect(guarded).not.toBe(handler);
+    });
+
+    it('guardService returns null for evolution-worker (quiet, default off)', async () => {
+      const { guardService } = await import('../../src/core/surface-guard.js');
+      const service = { api: null, start: () => {} };
+      const guarded = guardService('service:evolution-worker', service);
+      expect(guarded).toBeNull();
+    });
+
+    it('guardService returns null for quiet surfaces', async () => {
+      const { guardService } = await import('../../src/core/surface-guard.js');
+      const service = { api: null, start: () => {} };
+      const guarded = guardService('service:trajectory', service);
+      expect(guarded).toBeNull();
+    });
+
+    it('guardService returns null for gone surfaces even with override', async () => {
+      const { guardService } = await import('../../src/core/surface-guard.js');
+      const service = { api: null, start: () => {} };
+      const guarded = guardService('prompt_section:message_sanitize', service);
+      expect(guarded).toBeNull();
     });
   });
 });

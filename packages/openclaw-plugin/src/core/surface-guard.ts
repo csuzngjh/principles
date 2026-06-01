@@ -5,6 +5,7 @@ import {
   type PluginSurfaceEntry,
   type MvpCategory,
 } from '@principles/core/runtime-v2';
+import type { OpenClawPluginService } from '../openclaw-sdk.js';
 
 export interface SurfaceGuardResult {
   passed: boolean;
@@ -91,6 +92,38 @@ export function isSurfaceEnabled(
   }
 
   return { enabled: entry.enabledByDefault };
+}
+
+export type HookHandler<E, C, R> = (event: E, ctx: C) => R | Promise<R>;
+
+export function guardHook<E, C, R>(
+  surfaceId: string,
+  handler: HookHandler<E, C, R>,
+  logger?: { info?: (msg: string) => void; debug?: (msg: string) => void },
+): HookHandler<E, C, R> {
+  const check = isSurfaceEnabled(surfaceId);
+  if (check.enabled) {
+    return handler;
+  }
+  const reason = check.reason ?? 'surface not enabled';
+  return (event: E, ctx: C): R | Promise<R> => {
+    logger?.debug?.(`[PD:surface-guard] SKIP ${surfaceId}: ${reason}`);
+    return undefined as R;
+  };
+}
+
+export function guardService<T extends OpenClawPluginService>(
+  surfaceId: string,
+  service: T,
+  logger?: { info?: (msg: string) => void; debug?: (msg: string) => void },
+): T | null {
+  const check = isSurfaceEnabled(surfaceId);
+  if (check.enabled) {
+    return service;
+  }
+  const reason = check.reason ?? 'surface not enabled';
+  logger?.info?.(`[PD:surface-guard] SKIP service ${surfaceId}: ${reason}`);
+  return null;
 }
 
 export { PLUGIN_SURFACE_REGISTRY, validateSurfaceRegistry, getSurfacesByCategory };
