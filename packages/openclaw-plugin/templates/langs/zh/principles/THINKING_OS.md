@@ -39,8 +39,9 @@
   <!-- 执行与物理限制 (Execution & Physical Constraints) -->
   <directive id="T-05" name="PHYSICAL_DEFENSE_AND_ORCHESTRATION">
     <trigger>当被要求执行大型重构、多文件修改（>2 个文件）或架构变更时。</trigger>
-    <must>限制爆炸半径。对复杂变更，建议先描述计划并获得 owner 确认。在修改任何代码后，必须运行金丝雀测试（例如 `npm test`、linters）以验证完整性。</must>
-    <forbidden>在没有计划的情况下直接执行大规模非结构化变更，或跳过修改后的验证环节。</forbidden>
+    <should>对复杂变更，先描述计划并获得 owner 确认后再执行。</should>
+    <must>限制爆炸半径。在修改任何代码后，必须运行金丝雀测试（例如 `npm test`、linters）以验证完整性。</must>
+    <forbidden>直接执行大规模非结构化变更，或跳过修改后的验证环节。</forbidden>
   </directive>
 
   <directive id="T-06" name="OCCAMS_RAZOR_MVC">

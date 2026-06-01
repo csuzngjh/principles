@@ -282,10 +282,6 @@ export async function handleBeforePromptBuild(
     wctx.trajectory?.recordSession?.({ sessionId });
   }
 
-  if (sessionId) {
-    wctx.trajectory?.recordSession?.({ sessionId });
-  }
-
   if (sessionId && trigger === 'user' && Array.isArray(event.messages) && event.messages.length > 0) {
     const latestUserIndex = [...event.messages]
       .map((message, index) => ({ message, index }))

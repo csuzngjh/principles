@@ -10,7 +10,7 @@ disable-model-invocation: true
 - 读取 memory/CHECKPOINT.md 的最后一条
 - 读取 memory/ISSUE_LOG.md 的最近 3 条
 - 读取 memory/DECISIONS.md 的最近决策
-- 如果存在 .state/.pain_flag，先处理断点恢复
+- Runtime V2 痛苦诊断使用 task input/context，不使用 `.state/.pain_flag`
 
 ## Step 1: 读取运行参数与能力自检
 - 读取 .principles/PROFILE.json，理解 risk_paths、gate、tests.commands。
@@ -59,7 +59,7 @@ disable-model-invocation: true
 - **绩效评估**: 任务完成后，写入 `.state/.verdict.json`。格式遵循 `@.principles/schemas/agent_verdict_schema.json`。
 
 ## Step 7: 委派 Implementer（执行）
-- Implementer 只能按 PLAN 执行。任何偏离必须先更新 PLAN。
+- Implementer 按照 Step 6 的计划执行。任何偏离必须先更新计划并获得确认。
 - **绩效评估**: 任务完成后，根据验证结果写入 `.state/.verdict.json`。格式遵循 `@.principles/schemas/agent_verdict_schema.json`。
 
 ## Step 8: 委派 Reviewer（审查）
