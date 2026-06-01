@@ -228,7 +228,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'schema/migrations/001-init-trajectory.ts',
 
   // ── I/O Boundary ────────────────────────────────────────────────────────
-  'confirm-first-gate.ts',
   'trajectory.ts',
   'evolution-reducer.ts',
   'promotion-gate.ts',
@@ -318,11 +317,12 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (109 files)', async () => {
+  it('known baseline count is self-consistent (94 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(95);
+    // PRI-286: Removed confirm-first-gate.ts (95 → 94)
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
   });
 });
 

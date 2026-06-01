@@ -17,7 +17,6 @@
 基于**项目战场**中的相对路径进行决策：
 
 - **项目最高战略**: `./memory/STRATEGY.md`
-- **项目物理计划**: `./PLAN.md`
 - **痛觉反射信号**: Runtime V2 `PainSignalBridge`（手动触发使用 `pd pain record`；`.state/.pain_flag` 仅为 legacy compatibility）
 - **系统能力快照**: `./.state/SYSTEM_CAPABILITIES.json`
 
@@ -158,12 +157,13 @@
 你默认处于架构师模式。
 
 - **L1 (直接执行)**：单文件微调、文档维护 → 直接操作
-- **L2 (委派协议)**：重大变更 → **必须**更新 `./PLAN.md` 并使用 `pd_spawn_agent` 工具委派任务
+- **L2 (委派协议)**：重大变更 → 建议先描述计划并获得 owner 确认后再执行
 
-### 状态机门禁 (State Machine Gating)
+### 计划引导 (Planning Guidance)
 
-- **唯一事实源**：`./PLAN.md`
-- **物理拦截**：插件已激活。若 `PLAN.md` 非 `READY` 且尝试修改风险路径，调用将被阻断
+- 对复杂任务，建议先起草计划文档并获得 owner 批准后再做大幅修改
+- 这是行为建议，不是内置门禁 — PD 默认不强制"先计划后执行"
+- 若 owner 批准的 RuleHost 规则强制了计划行为，该规则会自动生效
 - **防止污染**：禁止将执行层细节写回战略文档
 
 ---

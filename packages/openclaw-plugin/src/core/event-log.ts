@@ -28,7 +28,6 @@ import type {
   RuleHostAutoCorrectProposedEventData,
   RuleHostAutoCorrectAppliedEventData,
   RuntimeV2PromptActivationsInjectedEventData,
-  RuntimeV2ConfirmFirstGateEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
@@ -208,14 +207,6 @@ export class EventLog {
 
   recordRuntimeV2ActivationsInjected(data: RuntimeV2PromptActivationsInjectedEventData): void {
     this.record('runtime_v2_prompt_activations_injected', 'injected', data.sessionId, data);
-  }
-
-  recordConfirmFirstGateBlocked(data: RuntimeV2ConfirmFirstGateEventData): void {
-    this.record('runtime_v2_confirm_first_gate_blocked', 'blocked', data.sessionId, data);
-  }
-
-  recordConfirmFirstGateApproved(data: RuntimeV2ConfirmFirstGateEventData): void {
-    this.record('runtime_v2_confirm_first_gate_approved', 'approved', data.sessionId, data);
   }
 
   private record(

@@ -9,9 +9,7 @@
  * 2. Rule Host: Dynamic principle-based evaluation (sole gate)
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import { normalizePath, planStatus } from '../utils/io.js';
+import { normalizePath } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
@@ -19,7 +17,6 @@ import type { RuleHostInput } from '@principles/core/runtime-v2';
 import { validateCorrectionProposal, validateProposedPathBounds } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
-import { evaluateConfirmFirstGateSync } from '../core/confirm-first-gate.js';
 import { getSession, hasRecentThinking } from '../core/session-tracker.js';
 import { getEvolutionEngine } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
@@ -42,42 +39,6 @@ export function handleBeforeToolCall(
 
   const wctx = WorkspaceContext.fromHookContext(ctx);
 
-  // 1.5. Confirm-First Gate — runs BEFORE filePath resolution to catch apply_patch/no-path cases
-  try {
-    const cfResult = evaluateConfirmFirstGateSync(
-      ctx.sessionId,
-      event.toolName,
-      event.params,
-    );
-
-    if (cfResult.action === 'block') {
-      const eventLog = EventLogService.get(wctx.stateDir, logger as PluginLogger | undefined);
-      eventLog.recordConfirmFirstGateBlocked({
-        sessionId: ctx.sessionId ?? 'unknown',
-        workspaceDir: ctx.workspaceDir,
-        toolName: event.toolName,
-        reason: cfResult.reason ?? 'confirm_first_required',
-        principleId: cfResult.principleId ?? 'unknown',
-        nextAction: cfResult.nextAction ?? '',
-      });
-
-      // Use safe placeholder when filePath is unavailable (e.g., apply_patch with no path)
-      const safePath = (event.params?.file_path || event.params?.path || event.params?.file || event.params?.target)
-        ?? `<tool:${event.toolName}>`;
-
-      return recordGateBlockAndReturn(wctx, {
-        filePath: typeof safePath === 'string' ? safePath : `<tool:${event.toolName}>`,
-        reason: cfResult.reason ?? 'confirm_first_required',
-        toolName: event.toolName,
-        sessionId: ctx.sessionId,
-        blockSource: 'confirm-first-gate',
-      }, logger);
-    }
-  } catch (cfErr) {
-    // ERR-002: fail loud — log but do not crash the gate
-    logger?.warn?.(`[PD:ConfirmFirst] Gate evaluation failed (non-blocking): ${String(cfErr)}`);
-  }
-
   // 2. Resolve the target file path
   let filePath = event.params?.file_path || event.params?.path || event.params?.file || event.params?.target;
 
@@ -92,6 +53,12 @@ export function handleBeforeToolCall(
       // Bash command without a clear file target — let it through to Rule Host
       filePath = command;
     }
+  }
+
+  // Write tools without a file path must still go through RuleHost evaluation.
+  // Use a synthetic path so RuleHost can evaluate and potentially block.
+  if (!filePath && isWriteTool) {
+    filePath = `<tool:${event.toolName}>`;
   }
 
   if (typeof filePath !== 'string') return;
@@ -109,8 +76,12 @@ export function handleBeforeToolCall(
       },
       workspace: {
         isRiskPath: false, // Rule Host determines risk dynamically
-        planStatus: _getPlanStatus(ctx.workspaceDir),
-        hasPlanFile: _hasPlanFile(ctx.workspaceDir),
+        // DEPRECATED (PRI-286): planStatus/hasPlanFile are legacy compatibility fields.
+        // Live PD no longer reads or manages PLAN.md state. These fields must not be
+        // used for new MVP behavior. Future "plan-first" enforcement must come from
+        // owner-approved RuleHost/code_tool_hook activation, not built-in state.
+        planStatus: 'NONE' as const,
+        hasPlanFile: false,
       },
       session: {
         sessionId: ctx.sessionId,
@@ -377,25 +348,6 @@ function _extractParamsSummary(params: Record<string, unknown>): Record<string, 
   return summary;
 }
 
-function _getPlanStatus(workspaceDir: string): 'NONE' | 'DRAFT' | 'READY' | 'UNKNOWN' {
-  try {
-    const status = planStatus(workspaceDir);
-    if (status === 'READY') return 'READY';
-    if (status === 'DRAFT') return 'DRAFT';
-    if (status === '') return 'NONE';
-    return 'UNKNOWN';
-  } catch {
-    return 'UNKNOWN';
-  }
-}
-
-function _hasPlanFile(workspaceDir: string): boolean {
-  try {
-    return fs.existsSync(path.join(workspaceDir, 'PLAN.md'));
-  } catch {
-    return false;
-  }
-}
 
 function _getCurrentGfi(sessionId?: string): number {
   if (!sessionId) return 0;

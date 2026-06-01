@@ -73,29 +73,19 @@ The general strategy: **start soft, escalate if needed.**
 
 ## Workspace Guardrails
 
-PD can block risky edits until the agent has a clear plan. This protects important files like:
-
-- Agent identity files (`SOUL.md`, `AGENTS.md`)
-- Memory files (`memory/`)
-- Strategy and plan files (`PLAN.md`)
-- Custom high-risk paths you configure
+PD uses RuleHost — an owner-governed, dynamic rule system — to enforce behavioral principles. When an owner-approved principle blocks a tool call, the agent receives guidance on how to proceed.
 
 ### How It Works
 
-When the agent tries to edit a protected file, PD checks `PLAN.md`:
+RuleHost evaluates each mutating tool call against activated rules:
 
-```
-STATUS: READY    → Edit allowed
-STATUS: DRAFT    → Edit blocked
-No PLAN.md       → Edit blocked
-```
+- If a rule matches and blocks → the agent receives an explanation and guidance
+- If no rule blocks → the operation proceeds normally
+- Rules are activated through the MVP channels: prompt injection, code_tool_hook, and defer_archive
 
-### What the Agent Should Do When Blocked
+### Planning Guidance
 
-1. Update `PLAN.md` with an explanation
-2. Describe the risk and why the edit is needed
-3. Set `STATUS: READY`
-4. Retry the operation
+For complex tasks, agents are encouraged to describe their plan and get owner confirmation before making large changes. This is a behavioral suggestion, not a built-in gate. If the owner wants to enforce "plan before action" as a hard rule, they can activate a RuleHost rule through the standard internalization pipeline.
 
 ### Configuring Risk Paths
 
