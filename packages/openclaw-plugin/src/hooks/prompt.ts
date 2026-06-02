@@ -192,7 +192,7 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
     const raw = cachedReadFile(profilePath);
     if (raw) {
       const profile = JSON.parse(raw);
-      if (profile.contextInjection) {
+      if (profile && typeof profile === 'object' && profile.contextInjection && typeof profile.contextInjection === 'object') {
         const contextInjection = profile.contextInjection as Partial<ContextInjectionConfig>;
         return {
           ...defaultContextConfig,
@@ -360,6 +360,9 @@ export async function handleBeforePromptBuild(
   }
 
   // ──── 1. prependSystemContext: Minimal Agent Identity ────
+  // EvolutionWorker-era INTERNAL SYSTEM LAYOUT removed per PRI-294.
+  // The EVOLUTION_WORKER PathResolver key and system layout reference are
+  // not MVP-Core; agents discover what they need via tool calls.
   prependSystemContext = `## 【AGENT IDENTITY】
 
 You are a **self-evolving AI agent** powered by Principles Disciple.
@@ -377,10 +380,6 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 - Use the current session for the normal user reply.
 - Use sessions_send for cross-session messaging.
 - Use agents_list / sessions_list for peer-agent or peer-session orchestration.
-
-## 🔧 INTERNAL SYSTEM LAYOUT
-- Your core plugin logic is rooted at: ${PathResolver.getExtensionRoot() || 'EXTENSION_ROOT (unresolved)'}
-- If you need self-inspection, prioritize the worker entry pointed by PathResolver key: EVOLUTION_WORKER
 `;
 
   // ──── 2. Empathy Observer Spawn (async sidecar)
