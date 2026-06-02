@@ -25,16 +25,13 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 
 | Command | Purpose | Use Case |
 |---------|---------|----------|
-| `/pd-init` | Initialize strategy and OKRs | New project startup |
-| `/pd-okr` | Objectives and Key Results management | Weekly/monthly review |
+| `/pd-init` | Initialize strategy | New project startup |
 | `/pd-bootstrap` | Environment tool scan and upgrade | Tool upgrade |
 | `/pd-research` | Initiate tool upgrade research | Deep research |
 | `/pd-thinking` | Manage mental models and candidates | Metacognition |
 | `/pd-evolve` | Execute full evolution loop | Bug fix |
-| `/pd-daily` | Configure and send evolution daily report | Daily review |
 | `/pd-evolution-status` | View trust score and security stage | Permission check |
 | `/pd-status` | View system status (GFI and Pain Dictionary) | Health check |
-| `/pd-grooming` | Workspace digital cleanup | Entropy reduction |
 | `/pd-help` | Get interactive command guidance | This skill |
 
 ---
@@ -46,7 +43,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 **Trigger**: User says "I just created a new project" or similar
 
 **Recommended Flow**:
-1. `/pd-init` - Establish strategic vision and OKR framework
+1. `/pd-init` - Establish strategic vision
 2. `/pd-bootstrap` - Scan environment tools, get capability list
 3. `/pd-thinking` - Establish project's mental model baseline
 
@@ -71,26 +68,14 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 **Trigger**: User says "what did I do today", "check progress", "give me a report"
 
 **Recommended Flow**:
-1. `/pd-daily` - Send today's evolution report
-2. `/pd-evolution-status` - View current trust score
-3. `/pd-okr` - Check OKR alignment
+1. `/pd-evolution-status` - View current trust score
+2. `/pd-status` - Check GFI and Pain Dictionary status
 
-**Script**: "Daily report in hand, evolution I command. Let me help you review today's achievements."
-
----
-
-### Scenario 4: Messy Workspace
-
-**Trigger**: User says "project is too messy", "too many files", "need to organize"
-
-**Recommended Flow**:
-1. `/pd-grooming` - Start workspace cleanup
-
-**Script**: "Digital cleanliness is a virtue. Let me help you reduce entropy."
+**Script**: "Let me help you review the current system status."
 
 ---
 
-### Scenario 5: Permission or Security Related
+### Scenario 4: Permission or Security Related
 
 **Trigger**: User says "not enough permissions", "blocked", "security level"
 
@@ -186,8 +171,8 @@ For complex scenarios, combine multiple skills:
 | Scenario | Combined Flow |
 |----------|---------------|
 | Major refactor | `/pd-evolve` → `deductive-audit` → execute |
-| System optimization | `/pd-status` → `evolve-system` → `root-cause` |
-| Project review | `/pd-daily` → `/pd-okr` → `reflection-log` |
+| System optimization | `/pd-status` → `root-cause` → optimize |
+| Project review | `/pd-evolution-status` → `/pd-status` → `reflection-log` |
 
 ### Internal Skill Calls
 

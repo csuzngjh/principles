@@ -21,10 +21,6 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     zh: '初始化工作区（生成 PRINCIPLES.md、THINKING_OS.md 等）',
     en: 'Initialize workspace (generate PRINCIPLES.md, THINKING_OS.md, etc.)'
   },
-  'pd-okr': {
-    zh: '管理 OKR 目标与关键结果',
-    en: 'Manage OKR goals and key results'
-  },
   'pd-bootstrap': {
     zh: '扫描环境工具并建议升级',
     en: 'Scan environment tools and suggest upgrades'
@@ -36,14 +32,6 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
   'pd-thinking': {
     zh: '管理思维模型 [status|propose|audit]（默认关闭，/pd-context thinking on 开启）',
     en: 'Manage Thinking OS [status|propose|audit] (off by default, enable via /pd-context thinking on)'
-  },
-  'pd-daily': {
-    zh: '配置并发送进化日报',
-    en: 'Configure and send daily evolution report'
-  },
-  'pd-grooming': {
-    zh: '工作区清理与大扫除',
-    en: 'Workspace cleanup and grooming'
   },
   'pd-help': {
     zh: '显示所有命令和使用指南',
