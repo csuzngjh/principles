@@ -1,8 +1,8 @@
 # PD 项目路线图：2026-05 版
 
 > **状态**: Active / **MVP-First Track**
-> **更新日期**: 2026-05-24（v3.0 — MVP-First Pivot）
-> **基准代码**: `origin/main` = `b4444507`（PR #696 合并后；PRI-252 纠偏中）
+> **更新日期**: 2026-06-02（v3.1 — MVP Track 进度同步）
+> **基准代码**: `origin/main` = `b4444507`（PR #696 合并后）；2026-06-02 基于 Linear 完成工单同步
 > **主决策**:
 > - **[ADR-0014](../../adr/0014-mvp-first-strategy-and-product-pivot.md)（MVP-First Strategy）★ 当前主决策**
 > - [ADR-0012](../../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md)（Runtime V2-only，仍生效）
@@ -38,10 +38,10 @@ PD 进入 **MVP-First 阶段**。所有架构演进暂停，目标是在 **4-6 �
 | Phase 0: low-risk pipeline | Done | Pain → Activation 基础路径已验证 |
 | Phase 1A: L2 / RuleHost safety | Done | RuleHostWriter / sandbox / approval 已落地 |
 | Phase 1B P1: stability baseline | Done | PRI-200~225 完成 |
-| Phase 1B P2: Nocturnal retirement | In progress | PRI-227~231 作为 MVP 期减法继续 |
+| Phase 1B P2: Nocturnal retirement | Done | PRI-227~231、PRI-119、PRI-242 已完成 |
 | ~~Phase 1C: value loop closure~~ | Cancelled / Deferred | ADR-0014 取消；重启条件见 post-mvp §1 |
 | ~~Phase 1D: lean foundations~~ | Cancelled / Deferred | 同上 |
-| **MVP Track (Week 1-6)** | **Active** | **proven-channel 演示 + 种子客户邀请** |
+| **MVP Track (Week 1-6)** | **Active** | **Week 1-4 完成，Week 5-6 部分完成，进入种子客户邀请阶段** |
 | Phase 2+ (BALM/LRAS/GAP/MissionScheduler) | Hold | 准入门槛改为外部反馈驱动 |
 
 ## 立即执行顺序
@@ -52,8 +52,16 @@ PD 进入 **MVP-First 阶段**。所有架构演进暂停，目标是在 **4-6 �
 4. ✅ README.md / AGENTS.md / 活跃架构索引由 PRI-252 纠偏
 5. ✅ Linear: PRI-232~236 canceled，禁止从历史文档恢复
 6. ✅ Linear: PRI-243 移出 critical path；PRI-240 改为 proven-channel baseline
-7. ⏳ PRI-239: 建立真实可加载、可测试的 feature flag contract
-8. ⏳ PRI-240 / PRI-242: 验证现有通道并继续 legacy retirement
+7. ✅ PRI-239: feature flag contract 已实现并测试
+8. ✅ PRI-240 / PRI-242: proven-channel baseline + legacy retirement 已完成
+9. ✅ PRI-244/245/246: Console 审批 UI + 三页化 + Demo 已完成
+10. ✅ PRI-247: pd-cli 一键安装已完成
+11. ✅ PRI-253~296（排除 Canceled/Backlog）: MVP live pain / confirm-first / diagnostician / plugin 瘦身等已完成
+12. ⏳ PRI-248: GETTING-STARTED 用户视角重写（Todo）
+13. ⏳ PRI-249: 故事 A' 录屏（Backlog）
+14. ⏳ PRI-251: 邀请第一个种子客户（Backlog）
+15. ⏳ PRI-297: Secret redaction from telemetry（Todo）
+16. ⏳ PRI-278~282: Codex CLI adapter 系列（Backlog）
 
 ## AI 执行纪律（v3.0 强化）
 
