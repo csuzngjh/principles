@@ -31,7 +31,13 @@ export function redactAbsolutePaths(text: string): string {
 // OpenAI sk-..., Anthropic sk-ant-..., generic sk-_...
 const OPENAI_TOKEN = /\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}\b/g;
 // GitHub tokens: ghp_, gho_, ghu_, ghs_, ghr_
-const GITHUB_TOKEN = /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g;
+const GITHUB_TOKEN = /\bgh[pousr]_[A-Za-z0-9_]{16,}\b/g;
+// Linear API tokens: lin_api_<hex> (underscores allowed — e.g. lin_api_test_abc123)
+const LINEAR_TOKEN = /\blin_api_[A-Za-z0-9_-]{16,}\b/g;
+// Authorization header values (keep key label, redact value)
+const AUTH_HEADER_VALUE = /(Authorization\s*:\s*).{1,500}/gi;
+// PowerShell env var: $env:VAR="value"
+const PWSH_ENV_VAR = /(\$env:\s*[A-Z_][A-Z0-9_]{2,}\s*=\s*")([^"]*)(")/gi;
 // Generic api_key= / token= / secret= / password= assignments
 const KEY_ASSIGN = /\b(api[_-]?key|token|secret|password|auth(?:_?token)?)\s*[:=]\s*['"]?([^\s'",}{]+)['"]?/gi;
 // Bearer headers
@@ -45,6 +51,9 @@ export function redactTokenLikeValues(text: string): string {
   return text
     .replace(OPENAI_TOKEN, REDACTED_VALUE)
     .replace(GITHUB_TOKEN, REDACTED_VALUE)
+    .replace(LINEAR_TOKEN, REDACTED_VALUE)
+    .replace(AUTH_HEADER_VALUE, '$1[REDACTED]')
+    .replace(PWSH_ENV_VAR, '$1[REDACTED]$3')
     .replace(BEARER, REDACTED_VALUE)
     .replace(KEY_ASSIGN, (_m, key: string) => `${key}=${REDACTED_VALUE}`);
 }
@@ -57,6 +66,23 @@ const ENV_ASSIGN = /\b([A-Z_][A-Z0-9_]{2,})\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s,;
 export function redactEnvLikeValues(text: string): string {
   if (typeof text !== 'string') return text;
   return text.replace(ENV_ASSIGN, (_m, key: string) => `${key}=${REDACTED_VALUE}`);
+}
+
+// ── Combined telemetry redaction ────────────────────────────────────────────
+
+/**
+ * Run all string-level redactors in sequence on telemetry strings (commands,
+ * file paths, tool arguments, params summaries) before they enter event logs.
+ *
+ * This combines token, env, and auth-header redaction in a single pass.
+ * ERR-002: never throws; returns original for non-string input.
+ * ERR-045/046: covers composite command strings, Authorization headers, env vars.
+ */
+export function redactTelemetryString(text: string): string {
+  if (typeof text !== 'string') return text;
+  let result = redactTokenLikeValues(text);
+  result = redactEnvLikeValues(result);
+  return result;
 }
 
 // ── Stack trace redaction ──────────────────────────────────────────────────

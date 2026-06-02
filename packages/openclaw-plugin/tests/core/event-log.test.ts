@@ -315,4 +315,113 @@ describe('EventLog', () => {
       expect(stats.evolution.rulehostAutoCorrectApplied).toBe(0);
     });
   });
+
+  describe('telemetry redaction', () => {
+    it('redacts lin_api_ token from rulehost_evaluated filePath', () => {
+      const sensitivePath = 'curl -s -H "Authorization: lin_api_TEST_REDACT_ME_1234567890ABCDEF" https://api.linear.app';
+      eventLog.recordRuleHostEvaluated({
+        toolName: 'bash',
+        filePath: sensitivePath,
+        matched: true,
+        decision: 'allow',
+        ruleId: 'r1',
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('lin_api_TEST_REDACT_ME');
+      expect(content).toContain('[REDACTED]');
+    });
+
+    it('redacts Authorization header from tool_call data', () => {
+      eventLog.recordToolCall('s1', {
+        toolName: 'bash',
+        command: 'curl -H "Authorization: Bearer sk-TEST_REDACT_ME_1234567890" https://api.example.com',
+        error: undefined,
+        gfi: 0,
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('sk-TEST_REDACT_ME_1234567890');
+      expect(content).not.toContain('Bearer sk-TEST_REDACT_ME');
+      expect(content).toContain('[REDACTED]');
+    });
+
+    it('redacts ghp_ token from tool_call data', () => {
+      eventLog.recordToolCall('s1', {
+        toolName: 'bash',
+        command: 'ghp_TEST_REDACT_ME_1234567890ABCDEFGHIJKLMN',
+        error: undefined,
+        gfi: 0,
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('ghp_TEST_REDACT_ME');
+      expect(content).toContain('[REDACTED]');
+    });
+
+    it('redacts Bearer token in tool_call data', () => {
+      eventLog.recordToolCall('s1', {
+        toolName: 'bash',
+        command: 'curl -H "Authorization: Bearer TEST_REDACT_ME_TOKEN_1234567890"',
+        error: undefined,
+        gfi: 0,
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('TEST_REDACT_ME_TOKEN');
+      expect(content).toContain('[REDACTED]');
+    });
+
+    it('redacts env assignment in tool_call data', () => {
+      eventLog.recordToolCall('s1', {
+        toolName: 'bash',
+        command: 'LINEAR_API_KEY=lin_api_TEST_REDACT_ME_1234567890ABCDEF curl -s https://api.linear.app',
+        error: undefined,
+        gfi: 0,
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('lin_api_TEST_REDACT_ME');
+      expect(content).toContain('[REDACTED]');
+    });
+
+    it('preserves normal file path in rulehost_evaluated', () => {
+      const normalPath = 'src/app.ts';
+      eventLog.recordRuleHostEvaluated({
+        toolName: 'write',
+        filePath: normalPath,
+        matched: true,
+        decision: 'allow',
+        ruleId: 'r1',
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).toContain(normalPath);
+    });
+
+    it('non-telemetry types are not affected', () => {
+      eventLog.recordPainSignal('s1', {
+        source: 'tool_failure',
+        score: 75,
+        reason: 'normal pain signal',
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).toContain('normal pain signal');
+    });
+  });
 });
