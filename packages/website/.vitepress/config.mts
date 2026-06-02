@@ -80,6 +80,7 @@ export default defineConfig({
             {
               text: '使用指南与参考手册',
               items: [
+                { text: '快速入门 (Getting Started)', link: '/docs/getting-started' },
                 { text: '用户指南 (User Guide)', link: '/zh/docs/user-guide' },
               ]
             }

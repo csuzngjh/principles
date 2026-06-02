@@ -7,13 +7,20 @@ description: Install Principles Disciple in 2 minutes and let your AI agent lear
 
 ## 30 Seconds: What PD Does
 
-Your AI agent keeps making the same mistakes? PD captures those mistakes, finds the pattern, and lets you turn them into **reviewed, reversible rules** — so the agent doesn't repeat them.
+Your AI agent keeps making the same mistakes? PD captures those mistakes, finds the pattern, and lets you turn them into **reviewed, reversible rules** — so the agent stops repeating them.
 
 ```
 Agent repeats a mistake → PD spots the pattern → You review → Agent improves
 ```
 
-You're always in control. Nothing activates without your approval.
+You're always in control. Nothing activates without your approval. Everything is reversible.
+
+### What PD Is NOT
+
+- ❌ **Not a task executor** — PD doesn't do your work. It shapes how your AI works.
+- ❌ **Not a memory system** — PD doesn't help the AI remember facts.
+- ❌ **Not an autonomous robot** — PD proposes, **you approve**.
+- ❌ **Not a penalty system** — PD learns from patterns, not punishment.
 
 ## 2 Minutes: Install & Go
 
@@ -63,7 +70,7 @@ You'll see the proposal in the console. Choose one of three actions:
 Changed your mind? Undo anytime:
 
 ```
-/pd-rollback-impl <id>
+pd activation disable <id> --reason "Changed my mind"
 ```
 
 ## That's It
@@ -76,6 +83,6 @@ PD is now watching for repeated mistakes and waiting for your review. No configu
 
 - AI won't edit files? → Check if a RuleHost rule is blocking the operation
 - Plugin won't load? → `cd ~/.openclaw/extensions/principles-disciple && npm install micromatch@^4.0.8 @sinclair/typebox@^0.34.48`
-- Check health anytime → `/pd-status`
+- Check health anytime → `pd status`
 
-**Want more?** → [User Guide](/docs/user-guide) | [Development Guide](/docs/development)
+**Want the full story?** → [Full Getting Started Guide](/docs/GETTING-STARTED) | [User Guide](/docs/user-guide) | [Development Guide](/docs/development)
