@@ -19,6 +19,7 @@ export interface CorrectionObserverServiceShape {
 
 let correctionObserverTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let correctionObserverStopped = false;
+const startedWorkspaces = new Set<string>();
 
 const CORRECTION_OBSERVER_INTERVAL_MS = 15 * 60 * 1000;
 const CORRECTION_OBSERVER_INITIAL_DELAY_MS = 10_000;
@@ -158,6 +159,12 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
             return;
         }
 
+        if (startedWorkspaces.has(workspaceDir)) {
+            if (logger) logger.info(`[PD:CorrectionObserver] Already started for workspace: ${workspaceDir}. Skipping duplicate start.`);
+            return;
+        }
+        startedWorkspaces.add(workspaceDir);
+
         correctionObserverStopped = false;
 
         const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
@@ -186,6 +193,7 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
 
     stop(_ctx: OpenClawPluginServiceContext): void {
         correctionObserverStopped = true;
+        startedWorkspaces.clear();
         if (correctionObserverTimeoutId) clearTimeout(correctionObserverTimeoutId);
         correctionObserverTimeoutId = null;
     },

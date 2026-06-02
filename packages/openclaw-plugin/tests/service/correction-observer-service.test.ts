@@ -198,6 +198,89 @@ describe('CorrectionObserverService — Independent Service (PRI-293)', () => {
       expect.stringContaining('workspaceDir not found')
     );
   });
+
+  it('double start same workspace only dispatches one loop (P1 fix)', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-dbl-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const logger1 = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const logger2 = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    try {
+      CorrectionObserverService.start({
+        workspaceDir,
+        stateDir,
+        logger: logger1,
+        config: { get: () => undefined },
+      } as any);
+
+      CorrectionObserverService.start({
+        workspaceDir,
+        stateDir,
+        logger: logger2,
+        config: { get: () => undefined },
+      } as any);
+
+      expect(logger2.info).toHaveBeenCalledWith(
+        expect.stringContaining('Already started')
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      CorrectionObserverService.stop?.({} as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('stop after double start cancels all timers and allows clean restart', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-stopdbl-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    try {
+      CorrectionObserverService.start({
+        workspaceDir,
+        stateDir,
+        logger,
+        config: { get: () => undefined },
+      } as any);
+
+      CorrectionObserverService.start({
+        workspaceDir,
+        stateDir,
+        logger,
+        config: { get: () => undefined },
+      } as any);
+
+      CorrectionObserverService.stop?.({} as any);
+
+      vi.advanceTimersByTime(30_000);
+
+      expect(mockDispatch).not.toHaveBeenCalled();
+
+      CorrectionObserverService.start({
+        workspaceDir,
+        stateDir,
+        logger,
+        config: { get: () => undefined },
+      } as any);
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('[PD:CorrectionObserver] Starting')
+      );
+    } finally {
+      CorrectionObserverService.stop?.({} as any);
+      safeRmDir(workspaceDir);
+    }
+  });
 });
 
 describe('runCorrectionObserverCycle — Independent Execution', () => {
