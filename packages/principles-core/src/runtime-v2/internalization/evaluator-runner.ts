@@ -140,7 +140,6 @@ export class EvaluatorRunner {
   async run(taskId: string): Promise<EvaluatorRunnerResult> {
     this.phase = RunnerPhase.Idle;
 
-     
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({

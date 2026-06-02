@@ -180,7 +180,7 @@ export class DreamerRunner {
     this.phase = RunnerPhase.Idle;
 
     // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
-     
+
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({

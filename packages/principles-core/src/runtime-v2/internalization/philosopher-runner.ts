@@ -172,7 +172,6 @@ export class PhilosopherRunner {
   async run(taskId: string): Promise<PhilosopherRunnerResult> {
     this.phase = RunnerPhase.Idle;
 
-     
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({

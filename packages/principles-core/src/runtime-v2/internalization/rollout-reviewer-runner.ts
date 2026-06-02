@@ -140,7 +140,6 @@ export class RolloutReviewerRunner {
   async run(taskId: string): Promise<RolloutReviewerRunnerResult> {
     this.phase = RunnerPhase.Idle;
 
-     
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({

@@ -136,7 +136,6 @@ export class ArtificerRunner {
   async run(taskId: string): Promise<ArtificerRunnerResult> {
     this.phase = RunnerPhase.Idle;
 
-     
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({
