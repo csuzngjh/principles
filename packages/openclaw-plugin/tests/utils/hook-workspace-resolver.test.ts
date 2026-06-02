@@ -162,18 +162,17 @@ describe('resolveHookWorkspaceDir — PD canonical primary', () => {
     }
   });
 
-  it('falls back to OpenClaw context when no PD canonical config exists', () => {
+  it('falls back to OpenClaw context when no PD explicit config exists', () => {
     const result = resolveHookWorkspaceDir(
       { workspaceDir: validWorkspace },
       api as any,
       'test',
-      { canonicalResolver: noCanonical },
+      { canonicalResolver: noCanonical, explicitPdResolver: noCanonical },
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.source).toBe('openclaw_context');
       expect(result.workspaceDir).toBe(validWorkspace);
-      expect(result.consistencyWarning).toContain('PD canonical config not found');
     }
   });
 
@@ -183,13 +182,12 @@ describe('resolveHookWorkspaceDir — PD canonical primary', () => {
       {},
       api as any,
       'test',
-      { canonicalResolver: noCanonical },
+      { canonicalResolver: noCanonical, explicitPdResolver: noCanonical },
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.source).toBe('openclaw_api');
       expect(result.workspaceDir).toBe(validWorkspace);
-      expect(result.consistencyWarning).toContain('PD canonical config not found');
     }
   });
 
@@ -199,7 +197,7 @@ describe('resolveHookWorkspaceDir — PD canonical primary', () => {
       {},
       api as any,
       'test_hook',
-      { canonicalResolver: noCanonical },
+      { canonicalResolver: noCanonical, explicitPdResolver: noCanonical },
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -216,11 +214,30 @@ describe('resolveHookWorkspaceDir — PD canonical primary', () => {
       { workspaceDir: homeDir, agentId: 'main' },
       api as any,
       'test',
-      { canonicalResolver: noCanonical },
+      { canonicalResolver: noCanonical, explicitPdResolver: noCanonical },
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.source).toBe('openclaw_api');
+      expect(result.workspaceDir).toBe(validWorkspace);
+    }
+  });
+
+  it('ctx.workspaceDir takes priority over pd_default when no explicit PD source exists', () => {
+    // canonicalResolver returns pd_default, but ctx.workspaceDir is a real workspace
+    const pdDefaultResolver = (): CanonicalWorkspaceResult => ({
+      workspaceDir: path.join(homeDir, '.openclaw', 'workspace'),
+      source: 'pd_default',
+    });
+    const result = resolveHookWorkspaceDir(
+      { workspaceDir: validWorkspace },
+      api as any,
+      'test',
+      { canonicalResolver: pdDefaultResolver, explicitPdResolver: noCanonical },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.source).toBe('openclaw_context');
       expect(result.workspaceDir).toBe(validWorkspace);
     }
   });
@@ -233,7 +250,7 @@ describe('resolveHookWorkspaceDir — PD canonical primary', () => {
       {},
       api as any,
       'test_hook',
-      { canonicalResolver: noCanonical },
+      { canonicalResolver: noCanonical, explicitPdResolver: noCanonical },
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -295,18 +312,22 @@ describe('resolveToolHookWorkspaceDirSafe (backward compat)', () => {
     );
   });
 
-  it('returns undefined and logs when all sources fail', () => {
+  it('returns pd_default when only default fallback is available', () => {
+    // When no explicit PD source, no ctx.workspaceDir, and no API resolution,
+    // resolveToolHookWorkspaceDirSafe falls back to pd_default
     api.runtime.agent.resolveAgentWorkspaceDir.mockReturnValue(homeDir);
-    const result = resolveHookWorkspaceDir(
+    const result = resolveToolHookWorkspaceDirSafe(
       {},
       api as any,
       'test',
-      { canonicalResolver: noCanonical },
     );
-    expect(result.ok).toBe(false);
+    // pd_default (~/.openclaw/workspace) is used as last resort
+    expect(result).toBeDefined();
+    expect(result).toContain('.openclaw');
   });
 
-  it('no silent skip — failure includes workspace_dir_unresolvable reason', () => {
+  it('returns undefined and logs when all sources including pd_default fail', () => {
+    // To test true total failure, we use resolveHookWorkspaceDir with mocked resolvers
     api.runtime.agent.resolveAgentWorkspaceDir.mockImplementation(() => {
       throw new Error('no workspace');
     });
@@ -314,12 +335,13 @@ describe('resolveToolHookWorkspaceDirSafe (backward compat)', () => {
       {},
       api as any,
       'test_hook',
-      { canonicalResolver: noCanonical },
+      { canonicalResolver: noCanonical, explicitPdResolver: noCanonical },
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toBe('workspace_dir_unresolvable');
       expect(result.message).toContain('test_hook');
+      expect(result.nextAction).toContain('PD_WORKSPACE_DIR');
     }
   });
 });

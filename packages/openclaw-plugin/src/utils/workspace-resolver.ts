@@ -160,6 +160,39 @@ export function resolveCanonicalWorkspaceDir(): CanonicalWorkspaceResult | null 
   return null;
 }
 
+/**
+ * Resolve only PD explicit sources (env vars + config file), excluding pd_default.
+ * Used by hook resolution to ensure ctx.workspaceDir takes priority over the
+ * hardcoded default fallback.
+ */
+function resolveExplicitPdSources(): CanonicalWorkspaceResult | null {
+  const pdEnv = process.env.PD_WORKSPACE_DIR;
+  if (pdEnv && pdEnv.trim()) {
+    const dir = path.resolve(pdEnv.trim());
+    if (!validateWorkspaceDir(dir)) {
+      return { workspaceDir: dir, source: 'pd_env' };
+    }
+  }
+
+  const ocEnv = process.env.OPENCLAW_WORKSPACE;
+  if (ocEnv && ocEnv.trim()) {
+    const dir = path.resolve(ocEnv.trim());
+    if (!validateWorkspaceDir(dir)) {
+      return { workspaceDir: dir, source: 'openclaw_env' };
+    }
+  }
+
+  const configWorkspace = loadWorkspaceFromPdConfigFile();
+  if (configWorkspace) {
+    const dir = path.resolve(configWorkspace);
+    if (!validateWorkspaceDir(dir)) {
+      return { workspaceDir: dir, source: 'pd_config' };
+    }
+  }
+
+  return null;
+}
+
 // ── Hook Workspace Resolution (PRI-259) ────────────────────────────────
 
 export type HookWorkspaceSource = CanonicalWorkspaceSource | 'openclaw_context' | 'openclaw_api';
@@ -199,6 +232,7 @@ function tryResolveFromOpenClawApi(
 
 export interface HookWorkspaceResolutionOptions {
   canonicalResolver?: () => CanonicalWorkspaceResult | null;
+  explicitPdResolver?: () => CanonicalWorkspaceResult | null;
 }
 
 export function resolveHookWorkspaceDir(
@@ -207,30 +241,34 @@ export function resolveHookWorkspaceDir(
   source: string,
   options?: HookWorkspaceResolutionOptions,
 ): HookWorkspaceResolutionResult {
-  const resolveCanonical = options?.canonicalResolver ?? resolveCanonicalWorkspaceDir;
-  const canonical = resolveCanonical();
+  // Priority 1: PD explicit sources (env vars + config file) — these are
+  // owner-declared and intentionally override the live session context.
+  const resolveExplicit = options?.explicitPdResolver ?? resolveExplicitPdSources;
+  const explicit = resolveExplicit();
 
-  if (canonical) {
+  if (explicit) {
     let consistencyWarning: string | undefined;
 
     if (ctx.workspaceDir) {
       const normalizedCtx = path.resolve(ctx.workspaceDir);
-      const normalizedCanonical = path.resolve(canonical.workspaceDir);
-      if (normalizedCtx !== normalizedCanonical) {
+      const normalizedExplicit = path.resolve(explicit.workspaceDir);
+      if (normalizedCtx !== normalizedExplicit) {
         consistencyWarning =
-          `PD canonical workspace (${canonical.source}: ${canonical.workspaceDir}) ` +
-          `differs from OpenClaw context (${ctx.workspaceDir}). Using PD canonical.`;
+          `PD explicit workspace (${explicit.source}: ${explicit.workspaceDir}) ` +
+          `differs from OpenClaw context (${ctx.workspaceDir}). Using PD explicit.`;
       }
     }
 
     return {
       ok: true,
-      workspaceDir: canonical.workspaceDir,
-      source: canonical.source,
+      workspaceDir: explicit.workspaceDir,
+      source: explicit.source,
       consistencyWarning,
     };
   }
 
+  // Priority 2: OpenClaw live context — the real session workspace.
+  // This MUST take priority over pd_default (the hardcoded fallback).
   if (ctx.workspaceDir) {
     const issue = validateWorkspaceDir(ctx.workspaceDir);
     if (!issue) {
@@ -238,22 +276,31 @@ export function resolveHookWorkspaceDir(
         ok: true,
         workspaceDir: ctx.workspaceDir,
         source: 'openclaw_context',
-        consistencyWarning:
-          'PD canonical config not found; using OpenClaw context as fallback. ' +
-          'Configure PD_WORKSPACE_DIR or ~/.openclaw/principles-disciple.json for stable resolution.',
       };
     }
   }
 
+  // Priority 3: OpenClaw API resolution
   const apiResolved = tryResolveFromOpenClawApi(api, ctx.agentId);
   if (apiResolved) {
     return {
       ok: true,
       workspaceDir: apiResolved,
       source: 'openclaw_api',
+    };
+  }
+
+  // Priority 4: pd_default (hardcoded fallback) — only when nothing else works
+  const resolveCanonical = options?.canonicalResolver ?? resolveCanonicalWorkspaceDir;
+  const canonical = resolveCanonical();
+  if (canonical && canonical.source === 'pd_default') {
+    return {
+      ok: true,
+      workspaceDir: canonical.workspaceDir,
+      source: 'pd_default',
       consistencyWarning:
-        'PD canonical config not found; using OpenClaw API as fallback. ' +
-        'Configure PD_WORKSPACE_DIR or ~/.openclaw/principles-disciple.json for stable resolution.',
+        'Using hardcoded default workspace (~/.openclaw/workspace). ' +
+        'Set PD_WORKSPACE_DIR or create ~/.openclaw/principles-disciple.json for stable resolution.',
     };
   }
 
@@ -265,8 +312,8 @@ export function resolveHookWorkspaceDir(
       'with a "workspace" field, or ensure OpenClaw provides workspaceDir in hook context.',
     message:
       `[PD:${source}] Cannot resolve workspace directory from any source. ` +
-      `PD canonical config (PD_WORKSPACE_DIR, principles-disciple.json, ~/.openclaw/workspace) ` +
-      `and OpenClaw fallback (ctx.workspaceDir, api.resolveAgentWorkspaceDir) all failed.`,
+      `PD explicit config (PD_WORKSPACE_DIR, principles-disciple.json) ` +
+      `and OpenClaw fallback (ctx.workspaceDir, api.resolveAgentWorkspaceDir, ~/.openclaw/workspace) all failed.`,
   };
 }
 
