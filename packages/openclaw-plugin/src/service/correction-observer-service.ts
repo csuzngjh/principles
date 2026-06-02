@@ -18,6 +18,7 @@ export interface CorrectionObserverServiceShape {
 }
 
 let correctionObserverTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let correctionObserverStopped = false;
 
 const CORRECTION_OBSERVER_INTERVAL_MS = 15 * 60 * 1000;
 const CORRECTION_OBSERVER_INITIAL_DELAY_MS = 10_000;
@@ -157,13 +158,17 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
             return;
         }
 
+        correctionObserverStopped = false;
+
         const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
         if (logger) logger.info(`[PD:CorrectionObserver] Starting with workspaceDir=${wctx.workspaceDir}, stateDir=${wctx.stateDir}`);
 
         const interval = CORRECTION_OBSERVER_INTERVAL_MS;
 
         async function runCycle(): Promise<void> {
+            if (correctionObserverStopped) return;
             await runCorrectionObserverCycle(wctx, logger);
+            if (correctionObserverStopped) return;
             correctionObserverTimeoutId = setTimeout(runCycle, interval);
             correctionObserverTimeoutId.unref();
         }
@@ -171,6 +176,7 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
         correctionObserverTimeoutId = setTimeout(() => {
             void runCycle().catch((err) => {
                 if (logger) logger.error(`[PD:CorrectionObserver] Startup cycle failed: ${String(err)}`);
+                if (correctionObserverStopped) return;
                 correctionObserverTimeoutId = setTimeout(runCycle, interval);
                 correctionObserverTimeoutId.unref();
             });
@@ -179,6 +185,7 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
     },
 
     stop(_ctx: OpenClawPluginServiceContext): void {
+        correctionObserverStopped = true;
         if (correctionObserverTimeoutId) clearTimeout(correctionObserverTimeoutId);
         correctionObserverTimeoutId = null;
     },

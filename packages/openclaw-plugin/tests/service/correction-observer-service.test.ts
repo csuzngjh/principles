@@ -149,6 +149,42 @@ describe('CorrectionObserverService — Independent Service (PRI-293)', () => {
     }
   });
 
+  it('does not reschedule after stop during active cycle (P2 fix)', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-obs-race-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    let cycleResolve: () => void;
+    const cyclePromise = new Promise<void>(r => { cycleResolve = r; });
+    mockDispatch.mockImplementationOnce(async () => {
+      cycleResolve!();
+      return { updated: false, summary: 'in-flight' };
+    });
+
+    try {
+      CorrectionObserverService.start({
+        workspaceDir,
+        stateDir,
+        logger,
+        config: { get: () => undefined },
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await cyclePromise;
+
+      CorrectionObserverService.stop?.({} as any);
+
+      vi.advanceTimersByTime(15 * 60 * 1000 * 2);
+
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      CorrectionObserverService.stop?.({} as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
   it('logs structured reason when workspaceDir is missing (ERR-002)', () => {
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 

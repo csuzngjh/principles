@@ -236,4 +236,4 @@ To resolve this bottleneck, we have promoted the **Empathy Observer** (previousl
 
 ### Reclassified Items
 1. **Empathy Observer**: Reclassified from **MVP-Quiet** to **MVP-Core** (wired asynchronously in the prompt build hook).
-2. **Correction Observer**: Reclassified from **MVP-Gone** (as nocturnal workflow) to **MVP-Core**. Originally triggered on evolution heartbeat; extracted to an independent service with its own feature flag (`correction_observer`, core, default on) per PRI-293, so it no longer depends on the default-off EvolutionWorker.
+2. **Correction Observer**: Reclassified from **MVP-Gone** (as nocturnal workflow) to **MVP-Core**. Originally triggered on evolution heartbeat; extracted to an independent service with its own feature flag (`correction_observer`, quiet category with enabled=true default, to allow runtime disabling) per PRI-293, so it no longer depends on the default-off EvolutionWorker. Surface registry entries remain `core` for triage; feature flag is `quiet` to preserve the runtime kill switch.
