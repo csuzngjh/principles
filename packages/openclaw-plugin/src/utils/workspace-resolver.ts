@@ -327,8 +327,9 @@ export function resolveToolHookWorkspaceDirSafe(
   ctx: WorkspaceResolutionContext,
   api: OpenClawPluginApi,
   source: string,
+  options?: HookWorkspaceResolutionOptions,
 ): string | undefined {
-  const result = resolveHookWorkspaceDir(ctx, api, source);
+  const result = resolveHookWorkspaceDir(ctx, api, source, options);
 
   if (!result.ok) {
     api.logger.warn(result.message);

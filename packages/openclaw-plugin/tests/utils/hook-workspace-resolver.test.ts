@@ -327,21 +327,21 @@ describe('resolveToolHookWorkspaceDirSafe (backward compat)', () => {
   });
 
   it('returns undefined and logs when all sources including pd_default fail', () => {
-    // To test true total failure, we use resolveHookWorkspaceDir with mocked resolvers
     api.runtime.agent.resolveAgentWorkspaceDir.mockImplementation(() => {
       throw new Error('no workspace');
     });
-    const result = resolveHookWorkspaceDir(
+    const result = resolveToolHookWorkspaceDirSafe(
       {},
       api as any,
       'test_hook',
       { canonicalResolver: noCanonical, explicitPdResolver: noCanonical },
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toBe('workspace_dir_unresolvable');
-      expect(result.message).toContain('test_hook');
-      expect(result.nextAction).toContain('PD_WORKSPACE_DIR');
-    }
+    expect(result).toBeUndefined();
+    expect(logger.warn).toHaveBeenCalled();
+    const warnCalls = logger.warn.mock.calls.map((c: unknown[]) => String(c[0]));
+    const fullWarn = warnCalls.join('\n');
+    expect(fullWarn).toContain('Cannot resolve workspace directory');
+    expect(fullWarn).toContain('PD_WORKSPACE_DIR');
+    expect(fullWarn).toContain('principles-disciple.json');
   });
 });
