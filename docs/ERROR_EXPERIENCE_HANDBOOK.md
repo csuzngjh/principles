@@ -127,6 +127,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
 | ERR-045 | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys like github_token pass through unredacted | PRI-285 |
 | ERR-046 | Redaction pipeline truncates string values without running path/token/env redactors — secrets in values like buildId or cwd slip through | PRI-285 |
+| ERR-049 | Unconditional taskId reinjection bypasses validator mismatch check — malicious LLM lineage fields pass validation | PRI-294 |
 
 ---
 
@@ -688,7 +689,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Add a tarball content contract test that: (1) reads `package.json files` array, (2) asserts required directories are listed, (3) after `npm pack`, asserts the tarball contains expected files. Run this test in CI, not just locally.
 - **Source**: PRI-247 / PR #721
 - **Date**: 2026-05-26
-- **Recurrence**: Same class as ERR-025, ERR-026
+- **Recurrence**: Same class as ERR-025, ERR-026. Also 2026-06-02 PRI-250 (PR #794): Three separate missing-component issues in the published installer: (1) `js-yaml` and `semver` were in `devDependencies` instead of `dependencies`, so npm publish stripped them — installer crashes on startup with `ERR_MODULE_NOT_FOUND`; (2) console's bundled `agents.js` imports `better-sqlite3` directly but console's `package.json` didn't declare it — `npm file:../core` creates a symlink that does not hoist transitive dependencies; (3) `installBundledCore` copies core/ but never runs `npm install`, so core has no `node_modules` and native modules are unavailable. Fixed by moving runtime deps to `dependencies`, adding `better-sqlite3` to console deps, and adding `installCoreDependencies` step with native rebuild + verify.
 
 ---
 
@@ -749,3 +750,15 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-285 / PR #767
 - **Date**: 2026-06-01
 - **Recurrence**: Same class as ERR-001, ERR-005 (runtime type check operates on wrong value)
+
+---
+
+**[ERR-049]** | Unconditional taskId reinjection bypasses validator mismatch check — malicious LLM lineage fields pass validation
+
+- **What happened**: When fixing `stripLineageFields` removing `taskId` from LLM output (PRI-272), I used unconditional assignment `(output as unknown as Record<string, unknown>).taskId = taskId` in all 7 peer runners (Dreamer, Philosopher, Scribe, Artificer, Evaluator, RolloutReviewer, Trainer). This overwrote any LLM-supplied `taskId` — including wrong or malicious values — before `DefaultDreamerValidator.validate()` could check for mismatches. The `output.taskId !== taskId` check became dead code.
+- **Why it's wrong**: The validator's taskId mismatch check is a security boundary (ERR-008 lineage protection). It prevents LLM-supplied lineage fields from poisoning downstream artifacts. Unconditional reinjection bypasses this check entirely — a malicious or buggy LLM that returns `taskId: "injected-id"` would have it silently overwritten with the correct value, and the artifact would be written as if the LLM output was trustworthy.
+- **Correct approach**: Only inject runner-owned lineage when the property is **absent** via `Object.hasOwn(output, 'taskId')`. Present but invalid/falsy values (`''`, `0`, `false`, `null`, wrong string) must NOT be overwritten — they must reach the validator and fail loud (Runtime Contract Rule 3). Use the `injectRunnerLineageIfAbsent(output, 'taskId', taskId)` helper from `peer-runner-contracts.ts` to centralize this logic across all 7 runners. The helper performs a runtime type guard (`output !== null && typeof output === 'object'`) before calling `Object.hasOwn`.
+- **How to prevent**: When re-injecting fields stripped by a security mechanism, always use `Object.hasOwn` — never truthiness checks (`!value`). Truthiness treats `''`, `0`, `false`, `null` as "missing" and silently overwrites them, hiding validation failures. Required regression tests per runner: missing taskId → injected; `taskId: ''` → not overwritten, validation fails; `taskId: 0` → not overwritten, validation fails; `taskId: false` → not overwritten, validation fails; `taskId: 'wrong-id'` → not overwritten, validation fails. Static regression test: verify no runner contains the old `!(output as unknown as Record<string, unknown>).taskId` pattern.
+- **Source**: PRI-294 / PR #790
+- **Date**: 2026-06-02
+- **Recurrence**: Same class as ERR-008 (lineage fields must not be trusted from LLM output)

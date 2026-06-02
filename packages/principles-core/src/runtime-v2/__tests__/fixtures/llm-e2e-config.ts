@@ -19,7 +19,9 @@ const SENSENOVA_DEFAULT_MODEL = 'deepseek-v4-flash';
 
 export function getLlmE2eConfig(): LlmE2eTestConfig | null {
   const llmE2eApiKey = process.env.LLM_E2E_API_KEY;
-  const sensenovaApiKey = process.env.SENSENOVA_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN;
+  // Only use SENSENOVA_API_KEY; ANTHROPIC_AUTH_TOKEN is not a valid SenseNova
+  // key and must not trigger E2E tests when set by other tools.
+  const sensenovaApiKey = process.env.SENSENOVA_API_KEY;
 
   if (llmE2eApiKey) {
     const provider = process.env.LLM_E2E_PROVIDER ?? 'sensenova';
@@ -42,7 +44,7 @@ export function getLlmE2eConfig(): LlmE2eTestConfig | null {
       apiKey: sensenovaApiKey,
       model: process.env.LLM_E2E_MODEL ?? SENSENOVA_DEFAULT_MODEL,
       provider,
-      apiKeyEnv: process.env.SENSENOVA_API_KEY ? 'SENSENOVA_API_KEY' : 'ANTHROPIC_AUTH_TOKEN',
+      apiKeyEnv: 'SENSENOVA_API_KEY',
       baseUrl: process.env.LLM_E2E_BASE_URL ?? (isSensenova ? SENSENOVA_DEFAULT_BASE_URL : undefined),
       timeoutMs: 120_000,
       maxRetries: 2,

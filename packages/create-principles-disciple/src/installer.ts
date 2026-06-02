@@ -125,6 +125,7 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Checking built plugin', weight: 3 },
   { name: 'Backing up existing install', weight: 3 },
   { name: 'Installing bundled @principles/core', weight: 8 },
+  { name: 'Installing core dependencies', weight: 10 },
   { name: 'Installing plugin', weight: 10 },
   { name: 'Pre-filling @principles/core for plugin', weight: 3 },
   { name: 'Installing plugin dependencies', weight: 20 },
@@ -360,10 +361,10 @@ async function installPluginDependencies(): Promise<void> {
   }
   const pkg = packageJsonRaw as Record<string, unknown>;
   const deps = (typeof pkg.dependencies === 'object' && pkg.dependencies !== null && !Array.isArray(pkg.dependencies))
-    ? Object.keys(pkg.dependencies as Record<string, unknown>)
+    ? Object.keys(pkg.dependencies)
     : [];
   const devDeps = (typeof pkg.devDependencies === 'object' && pkg.devDependencies !== null && !Array.isArray(pkg.devDependencies))
-    ? Object.keys(pkg.devDependencies as Record<string, unknown>)
+    ? Object.keys(pkg.devDependencies)
     : [];
   const allDeps = [...deps, ...devDeps];
 
@@ -610,6 +611,19 @@ function ensureCoreDependency(_targetDir: string): void {
   if (!existsSync(coreDir)) {
     throw new Error('Installed @principles/core not found. Run installBundledCore first.');
   }
+}
+
+async function installCoreDependencies(): Promise<void> {
+  const coreDir = getInstalledCoreDir();
+  const packageJsonPath = path.join(coreDir, 'package.json');
+
+  if (!existsSync(packageJsonPath)) {
+    throw new Error('Core package.json not found after copy — install is corrupted');
+  }
+
+  await runNpmInstall(coreDir, 'Core');
+  await rebuildNativeModules(coreDir, 'Core');
+  verifyNativeModules(coreDir, 'Core');
 }
 
 async function installConsoleDependencies(): Promise<void> {
@@ -900,6 +914,10 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing bundled @principles/core...');
     installBundledCore(pluginDir);
+    stepIndex++;
+
+    if (spinner) updateProgress(spinner, stepIndex, 'Installing core dependencies...');
+    await installCoreDependencies();
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing plugin...');
