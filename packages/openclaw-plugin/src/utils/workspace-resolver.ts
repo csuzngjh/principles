@@ -2,6 +2,11 @@
  * Workspace Directory Resolution Utilities
  *
  * Shared helpers for resolving workspace directories across commands and hooks.
+ *
+ * Hook resolution priority (PRI-259): PD canonical config → OpenClaw fallback.
+ * PD canonical sources: PD_WORKSPACE_DIR env → OPENCLAW_WORKSPACE env →
+ * principles-disciple.json → ~/.openclaw/workspace default.
+ * OpenClaw fallback: ctx.workspaceDir → api.runtime.agent.resolveAgentWorkspaceDir().
  */
 
 import type { OpenClawPluginApi, PluginCommandContext } from '../openclaw-sdk.js';
@@ -9,6 +14,8 @@ import { validateWorkspaceDir, type WorkspaceResolutionContext } from '../core/w
 import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
 
 /**
  * Resolve workspace directory for command execution.
@@ -83,16 +90,210 @@ export function resolvePluginCommandWorkspaceDir(
   );
 }
 
+// ── PD Canonical Workspace Config Resolution (PRI-259) ──────────────────
+
+export type CanonicalWorkspaceSource = 'pd_env' | 'openclaw_env' | 'pd_config' | 'pd_default';
+
+export interface CanonicalWorkspaceResult {
+  workspaceDir: string;
+  source: CanonicalWorkspaceSource;
+}
+
+const PD_CONFIG_FILENAME = 'principles-disciple.json';
+
+function loadWorkspaceFromPdConfigFile(): string | null {
+  const candidates = [
+    path.join(os.homedir(), '.openclaw', PD_CONFIG_FILENAME),
+    path.join(os.homedir(), '.principles', PD_CONFIG_FILENAME),
+    path.join(process.cwd(), PD_CONFIG_FILENAME),
+  ];
+
+  for (const configPath of candidates) {
+    if (!fs.existsSync(configPath)) continue;
+    try {
+      const raw = fs.readFileSync(configPath, 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        if (Object.hasOwn(parsed, 'workspace')) {
+          const workspaceValue = (parsed as Record<string, unknown>)['workspace'];
+          if (typeof workspaceValue === 'string' && workspaceValue.trim()) {
+            return workspaceValue.trim();
+          }
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+export function resolveCanonicalWorkspaceDir(): CanonicalWorkspaceResult | null {
+  const pdEnv = process.env.PD_WORKSPACE_DIR;
+  if (pdEnv && pdEnv.trim()) {
+    const dir = path.resolve(pdEnv.trim());
+    if (!validateWorkspaceDir(dir)) {
+      return { workspaceDir: dir, source: 'pd_env' };
+    }
+  }
+
+  const ocEnv = process.env.OPENCLAW_WORKSPACE;
+  if (ocEnv && ocEnv.trim()) {
+    const dir = path.resolve(ocEnv.trim());
+    if (!validateWorkspaceDir(dir)) {
+      return { workspaceDir: dir, source: 'openclaw_env' };
+    }
+  }
+
+  const configWorkspace = loadWorkspaceFromPdConfigFile();
+  if (configWorkspace) {
+    const dir = path.resolve(configWorkspace);
+    if (!validateWorkspaceDir(dir)) {
+      return { workspaceDir: dir, source: 'pd_config' };
+    }
+  }
+
+  const defaultDir = path.join(os.homedir(), '.openclaw', 'workspace');
+  if (!validateWorkspaceDir(defaultDir)) {
+    return { workspaceDir: defaultDir, source: 'pd_default' };
+  }
+
+  return null;
+}
+
+// ── Hook Workspace Resolution (PRI-259) ────────────────────────────────
+
+export type HookWorkspaceSource = CanonicalWorkspaceSource | 'openclaw_context' | 'openclaw_api';
+
+export interface HookWorkspaceResolutionSuccess {
+  ok: true;
+  workspaceDir: string;
+  source: HookWorkspaceSource;
+  consistencyWarning?: string;
+}
+
+export interface HookWorkspaceResolutionFailure {
+  ok: false;
+  reason: string;
+  nextAction: string;
+  message: string;
+}
+
+export type HookWorkspaceResolutionResult =
+  | HookWorkspaceResolutionSuccess
+  | HookWorkspaceResolutionFailure;
+
+function tryResolveFromOpenClawApi(
+  api: OpenClawPluginApi,
+  agentId: string | undefined,
+): string | undefined {
+  try {
+    const resolved = api.runtime?.agent?.resolveAgentWorkspaceDir?.(api.config, agentId ?? 'main');
+    if (resolved && !validateWorkspaceDir(resolved)) {
+      return resolved;
+    }
+  } catch {
+    // Fall through
+  }
+  return undefined;
+}
+
+export interface HookWorkspaceResolutionOptions {
+  canonicalResolver?: () => CanonicalWorkspaceResult | null;
+}
+
+export function resolveHookWorkspaceDir(
+  ctx: WorkspaceResolutionContext,
+  api: OpenClawPluginApi,
+  source: string,
+  options?: HookWorkspaceResolutionOptions,
+): HookWorkspaceResolutionResult {
+  const resolveCanonical = options?.canonicalResolver ?? resolveCanonicalWorkspaceDir;
+  const canonical = resolveCanonical();
+
+  if (canonical) {
+    let consistencyWarning: string | undefined;
+
+    if (ctx.workspaceDir) {
+      const normalizedCtx = path.resolve(ctx.workspaceDir);
+      const normalizedCanonical = path.resolve(canonical.workspaceDir);
+      if (normalizedCtx !== normalizedCanonical) {
+        consistencyWarning =
+          `PD canonical workspace (${canonical.source}: ${canonical.workspaceDir}) ` +
+          `differs from OpenClaw context (${ctx.workspaceDir}). Using PD canonical.`;
+      }
+    }
+
+    return {
+      ok: true,
+      workspaceDir: canonical.workspaceDir,
+      source: canonical.source,
+      consistencyWarning,
+    };
+  }
+
+  if (ctx.workspaceDir) {
+    const issue = validateWorkspaceDir(ctx.workspaceDir);
+    if (!issue) {
+      return {
+        ok: true,
+        workspaceDir: ctx.workspaceDir,
+        source: 'openclaw_context',
+        consistencyWarning:
+          'PD canonical config not found; using OpenClaw context as fallback. ' +
+          'Configure PD_WORKSPACE_DIR or ~/.openclaw/principles-disciple.json for stable resolution.',
+      };
+    }
+  }
+
+  const apiResolved = tryResolveFromOpenClawApi(api, ctx.agentId);
+  if (apiResolved) {
+    return {
+      ok: true,
+      workspaceDir: apiResolved,
+      source: 'openclaw_api',
+      consistencyWarning:
+        'PD canonical config not found; using OpenClaw API as fallback. ' +
+        'Configure PD_WORKSPACE_DIR or ~/.openclaw/principles-disciple.json for stable resolution.',
+    };
+  }
+
+  return {
+    ok: false,
+    reason: 'workspace_dir_unresolvable',
+    nextAction:
+      'Set PD_WORKSPACE_DIR environment variable, create ~/.openclaw/principles-disciple.json ' +
+      'with a "workspace" field, or ensure OpenClaw provides workspaceDir in hook context.',
+    message:
+      `[PD:${source}] Cannot resolve workspace directory from any source. ` +
+      `PD canonical config (PD_WORKSPACE_DIR, principles-disciple.json, ~/.openclaw/workspace) ` +
+      `and OpenClaw fallback (ctx.workspaceDir, api.resolveAgentWorkspaceDir) all failed.`,
+  };
+}
+
 /**
  * Resolve workspace directory for tool hook execution (safe version).
  * Returns undefined instead of throwing if resolution fails.
+ *
+ * PRI-259: Uses PD canonical config as primary source, OpenClaw as fallback.
  */
 export function resolveToolHookWorkspaceDirSafe(
   ctx: WorkspaceResolutionContext,
   api: OpenClawPluginApi,
   source: string,
 ): string | undefined {
-  return resolveWorkspaceDir(api, ctx, { source });
+  const result = resolveHookWorkspaceDir(ctx, api, source);
+
+  if (!result.ok) {
+    api.logger.warn(result.message);
+    return undefined;
+  }
+
+  if (result.consistencyWarning) {
+    api.logger.warn(`[PD:${source}] ${result.consistencyWarning}`);
+  }
+
+  return result.workspaceDir;
 }
 
 export class WorkspaceResolutionError extends Error {
