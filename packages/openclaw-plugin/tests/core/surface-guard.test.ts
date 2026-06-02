@@ -175,21 +175,21 @@ describe('surface-guard', () => {
     });
 
     it('returns original service for enabled surface', () => {
-      const mockService = { name: 'test-service' } as any;
-      const result = guardService('hook:before_prompt_build' as any, mockService);
+      const mockService = { name: 'test-service' };
+      const result = guardService('hook:before_prompt_build', mockService);
       expect(result).toBe(mockService);
     });
 
     it('returns null for disabled surface without logger', () => {
-      const mockService = { name: 'test-service' } as any;
-      const result = guardService('hook:after_tool_call.trajectory' as any, mockService);
+      const mockService = { name: 'test-service' };
+      const result = guardService('hook:after_tool_call.trajectory', mockService);
       expect(result).toBeNull();
     });
 
     it('logs when surface is disabled with logger', () => {
       const mockLogger = { info: vi.fn(), debug: vi.fn() };
-      const mockService = { name: 'test-service' } as any;
-      const result = guardService('hook:after_tool_call.trajectory' as any, mockService, mockLogger);
+      const mockService = { name: 'test-service' };
+      const result = guardService('hook:after_tool_call.trajectory', mockService, mockLogger);
       expect(result).toBeNull();
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('SKIP service'),
@@ -197,14 +197,14 @@ describe('surface-guard', () => {
     });
 
     it('returns null for unknown surface', () => {
-      const mockService = { name: 'test-service' } as any;
-      const result = guardService('service:nonexistent' as any, mockService);
+      const mockService = { name: 'test-service' };
+      const result = guardService('service:nonexistent', mockService);
       expect(result).toBeNull();
     });
 
     it('cannot re-enable gone service', () => {
-      const mockService = { name: 'gone-service' } as any;
-      const result = guardService('service:gone_test' as any, mockService);
+      const mockService = { name: 'gone-service' };
+      const result = guardService('service:gone_test', mockService);
       expect(result).toBeNull();
     });
   });
