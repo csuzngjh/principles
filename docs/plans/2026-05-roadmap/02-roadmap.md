@@ -1,7 +1,7 @@
 # 02 - 路线图：MVP-First Track（Runtime V2 收敛 + 种子客户验证）
 
-> **更新日期**: 2026-05-24（v3.0 — MVP-First Pivot）
-> **基准**: `origin/main` = `b4444507`（PR #696 合并后；PRI-252 纠偏中）
+> **更新日期**: 2026-06-02（v3.1 — MVP Track 进度同步）
+> **基准**: `origin/main` = `b4444507`（PR #696 合并后）；2026-06-02 基于 Linear 完成工单同步
 > **主决策**:
 > - [ADR-0014](../../adr/0014-mvp-first-strategy-and-product-pivot.md) **★ MVP-First Strategy（当前主决策）**
 > - [ADR-0012](../../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md)（Runtime V2-only，仍生效）
@@ -20,10 +20,10 @@
 | Phase 0: low-risk E2E | Done | Pain → Activation 基础路径已验证 |
 | Phase 1A: L2 / RuleHost safety | Done | RuleHostWriter / sandbox / approval 已落地 |
 | Phase 1B P1: stability baseline | Done | PRI-200~225 完成 |
-| Phase 1B P2: Nocturnal retirement | In progress | PRI-227~231，作为 MVP 期减法继续 |
+| Phase 1B P2: Nocturnal retirement | Done | PRI-227~231、PRI-119、PRI-242 已完成 |
 | ~~Phase 1C: value loop closure (Attribution)~~ | **Cancelled / Deferred** | ADR-0014 取消；重启条件见 post-mvp §1 |
 | ~~Phase 1D: lean foundations~~ | **Cancelled / Deferred** | 同上；重启条件见 post-mvp §2-§5 |
-| **MVP Track** | **Active** | **Week 1-6，故事 A' 验证** |
+| **MVP Track** | **Active** | **Week 1-4 已完成，Week 5-6 部分完成，进入种子客户邀请阶段** |
 | Phase 2+ (BALM/LRAS/GAP/MissionScheduler) | Hold | 准入门槛改为外部反馈驱动；见 post-mvp §7-§10 |
 
 ## 2. MVP Track 6 周路线图
@@ -31,24 +31,38 @@
 详见 [07-mvp-first-pivot.md §5](./07-mvp-first-pivot.md)。摘要：
 
 ```
-Week 1-2 减法 + proven-channel 闭环
-  PRI-252  MVP-First 文档/Linear 控制面纠偏
-  PRI-239  feature flags contract + MVP-Quiet 关闭
-  PRI-240  prompt / RuleHost / defer_archive synthetic 冒烟
-  PRI-242  Nocturnal 退役继续（PRI-227 + PRI-230）
+Week 1-2 减法 + proven-channel 闭环 ✅ 全部完成
+  ✅ PRI-252  MVP-First 文档/Linear 控制面纠偏
+  ✅ PRI-239  feature flags contract + MVP-Quiet 关闭
+  ✅ PRI-240  prompt / RuleHost / defer_archive synthetic 冒烟
+  ✅ PRI-242  Nocturnal 退役继续（PRI-227 + PRI-230）
 
-Week 3-4 用户旅程 + proven-channel 演示
-  PRI-244  pd-console proven-channel 审批 UI
-  PRI-245  pd-console 三页化（Pain / Principle / Approval）
-  PRI-246  Demo workspace + 故事 A' proven-channel 场景
-  PRI-243  SkillFileWriter 仅作为需求触发后的 stretch，不预排实现
+Week 3-4 用户旅程 + proven-channel 演示 ✅ 全部完成
+  ✅ PRI-244  pd-console proven-channel 审批 UI
+  ✅ PRI-245  pd-console 三页化（Pain / Principle / Approval）
+  ✅ PRI-246  Demo workspace + 故事 A' proven-channel 场景
+  ⏸ PRI-243  SkillFileWriter 仅作为需求触发后的 stretch，不预排实现
 
-Week 5-6 安装 + 邀请
-  PRI-247  pd-cli 一键安装
-  PRI-248  GETTING-STARTED 用户视角重写
-  PRI-249  故事 A' 录屏
-  PRI-250  多环境冒烟（Win/Mac/Linux）
-  PRI-251  邀请第一个种子客户
+Week 5-6 安装 + 邀请（部分完成）
+  ✅ PRI-247  pd-cli 一键安装
+  ⏳ PRI-248  GETTING-STARTED 用户视角重写
+  ⏳ PRI-249  故事 A' 录屏
+  ⏳ PRI-251  邀请第一个种子客户
+  ✅ PRI-250  多环境冒烟（Windows + WSL，PR #794）
+
+额外完成的 MVP 工作（原路线图未列出）
+  ✅ PRI-253  MVP release gate: clean live workspace
+  ✅ PRI-254  MVP installer: owner review console entrypoint
+  ✅ PRI-255~257  MVP live pain 信号质量门控与证据保留
+  ✅ PRI-259  PD-owned workspace config
+  ✅ PRI-260~265  Console 审批后端 + activation 修复
+  ✅ PRI-266/270/286/287  Confirm-first gate 持久化与清理
+  ✅ PRI-271/272  Diagnostician 弱模型鲁棒性
+  ✅ PRI-273  E2E trap-task Story A' 验证
+  ✅ PRI-274/277  MVP 输入信号充分性
+  ✅ PRI-283  SchemaPromptAdapter
+  ✅ PRI-285  MVP seed 反馈通道
+  ✅ PRI-288/289/290/291/292/293/294/296  Plugin surface 清理与瘦身
 ```
 
 ## 3. MVP-Core / MVP-Quiet / MVP-Gone 清单
@@ -86,18 +100,23 @@ Week 5-6 安装 + 邀请
 
 | Issue | 状态 | 处置 |
 |-------|------|------|
-| PRI-227 | Todo | MVP 期继续，作为 PRI-MVP-6 的一部分 |
-| PRI-228 | Backlog | MVP 后再评估 |
-| PRI-229 | Backlog | MVP 后再评估 |
-| PRI-230 | Backlog | MVP 期继续，作为 PRI-MVP-6 的一部分 |
-| PRI-231 | Backlog | MVP 后再评估（CI 收缩）|
-| PRI-118 | Todo | 降级为 backlog；不在 MVP 路径，但 trajectory facade 仍有 long-term 价值 |
-| PRI-119 | Todo | MVP 期可执行（Nocturnal cutover 的关键步骤）|
-| PRI-148 | Todo | 降级为 backlog；MVP 用 Approval reject 简单路径，RejectionFeedback 待外部需求 |
-| PRI-150 | Backlog | MVP 后再评估 |
-| PRI-154 | Backlog | MVP 后再评估 |
-| PRI-162 | Todo | MVP 期可执行（PD-owned scheduling 是减法）|
-| PRI-183 | Todo | docs only，MVP 期完成 |
+| PRI-227 | Done | ✅ 已完成 |
+| PRI-228 | Done | ✅ 已完成 |
+| PRI-229 | Done | ✅ 已完成 |
+| PRI-230 | Done | ✅ 已完成 |
+| PRI-231 | Done | ✅ 已完成（CI 收缩） |
+| PRI-118 | Backlog | 降级为 backlog；不在 MVP 路径，但 trajectory facade 仍有 long-term 价值 |
+| PRI-119 | Done | ✅ 已完成（EvolutionWorker cutover） |
+| PRI-148 | Backlog | MVP 用 Approval reject 简单路径；RejectionFeedback 待外部需求 |
+| PRI-150 | Canceled | MVP 后再评估 |
+| PRI-154 | Canceled | MVP 后再评估 |
+| PRI-162 | Done | ✅ 已完成（PD-owned scheduling） |
+| PRI-183 | Done | ✅ 已完成（PRUNING_PIPELINE 文档） |
+| PRI-248 | Todo | 执行中（GETTING-STARTED 重写） |
+| PRI-249 | Backlog | 需完成（Story A' 录屏） |
+| PRI-251 | Backlog | 需完成（邀请种子客户） |
+| PRI-278~282 | Backlog | Codex CLI adapter 系列（新增方向） |
+| PRI-297 | Todo | 执行中（Secret redaction） |
 
 ## 7. 不再分配 / 不再优先
 
@@ -121,9 +140,18 @@ Week 5-6 安装 + 邀请
 5. ✅ 06-评审 顶部 Superseded 注记
 6. ✅ PD_System_Dynamics_Model.md v2.0 deferred 注记
 7. ✅ 02-roadmap.md 修订（本文件）
-8. ⏳ README.md 修订
-9. ⏳ AGENTS.md 修订（MVP 三问 + 三档分类）
+8. ✅ README.md 修订
+9. ✅ AGENTS.md 修订（MVP 三问 + 三档分类）
 10. ✅ Linear: PRI-232~236 已 canceled，等待 post-MVP 重启条件
-11. ⏳ PRI-252: 纠正文档和实际 issue 范围，删除旧派工入口
-12. ⏳ PRI-239: 仅在 loader/test 可证实时启用 feature flag 强制规则
-13. ⏳ PRI-240 / 242 / 244~251: 依 proven-channel 与 legacy retirement 顺序执行
+11. ✅ PRI-252: 控制面纠偏完成
+12. ✅ PRI-239: feature flag contract 已实现并测试
+13. ✅ PRI-240: proven-channel synthetic baseline 已完成
+14. ✅ PRI-242: Nocturnal / idle-trigger 退役已完成
+15. ✅ PRI-244/245/246: Console 审批 UI + 三页化 + Demo 已完成
+16. ✅ PRI-247: pd-cli 一键安装已完成
+17. ✅ PRI-253~296（排除 Canceled/Backlog）: MVP live pain / confirm-first / diagnostician / plugin 瘦身等已完成
+18. ⏳ PRI-248: GETTING-STARTED 用户视角重写（Todo）
+19. ⏳ PRI-249: 故事 A' 录屏（Backlog）
+20. ⏳ PRI-251: 邀请第一个种子客户（Backlog）
+21. ⏳ PRI-297: Secret redaction from telemetry（Todo）
+22. ⏳ PRI-278~282: Codex CLI adapter 系列（Backlog）
