@@ -37,13 +37,13 @@ export interface ContextInjectionConfig {
 
 /**
  * Default context injection configuration
- * Based on user requirements:
+ * Based on MVP-first strategy (ADR-0014):
  * - principles: always on (not configurable)
- * - thinkingOs: true (can be turned off)
+ * - thinkingOs: false by default (MVP-Quiet, user can opt-in via /pd-context)
  * - projectFocus: 'off' (default closed, user can enable)
  */
 export const defaultContextConfig: ContextInjectionConfig = {
-  thinkingOs: true,
+  thinkingOs: false,
   projectFocus: 'off',
   evolutionContext: {
     enabled: true,
