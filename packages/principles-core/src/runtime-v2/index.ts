@@ -961,6 +961,17 @@ export {
   MemoryApprovalQueueStore,
   SqliteApprovalQueueStore,
   mapConfidenceToLabel,
+  RUNTIME_V2_PRINCIPLE_BUDGET,
+  isArtifactRecord,
+  filterPromptActivations,
+  resolvePrincipleFromArtifact,
+  trimToBudget,
+  renderPrinciplesToDirectives,
+} from './activation/index.js';
+
+export type {
+  ActivatedPrinciple,
+  PromptActivationReaderResult,
 } from './activation/index.js';
 
 // ── GFI Core Kernel (PRI-76) ────────────────────────────────────────────────
