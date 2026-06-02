@@ -145,6 +145,8 @@ const REQUIRED_SOURCE_FILES = [
   // PRI-146
   'activation/writers/rule-host-writer.ts',
   'activation/writers/index.ts',
+  // PRI-295
+  'activation/prompt-activation-reader-contract.ts',
   // PRI-215
   'synthetic-baseline.ts',
   // PRI-239
@@ -403,6 +405,8 @@ const REQUIRED_TEST_FILES = [
   'synthetic-baseline.test.ts',
   // PRI-239
   '../feature-flags/__tests__/feature-flag-contract.test.ts',
+  // PRI-295
+  '../activation/__tests__/prompt-activation-reader-contract.test.ts',
 ];
 
 const REQUIRED_DOC_FILES: string[] = [];
@@ -465,6 +469,11 @@ describe('runtime-v2 public API (index.ts barrel)', () => {
     // PRI-239
     'validateFeatureFlagRaw',
     'computeEffectiveFlags',
+    // PRI-295
+    'filterPromptActivations',
+    'resolvePrincipleFromArtifact',
+    'trimToBudget',
+    'renderPrinciplesToDirectives',
   ];
 
   for (const name of REQUIRED_EXPORTS) {
