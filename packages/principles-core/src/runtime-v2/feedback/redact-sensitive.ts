@@ -35,7 +35,9 @@ const GITHUB_TOKEN = /\bgh[pousr]_[A-Za-z0-9_]{16,}\b/g;
 // Linear API tokens: lin_api_<hex> (underscores allowed — e.g. lin_api_test_abc123)
 const LINEAR_TOKEN = /\blin_api_[A-Za-z0-9_-]{16,}\b/g;
 // Authorization header values (keep key label, redact value)
-const AUTH_HEADER_VALUE = /(Authorization\s*:\s*).{1,500}/gi;
+// Non-greedy: stop at closing quote, close-brace, newline, or comma to avoid
+// consuming the rest of a command string as the "value".
+const AUTH_HEADER_VALUE = /(Authorization\s*:\s*).{1,200}?(?=,|"|'|\n|\r|$)/gi;
 // PowerShell env var: $env:VAR="value"
 const PWSH_ENV_VAR = /(\$env:\s*[A-Z_][A-Z0-9_]{2,}\s*=\s*")([^"]*)(")/gi;
 // Generic api_key= / token= / secret= / password= assignments

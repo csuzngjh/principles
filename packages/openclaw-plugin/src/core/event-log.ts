@@ -244,7 +244,22 @@ export class EventLog {
       for (const [key, value] of Object.entries(data)) {
         if (typeof value === 'string') {
           redacted[key] = redactTelemetryString(value);
-        } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        } else if (Array.isArray(value)) {
+          // Recurse into arrays (e.g. correctedFields with original/applied)
+          redacted[key] = value.map((item: unknown) => {
+            if (typeof item === 'string') {
+              return redactTelemetryString(item);
+            }
+            if (typeof item === 'object' && item !== null) {
+              const nested: Record<string, unknown> = {};
+              for (const [nk, nv] of Object.entries(item as Record<string, unknown>)) {
+                nested[nk] = typeof nv === 'string' ? redactTelemetryString(nv) : nv;
+              }
+              return nested;
+            }
+            return item;
+          });
+        } else if (typeof value === 'object' && value !== null) {
           // Recurse one level for nested objects (e.g. paramsSummary)
           const nested: Record<string, unknown> = {};
           for (const [nk, nv] of Object.entries(value as Record<string, unknown>)) {

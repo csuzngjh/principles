@@ -14,7 +14,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
 import type { RuleHostInput } from '@principles/core/runtime-v2';
-import { validateCorrectionProposal, validateProposedPathBounds, redactTelemetryString } from '@principles/core/runtime-v2';
+import { validateCorrectionProposal, validateProposedPathBounds } from '@principles/core/runtime-v2';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { getSession, hasRecentThinking } from '../core/session-tracker.js';
@@ -339,12 +339,15 @@ export function handleBeforeToolCall(
 
 function _extractParamsSummary(params: Record<string, unknown>): Record<string, unknown> {
   const summary: Record<string, unknown> = {};
-  if (params.file_path) summary.file_path = redactTelemetryString(String(params.file_path));
-  if (params.path) summary.path = redactTelemetryString(String(params.path));
-  if (params.command) summary.command = redactTelemetryString(String(params.command));
-  if (params.args) summary.args = redactTelemetryString(String(params.args));
-  if (params.old_string) summary.old_string = redactTelemetryString(String(params.old_string));
-  if (params.new_string) summary.new_string = redactTelemetryString(String(params.new_string));
+  // NOTE: Do NOT redact here — this feeds into RuleHost.evaluate() which
+  // may match against paramsSummary.command. Redaction happens at
+  // EventLog.record() before persistence.
+  if (params.file_path) summary.file_path = params.file_path;
+  if (params.path) summary.path = params.path;
+  if (params.command) summary.command = params.command;
+  if (params.args) summary.args = params.args;
+  if (params.old_string) summary.old_string = params.old_string;
+  if (params.new_string) summary.new_string = params.new_string;
   return summary;
 }
 
