@@ -210,6 +210,7 @@ describe('computeEffectiveFlags', () => {
     for (const flag of quietFlags) {
       // feedback_channel is a quiet flag that defaults on (MVP seed channel)
       if (flag.id === 'feedback_channel') continue;
+      if (flag.id === 'correction_observer') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });

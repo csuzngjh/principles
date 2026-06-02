@@ -126,6 +126,14 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     disabledReason: 'MVP-Quiet: evolution worker gated behind evolution_worker feature flag (PRI-288); default off per ADR-0014 §2.5',
   },
   {
+    id: 'service:correction-observer',
+    kind: 'service',
+    category: 'core',
+    enabledByDefault: true,
+    since: '2026-06-02',
+    description: 'Independent correction observer service for keyword self-correction (MVP-Core per ADR-0014 amendment, PRI-293)',
+  },
+  {
     id: 'service:trajectory',
     kind: 'service',
     category: 'quiet',
@@ -168,6 +176,14 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     since: '2026-06-01',
     description: 'Evolution worker start on first prompt per workspace (MVP-Quiet per PRI-288/ADR-0014)',
     disabledReason: 'MVP-Quiet: evolution worker startup gated behind evolution_worker feature flag (PRI-288); default off per ADR-0014 §2.5',
+  },
+  {
+    id: 'startup:correction-observer',
+    kind: 'startup',
+    category: 'core',
+    enabledByDefault: true,
+    since: '2026-06-02',
+    description: 'Correction observer start on first prompt per workspace (MVP-Core per ADR-0014 amendment, PRI-293)',
   },
 ];
 
