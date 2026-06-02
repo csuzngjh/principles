@@ -203,8 +203,10 @@ export class TrainerRunner {
       this.phase = RunnerPhase.FetchingOutput;
       const output = await this.fetchAndParseOutput(runHandle.runId);
 
-      // Re-inject taskId stripped by stripLineageFields (PRI-272 / ERR-008).
-      (output as unknown as Record<string, unknown>).taskId = taskId;
+      // Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
+      if (!(output as unknown as Record<string, unknown>).taskId) {
+        (output as unknown as Record<string, unknown>).taskId = taskId;
+      }
 
       this.phase = RunnerPhase.Validating;
       const validationResult = await this.validator.validate(output, taskId, sourceRolloutReviewerArtifactId ?? undefined);

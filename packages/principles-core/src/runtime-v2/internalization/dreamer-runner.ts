@@ -244,9 +244,12 @@ export class DreamerRunner {
       this.phase = RunnerPhase.FetchingOutput;
       const output = await this.fetchAndParseOutput(runHandle.runId, taskId);
 
-      // Re-inject taskId stripped by stripLineageFields (PRI-272 / ERR-008).
-      // The runner owns the correct taskId; LLM-supplied values must not be trusted.
-      (output as unknown as Record<string, unknown>).taskId = taskId;
+      // Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
+      // Only fill when missing — do NOT overwrite a wrong LLM-supplied value;
+      // the validator must catch taskId mismatches.
+      if (!(output as unknown as Record<string, unknown>).taskId) {
+        (output as unknown as Record<string, unknown>).taskId = taskId;
+      }
 
       // 7. Validate
       this.phase = RunnerPhase.Validating;
