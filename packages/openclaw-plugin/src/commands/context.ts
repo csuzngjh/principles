@@ -226,7 +226,7 @@ function applyPreset(
             break;
         case 'standard':
             config = {
-                thinkingOs: true,
+                thinkingOs: false,
                 projectFocus: 'off',
                 evolutionContext: { ...defaultContextConfig.evolutionContext }
             };
@@ -272,8 +272,8 @@ function showHelp(isZh: boolean): string {
 
 **预设模式**:
 \`/pd-context minimal\` - 最小模式（仅核心原则）
-\`/pd-context standard\` - 标准模式（原则+思维模型）
-\`/pd-context full\` - 完整模式（全部开启）
+\`/pd-context standard\` - 标准模式（原则，不含思维模型）
+\`/pd-context full\` - 完整模式（原则+思维模型+项目上下文）
 
 **注意**: 核心原则始终注入，不可关闭。
 `.trim();
@@ -291,8 +291,8 @@ function showHelp(isZh: boolean): string {
 
 **Presets**:
 \`/pd-context minimal\` - Minimal mode (core principles only)
-\`/pd-context standard\` - Standard mode (principles + thinking)
-\`/pd-context full\` - Full mode (all enabled)
+\`/pd-context standard\` - Standard mode (principles, no Thinking OS)
+\`/pd-context full\` - Full mode (principles + Thinking OS + project context)
 
 **Note**: Core Principles are always injected and cannot be disabled.
 `.trim();
