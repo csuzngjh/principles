@@ -62,7 +62,7 @@ Week 5-6 安装 + 邀请（部分完成）
   ✅ PRI-274/277  MVP 输入信号充分性
   ✅ PRI-283  SchemaPromptAdapter
   ✅ PRI-285  MVP seed 反馈通道
-  ✅ PRI-288~296  Plugin surface 清理与瘦身
+  ✅ PRI-288/289/290/291/292/293/294/296  Plugin surface 清理与瘦身
 ```
 
 ## 3. MVP-Core / MVP-Quiet / MVP-Gone 清单
@@ -149,7 +149,7 @@ Week 5-6 安装 + 邀请（部分完成）
 14. ✅ PRI-242: Nocturnal / idle-trigger 退役已完成
 15. ✅ PRI-244/245/246: Console 审批 UI + 三页化 + Demo 已完成
 16. ✅ PRI-247: pd-cli 一键安装已完成
-17. ✅ PRI-253~296: MVP live pain / confirm-first / diagnostician / plugin 瘦身等已完成
+17. ✅ PRI-253~296（排除 Canceled/Backlog）: MVP live pain / confirm-first / diagnostician / plugin 瘦身等已完成
 18. ⏳ PRI-248: GETTING-STARTED 用户视角重写（Todo）
 19. ⏳ PRI-249: 故事 A' 录屏（Backlog）
 20. ⏳ PRI-251: 邀请第一个种子客户（Backlog）

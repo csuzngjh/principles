@@ -34,7 +34,7 @@
 | Console 审批后端 + activation 修复 | PRI-260、262、263、264、265 |
 | SchemaPromptAdapter | PRI-283 |
 | MVP seed 反馈通道 | PRI-285 |
-| Plugin surface 清理与瘦身 | PRI-288~296 |
+| Plugin surface 清理与瘦身 | PRI-288、289、290、291、292、293、294、296 |
 | PD-owned workspace config | PRI-259 |
 | E2E Story A' 验证 | PRI-273 |
 | MVP 输入信号充分性 | PRI-274、277 |
@@ -50,7 +50,17 @@
 | PRI-227 / PRI-119 / PRI-162 / PRI-228 / PRI-229 / PRI-230 / PRI-231 | Runtime V2 cutover 与 Nocturnal/idle/plugin 复杂度退役 | ✅ Done | — |
 | PRI-244 / PRI-245 / PRI-246 | 现有三通道的 operator UI 与 demo | ✅ Done | — |
 | PRI-247 | pd-cli 一键安装 | ✅ Done | — |
-| PRI-253~296 | MVP live pain / confirm-first / diagnostician / plugin 瘦身等 | ✅ Done | — |
+| PRI-253/254/255/256/257 | MVP release gate + live pain 信号质量门控与证据保留 | ✅ Done | — |
+| PRI-259 | PD-owned workspace config | ✅ Done | — |
+| PRI-260/262/263/264/265 | Console 审批后端 + activation 修复 | ✅ Done | — |
+| PRI-261/295 | Runtime V2 prompt activation 绑定 + activation reader contract | ✅ Done | — |
+| PRI-266/270/286/287 | Confirm-first gate 持久化与清理 | ✅ Done | — |
+| PRI-271/272 | Diagnostician 弱模型鲁棒性 | ✅ Done | — |
+| PRI-273 | E2E Story A' 验证 | ✅ Done | — |
+| PRI-274/277 | MVP 输入信号充分性 | ✅ Done | — |
+| PRI-283 | SchemaPromptAdapter | ✅ Done | — |
+| PRI-285 | MVP seed 反馈通道 | ✅ Done | — |
+| PRI-288/289/290/291/292/293/294/296 | Plugin surface 清理与瘦身 | ✅ Done | — |
 | PRI-248 | GETTING-STARTED 用户视角重写 | ⏳ Todo | 强 AI 或文档 |
 | PRI-249 | 故事 A' 录屏 | ⏳ Backlog | 内容产出 |
 | PRI-251 | 邀请第一个种子客户 | ⏳ Backlog | 沟通 |

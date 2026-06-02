@@ -88,7 +88,7 @@ Legacy Nocturnal/idle 执行入口已全部切断。以下 caller cutover 已完
 
 ### Legacy 成本已大幅降低（退役进行中）
 
-Legacy 代码已通过 PRI-227~231、PRI-119、PRI-242、PRI-288~294、PRI-296 大幅削减。剩余代码量需根据最新 main 分支重新评估。
+Legacy 代码已通过 PRI-227~231、PRI-119、PRI-242、PRI-288/289/290/291/292/293/294/296 大幅削减。剩余代码量需根据最新 main 分支重新评估。
 
 `evolution-worker.ts` 与 `trajectory.ts` 仍是后续边界治理重点，但优先级已降低（MVP 期减法优先）。
 

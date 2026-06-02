@@ -124,12 +124,13 @@
 | PRI-259 | PD-owned workspace config + OpenClaw hook 绑定 | ✅ Done |
 | PRI-260~265 | Console 审批后端 API + activation record 修复 | ✅ Done |
 | PRI-266/270/286/287 | Confirm-first gate 持久化与指令状态清理 | ✅ Done |
+| PRI-261/295 | Runtime V2 prompt activation 绑定 + activation reader contract | ✅ Done |
 | PRI-271/272 | Diagnostician 弱模型鲁棒性 + taskId lineage 修正 | ✅ Done |
 | PRI-273 | E2E trap-task Story A' 验证 | ✅ Done |
 | PRI-274/277 | MVP 输入信号充分性（empathy + owner message） | ✅ Done |
 | PRI-283 | SchemaPromptAdapter（schema 驱动 prompt 生成） | ✅ Done |
 | PRI-285 | MVP seed 反馈通道（隐私保护） | ✅ Done |
-| PRI-288~296 | Plugin surface 清理与瘦身（EvolutionWorker 隔离、prompt 注入瘦身等） | ✅ Done |
+| PRI-288/289/290/291/292/293/294/296 | Plugin surface 清理与瘦身（EvolutionWorker 隔离、prompt 注入瘦身等） | ✅ Done |
 | PRI-297 | Secret redaction from telemetry | ⏳ Todo |
 
 ## 6. 风险与缓解
@@ -225,7 +226,7 @@ MVP Track 完成 (Week 6 末)
 11. ✅ Linear: PRI-252 控制面纠偏完成
 12. ✅ Linear: PRI-239 feature flag contract 已实现并测试
 13. ✅ Linear: PRI-240/242/244/245/246/247 proven-channel 验证 + legacy retirement + console + installer 完成
-14. ✅ Linear: PRI-253~296 MVP live pain / confirm-first / diagnostician / plugin 瘦身等完成
+14. ✅ Linear: PRI-253~296（排除 Canceled/Backlog）MVP live pain / confirm-first / diagnostician / plugin 瘦身等完成
 15. ⏳ Linear: PRI-248 GETTING-STARTED 重写（Todo）
 16. ⏳ Linear: PRI-249 故事 A' 录屏（Backlog）
 17. ⏳ Linear: PRI-251 邀请种子客户（Backlog）

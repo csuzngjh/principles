@@ -117,7 +117,7 @@ Principles Disciple (PD) 目前最致命的泥潭在于**“数据链路太长�
 
 ## 5. Issue 启动规则与依赖表 (Issue Activation Rules & Dependency Matrix)
 
-> **交付状态更新 (2026-06-02)**: PRI-200、205-213、215-220、224-225 已完成。Nocturnal 退役（PRI-227~231、PRI-119、PRI-242）已完成。Plugin 瘦身（PRI-288~296）已完成。Feature flag registry（PRI-239）已完成。下表保留历史执行关系作为审计记录；新的 active backlog 以 `02-roadmap.md` 和 `03-linear-sync-plan.md` 的 MVP Track 为准。
+> **交付状态更新 (2026-06-02)**: PRI-200、205-213、215-220、224-225 已完成。Nocturnal 退役（PRI-227~231、PRI-119、PRI-242）已完成。Plugin 瘦身（PRI-288/289/290/291/292/293/294/296）已完成。Feature flag registry（PRI-239）已完成。下表保留历史执行关系作为审计记录；新的 active backlog 以 `02-roadmap.md` 和 `03-linear-sync-plan.md` 的 MVP Track 为准。
 
 | Issue 编号 | 任务标题与性质 | 启动条件 / 依赖项 | 执行方式推荐 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -154,4 +154,4 @@ Principles Disciple (PD) 目前最致命的泥潭在于**“数据链路太长�
 1.  **第一阶段 (文档与盘点)**：`PRI-205` 及 `PRI-211` 顺利产出且无一冲突。Plugin 核心的 122 个文件资产图谱梳理完毕，物理与逻辑分类精确到行，`ADR-0005` 完整受护。
 2.  **第二阶段 (基线与修复)**：`PRI-206` 合成基线在 CI 中可以 100% 重复跑通并输出标准内化样本；`PRI-200` 结构化修复能在 2 次重试内安全挽回受损的 LLM 输出，失败时 evidence 完美归入 `runs.metadata` 数据库。
 3.  **第三阶段 (混沌与防线)**：分层混沌测试用例（A-D）能精准触发异常并全部被安全机制（幂等、去重、沙箱、现有的恢复机制）拦截；CI 回归测试中引入 `LAYER-1`/`LAYER-2` 反肥胖架构哨兵，强力断言插件不会反向依赖 Core。
-4.  **第四阶段 (精细瘦身，已完成大部分)**: PRI-213 已完成首批纯算法迁移；Nocturnal 退役（PRI-227~231、PRI-119、PRI-242）已完成；Plugin surface 清理（PRI-288~296）已完成。成功标准：重复 Nocturnal 执行链已删除，OpenClaw idle/night 依赖已取消，测试已收缩（PRI-231）。
+4.  **第四阶段 (精细瘦身，已完成大部分)**: PRI-213 已完成首批纯算法迁移；Nocturnal 退役（PRI-227~231、PRI-119、PRI-242）已完成；Plugin surface 清理（PRI-288/289/290/291/292/293/294/296）已完成。成功标准：重复 Nocturnal 执行链已删除，OpenClaw idle/night 依赖已取消，测试已收缩（PRI-231）。

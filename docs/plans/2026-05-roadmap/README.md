@@ -56,7 +56,7 @@ PD 进入 **MVP-First 阶段**。所有架构演进暂停，目标是在 **4-6 �
 8. ✅ PRI-240 / PRI-242: proven-channel baseline + legacy retirement 已完成
 9. ✅ PRI-244/245/246: Console 审批 UI + 三页化 + Demo 已完成
 10. ✅ PRI-247: pd-cli 一键安装已完成
-11. ✅ PRI-253~296: MVP live pain / confirm-first / diagnostician / plugin 瘦身等已完成
+11. ✅ PRI-253~296（排除 Canceled/Backlog）: MVP live pain / confirm-first / diagnostician / plugin 瘦身等已完成
 12. ⏳ PRI-248: GETTING-STARTED 用户视角重写（Todo）
 13. ⏳ PRI-249: 故事 A' 录屏（Backlog）
 14. ⏳ PRI-251: 邀请第一个种子客户（Backlog）
