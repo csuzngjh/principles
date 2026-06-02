@@ -13,14 +13,9 @@ const WORKSPACE_RESOLVER_TS = fs.readFileSync(
 );
 
 describe('Hook workspace resolution NextAction contract', () => {
-  it('HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION constant references PD canonical config sources', () => {
-    const constantMatch = INDEX_TS.match(
-      /const HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION\s*=\s*'([^']+)'/,
-    );
-    expect(constantMatch).not.toBeNull();
-    const constantValue = constantMatch![1];
-    expect(constantValue).toContain('PD_WORKSPACE_DIR');
-    expect(constantValue).toContain('principles-disciple.json');
+  it('no stale HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION constant remains', () => {
+    const constantMatch = INDEX_TS.match(/HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION/);
+    expect(constantMatch).toBeNull();
   });
 
   it('resolveHookWorkspaceDir failure result includes PD canonical config in nextAction', () => {

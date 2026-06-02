@@ -68,10 +68,6 @@ import { checkSurfaceGuard, guardHook, guardService } from './core/surface-guard
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
 
-const HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION =
-  'set PD_WORKSPACE_DIR environment variable or create ~/.openclaw/principles-disciple.json ' +
-  'with a "workspace" field; PD canonical config is now the primary resolution source (PRI-259)';
-
 // Map from childSessionKey → shadowObservationId
 // Used to complete shadow observations when subagent ends
 const pendingShadowObservations = new Map<string, string>();

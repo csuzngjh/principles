@@ -11,7 +11,6 @@
 
 import type { OpenClawPluginApi, PluginCommandContext } from '../openclaw-sdk.js';
 import { validateWorkspaceDir, type WorkspaceResolutionContext } from '../core/workspace-dir-validation.js';
-import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import * as path from 'path';
 import * as os from 'os';
