@@ -11,9 +11,9 @@ import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
-import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../core/runtime-v2-prompt-activation-reader.js';
+import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
@@ -899,20 +899,12 @@ ${heartbeatChecklist}
     dedupedV2 = v2Result.principles.filter((p) => !legacyActiveIds.has(p.principleId));
 
     if (dedupedV2.length > 0) {
-      let remaining = RUNTIME_V2_PRINCIPLE_BUDGET;
-      const lines: string[] = [];
-      lines.push('Runtime V2 activated principles (owner-approved):');
-      remaining -= 'Runtime V2 activated principles (owner-approved):'.length;
-
-      for (const p of dedupedV2) {
-        const entry = `- [${escapeXml(p.principleId)}] ${escapeXml(p.text)}`;
-        if (remaining < entry.length + 1) {
-          logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — truncating after ${lines.length - 1} principles`);
-          break;
-        }
-        lines.push(entry);
-        remaining -= entry.length + 1;
-        runtimeV2PrincipleIds.add(p.principleId);
+      const { lines, injectedIds, truncated } = trimToBudget(dedupedV2, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+      if (truncated) {
+        logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — truncating after ${injectedIds.size} principles`);
+      }
+      for (const id of injectedIds) {
+        runtimeV2PrincipleIds.add(id);
       }
       runtimeV2PrinciplesContent = lines.join('\n');
     }
@@ -985,24 +977,8 @@ ${empathySilenceConstraint}
   // PLACED IN prependSystemContext (before gateway system prompt) for highest LLM attention.
   // These are owner-reviewed, validated behavior constraints — not background context.
   if (runtimeV2PrincipleIds.size > 0) {
-    const directiveLines: string[] = [];
-    directiveLines.push('');
-    directiveLines.push('## 【OWNER-APPROVED BEHAVIOR DIRECTIVES】');
-    directiveLines.push('');
-    directiveLines.push('Owner-approved behavior directives are active operating constraints learned from prior owner corrections.');
-    directiveLines.push('These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.');
-    directiveLines.push('For ambiguous coding or file-changing tasks, follow these directives before using mutating tools.');
-    directiveLines.push('');
-    for (const p of dedupedV2) {
-      if (!runtimeV2PrincipleIds.has(p.principleId)) continue;
-      directiveLines.push(`<directive id="${escapeXml(p.principleId)}" source="runtime_v2_activation">`);
-      directiveLines.push(`MANDATORY: ${escapeXml(p.text)}`);
-      directiveLines.push('Apply this as an active behavior constraint. Do not treat this as background context.');
-      directiveLines.push('</directive>');
-      directiveLines.push('');
-    }
-    directiveLines.push('Note: These directives do not override safety, security, or core system policy.');
-    prependSystemContext += directiveLines.join('\n');
+    const directiveText = renderPrinciplesToDirectives(dedupedV2, runtimeV2PrincipleIds, escapeXml);
+    prependSystemContext += directiveText;
   }
 
   // Routing Guidance (section 5 — injected between evolution principles and core principles)
