@@ -225,6 +225,32 @@ export function isValidPITaskRecord(record: TaskRecord): record is PITaskRecord 
 }
 
 /**
+ * Re-inject a runner-owned lineage field into LLM output when absent.
+ *
+ * Uses `Object.hasOwn` (ERR-013) so that present-but-falsy values
+ * (`''`, `0`, `false`, `null`) are never overwritten — they must reach
+ * the validator and fail loud (Runtime Contract Rule 3).
+ *
+ * Only fills when the property is truly absent from the object's own keys.
+ *
+ * @param output   The parsed LLM output (untrusted — may be any shape).
+ * @param key      The lineage field to inject (e.g. 'taskId').
+ * @param value    The runner-owned value to inject.
+ */
+export function injectRunnerLineageIfAbsent(
+  output: unknown,
+  key: string,
+  value: string,
+): void {
+  if (output !== null && typeof output === 'object' && !Array.isArray(output)) {
+    const record = output as Record<string, unknown>;
+    if (!Object.hasOwn(record, key)) {
+      record[key] = value;
+    }
+  }
+}
+
+/**
  * Creates a minimal PITaskRecord for testing purposes.
  * Not for production use — real tasks should be created via RuntimeStateManager.
  */
