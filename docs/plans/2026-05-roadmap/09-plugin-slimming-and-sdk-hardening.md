@@ -43,11 +43,10 @@ Hard constraints:
 
 - **GFI scoring engine is MVP-Core when used for empathy evidence.** It must not be deleted as part of prompt diet. It is used by `trackFriction(...)` and the empathy pain path to accumulate friction and emit pain when thresholds are crossed.
 - **GFI attitude / personality prompt text is not MVP-Core.** It can be removed from user-visible agent prompt behavior because it is not owner-reviewed and creates behavior noise.
-- **Correction Observer cannot remain dependent on a default-off legacy worker if it is MVP-Core.** Current code has Correction Observer integration under the EvolutionWorker heartbeat while the `evolution_worker` feature is quiet/default-off. That is a real code/docs mismatch. The cleanup must either:
-  - extract Correction Observer into an independently gated MVP-Core observer with its own live trigger and tests, or
-  - run a maintainer-approved product decision to downgrade Correction Observer back to MVP-Quiet.
-
-Until that decision is made, Phase 3 must treat Correction Observer as protected. Do not delete it while deleting or quarantining EvolutionWorker-era code.
+- **Correction Observer is already an independent MVP-Core service.** ADR-0014 amendment (2026-05-30) + PRI-293 established it as an independently gated service with its own startup path and tests. The repo has `service:correction-observer` registered as `core` category with `enabledByDefault:true`, and `startup:correction-observer` registered identically. The `evolution_worker` feature flag is `quiet: false` and `service:evolution-worker` is `quiet: false` — entirely independent.
+  - Correction Observer does NOT depend on EvolutionWorker at the code or startup level. It starts via `shouldStartCorrectionObserver()` + `CorrectionObserverService.start()` directly in `index.ts`.
+  - The cleanup concern shifts from "extracting from EvolutionWorker" to "not accidentally deleting CorrectionObserver files or tests during the EvolutionWorker-era code sweep."
+  - Phase 3 should verify: (1) startup path independence is tested, (2) `evolution_worker` disable does not affect CorrectionObserver, (3) CorrectionObserver disable via `correction_observer.enabled=false` still works.
 
 ## 2. Current Prompt Principle Injection
 
@@ -121,7 +120,7 @@ Implementation note:
 | RuleHost before_tool_call gate | Keep | Runtime V2 RuleHost + plugin adapter | MVP-Core |
 | Pain / empathy event entry | Keep | Plugin event adapter + core classifier | MVP-Core |
 | Empathy Observer | Keep / harden | Prompt hook observer + GFI scoring | MVP-Core by ADR-0014 amendment |
-| Correction Observer | Extract or explicitly downgrade | Runtime V2/core observer, not default-off worker | Protected until decision |
+| Correction Observer | Keep — already independent | Runtime V2/core observer, independently started via shouldStartCorrectionObserver() | Already MVP-Core; protected from EvolutionWorker-era deletion
 | Feedback drafts | Keep | Console/API/CLI feedback path | MVP-Core for seed feedback |
 | Thinking OS prompt block | Remove from default | Post-MVP archive only | Not owner-reviewed |
 | `/pd-thinking` command | Disable/remove | None in MVP | Do not expose as live product |
@@ -257,6 +256,8 @@ Actions:
   - RuleHost gate adapter
   - optional minimal trajectory evidence reader
 - Extract or explicitly preserve Correction Observer before removing/quarantining the worker heartbeat that currently hosts it.
+  Note: CorrectionObserver is already independently started (PRI-293) and does NOT depend on EvolutionWorker.
+  The concern here is: (1) do not accidentally delete CorrectionObserver/its tests during deletion sweep, (2) verify evolution_worker disable does not affect it.
 - Remove or quarantine queue backfill, watchdog, shadow observation, local worker routing, and stale lifecycle hooks only after proving no MVP caller remains.
 - Do not modify frozen legacy files: `nocturnal-trinity.ts`, `nocturnal-arbiter.ts`, `nocturnal-service.ts`.
 
@@ -264,7 +265,7 @@ Acceptance:
 
 - Hook tests still cover `before_prompt_build`, `before_tool_call`, `after_tool_call`, and `llm_output` where still enabled.
 - No duplicate startup worker is left running.
-- Correction Observer has an explicit live owner: independent MVP-Core observer, or maintainer-approved downgrade to MVP-Quiet.
+- Correction Observer has an explicit live owner: independently gated via `shouldStartCorrectionObserver()` + `CorrectionObserverService.start()`. No longer hosted by EvolutionWorker. Verified by `evolution-worker.correction-observer.test.ts`.
 - Health/canary output remains explainable.
 
 Relevant ERR:
@@ -339,7 +340,7 @@ Acceptance:
 - Runtime V2 activated prompt directives inject successfully.
 - RuleHost events fire for mutating tools.
 - Empathy/GFI evidence path still works.
-- Correction Observer ownership is explicit and tested or explicitly deferred by maintainer decision.
+- Correction Observer ownership is explicit: independently started via `shouldStartCorrectionObserver()` in `index.ts`, gated by `correction_observer` feature flag, registered as `service:correction-observer` + `startup:correction-observer` (both core, enabledByDefault:true).
 - Feedback draft is created locally and not auto-submitted.
 - Any degraded health is classified as historical noise, current-chain blocker, or follow-up.
 
@@ -349,7 +350,7 @@ This regression gate should also be run after each deletion phase, not only at t
 
 1. `PRI-new: Remove Thinking OS from MVP prompt path`
 2. `PRI-new: Delete non-MVP plugin skills and templates`
-3. `PRI-new: Reconcile Correction Observer ownership before EvolutionWorker deletion`
+3. `PRI-new: Verify Correction Observer protection during EvolutionWorker-era deletion sweep`
 4. `PRI-new: Split EvolutionWorker-era services into MVP hook adapters`
 5. `PRI-new: Move prompt activation reader contract into Runtime V2 core`
 6. `PRI-new: Re-verify prompt / RuleHost / defer_archive / empathy after plugin slimming`
@@ -375,6 +376,6 @@ Before implementation starts, confirm:
 
 1. Should Thinking OS be fully deleted from the plugin bundle, or archived but unreachable by default?
 2. Should legacy `<evolution_principles>` remain for one release as compatibility, or be removed in the same cleanup wave?
-3. Should Correction Observer be extracted into an independent MVP-Core observer now, or should ADR-0014 be amended to downgrade it back to MVP-Quiet?
+3. Is Correction Observer independently tested? Current code starts it via `shouldStartCorrectionObserver()` independent of EvolutionWorker, and `evolution-worker.correction-observer.test.ts` proves feature flag independence. The Phase 3 sweep must not accidentally delete CorrectionObserver files/tests. This is a protect-in-sweep concern, not a reconcile-concern. Is this formulation correct?
 4. Should GFI attitude prompt text be removed while preserving GFI scoring for empathy evidence? The recommended answer is yes.
 5. Which live OpenClaw smoke task should be reused as the seed-user regression fixture?
