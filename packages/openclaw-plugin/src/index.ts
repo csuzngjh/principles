@@ -581,11 +581,12 @@ const plugin = {
       return handleAfterCompaction(event, { ...ctx, workspaceDir: wsResult.workspaceDir });
     }));
 
-    // ── Service: Background Evolution Worker ──
+    // ── Service Registration (surface-guarded) ──
+    // PRI-294: EvolutionWorker service registration removed — it starts via
+    // before_prompt_build hook gate, not via api.registerService. The surface
+    // guard already prevents registration when disabled (enabledByDefault=false).
+    // Dead pre-assignment of EvolutionWorkerService.api removed.
     try {
-      EvolutionWorkerService.api = api;
-      const guardedEvolutionWorker = guardService('service:evolution-worker', EvolutionWorkerService, api.logger);
-      if (guardedEvolutionWorker) api.registerService(guardedEvolutionWorker);
       const guardedCorrectionObserver = guardService('service:correction-observer', CorrectionObserverService, api.logger);
       if (guardedCorrectionObserver) api.registerService(guardedCorrectionObserver);
       const guardedTrajectory = guardService('service:trajectory', TrajectoryService, api.logger);

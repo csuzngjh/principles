@@ -40,6 +40,7 @@ import type { TelemetryEvent } from '../../telemetry-event.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 import { PhilosopherPromptBuilder } from './philosopher-prompt-builder.js';
+import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 
 // ── Result Types ──────────────────────────────────────────────────────────────
 
@@ -172,7 +173,6 @@ export class PhilosopherRunner {
   async run(taskId: string): Promise<PhilosopherRunnerResult> {
     this.phase = RunnerPhase.Idle;
 
-    // eslint-disable-next-line @typescript-eslint/init-declarations
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({
@@ -237,6 +237,9 @@ export class PhilosopherRunner {
 
       this.phase = RunnerPhase.FetchingOutput;
       const output = await this.fetchAndParseOutput(runHandle.runId);
+
+      // Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
+      injectRunnerLineageIfAbsent(output, 'taskId', taskId);
 
       this.phase = RunnerPhase.Validating;
       const validationResult = await this.validator.validate(output, taskId);
