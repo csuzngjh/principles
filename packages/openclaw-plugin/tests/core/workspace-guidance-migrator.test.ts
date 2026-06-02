@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { Dirent } from 'fs';
 import type { OpenClawPluginApi } from '../../src/openclaw-sdk.js';
 
 const mockFs = {
@@ -153,7 +154,7 @@ describe('workspace-guidance-migrator', () => {
       mockFs.readdirSync.mockReturnValue([
         { isDirectory: () => true, name: 'admin' },
         { isDirectory: () => true, name: 'reflection' },
-      ] as any);
+      ] as Dirent[]);
       mockFs.readFileSync.mockReturnValue(
         'Ensure `PLAN.md` contains `## Target Files` heading.',
       );

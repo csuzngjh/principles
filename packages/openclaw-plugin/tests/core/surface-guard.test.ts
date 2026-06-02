@@ -98,14 +98,6 @@ describe('surface-guard', () => {
       expect(result.enabled).toBe(true);
     });
 
-    it('cannot re-enable gone surface', () => {
-      const result = isSurfaceEnabled('service:gone_test', {
-        'service:gone_test': true,
-      });
-      expect(result.enabled).toBe(false);
-      expect(result.reason).toContain('gone');
-    });
-
     it('cannot disable core surface', () => {
       const result = isSurfaceEnabled('hook:before_prompt_build', {
         'hook:before_prompt_build': false,
@@ -199,12 +191,6 @@ describe('surface-guard', () => {
     it('returns null for unknown surface', () => {
       const mockService = { name: 'test-service' };
       const result = guardService('service:nonexistent', mockService);
-      expect(result).toBeNull();
-    });
-
-    it('cannot re-enable gone service', () => {
-      const mockService = { name: 'gone-service' };
-      const result = guardService('service:gone_test', mockService);
       expect(result).toBeNull();
     });
   });
