@@ -15,6 +15,23 @@ export interface SurfaceGuardResult {
   warnings: string[];
 }
 
+// Surface-level once-only log state (PRI-298).
+// The first time a quiet/non-core surface guard fires in this process, the
+// disabled reason is emitted once. Subsequent fires for the same surfaceId
+// are still observable (the no-op handler preserves behaviour) but no longer
+// flood the log on every hook call. Fresh processes start with an empty set,
+// so each plugin load gets one observable skip per surface.
+const loggedSkipSurfaces = new Set<string>();
+
+/**
+ * Reset the per-process surface-guard skip log bookkeeping. Intended for tests
+ * that need to assert on the first-fire log without cross-test pollution.
+ * Not part of the production API surface; do not call from runtime code.
+ */
+export function __resetSurfaceGuardSkipLogStateForTests(): void {
+  loggedSkipSurfaces.clear();
+}
+
 export function checkSurfaceGuard(): SurfaceGuardResult {
   const validation = validateSurfaceRegistry(PLUGIN_SURFACE_REGISTRY);
   const violations: string[] = [];
@@ -106,8 +123,14 @@ export function guardHook<E, C, R>(
     return handler;
   }
   const reason = check.reason ?? 'surface not enabled';
-  return (_event: E, _ctx: C): R | Promise<R> => {
+  // First-fire-per-surfaceId observability: emit the reason once so operators
+  // can still see why the guard fired; subsequent fires stay silent to avoid
+  // log noise on every hook call (PRI-298 / ERR-002).
+  if (!loggedSkipSurfaces.has(surfaceId)) {
+    loggedSkipSurfaces.add(surfaceId);
     logger?.info?.(`[PD:surface-guard] SKIP ${surfaceId}: ${reason}`);
+  }
+  return (_event: E, _ctx: C): R | Promise<R> => {
     return undefined as R;
   };
 }
@@ -122,7 +145,13 @@ export function guardService<T extends OpenClawPluginService>(
     return service;
   }
   const reason = check.reason ?? 'surface not enabled';
-  logger?.info?.(`[PD:surface-guard] SKIP service ${surfaceId}: ${reason}`);
+  // First-fire-per-surfaceId observability (PRI-298). guardService is called
+  // once per service during plugin registration, so the once-only check is
+  // defensive — it keeps the behaviour consistent with guardHook.
+  if (!loggedSkipSurfaces.has(surfaceId)) {
+    loggedSkipSurfaces.add(surfaceId);
+    logger?.info?.(`[PD:surface-guard] SKIP service ${surfaceId}: ${reason}`);
+  }
   return null;
 }
 
