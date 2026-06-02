@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { handleInitStrategy, handleManageOkr } from '../../src/commands/strategy';
+import { handleInitStrategy } from '../../src/commands/strategy';
 
 describe('Slash Commands Hook', () => {
   it('should handle /init-strategy command', () => {
-    const mockCtx = { 
+    const mockCtx = {
         workspaceDir: '/mock/workspace',
         commandBody: '/init-strategy',
         channel: 'cli',
@@ -15,20 +15,5 @@ describe('Slash Commands Hook', () => {
 
     expect(result).toBeDefined();
     expect(result.text).toContain('Strategy Initialization');
-  });
-
-  it('should handle /manage-okr command', () => {
-    const mockCtx = { 
-        workspaceDir: '/mock/workspace',
-        commandBody: '/manage-okr',
-        channel: 'cli',
-        isAuthorizedSender: true,
-        config: {} as any
-    };
-
-    const result = handleManageOkr(mockCtx as any);
-
-    expect(result).toBeDefined();
-    expect(result.text).toContain('OKR Management');
   });
 });

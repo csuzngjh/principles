@@ -51,4 +51,4 @@ Based on user's responses, extract 1-3 macro **Objectives (O)**.
 ```
 
 ## Completion
-After writing, prompt user: "✅ Strategic anchor locked. Recommend running `/manage-okr` for quarterly/iteration-level task breakdown."
+After writing, prompt user: "✅ Strategic anchor locked. Recommend running `/pd-status` to check system status, or use `/pd-bootstrap` to scan environment tools."
