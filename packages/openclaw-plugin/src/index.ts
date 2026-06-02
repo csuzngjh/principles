@@ -58,7 +58,7 @@ import { migrateDirectoryStructure } from './core/migration.js';
 import { migrateStaleWorkspaceGuidance } from './core/workspace-guidance-migrator.js';
 import { SystemLogger } from './core/system-logger.js';
 import { PathResolver } from './core/path-resolver.js';
-import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe } from './utils/workspace-resolver.js';
+import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe, resolveHookWorkspaceDir } from './utils/workspace-resolver.js';
 import { computeRuntimeShadowTaskFingerprint, PD_LOCAL_PROFILES } from './utils/shadow-fingerprint.js';
 import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
@@ -67,10 +67,6 @@ import { checkSurfaceGuard, guardHook, guardService } from './core/surface-guard
 
 // Track started workspaces — one-time init + evolution worker per workspace
 const startedWorkspaces = new Set<string>();
-
-const HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION =
-  'verify gateway plugin activation and hook workspace binding; ' +
-  'migrate live hook workspace resolution to PD-owned canonical configuration before relying on config-based recovery';
 
 // Map from childSessionKey → shadowObservationId
 // Used to complete shadow observations when subagent ends
@@ -235,16 +231,19 @@ const plugin = {
     api.on(
       'before_prompt_build',
       guardHook('hook:before_prompt_build', api.logger, async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
-        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_prompt_build');
-        if (!workspaceDir) {
+        const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_prompt_build');
+        if (!wsResult.ok) {
           api.logger.error(
             `[PD:before_prompt_build] workspaceDir resolution failed. ` +
-            `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
-            `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
+            `reason=${wsResult.reason} agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
             `Hook skipped — no mutation will occur. ` +
-            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+            `NextAction: ${wsResult.nextAction}`,
           );
           return;
+        }
+        const workspaceDir = wsResult.workspaceDir;
+        if (wsResult.consistencyWarning) {
+          api.logger.warn(`[PD:before_prompt_build] ${wsResult.consistencyWarning}`);
         }
         try {
           if (!startedWorkspaces.has(workspaceDir)) {
@@ -313,16 +312,19 @@ const plugin = {
     api.on(
       'before_tool_call',
       guardHook('hook:before_tool_call', api.logger, (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
-        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_tool_call');
-        if (!workspaceDir) {
+        const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_tool_call');
+        if (!wsResult.ok) {
           api.logger.error(
             `[PD:before_tool_call] workspaceDir resolution failed. ` +
-            `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
-            `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
+            `reason=${wsResult.reason} agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
             `Hook skipped — security gate bypassed. ` +
-            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+            `NextAction: ${wsResult.nextAction}`,
           );
           return;
+        }
+        const workspaceDir = wsResult.workspaceDir;
+        if (wsResult.consistencyWarning) {
+          api.logger.warn(`[PD:before_tool_call] ${wsResult.consistencyWarning}`);
         }
         try {
           const pluginConfig = api.pluginConfig ?? {};
@@ -348,16 +350,19 @@ const plugin = {
     api.on(
       'after_tool_call',
       guardHook('hook:after_tool_call', api.logger, (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
-        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_tool_call');
-        if (!workspaceDir) {
+        const wsResult = resolveHookWorkspaceDir(ctx, api, 'after_tool_call');
+        if (!wsResult.ok) {
           api.logger.error(
             `[PD:after_tool_call] workspaceDir resolution failed. ` +
-            `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'} ` +
-            `sessionKey=${ctx.sessionKey ?? '(missing)'}. ` +
+            `reason=${wsResult.reason} agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
             `Hook skipped — pain detection bypassed. ` +
-            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+            `NextAction: ${wsResult.nextAction}`,
           );
           return;
+        }
+        const workspaceDir = wsResult.workspaceDir;
+        if (wsResult.consistencyWarning) {
+          api.logger.warn(`[PD:after_tool_call] ${wsResult.consistencyWarning}`);
         }
         try {
           const pluginConfig = api.pluginConfig ?? {};
@@ -381,16 +386,20 @@ const plugin = {
     api.on(
       'llm_output',
       guardHook('hook:llm_output', api.logger, (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
-        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'llm_output');
-        if (!workspaceDir) {
+        const wsResult = resolveHookWorkspaceDir(ctx, api, 'llm_output');
+        if (!wsResult.ok) {
           api.logger.error(
             `[PD:llm_output] workspaceDir resolution failed. ` +
-            `agentId=${ctx.agentId ?? '(missing)'} ` +
+            `reason=${wsResult.reason} agentId=${ctx.agentId ?? '(missing)'} ` +
             `sessionId=${ctx.sessionId ?? '(missing)'}. ` +
             `Hook skipped — LLM analysis bypassed. ` +
-            `NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+            `NextAction: ${wsResult.nextAction}`,
           );
           return;
+        }
+        const workspaceDir = wsResult.workspaceDir;
+        if (wsResult.consistencyWarning) {
+          api.logger.warn(`[PD:llm_output] ${wsResult.consistencyWarning}`);
         }
         try {
           handleLlmOutput(event, { ...ctx, workspaceDir });
@@ -525,42 +534,51 @@ const plugin = {
 
     // ── Hook: Lifecycle ──
     api.on('before_reset', guardHook('hook:before_reset', api.logger, (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
-      const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_reset');
-      if (!workspaceDir) {
+      const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_reset');
+      if (!wsResult.ok) {
         api.logger.error(
           `[PD:before_reset] workspaceDir resolution failed. ` +
-          `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
-          `Hook skipped. NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+          `reason=${wsResult.reason} agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+          `Hook skipped. NextAction: ${wsResult.nextAction}`,
         );
         return;
       }
-      return handleBeforeReset(event, { ...ctx, workspaceDir });
+      if (wsResult.consistencyWarning) {
+        api.logger.warn(`[PD:before_reset] ${wsResult.consistencyWarning}`);
+      }
+      return handleBeforeReset(event, { ...ctx, workspaceDir: wsResult.workspaceDir });
     }));
     
     api.on('before_compaction', guardHook('hook:before_compaction', api.logger, (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
-      const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_compaction');
-      if (!workspaceDir) {
+      const wsResult = resolveHookWorkspaceDir(ctx, api, 'before_compaction');
+      if (!wsResult.ok) {
         api.logger.error(
           `[PD:before_compaction] workspaceDir resolution failed. ` +
-          `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
-          `Hook skipped. NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+          `reason=${wsResult.reason} agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+          `Hook skipped. NextAction: ${wsResult.nextAction}`,
         );
         return;
       }
-      return handleBeforeCompaction(event, { ...ctx, workspaceDir });
+      if (wsResult.consistencyWarning) {
+        api.logger.warn(`[PD:before_compaction] ${wsResult.consistencyWarning}`);
+      }
+      return handleBeforeCompaction(event, { ...ctx, workspaceDir: wsResult.workspaceDir });
     }));
     
     api.on('after_compaction', guardHook('hook:after_compaction', api.logger, (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
-      const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_compaction');
-      if (!workspaceDir) {
+      const wsResult = resolveHookWorkspaceDir(ctx, api, 'after_compaction');
+      if (!wsResult.ok) {
         api.logger.error(
           `[PD:after_compaction] workspaceDir resolution failed. ` +
-          `agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
-          `Hook skipped. NextAction: ${HOOK_WORKSPACE_RESOLUTION_NEXT_ACTION}`,
+          `reason=${wsResult.reason} agentId=${ctx.agentId ?? '(missing)'} sessionId=${ctx.sessionId ?? '(missing)'}. ` +
+          `Hook skipped. NextAction: ${wsResult.nextAction}`,
         );
         return;
       }
-      return handleAfterCompaction(event, { ...ctx, workspaceDir });
+      if (wsResult.consistencyWarning) {
+        api.logger.warn(`[PD:after_compaction] ${wsResult.consistencyWarning}`);
+      }
+      return handleAfterCompaction(event, { ...ctx, workspaceDir: wsResult.workspaceDir });
     }));
 
     // ── Service Registration (surface-guarded) ──
