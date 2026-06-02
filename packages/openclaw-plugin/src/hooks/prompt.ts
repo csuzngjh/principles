@@ -7,13 +7,14 @@ import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbat
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
-import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
+// local-worker-routing: removed from prompt injection per PRI-291 (MVP-Quiet)
+// classifyTask is still available for non-prompt consumers
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, WorkflowFunnelLoader, PiAiRuntimeAdapter, EmpathyObserver, AgentScheduler, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives } from '@principles/core/runtime-v2';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
-import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../core/runtime-v2-prompt-activation-reader.js';
+import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
@@ -25,7 +26,6 @@ import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { emitPainDetectedEvent, buildTrajectoryEvidence } from './pain.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import {
-  buildAttitudeDirective,
   detectCorrectionCue as coreDetectCorrectionCue,
   extractMessageContent,
   isMinimalTrigger,
@@ -703,10 +703,9 @@ ${heartbeatChecklist}
 
   }
 
-  // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
-
-  const currentGfi = session?.currentGfi || 0;
-  const attitudeDirective = buildAttitudeDirective(currentGfi);
+  // ──── 6. GFI score (for empathy/evidence path only — NOT for attitude/personality prompt)
+  // Attitude/personality prompt injection removed per PRI-291 (MVP diet).
+  // GFI scoring, trackFriction, and empathy pain emission remain active.
 
   // ──── 7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context ────
   // NOTE: Principles is ALWAYS injected (not configurable)
@@ -899,20 +898,12 @@ ${heartbeatChecklist}
     dedupedV2 = v2Result.principles.filter((p) => !legacyActiveIds.has(p.principleId));
 
     if (dedupedV2.length > 0) {
-      let remaining = RUNTIME_V2_PRINCIPLE_BUDGET;
-      const lines: string[] = [];
-      lines.push('Runtime V2 activated principles (owner-approved):');
-      remaining -= 'Runtime V2 activated principles (owner-approved):'.length;
-
-      for (const p of dedupedV2) {
-        const entry = `- [${escapeXml(p.principleId)}] ${escapeXml(p.text)}`;
-        if (remaining < entry.length + 1) {
-          logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — truncating after ${lines.length - 1} principles`);
-          break;
-        }
-        lines.push(entry);
-        remaining -= entry.length + 1;
-        runtimeV2PrincipleIds.add(p.principleId);
+      const { lines, injectedIds, truncated } = trimToBudget(dedupedV2, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+      if (truncated) {
+        logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — truncating after ${injectedIds.size} principles`);
+      }
+      for (const id of injectedIds) {
+        runtimeV2PrincipleIds.add(id);
       }
       runtimeV2PrinciplesContent = lines.join('\n');
     }
@@ -985,129 +976,13 @@ ${empathySilenceConstraint}
   // PLACED IN prependSystemContext (before gateway system prompt) for highest LLM attention.
   // These are owner-reviewed, validated behavior constraints — not background context.
   if (runtimeV2PrincipleIds.size > 0) {
-    const directiveLines: string[] = [];
-    directiveLines.push('');
-    directiveLines.push('## 【OWNER-APPROVED BEHAVIOR DIRECTIVES】');
-    directiveLines.push('');
-    directiveLines.push('Owner-approved behavior directives are active operating constraints learned from prior owner corrections.');
-    directiveLines.push('These directives are mandatory for this session unless they conflict with safety, security, or higher-priority system policy.');
-    directiveLines.push('For ambiguous coding or file-changing tasks, follow these directives before using mutating tools.');
-    directiveLines.push('');
-    for (const p of dedupedV2) {
-      if (!runtimeV2PrincipleIds.has(p.principleId)) continue;
-      directiveLines.push(`<directive id="${escapeXml(p.principleId)}" source="runtime_v2_activation">`);
-      directiveLines.push(`MANDATORY: ${escapeXml(p.text)}`);
-      directiveLines.push('Apply this as an active behavior constraint. Do not treat this as background context.');
-      directiveLines.push('</directive>');
-      directiveLines.push('');
-    }
-    directiveLines.push('Note: These directives do not override safety, security, or core system policy.');
-    prependSystemContext += directiveLines.join('\n');
+    const directiveText = renderPrinciplesToDirectives(dedupedV2, runtimeV2PrincipleIds, escapeXml);
+    prependSystemContext += directiveText;
   }
 
-  // Routing Guidance (section 5 — injected between evolution principles and core principles)
-  // Inject delegation guidance when task is bounded + deployment allowed + not high-entropy.
-  // This is a non-authoritative suggestion — the main agent decides whether to follow.
-  // Shadow evidence comes from real runtime hooks (subagent_spawning/subagent_ended).
-  if (!isMinimalMode && sessionId) {
-    try {
-      // Use the already extracted and cleaned user message
-      const latestUserText = latestUserMessage || '';
-
-      if (latestUserText && latestUserText.trim().length > 0) {
-        // Infer requestedTools and requestedFiles from message content
-        const toolPatterns: { pattern: RegExp; tool: string }[] = [
-          { pattern: /\b(edit|replace|write|modify|update|fix|patch|add|remove|delete|insert)\b/gi, tool: 'edit' },
-          { pattern: /\b(read|cat|view|show|get|find|search|grep|look|inspect|examine|list|head|tail|diff)\b/gi, tool: 'read' },
-          { pattern: /\b(run|execute|exec|bash|shell|command)\b/gi, tool: 'bash' },
-        ];
-        const filePattern = /\b([a-zA-Z]:\\?[^\s,]+\.[a-z]{2,10}|[./][^\s,]+\.[a-z]{2,10})\b/gi;
-        const toolMatches = toolPatterns.flatMap(({ pattern, tool }) => {
-          const matches: string[] = [];
-          const r = new RegExp(pattern.source, pattern.flags);
-          while (r.exec(latestUserText) !== null) matches.push(tool);
-          return matches;
-        });
-        const fileMatches = latestUserText.match(filePattern) ?? [];
-
-        const routingInput: RoutingInput = {
-          taskIntent: toolMatches[0] ?? undefined,
-          taskDescription: latestUserText.trim(),
-          requestedFiles: fileMatches.length > 0 ? fileMatches : undefined,
-        };
-
-        const decision = classifyTask(routingInput, wctx.stateDir);
-
-        // Inject guidance only when: route_local + deployable checkpoint + not high-entropy
-        const isDeployableState =
-          decision.activeCheckpointState === 'shadow_ready' ||
-          decision.activeCheckpointState === 'promotable';
-
-        if (
-          decision.decision === 'route_local' &&
-          decision.targetProfile !== null &&
-          isDeployableState
-        ) {
-          const profile = decision.targetProfile;
-
-          if (profile === 'local-reader') {
-            appendParts.push(`<routing_guidance>
-DELEGATION SUGGESTION: This task appears suitable for the local-reader subagent.
-
-**Task Fit**: ${decision.reason}
-
-**Suggested Action**: Consider routing to \`local-reader\` (pd-explorer skill) for focused reading, inspection, and information retrieval.
-
-**Why This Works**:
-- Task keywords indicate read-only or inspect operations
-- Bounded scope — no multi-file coordination needed
-- Shadow observation in progress — real runtime evidence being collected
-
-**Note**: This is a non-authoritative suggestion. The main agent decides whether to route based on full context. Shadow evidence from runtime hooks will inform future promotion decisions.
-</routing_guidance>`);
-          } else if (profile === 'local-editor') {
-            appendParts.push(`<routing_guidance>
-DELEGATION SUGGESTION: This task appears suitable for the local-editor subagent.
-
-**Task Fit**: ${decision.reason}
-
-**Suggested Action**: Consider routing to \`local-editor\` (pd-repair skill) for bounded editing, modification, and repair tasks.
-
-**Why This Works**:
-- Task keywords indicate bounded modification operations
-- Target files appear limited in scope (1-3 files)
-- Shadow observation in progress — real runtime evidence being collected
-
-**Note**: This is a non-authoritative suggestion. The main agent decides whether to route based on full context. Shadow evidence from runtime hooks will inform future promotion decisions.
-</routing_guidance>`);
-          }
-        } else if (
-          decision.decision === 'stay_main' &&
-          decision.classification !== 'reader_eligible' &&
-          decision.classification !== 'editor_eligible'
-        ) {
-          // Only show stay_main guidance when the task is genuinely high-entropy/risk/ambiguous
-          appendParts.push(`<routing_guidance>
-ROUTING GUIDANCE: Task should remain on the main agent.
-
-**Reason**: ${decision.reason}
-
-**Blockers**: ${decision.blockers.length > 0 ? decision.blockers.join('; ') : 'none'}
-
-**Why Stay Main**:
-- Task contains high-entropy signals (open-ended, multi-step, or ambiguous)
-- Or: task involves risk signals requiring main-agent supervision
-- Or: deployment not available for the natural target profile
-
-**Note**: This is a non-authoritative suggestion backed by policy classification. The main agent has full discretion.
-</routing_guidance>`);
-        }
-      }
-    } catch (e) {
-      // Routing guidance is best-effort — never fail the hook
-      logger?.warn?.(`[PD:Prompt] Routing guidance injection failed: ${String(e)}`);
-    }
-  }
+  // Routing guidance removed per PRI-291 (MVP diet).
+  // Local worker routing is MVP-Quiet per ADR-0014 §2.5.
+  // The classifyTask helper and local-worker-routing module are preserved for non-prompt consumers.
 
 
   // 6. Principles (always on, highest priority, goes last for recency effect)
@@ -1130,15 +1005,8 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 **【EXECUTION RULES】** (Priority: Low → High):
 - \`<behavioral_constraints>\` - Output format restrictions (hide diagnostic JSON)
 - \`<project_context>\` - Current priorities (can be overridden)
-- \`<reflection_log>\` - Past lessons (inform your approach)
-- \`<thinking_os>\` - Thinking models (guide your reasoning)
-- \`<evolution_principles>\` - Newly learned principles (active + probation)
-- \`<routing_guidance>\` - Delegation suggestions (non-authoritative, best-effort)
+- \`<evolution_principles>\` - Learned principles (active + probation)
 - \`<core_principles>\` - Core rules (NON-NEGOTIABLE, highest priority)
-
-**Remember**: You are the Spicy Evolver. You despise entropy. You evolve through pain.
-
-${attitudeDirective}
 `;
   }
 

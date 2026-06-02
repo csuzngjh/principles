@@ -63,3 +63,17 @@ export { SqliteApprovalQueueStore } from './sqlite-approval-store.js';
 
 export { RuleHostWriter } from './writers/rule-host-writer.js';
 export type { RuleHostWriterConfig } from './writers/rule-host-writer.js';
+
+export {
+  RUNTIME_V2_PRINCIPLE_BUDGET,
+  isRecord as isArtifactRecord,
+  filterPromptActivations,
+  resolvePrincipleFromArtifact,
+  trimToBudget,
+  renderPrinciplesToDirectives,
+} from './prompt-activation-reader-contract.js';
+
+export type {
+  ActivatedPrinciple,
+  PromptActivationReaderResult,
+} from './prompt-activation-reader-contract.js';
