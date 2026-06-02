@@ -180,7 +180,7 @@ export class DreamerRunner {
     this.phase = RunnerPhase.Idle;
 
     // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({
@@ -243,6 +243,10 @@ export class DreamerRunner {
       // 6. Fetch output
       this.phase = RunnerPhase.FetchingOutput;
       const output = await this.fetchAndParseOutput(runHandle.runId, taskId);
+
+      // Re-inject taskId stripped by stripLineageFields (PRI-272 / ERR-008).
+      // The runner owns the correct taskId; LLM-supplied values must not be trusted.
+      (output as unknown as Record<string, unknown>).taskId = taskId;
 
       // 7. Validate
       this.phase = RunnerPhase.Validating;

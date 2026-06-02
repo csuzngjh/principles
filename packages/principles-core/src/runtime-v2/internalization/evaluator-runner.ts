@@ -140,7 +140,7 @@ export class EvaluatorRunner {
   async run(taskId: string): Promise<EvaluatorRunnerResult> {
     this.phase = RunnerPhase.Idle;
 
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({
@@ -203,6 +203,9 @@ export class EvaluatorRunner {
 
       this.phase = RunnerPhase.FetchingOutput;
       const output = await this.fetchAndParseOutput(runHandle.runId);
+
+      // Re-inject taskId stripped by stripLineageFields (PRI-272 / ERR-008).
+      (output as unknown as Record<string, unknown>).taskId = taskId;
 
       this.phase = RunnerPhase.Validating;
       const validationResult = await this.validator.validate(output, taskId, sourceArtificerArtifactId ?? undefined);
