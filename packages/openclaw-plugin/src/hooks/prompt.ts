@@ -192,7 +192,7 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
     const raw = cachedReadFile(profilePath);
     if (raw) {
       const profile = JSON.parse(raw);
-      if (profile.contextInjection) {
+      if (profile && typeof profile === 'object' && profile.contextInjection && typeof profile.contextInjection === 'object') {
         const contextInjection = profile.contextInjection as Partial<ContextInjectionConfig>;
         return {
           ...defaultContextConfig,

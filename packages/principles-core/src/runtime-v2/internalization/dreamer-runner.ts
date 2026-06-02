@@ -40,6 +40,7 @@ import type { TelemetryEvent } from '../../telemetry-event.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
+import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 
 // ── Result Types ─────────────────────────────────────────────────────────────
 
@@ -245,11 +246,9 @@ export class DreamerRunner {
       const output = await this.fetchAndParseOutput(runHandle.runId, taskId);
 
       // Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
-      // Only fill when missing — do NOT overwrite a wrong LLM-supplied value;
-      // the validator must catch taskId mismatches.
-      if (!(output as unknown as Record<string, unknown>).taskId) {
-        (output as unknown as Record<string, unknown>).taskId = taskId;
-      }
+      // Only fill when absent via Object.hasOwn — present-but-falsy values
+      // must reach validation and fail loud (Runtime Contract Rule 3).
+      injectRunnerLineageIfAbsent(output, 'taskId', taskId);
 
       // 7. Validate
       this.phase = RunnerPhase.Validating;
