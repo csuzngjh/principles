@@ -34,8 +34,8 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     en: 'Research tool upgrade solutions'
   },
   'pd-thinking': {
-    zh: '管理思维模型 [status|propose|audit]',
-    en: 'Manage Thinking OS [status|propose|audit]'
+    zh: '管理思维模型 [status|propose|audit]（默认关闭，/pd-context thinking on 开启）',
+    en: 'Manage Thinking OS [status|propose|audit] (off by default, enable via /pd-context thinking on)'
   },
   'pd-daily': {
     zh: '配置并发送进化日报',
