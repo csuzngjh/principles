@@ -46,7 +46,17 @@ export class PromptActivationReader {
       const promptActivations = filterPromptActivations(allActivations);
 
       for (const activation of promptActivations) {
-        const artifactRow = this.queryArtifactRow(sqliteConn, activation.artifactId);
+        let artifactRow: unknown | null;
+        try {
+          artifactRow = this.queryArtifactRow(sqliteConn, activation.artifactId);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          const warning = `artifact_query_failed: artifactId=${activation.artifactId} reason=${msg}; nextAction=check_pi_artifacts_table`;
+          warnings.push(warning);
+          this.deps.logger?.warn?.(`[PD:RuntimeV2] ${warning}`);
+          continue;
+        }
+
         if (artifactRow === null) {
           const warning = `artifact_not_found: artifactId=${activation.artifactId}; nextAction=check_pi_artifacts_table`;
           warnings.push(warning);
@@ -89,8 +99,7 @@ export class PromptActivationReader {
       return row ?? null;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      this.deps.logger?.warn?.(`[PD:RuntimeV2] artifact_query_failed: artifactId=${artifactId} reason=${msg}; nextAction=check_pi_artifacts_table`);
-      return null;
+      throw new Error(`artifact_query_failed: artifactId=${artifactId} reason=${msg}; nextAction=check_pi_artifacts_table`);
     }
   }
 
