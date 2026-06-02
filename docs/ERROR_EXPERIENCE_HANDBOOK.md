@@ -127,6 +127,7 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
 | ERR-045 | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys like github_token pass through unredacted | PRI-285 |
 | ERR-046 | Redaction pipeline truncates string values without running path/token/env redactors — secrets in values like buildId or cwd slip through | PRI-285 |
+| ERR-049 | Unconditional taskId reinjection bypasses validator mismatch check — malicious LLM lineage fields pass validation | PRI-294 |
 
 ---
 
@@ -749,3 +750,15 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-285 / PR #767
 - **Date**: 2026-06-01
 - **Recurrence**: Same class as ERR-001, ERR-005 (runtime type check operates on wrong value)
+
+---
+
+**[ERR-049]** | Unconditional taskId reinjection bypasses validator mismatch check — malicious LLM lineage fields pass validation
+
+- **What happened**: When fixing `stripLineageFields` removing `taskId` from LLM output (PRI-272), I used unconditional assignment `(output as unknown as Record<string, unknown>).taskId = taskId` in all 7 peer runners (Dreamer, Philosopher, Scribe, Artificer, Evaluator, RolloutReviewer, Trainer). This overwrote any LLM-supplied `taskId` — including wrong or malicious values — before `DefaultDreamerValidator.validate()` could check for mismatches. The `output.taskId !== taskId` check became dead code.
+- **Why it's wrong**: The validator's taskId mismatch check is a security boundary (ERR-008 lineage protection). It prevents LLM-supplied lineage fields from poisoning downstream artifacts. Unconditional reinjection bypasses this check entirely — a malicious or buggy LLM that returns `taskId: "injected-id"` would have it silently overwritten with the correct value, and the artifact would be written as if the LLM output was trustworthy.
+- **Correct approach**: Only reinject `taskId` when it is missing (undefined/null/empty). Use `if (!(output as Record<string, unknown>).taskId)` to guard the assignment. This preserves the validator's ability to detect and reject wrong values while still filling in the field when `stripLineageFields` removed it.
+- **How to prevent**: When re-injecting fields stripped by a security mechanism, always use conditional injection — only fill missing values, never overwrite existing ones. The security check must remain able to detect malicious/incorrect values. Add a test that verifies a wrong `taskId` in LLM output is still rejected after reinjection (e.g., `dreamer-runner-vslice.test.ts` "malformed output with taskId mismatch").
+- **Source**: PRI-294 / PR #790
+- **Date**: 2026-06-02
+- **Recurrence**: Same class as ERR-008 (lineage fields must not be trusted from LLM output)
