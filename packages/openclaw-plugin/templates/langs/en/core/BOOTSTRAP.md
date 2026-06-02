@@ -145,12 +145,11 @@ If the user has clear project goals, run `/init-strategy` skill to:
 
 ## ⏰ Cron Jobs Initialization (Recommended)
 
-**Why you need this:** Your HEARTBEAT.md has been simplified to reduce token cost. But the tasks that were removed (grooming, health checks, strategy alignment, weekly governance) are still important — they just moved here. Without these cron jobs, your workspace will accumulate temp files, drift from strategy, and lose track of weekly progress.
+**Why you need this:** Your HEARTBEAT.md has been simplified to reduce token cost. But the tasks that were removed (health checks, strategy alignment, weekly governance) are still important — they just moved here. Without these cron jobs, your workspace will drift from strategy and lose track of weekly progress.
 
 **How to install:** Ask the user for permission, then execute the CLI commands below. Each command creates a background task that runs automatically.
 
 **What you get:**
-- Clean workspace (no temp file buildup)
 - Early warning on tool failures
 - Automatic strategy alignment
 - Weekly governance with evidence-based task validation
@@ -158,24 +157,11 @@ If the user has clear project goals, run `/init-strategy` skill to:
 
 ### Ask the User
 
-> "I can set up background cron jobs for automatic maintenance: cleanup, health checks, strategy alignment, and weekly governance. Should I configure them?"
+> "I can set up background cron jobs for automatic maintenance: health checks, strategy alignment, and weekly governance. Should I configure them?"
 
 If the user agrees, **execute these commands:**
 
-### 1. Grooming (Daily at 2 AM)
-
-**What it does:** Cleans workspace temp files daily to prevent clutter buildup.
-
-```bash
-openclaw cron add --name "pd-grooming-daily" \
-  --cron "0 2 * * *" --tz "UTC" \
-  --session isolated \
-  --light-context \
-  --no-deliver \
-  --message 'Execute pd-grooming skill: Check workspace root, clean temp files and digital clutter. Follow safety rules strictly. Do not delete business code.'
-```
-
-### 2. Health Check (Every 4 hours)
+### 1. Health Check (Every 4 hours)
 
 **What it does:** Verifies core tools (rg, node, python) are available and alerts on failure.
 
@@ -220,7 +206,7 @@ openclaw cron add --name "weekly-governance" \
   --cron "0 0 * * 0" --tz "UTC" \
   --session isolated \
   --timeout 300000 \
-  --message 'Execute weekly governance: 1) Validate CURRENT_FOCUS.md claims (PR merged? docs exist? tests pass?), 2) Update WEEK_STATE.json metrics, 3) Record to WEEK_EVENTS.jsonl, 4) If task queue empty, derive tasks from OKR and notify user'
+  --message 'Execute weekly governance: 1) Validate CURRENT_FOCUS.md claims (PR merged? docs exist? tests pass?), 2) Update WEEK_STATE.json metrics, 3) Record to WEEK_EVENTS.jsonl, 4) If task queue empty, remind user to plan next phase tasks'
 ```
 
 **JSON config reference:**

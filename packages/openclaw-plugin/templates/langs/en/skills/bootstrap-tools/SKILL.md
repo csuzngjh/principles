@@ -46,7 +46,7 @@ Your goal is to equip the agent team with the most advanced weapons. By analyzin
             ## Environment Capabilities
             Check @.state/SYSTEM_CAPABILITIES.json for high-performance tools (e.g., ripgrep, ast-grep) available in this environment. Use them!
             ```
-          - Prompt user to run `/manage-okr` or `/admin diagnose` to let Agent perceive new capabilities.
+          - Prompt user to run `/pd-status` or `/admin diagnose` to let Agent perceive new capabilities.
 
 ## Core Principles
 - **Prefer New Over Old**: Dare to recommend new tools to replace old ones (e.g., recommend `pnpm` over `npm`, `vitest` over `jest`), but explain the reasoning.

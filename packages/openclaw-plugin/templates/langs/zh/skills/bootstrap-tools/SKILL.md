@@ -46,7 +46,7 @@ disable-model-invocation: true
             ## Environment Capabilities
             Check @.state/SYSTEM_CAPABILITIES.json for high-performance tools (e.g., ripgrep, ast-grep) available in this environment. Use them!
             ```
-          - 提示用户运行 `/manage-okr` 或 `/admin diagnose` 以让 Agent 感知新能力。
+          - 提示用户运行 `/pd-status` 或 `/admin diagnose` 以让 Agent 感知新能力。
 ## 核心原则
 - **喜新厌旧**: 敢于推荐新工具替代旧工具（如推荐 `pnpm` 替 `npm`，推荐 `vitest` 替 `jest`），但要说明理由。
 - **安全第一**: 在安装前必须获得用户明确授权。

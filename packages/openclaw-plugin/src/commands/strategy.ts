@@ -19,21 +19,3 @@ export function handleInitStrategy(ctx: PluginCommandContext): PluginCommandResu
       `Then update \`${userContextPath}\` with key user preferences discovered.`,
   };
 }
-
-export function handleManageOkr(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = resolvePluginCommandWorkspaceDir(ctx, 'strategy:manageOkr');
-  const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
-
-  const focusPath = wctx.resolve('CURRENT_FOCUS').replace(workspaceDir, '').replace(/^\/+/, '');
-  const weekStatePath = wctx.resolve('WEEK_STATE').replace(workspaceDir, '').replace(/^\/+/, '');
-
-  return {
-    text:
-      `📊 **OKR Management**\n\n` +
-      `The Agent will analyze recent work and align sub-agent objectives.\n\n` +
-      `**Instructions for Agent:** Read \`${focusPath}\` and \`${weekStatePath}\`. ` +
-      `Compare them against recent session history. ` +
-      `Update OKRs as needed and output a brief alignment report. ` +
-      `If OKRs are stale (>7 days), prompt the user for a re-alignment conversation.`,
-  };
-}
