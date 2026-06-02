@@ -8,6 +8,7 @@ import {
   getSurfaceIdForService,
 } from '../../src/core/surface-guard.js';
 import { PLUGIN_SURFACE_REGISTRY } from '@principles/core/runtime-v2';
+import type { OpenClawPluginService } from '../../src/openclaw-sdk.js';
 
 describe('surface-guard', () => {
   describe('getSurfaceIdForHook', () => {
@@ -167,20 +168,20 @@ describe('surface-guard', () => {
     });
 
     it('returns original service for enabled surface', () => {
-      const mockService = { name: 'test-service' };
+      const mockService: OpenClawPluginService = { id: 'test-service' };
       const result = guardService('hook:before_prompt_build', mockService);
       expect(result).toBe(mockService);
     });
 
     it('returns null for disabled surface without logger', () => {
-      const mockService = { name: 'test-service' };
+      const mockService: OpenClawPluginService = { id: 'test-service' };
       const result = guardService('hook:after_tool_call.trajectory', mockService);
       expect(result).toBeNull();
     });
 
     it('logs when surface is disabled with logger', () => {
       const mockLogger = { info: vi.fn(), debug: vi.fn() };
-      const mockService = { name: 'test-service' };
+      const mockService: OpenClawPluginService = { id: 'test-service' };
       const result = guardService('hook:after_tool_call.trajectory', mockService, mockLogger);
       expect(result).toBeNull();
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -189,7 +190,7 @@ describe('surface-guard', () => {
     });
 
     it('returns null for unknown surface', () => {
-      const mockService = { name: 'test-service' };
+      const mockService: OpenClawPluginService = { id: 'test-service' };
       const result = guardService('service:nonexistent', mockService);
       expect(result).toBeNull();
     });
