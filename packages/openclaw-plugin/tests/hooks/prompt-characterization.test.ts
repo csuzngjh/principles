@@ -188,10 +188,13 @@ function makeCtx(overrides: {
   } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
 }
 
-// ─── Tests: Attitude Directive (GFI thresholds) ───────────────────────────
+// ─── Tests: Attitude Directive removed (PRI-291 MVP diet) ───────────────
+// Attitude/personality prompt text was removed per PRI-291.
+// GFI scoring (trackFriction) and empathy pain emission remain active.
+// These tests verify that attitude text no longer appears in prompts.
 
-describe('Attitude directive — GFI thresholds', () => {
-  // Ensure appendParts is non-empty so attitudeDirective is included in appendSystemContext.
+describe('Attitude/personality directive — removed from prompt (PRI-291)', () => {
+  // Ensure appendParts is non-empty so we can verify absence
   beforeEach(async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
@@ -209,59 +212,42 @@ describe('Attitude directive — GFI thresholds', () => {
     });
   });
 
-  it('GFI >= 70 injects HUMBLE_RECOVERY mode', async () => {
+  it('GFI >= 70 does NOT inject HUMBLE_RECOVERY mode', async () => {
     setSessionGfi(75);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 75 }));
 
-    expect(result?.appendSystemContext).toContain('HUMBLE_RECOVERY');
-    expect(result?.appendSystemContext).toContain('GFI: 75');
+    const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
+    expect(combined).not.toContain('HUMBLE_RECOVERY');
   });
 
-  it('GFI >= 70 injects HUMBLE_RECOVERY mode at boundary (70 exactly)', async () => {
-    setSessionGfi(70);
-    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 70 }));
-
-    expect(result?.appendSystemContext).toContain('HUMBLE_RECOVERY');
-  });
-
-  it('GFI >= 40 and < 70 injects CONCILIATORY mode', async () => {
+  it('GFI >= 40 does NOT inject CONCILIATORY mode', async () => {
     setSessionGfi(50);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 50 }));
 
-    expect(result?.appendSystemContext).toContain('CONCILIATORY');
-    expect(result?.appendSystemContext).toContain('GFI: 50');
+    const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
+    expect(combined).not.toContain('CONCILIATORY');
   });
 
-  it('GFI >= 40 and < 70 injects CONCILIATORY mode at boundary (40 exactly)', async () => {
-    setSessionGfi(40);
-    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 40 }));
-
-    expect(result?.appendSystemContext).toContain('CONCILIATORY');
-  });
-
-  it('GFI < 40 injects EFFICIENT mode', async () => {
+  it('GFI < 40 does NOT inject EFFICIENT mode', async () => {
     setSessionGfi(10);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 10 }));
 
-    expect(result?.appendSystemContext).toContain('EFFICIENT');
-    expect(result?.appendSystemContext).toContain('GFI: 10');
+    const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
+    expect(combined).not.toContain('EFFICIENT');
   });
 
-  it('GFI = 0 (no session) falls back to 0 and injects EFFICIENT', async () => {
-    setSessionGfi(0);
-    const { getSession } = await import('../../src/core/session-tracker.js');
-    // Override to return undefined (no session found)
-    (getSession as ReturnType<typeof vi.fn>).mockReturnValueOnce(undefined);
-
+  it('no "Spicy Evolver" persona text appears in prompt', async () => {
+    setSessionGfi(20);
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionId: 'no-such-session' }));
+    const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({ sessionGfi: 20 }));
 
-    expect(result?.appendSystemContext).toContain('EFFICIENT');
+    const combined = (result?.prependSystemContext ?? '') + (result?.appendSystemContext ?? '');
+    expect(combined).not.toContain('Spicy Evolver');
+    expect(combined).not.toContain('despise entropy');
+    expect(combined).not.toContain('evolve through pain');
   });
 });
 
