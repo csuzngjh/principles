@@ -123,18 +123,25 @@ describe('workspace-guidance-migrator', () => {
     });
 
     it('handles write errors and restores original', () => {
+      const originalContent = '# Agent Instructions\nPhysical interception ensures safety.';
       mockFs.existsSync.mockReturnValue(true);
-      mockFs.readFileSync.mockReturnValue(
-        '# Agent Instructions\nPhysical interception ensures safety.',
-      );
-      mockFs.writeFileSync.mockImplementation((path: string) => {
+      mockFs.readFileSync.mockReturnValue(originalContent);
+
+      let callCount = 0;
+      mockFs.writeFileSync.mockImplementation((path: string, content: string) => {
+        callCount++;
         if (path.includes('.pre-pri286.bak')) return;
+        if (callCount === 2) {
+          expect(content).toBe(originalContent);
+          return;
+        }
         throw new Error('Write error');
       });
 
       const result = migrateStaleWorkspaceGuidance(mockApi, '/workspace');
 
       expect(result.errors.length).toBeGreaterThan(0);
+      expect(callCount).toBeGreaterThanOrEqual(2);
     });
 
     it('skips non-guidance files', () => {
