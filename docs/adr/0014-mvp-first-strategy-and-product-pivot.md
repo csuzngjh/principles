@@ -232,8 +232,8 @@ During real-world execution testing of MVP Story A', it was observed that **dete
 To resolve this bottleneck, we have promoted the **Empathy Observer** (previously classified as MVP-Quiet) and **Correction Observer** (previously part of the retired nocturnal pipeline, now re-designed as an active SDK-level periodic optimizer) to **MVP-Core**.
 
 - **Empathy Observer**: Uses LLM semantic analysis in the background of conversational prompts to extract high-quality emotional friction and frustration keywords from user messages. This reactively captures frustration patterns that traditional programmatic error-catchers miss completely.
-- **Correction Observer**: Periodically reviews SQLite trajectory history on worker heartbeat to automatically adjust keyword weights and decay false positives, ensuring trigger accuracy continuously remains self-correcting.
+- **Correction Observer**: Periodically reviews SQLite trajectory history to automatically adjust keyword weights and decay false positives, ensuring trigger accuracy continuously remains self-correcting. Now runs as an **independent service** (not on evolution heartbeat) per PRI-293.
 
 ### Reclassified Items
 1. **Empathy Observer**: Reclassified from **MVP-Quiet** to **MVP-Core** (wired asynchronously in the prompt build hook).
-2. **Correction Observer**: Reclassified from **MVP-Gone** (as nocturnal workflow) to **MVP-Core** (as a lightweight SDK-level observer triggered on evolution heartbeat).
+2. **Correction Observer**: Reclassified from **MVP-Gone** (as nocturnal workflow) to **MVP-Core**. Originally triggered on evolution heartbeat; extracted to an independent service with its own feature flag (`correction_observer`, quiet category with enabled=true default, to allow runtime disabling) per PRI-293, so it no longer depends on the default-off EvolutionWorker. Surface registry entries remain `core` for triage; feature flag is `quiet` to preserve the runtime kill switch.
