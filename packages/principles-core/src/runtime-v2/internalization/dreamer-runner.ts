@@ -40,6 +40,7 @@ import type { TelemetryEvent } from '../../telemetry-event.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RunnerPhase } from '../runner/runner-phase.js';
 import { DreamerPromptBuilder } from './dreamer-prompt-builder.js';
+import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 
 // ── Result Types ─────────────────────────────────────────────────────────────
 
@@ -180,7 +181,7 @@ export class DreamerRunner {
     this.phase = RunnerPhase.Idle;
 
     // 1. Acquire lease — isolated try/catch so lease_conflict never uses synthetic TaskRecord
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+
     let leasedTask: TaskRecord;
     try {
       leasedTask = await this.stateManager.acquireLease({
@@ -243,6 +244,11 @@ export class DreamerRunner {
       // 6. Fetch output
       this.phase = RunnerPhase.FetchingOutput;
       const output = await this.fetchAndParseOutput(runHandle.runId, taskId);
+
+      // Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
+      // Only fill when absent via Object.hasOwn — present-but-falsy values
+      // must reach validation and fail loud (Runtime Contract Rule 3).
+      injectRunnerLineageIfAbsent(output, 'taskId', taskId);
 
       // 7. Validate
       this.phase = RunnerPhase.Validating;

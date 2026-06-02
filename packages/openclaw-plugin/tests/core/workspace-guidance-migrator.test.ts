@@ -13,6 +13,15 @@ const mockFs = {
 
 vi.mock('fs', () => mockFs);
 
+// Mock heavy core module to avoid slow re-imports and to control staleness detection
+const mockMigrateWorkspaceGuidance = vi.fn<(content: string, relativePath: string) => { changed: boolean; migrated: string }>();
+const mockContainsStalePlanMdGuidance = vi.fn<(content: string, relativePath: string) => boolean>();
+
+vi.mock('@principles/core/runtime-v2', () => ({
+  migrateWorkspaceGuidance: (...args: unknown[]) => mockMigrateWorkspaceGuidance(...(args as [string, string])),
+  containsStalePlanMdGuidance: (...args: unknown[]) => mockContainsStalePlanMdGuidance(...(args as [string, string])),
+}));
+
 const WORKSPACE_GUIDANCE_MIGRATOR_PATH = '../../src/core/workspace-guidance-migrator.js';
 
 describe('workspace-guidance-migrator', () => {
@@ -41,6 +50,13 @@ describe('workspace-guidance-migrator', () => {
     mockFs.writeFileSync.mockReturnValue(undefined);
     mockFs.readdirSync.mockReturnValue([]);
 
+    // Default: content is NOT stale
+    mockContainsStalePlanMdGuidance.mockReturnValue(false);
+    mockMigrateWorkspaceGuidance.mockImplementation((content: string) => ({
+      changed: false,
+      migrated: content,
+    }));
+
     const module = await import(WORKSPACE_GUIDANCE_MIGRATOR_PATH);
     migrateStaleWorkspaceGuidance = module.migrateStaleWorkspaceGuidance;
   });
@@ -63,6 +79,7 @@ describe('workspace-guidance-migrator', () => {
     it('skips files with no stale guidance', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue('# Clean AGENTS.md\nNo stale references here.');
+      // Default: containsStalePlanMdGuidance returns false
 
       const result = migrateStaleWorkspaceGuidance(mockApi, '/workspace');
 
@@ -76,6 +93,14 @@ describe('workspace-guidance-migrator', () => {
       mockFs.readFileSync.mockReturnValue(
         '# Agent Instructions\nPhysical interception ensures safety.',
       );
+      // First call (AGENTS.md) is stale, second (MEMORY.md) is not
+      mockContainsStalePlanMdGuidance
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false);
+      mockMigrateWorkspaceGuidance.mockImplementation((content: string) => ({
+        changed: true,
+        migrated: content.replace('Physical interception', 'MIGRATED'),
+      }));
 
       const result = migrateStaleWorkspaceGuidance(mockApi, '/workspace');
 
@@ -88,6 +113,11 @@ describe('workspace-guidance-migrator', () => {
       mockFs.readFileSync.mockReturnValue(
         '# Agent Instructions\nPhysical interception ensures safety.',
       );
+      mockContainsStalePlanMdGuidance.mockReturnValue(true);
+      mockMigrateWorkspaceGuidance.mockImplementation((content: string) => ({
+        changed: true,
+        migrated: content.replace('Physical interception', 'MIGRATED'),
+      }));
 
       migrateStaleWorkspaceGuidance(mockApi, '/workspace');
 
@@ -102,6 +132,11 @@ describe('workspace-guidance-migrator', () => {
       mockFs.readFileSync.mockReturnValue(
         '# Agent Instructions\nPhysical interception ensures safety.',
       );
+      mockContainsStalePlanMdGuidance.mockReturnValue(true);
+      mockMigrateWorkspaceGuidance.mockImplementation((content: string) => ({
+        changed: true,
+        migrated: content.replace('Physical interception', 'MIGRATED'),
+      }));
 
       migrateStaleWorkspaceGuidance(mockApi, '/workspace');
 
@@ -126,6 +161,11 @@ describe('workspace-guidance-migrator', () => {
       const originalContent = '# Agent Instructions\nPhysical interception ensures safety.';
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readFileSync.mockReturnValue(originalContent);
+      mockContainsStalePlanMdGuidance.mockReturnValue(true);
+      mockMigrateWorkspaceGuidance.mockImplementation((content: string) => ({
+        changed: true,
+        migrated: content.replace('Physical interception', 'MIGRATED'),
+      }));
 
       let callCount = 0;
       mockFs.writeFileSync.mockImplementation((path: string, content: string) => {
@@ -154,8 +194,9 @@ describe('workspace-guidance-migrator', () => {
     });
 
     it('discovers skill files in .principles/skills directory', () => {
+      const skillsPattern = path.join('.principles', 'skills');
       mockFs.existsSync.mockImplementation((p: string) => {
-        if (String(p).includes('.principles/skills')) return true;
+        if (String(p).includes(skillsPattern)) return true;
         return false;
       });
       mockFs.readdirSync.mockReturnValue([
@@ -165,6 +206,11 @@ describe('workspace-guidance-migrator', () => {
       mockFs.readFileSync.mockReturnValue(
         'Ensure `PLAN.md` contains `## Target Files` heading.',
       );
+      mockContainsStalePlanMdGuidance.mockReturnValue(true);
+      mockMigrateWorkspaceGuidance.mockImplementation((content: string) => ({
+        changed: true,
+        migrated: content.replace('## Target Files', '## Targets'),
+      }));
 
       const result = migrateStaleWorkspaceGuidance(mockApi, '/workspace');
 
@@ -182,8 +228,9 @@ describe('workspace-guidance-migrator', () => {
     });
 
     it('handles skills directory read error gracefully', () => {
+      const skillsPattern = path.join('.principles', 'skills');
       mockFs.existsSync.mockImplementation((p: string) => {
-        if (String(p).includes('.principles/skills')) return true;
+        if (String(p).includes(skillsPattern)) return true;
         return false;
       });
       mockFs.readdirSync.mockImplementation(() => {
