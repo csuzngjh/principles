@@ -32,7 +32,7 @@ import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from
 import { handleLlmOutput } from './hooks/llm.js';
 import { handleSubagentEnded } from './hooks/subagent.js';
 import * as TrajectoryCollector from './hooks/trajectory-collector.js';
-import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
+import { handleInitStrategy } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
 import { handlePainCommand, handlePainReportCommand } from './commands/pain.js';
@@ -603,24 +603,12 @@ const plugin = {
      
     registerCommandWithAlias('pd-init', 'pdi', getCommandDescription('pd-init', language), (ctx: any) => handleInitStrategy(ctx));
      
-    registerCommandWithAlias('pd-okr', 'pdk', getCommandDescription('pd-okr', language), (ctx: any) => handleManageOkr(ctx));
-     
     registerCommandWithAlias('pd-bootstrap', 'pdb', getCommandDescription('pd-bootstrap', language), (ctx: any) => handleBootstrapTools(ctx));
-     
+
     registerCommandWithAlias('pd-research', 'pdr', getCommandDescription('pd-research', language), (ctx: any) => handleResearchTools(ctx));
-     
+
     registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
-     
-    registerCommandWithAlias('pd-daily', 'pdd', getCommandDescription('pd-daily', language), () => ({
-      text: language === 'zh'
-        ? "请执行 pd-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。"
-        : "Please execute the pd-daily skill to configure and send your daily evolution report. The system will guide you through the configuration process."
-    }));
-    registerCommandWithAlias('pd-grooming', 'pdg', getCommandDescription('pd-grooming', language), () => ({
-      text: language === 'zh'
-        ? "请执行 pd-grooming 技能来执行大扫除。例如输入: '执行 pd-grooming 技能'"
-        : "Please execute the pd-grooming skill to clean up. For example: 'Execute pd-grooming skill'"
-    }));
+
     registerCommandWithAlias('pd-help', 'pdh', getCommandDescription('pd-help', language), () => {
         if (language === 'zh') {
           return { text: `
@@ -636,10 +624,7 @@ const plugin = {
 ## 状态查询
 | 短命令 | 长命令 | 用途 |
 |--------|--------|------|
-| \`/pdk\` | \`/pd-okr\` | OKR 目标管理 |
 | \`/pdt\` | \`/pd-thinking\` | 思维模型管理 |
-| \`/pdd\` | \`/pd-daily\` | 进化日报 |
-| \`/pdg\` | \`/pd-grooming\` | 工作区清理 |
 
 ## 其他命令
 | 命令 | 用途 |
@@ -667,10 +652,7 @@ const plugin = {
 ## Status
 | Short | Full | Purpose |
 |-------|------|---------|
-| \`/pdk\` | \`/pd-okr\` | OKR goal management |
 | \`/pdt\` | \`/pd-thinking\` | Mental model management |
-| \`/pdd\` | \`/pd-daily\` | Evolution report |
-| \`/pdg\` | \`/pd-grooming\` | Workspace cleanup |
 
 ## Other Commands
 | Command | Purpose |

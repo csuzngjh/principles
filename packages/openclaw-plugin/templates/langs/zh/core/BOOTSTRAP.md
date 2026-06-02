@@ -162,20 +162,7 @@ memory/
 
 如果用户同意，**执行以下命令：**
 
-### 1. 熵减巡检（每天凌晨 2 点）
-
-**功能：** 每天清理工作区临时文件，保持项目整洁。
-
-```bash
-openclaw cron add --name "pd-grooming-daily" \
-  --cron "0 2 * * *" --tz "UTC" \
-  --session isolated \
-  --light-context \
-  --no-deliver \
-  --message '执行 pd-grooming 技能：检查工作区根目录，清理临时文件和数字垃圾。严格遵循安全红线，不要删除业务代码。'
-```
-
-### 2. 环境健康检查（每 4 小时）
+### 1. 环境健康检查（每 4 小时）
 
 **功能：** 验证核心工具（rg, node, python）是否可用，异常时告警。
 
@@ -220,7 +207,7 @@ openclaw cron add --name "weekly-governance" \
   --cron "0 0 * * 0" --tz "UTC" \
   --session isolated \
   --timeout 300000 \
-  --message '执行周治理：1) 验证 CURRENT_FOCUS.md 声称（PR 合并？文档存在？测试通过？），2) 更新 WEEK_STATE.json 指标，3) 记录到 WEEK_EVENTS.jsonl，4) 如果任务队列为空，从 OKR 推导任务并通知用户'
+  --message '执行周治理：1) 验证 CURRENT_FOCUS.md 声称（PR 合并？文档存在？测试通过？），2) 更新 WEEK_STATE.json 指标，3) 记录到 WEEK_EVENTS.jsonl，4) 如果任务队列为空，提醒用户规划下一阶段任务'
 ```
 
 **JSON 配置参考：**

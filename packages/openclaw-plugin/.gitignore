@@ -26,3 +26,4 @@ dist/
 
 # Web 编译产物
 web/assets/
+packages/openclaw-plugin/principle_training_state.json
