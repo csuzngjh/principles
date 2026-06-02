@@ -1,7 +1,7 @@
-export type SurfaceKind = 'hook' | 'service' | 'startup' | 'prompt_section';
+export type SurfaceKind = 'hook' | 'service' | 'startup';
 export type MvpCategory = 'core' | 'quiet' | 'gone' | 'legacy_retire';
 
-export const VALID_SURFACE_KINDS: readonly SurfaceKind[] = ['hook', 'service', 'startup', 'prompt_section'];
+export const VALID_SURFACE_KINDS: readonly SurfaceKind[] = ['hook', 'service', 'startup'];
 export const VALID_MVP_CATEGORIES: readonly MvpCategory[] = ['core', 'quiet', 'gone', 'legacy_retire'];
 
 export interface PluginSurfaceEntry {
@@ -168,67 +168,6 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     since: '2026-06-01',
     description: 'Evolution worker start on first prompt per workspace (MVP-Quiet per PRI-288/ADR-0014)',
     disabledReason: 'MVP-Quiet: evolution worker startup gated behind evolution_worker feature flag (PRI-288); default off per ADR-0014 §2.5',
-  },
-  {
-    id: 'prompt_section:principles',
-    kind: 'prompt_section',
-    category: 'core',
-    enabledByDefault: true,
-    since: '2026-05-24',
-    description: 'Active principles injection into agent prompt',
-  },
-  {
-    id: 'prompt_section:empathy_observer',
-    kind: 'prompt_section',
-    category: 'core',
-    enabledByDefault: true,
-    since: '2026-05-30',
-    description: 'Empathy observer for frustration/friction detection (ADR-0014 amendment)',
-  },
-  {
-    id: 'prompt_section:thinking_os',
-    kind: 'prompt_section',
-    category: 'quiet',
-    enabledByDefault: false,
-    since: '2026-05-24',
-    description: 'Thinking OS mental model injection',
-    disabledReason: 'MVP-Quiet: makes prompt less interpretable; ADR-0014 §2.5',
-  },
-  {
-    id: 'prompt_section:gfi',
-    kind: 'prompt_section',
-    category: 'quiet',
-    enabledByDefault: false,
-    since: '2026-05-24',
-    description: 'Global Friction Index session scoring injection',
-    disabledReason: 'MVP-Quiet: internal metric, not user-visible; ADR-0014 §2.5',
-  },
-  {
-    id: 'prompt_section:focus_history',
-    kind: 'prompt_section',
-    category: 'quiet',
-    enabledByDefault: false,
-    since: '2026-05-24',
-    description: 'Focus history detailed injection',
-    disabledReason: 'MVP-Quiet: less interpretable; ADR-0014 §2.5',
-  },
-  {
-    id: 'prompt_section:routing_guidance',
-    kind: 'prompt_section',
-    category: 'quiet',
-    enabledByDefault: false,
-    since: '2026-05-24',
-    description: 'Routing guidance for local worker dispatch',
-    disabledReason: 'MVP-Quiet: shadow/local-worker routing not in Story A\'',
-  },
-  {
-    id: 'prompt_section:message_sanitize',
-    kind: 'prompt_section',
-    category: 'gone',
-    enabledByDefault: false,
-    since: '2026-05-24',
-    description: 'Message sanitization hook (retired)',
-    disabledReason: 'MVP-Gone: COMPONENTS.md self-tagged for deletion',
   },
 ];
 

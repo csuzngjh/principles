@@ -280,13 +280,6 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(centralSync!.category).toBe('quiet');
       expect(centralSync!.enabledByDefault).toBe(false);
     });
-
-    it('message_sanitize is MVP-Gone (ADR-0014 §2.5: COMPONENTS.md self-tagged)', () => {
-      const sanitize = PLUGIN_SURFACE_REGISTRY.find(s => s.id === 'prompt_section:message_sanitize');
-      expect(sanitize).toBeDefined();
-      expect(sanitize!.category).toBe('gone');
-      expect(sanitize!.enabledByDefault).toBe(false);
-    });
   });
 
   describe('surface guard runtime', () => {
@@ -310,11 +303,11 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(result.enabled).toBe(true);
     });
 
-    it('isSurfaceEnabled returns false for gone surfaces even with override', async () => {
+    it('isSurfaceEnabled returns false for unknown surfaces even with override', async () => {
       const { isSurfaceEnabled } = await import('../../src/core/surface-guard.js');
-      const result = isSurfaceEnabled('prompt_section:message_sanitize', { 'prompt_section:message_sanitize': true });
+      const result = isSurfaceEnabled('hook:nonexistent_gone', { 'hook:nonexistent_gone': true });
       expect(result.enabled).toBe(false);
-      expect(result.reason).toContain('gone');
+      expect(result.reason).toContain('not found in registry');
     });
 
     it('isSurfaceEnabled returns true for core surfaces even with false override', async () => {
@@ -352,10 +345,10 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(guarded({} as never, {} as never)).toBeUndefined();
     });
 
-    it('guardHook returns no-op handler for gone surfaces', async () => {
+    it('guardHook returns no-op handler for unregistered surfaces', async () => {
       const { guardHook } = await import('../../src/core/surface-guard.js');
       const handler = () => 'result';
-      const guarded = guardHook('prompt_section:message_sanitize', undefined, handler);
+      const guarded = guardHook('hook:nonexistent_hook', undefined, handler);
       expect(guarded).not.toBe(handler);
     });
 
@@ -395,10 +388,10 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(guarded).toBeNull();
     });
 
-    it('guardService returns null for gone surfaces even with override', async () => {
+    it('guardService returns null for unregistered surfaces', async () => {
       const { guardService } = await import('../../src/core/surface-guard.js');
       const service = { api: null, start: () => {} };
-      const guarded = guardService('prompt_section:message_sanitize', service);
+      const guarded = guardService('service:nonexistent_service', service);
       expect(guarded).toBeNull();
     });
   });

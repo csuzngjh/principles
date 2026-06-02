@@ -93,11 +93,15 @@ describe('plugin-surface-registry', () => {
     });
 
     it('ignores gone surface override', () => {
-      const enabled = getEnabledSurfaces(PLUGIN_SURFACE_REGISTRY, {
-        'prompt_section:message_sanitize': true,
+      const goneEntry: PluginSurfaceEntry = {
+        id: 'hook:gone_test', kind: 'hook', category: 'gone', enabledByDefault: false,
+        since: '2026-01-01', description: 'test gone', disabledReason: 'test',
+      };
+      const enabled = getEnabledSurfaces([...PLUGIN_SURFACE_REGISTRY, goneEntry], {
+        'hook:gone_test': true,
       });
-      const sanitize = enabled.find(s => s.id === 'prompt_section:message_sanitize');
-      expect(sanitize).toBeUndefined();
+      const gone = enabled.find(s => s.id === 'hook:gone_test');
+      expect(gone).toBeUndefined();
     });
 
     it('ignores core surface disable override', () => {
@@ -154,7 +158,7 @@ describe('plugin-surface-registry', () => {
 
   describe('constant integrity', () => {
     it('VALID_SURFACE_KINDS contains expected kinds', () => {
-      expect(VALID_SURFACE_KINDS).toEqual(['hook', 'service', 'startup', 'prompt_section']);
+      expect(VALID_SURFACE_KINDS).toEqual(['hook', 'service', 'startup']);
     });
 
     it('VALID_MVP_CATEGORIES contains expected categories', () => {
