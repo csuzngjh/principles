@@ -200,12 +200,21 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       expect(unclassified).toEqual([]);
     });
 
-    it('total service registrations match expected count', () => {
+    it('registered service IDs match expected MVP set', () => {
+      // Quiet/disabled services (e.g. evolution-worker per PRI-294) exist in the
+      // registry but are NOT registered via guardService in index.ts.
       const source = read('packages/openclaw-plugin/src/index.ts');
       const registrations = extractServiceRegistrations(source);
 
-      const registryServiceCount = PLUGIN_SURFACE_REGISTRY.filter(s => s.kind === 'service').length;
-      expect(registrations.length).toBe(registryServiceCount);
+      const registeredIds = registrations.map(r => r.surfaceId).sort();
+      const expectedIds = [
+        'service:central-sync',
+        'service:correction-observer',
+        'service:pd-task',
+        'service:trajectory',
+      ].sort();
+
+      expect(registeredIds).toEqual(expectedIds);
     });
   });
 
