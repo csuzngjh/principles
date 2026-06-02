@@ -49,6 +49,7 @@ import { handleExportCommand } from './commands/export.js';
 import { handleSamplesCommand } from './commands/samples.js';
 import { handleWorkflowDebugCommand } from './commands/workflow-debug.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
+import { CorrectionObserverService } from './service/correction-observer-service.js';
 import { TrajectoryService } from './service/trajectory-service.js';
 import { PDTaskService } from './core/pd-task-service.js';
 import { CentralSyncService } from './service/central-sync-service.js';
@@ -168,6 +169,30 @@ export function shouldStartEvolutionWorker(
   return { shouldStart: false, flagSource: flag.source, disabledInfo };
 }
 
+export interface CorrectionObserverGateResult {
+  shouldStart: boolean;
+  flagSource: string;
+  disabledInfo: string | null;
+}
+
+export function shouldStartCorrectionObserver(
+  workspaceDir: string,
+  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
+): CorrectionObserverGateResult {
+  const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'correction_observer', logger);
+  if (flag.enabled) {
+    return { shouldStart: true, flagSource: flag.source, disabledInfo: null };
+  }
+  const disabledInfo = JSON.stringify({
+    reason: 'correction_observer_disabled',
+    nextAction: 'set correction_observer.enabled=true in .pd/feature-flags.yaml to enable',
+    featureFlag: 'correction_observer',
+    boundedContext: 'correction_observer_service',
+    flagSource: flag.source,
+  });
+  return { shouldStart: false, flagSource: flag.source, disabledInfo };
+}
+
 const plugin = {
   name: "Principles Disciple",
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
@@ -245,6 +270,22 @@ const plugin = {
               // Structured observability per ERR-002: no silent skip
               api.logger.info(`[PD] EvolutionWorker NOT started for workspace: ${workspaceDir}. ${gate.disabledInfo}`);
               SystemLogger.log(workspaceDir, 'EVOLUTION_WORKER_DISABLED', gate.disabledInfo ?? '');
+            }
+
+            // ── Start CorrectionObserver for THIS workspace ──
+            // MVP-Core per ADR-0014 amendment, independently owned (PRI-293).
+            const corrGate = shouldStartCorrectionObserver(workspaceDir, api.logger);
+            if (corrGate.shouldStart) {
+              CorrectionObserverService.start({
+                config: api.config,
+                workspaceDir,
+                stateDir: path.join(workspaceDir, '.state'),
+                logger: api.logger,
+              });
+              api.logger.info(`[PD] CorrectionObserver started for workspace: ${workspaceDir} (flag source: ${corrGate.flagSource})`);
+            } else {
+              api.logger.info(`[PD] CorrectionObserver NOT started for workspace: ${workspaceDir}. ${corrGate.disabledInfo}`);
+              SystemLogger.log(workspaceDir, 'CORRECTION_OBSERVER_DISABLED', corrGate.disabledInfo ?? '');
             }
           }
 
@@ -527,6 +568,8 @@ const plugin = {
       EvolutionWorkerService.api = api;
       const guardedEvolutionWorker = guardService('service:evolution-worker', EvolutionWorkerService, api.logger);
       if (guardedEvolutionWorker) api.registerService(guardedEvolutionWorker);
+      const guardedCorrectionObserver = guardService('service:correction-observer', CorrectionObserverService, api.logger);
+      if (guardedCorrectionObserver) api.registerService(guardedCorrectionObserver);
       const guardedTrajectory = guardService('service:trajectory', TrajectoryService, api.logger);
       if (guardedTrajectory) api.registerService(guardedTrajectory);
       const guardedPdTask = guardService('service:pd-task', PDTaskService, api.logger);
