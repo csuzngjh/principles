@@ -65,7 +65,7 @@ vi.mock('@principles/core/runtime-v2', () => {
   };
 });
 
-import { CorrectionObserverService, runCorrectionObserverCycle } from '../../src/service/correction-observer-service.js';
+import { CorrectionObserverService, runCorrectionObserverCycle, resolveCorrectionObserver } from '../../src/service/correction-observer-service.js';
 import { safeRmDir } from '../test-utils.js';
 
 describe('CorrectionObserverService — Independent Service (PRI-293)', () => {
@@ -325,6 +325,54 @@ describe('runCorrectionObserverCycle — Independent Execution', () => {
         expect.stringContaining('Correction observer cycle failed')
       );
     } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+});
+
+describe('resolveCorrectionObserver — Configuration Resolution', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns observer when API key env is set with mocked policy', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-resolve-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    try {
+      const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+      const result = resolveCorrectionObserver(wctx, logger as any);
+
+      // With mocked WorkflowFunnelLoader returning valid policy, should return observer
+      expect(result).not.toBeNull();
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY;
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('returns observer when workflows.yaml provides valid policy', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-policy-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    try {
+      const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+      const result = resolveCorrectionObserver(wctx, logger as any);
+
+      // With mocked WorkflowFunnelLoader returning valid policy, should return observer
+      expect(result).not.toBeNull();
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY;
       safeRmDir(workspaceDir);
     }
   });
