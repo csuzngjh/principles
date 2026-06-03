@@ -1,20 +1,62 @@
-import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
-import type {
-  PDRuntimeAdapter,
-  RunHandle,
-  RunStatus,
-  StartRunInput,
-} from '../runtime-protocol.js';
-import type { StoreEventEmitter } from '../store/event-emitter.js';
+/**
+ * ArtificerRunner — Implementation plan generator for the Internalization Engine (PRI-111).
+ *
+ * Migrated to extend BasePeerRunner (PRI-302). The shared lease → buildContext →
+ * invoke → poll → fetch → validate → succeed/fail pipeline is now in the base
+ * class. This file only contains Artificer-specific logic.
+ *
+ * Key constraints (ADR-0003):
+ *   - Uses PDRuntimeAdapter for all LLM execution (no direct SDK calls)
+ *   - Does NOT directly invoke Evaluator/RolloutReviewer (host layer enqueues)
+ *   - No plugin-layer imports (core is infrastructure-agnostic)
+ *   - Uses RuntimeStateManager for all state operations
+ *
+ * Trust boundary (Artificer is activation-capable, higher risk than upstream runners):
+ *   - LLM output enters as `unknown`; only after validateOutput + lineage check
+ *     can it be treated as ArtificerOutputV1
+ *   - sourceScribeArtifactId lineage consistency enforced in succeedTask (ERR-004)
+ *   - Invalid activation/action/channel cannot succeed commit
+ *   - Artifact write failure → retryOrFail, never silent
+ *
+ * Pipeline:
+ *   1. acquireLease — isolated try/catch, lease_conflict is non-mutating
+ *   2. resolve Scribe dependency from dependencyTaskIds
+ *   3. fetch Scribe artifact via PIArtifactStore
+ *   4. startRun with outputSchemaRef: 'artificer-output-v1'
+ *   5. pollUntilTerminal (inherited)
+ *   6. fetchOutput → validate as unknown → cast to ArtificerOutputV1
+ *   7. checkLineageIntegrity (sourceScribeArtifactId consistency, ERR-008)
+ *   8. updateRunOutput → persist serialized output
+ *   9. write PIArtifact → markTaskSucceeded with artificer:// resultRef
+ *
+ * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
+ * @see BasePeerRunner in runner/base-peer-runner.ts
+ */
+import type { RunHandle } from '../runtime-protocol.js';
 import type { ArtificerOutputV1, ArtificerValidator } from './artificer-output.js';
-import type { PIArtifactStore } from './pi-artifact.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
-import type { TelemetryEvent } from '../../telemetry-event.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
-import { RunnerPhase } from '../runner/runner-phase.js';
 import { ArtificerPromptBuilder } from './artificer-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
+import { BasePeerRunner } from '../runner/base-peer-runner.js';
+import type {
+  PeerRunnerOptions,
+  PeerRunnerDeps,
+  PeerRunnerResult,
+  PeerRunnerValidationResult,
+} from '../runner/peer-runner-types.js';
+
+// ── Artificer-specific context ──────────────────────────────────────────────
+
+/** Context built by ArtificerRunner.buildContext() and consumed by invokeRuntime(). */
+interface ArtificerContext {
+  readonly contextHash: string;
+  readonly scribeArtifact: string | null;
+  readonly sourceScribeArtifactId: string | null;
+}
+
+// ── Result Types (backward-compatible exports) ───────────────────────────────
 
 export type ArtificerRunnerResultStatus = 'succeeded' | 'failed' | 'retried';
 
@@ -30,6 +72,8 @@ export interface ArtificerRunnerResult {
   readonly failureReason?: string;
   readonly attemptCount: number;
 }
+
+// ── Constructor Options (backward-compatible exports) ────────────────────────
 
 export interface ArtificerRunnerOptions {
   readonly pollIntervalMs?: number;
@@ -67,172 +111,35 @@ export function resolveArtificerRunnerOptions(options: ArtificerRunnerOptions): 
   };
 }
 
-export interface ArtificerRunnerDeps {
-  readonly stateManager: RuntimeStateManager;
-  readonly runtimeAdapter: PDRuntimeAdapter;
-  readonly eventEmitter: StoreEventEmitter;
+// ── Dependencies (backward-compatible; extends PeerRunnerDeps) ───────────────
+
+export interface ArtificerRunnerDeps extends PeerRunnerDeps {
   readonly validator: ArtificerValidator;
-  readonly artifactStore: PIArtifactStore;
 }
 
-interface FailureContext {
-  readonly taskId: string;
-  readonly task: TaskRecord;
-  readonly errorCategory: PDErrorCategory;
-  readonly failureReason: string;
-}
+// ── ArtificerRunner ──────────────────────────────────────────────────────────
 
-interface SucceedContext {
-  readonly taskId: string;
-  readonly runId: string;
-  readonly output: ArtificerOutputV1;
-  readonly task: TaskRecord;
-  readonly contextHash: string;
-}
-
-interface ValidationErrorContext {
-  readonly taskId: string;
-  readonly task: TaskRecord;
-  readonly errors: readonly string[];
-  readonly errorCategory?: string;
-}
-
-export class ArtificerRunner {
-  private phase: RunnerPhase = RunnerPhase.Idle;
-  private readonly resolvedOptions: ResolvedArtificerRunnerOptions;
-  private readonly stateManager: RuntimeStateManager;
-  private readonly runtimeAdapter: PDRuntimeAdapter;
-  private readonly eventEmitter: StoreEventEmitter;
+export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerOutputV1> {
   private readonly validator: ArtificerValidator;
-  private readonly artifactStore: PIArtifactStore;
 
-  constructor(deps: ArtificerRunnerDeps, options: ArtificerRunnerOptions) {
-    this.stateManager = deps.stateManager;
-    this.runtimeAdapter = deps.runtimeAdapter;
-    this.eventEmitter = deps.eventEmitter;
+  constructor(deps: ArtificerRunnerDeps, options: PeerRunnerOptions) {
+    super(deps, options, {
+      runnerName: 'artificer',
+      expectedTaskKind: 'artificer',
+      defaultAgentId: 'artificer',
+      resultRefPrefix: 'artificer',
+    });
     this.validator = deps.validator;
-    this.artifactStore = deps.artifactStore;
-    this.resolvedOptions = resolveArtificerRunnerOptions(options);
   }
 
-  get currentPhase(): RunnerPhase {
-    return this.phase;
+  // ── Abstract implementations ───────────────────────────────────────────────
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  get permanentErrorCategories(): ReadonlySet<PDErrorCategory> {
+    return new Set(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid', 'output_invalid']);
   }
 
-  private emitArtificerEvent(
-    eventType: string,
-    taskId: string,
-    payload: Record<string, unknown>,
-  ): void {
-    this.eventEmitter.emitTelemetry({
-      eventType: eventType as TelemetryEvent['eventType'],
-      traceId: taskId,
-      timestamp: new Date().toISOString(),
-      sessionId: this.resolvedOptions.owner,
-      agentId: this.resolvedOptions.agentId,
-      payload,
-    });
-  }
-
-  async run(taskId: string): Promise<ArtificerRunnerResult> {
-    this.phase = RunnerPhase.Idle;
-
-    let leasedTask: TaskRecord;
-    try {
-      leasedTask = await this.stateManager.acquireLease({
-        taskId,
-        owner: this.resolvedOptions.owner,
-        runtimeKind: this.resolvedOptions.runtimeKind,
-      });
-    } catch (error) {
-      return await this.handleLeaseOrPhaseError(taskId, error);
-    }
-
-    if (leasedTask.taskKind !== 'artificer') {
-      this.emitArtificerEvent('artificer_wrong_task_kind', taskId, {
-        expectedKind: 'artificer',
-        actualKind: leasedTask.taskKind,
-      });
-      await this.stateManager.markTaskFailed(taskId, 'input_invalid');
-      return {
-        status: 'failed',
-        taskId,
-        errorCategory: 'input_invalid',
-        failureReason: `Task kind must be 'artificer', got '${leasedTask.taskKind}'`,
-        attemptCount: leasedTask.attemptCount,
-      };
-    }
-
-    this.emitArtificerEvent('artificer_task_leased', taskId, {
-      taskKind: 'artificer',
-      attemptCount: leasedTask.attemptCount,
-    });
-
-    try {
-      const storeRunId = await this.resolveStoreRunId(taskId);
-
-      this.phase = RunnerPhase.BuildingContext;
-      const { contextHash, scribeArtifact, sourceScribeArtifactId } = await this.buildContext(taskId);
-
-      if (!scribeArtifact || !sourceScribeArtifactId) {
-        return this.retryOrFail({
-          taskId,
-          task: leasedTask,
-          errorCategory: 'input_invalid',
-          failureReason: sourceScribeArtifactId ? 'Scribe dependency artifact not found' : 'Scribe dependency artifact ID not resolved',
-        });
-      }
-
-      this.emitArtificerEvent('artificer_context_built', taskId, { contextHash });
-
-      this.phase = RunnerPhase.Invoking;
-      const runHandle = await this.invokeRuntime({ taskId, contextHash, scribeArtifact, sourceScribeArtifactId });
-
-      this.emitArtificerEvent('artificer_run_started', taskId, {
-        runtimeKind: this.resolvedOptions.runtimeKind,
-      });
-
-      this.phase = RunnerPhase.Polling;
-      const finalStatus = await this.pollUntilTerminal(runHandle);
-
-      if (finalStatus.status !== 'succeeded') {
-        return await this.handleRuntimeFailure(taskId, leasedTask, finalStatus);
-      }
-
-      this.phase = RunnerPhase.FetchingOutput;
-      const output = await this.fetchAndParseOutput(runHandle.runId);
-
-      // Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
-      injectRunnerLineageIfAbsent(output, 'taskId', taskId);
-
-      this.phase = RunnerPhase.Validating;
-      const validationResult = await this.validator.validate(output, taskId, sourceScribeArtifactId ?? undefined);
-      if (!validationResult.valid) {
-        return await this.handleValidationError({
-          taskId,
-          task: leasedTask,
-          errors: validationResult.errors,
-          errorCategory: validationResult.errorCategory,
-        });
-      }
-
-      this.emitArtificerEvent('artificer_output_validated', taskId, {
-        implementationSummary: output.implementationPlan.summary,
-      });
-
-      return await this.succeedTask({
-        taskId,
-        runId: storeRunId,
-        output,
-        task: leasedTask,
-        contextHash,
-      });
-    } catch (error) {
-      return await this.handlePostLeaseError(taskId, leasedTask, error);
-    }
-  }
-
-  private async buildContext(taskId: string): Promise<{ contextHash: string; scribeArtifact: string | null; sourceScribeArtifactId: string | null }> {
+  async buildContext(taskId: string): Promise<ArtificerContext> {
     const task = await this.stateManager.getTask(taskId);
     if (!task) {
       throw new PDRuntimeError('input_invalid', `Task ${taskId} not found`);
@@ -242,7 +149,7 @@ export class ArtificerRunner {
     const deps = piTask?.dependencyTaskIds ?? [];
 
     if (deps.length === 0) {
-      this.emitArtificerEvent('artificer_no_dependencies', taskId, {});
+      this.emitEvent('no_dependencies', taskId, {});
       return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null };
     }
 
@@ -251,7 +158,7 @@ export class ArtificerRunner {
       if (!depTask) continue;
       if (depTask.taskKind !== 'scribe') continue;
       if (depTask.status !== 'succeeded') {
-        this.emitArtificerEvent('artificer_dependency_not_succeeded', taskId, {
+        this.emitEvent('dependency_not_succeeded', taskId, {
           depTaskId: depId,
           depStatus: depTask.status,
         });
@@ -263,411 +170,187 @@ export class ArtificerRunner {
         const [firstArtifact] = artifacts;
         if (!firstArtifact) continue;
         const artifactRef = firstArtifact.artifactId;
-        this.emitArtificerEvent('artificer_scribe_dep_selected', taskId, {
+        this.emitEvent('scribe_dep_selected', taskId, {
           depTaskId: depId,
           artifactId: firstArtifact.artifactId,
         });
         return {
-          contextHash: ArtificerRunner.hashContextRefs([artifactRef]),
+          contextHash: BasePeerRunner.hashContextRefs([artifactRef]),
           scribeArtifact: firstArtifact.contentJson,
           sourceScribeArtifactId: firstArtifact.artifactId,
         };
       }
     }
 
-    this.emitArtificerEvent('artificer_no_scribe_artifact', taskId, {});
+    this.emitEvent('no_scribe_artifact', taskId, {});
     return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null };
   }
 
-  private static hashContextRefs(refs: readonly string[]): string {
-    if (refs.length === 0) return 'empty';
-    const str = refs.join('|');
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = (Math.imul(31, hash) + str.charCodeAt(i)) | 0;
+  async invokeRuntime(taskId: string, context: ArtificerContext): Promise<RunHandle> {
+    if (!context.scribeArtifact || !context.sourceScribeArtifactId) {
+      throw new PDRuntimeError('input_invalid', 'Scribe dependency artifact not resolved');
     }
-    return `ctx-${Math.abs(hash).toString(16)}`;
-  }
 
-  private async resolveStoreRunId(taskId: string): Promise<string> {
-    const runs = await this.stateManager.getRunsByTask(taskId);
-    const latestRun = runs[runs.length - 1];
-    if (!latestRun) {
-      throw new PDRuntimeError('execution_failed', `No run records found for task ${taskId} after lease acquisition`);
-    }
-    return latestRun.runId;
-  }
-
-  private async invokeRuntime(params: {
-    taskId: string;
-    contextHash: string;
-    scribeArtifact: string | null;
-    sourceScribeArtifactId: string;
-  }): Promise<RunHandle> {
-    let parsedScribeArtifact: unknown = null;
-    if (params.scribeArtifact) {
-      try {
-        parsedScribeArtifact = JSON.parse(params.scribeArtifact);
-      } catch {
-        parsedScribeArtifact = params.scribeArtifact;
-      }
+    let scribeArtifactInput: unknown;
+    try {
+      scribeArtifactInput = JSON.parse(context.scribeArtifact);
+    } catch {
+      scribeArtifactInput = context.scribeArtifact;
     }
 
     const builder = new ArtificerPromptBuilder();
     const { message } = builder.buildPrompt({
-      taskId: params.taskId,
-      contextHash: params.contextHash,
-      scribeArtifact: parsedScribeArtifact,
-      sourceScribeArtifactId: params.sourceScribeArtifactId,
+      taskId,
+      contextHash: context.contextHash,
+      scribeArtifact: scribeArtifactInput,
+      sourceScribeArtifactId: context.sourceScribeArtifactId,
     });
 
-    const startInput: StartRunInput = {
+    return this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
-      taskRef: { taskId: params.taskId },
+      taskRef: { taskId },
       inputPayload: message,
       contextItems: [],
       outputSchemaRef: 'artificer-output-v1',
       timeoutMs: this.resolvedOptions.timeoutMs,
+    });
+  }
+
+  async validateOutput(output: unknown, taskId: string, context: ArtificerContext): Promise<PeerRunnerValidationResult> {
+    const result = await this.validator.validate(output, taskId, context.sourceScribeArtifactId ?? undefined);
+    return {
+      valid: result.valid,
+      errors: result.errors,
+      errorCategory: result.errorCategory as PDErrorCategory | undefined,
     };
-
-    return this.runtimeAdapter.startRun(startInput);
   }
 
-  private async pollUntilTerminal(runHandle: RunHandle): Promise<RunStatus> {
-    const deadline = Date.now() + this.resolvedOptions.timeoutMs;
-    const terminalStatuses: readonly string[] = ['succeeded', 'failed', 'timed_out', 'cancelled'];
-
-    while (Date.now() < deadline) {
-      const status = await this.runtimeAdapter.pollRun(runHandle.runId);
-      if (terminalStatuses.includes(status.status)) {
-        return status;
-      }
-      await this.sleep(this.resolvedOptions.pollIntervalMs);
+  // eslint-disable-next-line @typescript-eslint/max-params
+  async succeedTask(
+    taskId: string,
+    runId: string,
+    output: ArtificerOutputV1,
+    task: TaskRecord,
+    contextHash: string,
+    context: ArtificerContext,
+  ): Promise<PeerRunnerResult<ArtificerOutputV1>> {
+    // Lineage consistency: sourceScribeArtifactId must match buildContext result (ERR-004, ERR-008).
+    if (!context.sourceScribeArtifactId || output.sourceScribeArtifactId !== context.sourceScribeArtifactId) {
+      throw new PDRuntimeError(
+        'output_invalid',
+        `sourceScribeArtifactId mismatch: expected ${context.sourceScribeArtifactId ?? '(none)'}, got ${output.sourceScribeArtifactId}`,
+      );
     }
 
-    let cancelFailed = false;
+    // Store output before marking succeeded
     try {
-      await this.runtimeAdapter.cancelRun(runHandle.runId);
-    } catch (cancelErr) {
-      cancelFailed = true;
-      this.emitArtificerEvent('artificer_cancel_run_failed', runHandle.runId, {
-        runId: runHandle.runId,
-        errorMessage: cancelErr instanceof Error ? cancelErr.message : String(cancelErr),
-      });
-    }
-    const cancelNote = cancelFailed ? ' (cancelRun also failed)' : '';
-    throw new PDRuntimeError('timeout', `Run ${runHandle.runId} timed out after ${this.resolvedOptions.timeoutMs}ms${cancelNote}`);
-  }
-
-  private async fetchAndParseOutput(runId: string): Promise<ArtificerOutputV1> {
-    const result = await this.runtimeAdapter.fetchOutput(runId);
-    if (!result || !result.payload) {
-      throw new PDRuntimeError('output_invalid', `No output available for run ${runId}`);
-    }
-    return result.payload as ArtificerOutputV1;
-  }
-
-  private async succeedTask(ctx: SucceedContext): Promise<ArtificerRunnerResult> {
-    try {
-      await this.stateManager.updateRunOutput(ctx.runId, JSON.stringify(ctx.output));
+      await this.stateManager.updateRunOutput(runId, JSON.stringify(output));
     } catch (updateErr) {
-      this.emitArtificerEvent('artificer_update_output_failed', ctx.taskId, {
-        runId: ctx.runId,
+      this.emitEvent('update_output_failed', taskId, {
+        runId,
         errorMessage: updateErr instanceof Error ? updateErr.message : String(updateErr),
       });
       throw updateErr;
     }
 
-    const artifactId = `pi-art-${ctx.taskId}-${ctx.runId}`;
-    const now = new Date().toISOString();
-
+    // Resolve lineage artifact IDs
     let lineageArtifactIds: string[] = [];
+    let lineageHasRejected = false;
     try {
-      const piTask = hydratePITaskRecord(ctx.task);
-      const deps = piTask?.dependencyTaskIds ?? [];
-      const results = await Promise.allSettled(
-        deps.map((depId) => this.artifactStore.listBySourceTaskId(depId)),
-      );
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          for (const artifact of result.value) {
-            lineageArtifactIds.push(artifact.artifactId);
-          }
-        }
-      }
-    } catch { /* lineage resolution failure is non-fatal */ }
+      const lineageResult = await this.resolveLineageArtifactIds(taskId);
+      lineageArtifactIds = lineageResult.ids;
+      lineageHasRejected = lineageResult.hasRejected;
+    } catch (lineageErr) {
+      this.emitEvent('lineage_resolve_failed', taskId, {
+        runId,
+        errorMessage: lineageErr instanceof Error ? lineageErr.message : String(lineageErr),
+      });
+    }
 
+    if (lineageHasRejected) {
+      this.emitEvent('lineage_partial', taskId, {
+        runId,
+        resolvedCount: lineageArtifactIds.length,
+        warning: 'Some dependency artifact queries were rejected; lineage may be incomplete',
+      });
+    }
+
+    // Write PIArtifact via artifactStore (idempotent upsert)
+    const artifactId = `pi-art-${taskId}-${runId}`;
+    const now = new Date().toISOString();
     try {
       await this.artifactStore.upsertArtifact({
         artifactId,
         artifactKind: 'principle',
-        sourceTaskId: ctx.taskId,
+        sourceTaskId: taskId,
         lineageArtifactIds,
         validationStatus: 'pending',
-        contentJson: JSON.stringify(ctx.output),
+        contentJson: JSON.stringify(output),
         createdAt: now,
         updatedAt: now,
       });
     } catch (artifactErr) {
-      this.emitArtificerEvent('artificer_artifact_write_failed', ctx.taskId, {
-        runId: ctx.runId,
+      this.emitEvent('artifact_write_failed', taskId, {
+        runId,
         errorMessage: artifactErr instanceof Error ? artifactErr.message : String(artifactErr),
       });
       return this.retryOrFail({
-        taskId: ctx.taskId,
-        task: ctx.task,
+        taskId,
+        task,
         errorCategory: 'artifact_commit_failed',
         failureReason: `PIArtifact write failed: ${artifactErr instanceof Error ? artifactErr.message : String(artifactErr)}`,
       });
     }
 
-    const resultRef = `artificer://${ctx.runId}`;
+    // Mark task succeeded
+    const resultRef = `${this.config.resultRefPrefix}://${runId}`;
     try {
-      await this.stateManager.markTaskSucceeded(ctx.taskId, resultRef);
+      await this.stateManager.markTaskSucceeded(taskId, resultRef);
     } catch (stateErr) {
-      this.emitArtificerEvent('artificer_mark_succeeded_failed', ctx.taskId, {
-        taskId: ctx.taskId,
-        runId: ctx.runId,
+      this.emitEvent('mark_succeeded_failed', taskId, {
+        taskId,
+        runId,
         errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
       });
       throw stateErr;
     }
 
-    this.emitArtificerEvent('artificer_task_succeeded', ctx.taskId, {
-      attemptCount: ctx.task.attemptCount,
+    this.emitEvent('task_succeeded', taskId, {
+      attemptCount: task.attemptCount,
       resultRef,
-      implementationSummary: ctx.output.implementationPlan.summary,
+      implementationSummary: output.implementationPlan.summary,
     });
 
-    this.phase = RunnerPhase.Completed;
     return {
       status: 'succeeded',
-      taskId: ctx.taskId,
-      runId: ctx.runId,
+      taskId,
+      runId,
       artifactId,
       resultRef,
-      contextHash: ctx.contextHash,
-      output: ctx.output,
-      attemptCount: ctx.task.attemptCount,
+      contextHash,
+      output,
+      attemptCount: task.attemptCount,
     };
   }
 
-  private async handleRuntimeFailure(
-    taskId: string,
-    task: TaskRecord,
-    runStatus: RunStatus,
-  ): Promise<ArtificerRunnerResult> {
-    const errorCategory = this.mapRunStatusToErrorCategory(runStatus.status);
+  // ── Optional hooks ─────────────────────────────────────────────────────────
 
-    this.emitArtificerEvent('artificer_run_failed', taskId, {
-      runStatus: runStatus.status,
-      errorCategory,
-    });
-
-    return this.retryOrFail({
-      taskId,
-      task,
-      errorCategory,
-      failureReason: `Runtime execution ended with status: ${runStatus.status}`,
-    });
-  }
-
-  private async handleValidationError(ctx: ValidationErrorContext): Promise<ArtificerRunnerResult> {
-    const category = (ctx.errorCategory ?? 'output_invalid') as PDErrorCategory;
-
-    this.emitArtificerEvent('artificer_output_invalid', ctx.taskId, {
-      errorCount: ctx.errors.length,
-      errorCategory: category,
-    });
-
-    return this.retryOrFail({
-      taskId: ctx.taskId,
-      task: ctx.task,
-      errorCategory: category,
-      failureReason: `Validation failed: ${ctx.errors.join('; ')}`,
-    });
-  }
-
-  private async handleLeaseOrPhaseError(
-    taskId: string,
-    error: unknown,
-  ): Promise<ArtificerRunnerResult> {
-    const classified = this.classifyError(error);
-
-    if (classified.category === 'lease_conflict') {
-      this.emitArtificerEvent('artificer_run_failed', taskId, {
-        errorCategory: 'lease_conflict',
-        errorMessage: classified.message,
-      });
-      return {
-        status: 'failed',
-        taskId,
-        errorCategory: 'lease_conflict',
-        failureReason: classified.message,
-        attemptCount: 1,
-      };
-    }
-
-    this.emitArtificerEvent('artificer_run_failed', taskId, {
-      errorCategory: classified.category,
-      errorMessage: classified.message,
-    });
-
-    const task: TaskRecord = {
-      taskId,
-      taskKind: 'artificer',
-      status: 'leased',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      attemptCount: 1,
-      maxAttempts: this.resolvedOptions.defaultMaxAttempts,
-    };
-    return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
-  }
-
-  private async handlePostLeaseError(
-    taskId: string,
-    task: TaskRecord,
-    error: unknown,
-  ): Promise<ArtificerRunnerResult> {
-    const classified = this.classifyError(error);
-
-    this.emitArtificerEvent('artificer_run_failed', taskId, {
-      errorCategory: classified.category,
-      errorMessage: classified.message,
-    });
-
-    return this.retryOrFail({ taskId, task, errorCategory: classified.category, failureReason: classified.message });
-  }
-
-  private async retryOrFail(ctx: FailureContext): Promise<ArtificerRunnerResult> {
-    if (this.isPermanentError(ctx.errorCategory)) {
-      try {
-        await this.stateManager.markTaskFailed(ctx.taskId, ctx.errorCategory);
-      } catch (stateErr) {
-        this.emitArtificerEvent('artificer_mark_failed_error', ctx.taskId, {
-          errorCategory: 'storage_unavailable',
-          attemptCount: ctx.task.attemptCount,
-          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-        });
-        return {
-          status: 'failed',
-          taskId: ctx.taskId,
-          errorCategory: 'storage_unavailable',
-          failureReason: `State manager error: ${ctx.failureReason}`,
-          attemptCount: ctx.task.attemptCount,
-        };
-      }
-      this.emitArtificerEvent('artificer_task_failed', ctx.taskId, {
-        errorCategory: ctx.errorCategory,
-        attemptCount: ctx.task.attemptCount,
-        failureReason: ctx.failureReason,
-      });
-      this.phase = RunnerPhase.Failed;
-      return {
-        status: 'failed',
-        taskId: ctx.taskId,
-        errorCategory: ctx.errorCategory,
-        failureReason: ctx.failureReason,
-        attemptCount: ctx.task.attemptCount,
-      };
-    }
-
-    const shouldRetry = this.stateManager.getRetryPolicy().shouldRetry(ctx.task);
-    if (shouldRetry) {
-      try {
-        await this.stateManager.markTaskRetryWait(ctx.taskId, ctx.errorCategory);
-      } catch (stateErr) {
-        this.emitArtificerEvent('artificer_mark_retry_error', ctx.taskId, {
-          errorCategory: 'storage_unavailable',
-          attemptCount: ctx.task.attemptCount,
-          errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-        });
-        return {
-          status: 'failed',
-          taskId: ctx.taskId,
-          errorCategory: 'storage_unavailable',
-          failureReason: `State manager error: ${ctx.failureReason}`,
-          attemptCount: ctx.task.attemptCount,
-        };
-      }
-      this.emitArtificerEvent('artificer_task_retried', ctx.taskId, {
-        errorCategory: ctx.errorCategory,
-        attemptCount: ctx.task.attemptCount,
-      });
-      this.phase = RunnerPhase.RetryWaiting;
-      return {
-        status: 'retried',
-        taskId: ctx.taskId,
-        errorCategory: ctx.errorCategory,
-        failureReason: ctx.failureReason,
-        attemptCount: ctx.task.attemptCount,
-      };
-    }
-
-    try {
-      await this.stateManager.markTaskFailed(ctx.taskId, 'max_attempts_exceeded');
-    } catch (stateErr) {
-      this.emitArtificerEvent('artificer_mark_failed_error', ctx.taskId, {
-        errorCategory: 'storage_unavailable',
-        attemptCount: ctx.task.attemptCount,
-        errorMessage: stateErr instanceof Error ? stateErr.message : String(stateErr),
-      });
-      return {
-        status: 'failed',
-        taskId: ctx.taskId,
-        errorCategory: 'storage_unavailable',
-        failureReason: `State manager error: ${ctx.failureReason}`,
-        attemptCount: ctx.task.attemptCount,
-      };
-    }
-    this.emitArtificerEvent('artificer_task_failed', ctx.taskId, {
-      errorCategory: 'max_attempts_exceeded',
-      attemptCount: ctx.task.attemptCount,
-      failureReason: `Max attempts exceeded: ${ctx.failureReason}`,
-    });
-    this.phase = RunnerPhase.Failed;
-    return {
-      status: 'failed',
-      taskId: ctx.taskId,
-      errorCategory: 'max_attempts_exceeded',
-      failureReason: `Max attempts exceeded: ${ctx.failureReason}`,
-      attemptCount: ctx.task.attemptCount,
-    };
-  }
-
-  private readonly PERMANENT_ERROR_CATEGORIES: ReadonlySet<PDErrorCategory> = new Set(
-    Object.freeze(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid', 'output_invalid'] as const),
-  );
-
-  private isPermanentError(category: PDErrorCategory): boolean {
-    return this.PERMANENT_ERROR_CATEGORIES.has(category);
-  }
-
+  /**
+   * Re-inject taskId if stripped by stripLineageFields (PRI-272 / ERR-008).
+   * Only fill when absent via Object.hasOwn — present-but-falsy values
+   * must reach validation and fail loud (Runtime Contract Rule 3).
+   */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  private classifyError(error: unknown): { category: PDErrorCategory; message: string } {
-    if (error instanceof PDRuntimeError) {
-      return { category: error.category, message: error.message };
-    }
-    if (error instanceof Error) {
-      return { category: 'execution_failed', message: error.message };
-    }
-    return { category: 'execution_failed', message: String(error) };
+  protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
+    injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  private mapRunStatusToErrorCategory(status: string): PDErrorCategory {
-    switch (status) {
-      case 'failed': return 'execution_failed';
-      case 'timed_out': return 'timeout';
-      case 'cancelled': return 'cancelled';
-      default: return 'execution_failed';
-    }
-  }
-
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  protected override emitSuccessTelemetry(taskId: string, output: ArtificerOutputV1): void {
+    this.emitEvent('implementation_plan_generated', taskId, {
+      implementationSummary: output.implementationPlan.summary,
+      targetSurface: output.implementationPlan.targetSurface,
+      confidence: output.implementationPlan.confidence,
+    });
   }
 }
 
