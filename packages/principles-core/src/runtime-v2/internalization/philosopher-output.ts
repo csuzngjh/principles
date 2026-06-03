@@ -57,46 +57,55 @@ export interface PhilosopherValidationResult {
 }
 
 export interface PhilosopherValidator {
-  validate(output: PhilosopherOutputV1, taskId: string): Promise<PhilosopherValidationResult>;
+  /**
+   * Validate untrusted LLM/runtime output.
+   *
+   * Receives `unknown` — must perform runtime validation before
+   * treating as PhilosopherOutputV1 (ERR-001, ERR-005, ERR-054).
+   */
+  validate(output: unknown, taskId: string): Promise<PhilosopherValidationResult>;
 }
 
 export class DefaultPhilosopherValidator implements PhilosopherValidator {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async validate(output: PhilosopherOutputV1, taskId: string): Promise<PhilosopherValidationResult> {
+  async validate(output: unknown, taskId: string): Promise<PhilosopherValidationResult> {
     const errors: string[] = [];
 
     if (typeof output !== 'object' || output === null) {
       return { valid: false, errors: ['Output is not an object'], errorCategory: 'output_invalid' };
     }
 
-    if (output.taskId !== taskId) {
-      errors.push(`taskId mismatch: expected ${taskId}, got ${String(output.taskId)}`);
+    // Safe property access via Record<string, unknown> — no `as PhilosopherOutputV1` (ERR-001).
+    const record = output as Record<string, unknown>;
+
+    if (record.taskId !== taskId) {
+      errors.push(`taskId mismatch: expected ${taskId}, got ${String(record.taskId)}`);
     }
 
-    if (typeof output.sourceDreamerArtifactId !== 'string' || output.sourceDreamerArtifactId.trim() === '') {
+    if (typeof record.sourceDreamerArtifactId !== 'string' || record.sourceDreamerArtifactId.trim() === '') {
       errors.push('sourceDreamerArtifactId must be non-empty string');
     }
 
-    if (typeof output.thesis !== 'string' || output.thesis.trim() === '') {
+    if (typeof record.thesis !== 'string' || record.thesis.trim() === '') {
       errors.push('thesis must be non-empty string');
     }
 
-    if (typeof output.principleCandidate !== 'object' || output.principleCandidate === null) {
+    if (typeof record.principleCandidate !== 'object' || record.principleCandidate === null) {
       errors.push('principleCandidate must be an object');
     } else {
-      const pc = output.principleCandidate as unknown as Record<string, unknown>;
-      if (typeof pc.title !== 'string' || (pc.title).trim() === '') errors.push('principleCandidate.title must be non-empty string');
-      if (typeof pc.rationale !== 'string' || (pc.rationale).trim() === '') errors.push('principleCandidate.rationale must be non-empty string');
-      if (typeof pc.scope !== 'string' || (pc.scope).trim() === '') errors.push('principleCandidate.scope must be non-empty string');
+      const pc = record.principleCandidate as Record<string, unknown>;
+      if (typeof pc.title !== 'string' || pc.title.trim() === '') errors.push('principleCandidate.title must be non-empty string');
+      if (typeof pc.rationale !== 'string' || pc.rationale.trim() === '') errors.push('principleCandidate.rationale must be non-empty string');
+      if (typeof pc.scope !== 'string' || pc.scope.trim() === '') errors.push('principleCandidate.scope must be non-empty string');
       if (typeof pc.confidence !== 'number') errors.push('principleCandidate.confidence must be number');
       else if (pc.confidence < 0 || pc.confidence > 1) errors.push('principleCandidate.confidence must be in [0, 1]');
     }
 
-    if (!Array.isArray(output.risks)) {
+    if (!Array.isArray(record.risks)) {
       errors.push('risks must be an array');
     }
 
-    if (typeof output.generatedAt !== 'string' || output.generatedAt.trim() === '') {
+    if (typeof record.generatedAt !== 'string' || record.generatedAt.trim() === '') {
       errors.push('generatedAt must be non-empty string');
     }
 
