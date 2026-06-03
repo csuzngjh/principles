@@ -208,8 +208,16 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
     output: PhilosopherOutputV1,
     task: TaskRecord,
     contextHash: string,
-    _context: PhilosopherContext,
+    context: PhilosopherContext,
   ): Promise<PeerRunnerResult<PhilosopherOutputV1>> {
+    // Lineage consistency: sourceDreamerArtifactId must match buildContext result (ERR-004).
+    if (output.sourceDreamerArtifactId !== context.sourceDreamerArtifactId) {
+      throw new PDRuntimeError(
+        'output_invalid',
+        `sourceDreamerArtifactId mismatch: expected ${context.sourceDreamerArtifactId}, got ${output.sourceDreamerArtifactId}`,
+      );
+    }
+
     // Store output before marking succeeded
     try {
       await this.stateManager.updateRunOutput(runId, JSON.stringify(output));

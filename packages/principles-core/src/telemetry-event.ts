@@ -124,6 +124,27 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_context_partial'),
   Type.Literal('dreamer_mark_failed_error'),
   Type.Literal('dreamer_mark_retry_error'),
+  // PRI-new: Philosopher runner events (BasePeerRunner migration)
+  Type.Literal('philosopher_task_leased'),
+  Type.Literal('philosopher_context_built'),
+  Type.Literal('philosopher_run_started'),
+  Type.Literal('philosopher_run_failed'),
+  Type.Literal('philosopher_output_invalid'),
+  Type.Literal('philosopher_output_validated'),
+  Type.Literal('philosopher_task_succeeded'),
+  Type.Literal('philosopher_task_retried'),
+  Type.Literal('philosopher_task_failed'),
+  Type.Literal('philosopher_principle_candidate_generated'),
+  Type.Literal('philosopher_cancel_run_failed'),
+  Type.Literal('philosopher_mark_succeeded_failed'),
+  Type.Literal('philosopher_update_output_failed'),
+  Type.Literal('philosopher_dependency_not_succeeded'),
+  Type.Literal('philosopher_lineage_resolve_failed'),
+  Type.Literal('philosopher_lineage_partial'),
+  Type.Literal('philosopher_artifact_write_failed'),
+  Type.Literal('philosopher_wrong_task_kind'),
+  Type.Literal('philosopher_mark_failed_error'),
+  Type.Literal('philosopher_mark_retry_error'),
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

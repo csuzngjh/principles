@@ -103,6 +103,8 @@ export class DefaultPhilosopherValidator implements PhilosopherValidator {
 
     if (!Array.isArray(record.risks)) {
       errors.push('risks must be an array');
+    } else if (record.risks.some((risk: unknown) => typeof risk !== 'string')) {
+      errors.push('risks must contain only strings');
     }
 
     if (typeof record.generatedAt !== 'string' || record.generatedAt.trim() === '') {

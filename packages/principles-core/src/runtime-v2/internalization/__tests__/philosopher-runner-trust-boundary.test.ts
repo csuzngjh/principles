@@ -353,4 +353,49 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     // postFetchTransform should NOT overwrite present-but-empty taskId
     expect(result.failureReason).toContain('taskId mismatch');
   });
+
+  it('risks with non-string elements fails validation (ERR-005 Rule 4)', async () => {
+    await artifactStore.upsertArtifact(makeDreamerArtifact());
+    const deps = createMockDeps({ artifactStore });
+
+    const badRisksOutput = { ...makePhilosopherOutput(), risks: [1, {}] };
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
+      payload: badRisksOutput,
+    });
+
+    const runner = new PhilosopherRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'philosopher',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(PHILOSOPHER_TASK_ID);
+    expect(result.status).toBe('failed');
+    expect(result.failureReason).toContain('risks must contain only strings');
+  });
+
+  it('sourceDreamerArtifactId mismatch fails loud before artifact commit (ERR-004)', async () => {
+    await artifactStore.upsertArtifact(makeDreamerArtifact());
+    const deps = createMockDeps({ artifactStore });
+
+    const mismatchedIdOutput = { ...makePhilosopherOutput(), sourceDreamerArtifactId: 'wrong-artifact-id' };
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
+      payload: mismatchedIdOutput,
+    });
+
+    const runner = new PhilosopherRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'philosopher',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(PHILOSOPHER_TASK_ID);
+    expect(result.status).toBe('failed');
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+
+    const artifacts = await artifactStore.listBySourceTaskId(PHILOSOPHER_TASK_ID);
+    expect(artifacts).toHaveLength(0);
+  });
 });
