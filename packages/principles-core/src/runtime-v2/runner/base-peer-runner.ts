@@ -303,6 +303,14 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       await this.sleep(this.resolvedOptions.pollIntervalMs);
     }
 
+    // Deadline reached — one final poll before cancelling
+    try {
+      const finalPoll = await this.runtimeAdapter.pollRun(runHandle.runId);
+      if (terminalStatuses.includes(finalPoll.status)) {
+        return finalPoll;
+      }
+    } catch { /* fall through to cancel/timeout */ }
+
     // Timeout — cancel gracefully
     let cancelFailed = false;
     try {
@@ -645,7 +653,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   }
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  private sleep(ms: number): Promise<void> {
+  protected sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
