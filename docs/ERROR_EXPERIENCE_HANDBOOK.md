@@ -139,6 +139,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 |----|---------|--------|
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
 | ERR-050 | Modified bundled/generated copy instead of source of truth | PRI-250 |
+| ERR-051 | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path | PRI-297 |
 
 ---
 
@@ -675,10 +676,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 48 |
+| Total lessons | 49 |
 | Last updated | 2026-06-02 |
 | Top category | Schema & Type |
-| Recurring errors | 25 |
+| Recurring errors | 26 |
 
 ---
 
@@ -775,3 +776,15 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-250 / PR #794
 - **Date**: 2026-06-02
 - **Recurrence**: Same class as ERR-040 (published artifact missing components) — editing a generated artifact instead of its source.
+
+
+---
+**[ERR-051]** | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path
+
+- **What happened**: PRI-297 added security redaction to _extractParamsSummary() in gate.ts, which is called before RuleHost.evaluate() receives the params. This meant raw exec commands containing Authorization: Bearer or LINEAR_API_KEY= were redacted before RuleHost implementations could match against input.action.paramsSummary.command. A live rule intended to block a command by URL/argument after an auth header would fail to match. The EventLog.record() chokepoint correctly redacted before persistence, but the gate.ts source-level redaction was premature.
+- **Why it's wrong**: Security redaction must happen at the persistence boundary (before event log write), not at the enforcement boundary (before RuleHost evaluation). Redacting before RuleHost evaluation silently degrades rule matching accuracy — rules that match on command strings stop working for commands containing secrets. This is the same class as ERR-002 (silent degradation) — the mechanism exists, but it's applied at the wrong layer, creating a hidden behavior change.
+- **Correct approach**: Apply redaction only in EventLog.record() as a chokepoint before JSON persistence. Leave _extractParamsSummary() raw — it feeds into RuleHost evaluation for command-matching rules. If a future requirement needs redacted versions in both places, two separate calls are needed: one for RuleHost input (preserving structure), one for EventLog (redacting).
+- **How to prevent**: When adding security/privacy transformations, identify the data flow boundaries first: (1) enforcement boundary (where conditions are matched), (2) persistence boundary (where data is written). Always apply transformations at the persistence boundary. If enforcement needs sanitized data, create a separate cleaned copy — never mutate the enforcement input. Add a test that proves the enforcement path receives raw data.
+- **Source**: PRI-297 / PR #797
+- **Date**: 2026-06-03
+- **Recurrence**: Same class as ERR-002 (silent degradation at wrong layer)
