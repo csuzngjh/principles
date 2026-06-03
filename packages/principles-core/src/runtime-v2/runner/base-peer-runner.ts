@@ -257,7 +257,11 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       this.emitSuccessTelemetry(taskId, output, context);
 
       // 9. Succeed task (abstract — subclass implements commit strategy)
-      return await this.succeedTask(taskId, storeRunId, output, leasedTask, context.contextHash, context);
+      const result = await this.succeedTask(taskId, storeRunId, output, leasedTask, context.contextHash, context);
+      if (result.status === 'succeeded') {
+        this.phase = RunnerPhase.Completed;
+      }
+      return result;
     } catch (error) {
       // Post-lease errors use retryOrFail with the real leasedTask
       return await this.handlePostLeaseError(taskId, leasedTask, error);
