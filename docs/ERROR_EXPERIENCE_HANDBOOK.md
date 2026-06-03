@@ -826,7 +826,11 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Any function that returns data from an external source (LLM, runtime adapter, network) must return `unknown`. The trust boundary is the validation step — no data should be typed before crossing it. Review checklist: (1) Does this function return data from an untrusted source? (2) If yes, does it return `unknown`? (3) Is the `as` cast AFTER a validation step?
 - **Source**: PRI-302 / PR #806
 - **Date**: 2026-06-03
-- **Recurrence**: Yes - 2026-06-03 PR #809 review: EvaluatorValidator.validate() interface accepted `EvaluatorOutputV1` instead of `unknown`, and evaluator-runner.ts line 203 used `output as EvaluatorOutputV1` before passing to the validator. Same class: typed parameter at trust boundary bypasses the purpose of runtime validation. Fixed by changing the interface to accept `unknown` and removing the `as EvaluatorOutputV1` cast.
+- **Recurrence**:
+  - (1) First occurrence in BasePeerRunner.fetchAndParseOutput (PR #806).
+  - (2) ArtificerRunner.validateOutput used `result.errorCategory as PDErrorCategory | undefined` instead of `isPDErrorCategory()` runtime check (PR #810, 2026-06-03). Same root cause: `as` cast used instead of runtime validation, violating Runtime Contract Rule 2. PhilosopherRunner already had the correct `isPDErrorCategory()` pattern but ArtificerRunner migration did not align to it.
+  - (3) 2026-06-03 PR #809 review: EvaluatorValidator.validate() interface accepted `EvaluatorOutputV1` instead of `unknown`, and evaluator-runner.ts line 203 used `output as EvaluatorOutputV1` before passing to the validator. Same class: typed parameter at trust boundary bypasses the purpose of runtime validation. Fixed by changing the interface to accept `unknown` and removing the `as EvaluatorOutputV1` cast.
+
 
 ---
 
@@ -839,3 +843,4 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PR #808/#809/#810
 - **Date**: 2026-06-03
 - **Recurrence**: None
+
