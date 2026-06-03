@@ -20,6 +20,7 @@ import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../../runtime-proto
 import type { StoreEventEmitter } from '../../store/event-emitter.js';
 import type { TaskRecord } from '../../task-status.js';
 import { PDRuntimeError } from '../../error-categories.js';
+import { RunnerPhase } from '../../runner/runner-phase.js';
 import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 
 const DREAMER_TASK_ID = 'dreamer-tb-001';
@@ -253,6 +254,7 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     expect(result.artifactId).toBeDefined();
     expect(result.output).toBeDefined();
     expect(result.output?.principleCandidate.title).toBe('Systematic Error Handling');
+    expect(runner.currentPhase).toBe(RunnerPhase.Completed);
 
     expect(deps.stateManager.markTaskSucceeded).toHaveBeenCalledWith(
       PHILOSOPHER_TASK_ID,
@@ -307,7 +309,36 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     expect(result.failureReason).toContain('taskId mismatch');
   });
 
-  it('postFetchTransform re-injects taskId when stripped', async () => {
+  it('validation failure does not set phase to Completed', async () => {
+    await artifactStore.upsertArtifact(makeDreamerArtifact());
+    const deps = createMockDeps({ artifactStore });
+
+    const invalidOutput = {
+      taskId: 'wrong-id',
+      sourceDreamerArtifactId: '',
+      thesis: '',
+      principleCandidate: { title: '', rationale: '', scope: '', confidence: 2.0 },
+      risks: 'not-array',
+      generatedAt: '',
+    };
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
+      payload: invalidOutput,
+    });
+
+    const runner = new PhilosopherRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'philosopher',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(PHILOSOPHER_TASK_ID);
+    expect(result.status).toBe('failed');
+    expect(runner.currentPhase).not.toBe(RunnerPhase.Completed);
+    expect(runner.currentPhase).toBe(RunnerPhase.Failed);
+  });
+
+  it('postFetchTransform re-injects taskId when stripped — phase is Completed', async () => {
     await artifactStore.upsertArtifact(makeDreamerArtifact());
     const deps = createMockDeps({ artifactStore });
 
@@ -328,6 +359,7 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     const result = await runner.run(PHILOSOPHER_TASK_ID);
     // postFetchTransform should re-inject taskId, then validation should pass
     expect(result.status).toBe('succeeded');
+    expect(runner.currentPhase).toBe(RunnerPhase.Completed);
   });
 
   it('present-but-empty taskId fails validation (not silently corrected)', async () => {

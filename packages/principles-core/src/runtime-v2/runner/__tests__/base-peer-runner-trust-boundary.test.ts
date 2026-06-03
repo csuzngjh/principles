@@ -23,6 +23,7 @@ import type {
   PeerRunnerResult,
   PeerRunnerValidationResult,
 } from '../peer-runner-types.js';
+import { RunnerPhase } from '../runner-phase.js';
 
 // ── Test fixture ─────────────────────────────────────────────────────────────
 
@@ -311,5 +312,32 @@ describe('BasePeerRunner trust boundary (ERR-001, ERR-005)', () => {
     expect(result.status).toBe('failed');
     expect(result.errorCategory).toBe('output_invalid');
     expect(runner.postFetchCallCount).toBe(0);
+  });
+
+  it('successful run sets phase to Completed', async () => {
+    const validPayload = { taskId: 'task-001', valid: true, data: 'test-data' };
+    (mockDeps.runtimeAdapter.fetchOutput as ReturnType<typeof vi.fn>).mockResolvedValue({
+      payload: validPayload,
+      runtimeKind: 'test-double',
+    });
+
+    const result = await runner.run('task-001');
+
+    expect(result.status).toBe('succeeded');
+    expect(runner.currentPhase).toBe(RunnerPhase.Completed);
+  });
+
+  it('validation failure does not set phase to Completed', async () => {
+    (mockDeps.runtimeAdapter.fetchOutput as ReturnType<typeof vi.fn>).mockResolvedValue({
+      payload: { wrong: 'shape' },
+      runtimeKind: 'test-double',
+    });
+    runner.shouldValidateSucceed = false;
+
+    const result = await runner.run('task-001');
+
+    expect(result.status).toBe('failed');
+    expect(runner.currentPhase).not.toBe(RunnerPhase.Completed);
+    expect(runner.currentPhase).toBe(RunnerPhase.Failed);
   });
 });
