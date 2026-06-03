@@ -315,4 +315,170 @@ describe('EventLog', () => {
       expect(stats.evolution.rulehostAutoCorrectApplied).toBe(0);
     });
   });
+
+  describe('telemetry redaction', () => {
+    it('redacts lin_api_ token from rulehost_evaluated filePath', () => {
+      const sensitivePath = 'curl -s -H "Authorization: lin_api_TEST_REDACT_ME_1234567890ABCDEF" https://api.linear.app';
+      eventLog.recordRuleHostEvaluated({
+        toolName: 'bash',
+        filePath: sensitivePath,
+        matched: true,
+        decision: 'allow',
+        ruleId: 'r1',
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('lin_api_TEST_REDACT_ME');
+      expect(content).toContain('[REDACTED]');
+    });
+
+    it('redacts Authorization header from tool_call data', () => {
+      eventLog.recordToolCall('s1', {
+        toolName: 'bash',
+        command: 'curl -H "Authorization: Bearer sk-TEST_REDACT_ME_1234567890" https://api.example.com',
+        error: undefined,
+        gfi: 0,
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('sk-TEST_REDACT_ME_1234567890');
+      expect(content).not.toContain('Bearer sk-TEST_REDACT_ME');
+      expect(content).toContain('[REDACTED]');
+    });
+
+    it('redacts ghp_ token from tool_call data', () => {
+      eventLog.recordToolCall('s1', {
+        toolName: 'bash',
+        command: 'ghp_TEST_REDACT_ME_1234567890ABCDEFGHIJKLMN',
+        error: undefined,
+        gfi: 0,
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('ghp_TEST_REDACT_ME');
+      expect(content).toContain('[REDACTED]');
+    });
+
+    it('redacts Bearer token in tool_call data', () => {
+      eventLog.recordToolCall('s1', {
+        toolName: 'bash',
+        command: 'curl -H "Authorization: Bearer TEST_REDACT_ME_TOKEN_1234567890"',
+        error: undefined,
+        gfi: 0,
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('TEST_REDACT_ME_TOKEN');
+      expect(content).toContain('[REDACTED]');
+    });
+
+    it('redacts env assignment in tool_call data', () => {
+      eventLog.recordToolCall('s1', {
+        toolName: 'bash',
+        command: 'LINEAR_API_KEY=lin_api_TEST_REDACT_ME_1234567890ABCDEF curl -s https://api.linear.app',
+        error: undefined,
+        gfi: 0,
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('lin_api_TEST_REDACT_ME');
+      expect(content).toContain('[REDACTED]');
+    });
+
+    it('preserves normal file path in rulehost_evaluated', () => {
+      const normalPath = 'src/app.ts';
+      eventLog.recordRuleHostEvaluated({
+        toolName: 'write',
+        filePath: normalPath,
+        matched: true,
+        decision: 'allow',
+        ruleId: 'r1',
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).toContain(normalPath);
+    });
+
+    it('non-telemetry types are not affected', () => {
+      eventLog.recordPainSignal('s1', {
+        source: 'tool_failure',
+        score: 75,
+        reason: 'normal pain signal',
+      });
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events_' + new Date().toISOString().slice(0, 10) + '.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).toContain('normal pain signal');
+    });
+
+    it('redaction failure returns masked payload, not raw secrets', () => {
+      // Contract check: the catch block in redactEventData must NOT return raw data.
+      // This is a static regression test for the ERR-002 fail-safe fix.
+      const eventLogSource = fs.readFileSync(
+        path.resolve(__dirname, '../../src/core/event-log.ts'),
+        'utf-8'
+      );
+      // Find the catch block lines (after '} catch')
+      const afterCatch = eventLogSource.match(/\}[\s\n]*catch[\s\n]*\([^)]*\)[\s\n]*\{([\s\S]*?)\}[\s\n]*(?:private|public|\n)/);
+      // If found, verify it doesn't contain 'return data'
+      if (afterCatch) {
+        expect(afterCatch[1]).not.toMatch(/return\s+data/);
+      }
+      // The catch block must produce a masked result with redactionStatus
+      expect(eventLogSource).toContain('redactionStatus');
+      expect(eventLogSource).toContain('redactionDataDropped');
+      expect(eventLogSource).toContain('redactionReason');
+    });
+
+    it('verifies that EventLog persistence path does not store raw secret and stores masked fallback on redaction failure', () => {
+      // 1. Success case: log a sensitive command
+      eventLog.recordToolCall('s1', {
+        toolName: 'bash',
+        command: 'curl -H "Authorization: Bearer sk-TEST_REDACT_ME_999" https://api.openai.com',
+        error: undefined,
+        gfi: 0,
+      });
+      eventLog.flush();
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const eventsFile = path.join(tempDir, 'logs', `events_${todayStr}.jsonl`);
+      let content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('sk-TEST_REDACT_ME_999');
+      expect(content).toContain('[REDACTED]');
+
+      // 2. Redaction failure case: use a throwing getter to trigger catch block
+      const badData = {
+        toolName: 'bash',
+        get command(): string {
+          throw new Error('Simulated getter crash');
+        },
+        error: undefined,
+        gfi: 0,
+      };
+
+      eventLog.recordToolCall('s1', badData as any);
+      eventLog.flush();
+
+      content = fs.readFileSync(eventsFile, 'utf-8');
+      // The raw data must not be written, and instead the failure marker is present
+      expect(content).toContain('"redactionFailure":true');
+      expect(content).toContain('"redactionStatus":"failed"');
+      expect(content).toContain('"redaction.status":"failed"');
+      expect(content).toContain('Simulated getter crash');
+    });
+  });
 });
+

@@ -1,4 +1,4 @@
-# Error Experience Handbook
+﻿# Error Experience Handbook
 
 > **MUST READ before starting any task.** This document records real errors made by AI coding assistants during code reviews. Reading it prevents repeating the same mistakes.
 
@@ -140,6 +140,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
 | ERR-050 | Modified bundled/generated copy instead of source of truth | PRI-250 |
 | ERR-051 | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path | PRI-297 |
+| ERR-052 | Cherry-pick from stacked feature branch cross-contaminates unrelated PR | PRI-299 |
+| ERR-053 | New CLI subcommand never registered in Commander program - 4 of 22 wiring tests silently fail | PRI-299 |
 
 ---
 
@@ -676,8 +678,8 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 49 |
-| Last updated | 2026-06-02 |
+| Total lessons | 51 |
+| Last updated | 2026-06-03 |
 | Top category | Schema & Type |
 | Recurring errors | 26 |
 
@@ -788,3 +790,26 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-297 / PR #797
 - **Date**: 2026-06-03
 - **Recurrence**: Same class as ERR-002 (silent degradation at wrong layer)
+---
+
+**[ERR-052]** | Cherry-pick from stacked feature branch cross-contaminates unrelated PR
+
+- **What happened**: When creating PR #800 (PRI-300 console-launcher) from the `feat/pri-300-console-launcher` branch, a cherry-pick from `feat/pri-299-config-doctor` was used to bring in the ERR-050 handbook entry. This cherry-pick also brought in the `pd config doctor` CLI source files from PRI-299, which were completely unrelated to the console launcher PR. PR #800's diff included config-doctor code that belonged in PR #801 (PRI-299).
+- **Why it's wrong**: Cherry-picking from a stacked feature branch carries all commits on that branch, not just the intended one. This cross-contaminates PRs with unrelated code, making reviews confusing and creating merge conflicts when both PRs target main. The reviewer sees changes that don't belong and must investigate whether they're intentional.
+- **Correct approach**: When a new PR needs a handbook entry from another branch, create the entry fresh on the new branch instead of cherry-picking. For code dependencies between stacked branches, use `git rebase` or create the dependent branch from the tip of the first branch. Never cherry-pick from a feature branch that contains unrelated work.
+- **How to prevent**: Before cherry-picking, inspect the source branch's full commit list (`git log main..source-branch`). If it contains commits unrelated to the target, create the needed changes manually instead. Add a pre-cherry-pick checklist: (1) list source commits, (2) verify all are relevant, (3) if not, create fresh.
+- **Source**: PRI-299 / PR #800
+- **Date**: 2026-06-03
+- **Recurrence**: None
+
+---
+
+**[ERR-053]** | New CLI subcommand never registered in Commander program - 4 of 22 wiring tests silently fail
+
+- **What happened**: `pd config doctor` subcommand was implemented in `config-doctor.ts` with full handler logic, but the subcommand was never registered in `packages/pd-cli/src/index.ts`. The Commander program had no `.command('config')` or `.command('doctor')` registration, so `pd config doctor` would fail with "unknown command". Meanwhile, 4 of 22 CLI wiring tests in `cli-wiring-registration.test.ts` were silently failing because they tested registration existence without asserting the command actually runs.
+- **Why it's wrong**: A CLI subcommand that is not registered is completely unreachable to users. The implementation exists but the wiring is missing - same class as ERR-024 (security validator not wired into enforcement path) and ERR-048 (activation write path disconnected from read path). The silently failing tests are the same class as ERR-025 (tests prove isolated behavior, not production defense).
+- **Correct approach**: When adding a new CLI subcommand, the implementation checklist must include: (1) handler file, (2) Commander registration in `index.ts`, (3) wiring test that calls `program.parseAsync(['node', 'pd', 'config', 'doctor', ...])` and asserts it reaches the handler, (4) no test should silently pass when the command is unregistered.
+- **How to prevent**: Add a mandatory "Commander registration" checklist item for every new CLI subcommand. The wiring test must call `program.parseAsync()` with the full command path, not just test handler existence. Add a global test that enumerates all registered commands and verifies each has a corresponding handler file.
+- **Source**: PRI-299 / PR #801
+- **Date**: 2026-06-03
+- **Recurrence**: Same class as ERR-024, ERR-048 (code exists but is not wired into production path)
