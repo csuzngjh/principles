@@ -1223,6 +1223,94 @@ describe('DefaultEvaluatorValidator (vertical slice)', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('dreamerArtifactId'))).toBe(true);
   });
+
+  it('rejects prototype-inherited taskId (ERR-013)', async () => {
+    const proto = { taskId: EVALUATOR_TASK_ID };
+    const output = Object.create(proto) as Record<string, unknown>;
+    // Copy all own properties from a valid output except taskId
+    const valid = makeEvaluatorOutput();
+    output.sourceArtificerArtifactId = valid.sourceArtificerArtifactId;
+    output.evaluation = valid.evaluation;
+    output.sourceTrace = valid.sourceTrace;
+    output.risks = valid.risks;
+    output.generatedAt = valid.generatedAt;
+    // taskId is only on prototype, not own property
+    expect(Object.hasOwn(output, 'taskId')).toBe(false);
+
+    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('taskId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited sourceArtificerArtifactId (ERR-013)', async () => {
+    const output = makeEvaluatorOutput() as unknown as Record<string, unknown>;
+    const validValue = output.sourceArtificerArtifactId as string;
+    delete output.sourceArtificerArtifactId;
+    const proto = { sourceArtificerArtifactId: validValue };
+    Object.setPrototypeOf(output, proto);
+    // sourceArtificerArtifactId is now only on prototype, not own property
+    expect(Object.hasOwn(output, 'sourceArtificerArtifactId')).toBe(false);
+
+    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('sourceArtificerArtifactId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited sourceTrace.artificerArtifactId (ERR-013)', async () => {
+    const output = makeEvaluatorOutput();
+    const sourceTrace = output.sourceTrace as unknown as Record<string, unknown>;
+    const validValue = sourceTrace.artificerArtifactId as string;
+    delete sourceTrace.artificerArtifactId;
+    const proto = { artificerArtifactId: validValue };
+    Object.setPrototypeOf(sourceTrace, proto);
+    // artificerArtifactId is now only on prototype, not own property
+    expect(Object.hasOwn(sourceTrace, 'artificerArtifactId')).toBe(false);
+
+    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('sourceTrace.artificerArtifactId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited evaluation.decision (ERR-013)', async () => {
+    const output = makeEvaluatorOutput();
+    const evaluation = output.evaluation as unknown as Record<string, unknown>;
+    delete evaluation.decision;
+    const proto = { decision: 'approved' };
+    Object.setPrototypeOf(evaluation, proto);
+    // decision is now only on prototype, not own property
+    expect(Object.hasOwn(evaluation, 'decision')).toBe(false);
+
+    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('evaluation.decision'))).toBe(true);
+  });
+
+  it('accepts unknown input that is structurally valid (ERR-001)', async () => {
+    // Build a plain object (not typed as EvaluatorOutputV1) and verify
+    // the unknown-typed validate interface works correctly
+    const plainObject: unknown = {
+      taskId: EVALUATOR_TASK_ID,
+      sourceArtificerArtifactId: 'pi-art-artificer-001-run-001',
+      evaluation: {
+        decision: 'approved',
+        summary: 'Implementation plan is well-structured and feasible',
+        score: 0.85,
+        strengths: ['Clear change descriptions', 'Good test coverage plan'],
+        concerns: ['Rollout notes could be more specific'],
+        requiredChanges: [],
+      },
+      sourceTrace: {
+        artificerArtifactId: 'pi-art-artificer-001-run-001',
+        scribeArtifactId: 'pi-art-scribe-001',
+      },
+      risks: ['May need additional integration tests'],
+      generatedAt: new Date().toISOString(),
+    };
+
+    const result = await validator.validate(plainObject, EVALUATOR_TASK_ID);
+    expect(result.valid).toBe(true);
+  });
+
 });
 
 describe('EvaluatorRunner integration: test-double captures sourceArtificerArtifactId from prompt', () => {

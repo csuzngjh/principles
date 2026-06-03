@@ -200,7 +200,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   async validateOutput(output: unknown, taskId: string, context: EvaluatorContext): Promise<PeerRunnerValidationResult> {
-    const result = await this.validator.validate(output as EvaluatorOutputV1, taskId, context.sourceArtificerArtifactId ?? undefined);
+    const result = await this.validator.validate(output, taskId, context.sourceArtificerArtifactId ?? undefined);
 
     // Trust-boundary: validator is an injected dependency returning `string | undefined`
     // for errorCategory. We must not `as`-cast; validate at runtime (ERR-001, ERR-005).
