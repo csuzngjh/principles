@@ -19,13 +19,29 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import * as childProcessModule from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import {
   isLoopbackHost,
   isPortInUse,
   findAvailablePort,
   planConsoleLaunch,
   probeConsoleHealth,
+  openBrowser,
 } from '../../src/services/console-launcher.js';
+
+vi.mock('child_process', async (importOriginal) => {
+  const original = await importOriginal<typeof import('child_process')>();
+  return {
+    ...original,
+    spawn: (...args: any[]) => {
+      if ((globalThis as any).__mockSpawn) {
+        return (globalThis as any).__mockSpawn(...args);
+      }
+      return original.spawn(...args as [any, any]);
+    },
+  };
+});
 
 // ─── Loopback safety ─────────────────────────────────────────────────────────
 
@@ -398,6 +414,118 @@ describe('CLI command wiring (pd console open)', () => {
       const parsed = JSON.parse(out);
       expect(parsed).toBeDefined();
     }
+  });
+
+  describe('openBrowser', () => {
+    afterEach(() => {
+      delete (globalThis as any).__mockSpawn;
+    });
+
+    it('returns opened: true when spawn does not emit error in the short window', async () => {
+      const mockChild = new EventEmitter() as any;
+      mockChild.unref = vi.fn();
+      let spawnCalled = false;
+      (globalThis as any).__mockSpawn = () => {
+        spawnCalled = true;
+        return mockChild;
+      };
+
+      const result = await openBrowser('http://127.0.0.1:3100');
+      expect(result.opened).toBe(true);
+      expect(spawnCalled).toBe(true);
+    });
+
+    it('returns opened: false when spawn emits an error within the short window', async () => {
+      const mockChild = new EventEmitter() as any;
+      mockChild.unref = vi.fn();
+      let spawnCalled = false;
+      (globalThis as any).__mockSpawn = () => {
+        spawnCalled = true;
+        process.nextTick(() => {
+          mockChild.emit('error', new Error('spawn ENOENT'));
+        });
+        return mockChild;
+      };
+
+      const result = await openBrowser('http://127.0.0.1:3100');
+      expect(result.opened).toBe(false);
+      expect(result.reason).toContain('Failed to spawn browser process: spawn ENOENT');
+      expect(spawnCalled).toBe(true);
+    });
+
+    it('returns opened: false when spawn throws synchronously', async () => {
+      let spawnCalled = false;
+      (globalThis as any).__mockSpawn = () => {
+        spawnCalled = true;
+        throw new Error('Sync spawn failure');
+      };
+
+      const result = await openBrowser('http://127.0.0.1:3100');
+      expect(result.opened).toBe(false);
+      expect(result.reason).toContain('Sync spawn failure');
+      expect(spawnCalled).toBe(true);
+    });
+  });
+
+  describe('handleConsoleOpen browser failure reporting', () => {
+    afterEach(() => {
+      delete (globalThis as any).__mockSpawn;
+      delete (globalThis as any).__mockPlanConsoleLaunch;
+      delete (globalThis as any).__mockProbeConsoleHealth;
+    });
+
+    it('sets browserOpened: false when browser fails to open', async () => {
+      const { handleConsoleOpen } = await import('../../src/commands/console.js');
+      
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const mockChild = new EventEmitter() as any;
+      mockChild.unref = vi.fn();
+      let spawnCalled = false;
+      (globalThis as any).__mockSpawn = () => {
+        spawnCalled = true;
+        process.nextTick(() => {
+          mockChild.emit('error', new Error('mock spawn error'));
+        });
+        return mockChild;
+      };
+
+      (globalThis as any).__mockPlanConsoleLaunch = async () => {
+        return {
+          status: 'reused',
+          url: 'http://127.0.0.1:3100',
+          port: 3100,
+          host: '127.0.0.1',
+          reused: true
+        };
+      };
+
+      (globalThis as any).__mockProbeConsoleHealth = async () => {
+        return {
+          healthy: true
+        };
+      };
+
+      await handleConsoleOpen({
+        workspace: tmp,
+        json: false,
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      const loggedOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(spawnCalled).toBe(true);
+      
+      expect(loggedOutput).not.toContain('Browser opened');
+      expect(loggedOutput).toContain('Open http://127.0.0.1:3100 in your browser');
+
+      exitSpy.mockRestore();
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
   });
 });
 

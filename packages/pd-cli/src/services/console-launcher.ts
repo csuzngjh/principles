@@ -96,6 +96,14 @@ export async function isPortInUse(host: string, port: number, timeoutMs = 800): 
 
 /** Probe a port to see if it serves a healthy PD Console. */
 export async function probeConsoleHealth(host: string, port: number, timeoutMs = 1500): Promise<{ healthy: boolean; reason?: string }> {
+  if (Object.hasOwn(globalThis, '__mockProbeConsoleHealth')) {
+    const mock = Reflect.get(globalThis, '__mockProbeConsoleHealth') as (
+      h: string,
+      p: number,
+      t: number
+    ) => Promise<{ healthy: boolean; reason?: string }>;
+    return mock(host, port, timeoutMs);
+  }
   return new Promise((resolve) => {
     const req = http.request(
       { host, port, path: '/api/health', method: 'GET', timeout: timeoutMs },
@@ -113,8 +121,8 @@ export async function probeConsoleHealth(host: string, port: number, timeoutMs =
             const body = JSON.parse(data) as unknown;
             if (body && typeof body === 'object') {
               const isHealthy = 
-                (Object.hasOwn(body, 'healthy') && (body as { healthy: unknown }).healthy === true) ||
-                (Object.hasOwn(body, 'success') && (body as { success: unknown }).success === true);
+                (Object.hasOwn(body, 'healthy') && Reflect.get(body, 'healthy') === true) ||
+                (Object.hasOwn(body, 'success') && Reflect.get(body, 'success') === true);
               if (isHealthy) {
                 resolve({ healthy: true });
               } else {
@@ -159,32 +167,56 @@ export async function findAvailablePort(
  * Open the system browser. Best-effort — failures are reported but do not
  * crash the launcher.
  */
-export async function openBrowser(url: string): Promise<{ opened: boolean; reason?: string }> {
+export async function openBrowser(url: string): Promise<{ opened: boolean; reason?: string; nextAction?: string }> {
   const { spawn } = await import('child_process');
   const { platform } = process;
 
-  try {
-    if (platform === 'win32') {
-      // Use `cmd /c start` so the process detaches and we don't hang.
-      const child = spawn('cmd', ['/c', 'start', '""', url], { detached: true, stdio: 'ignore' });
-      child.on('error', () => { /* ignore */ });
-      child.unref();
-      return { opened: true };
-    }
-    if (platform === 'darwin') {
-      const child = spawn('open', [url], { detached: true, stdio: 'ignore' });
-      child.on('error', () => { /* ignore */ });
-      child.unref();
-      return { opened: true };
-    }
-    // Linux / others
-    const child = spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
-    child.on('error', () => { /* ignore */ });
-    child.unref();
-    return { opened: true };
-  } catch (err) {
-    return { opened: false, reason: err instanceof Error ? err.message : String(err) };
+  let cmd: string;
+  let args: string[];
+
+  if (platform === 'win32') {
+    cmd = 'cmd';
+    args = ['/c', 'start', '""', url];
+  } else if (platform === 'darwin') {
+    cmd = 'open';
+    args = [url];
+  } else {
+    cmd = 'xdg-open';
+    args = [url];
   }
+
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+      
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          child.unref();
+          resolve({ opened: true });
+        }
+      }, 100);
+
+      child.on('error', (err) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve({
+            opened: false,
+            reason: `Failed to spawn browser process: ${err.message}`,
+            nextAction: `Ensure your system has '${cmd}' available in PATH or open the URL manually.`
+          });
+        }
+      });
+    } catch (err) {
+      resolve({
+        opened: false,
+        reason: err instanceof Error ? err.message : String(err),
+        nextAction: 'Ensure child_process is available or open the URL manually.'
+      });
+    }
+  });
 }
 
 // ─── Main launcher orchestrator ──────────────────────────────────────────────
@@ -217,6 +249,12 @@ export interface OrchestratorInput {
 }
 
 export async function planConsoleLaunch(input: OrchestratorInput): Promise<OrchestratorResult> {
+  if (Object.hasOwn(globalThis, '__mockPlanConsoleLaunch')) {
+    const mock = Reflect.get(globalThis, '__mockPlanConsoleLaunch') as (
+      i: OrchestratorInput
+    ) => Promise<OrchestratorResult>;
+    return mock(input);
+  }
   const host = input.host ?? DEFAULT_HOST;
   const preferredPort = input.preferredPort ?? DEFAULT_PORT;
 
