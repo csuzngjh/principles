@@ -1,8 +1,8 @@
 # 01 - 当前状态实证审计
 
-> **更新日期**: 2026-05-23
-> **审计基准**: `origin/main` = `6d8fa62e`
-> **架构决策**: ADR-0012 将 Runtime V2 设为唯一 forward execution path，并退役 OpenClaw-coupled Nocturnal/idle 调度
+> **更新日期**: 2026-06-02
+> **审计基准**: `origin/main` = `6d8fa62e`（初始）；2026-06-02 基于 Linear 完成工单同步
+> **架构决策**: ADR-0012 将 Runtime V2 设为唯一 forward execution path，并退役 OpenClaw-coupled Nocturnal/idle 调度；ADR-0014 MVP-First Strategy
 
 ## 1. 已交付能力
 
@@ -28,6 +28,27 @@
 | Successor enqueue/backfill/provider timeout | PRI-218、PRI-219、PRI-220 |
 | Release build 与 malformed metadata integrity | PRI-224、PRI-225 |
 
+### MVP Track 交付（ADR-0014 后）
+
+| 能力 | 交付 issue / PR |
+|------|-----------------|
+| MVP 控制面纠偏 + feature flag registry + proven-channel baseline | PRI-252、PRI-239、PRI-240 |
+| Nocturnal / idle-trigger 退役（全链路 caller cutover + 删除） | PRI-227、PRI-228、PRI-229、PRI-230、PRI-231、PRI-119、PRI-242 |
+| pd-console proven-channel 审批 UI + 三页化 + Demo workspace | PRI-244、PRI-245、PRI-246 |
+| pd-cli 一键安装 + 多环境冒烟 | PRI-247、PRI-250 |
+| MVP live pain 信号质量门控与证据保留 | PRI-253、PRI-255、PRI-256、PRI-257 |
+| Confirm-first gate 持久化与指令状态清理 | PRI-266、PRI-270、PRI-286、PRI-287 |
+| Diagnostician 弱模型鲁棒性 + taskId lineage 修正 | PRI-271、PRI-272 |
+| Runtime V2 prompt activation 绑定 + activation reader contract | PRI-261、PRI-295 |
+| Console 审批后端 API + activation record 修复 | PRI-260、PRI-262、PRI-263、PRI-264、PRI-265 |
+| SchemaPromptAdapter（schema 驱动 prompt 生成） | PRI-283 |
+| MVP seed 反馈通道（隐私保护） | PRI-285 |
+| Plugin surface 清理与瘦身 | PRI-288、PRI-289、PRI-290、PRI-291、PRI-292、PRI-293、PRI-294、PRI-296 |
+| PD-owned workspace config + OpenClaw hook workspace 绑定 | PRI-259 |
+| E2E trap-task 驱动的 Story A' 验证 | PRI-273 |
+| MVP 输入信号充分性（empathy 信号 + owner message） | PRI-274、PRI-277 |
+| PRUNING_PIPELINE 架构文档 | PRI-183 |
+
 ### Plugin boundary 已完成的第一步
 
 | 能力 | 交付 issue / PR |
@@ -50,26 +71,26 @@
 
 因此，不再需要保留第二套 Nocturnal 业务执行路径来“以防 Runtime V2 不可用”。
 
-### Legacy 执行仍在实际入口上
+### Legacy 执行入口已切断（PRI-227~231、PRI-119、PRI-242 已完成）
 
-不能直接 `rm` 文件的原因不是要长期保留它，而是必须先改 caller：
+Legacy Nocturnal/idle 执行入口已全部切断。以下 caller cutover 已完成：
 
-| 仍在引用的路径 | 证据 |
-|----------------|------|
-| Plugin 注册/启动 `EvolutionWorkerService` | `packages/openclaw-plugin/src/index.ts` |
-| EvolutionWorker 引用 `OpenClawTrinityRuntimeAdapter` 与 Nocturnal workflow | `packages/openclaw-plugin/src/service/evolution-worker.ts` |
-| Nocturnal review/train/rollout 命令仍注册 | `packages/openclaw-plugin/src/index.ts`, `src/commands/nocturnal-*.ts` |
+| 已切断的路径 | 执行 issue |
+|-------------|-----------|
+| EvolutionWorker 切换到 Runtime V2 | PRI-119 |
+| Plugin workspace discovery 替换为 PD-owned config | PRI-228 |
+| OpenClaw idle/night 执行入口删除 | PRI-230 |
+| Nocturnal legacy pipeline 删除 | PRI-230、PRI-242 |
+| Legacy entrypoint census + no-new-caller guard | PRI-227 |
+| CI 收缩（legacy 删除后测试收缩） | PRI-231 |
+| EvolutionWorkerService 隔离到 MVP feature flag 后 | PRI-288 |
+| Plugin hooks/services 缩减到 MVP surface | PRI-289、PRI-290、PRI-291、PRI-294 |
 
-### Legacy 成本已经高于保留价值
+### Legacy 成本已大幅降低（退役进行中）
 
-| 文件 | 当前约行数 | 目标 |
-|------|-----------:|------|
-| `openclaw-plugin/src/core/nocturnal-trinity.ts` | 2,541 | 删除重复执行代码 |
-| `openclaw-plugin/src/core/nocturnal-arbiter.ts` | 647 | 删除被 Runtime V2 validators 取代的执行合同 |
-| `openclaw-plugin/src/service/nocturnal-service.ts` | 1,679 | 删除反思编排；不保留 idle/night trigger |
-| **合计** | **4,867** | 显著减少代码及重复测试 |
+Legacy 代码已通过 PRI-227~231、PRI-119、PRI-242、PRI-288/289/290/291/292/293/294/296 大幅削减。剩余代码量需根据最新 main 分支重新评估。
 
-`evolution-worker.ts` 与 `trajectory.ts` 仍是后续边界治理重点，但应先切断 legacy execution，再决定剩余拆分。
+`evolution-worker.ts` 与 `trajectory.ts` 仍是后续边界治理重点，但优先级已降低（MVP 期减法优先）。
 
 ## 3. 决策修订
 
@@ -90,16 +111,23 @@
 
 | 主题 | 当前状态 | 下一动作 |
 |------|----------|----------|
-| Human rejection feedback | Approval UI 有了，反馈闭环未实现 | 优先执行 PRI-148 |
-| Legacy runtime retirement | 仍有真实 caller | 以 ADR-0012 下的新退役 issue 序列执行 |
-| Trajectory evidence boundary | SourceTrace core contract 已完成，plugin I/O god class 未收敛 | 重写并执行 PRI-118 |
-| Runtime V2 event visibility | PRI-154 描述仍指 legacy evolution | 重写为 Runtime V2 telemetry/event log |
-| Schema/config ownership | PRI-150/162 范围陈旧或违反纯 core 约束 | 拆小并重写后再做 |
-| Test/CI cost | 双轨及重复合同仍增加测试量 | legacy 删除后执行测试收缩 issue |
+| Human rejection feedback | PRI-148 仍在 Backlog | MVP 用 Approval reject 简单路径；完整反馈闭环待外部需求 |
+| Trajectory evidence boundary | PRI-118 仍在 Backlog | 降级为 backlog；trajectory facade 仍有 long-term 价值 |
+| GETTING-STARTED 用户视角重写 | PRI-248 仍在 Todo | 执行中 |
+| Story A' 录屏 | PRI-249 仍在 Backlog | 需完成 |
+| 邀请种子客户 | PRI-251 仍在 Backlog | 需完成 |
+| Codex CLI adapter | PRI-278~282 在 Backlog | 新增 host adapter 方向 |
+| Secret redaction from telemetry | PRI-297 在 Todo | 执行中 |
+| Schema/config ownership | PRI-150 已 Canceled | MVP 后再评估 |
+| Runtime V2 event visibility | PRI-154 已 Canceled | MVP 后再评估 |
 
 ## 5. 不应继续执行的旧描述
 
-- `PRI-149` 的标题仍称删除 Nocturnal，但已合并 PR 实际是 CLI Tier 2 boundary migration；它不能被视为删除完成。
-- `PRI-143` 的 IdleTrigger 方向已被 ADR-0012 取代；代码可在退役 PR 中删除或停止引用，不新增使用方。
-- `PRI-175` 至 `PRI-181` 中以 legacy subagent/nocturnal workflow 为中心的 host 扩展必须先重新分类，不能原样开发。
+- `PRI-149` 的标题仍称删除 Nocturnal，但已合并 PR 实际是 CLI Tier 2 boundary migration；Nocturnal 退役已由 PRI-227~231、PRI-119、PRI-242 完成。
+- `PRI-143` 的 IdleTrigger 方向已被 ADR-0012 取代；代码已在退役 PR 中删除。
+- `PRI-175` 至 `PRI-181` 中以 legacy subagent/nocturnal workflow 为中心的 host 扩展已全部 Canceled。
 - 任何要求建立 OpenClaw idle/night scheduling 的 Phase 2 spec 均需修订。
+- `PRI-258`（MVP evidence source）已 Canceled，不应恢复。
+- `PRI-267`/`268`（Confirm-first gate 变体）已 Canceled，功能已由 PRI-266/270/286 覆盖。
+- `PRI-275`/`276`（E2E 修复）已 Canceled，E2E 验证已由 PRI-273 重新实现。
+- `PRI-120`（FocusHistory thin-adapter cleanup）已 Canceled，legacy 退役后不再适用。

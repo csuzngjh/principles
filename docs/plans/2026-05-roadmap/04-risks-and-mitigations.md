@@ -1,6 +1,7 @@
 # 04 - 风险登记册 + 应对措施
 
 > **生成日期**: 2026-05-18
+> **最后更新**: 2026-06-02（MVP Track 进度同步）
 > **风险评级**: P0=阻塞性，P1=高，P2=中，P3=低
 > **配套文档**: [02-roadmap.md](./02-roadmap.md)
 
@@ -19,7 +20,7 @@
 | R-7 | PRI-172 与现有 replay-adapter 重复实现 | P2 | 高 | 双倍维护 + 行为分歧 | 03-linear-sync-plan §3 中已标注，需先决议 |
 | R-8 | pd-console Approvals UI 字段需求 PIArtifact 不产出 | P1 | 中 | UI 上线后字段缺失 | PRI-147/148 必须先调整 prompt schema |
 | R-9 | Linear 工单描述漂移导致 AI 助手误判 | P1 | 已发生（PRI-170）| 重做工作 | 强制 Pre-Implementation Check + 取消机制 |
-| R-10 | Symphony 工作区越界（PD 源码被 agent 改动）| P0 | 中 | 源码污染 + 不可信 commit | Project S 的 PRI-152 已 In Review |
+| R-10 | Symphony 工作区越界（PD 源码被 agent 改动）| P0 | 中 | 源码污染 + 不可信 commit | PRI-152 已 Done；workspace boundary 已强制执行 |
 | R-11 | SQLite 多进程并发死锁 | P1 | 低（已应对）| 流水线停摆 | 已通过 PRI-140 WAL + busy_timeout；ADR-0012 删除 IdleTrigger 依赖 |
 | R-12 | Phase 2 启动过早导致 Phase 1 返工 | P1 | 中 | 双倍工作 | 02-roadmap §5 明确依赖关系 |
 | R-13 | 架构守护测试无法覆盖 invariants 编号 | P2 | 中 | 不变量违反不报错 | 已建 PRI-184 |
@@ -92,7 +93,7 @@
 
 **应对（已实施 + 在 PRI-148 中强化）**：
 1. **PRI-141 已实施**：`rejection_count >= 3` 触发 UNRESOLVABLE，停止再生
-2. **PRI-148 强化**：`recordAndRequeue` 必须在创建新 Dreamer 任务前检查 rejection_count
+2. **PRI-148 仍在 Backlog**：`recordAndRequeue` 必须在创建新 Dreamer 任务前检查 rejection_count；MVP 期用简单 reject 路径
 3. **观测**：`pd canary` 输出 `unresolvable_task_count`
 
 ---
@@ -147,9 +148,9 @@
 **症状**：Symphony 调度 ACPX/Claude 在 `D:\Code\principles` 而非 `D:\Code\principles-workspaces\<issue>` 工作（已在 PRI-151 smoke 中发生）。
 
 **应对**：
-- **PRI-152 In Review**：Symphony 强制 worker workspace boundary
+- **PRI-152 已 Done**：Symphony 强制 worker workspace boundary
 - **不属于 PD 路线图的工作，但对 PD 安全至关重要**
-- 在 PRI-152 合并前，禁止 Symphony 自动派发任何 PD 实施类工单
+- workspace boundary 已强制执行
 
 ---
 
@@ -240,11 +241,14 @@
 | R-22 | PRRR 指标被过度解释 | 保留为研究提醒，不是 MVP KPI |
 | R-23 | BALM/LRAS/GAP/MissionScheduler 扩张 | 只允许外部反馈触发重启 |
 
-## MVP-First 当前风险（v3.0 — 2026-05-24）
+## MVP-First 当前风险（v3.1 — 2026-06-02）
 
-| ID | 风险 | 评级 | 应对 |
-|----|------|------|------|
-| R-MVP-1 | 历史模板或 Linear 描述重新派发 canceled Phase 1C/1D 工作 | P1 | PRI-252 删除可派工模板；Linear canceled issues 保持不可 dispatch；review 时核对 ADR-0014 |
-| R-MVP-2 | 把尚未实施的 `SkillFileWriter` 放进客户邀请 critical path | P1 | MVP 基线只含 prompt / RuleHost / defer_archive；skill 仅在需求有证据时立项 |
-| R-MVP-3 | Feature flag 文档 gate 先于 loader/registry 实现，阻塞修复或产生无效配置 | P1 | PRI-239 前禁止新扩张但允许修复/删除/验证；PRI-239 后才强制注册并测试 |
-| R-MVP-4 | 删除 legacy 时误伤仍在生产读路径中的历史数据 | P2 | caller cutover before deletion；需要时保留只读导入与真实 workspace smoke |
+| ID | 风险 | 评级 | 应对 | 当前状态 |
+|----|------|------|------|---------|
+| R-MVP-1 | 历史模板或 Linear 描述重新派发 canceled Phase 1C/1D 工作 | P1 | PRI-252 已 Done；Linear canceled issues 保持不可 dispatch | ✅ 已缓解 |
+| R-MVP-2 | 把尚未实施的 `SkillFileWriter` 放进客户邀请 critical path | P1 | MVP 基线只含 prompt / RuleHost / defer_archive；skill 仅在需求有证据时立项 | ✅ 已缓解 |
+| R-MVP-3 | Feature flag 文档 gate 先于 loader/registry 实现，阻塞修复或产生无效配置 | P1 | PRI-239 已 Done；feature flag registry 已实现并测试 | ✅ 已缓解 |
+| R-MVP-4 | 删除 legacy 时误伤仍在生产读路径中的历史数据 | P2 | PRI-227~231/119/242 已 Done；caller cutover before deletion 已执行 | ✅ 已缓解 |
+| R-MVP-5 | 种子客户邀请前核心链路不可运行 | P1 | PRI-253 release gate + PRI-273 E2E 验证 + PRI-292 live smoke 已完成 | ✅ 已缓解 |
+| R-MVP-6 | Console 审批后端未实现导致 UI 无法使用 | P1 | PRI-260~265 已 Done；审批后端 API + activation record 修复已完成 | ✅ 已缓解 |
+| R-MVP-7 | Diagnostician 弱模型导致诊断质量差 | P2 | PRI-271 已 Done；multi-attempt repair + JSON mode 已实现 | ✅ 已缓解 |
