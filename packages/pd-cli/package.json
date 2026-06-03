@@ -16,8 +16,7 @@
     "@principles/core": "^1.73.0",
     "commander": "^12.0.0",
     "js-yaml": "^4.1.1",
-    "better-sqlite3": "^12.9.0",
-    "@mariozechner/pi-ai": "^0.73.1"
+    "better-sqlite3": "^12.9.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
