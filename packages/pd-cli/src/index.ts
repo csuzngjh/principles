@@ -46,6 +46,7 @@ import { handleRuntimeActivationDispatch } from './commands/runtime-activation.j
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
+import { handleConfigDoctor } from './commands/config-doctor.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -366,6 +367,19 @@ runtimeCmd
       workspace: opts.workspace,
       json: opts.json,
     });
+  });
+
+const configCmd = program
+  .command('config')
+  .description('PD configuration discovery and diagnosis');
+
+configCmd
+  .command('doctor')
+  .description('Show PD + OpenClaw config locations, feature flags, and provider connectivity (PRI-299)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleConfigDoctor({ workspace: opts.workspace, json: opts.json });
   });
 
 const demoCmd = program
