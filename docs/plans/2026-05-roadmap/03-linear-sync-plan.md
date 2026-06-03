@@ -1,6 +1,6 @@
 # 03 - Linear 同步计划：MVP-First 可执行队列
 
-> **更新日期**: 2026-05-24（PRI-252 control-plane convergence）
+> **更新日期**: 2026-06-02（MVP Track 进度同步）
 > **当前决策来源**: [ADR-0014](../../adr/0014-mvp-first-strategy-and-product-pivot.md)
 > **执行路线**: [07-mvp-first-pivot.md](./07-mvp-first-pivot.md)
 > **延后工作重启条件**: [post-mvp-conditional-roadmap.md](../post-mvp-conditional-roadmap.md)
@@ -23,17 +23,49 @@
 | Plugin inventory/anti-growth/first extraction | PRI-211、212、213、215 |
 | CLI/read-model/lifecycle boundary slices | PRI-131、PRI-149 实际交付、PRI-198 |
 | MVP strategy pivot | ADR-0014 / PR #696；由 PRI-252 纠正残留冲突 |
+| MVP 控制面纠偏 + feature flags + proven-channel baseline | PRI-252、PRI-239、PRI-240 |
+| Nocturnal / idle-trigger 全链路退役 | PRI-227、228、229、230、231、119、242 |
+| Console 审批 UI + 三页化 + Demo | PRI-244、245、246 |
+| pd-cli 一键安装 | PRI-247 |
+| MVP live pain 信号质量门控 | PRI-253、255、256、257 |
+| Confirm-first gate 持久化与清理 | PRI-266、270、286、287 |
+| Diagnostician 弱模型鲁棒性 | PRI-271、272 |
+| Runtime V2 prompt activation 绑定 | PRI-261、295 |
+| Console 审批后端 + activation 修复 | PRI-260、262、263、264、265 |
+| SchemaPromptAdapter | PRI-283 |
+| MVP seed 反馈通道 | PRI-285 |
+| Plugin surface 清理与瘦身 | PRI-288、289、290、291、292、293、294、296 |
+| PD-owned workspace config | PRI-259 |
+| E2E Story A' 验证 | PRI-273 |
+| MVP 输入信号充分性 | PRI-274、277 |
+| PRUNING_PIPELINE 文档 | PRI-183 |
 
 ## 3. 当前可执行队列
 
 | Issue | 范围 | 状态策略 | 执行者 |
 |------|------|----------|--------|
-| PRI-252 | MVP-First 文档、Linear 与 agent gate 纠偏 | 先完成；阻止旧路线误派工 | 强 AI |
-| PRI-239 | 可加载、可测试的 feature flag contract | PRI-252 后执行；不得顺带新增功能 | 强 AI |
-| PRI-240 | proven-channel synthetic baseline fixtures | 只验证三个已实现通道 | 强 AI 或严格范围 Symphony |
-| PRI-227 / PRI-119 / PRI-162 / PRI-230 | Runtime V2 cutover 与 Nocturnal/idle/plugin 复杂度退役 | 属于减法，可在边界清晰时推进 | 强 AI |
-| PRI-244 / PRI-245 / PRI-246 | 现有三通道的 operator UI 与 demo | baseline 可信后推进 | 强 AI |
-| PRI-247~251 | 安装、指南、录屏、多环境验证、邀请客户 | demo 可运行后推进 | 文档小项可 Symphony |
+| PRI-252 | MVP-First 文档、Linear 与 agent gate 纠偏 | ✅ Done | — |
+| PRI-239 | 可加载、可测试的 feature flag contract | ✅ Done | — |
+| PRI-240 | proven-channel synthetic baseline fixtures | ✅ Done | — |
+| PRI-227 / PRI-119 / PRI-162 / PRI-228 / PRI-229 / PRI-230 / PRI-231 | Runtime V2 cutover 与 Nocturnal/idle/plugin 复杂度退役 | ✅ Done | — |
+| PRI-244 / PRI-245 / PRI-246 | 现有三通道的 operator UI 与 demo | ✅ Done | — |
+| PRI-247 | pd-cli 一键安装 | ✅ Done | — |
+| PRI-253/254/255/256/257 | MVP release gate + live pain 信号质量门控与证据保留 | ✅ Done | — |
+| PRI-259 | PD-owned workspace config | ✅ Done | — |
+| PRI-260/262/263/264/265 | Console 审批后端 + activation 修复 | ✅ Done | — |
+| PRI-261/295 | Runtime V2 prompt activation 绑定 + activation reader contract | ✅ Done | — |
+| PRI-266/270/286/287 | Confirm-first gate 持久化与清理 | ✅ Done | — |
+| PRI-271/272 | Diagnostician 弱模型鲁棒性 | ✅ Done | — |
+| PRI-273 | E2E Story A' 验证 | ✅ Done | — |
+| PRI-274/277 | MVP 输入信号充分性 | ✅ Done | — |
+| PRI-283 | SchemaPromptAdapter | ✅ Done | — |
+| PRI-285 | MVP seed 反馈通道 | ✅ Done | — |
+| PRI-288/289/290/291/292/293/294/296 | Plugin surface 清理与瘦身 | ✅ Done | — |
+| PRI-248 | GETTING-STARTED 用户视角重写 | ⏳ Todo | 强 AI 或文档 |
+| PRI-249 | 故事 A' 录屏 | ⏳ Backlog | 内容产出 |
+| PRI-251 | 邀请第一个种子客户 | ⏳ Backlog | 沟通 |
+| PRI-297 | Secret redaction from telemetry | ⏳ Todo | 强 AI |
+| PRI-278~282 | Codex CLI adapter 系列 | ⏳ Backlog | 强 AI |
 
 ## 4. 已取消 / 条件重启队列
 

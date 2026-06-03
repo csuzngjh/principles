@@ -339,6 +339,9 @@ export function handleBeforeToolCall(
 
 function _extractParamsSummary(params: Record<string, unknown>): Record<string, unknown> {
   const summary: Record<string, unknown> = {};
+  // NOTE: Do NOT redact here — this feeds into RuleHost.evaluate() which
+  // may match against paramsSummary.command. Redaction happens at
+  // EventLog.record() before persistence.
   if (params.file_path) summary.file_path = params.file_path;
   if (params.path) summary.path = params.path;
   if (params.command) summary.command = params.command;

@@ -32,6 +32,7 @@ import type {
 import { createEmptyDailyStats } from '../types/event-types.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
+import { redactTelemetryString } from '@principles/core/runtime-v2';
 
 const EVENT_LOG_RETENTION_DAYS = 7;
 
@@ -209,6 +210,88 @@ export class EventLog {
     this.record('runtime_v2_prompt_activations_injected', 'injected', data.sessionId, data);
   }
 
+  /**
+   * Redact telemetry-sensitive string values in event data before persistence.
+   * Applies redactTelemetryString to known high-risk fields (filePath, command,
+   * reason, args, new_string, old_string, text, paramsSummary values) and to all
+   * string values in tool_call/rulehost_* data as a safety net.
+   *
+   * ERR-002: never throws; returns data unchanged on error.
+   * ERR-045/046: covers composite command strings, Authorization headers, env vars.
+   */
+  private redactEventData(
+    type: EventType,
+    data: Record<string, unknown>
+  ): Record<string, unknown> {
+    try {
+      // Known high-risk event types — telemetry that carries tool commands / paths
+      const telemetryTypes: Set<EventType> = new Set([
+        'tool_call',
+        'rulehost_evaluated',
+        'rulehost_blocked',
+        'rulehost_requireApproval',
+        'rulehost_auto_correct_proposed',
+        'rulehost_auto_correct_applied',
+        'rule_enforced',
+        'hook_execution',
+        'gate_block',
+        'gate_bypass',
+      ]);
+
+      if (!telemetryTypes.has(type)) return data;
+
+      const redacted: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(data)) {
+        if (typeof value === 'string') {
+          redacted[key] = redactTelemetryString(value);
+        } else if (Array.isArray(value)) {
+          // Recurse into arrays (e.g. correctedFields with original/applied)
+          redacted[key] = value.map((item: unknown) => {
+            if (typeof item === 'string') {
+              return redactTelemetryString(item);
+            }
+            if (typeof item === 'object' && item !== null) {
+              const nested: Record<string, unknown> = {};
+              for (const [nk, nv] of Object.entries(item as Record<string, unknown>)) {
+                nested[nk] = typeof nv === 'string' ? redactTelemetryString(nv) : nv;
+              }
+              return nested;
+            }
+            return item;
+          });
+        } else if (typeof value === 'object' && value !== null) {
+          // Recurse one level for nested objects (e.g. paramsSummary)
+          const nested: Record<string, unknown> = {};
+          for (const [nk, nv] of Object.entries(value as Record<string, unknown>)) {
+            if (typeof nv === 'string') {
+              nested[nk] = redactTelemetryString(nv);
+            } else {
+              nested[nk] = nv;
+            }
+          }
+          redacted[key] = nested;
+        } else {
+          redacted[key] = value;
+        }
+      }
+      return redacted;
+    } catch (e) {
+      // ERR-002: fail safe — never write raw payload on redaction failure.
+      // Return a masked payload with context so downstream knows what happened.
+      const errStr = e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200);
+      const masked: Record<string, unknown> = {
+        redactionFailure: true,
+        redactionStatus: 'failed',
+        'redaction.status': 'failed',
+        redactionReason: errStr || 'unknown error',
+        redactionDataDropped: true,
+        originalType: type,
+        originalSessionId: data.sessionId ?? null,
+      };
+      return masked;
+    }
+  }
+
   private record(
     type: EventType, 
     category: EventCategory, 
@@ -218,13 +301,15 @@ export class EventLog {
     const now = new Date();
     const date = this.formatDate(now);
     
+    const redactedData = this.redactEventData(type, data as Record<string, unknown>);
+    
     const entry: EventLogEntry = {
       ts: now.toISOString(),
       date,
       type,
       category,
       sessionId,
-      data: data as Record<string, unknown>,
+      data: redactedData,
     };
     
     this.eventBuffer.push(entry);

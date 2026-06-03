@@ -7,6 +7,10 @@ import {
   resolveCanonicalWorkspaceDir,
   resolveHookWorkspaceDir,
   resolveToolHookWorkspaceDirSafe,
+  resolveCommandWorkspaceDir,
+  resolvePluginCommandWorkspaceDir,
+  resolveWorkspaceDirForRuntimeV2,
+  WorkspaceResolutionError,
 } from '../../src/utils/workspace-resolver.js';
 import type { CanonicalWorkspaceResult, HookWorkspaceResolutionResult } from '../../src/utils/workspace-resolver.js';
 
@@ -343,5 +347,178 @@ describe('resolveToolHookWorkspaceDirSafe (backward compat)', () => {
     expect(fullWarn).toContain('Cannot resolve workspace directory');
     expect(fullWarn).toContain('PD_WORKSPACE_DIR');
     expect(fullWarn).toContain('principles-disciple.json');
+  });
+});
+
+describe('resolveCommandWorkspaceDir — Command Resolution', () => {
+  const originalEnv = { ...process.env };
+  const logger = {
+    error: vi.fn(),
+    warn: vi.fn(),
+    info: vi.fn(),
+    debug: vi.fn(),
+  };
+
+  const api = {
+    runtime: {
+      agent: {
+        resolveAgentWorkspaceDir: vi.fn(),
+      },
+    },
+    config: {},
+    logger,
+  };
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    delete process.env.PD_WORKSPACE_DIR;
+    delete process.env.OPENCLAW_WORKSPACE;
+    vi.clearAllMocks();
+    ensureDir(validWorkspace);
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it('returns ctx.workspaceDir when valid', () => {
+    const result = resolveCommandWorkspaceDir(api as any, { workspaceDir: validWorkspace });
+    expect(result).toBe(validWorkspace);
+  });
+
+  it('throws when ctx.workspaceDir is home directory', () => {
+    expect(() => resolveCommandWorkspaceDir(api as any, { workspaceDir: homeDir }))
+      .toThrow(/is invalid/);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('is invalid'));
+  });
+
+  it('throws when ctx.workspaceDir is empty string', () => {
+    expect(() => resolveCommandWorkspaceDir(api as any, { workspaceDir: '' }))
+      .toThrow(/Cannot resolve workspace directory/);
+  });
+
+  it('falls back to API resolution when ctx.workspaceDir is undefined', () => {
+    api.runtime.agent.resolveAgentWorkspaceDir.mockReturnValue(validWorkspace);
+    process.env.OPENCLAW_WORKSPACE = validWorkspace;
+    const result = resolveCommandWorkspaceDir(api as any, {});
+    expect(result).toBe(path.resolve(validWorkspace));
+  });
+
+  it('falls back to PathResolver default when API throws', () => {
+    api.runtime.agent.resolveAgentWorkspaceDir.mockImplementation(() => {
+      throw new Error('API unavailable');
+    });
+    // PathResolver provides default ~/.openclaw/workspace fallback
+    const result = resolveCommandWorkspaceDir(api as any, {});
+    expect(result).toBeDefined();
+    expect(result).toContain('.openclaw');
+  });
+});
+
+describe('resolvePluginCommandWorkspaceDir — Plugin Command Resolution', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ensureDir(validWorkspace);
+  });
+
+  it('returns ctx.workspaceDir when valid', () => {
+    const ctx = { workspaceDir: validWorkspace, config: {} };
+    const result = resolvePluginCommandWorkspaceDir(ctx as any, 'test-source');
+    expect(result).toBe(validWorkspace);
+  });
+
+  it('throws when ctx.workspaceDir is home directory', () => {
+    const ctx = { workspaceDir: homeDir, config: {} };
+    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'test-source'))
+      .toThrow(/is invalid/);
+  });
+
+  it('falls back to ctx.config.workspaceDir when ctx.workspaceDir is undefined', () => {
+    const ctx = { workspaceDir: undefined, config: { workspaceDir: validWorkspace } };
+    const result = resolvePluginCommandWorkspaceDir(ctx as any, 'test-source');
+    expect(result).toBe(validWorkspace);
+  });
+
+  it('throws when both ctx.workspaceDir and ctx.config.workspaceDir are invalid', () => {
+    const ctx = { workspaceDir: homeDir, config: { workspaceDir: homeDir } };
+    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'test-source'))
+      .toThrow(/is invalid/);
+  });
+
+  it('throws critical error when no workspaceDir available', () => {
+    const ctx = { workspaceDir: undefined, config: {} };
+    expect(() => resolvePluginCommandWorkspaceDir(ctx as any, 'test-source'))
+      .toThrow(/CRITICAL: workspaceDir is not set/);
+  });
+});
+
+describe('resolveWorkspaceDirForRuntimeV2 — Runtime V2 Resolution', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ensureDir(validWorkspace);
+  });
+
+  it('returns normalized workspaceDir when valid', () => {
+    const result = resolveWorkspaceDirForRuntimeV2(
+      { workspaceDir: validWorkspace },
+      undefined,
+      'runtime-v2-test',
+    );
+    expect(result).toBe(path.resolve(validWorkspace));
+  });
+
+  it('throws WorkspaceResolutionError when workspaceDir is empty', () => {
+    expect(() => resolveWorkspaceDirForRuntimeV2({ workspaceDir: '' }, undefined, 'test'))
+      .toThrow(WorkspaceResolutionError);
+    
+    try {
+      resolveWorkspaceDirForRuntimeV2({ workspaceDir: '' }, undefined, 'test');
+    } catch (e) {
+      expect((e as WorkspaceResolutionError).reason).toBe('workspace_dir_missing');
+      expect((e as WorkspaceResolutionError).nextAction).toContain('PD_WORKSPACE_DIR');
+    }
+  });
+
+  it('throws WorkspaceResolutionError when workspaceDir is undefined', () => {
+    expect(() => resolveWorkspaceDirForRuntimeV2({}, undefined, 'test'))
+      .toThrow(WorkspaceResolutionError);
+  });
+
+  it('throws WorkspaceResolutionError when workspaceDir is home directory', () => {
+    expect(() => resolveWorkspaceDirForRuntimeV2({ workspaceDir: homeDir }, undefined, 'test'))
+      .toThrow(WorkspaceResolutionError);
+    
+    try {
+      resolveWorkspaceDirForRuntimeV2({ workspaceDir: homeDir }, undefined, 'test');
+    } catch (e) {
+      expect((e as WorkspaceResolutionError).reason).toBe('workspace_dir_invalid');
+    }
+  });
+});
+
+describe('WorkspaceResolutionError — Error Structure', () => {
+  it('has correct name and properties', () => {
+    const error = new WorkspaceResolutionError(
+      'Test message',
+      'test_reason',
+      'Test next action',
+    );
+    expect(error.name).toBe('WorkspaceResolutionError');
+    expect(error.message).toBe('Test message');
+    expect(error.reason).toBe('test_reason');
+    expect(error.nextAction).toBe('Test next action');
+  });
+
+  it('toJSON returns structured failure object', () => {
+    const error = new WorkspaceResolutionError(
+      'Test message',
+      'test_reason',
+      'Test next action',
+    );
+    const json = error.toJSON();
+    expect(json.ok).toBe(false);
+    expect(json.reason).toBe('test_reason');
+    expect(json.message).toBe('Test message');
+    expect(json.nextAction).toBe('Test next action');
   });
 });
