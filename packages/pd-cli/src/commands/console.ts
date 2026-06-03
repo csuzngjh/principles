@@ -312,13 +312,19 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     plan = await planConsoleLaunch({ workspaceDir, preferredPort, host, token });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const result: ConsoleLaunchResult = {
+      status: 'failed',
+      url: '',
+      port: preferredPort,
+      host,
+      workspaceDir,
+      reused: false,
+      browserOpened: false,
+      reason: 'launch_plan_error',
+      nextAction: 'Inspect logs and retry.',
+    };
     if (opts.json) {
-      console.log(JSON.stringify({
-        status: 'failed',
-        reason: 'launch_plan_error',
-        message,
-        nextAction: 'Inspect logs and retry.',
-      }, null, 2));
+      console.log(JSON.stringify({ ...result, message }, null, 2));
     } else {
       console.error(`error: launch plan failed: ${message}`);
     }

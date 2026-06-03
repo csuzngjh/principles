@@ -495,10 +495,29 @@ describe('CLI command wiring (pd console open)', () => {
     workspaceRoot = path.resolve(__dirname, '../../../..');
     cliPath = path.join(workspaceRoot, 'packages', 'pd-cli', 'dist', 'index.js');
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-console-open-test-'));
-    // Fake a console install: create dir + dist/server.js
+    // Fake a console install: create dir + dist/server.js with a minimal HTTP server
     const consoleDir = path.join(os.homedir(), '.openclaw', 'extensions', 'principles-disciple', 'console');
     fs.mkdirSync(path.join(consoleDir, 'dist'), { recursive: true });
-    fs.writeFileSync(path.join(consoleDir, 'dist', 'server.js'), '// fake console server\n');
+    fs.writeFileSync(path.join(consoleDir, 'dist', 'server.js'), `
+      const http = require('http');
+      const args = process.argv.slice(2);
+      const portIdx = args.indexOf('--port');
+      const port = portIdx >= 0 ? parseInt(args[portIdx + 1]) : 3100;
+      const hostIdx = args.indexOf('--host');
+      const host = hostIdx >= 0 ? args[hostIdx + 1] : '127.0.0.1';
+      const server = http.createServer((req, res) => {
+        if (req.url === '/api/health') {
+          res.writeHead(200, {'Content-Type': 'application/json'});
+          res.end(JSON.stringify({success: true}));
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      server.listen(port, host, () => {
+        console.log(JSON.stringify({status: 'running', port, host}));
+      });
+    `);
   });
 
   afterEach(() => {
@@ -577,10 +596,9 @@ describe('CLI command wiring (pd console open)', () => {
 
   it('pd console --no-auth --json legacy path parses --no-auth correctly', () => {
     const out = runPd(['console', '--workspace', tmp, '--json', '--no-auth'], workspaceRoot);
-    if (out.trim().length > 0) {
-      const parsed = JSON.parse(out);
-      expect(parsed).toBeDefined();
-    }
+    expect(out.trim()).not.toBe('');
+    const parsed = JSON.parse(out);
+    expect(parsed).toBeDefined();
   });
 
   describe('openBrowser', () => {
