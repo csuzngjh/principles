@@ -93,6 +93,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-019 | schemaCheck failure branch writes next iteration's errors into current attempt's record | PRI-200 |
 | ERR-020 | Commander negated boolean `--no-intake` ignored — checking wrong property name | PRI-217 |
 | ERR-047 | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through to String(err) | PRI-285 |
+| ERR-054 | `as TOutput` cast on untrusted LLM/runtime payload before validation — typed hooks receive unverified data | PRI-302 |
 
 ---
 
@@ -813,3 +814,15 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-299 / PR #801
 - **Date**: 2026-06-03
 - **Recurrence**: Same class as ERR-024, ERR-048 (code exists but is not wired into production path)
+
+---
+
+**[ERR-054]** | `as TOutput` cast on untrusted LLM/runtime payload before validation — typed hooks receive unverified data
+
+- **What happened**: `BasePeerRunner.fetchAndParseOutput()` cast `result.payload` as `TOutput` (generic type parameter) without runtime validation. The `run()` template method then called `postFetchTransform()` and `checkLineageIntegrity()` with this unverified typed data BEFORE calling `validateOutput()`. This meant untrusted LLM/runtime output entered typed runner hooks as if it were validated.
+- **Why it's wrong**: Violates Runtime Contract Rule 1 (ERR-001: treat parsed JSON/LLM output as `unknown`) and Rule 2 (ERR-005: do not use `as` to bypass runtime validation). The `as TOutput` cast is a type-system lie — the payload has not been validated at that point. Typed hooks receiving unverified data could access properties that don't exist, leading to silent undefined behavior or crashes.
+- **Correct approach**: `fetchAndParseOutput()` must return `unknown`. Pre-validation hooks (`postFetchTransform`) must accept `unknown`. Only after `validateOutput()` confirms the payload shape should data be cast to `TOutput`. Post-validation hooks (`checkLineageIntegrity`, `emitSuccessTelemetry`, `succeedTask`) receive the validated typed data.
+- **How to prevent**: Any function that returns data from an external source (LLM, runtime adapter, network) must return `unknown`. The trust boundary is the validation step — no data should be typed before crossing it. Review checklist: (1) Does this function return data from an untrusted source? (2) If yes, does it return `unknown`? (3) Is the `as` cast AFTER a validation step?
+- **Source**: PRI-302 / PR #806
+- **Date**: 2026-06-03
+- **Recurrence**: First occurrence. Same class as ERR-001 (`as string` cast on untrusted JSON) and ERR-005 (invalid salvaged arrays bypass type contract).
