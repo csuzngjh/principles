@@ -1344,6 +1344,7 @@ export {
   redactEnvLikeValues,
   redactStackTrace,
   redactSensitiveFields,
+  redactTelemetryString,
   REDACTED_PATH,
   REDACTED_VALUE,
   NO_STACK,

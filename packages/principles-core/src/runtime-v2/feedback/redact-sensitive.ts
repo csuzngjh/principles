@@ -15,8 +15,9 @@ const MAX_STACK_FRAMES_DEFAULT = 3;
 
 // Windows: C:\Users\alice\...   D:\foo\bar   E:/...
 const WINDOWS_PATH = /(?:[A-Za-z]:[\\/](?:[^\\\s/:*?"<>|]+[\\/])+[^\\\s/:*?"<>|]*)/g;
-// POSIX: /home/alice/...   /usr/local/bin/...
-const POSIX_PATH = /(?:\/(?:usr|home|var|opt|etc|tmp|root|run|mnt|media|srv|boot|dev|proc|sys)(?:\/[^\\\s/:*?"<>|]+)+)/g;
+// POSIX: /home/alice/...   /Users/wesley/...   /usr/local/bin/...
+// Preceded check (?<![a-zA-Z0-9_.]) preserves relative paths like ./usr/bin and avoids matching URL paths
+const POSIX_PATH = /(?<![a-zA-Z0-9_.])[\\/](?:usr|home|Users|var|opt|etc|tmp|root|run|mnt|media|srv|boot|dev|proc|sys)(?:[\\/][^\\\s/:*?"<>|]+)+/g;
 
 /**
  * Replace absolute paths with `<redacted-path>`. Relative paths are left alone.
@@ -31,7 +32,13 @@ export function redactAbsolutePaths(text: string): string {
 // OpenAI sk-..., Anthropic sk-ant-..., generic sk-_...
 const OPENAI_TOKEN = /\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}\b/g;
 // GitHub tokens: ghp_, gho_, ghu_, ghs_, ghr_
-const GITHUB_TOKEN = /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g;
+const GITHUB_TOKEN = /\bgh[pousr]_[A-Za-z0-9_]{16,}\b/g;
+// Linear API tokens: lin_api_<hex> (underscores allowed — e.g. lin_api_test_abc123)
+const LINEAR_TOKEN = /\blin_api_[A-Za-z0-9_-]{16,}\b/g;
+// Authorization header values (keep key label, optional quote, scheme like Bearer/Basic, redact only the actual token)
+const AUTH_HEADER_VALUE = /(Authorization\s*:\s*)(["'])?([A-Za-z]+\s+)?([^\s"';,]+)/gi;
+// PowerShell env var: $env:VAR="value"
+const PWSH_ENV_VAR = /(\$env:\s*[A-Z_][A-Z0-9_]{2,}\s*=\s*")([^"]*)(")/gi;
 // Generic api_key= / token= / secret= / password= assignments
 const KEY_ASSIGN = /\b(api[_-]?key|token|secret|password|auth(?:_?token)?)\s*[:=]\s*['"]?([^\s'",}{]+)['"]?/gi;
 // Bearer headers
@@ -45,6 +52,9 @@ export function redactTokenLikeValues(text: string): string {
   return text
     .replace(OPENAI_TOKEN, REDACTED_VALUE)
     .replace(GITHUB_TOKEN, REDACTED_VALUE)
+    .replace(LINEAR_TOKEN, REDACTED_VALUE)
+    .replace(AUTH_HEADER_VALUE, '$1$2$3[REDACTED]')
+    .replace(PWSH_ENV_VAR, '$1[REDACTED]$3')
     .replace(BEARER, REDACTED_VALUE)
     .replace(KEY_ASSIGN, (_m, key: string) => `${key}=${REDACTED_VALUE}`);
 }
@@ -57,6 +67,29 @@ const ENV_ASSIGN = /\b([A-Z_][A-Z0-9_]{2,})\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s,;
 export function redactEnvLikeValues(text: string): string {
   if (typeof text !== 'string') return text;
   return text.replace(ENV_ASSIGN, (_m, key: string) => `${key}=${REDACTED_VALUE}`);
+}
+
+// ── Combined telemetry redaction ────────────────────────────────────────────
+
+export function redactTelemetryString(text: string): string;
+export function redactTelemetryString(text: unknown): unknown;
+/**
+ * Run all string-level redactors in sequence on telemetry strings (commands,
+ * file paths, tool arguments, params summaries) before they enter event logs.
+ *
+ * This combines token, env, auth-header, and absolute-path redaction in a single pass.
+ * ERR-002: never throws; returns original value for non-string input.
+ * ERR-045/046: covers composite command strings, Authorization headers, env vars, paths.
+ * ERR-001: no `as` casts — runtime type guard via typeof.
+ *
+ * Type signature accepts `unknown` so callers don't need unsafe casts.
+ */
+export function redactTelemetryString(text: unknown): unknown {
+  if (typeof text !== 'string') return text;
+  let result = redactAbsolutePaths(text);
+  result = redactTokenLikeValues(result);
+  result = redactEnvLikeValues(result);
+  return result;
 }
 
 // ── Stack trace redaction ──────────────────────────────────────────────────
