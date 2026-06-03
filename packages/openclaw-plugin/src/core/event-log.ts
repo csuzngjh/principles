@@ -275,9 +275,20 @@ export class EventLog {
         }
       }
       return redacted;
-    } catch {
-      // ERR-002: fail safe — return original data on unexpected error
-      return data;
+    } catch (e) {
+      // ERR-002: fail safe — never write raw payload on redaction failure.
+      // Return a masked payload with context so downstream knows what happened.
+      const errStr = e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200);
+      const masked: Record<string, unknown> = {
+        redactionFailure: true,
+        redactionStatus: 'failed',
+        'redaction.status': 'failed',
+        redactionReason: errStr || 'unknown error',
+        redactionDataDropped: true,
+        originalType: type,
+        originalSessionId: data.sessionId ?? null,
+      };
+      return masked;
     }
   }
 

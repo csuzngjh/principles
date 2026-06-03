@@ -423,5 +423,62 @@ describe('EventLog', () => {
       const content = fs.readFileSync(eventsFile, 'utf-8');
       expect(content).toContain('normal pain signal');
     });
+
+    it('redaction failure returns masked payload, not raw secrets', () => {
+      // Contract check: the catch block in redactEventData must NOT return raw data.
+      // This is a static regression test for the ERR-002 fail-safe fix.
+      const eventLogSource = fs.readFileSync(
+        path.resolve(__dirname, '../../src/core/event-log.ts'),
+        'utf-8'
+      );
+      // Find the catch block lines (after '} catch')
+      const afterCatch = eventLogSource.match(/\}[\s\n]*catch[\s\n]*\([^)]*\)[\s\n]*\{([\s\S]*?)\}[\s\n]*(?:private|public|\n)/);
+      // If found, verify it doesn't contain 'return data'
+      if (afterCatch) {
+        expect(afterCatch[1]).not.toMatch(/return\s+data/);
+      }
+      // The catch block must produce a masked result with redactionStatus
+      expect(eventLogSource).toContain('redactionStatus');
+      expect(eventLogSource).toContain('redactionDataDropped');
+      expect(eventLogSource).toContain('redactionReason');
+    });
+
+    it('verifies that EventLog persistence path does not store raw secret and stores masked fallback on redaction failure', () => {
+      // 1. Success case: log a sensitive command
+      eventLog.recordToolCall('s1', {
+        toolName: 'bash',
+        command: 'curl -H "Authorization: Bearer sk-TEST_REDACT_ME_999" https://api.openai.com',
+        error: undefined,
+        gfi: 0,
+      });
+      eventLog.flush();
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const eventsFile = path.join(tempDir, 'logs', `events_${todayStr}.jsonl`);
+      let content = fs.readFileSync(eventsFile, 'utf-8');
+      expect(content).not.toContain('sk-TEST_REDACT_ME_999');
+      expect(content).toContain('[REDACTED]');
+
+      // 2. Redaction failure case: use a throwing getter to trigger catch block
+      const badData = {
+        toolName: 'bash',
+        get command(): string {
+          throw new Error('Simulated getter crash');
+        },
+        error: undefined,
+        gfi: 0,
+      };
+
+      eventLog.recordToolCall('s1', badData as any);
+      eventLog.flush();
+
+      content = fs.readFileSync(eventsFile, 'utf-8');
+      // The raw data must not be written, and instead the failure marker is present
+      expect(content).toContain('"redactionFailure":true');
+      expect(content).toContain('"redactionStatus":"failed"');
+      expect(content).toContain('"redaction.status":"failed"');
+      expect(content).toContain('Simulated getter crash');
+    });
   });
 });
+

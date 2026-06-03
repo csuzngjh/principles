@@ -357,8 +357,51 @@ describe('redactTelemetryString', () => {
     expect(result).toBe('echo hello world');
   });
 
-  it('handles non-string input (fail safe)', () => {
-    const result = redactTelemetryString(undefined as unknown as string);
-    expect(result).toBe(undefined);
+  it('handles non-string input (fail safe - returns original value)', () => {
+    const undef = redactTelemetryString(undefined);
+    expect(undef).toBe(undefined);
+    const nullVal = redactTelemetryString(null);
+    expect(nullVal).toBe(null);
+    const num = redactTelemetryString(42);
+    expect(num).toBe(42);
+    const obj = redactTelemetryString({ x: 1 });
+    expect(obj).toEqual({ x: 1 });
+  });
+
+  it('redacts Windows absolute paths', () => {
+    const text = 'C:\\Users\\alice\\project\\secret.txt';
+    const result = redactTelemetryString(text);
+    expect(result).toContain('<redacted-path>');
+    expect(result).not.toContain('alice');
+  });
+
+  it('redacts POSIX absolute paths starting with /home/ and /Users/', () => {
+    const text1 = '/home/alice/.config/credentials.json';
+    const result1 = redactTelemetryString(text1);
+    expect(result1).toContain('<redacted-path>');
+    expect(result1).not.toContain('alice');
+
+    const text2 = '/Users/wesley/secret-project/config.yaml';
+    const result2 = redactTelemetryString(text2);
+    expect(result2).toContain('<redacted-path>');
+    expect(result2).not.toContain('wesley');
+  });
+
+  it('preserves relative path alongside absolute path redaction', () => {
+    const text = 'cp /home/alice/secret.txt src/app.ts';
+    const result = redactTelemetryString(text);
+    expect(result).toContain('<redacted-path>');
+    expect(result).toContain('src/app.ts');
+  });
+
+  it('preserves relative paths starting with ./ or ../ or plain words', () => {
+    const text1 = './usr/bin/local';
+    expect(redactTelemetryString(text1)).toBe(text1);
+
+    const text2 = '../home/secret';
+    expect(redactTelemetryString(text2)).toBe(text2);
+
+    const text3 = 'usr/local/bin';
+    expect(redactTelemetryString(text3)).toBe(text3);
   });
 });
