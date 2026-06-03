@@ -65,7 +65,7 @@ function makeValidConfig(): PdConfig {
         evaluator: { enabled: false },
         rolloutReviewer: { enabled: false },
         trainer: { enabled: false },
-        correctionObserver: { enabled: true },
+        correctionObserver: { enabled: false },
         empathyObserver: { enabled: false },
       },
     },

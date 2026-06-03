@@ -24,7 +24,7 @@ export const DEFAULT_FEATURE_FLAGS: Record<string, FeatureFlagEntry> = {
   prompt:             { category: 'core',  enabled: true },
   code_tool_hook:     { category: 'core',  enabled: true },
   defer_archive:      { category: 'core',  enabled: true },
-  correction_observer:{ category: 'quiet', enabled: true },
+  correction_observer:{ category: 'quiet', enabled: false },
 
   // MVP-Quiet (ADR-0014 §2.5)
   feedback_channel:   { category: 'quiet', enabled: true },
@@ -59,7 +59,7 @@ const DEFAULT_AGENT_ENABLED: Record<InternalAgentName, boolean> = {
   evaluator: false,
   rolloutReviewer: false,
   trainer: false,
-  correctionObserver: true,
+  correctionObserver: false,
   empathyObserver: false,
 };
 

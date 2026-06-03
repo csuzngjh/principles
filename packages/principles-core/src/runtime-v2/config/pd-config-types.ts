@@ -2,7 +2,7 @@
  * PD-Owned Config Contract — PRI-304
  *
  * Pure types and constants for `.pd/config.yaml`.
- * No I/O — YAML loading lives in pd-cli / openclaw-plugin.
+ * No I/O — YAML loading lives in pd-cli / plugin boundary.
  *
  * ADR-0016: PD owns exactly one user config file.
  * .pd/feature-flags.yaml is retired into this contract.

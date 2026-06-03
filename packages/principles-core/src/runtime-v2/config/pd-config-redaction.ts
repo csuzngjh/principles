@@ -192,13 +192,12 @@ export function redactConfigValue(value: unknown, key?: string): unknown {
     return value.slice(0, 20).map((v) => redactConfigValue(v, undefined));
   }
 
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
     const result: Record<string, unknown> = {};
-    const keys = Object.keys(obj).slice(0, 30);
-    for (const k of keys) {
+    const entries = Object.entries(value).slice(0, 30);
+    for (const [k, v] of entries) {
       if (DANGEROUS_KEYS.has(k)) continue;
-      result[k] = redactConfigValue(obj[k], k);
+      result[k] = redactConfigValue(v, k);
     }
     return result;
   }
