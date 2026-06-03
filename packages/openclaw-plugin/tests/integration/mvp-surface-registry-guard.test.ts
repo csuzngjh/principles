@@ -493,5 +493,45 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       guarded2({} as never, {} as never);
       expect(logs.length).toBe(2);
     });
+
+    it('PRI-298 / chatgpt P2: guardHook does NOT log at construction time', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+      const logs: string[] = [];
+      const logger = { info: (msg: string) => { logs.push(msg); } };
+      // The act of constructing the guard must not emit a SKIP line. Plugin
+      // startup that registers 7 quiet hooks would otherwise log 7 SKIP
+      // lines before any real traffic.
+      guardHook('hook:after_tool_call.trajectory', logger, () => 'result');
+      expect(logs.length).toBe(0);
+
+      // The first INVOCATION is when the log fires (and only once).
+      const guarded = guardHook('hook:llm_output.trajectory', logger, () => 'result');
+      guarded({} as never, {} as never);
+      expect(logs.length).toBe(1);
+    });
+
+    it('PRI-298 / coderabbit Major: guardHook logger undefined on first fire does not consume the one-shot slot', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+
+      // First call: no logger. The no-op suppresses the handler, but the
+      // once-only slot is preserved (a missing logger must not eat the
+      // chance to surface the disabled reason later).
+      const handler1 = guardHook('hook:after_tool_call.trajectory', undefined, () => 'result');
+      handler1({} as never, {} as never);
+
+      // Second call: real logger. This is now the first log emission for
+      // this surfaceId.
+      const logs: string[] = [];
+      const logger = { info: (msg: string) => { logs.push(msg); } };
+      const handler2 = guardHook('hook:after_tool_call.trajectory', logger, () => 'result');
+      handler2({} as never, {} as never);
+      expect(logs.length).toBe(1);
+      expect(logs[0]).toContain('[PD:surface-guard] SKIP');
+
+      // Third call: slot is now consumed; the third call is silent.
+      const handler3 = guardHook('hook:after_tool_call.trajectory', logger, () => 'result');
+      handler3({} as never, {} as never);
+      expect(logs.length).toBe(1);
+    });
   });
 });

@@ -60,7 +60,7 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: false,
     since: '2026-05-24',
     description: 'Trajectory collector for after_tool_call events',
-    disabledReason: 'Disabled by default: trajectory collection is opt-in; enable via feature flag override to record hook trajectories.',
+    disabledReason: 'Disabled by default: trajectory collection is opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
     id: 'hook:llm_output.trajectory',
@@ -69,7 +69,7 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: false,
     since: '2026-05-24',
     description: 'Trajectory collector for llm_output events',
-    disabledReason: 'Disabled by default: trajectory collection is opt-in; enable via feature flag override to record hook trajectories.',
+    disabledReason: 'Disabled by default: trajectory collection is opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
     id: 'hook:subagent_spawning',
@@ -78,7 +78,7 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: false,
     since: '2026-05-24',
     description: 'Shadow routing observation on subagent spawn',
-    disabledReason: 'Disabled by default: shadow observation is opt-in; enable via feature flag override to capture shadow routing evidence.',
+    disabledReason: 'Disabled by default: shadow observation is opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
     id: 'hook:subagent_ended',
@@ -87,7 +87,7 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: false,
     since: '2026-05-24',
     description: 'Shadow observation completion on subagent end',
-    disabledReason: 'Disabled by default: shadow observation is opt-in; enable via feature flag override to capture shadow routing evidence.',
+    disabledReason: 'Disabled by default: shadow observation is opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
     id: 'hook:before_reset',
@@ -96,7 +96,7 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: false,
     since: '2026-05-24',
     description: 'Lifecycle hook for context reset',
-    disabledReason: 'Disabled by default: lifecycle hooks are opt-in; enable via feature flag override to react to context reset events.',
+    disabledReason: 'Disabled by default: lifecycle hooks are opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
     id: 'hook:before_compaction',
@@ -105,7 +105,7 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: false,
     since: '2026-05-24',
     description: 'Lifecycle hook for before compaction',
-    disabledReason: 'Disabled by default: lifecycle hooks are opt-in; enable via feature flag override to react to compaction events.',
+    disabledReason: 'Disabled by default: lifecycle hooks are opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
     id: 'hook:after_compaction',
@@ -114,7 +114,7 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: false,
     since: '2026-05-24',
     description: 'Lifecycle hook for after compaction',
-    disabledReason: 'Disabled by default: lifecycle hooks are opt-in; enable via feature flag override to react to compaction events.',
+    disabledReason: 'Disabled by default: lifecycle hooks are opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
     id: 'service:evolution-worker',
@@ -140,7 +140,7 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: false,
     since: '2026-05-24',
     description: 'Trajectory collection service',
-    disabledReason: 'Disabled by default: trajectory service is opt-in; enable via feature flag override.',
+    disabledReason: 'Disabled by default: trajectory service is opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
     id: 'service:pd-task',
@@ -149,7 +149,7 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: false,
     since: '2026-05-24',
     description: 'PD task management service',
-    disabledReason: 'Disabled by default: pd-task service is opt-in; enable via feature flag override.',
+    disabledReason: 'Disabled by default: pd-task service is opt-in; default off per ADR-0014 §2.5 (preserved in plugin code, not active in production).',
   },
   {
     id: 'service:central-sync',
@@ -158,7 +158,7 @@ export const PLUGIN_SURFACE_REGISTRY: readonly PluginSurfaceEntry[] = [
     enabledByDefault: false,
     since: '2026-05-24',
     description: 'Cross-workspace central sync service',
-    disabledReason: 'Disabled by default: cross-workspace central sync is opt-in for multi-workspace deployments; enable via feature flag override. (ADR-0014 §2.4: single-workspace scope)',
+    disabledReason: 'Disabled by default: cross-workspace central sync is opt-in for multi-workspace deployments; default off per ADR-0014 §2.4 (preserved in plugin code, not active in production).',
   },
   {
     id: 'startup:workspace-init',

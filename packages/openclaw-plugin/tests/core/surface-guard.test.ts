@@ -151,6 +151,39 @@ describe('surface-guard', () => {
       expect(mockHandler).not.toHaveBeenCalled();
     });
 
+    it('does not log at guardHook construction time (PRI-298 / chatgpt P2)', () => {
+      // Registering a guard for a quiet hook must not emit the SKIP line on
+      // its own; the log fires only when the returned no-op is actually
+      // invoked. Plugin startup that registers a dozen quiet hooks would
+      // otherwise log a dozen SKIP lines before any real traffic.
+      const mockLogger = { info: vi.fn(), debug: vi.fn() };
+      guardHook('hook:after_tool_call.trajectory', mockLogger, vi.fn());
+      expect(mockLogger.info).not.toHaveBeenCalled();
+    });
+
+    it('logger undefined on first fire does not consume the one-shot slot (PRI-298 / coderabbit Major)', () => {
+      // First call has no logger — the no-op still suppresses the handler,
+      // and the once-only slot is preserved for a later call that does
+      // have a logger.
+      const handler1 = guardHook('hook:after_tool_call.trajectory', undefined, vi.fn());
+      handler1({}, {});
+
+      const mockLogger = { info: vi.fn(), debug: vi.fn() };
+      const handler2 = guardHook('hook:after_tool_call.trajectory', mockLogger, vi.fn());
+      handler2({}, {});
+
+      // Only the second call (which had a logger) should have emitted a log.
+      expect(mockLogger.info).toHaveBeenCalledTimes(1);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('[PD:surface-guard] SKIP hook:after_tool_call.trajectory'),
+      );
+
+      // A third call should now be silent (slot consumed by the second call).
+      const handler3 = guardHook('hook:after_tool_call.trajectory', mockLogger, vi.fn());
+      handler3({}, {});
+      expect(mockLogger.info).toHaveBeenCalledTimes(1);
+    });
+
     it('does not log for enabled surface', () => {
       const mockLogger = { info: vi.fn(), debug: vi.fn() };
       const mockHandler = vi.fn();
@@ -275,13 +308,33 @@ describe('surface-guard', () => {
       }
     });
 
-    it('trajectory hook disabledReason is opt-in / feature-flag oriented', () => {
+    it('trajectory hook disabledReason is opt-in and ADR-anchored (PRI-298)', () => {
       const trajectory = PLUGIN_SURFACE_REGISTRY.find(
         s => s.id === 'hook:after_tool_call.trajectory',
       );
       expect(trajectory?.disabledReason).toBeDefined();
-      expect(trajectory!.disabledReason!.toLowerCase()).toContain('opt-in');
-      expect(trajectory!.disabledReason!.toLowerCase()).toContain('feature flag');
+      const reason = trajectory!.disabledReason!.toLowerCase();
+      // Quiet hook copy is opt-in / opt-out anchored on a real ADR section
+      // (no MVP-phase residue, no promise of a feature-flag override that
+      // the production guard path does not actually consume — chatgpt P2).
+      expect(reason).toContain('opt-in');
+      expect(reason).toContain('default off');
+      expect(reason).toMatch(/adr-?0014/);
+    });
+
+    it('no quiet surface disabledReason promises a feature flag override (PRI-298 / chatgpt P2)', () => {
+      // The runtime guard path (`isSurfaceEnabled(surfaceId)` with no
+      // overrides argument) does not consume `.pd/feature-flags.yaml`, so
+      // telling operators to "enable via feature flag override" would be
+      // an impossible next action. Quiet copy must describe the surface
+      // honestly without pointing to a non-existent override path.
+      const quiet = PLUGIN_SURFACE_REGISTRY.filter(s => s.category === 'quiet');
+      expect(quiet.length).toBeGreaterThan(0);
+      for (const surface of quiet) {
+        const reason = surface.disabledReason!.toLowerCase();
+        expect(reason).not.toContain('enable via feature flag');
+        expect(reason).not.toMatch(/enable via .* override/);
+      }
     });
   });
 });
