@@ -147,6 +147,19 @@ describe('findAvailablePort', () => {
       }
     }
   });
+
+  it('does not return ports above 65535 when fallback goes out of range', async () => {
+    (globalThis as any).__mockIsPortInUse = async (host: string, port: number) => {
+      if (port === 65535) return true;
+      return false;
+    };
+    try {
+      const port = await findAvailablePort('127.0.0.1', 65535, 2);
+      expect(port).toBeNull();
+    } finally {
+      delete (globalThis as any).__mockIsPortInUse;
+    }
+  });
 });
 
 // ─── planConsoleLaunch: refused (non-loopback) ──────────────────────────────
@@ -525,6 +538,38 @@ describe('CLI command wiring (pd console open)', () => {
       exitSpy.mockRestore();
       logSpy.mockRestore();
       errorSpy.mockRestore();
+    });
+  });
+
+  describe('Strict port parsing and boundary validation', () => {
+    it('rejects partial numeric strings like 3100abc', () => {
+      const out = runPd(['console', 'open', '--workspace', tmp, '--port', '3100abc', '--json', '--no-browser'], workspaceRoot);
+      const parsed = JSON.parse(out);
+      expect(parsed.status).toBe('failed');
+      expect(parsed.reason).toMatch(/Invalid --port/);
+    });
+
+    it('rejects port 0', () => {
+      const out = runPd(['console', 'open', '--workspace', tmp, '--port', '0', '--json', '--no-browser'], workspaceRoot);
+      const parsed = JSON.parse(out);
+      expect(parsed.status).toBe('failed');
+      expect(parsed.reason).toMatch(/Invalid --port/);
+    });
+  });
+
+  describe('Non-loopback host checks before workspace resolution', () => {
+    it('refuses non-loopback hosts even when workspace is missing', () => {
+      const previous = process.env.PD_WORKSPACE_DIR;
+      delete process.env.PD_WORKSPACE_DIR;
+      try {
+        const out = runPd(['console', 'open', '--host', '192.168.1.100', '--json', '--no-browser'], workspaceRoot);
+        const parsed = JSON.parse(out);
+        expect(parsed.status).toBe('refused');
+        expect(parsed.reason).toMatch(/non-loopback/i);
+        expect(parsed.workspaceDir).toBe('');
+      } finally {
+        if (previous !== undefined) process.env.PD_WORKSPACE_DIR = previous;
+      }
     });
   });
 });

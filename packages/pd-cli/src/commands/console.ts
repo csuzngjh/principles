@@ -154,7 +154,32 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
  *   - Emits structured reason+nextAction on every failure path
  */
 export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<void> {
-  // 1) Resolve workspace (ERR-040: fail loud if missing)
+  // 1) Loopback safety (ERR-049: refuse non-loopback) — check FIRST so we
+  //    never reveal runtime information about non-loopback hosts and refuse before workspace resolution.
+  const host = opts.host ?? '127.0.0.1';
+  if (!isLoopbackHost(host)) {
+    const result: ConsoleLaunchResult = {
+      status: 'refused',
+      url: '',
+      port: 0,
+      host,
+      workspaceDir: '',
+      reused: false,
+      browserOpened: false,
+      reason: `Non-loopback host refused: '${host}'. Console binds to loopback only.`,
+      nextAction: 'Use the default (127.0.0.1) or "localhost". Do not pass --host 0.0.0.0 or a LAN address.',
+    };
+    if (opts.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.error(`error: ${result.reason}`);
+      console.error(`next:   ${result.nextAction}`);
+    }
+    process.exit(1);
+    return;
+  }
+
+  // 2) Resolve workspace (ERR-040: fail loud if missing)
   let workspaceDir: string;
   try {
     workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
@@ -164,7 +189,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
       status: 'failed',
       url: '',
       port: 0,
-      host: '127.0.0.1',
+      host,
       workspaceDir: '',
       reused: false,
       browserOpened: false,
@@ -181,52 +206,52 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     return;
   }
 
-  // 2) Loopback safety (ERR-049: refuse non-loopback) — check FIRST so we
-  //    never reveal runtime information about non-loopback hosts.
-  const host = opts.host ?? '127.0.0.1';
-  if (!isLoopbackHost(host)) {
-    const result: ConsoleLaunchResult = {
-      status: 'refused',
-      url: '',
-      port: 0,
-      host,
-      workspaceDir,
-      reused: false,
-      browserOpened: false,
-      reason: `Non-loopback host refused: '${host}'. Console binds to loopback only.`,
-      nextAction: 'Use the default (127.0.0.1) or "localhost". Do not pass --host 0.0.0.0 or a LAN address.',
-    };
-    if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      console.error(`error: ${result.reason}`);
-      console.error(`next:   ${result.nextAction}`);
+  // 3) Strict port parsing
+  let preferredPort = 3100;
+  if (opts.port !== undefined) {
+    if (!/^\d+$/.test(opts.port)) {
+      const result: ConsoleLaunchResult = {
+        status: 'failed',
+        url: '',
+        port: 0,
+        host,
+        workspaceDir,
+        reused: false,
+        browserOpened: false,
+        reason: `Invalid --port: '${opts.port}'. Must be an integer 1..65535.`,
+        nextAction: 'Use --port 3100 (default) or another valid port number.',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`error: ${result.reason}`);
+        console.error(`next:   ${result.nextAction}`);
+      }
+      process.exit(1);
+      return;
     }
-    process.exit(1);
-    return;
-  }
-
-  const preferredPort = opts.port ? parseInt(opts.port, 10) : 3100;
-  if (Number.isNaN(preferredPort) || preferredPort < 1 || preferredPort > 65535) {
-    const result: ConsoleLaunchResult = {
-      status: 'failed',
-      url: '',
-      port: 0,
-      host,
-      workspaceDir,
-      reused: false,
-      browserOpened: false,
-      reason: `Invalid --port: '${opts.port}'. Must be an integer 1..65535.`,
-      nextAction: 'Use --port 3100 (default) or another valid port number.',
-    };
-    if (opts.json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      console.error(`error: ${result.reason}`);
-      console.error(`next:   ${result.nextAction}`);
+    preferredPort = Number(opts.port);
+    if (preferredPort < 1 || preferredPort > 65535) {
+      const result: ConsoleLaunchResult = {
+        status: 'failed',
+        url: '',
+        port: 0,
+        host,
+        workspaceDir,
+        reused: false,
+        browserOpened: false,
+        reason: `Invalid --port: '${opts.port}'. Must be an integer 1..65535.`,
+        nextAction: 'Use --port 3100 (default) or another valid port number.',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`error: ${result.reason}`);
+        console.error(`next:   ${result.nextAction}`);
+      }
+      process.exit(1);
+      return;
     }
-    process.exit(1);
-    return;
   }
 
   // 3) Check that the console runtime is installed (ERR-040: fail loud if missing)

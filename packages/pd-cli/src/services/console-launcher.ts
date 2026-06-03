@@ -66,6 +66,14 @@ export function isLoopbackHost(host: string): boolean {
 
 /** Returns true if the port on the given host accepts a TCP connection. */
 export async function isPortInUse(host: string, port: number, timeoutMs = 800): Promise<boolean> {
+  if (Object.hasOwn(globalThis, '__mockIsPortInUse')) {
+    const mock = Reflect.get(globalThis, '__mockIsPortInUse') as (
+      h: string,
+      p: number,
+      t?: number
+    ) => Promise<boolean>;
+    return mock(host, port, timeoutMs);
+  }
   return new Promise((resolve) => {
     const socket = new net.Socket();
     let settled = false;
@@ -156,6 +164,9 @@ export async function findAvailablePort(
 ): Promise<number | null> {
   for (let i = 0; i < limit; i++) {
     const candidate = preferred + i;
+    if (candidate > 65535 || candidate < 1) {
+      break;
+    }
     if (!(await isPortInUse(host, candidate))) return candidate;
   }
   return null;
