@@ -45,8 +45,8 @@ import type {
 /** Context built by ScribeRunner.buildContext() and consumed by invokeRuntime(). */
 interface ScribeContext {
   readonly contextHash: string;
-  readonly philosopherArtifact: string | null;
-  readonly sourcePhilosopherArtifactId: string | null;
+  readonly philosopherArtifact: string;
+  readonly sourcePhilosopherArtifactId: string;
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -122,7 +122,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   get permanentErrorCategories(): ReadonlySet<PDErrorCategory> {
-    return new Set(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid', 'output_invalid']);
+    return new Set(['storage_unavailable', 'workspace_invalid', 'capability_missing', 'cancelled', 'input_invalid']);
   }
 
   async buildContext(taskId: string): Promise<ScribeContext> {
@@ -135,8 +135,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     const deps = piTask?.dependencyTaskIds ?? [];
 
     if (deps.length === 0) {
-      this.emitEvent('no_dependencies', taskId, {});
-      throw new PDRuntimeError('input_invalid', 'No philosopher dependency found for scribe task');
+      throw new PDRuntimeError('input_invalid', 'Philosopher dependency artifact not found');
     }
 
     for (const depId of deps) {
@@ -165,18 +164,15 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       }
     }
 
-    this.emitEvent('no_philosopher_artifact', taskId, {});
     throw new PDRuntimeError('input_invalid', 'Philosopher dependency artifact not found');
   }
 
   async invokeRuntime(taskId: string, context: ScribeContext): Promise<RunHandle> {
-    let parsedPhilosopherArtifact: unknown = null;
-    if (context.philosopherArtifact) {
-      try {
-        parsedPhilosopherArtifact = JSON.parse(context.philosopherArtifact);
-      } catch {
-        parsedPhilosopherArtifact = context.philosopherArtifact;
-      }
+    let parsedPhilosopherArtifact: unknown;
+    try {
+      parsedPhilosopherArtifact = JSON.parse(context.philosopherArtifact);
+    } catch {
+      parsedPhilosopherArtifact = context.philosopherArtifact;
     }
 
     const builder = new ScribePromptBuilder();
@@ -184,7 +180,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       taskId,
       contextHash: context.contextHash,
       philosopherArtifact: parsedPhilosopherArtifact,
-      sourcePhilosopherArtifactId: context.sourcePhilosopherArtifactId ?? '',
+      sourcePhilosopherArtifactId: context.sourcePhilosopherArtifactId,
     });
 
     return this.runtimeAdapter.startRun({
@@ -198,7 +194,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
   }
 
   async validateOutput(output: unknown, taskId: string, context: ScribeContext): Promise<PeerRunnerValidationResult> {
-    const result = await this.validator.validate(output, taskId, context.sourcePhilosopherArtifactId ?? undefined);
+    const result = await this.validator.validate(output, taskId, context.sourcePhilosopherArtifactId);
 
     // Trust-boundary: validator is an injected dependency returning `string | undefined`
     // for errorCategory. We must not `as`-cast; validate at runtime (ERR-001, ERR-005).
@@ -234,8 +230,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     context: ScribeContext,
   ): Promise<PeerRunnerResult<ScribeOutputV1>> {
     // Lineage consistency: sourcePhilosopherArtifactId must match buildContext result (ERR-004).
-    if (context.sourcePhilosopherArtifactId !== null
-        && output.sourcePhilosopherArtifactId !== context.sourcePhilosopherArtifactId) {
+    if (output.sourcePhilosopherArtifactId !== context.sourcePhilosopherArtifactId) {
       throw new PDRuntimeError(
         'output_invalid',
         `sourcePhilosopherArtifactId mismatch: expected ${context.sourcePhilosopherArtifactId}, got ${output.sourcePhilosopherArtifactId}`,
@@ -343,20 +338,6 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
     injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
-  }
-
-  /**
-   * Check lineage integrity after validation passes.
-   * Verifies sourcePhilosopherArtifactId is consistent with context (ERR-004, ERR-008).
-   */
-  protected override checkLineageIntegrity(taskId: string, output: ScribeOutputV1): void {
-    // Note: full mismatch check is in succeedTask (which throws on mismatch).
-    // This hook provides observability for lineage integrity.
-    if (!output.sourcePhilosopherArtifactId || output.sourcePhilosopherArtifactId.trim() === '') {
-      this.emitEvent('lineage_integrity_warning', taskId, {
-        warning: 'sourcePhilosopherArtifactId is empty or whitespace after validation',
-      });
-    }
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: ScribeOutputV1): void {

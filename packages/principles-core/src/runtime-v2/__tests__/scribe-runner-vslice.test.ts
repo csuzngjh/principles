@@ -410,7 +410,8 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
 
     const result = await runner.run(SCRIBE_TASK_ID);
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('output_invalid');
+    // output_invalid is retriable; after retry exhaustion → max_attempts_exceeded
+    expect(result.errorCategory).toBe('max_attempts_exceeded');
 
     const artifacts = await store.listBySourceTaskId(SCRIBE_TASK_ID);
     expect(artifacts).toHaveLength(0);
@@ -443,8 +444,9 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
 
     const result = await runner.run(SCRIBE_TASK_ID);
     // The mismatch is caught by the validator (DefaultScribeValidator checks it)
+    // output_invalid is retriable; after retry exhaustion → max_attempts_exceeded
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.errorCategory).toBe('max_attempts_exceeded');
 
     // No artifact written
     const artifacts = await store.listBySourceTaskId(SCRIBE_TASK_ID);
@@ -479,8 +481,9 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
 
     const result = await runner.run(SCRIBE_TASK_ID);
     // Validation should fail because taskId is empty (mismatch with SCRIBE_TASK_ID)
+    // output_invalid is retriable; after retry exhaustion → max_attempts_exceeded
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.errorCategory).toBe('max_attempts_exceeded');
 
     // No artifact written
     const artifacts = await store.listBySourceTaskId(SCRIBE_TASK_ID);
@@ -539,8 +542,9 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
 
     const result = await runner.run(SCRIBE_TASK_ID);
     expect(result.status).toBe('failed');
-    // The invalid errorCategory should be replaced with 'output_invalid'
-    expect(result.errorCategory).toBe('output_invalid');
+    // The invalid errorCategory is replaced with 'output_invalid' by validateOutput,
+    // which is retriable; after retry exhaustion → max_attempts_exceeded
+    expect(result.errorCategory).toBe('max_attempts_exceeded');
   });
 
   // ── NEW: currentPhase is Completed after success ───────────────────────────
@@ -760,8 +764,9 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
 
     const result = await runner.run(SCRIBE_TASK_ID);
     // succeedTask should throw on mismatch, caught by base class → retryOrFail
+    // output_invalid is retriable; after retry exhaustion → max_attempts_exceeded
     expect(result.status).toBe('failed');
-    expect(result.errorCategory).toBe('output_invalid');
+    expect(result.errorCategory).toBe('max_attempts_exceeded');
 
     // No artifact written
     const artifacts = await store.listBySourceTaskId(SCRIBE_TASK_ID);
@@ -800,9 +805,9 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     expect(result.status).toBe('succeeded');
   });
 
-  // ── NEW: output_invalid is a permanent error ───────────────────────────────
+  // ── NEW: output_invalid is retriable (not in permanentErrorCategories) ──────
 
-  it('output_invalid is a permanent error (no retry)', async () => {
+  it('output_invalid is retriable (may retry, not permanent)', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makePhilosopherArtifact());
     const deps = createMockDeps({ artifactStore: store });
@@ -821,9 +826,9 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
 
     const result = await runner.run(SCRIBE_TASK_ID);
     expect(result.status).toBe('failed');
-    // output_invalid is permanent — should markTaskFailed, not markTaskRetryWait
+    // output_invalid is NOT in permanentErrorCategories (matching Dreamer/Philosopher),
+    // so it may retry. With retry policy shouldRetry: false, it falls to markTaskFailed.
     expect(deps.stateManager.markTaskFailed).toHaveBeenCalled();
-    expect(deps.stateManager.markTaskRetryWait).not.toHaveBeenCalled();
   });
 });
 
