@@ -398,4 +398,41 @@ describe('PhilosopherRunner trust boundary (PRI-new)', () => {
     const artifacts = await artifactStore.listBySourceTaskId(PHILOSOPHER_TASK_ID);
     expect(artifacts).toHaveLength(0);
   });
+
+  it('invalid errorCategory from custom validator fails loud and does not leak through', async () => {
+    await artifactStore.upsertArtifact(makeDreamerArtifact());
+
+    // Custom validator returning an invalid errorCategory string
+    const rogueValidator = {
+      validate: vi.fn().mockResolvedValue({
+        valid: false,
+        errors: ['some validation error'],
+        errorCategory: 'not_a_real_category',
+      }),
+    };
+
+    const deps = createMockDeps({ artifactStore, validator: rogueValidator });
+    const runner = new PhilosopherRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'philosopher',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(PHILOSOPHER_TASK_ID);
+    expect(result.status).toBe('failed');
+    // The invalid category must NOT leak into result.errorCategory
+    expect(result.errorCategory).not.toBe('not_a_real_category');
+    // errorCategory should be a valid PDErrorCategory (output_invalid from the guard,
+    // then escalated by retryOrFail to max_attempts_exceeded since output_invalid is transient
+    // and retry policy returns shouldRetry=false)
+    expect(result.errorCategory).toBe('max_attempts_exceeded');
+    // failureReason must mention the invalid errorCategory
+    expect(result.failureReason).toContain('invalid errorCategory');
+    expect(result.failureReason).toContain('not_a_real_category');
+    // No artifact written, no task marked succeeded
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+    const artifacts = await artifactStore.listBySourceTaskId(PHILOSOPHER_TASK_ID);
+    expect(artifacts).toHaveLength(0);
+  });
 });

@@ -28,7 +28,7 @@
 import type { RunHandle } from '../runtime-protocol.js';
 import type { PhilosopherOutputV1, PhilosopherValidator } from './philosopher-output.js';
 import type { TaskRecord } from '../task-status.js';
-import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
+import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { PhilosopherPromptBuilder } from './philosopher-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
@@ -194,10 +194,28 @@ export class PhilosopherRunner extends BasePeerRunner<PhilosopherContext, Philos
 
   async validateOutput(output: unknown, taskId: string): Promise<PeerRunnerValidationResult> {
     const result = await this.validator.validate(output, taskId);
+
+    // Trust-boundary: validator is an injected dependency returning `string | undefined`
+    // for errorCategory. We must not `as`-cast; validate at runtime (ERR-001, ERR-005).
+    const rawCategory = result.errorCategory;
+    let errorCategory: PDErrorCategory | undefined;
+    if (rawCategory == null) {
+      errorCategory = undefined;
+    } else if (isPDErrorCategory(rawCategory)) {
+      errorCategory = rawCategory;
+    } else {
+      // Invalid errorCategory from validator — fail loud, do not pass through
+      return {
+        valid: false,
+        errors: [...result.errors, `invalid errorCategory: ${rawCategory}`],
+        errorCategory: 'output_invalid',
+      };
+    }
+
     return {
       valid: result.valid,
       errors: result.errors,
-      errorCategory: result.errorCategory as PDErrorCategory | undefined,
+      errorCategory,
     };
   }
 
