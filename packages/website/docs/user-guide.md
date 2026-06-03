@@ -170,13 +170,13 @@ The canary runs 7 checks and reports one of three statuses:
 ### Start the Console
 
 ```bash
-pd console --workspace "<path>" --no-auth
+pd console open --workspace "<path>"
 ```
 
-Opens the local web UI at [http://127.0.0.1:3100](http://127.0.0.1:3100).
+Opens the local web UI in your browser. The launcher reuses an existing healthy console or starts one on `127.0.0.1:3100`; if the port is busy, it tries the next local port.
 
 ::: warning
-The console binds to `127.0.0.1` (loopback only) by default. It is not accessible from other machines. If you need network access, use `--host <ip>` with `--token <secret>`.
+The console is loopback-only. It is not accessible from other machines, and `pd console open` refuses non-loopback hosts.
 :::
 
 ## The Review Console
@@ -190,6 +190,7 @@ The local console is your primary window into PD's activity.
 - **Active principles** — What's currently guiding or constraining the agent?
 - **Approval queue** — What's waiting for your decision?
 - **Evolution events** — Timeline of all principle lifecycle changes
+- **Feedback drafts** — Privacy-preserving local reports you can review before sending
 
 ### Reviewing a Principle Candidate
 
@@ -215,6 +216,12 @@ This restores the previous state. You can also disable without rolling back:
 ```bash
 /pd-disable-impl <id>
 ```
+
+### Reporting a Problem
+
+Use **Report Problem** in the console when PD behaves unexpectedly. The report is saved as a local draft under the workspace, shows a privacy preview, and can be copied as Markdown, email-ready text, or a GitHub issue draft.
+
+PD does not automatically upload raw prompts, raw chats, trajectory files, file contents, environment variables, or tokens.
 
 ## Configuration
 
