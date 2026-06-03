@@ -682,7 +682,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | Total lessons | 51 |
 | Last updated | 2026-06-03 |
 | Top category | Schema & Type |
-| Recurring errors | 26 |
+| Recurring errors | 27 |
 
 ---
 
@@ -825,4 +825,4 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: Any function that returns data from an external source (LLM, runtime adapter, network) must return `unknown`. The trust boundary is the validation step — no data should be typed before crossing it. Review checklist: (1) Does this function return data from an untrusted source? (2) If yes, does it return `unknown`? (3) Is the `as` cast AFTER a validation step?
 - **Source**: PRI-302 / PR #806
 - **Date**: 2026-06-03
-- **Recurrence**: First occurrence. Same class as ERR-001 (`as string` cast on untrusted JSON) and ERR-005 (invalid salvaged arrays bypass type contract).
+- **Recurrence**: (1) First occurrence in BasePeerRunner.fetchAndParseOutput (PR #806). (2) ArtificerRunner.validateOutput used `result.errorCategory as PDErrorCategory | undefined` instead of `isPDErrorCategory()` runtime check (PR #810, 2026-06-03). Same root cause: `as` cast used instead of runtime validation, violating Runtime Contract Rule 2. PhilosopherRunner already had the correct `isPDErrorCategory()` pattern but ArtificerRunner migration did not align to it.
