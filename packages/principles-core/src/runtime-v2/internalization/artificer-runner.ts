@@ -35,7 +35,7 @@
 import type { RunHandle } from '../runtime-protocol.js';
 import type { ArtificerOutputV1, ArtificerValidator } from './artificer-output.js';
 import type { TaskRecord } from '../task-status.js';
-import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
+import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { ArtificerPromptBuilder } from './artificer-prompt-builder.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
@@ -218,10 +218,28 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerO
 
   async validateOutput(output: unknown, taskId: string, context: ArtificerContext): Promise<PeerRunnerValidationResult> {
     const result = await this.validator.validate(output, taskId, context.sourceScribeArtifactId ?? undefined);
+
+    // Trust-boundary: validator returns `string | undefined` for errorCategory.
+    // Must not `as`-cast; validate at runtime (ERR-001, ERR-005).
+    const rawCategory = result.errorCategory;
+    let errorCategory: PDErrorCategory | undefined;
+    if (rawCategory == null) {
+      errorCategory = undefined;
+    } else if (isPDErrorCategory(rawCategory)) {
+      errorCategory = rawCategory;
+    } else {
+      // Invalid errorCategory from validator — fail loud, do not pass through
+      return {
+        valid: false,
+        errors: [...result.errors, `invalid errorCategory: ${rawCategory}`],
+        errorCategory: 'output_invalid',
+      };
+    }
+
     return {
       valid: result.valid,
       errors: result.errors,
-      errorCategory: result.errorCategory as PDErrorCategory | undefined,
+      errorCategory,
     };
   }
 
