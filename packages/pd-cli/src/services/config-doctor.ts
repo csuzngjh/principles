@@ -79,6 +79,20 @@ export interface DoctorOutput {
   };
   featureFlags: FeatureFlagSummary;
   providerHealth: ProviderHealthEntry[];
+  internalAgents: {
+    correctionObserver: {
+      enabled: boolean;
+      flagSource: string;
+      status: 'disabled' | 'configured' | 'auth_missing' | 'config_missing' | 'unavailable';
+      configSource: 'workflows.yaml' | 'env' | 'missing' | 'unavailable';
+      provider: string | null;
+      model: string | null;
+      apiKeyEnv: string | null;
+      apiKeyPresent: boolean;
+      reason: string;
+      nextAction: string;
+    };
+  };
   warnings: string[];
   reason?: string;
   nextActions: string[];
@@ -428,15 +442,37 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
   const stateDbPath = path.join(pdDir, 'state.db');
 
   // 1) Feature flags
-  const flags = loadEffectiveFeatureFlags(workspaceDir);
-  const enabledMvpChannels: string[] = [];
-  const disabledFlags: string[] = [];
-  for (const flag of Object.values(flags.flags)) {
-    if (flag.enabled && MVP_CHANNELS.has(flag.id)) {
-      enabledMvpChannels.push(flag.id);
-    } else if (!flag.enabled) {
-      disabledFlags.push(flag.id);
+  let enabledMvpChannels: string[] = [];
+  let disabledFlags: string[] = [];
+  let flagSource: string;
+  let flagWarnings: string[];
+  let hasFeatureFlagsError = false;
+  let featureFlagsErrorMessage = '';
+
+  let correctionObserverEnabled = true;
+  let coFlagSource = 'defaults';
+
+  try {
+    const flags = loadEffectiveFeatureFlags(workspaceDir);
+    flagSource = flags.source;
+    flagWarnings = [...flags.warnings];
+    for (const flag of Object.values(flags.flags)) {
+      if (flag.enabled && MVP_CHANNELS.has(flag.id)) {
+        enabledMvpChannels.push(flag.id);
+      } else if (!flag.enabled) {
+        disabledFlags.push(flag.id);
+      }
     }
+    if (flags.flags && flags.flags.correction_observer) {
+      correctionObserverEnabled = flags.flags.correction_observer.enabled;
+      coFlagSource = flags.source;
+    }
+  } catch (err) {
+    hasFeatureFlagsError = true;
+    featureFlagsErrorMessage = err instanceof Error ? err.message : String(err);
+    flagSource = 'unavailable';
+    flagWarnings = [`feature flags unavailable: ${featureFlagsErrorMessage}`];
+    coFlagSource = 'unavailable';
   }
 
   // 2) Provider config from workflows.yaml (or CLI override)
@@ -542,11 +578,112 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
   }
 
   // 4) Aggregate feature-flag warnings
-  for (const w of flags.warnings) {
+  for (const w of flagWarnings) {
     warnings.push(w);
   }
-  if (flags.warnings.length > 0) {
+  if (flagWarnings.length > 0 && !hasFeatureFlagsError) {
     nextActions.push('Review .pd/feature-flags.yaml — see warnings for details');
+  }
+  if (hasFeatureFlagsError) {
+    warnings.push(`feature flags unavailable: ${featureFlagsErrorMessage}`);
+    nextActions.push(`Check that ${featureFlagsPath} is a readable file, not a directory.`);
+    nextActions.push('Re-run npx create-principles-disciple if the config was generated incorrectly.');
+  }
+
+  // 4.5) CorrectionObserver Diagnostics
+  let coStatus: 'disabled' | 'configured' | 'auth_missing' | 'config_missing' | 'unavailable';
+  let coConfigSource: 'workflows.yaml' | 'env' | 'missing' | 'unavailable';
+  let coProvider: string | null = null;
+  let coModel: string | null = null;
+  let coApiKeyEnv: string | null = null;
+  let coApiKeyPresent = false;
+  let coReason: string;
+  let coNextAction: string;
+
+  if (!correctionObserverEnabled) {
+    coStatus = 'disabled';
+    coConfigSource = 'missing';
+    coProvider = null;
+    coModel = null;
+    coApiKeyEnv = null;
+    coApiKeyPresent = false;
+    coReason = 'CorrectionObserver is disabled via feature flags';
+    coNextAction = 'Set correction_observer.enabled=true in .pd/feature-flags.yaml to enable it';
+  } else {
+    const coWorkflowsPath = path.join(workspaceDir, '.state', 'workflows.yaml');
+    let coWorkflowsFound = false;
+    let coWorkflowsParseError = false;
+    let coWorkflowsParseErrorMessage = '';
+    let coWorkflowPolicy: Record<string, unknown> | null = null;
+
+    if (fs.existsSync(coWorkflowsPath)) {
+      coWorkflowsFound = true;
+      try {
+        const raw = fs.readFileSync(coWorkflowsPath, 'utf8');
+        const parsed = yaml.load(raw);
+        if (isRecord(parsed)) {
+          const funnelsRaw = parsed.funnels;
+          if (Array.isArray(funnelsRaw)) {
+            for (const f of funnelsRaw) {
+              if (isRecord(f) && f.workflowId === 'pd-correction-observer' && isRecord(f.policy)) {
+                coWorkflowPolicy = f.policy;
+                break;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        coWorkflowsParseError = true;
+        coWorkflowsParseErrorMessage = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    if (coWorkflowsParseError) {
+      coStatus = 'unavailable';
+      coConfigSource = 'unavailable';
+      coReason = `workflows.yaml parse failure: ${coWorkflowsParseErrorMessage}`;
+      coNextAction = 'Fix workflows.yaml syntax or file access permissions';
+    } else if (coWorkflowsFound && coWorkflowPolicy && coWorkflowPolicy.runtimeKind === 'pi-ai') {
+      coConfigSource = 'workflows.yaml';
+      coProvider = typeof coWorkflowPolicy.provider === 'string' ? coWorkflowPolicy.provider : null;
+      coModel = typeof coWorkflowPolicy.model === 'string' ? coWorkflowPolicy.model : null;
+      coApiKeyEnv = typeof coWorkflowPolicy.apiKeyEnv === 'string' ? coWorkflowPolicy.apiKeyEnv : null;
+      coApiKeyPresent = !!coApiKeyEnv && Object.prototype.hasOwnProperty.call(process.env, coApiKeyEnv) && !!process.env[coApiKeyEnv];
+
+      if (!coProvider || !coModel) {
+        coStatus = 'config_missing';
+        coReason = !coProvider ? 'Provider not configured in workflows.yaml policy' : 'Model not configured in workflows.yaml policy';
+        coNextAction = 'Set provider and model in pd-correction-observer policy in workflows.yaml';
+      } else if (!coApiKeyEnv) {
+        coStatus = 'auth_missing';
+        coReason = 'apiKeyEnv is not set in workflows.yaml pd-correction-observer policy';
+        coNextAction = "Add 'apiKeyEnv: <ENV_VAR_NAME>' to workflows.yaml pd-correction-observer policy and ensure the env var holds a valid key";
+      } else if (!coApiKeyPresent) {
+        coStatus = 'auth_missing';
+        coReason = `Environment variable '${coApiKeyEnv}' is not set or empty`;
+        coNextAction = `Set the environment variable '${coApiKeyEnv}' with a valid API key, or disable correction_observer in feature flags`;
+      } else {
+        coStatus = 'configured';
+        coReason = 'CorrectionObserver is configured and ready via workflows.yaml';
+        coNextAction = 'No action required; correction observer is active';
+      }
+    } else {
+      coConfigSource = 'env';
+      coProvider = process.env.PD_CORRECTION_PROVIDER || 'anthropic';
+      coModel = process.env.PD_CORRECTION_MODEL || 'anthropic/claude-3-5-sonnet';
+      coApiKeyEnv = process.env.PD_CORRECTION_API_KEY_ENV || 'ANTHROPIC_API_KEY';
+      coApiKeyPresent = !!coApiKeyEnv && Object.prototype.hasOwnProperty.call(process.env, coApiKeyEnv) && !!process.env[coApiKeyEnv];
+
+      if (!coApiKeyPresent) {
+        coStatus = 'auth_missing';
+        coReason = `Environment variable '${coApiKeyEnv}' is not set or empty`;
+        coNextAction = `Set the environment variable '${coApiKeyEnv}' with a valid API key, or configure workflows.yaml, or disable correction_observer in feature flags`;
+      } else {
+        coStatus = 'configured';
+        coReason = 'CorrectionObserver is configured and ready via env overrides/defaults';
+        coNextAction = 'No action required; correction observer is active';
+      }
+    }
   }
 
   // 5) Compute overall status
@@ -558,7 +695,7 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
   if (classifications.includes('auth_missing') || classifications.includes('config_missing')) {
     status = 'failed';
   }
-  if (warnings.length > 0 && status === 'ok') {
+  if ((warnings.length > 0 || hasFeatureFlagsError) && status === 'ok') {
     status = 'degraded';
   }
 
@@ -596,13 +733,27 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
       openclawConfig: pathEntry(getOpenClawConfigPath()),
     },
     featureFlags: {
-      source: flags.source,
-      configPath: flags.configPath,
+      source: flagSource,
+      configPath: featureFlagsPath,
       enabledMvpChannels,
       disabledFlags,
-      warnings: [...flags.warnings],
+      warnings: flagWarnings,
     },
     providerHealth,
+    internalAgents: {
+      correctionObserver: {
+        enabled: correctionObserverEnabled,
+        flagSource: coFlagSource,
+        status: coStatus,
+        configSource: coConfigSource,
+        provider: coProvider,
+        model: coModel,
+        apiKeyEnv: coApiKeyEnv,
+        apiKeyPresent: coApiKeyPresent,
+        reason: coReason,
+        nextAction: coNextAction,
+      },
+    },
     warnings,
     nextActions: nextActions.length > 0 ? nextActions : ['All checks passed — provider is configured and reachable'],
   };

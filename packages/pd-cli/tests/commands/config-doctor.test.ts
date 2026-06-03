@@ -417,6 +417,108 @@ describe('buildDoctorOutput — JSON output contract', () => {
   });
 });
 
+describe('buildDoctorOutput — feature flags failure resilience', () => {
+  it('does not throw when feature-flags.yaml is a directory, outputs degraded status and flag warnings', async () => {
+    const tmp = mkTmpDir();
+    try {
+      const pdDir = path.join(tmp, '.pd');
+      fs.mkdirSync(pdDir, { recursive: true });
+      fs.mkdirSync(path.join(pdDir, 'feature-flags.yaml'), { recursive: true });
+
+      const output = await buildDoctorOutput({ workspaceDir: tmp });
+      expect(['degraded', 'failed']).toContain(output.status);
+      expect(output.featureFlags.source).toBe('unavailable');
+      expect(output.featureFlags.warnings.some(w => w.includes('feature flags unavailable'))).toBe(true);
+      expect(output.warnings.some(w => w.includes('feature flags unavailable'))).toBe(true);
+      expect(output.nextActions.some(a => a.includes('readable file, not a directory'))).toBe(true);
+    } finally { rmTmpDir(tmp); }
+  });
+});
+
+describe('buildDoctorOutput — CorrectionObserver diagnostics', () => {
+  it('reports auth_missing when ANTHROPIC_API_KEY is not set (default env fallback)', async () => {
+    const tmp = mkTmpDir();
+    const apiKeyEnv = 'ANTHROPIC_API_KEY';
+    const previous = process.env[apiKeyEnv];
+    delete process.env[apiKeyEnv];
+    try {
+      const output = await buildDoctorOutput({ workspaceDir: tmp });
+      const co = output.internalAgents.correctionObserver;
+      expect(co.enabled).toBe(true);
+      expect(co.status).toBe('auth_missing');
+      expect(co.configSource).toBe('env');
+      expect(co.apiKeyEnv).toBe('ANTHROPIC_API_KEY');
+      expect(co.apiKeyPresent).toBe(false);
+      expect(co.nextAction).toMatch(/set the environment variable 'ANTHROPIC_API_KEY'/i);
+    } finally {
+      if (previous !== undefined) {
+        process.env[apiKeyEnv] = previous;
+      }
+      rmTmpDir(tmp);
+    }
+  });
+
+  it('reports disabled when correction_observer is disabled in feature-flags.yaml', async () => {
+    const tmp = mkTmpDir();
+    try {
+      const pdDir = path.join(tmp, '.pd');
+      fs.mkdirSync(pdDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pdDir, 'feature-flags.yaml'),
+        'correction_observer:\n  enabled: false\n',
+        'utf8',
+      );
+      const output = await buildDoctorOutput({ workspaceDir: tmp });
+      const co = output.internalAgents.correctionObserver;
+      expect(co.enabled).toBe(false);
+      expect(co.status).toBe('disabled');
+      expect(co.reason).toContain('CorrectionObserver is disabled');
+      expect(co.nextAction).toContain('correction_observer.enabled=true');
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('reports configured when pd-correction-observer policy is present in workflows.yaml and key exists', async () => {
+    const tmp = mkTmpDir();
+    const customKeyEnv = 'PD_DOCTOR_TEST_CO_KEY';
+    const previous = process.env[customKeyEnv];
+    process.env[customKeyEnv] = 'dummy-key-value-not-leaked';
+    try {
+      writeWorkflowsYaml(path.join(tmp, '.state'), {
+        version: '1',
+        funnels: [
+          {
+            workflowId: 'pd-correction-observer',
+            policy: {
+              runtimeKind: 'pi-ai',
+              provider: 'anthropic',
+              model: 'anthropic/claude-3-5-sonnet',
+              apiKeyEnv: customKeyEnv,
+            },
+          },
+        ],
+      });
+      const output = await buildDoctorOutput({ workspaceDir: tmp });
+      const co = output.internalAgents.correctionObserver;
+      expect(co.enabled).toBe(true);
+      expect(co.status).toBe('configured');
+      expect(co.configSource).toBe('workflows.yaml');
+      expect(co.provider).toBe('anthropic');
+      expect(co.model).toBe('anthropic/claude-3-5-sonnet');
+      expect(co.apiKeyEnv).toBe(customKeyEnv);
+      expect(co.apiKeyPresent).toBe(true);
+      const json = JSON.stringify(output);
+      expect(json).not.toContain('dummy-key-value-not-leaked');
+    } finally {
+      if (previous === undefined) {
+        delete process.env[customKeyEnv];
+      } else {
+        process.env[customKeyEnv] = previous;
+      }
+      rmTmpDir(tmp);
+    }
+  });
+});
+
 // ─── CLI command wiring ──────────────────────────────────────────────────────
 
 describe('CLI command wiring (pd config doctor)', () => {

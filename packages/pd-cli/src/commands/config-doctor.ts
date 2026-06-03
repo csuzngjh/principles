@@ -73,6 +73,29 @@ function formatTextOutput(output: DoctorOutput): string {
   }
   lines.push('');
 
+  lines.push('Internal agents:');
+  if (output.internalAgents && output.internalAgents.correctionObserver) {
+    const co = output.internalAgents.correctionObserver;
+    const coStatus = co.status.toUpperCase();
+    const coProvider = co.provider ?? '(unset)';
+    const coModel = co.model ?? '(unset)';
+    const coApiKeyEnv = co.apiKeyEnv ?? '(unset)';
+    const coApiKeyState = co.apiKeyPresent ? 'present' : 'absent';
+    lines.push(`  correctionObserver: [${coStatus}]`);
+    lines.push(`    enabled:     ${co.enabled}`);
+    lines.push(`    flagSource:  ${co.flagSource}`);
+    lines.push(`    configSource:${co.configSource}`);
+    if (co.provider || co.model) {
+      lines.push(`    provider:    ${coProvider} / ${coModel}`);
+    }
+    lines.push(`    apiKeyEnv:   ${coApiKeyEnv} (${coApiKeyState})`);
+    lines.push(`    reason:      ${co.reason}`);
+    lines.push(`    nextAction:  ${co.nextAction}`);
+  } else {
+    lines.push('  (no internal agents diagnosed)');
+  }
+  lines.push('');
+
   if (output.warnings.length > 0) {
     lines.push('Warnings:');
     for (const w of output.warnings) {
