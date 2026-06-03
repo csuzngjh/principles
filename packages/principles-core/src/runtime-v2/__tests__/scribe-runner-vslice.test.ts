@@ -830,6 +830,40 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
     // so it may retry. With retry policy shouldRetry: false, it falls to markTaskFailed.
     expect(deps.stateManager.markTaskFailed).toHaveBeenCalled();
   });
+
+  // ── Telemetry dedup regression test ───────────────────────────────────────
+
+  it('successful run emits exactly 1 scribe_output_validated and 1 scribe_principle_draft_generated', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makePhilosopherArtifact());
+
+    const deps = createMockDeps({ artifactStore: store });
+    const emitTelemetry = vi.fn();
+    (deps.eventEmitter as unknown as Record<string, unknown>).emitTelemetry = emitTelemetry;
+
+    const runner = new ScribeRunner(deps, {
+      owner: 'test-dedup',
+      runtimeKind: 'scribe',
+      pollIntervalMs: 10,
+      timeoutMs: 5000,
+    });
+
+    const result = await runner.run(SCRIBE_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // Count telemetry events by type
+    const outputValidatedCalls = emitTelemetry.mock.calls.filter(
+      (c: unknown[]) => typeof c[0] === 'object' && c[0] !== null && 'eventType' in c[0] && c[0].eventType === 'scribe_output_validated',
+    );
+    const draftGeneratedCalls = emitTelemetry.mock.calls.filter(
+      (c: unknown[]) => typeof c[0] === 'object' && c[0] !== null && 'eventType' in c[0] && c[0].eventType === 'scribe_principle_draft_generated',
+    );
+
+    // Exactly 1 output_validated (from BasePeerRunner), not 2
+    expect(outputValidatedCalls).toHaveLength(1);
+    // Exactly 1 principle_draft_generated (from emitSuccessTelemetry)
+    expect(draftGeneratedCalls).toHaveLength(1);
+  });
 });
 
 describe('DefaultScribeValidator (PRI-109)', () => {

@@ -341,7 +341,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: ScribeOutputV1): void {
-    this.emitEvent('output_validated', taskId, {
+    this.emitEvent('principle_draft_generated', taskId, {
       principleTitle: output.principleDraft.title,
     });
   }
