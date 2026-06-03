@@ -66,32 +66,41 @@ export interface ScribeValidationResult {
 }
 
 export interface ScribeValidator {
-  validate(output: ScribeOutputV1, taskId: string, expectedSourcePhilosopherArtifactId?: string): Promise<ScribeValidationResult>;
+  /**
+   * Validate untrusted LLM/runtime output.
+   *
+   * Receives `unknown` — must perform runtime validation before
+   * treating as ScribeOutputV1 (ERR-001, ERR-005).
+   */
+  validate(output: unknown, taskId: string, expectedSourcePhilosopherArtifactId?: string): Promise<ScribeValidationResult>;
 }
 
 export class DefaultScribeValidator implements ScribeValidator {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async validate(output: ScribeOutputV1, taskId: string, expectedSourcePhilosopherArtifactId?: string): Promise<ScribeValidationResult> {
+  async validate(output: unknown, taskId: string, expectedSourcePhilosopherArtifactId?: string): Promise<ScribeValidationResult> {
     const errors: string[] = [];
 
     if (typeof output !== 'object' || output === null) {
       return { valid: false, errors: ['Output is not an object'], errorCategory: 'output_invalid' };
     }
 
-    if (output.taskId !== taskId) {
-      errors.push(`taskId mismatch: expected ${taskId}, got ${String(output.taskId)}`);
+    // After null-check, treat as Record for runtime property access (ERR-001, ERR-005).
+    const obj = output as Record<string, unknown>;
+
+    if (obj.taskId !== taskId) {
+      errors.push(`taskId mismatch: expected ${taskId}, got ${String(obj.taskId)}`);
     }
 
-    if (typeof output.sourcePhilosopherArtifactId !== 'string' || output.sourcePhilosopherArtifactId.trim() === '') {
+    if (typeof obj.sourcePhilosopherArtifactId !== 'string' || obj.sourcePhilosopherArtifactId.trim() === '') {
       errors.push('sourcePhilosopherArtifactId must be non-empty string');
-    } else if (expectedSourcePhilosopherArtifactId && output.sourcePhilosopherArtifactId !== expectedSourcePhilosopherArtifactId) {
-      errors.push(`sourcePhilosopherArtifactId mismatch: expected ${expectedSourcePhilosopherArtifactId}, got ${output.sourcePhilosopherArtifactId}`);
+    } else if (expectedSourcePhilosopherArtifactId && obj.sourcePhilosopherArtifactId !== expectedSourcePhilosopherArtifactId) {
+      errors.push(`sourcePhilosopherArtifactId mismatch: expected ${expectedSourcePhilosopherArtifactId}, got ${obj.sourcePhilosopherArtifactId}`);
     }
 
-    if (typeof output.principleDraft !== 'object' || output.principleDraft === null) {
+    if (typeof obj.principleDraft !== 'object' || obj.principleDraft === null) {
       errors.push('principleDraft must be an object');
     } else {
-      const pd = output.principleDraft as unknown as Record<string, unknown>;
+      const pd = obj.principleDraft as Record<string, unknown>;
       if (typeof pd.title !== 'string' || (pd.title).trim() === '') errors.push('principleDraft.title must be non-empty string');
       if (typeof pd.statement !== 'string' || (pd.statement).trim() === '') errors.push('principleDraft.statement must be non-empty string');
       if (typeof pd.rationale !== 'string' || (pd.rationale).trim() === '') errors.push('principleDraft.rationale must be non-empty string');
@@ -103,10 +112,10 @@ export class DefaultScribeValidator implements ScribeValidator {
       else if (pd.confidence < 0 || pd.confidence > 1) errors.push('principleDraft.confidence must be in [0, 1]');
     }
 
-    if (typeof output.sourceTrace !== 'object' || output.sourceTrace === null) {
+    if (typeof obj.sourceTrace !== 'object' || obj.sourceTrace === null) {
       errors.push('sourceTrace must be an object');
     } else {
-      const st = output.sourceTrace as unknown as Record<string, unknown>;
+      const st = obj.sourceTrace as Record<string, unknown>;
       if (typeof st.philosopherArtifactId !== 'string' || (st.philosopherArtifactId).trim() === '') {
         errors.push('sourceTrace.philosopherArtifactId must be non-empty string');
       } else if (expectedSourcePhilosopherArtifactId && st.philosopherArtifactId !== expectedSourcePhilosopherArtifactId) {
@@ -114,13 +123,13 @@ export class DefaultScribeValidator implements ScribeValidator {
       }
     }
 
-    if (!Array.isArray(output.risks)) {
+    if (!Array.isArray(obj.risks)) {
       errors.push('risks must be an array');
-    } else if (!(output.risks as unknown[]).every(e => typeof e === 'string')) {
+    } else if (!(obj.risks as unknown[]).every(e => typeof e === 'string')) {
       errors.push('risks must be an array of strings');
     }
 
-    if (typeof output.generatedAt !== 'string' || output.generatedAt.trim() === '') {
+    if (typeof obj.generatedAt !== 'string' || obj.generatedAt.trim() === '') {
       errors.push('generatedAt must be non-empty string');
     }
 
