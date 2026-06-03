@@ -10,7 +10,7 @@ function runPdHelp(args: string[]): string {
   try {
     return execFileSync('node', ['packages/pd-cli/dist/index.js', ...args], {
       encoding: 'utf8',
-      cwd: 'D:/Code/principles',
+      cwd: process.cwd(),
     });
   } catch (err: unknown) {
     if (err && typeof err === 'object' && 'stdout' in err) {

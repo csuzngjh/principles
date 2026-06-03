@@ -1,6 +1,6 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
- * pd CLI — Principles Disciple command-line interface.
+ * pd CLI 鈥?Principles Disciple command-line interface.
  *
  * Usage:
  *   pd pain record --reason <text> [--score N] [--source manual]
@@ -55,7 +55,7 @@ const program = new Command();
 
 program
   .name('pd')
-  .description('PD CLI — Pain recording, sample management, and evolution tasks')
+  .description('PD CLI 鈥?Pain recording, sample management, and evolution tasks')
   .version(pkg.version);
 
 const painCmd = program
@@ -147,7 +147,7 @@ centralCmd
     await handleCentralSync();
   });
 
-// ── Runtime v2 task/run commands ──────────────────────────────────────────────
+// 鈹€鈹€ Runtime v2 task/run commands 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const rtTaskCmd = program
   .command('task')
@@ -190,7 +190,7 @@ rtRunCmd
     await handleRunShow({ id: runId });
   });
 
-// ── Runtime v2 trajectory/history/context commands ───────────────────────────
+// 鈹€鈹€ Runtime v2 trajectory/history/context commands 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const trajectoryCmd = program
   .command('trajectory')
@@ -239,7 +239,7 @@ contextCmd
     await handleContextBuild(taskId, opts);
   });
 
-// ── Legacy import command ───────────────────────────────────────────────────────
+// 鈹€鈹€ Legacy import command 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const legacyCmd = program
   .command('legacy')
@@ -258,7 +258,7 @@ importCmd
     await handleLegacyImportOpenClaw(opts);
   });
 
-// ── Diagnostician run/status commands ─────────────────────────────────────
+// 鈹€鈹€ Diagnostician run/status commands 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const diagnoseCmd = program
   .command('diagnose')
@@ -283,19 +283,19 @@ diagnoseCmd
   .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
   .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
   .option('-a, --agent <agentId>', 'Agent ID to invoke')
-  .option('--provider <name>', 'LLM provider (e.g., openrouter) — for pi-ai, falls back to policy')
-  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — for pi-ai, falls back to policy')
-  .option('--apiKeyEnv <name>', 'Env var name for API key — for pi-ai, falls back to policy')
-  .option('--baseUrl <url>', 'Custom base URL — for pi-ai, falls back to policy')
-  .option('--maxRetries <n>', 'Max retry attempts for LLM failures — for pi-ai, falls back to policy', parseInt)
-  .option('--timeoutMs <ms>', 'Timeout in milliseconds — for pi-ai, falls back to policy', parseInt)
+  .option('--provider <name>', 'LLM provider (e.g., openrouter) 鈥?for pi-ai, falls back to policy')
+  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) 鈥?for pi-ai, falls back to policy')
+  .option('--apiKeyEnv <name>', 'Env var name for API key 鈥?for pi-ai, falls back to policy')
+  .option('--baseUrl <url>', 'Custom base URL 鈥?for pi-ai, falls back to policy')
+  .option('--maxRetries <n>', 'Max retry attempts for LLM failures 鈥?for pi-ai, falls back to policy', parseInt)
+  .option('--timeoutMs <ms>', 'Timeout in milliseconds 鈥?for pi-ai, falls back to policy', parseInt)
   .option('--no-intake', 'Skip candidate intake after successful diagnosis')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleDiagnoseRun(opts);
   });
 
-// ── Runtime probe command (HG-01 HARD GATE) ─────────────────────────────────
+// 鈹€鈹€ Runtime probe command (HG-01 HARD GATE) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const runtimeCmd = program
   .command('runtime')
@@ -316,7 +316,7 @@ const synthCmd = runtimeCmd
 
 synthCmd
   .command('baseline')
-  .description('Run synthetic PD workload baseline (PRI-206) — deterministic, no LLM required')
+  .description('Run synthetic PD workload baseline (PRI-206) 鈥?deterministic, no LLM required')
   .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
@@ -325,7 +325,7 @@ synthCmd
 
 synthCmd
   .command('flood')
-  .description('Run pain flood simulation (PRI-208) — deterministic dedup/stress test, no LLM required')
+  .description('Run pain flood simulation (PRI-208) 鈥?deterministic dedup/stress test, no LLM required')
   .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
   .option('--json', 'Output raw JSON')
   .option('--identical-count <n>', 'Number of identical pain signals (default: 10)', parseInt)
@@ -343,7 +343,7 @@ synthCmd
 
 synthCmd
   .command('proven-channel')
-  .description('Run MVP activation continuity baseline (PRI-240) — deterministic, no LLM required')
+  .description('Run MVP activation continuity baseline (PRI-240) 鈥?deterministic, no LLM required')
   .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
   .option('--json', 'Output raw JSON')
   .option('--channels <channels>', 'Comma-separated channel list (prompt,code_tool_hook,defer_archive)')
@@ -373,7 +373,7 @@ const demoCmd = program
 
 demoCmd
   .command('story-a')
-  .description('Run Story A\' proven-channel demo (PRI-246) — full evidence→proposal→approval→activation→observation chain')
+  .description('Run Story A\' proven-channel demo (PRI-246) 鈥?full evidence鈫抪roposal鈫抋pproval鈫抋ctivation鈫抩bservation chain')
   .option('-w, --workspace <path>', 'Workspace directory (default: temp workspace)')
   .option('--json', 'Output raw JSON')
   .option('--channels <channels>', 'Comma-separated channel list (prompt,code_tool_hook,defer_archive)')
@@ -392,13 +392,13 @@ runtimeCmd
   .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
   .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
   .option('-a, --agent <agentId>', 'Agent ID to probe')
-  .option('--provider <name>', 'LLM provider (e.g., openrouter) — for pi-ai, falls back to --workspace workflows.yaml')
-  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — for pi-ai, falls back to --workspace workflows.yaml')
-  .option('--apiKeyEnv <name>', 'Env var name for API key (e.g., OPENROUTER_API_KEY) — for pi-ai, falls back to --workspace workflows.yaml')
-  .option('--baseUrl <url>', 'Custom base URL for OpenAI-compatible providers — for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--provider <name>', 'LLM provider (e.g., openrouter) 鈥?for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) 鈥?for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--apiKeyEnv <name>', 'Env var name for API key (e.g., OPENROUTER_API_KEY) 鈥?for pi-ai, falls back to --workspace workflows.yaml')
+  .option('--baseUrl <url>', 'Custom base URL for OpenAI-compatible providers 鈥?for pi-ai, falls back to --workspace workflows.yaml')
   .option('--maxRetries <n>', 'Max retry attempts for LLM failures', parseInt)
   .option('--timeoutMs <ms>', 'Timeout in milliseconds for probe', parseInt)
-  .option('-w, --workspace <path>', 'Workspace directory — loads pi-ai policy from .state/workflows.yaml')
+  .option('-w, --workspace <path>', 'Workspace directory 鈥?loads pi-ai policy from .state/workflows.yaml')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeProbe(opts);
@@ -462,17 +462,17 @@ runtimeHealthCmd
 
 runtimeHealthCmd
   .command('gfi')
-  .description('GFI workspace snapshot — active vs stale session breakdown')
+  .description('GFI workspace snapshot 鈥?active vs stale session breakdown')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handleRuntimeGfiSnapshot({ workspace: opts.workspace, json: opts.json });
   });
 
-// PRI-82: pd runtime gfi snapshot — canonical operator command (alias of runtime health gfi)
+// PRI-82: pd runtime gfi snapshot 鈥?canonical operator command (alias of runtime health gfi)
 runtimeCmd
   .command('gfi')
-  .description('GFI workspace snapshot — active vs stale session breakdown')
+  .description('GFI workspace snapshot 鈥?active vs stale session breakdown')
   .command('snapshot')
   .description('GFI workspace snapshot for the operator (alias: pd runtime health gfi)')
   .option('-w, --workspace <path>', 'Workspace directory')
@@ -608,7 +608,7 @@ const pruningCmd = runtimeCmd
 
 pruningCmd
   .command('report')
-  .description('Show pruning health report — watch/review principle signals')
+  .description('Show pruning health report 鈥?watch/review principle signals')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output raw JSON')
   .action((opts) => {
@@ -679,7 +679,7 @@ pruningCmd
     });
   });
 
-// ── Candidate inspection commands ───────────────────────────────────────────
+// 鈹€鈹€ Candidate inspection commands 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const candidateCmd = program
   .command('candidate')
@@ -783,7 +783,7 @@ candidateInternalizationCmd
     await handleCandidateInternalizationBackfill({ workspace: opts.workspace, dryRun: opts.dryRun, confirm: opts.confirm, includePending: opts.includePending, json: opts.json });
   });
 
-// ── Artifact inspection commands ────────────────────────────────────────────
+// 鈹€鈹€ Artifact inspection commands 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const artifactCmd = program
   .command('artifact')
@@ -826,6 +826,24 @@ program
       workspace: opts.workspace,
       port: opts.port,
       noAuth: opts.noAuth,
+      json: opts.json,
+    });
+  });
+
+// PRI-299: PD Config Doctor 鈥?surface config paths, feature flags, and provider connectivity
+const configCmd = program
+  .command('config')
+  .description('PD config diagnostics');
+
+configCmd
+  .command('doctor')
+  .description('Inspect PD / OpenClaw config paths, feature flags, and provider connectivity (PRI-299)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output a single parseable JSON object on stdout', false)
+  .action(async (opts) => {
+    const { handleConfigDoctor } = await import('./commands/config-doctor.js');
+    await handleConfigDoctor({
+      workspace: opts.workspace,
       json: opts.json,
     });
   });
