@@ -119,6 +119,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('dreamer_task_failed'),
   Type.Literal('dreamer_candidate_generated'),
   Type.Literal('dreamer_cancel_run_failed'),
+  Type.Literal('dreamer_output_extraction_failed'),
   Type.Literal('dreamer_mark_succeeded_failed'),
   Type.Literal('dreamer_update_output_failed'),
   Type.Literal('dreamer_context_partial'),
@@ -143,6 +144,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('philosopher_lineage_partial'),
   Type.Literal('philosopher_artifact_write_failed'),
   Type.Literal('philosopher_wrong_task_kind'),
+  Type.Literal('philosopher_output_extraction_failed'),
   Type.Literal('philosopher_mark_failed_error'),
   Type.Literal('philosopher_mark_retry_error'),
 ]);
