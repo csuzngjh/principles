@@ -1376,6 +1376,62 @@ export {
   createFeedbackReport,
   safeStringifyPreview,
 } from './feedback/index.js';
+
+// ── PD-Owned Config Contract (PRI-304) ──────────────────────────────────────
+//
+// Pure types, validation, defaults, effective config, redaction, and feature
+// flag computation for `.pd/config.yaml`. No I/O — YAML loading lives in
+// pd-cli / openclaw-plugin. ADR-0016: PD owns exactly one user config file.
+
+export {
+  PD_CONFIG_VERSION,
+  VALID_FEATURE_CATEGORIES,
+  VALID_PROFILE_TYPES,
+  INTERNAL_AGENT_NAMES,
+  VALID_DIAGNOSTICS_MODES,
+  DANGEROUS_KEYS as PD_CONFIG_DANGEROUS_KEYS,
+  validatePdConfig,
+  DEFAULT_FEATURE_FLAGS as PD_DEFAULT_FEATURE_FLAGS,
+  DEFAULT_RUNTIME_PROFILE_ID,
+  DEFAULT_RUNTIME_PROFILE,
+  DEFAULT_UI as PD_DEFAULT_UI,
+  getDefaultInternalAgents,
+  getDefaultPdConfig,
+  computeEffectivePdConfig,
+  redactPdConfig,
+  redactConfigValue,
+  MVP_CHANNEL_IDS,
+  computeFeatureFlagsFromConfig,
+  isFeatureEnabled,
+  getEnabledFlagIds,
+} from './config/index.js';
+
+export type {
+  PdConfigVersion,
+  FeatureCategory,
+  FeatureFlagEntry,
+  RuntimeProfileType,
+  OpenClawRuntimeProfile,
+  PdLocalRuntimeProfile,
+  RuntimeProfile,
+  InternalAgentName,
+  InternalAgentBinding,
+  InternalAgentsConfig,
+  DiagnosticsMode,
+  UiConfig,
+  PdConfig,
+  PdConfigValidationError,
+  PdConfigValidationResultOk,
+  PdConfigValidationResultErr,
+  PdConfigValidationResult,
+  EffectivePdConfig,
+  RedactedRuntimeProfileSummary,
+  RedactedAgentSummary,
+  RedactedFeatureSummary,
+  RedactedPdConfigSummary,
+  EffectiveFeatureFlag,
+  FeatureFlagsResult,
+} from './config/index.js';
 export type {
   FeedbackType,
   UserSeverity,

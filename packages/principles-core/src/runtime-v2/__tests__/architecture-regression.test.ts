@@ -3486,3 +3486,44 @@ describe('PRI-239: Feature flag registry architecture boundary', () => {
   });
 });
 
+describe('PRI-304: PD-Owned Config Contract barrel exports and purity', () => {
+  it('BARREL_EXPORTS: runtime-v2/index.ts exports PD config contract symbols', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '..', 'index.ts'), 'utf-8');
+    // Core types
+    expect(src).toContain('PdConfig');
+    expect(src).toContain('PdConfigValidationResult');
+    expect(src).toContain('EffectivePdConfig');
+    expect(src).toContain('RedactedPdConfigSummary');
+    // Core functions
+    expect(src).toContain('validatePdConfig');
+    expect(src).toContain('computeEffectivePdConfig');
+    expect(src).toContain('redactPdConfig');
+    expect(src).toContain('redactConfigValue');
+    expect(src).toContain('computeFeatureFlagsFromConfig');
+    expect(src).toContain('isFeatureEnabled');
+    // Defaults
+    expect(src).toContain('getDefaultPdConfig');
+    expect(src).toContain('DEFAULT_RUNTIME_PROFILE_ID');
+    // Config barrel import path
+    expect(src).toContain("from './config/index.js'");
+  });
+
+  it('CORE_PURE: config/ module has zero infrastructure imports', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const configDir = resolve(__dirname, '..', 'config');
+    const files = ['pd-config-types.ts', 'pd-config-validate.ts', 'pd-config-defaults.ts', 'pd-config-effective.ts', 'pd-config-redaction.ts', 'pd-config-feature-flags.ts', 'index.ts'];
+    for (const file of files) {
+      const src = readFileSync(resolve(configDir, file), 'utf-8');
+      expect(src).not.toContain('node:fs');
+      expect(src).not.toContain('node:path');
+      expect(src).not.toContain('node:process');
+      expect(src).not.toContain('openclaw-plugin');
+      expect(src).not.toContain('eval(');
+      expect(src).not.toContain('new Function');
+    }
+  });
+});
+

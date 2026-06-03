@@ -1,0 +1,186 @@
+/**
+ * PD-Owned Config Contract — PRI-304
+ *
+ * Pure types and constants for `.pd/config.yaml`.
+ * No I/O — YAML loading lives in pd-cli / plugin boundary.
+ *
+ * ADR-0016: PD owns exactly one user config file.
+ * .pd/feature-flags.yaml is retired into this contract.
+ * .state/workflows.yaml is not a compatibility input.
+ * PD does not own provider secrets.
+ */
+
+// ── Config Version ──────────────────────────────────────────────────────────
+
+export const PD_CONFIG_VERSION = 1;
+export type PdConfigVersion = 1;
+
+// ── Feature Flag Category ───────────────────────────────────────────────────
+
+export const VALID_FEATURE_CATEGORIES = ['core', 'quiet', 'gone'] as const;
+export type FeatureCategory = (typeof VALID_FEATURE_CATEGORIES)[number];
+
+// ── Feature Flag Entry ──────────────────────────────────────────────────────
+
+export interface FeatureFlagEntry {
+  category: FeatureCategory;
+  enabled: boolean;
+}
+
+// ── Runtime Profile Types ───────────────────────────────────────────────────
+
+export const VALID_PROFILE_TYPES = ['openclaw', 'pi-ai'] as const;
+export type RuntimeProfileType = (typeof VALID_PROFILE_TYPES)[number];
+
+/** OpenClaw profile: references only, no secrets */
+export interface OpenClawRuntimeProfile {
+  type: 'openclaw';
+  /** Optional provider label (e.g. "lmstudio") */
+  provider?: string;
+  /** Optional model label (e.g. "qwen3.6-27b-mtp") */
+  model?: string;
+  /** Optional source identifier (e.g. "default") */
+  source?: string;
+}
+
+/** PD-local pi-ai profile: non-secret fields + apiKeyEnv name */
+export interface PdLocalRuntimeProfile {
+  type: 'pi-ai';
+  provider: string;
+  model: string;
+  /** Environment variable name containing the API key — never the key value itself */
+  apiKeyEnv: string;
+  /** Optional base URL override */
+  baseUrl?: string;
+  /** Optional timeout in milliseconds */
+  timeoutMs?: number;
+}
+
+export type RuntimeProfile = OpenClawRuntimeProfile | PdLocalRuntimeProfile;
+
+// ── Internal Agent Names ────────────────────────────────────────────────────
+
+export const INTERNAL_AGENT_NAMES = [
+  'diagnostician',
+  'dreamer',
+  'philosopher',
+  'scribe',
+  'artificer',
+  'evaluator',
+  'rolloutReviewer',
+  'trainer',
+  'correctionObserver',
+  'empathyObserver',
+] as const;
+
+export type InternalAgentName = (typeof INTERNAL_AGENT_NAMES)[number];
+
+// ── Internal Agent Binding ──────────────────────────────────────────────────
+
+export interface InternalAgentBinding {
+  enabled: boolean;
+  /** Runtime profile ID referencing a profile in runtimeProfiles */
+  runtimeProfile?: string;
+}
+
+// ── Internal Agents Config ──────────────────────────────────────────────────
+
+export interface InternalAgentsConfig {
+  /** Default runtime profile for all agents without explicit override */
+  defaultRuntime: string;
+  /** Per-agent overrides */
+  agents: Record<InternalAgentName, InternalAgentBinding>;
+}
+
+// ── UI Config ───────────────────────────────────────────────────────────────
+
+export const VALID_DIAGNOSTICS_MODES = ['simple', 'advanced'] as const;
+export type DiagnosticsMode = (typeof VALID_DIAGNOSTICS_MODES)[number];
+
+export interface UiConfig {
+  diagnostics: {
+    mode: DiagnosticsMode;
+  };
+}
+
+// ── Top-Level Config ────────────────────────────────────────────────────────
+
+export interface PdConfig {
+  version: PdConfigVersion;
+  features: Record<string, FeatureFlagEntry>;
+  runtimeProfiles: Record<string, RuntimeProfile>;
+  internalAgents: InternalAgentsConfig;
+  ui: UiConfig;
+}
+
+// ── Validation Result ───────────────────────────────────────────────────────
+
+export interface PdConfigValidationError {
+  path: string;
+  reason: string;
+  nextAction: string;
+}
+
+export interface PdConfigValidationResultOk {
+  ok: true;
+  value: PdConfig;
+}
+
+export interface PdConfigValidationResultErr {
+  ok: false;
+  errors: PdConfigValidationError[];
+}
+
+export type PdConfigValidationResult =
+  | PdConfigValidationResultOk
+  | PdConfigValidationResultErr;
+
+// ── Effective Config ────────────────────────────────────────────────────────
+
+export interface EffectivePdConfig {
+  config: PdConfig;
+  source: 'defaults' | 'user_config';
+  warnings: string[];
+}
+
+// ── Redacted Summary ────────────────────────────────────────────────────────
+
+export interface RedactedRuntimeProfileSummary {
+  id: string;
+  type: RuntimeProfileType;
+  /** Safe label for display (e.g. "openclaw: lmstudio/qwen3.6-27b-mtp") */
+  label: string;
+  /** For pi-ai profiles: the env var name, never the value */
+  apiKeyEnv?: string;
+  /** Whether the profile appears ready (has required fields) */
+  readiness: 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
+}
+
+export interface RedactedAgentSummary {
+  name: InternalAgentName;
+  enabled: boolean;
+  runtimeProfileId: string;
+  runtimeProfileLabel: string;
+  readiness: 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
+}
+
+export interface RedactedFeatureSummary {
+  id: string;
+  category: FeatureCategory;
+  enabled: boolean;
+}
+
+export interface RedactedPdConfigSummary {
+  version: PdConfigVersion;
+  source: 'defaults' | 'user_config';
+  features: RedactedFeatureSummary[];
+  runtimeProfiles: RedactedRuntimeProfileSummary[];
+  defaultRuntime: string;
+  agents: RedactedAgentSummary[];
+  ui: UiConfig;
+  warnings: string[];
+}
+
+// ── Dangerous Keys ──────────────────────────────────────────────────────────
+
+export const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
