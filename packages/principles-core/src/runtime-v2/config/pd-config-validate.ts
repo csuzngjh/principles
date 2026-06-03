@@ -199,7 +199,7 @@ function validatePdLocalProfile(
   }
 
   // Reject raw secret values
-  const forbiddenValueKeys = ['apiKey', 'api_key', 'token', 'secret', 'password'];
+  const forbiddenValueKeys = ['apiKey', 'api_key', 'token', 'gatewayToken', 'gateway_token', 'secret', 'password', 'auth'];
   for (const fk of forbiddenValueKeys) {
     if (Object.hasOwn(raw, fk)) {
       errors.push(err(`${path}.${fk}`, `profile '${profileId}' contains forbidden secret field '${fk}'`, `Remove '${fk}' from profile '${profileId}' — use 'apiKeyEnv' for env var name reference (ADR-0016 §2.2)`));

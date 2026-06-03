@@ -257,6 +257,15 @@ describe('Scenario 3: Malformed config → structured error', () => {
     expect(result.errors.some(e => e.reason.includes('forbidden secret field'))).toBe(true);
   });
 
+  it('gateway_token in pi-ai profile is rejected as forbidden secret field', () => {
+    const raw = makeValidConfig();
+    raw.runtimeProfiles['bad.gw'] = { type: 'pi-ai', provider: 'test', model: 'test', apiKeyEnv: 'TEST_KEY', gateway_token: 'gw-secret' } as unknown as RuntimeProfile;
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected error');
+    expect(result.errors.some(e => e.reason.includes('forbidden secret field') && e.path.includes('gateway_token'))).toBe(true);
+  });
+
   it('dangerous key at root returns structured error', () => {
     // Use JSON.parse to create an object with 'constructor' as an own property
     // (spread/Object.assign cannot set __proto__ as an own enumerable property)
