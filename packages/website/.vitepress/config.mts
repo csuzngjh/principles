@@ -71,7 +71,7 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: '首页', link: '/zh/' },
-          { text: '文档', link: '/zh/docs/user-guide' },
+          { text: '文档', link: '/zh/docs/getting-started' },
           { text: '思维深渊', link: '/zh/abyss/' },
           { text: 'GitHub', link: 'https://github.com/csuzngjh/principles' }
         ],
@@ -80,6 +80,7 @@ export default defineConfig({
             {
               text: '使用指南与参考手册',
               items: [
+                { text: '快速开始 (Getting Started)', link: '/zh/docs/getting-started' },
                 { text: '用户指南 (User Guide)', link: '/zh/docs/user-guide' },
               ]
             }
