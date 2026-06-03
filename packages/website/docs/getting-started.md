@@ -37,10 +37,12 @@ See `healthy`? You're good.
 ### 3. Open the Console
 
 ```bash
-pd console --workspace "<your-workspace-path>" --no-auth
+pd console open --workspace "<your-workspace-path>"
 ```
 
-Then open **http://127.0.0.1:3100** — this is where you review and approve principle proposals.
+This opens the local review console in your browser. If port 3100 is busy, PD picks the next available local port.
+
+The console is loopback-only. It binds to your own machine, not the public network.
 
 ### 4. Let It Run
 
@@ -66,6 +68,12 @@ Changed your mind? Undo anytime:
 /pd-rollback-impl <id>
 ```
 
+## Report a Problem
+
+Seed users should not need to collect logs manually. In the console, use **Report Problem** to create a local feedback draft with a privacy preview.
+
+PD does **not** automatically upload prompts, chat logs, files, environment variables, or tokens. You review the draft first, then copy it into email or GitHub if you choose.
+
 ## That's It
 
 PD is now watching for repeated mistakes and waiting for your review. No configuration needed — it just works.
@@ -75,7 +83,7 @@ PD is now watching for repeated mistakes and waiting for your review. No configu
 **Stuck?**
 
 - AI won't edit files? → Check if a RuleHost rule is blocking the operation
-- Plugin won't load? → `cd ~/.openclaw/extensions/principles-disciple && npm install micromatch@^4.0.8 @sinclair/typebox@^0.34.48`
-- Check health anytime → `/pd-status`
+- Console won't open? → `pd console open --workspace "<your-workspace-path>" --json`
+- Check health anytime → `pd runtime canary --workspace "<your-workspace-path>" --json`
 
 **Want more?** → [User Guide](/docs/user-guide) | [Development Guide](/docs/development)
