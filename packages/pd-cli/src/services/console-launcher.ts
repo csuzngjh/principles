@@ -73,6 +73,16 @@ export function normalizeLoopbackHost(host: string): string {
   return host;
 }
 
+/**
+ * Build a valid Console URL from a normalized loopback host and port.
+ * - IPv6 ::1 → http://[::1]:port (brackets required for valid URL)
+ * - IPv4/localhost → http://host:port (unchanged)
+ */
+export function buildConsoleUrl(host: string, port: number): string {
+  if (host === '::1') return `http://[::1]:${port}`;
+  return `http://${host}:${port}`;
+}
+
 // ─── Port detection (ERR-022: bounded) ───────────────────────────────────────
 
 /** Returns true if the port on the given host accepts a TCP connection. */
@@ -318,7 +328,7 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
   if (health.healthy) {
     return {
       status: 'reused',
-      url: `http://${host}:${preferredPort}`,
+      url: buildConsoleUrl(host, preferredPort),
       port: preferredPort,
       host,
       reused: true,
@@ -344,7 +354,7 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
     }
     return {
       status: 'started',
-      url: `http://${host}:${freePort}`,
+      url: buildConsoleUrl(host, freePort),
       port: freePort,
       host,
       reused: false,
@@ -355,7 +365,7 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
   // Preferred port is free → bind there.
   return {
     status: 'started',
-    url: `http://${host}:${preferredPort}`,
+    url: buildConsoleUrl(host, preferredPort),
     port: preferredPort,
     host,
     reused: false,

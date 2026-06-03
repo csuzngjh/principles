@@ -24,6 +24,7 @@ import { EventEmitter } from 'node:events';
 import {
   isLoopbackHost,
   normalizeLoopbackHost,
+  buildConsoleUrl,
   isPortInUse,
   findAvailablePort,
   planConsoleLaunch,
@@ -86,6 +87,26 @@ describe('normalizeLoopbackHost', () => {
 
   it('passes through non-loopback as-is (caller must reject)', () => {
     expect(normalizeLoopbackHost('0.0.0.0')).toBe('0.0.0.0');
+  });
+});
+
+// ─── URL formatting for IPv6 ─────────────────────────────────────────────────
+
+describe('buildConsoleUrl', () => {
+  it('wraps ::1 in brackets for valid URL', () => {
+    expect(buildConsoleUrl('::1', 3100)).toBe('http://[::1]:3100');
+  });
+
+  it('keeps 127.0.0.1 unchanged', () => {
+    expect(buildConsoleUrl('127.0.0.1', 3100)).toBe('http://127.0.0.1:3100');
+  });
+
+  it('keeps localhost unchanged', () => {
+    expect(buildConsoleUrl('localhost', 3100)).toBe('http://localhost:3100');
+  });
+
+  it('keeps 127.x.x.x unchanged', () => {
+    expect(buildConsoleUrl('127.0.0.42', 3119)).toBe('http://127.0.0.42:3119');
   });
 });
 
@@ -222,7 +243,21 @@ describe('planConsoleLaunch — refused (non-loopback host)', () => {
     });
     expect(result.status).toBe('started');
     expect(result.host).toBe('::1');
-    expect(result.url).toBe(`http://::1:${preferred}`);
+    // URL must have brackets for valid IPv6 URL format
+    expect(result.url).toBe(`http://[::1]:${preferred}`);
+  });
+
+  it('formats ::1 URL with brackets (no raw IPv6 in URL)', async () => {
+    const preferred = 49251;
+    expect(await isPortInUse('::1', preferred)).toBe(false);
+    const result = await planConsoleLaunch({
+      workspaceDir: '/tmp/anywhere',
+      preferredPort: preferred,
+      host: '::1',
+    });
+    expect(result.status).toBe('started');
+    expect(result.host).toBe('::1');
+    expect(result.url).toBe(`http://[::1]:${preferred}`);
   });
 });
 
