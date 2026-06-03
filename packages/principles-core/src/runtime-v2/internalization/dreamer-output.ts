@@ -108,36 +108,40 @@ export interface DreamerValidationResult {
  * PassThroughDreamerValidator is test-only and must not be used in production paths.
  */
 export interface DreamerValidator {
-  validate(output: DreamerOutput, taskId: string): Promise<DreamerValidationResult>;
+  /** Validate untrusted output. Accepts `unknown` — must perform runtime checks (ERR-001). */
+  validate(output: unknown, taskId: string): Promise<DreamerValidationResult>;
 }
 
 const VALID_RISK_LEVELS = new Set(['low', 'medium', 'high']);
 
 export class DefaultDreamerValidator implements DreamerValidator {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async validate(output: DreamerOutput, taskId: string): Promise<DreamerValidationResult> {
+  async validate(output: unknown, taskId: string): Promise<DreamerValidationResult> {
     const errors: string[] = [];
 
     if (typeof output !== 'object' || output === null) {
       return { valid: false, errors: ['Output is not an object'], errorCategory: 'output_invalid' };
     }
 
-    if (output.taskId !== taskId) {
-      errors.push(`taskId mismatch: expected ${taskId}, got ${String(output.taskId)}`);
+    // Narrow to Record for property access — all fields still treated as untrusted.
+    const record = output as Record<string, unknown>;
+
+    if (record.taskId !== taskId) {
+      errors.push(`taskId mismatch: expected ${taskId}, got ${String(record.taskId)}`);
     }
 
-    if (output.valid !== true) {
+    if (record.valid !== true) {
       errors.push('output.valid must be true');
     }
 
-    if (!Array.isArray(output.candidates)) {
+    if (!Array.isArray(record.candidates)) {
       errors.push('candidates must be an array');
     } else {
-      if (output.candidates.length < 1 || output.candidates.length > 5) {
+      if (record.candidates.length < 1 || record.candidates.length > 5) {
         errors.push('candidates must have 1-5 items');
       }
-      for (let i = 0; i < output.candidates.length; i++) {
-        const c = output.candidates[i] as Record<string, unknown> | undefined;
+      for (let i = 0; i < record.candidates.length; i++) {
+        const c = record.candidates[i] as Record<string, unknown> | undefined;
         if (!c) {
           errors.push(`candidates[${i}] is null/undefined`);
           continue;
@@ -153,11 +157,11 @@ export class DefaultDreamerValidator implements DreamerValidator {
       }
     }
 
-    if (!Array.isArray(output.contextRefs)) {
+    if (!Array.isArray(record.contextRefs)) {
       errors.push('contextRefs must be an array');
     }
 
-    if (typeof output.generatedAt !== 'string' || (output.generatedAt).trim() === '') {
+    if (typeof record.generatedAt !== 'string' || (record.generatedAt).trim() === '') {
       errors.push('generatedAt must be non-empty string');
     }
 
@@ -177,7 +181,7 @@ export class DefaultDreamerValidator implements DreamerValidator {
  */
 export class PassThroughDreamerValidator implements DreamerValidator {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async validate(_output: DreamerOutput, _taskId: string): Promise<DreamerValidationResult> {
+  async validate(_output: unknown, _taskId: string): Promise<DreamerValidationResult> {
     return { valid: true, errors: [] };
   }
 }
