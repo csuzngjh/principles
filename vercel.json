@@ -3,6 +3,7 @@
   "outputDirectory": "packages/website/.vitepress/dist",
   "installCommand": "cd packages/website && npm install",
   "framework": null,
+  "cleanUrls": true,
   "rewrites": [
     {
       "source": "/(.*)",
