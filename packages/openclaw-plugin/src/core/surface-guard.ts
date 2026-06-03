@@ -15,6 +15,53 @@ export interface SurfaceGuardResult {
   warnings: string[];
 }
 
+// Surface-level once-only log state (PRI-298).
+// The first time a quiet/non-core surface guard actually fires in this
+// process, the disabled reason is emitted once. Subsequent fires for the
+// same surfaceId are still observable (the no-op handler preserves
+// behaviour) but no longer flood the log. Fresh processes start with an
+// empty set, so each plugin load gets one observable skip per surface.
+//
+// The Set is only updated when the log was actually emitted, so passing
+// `undefined` for the logger on a quiet first fire does NOT consume the
+// one-shot slot — a later registration that supplies a logger still gets
+// the first-fire reason (PRI-298 / ERR-002).
+const loggedSkipSurfaces = new Set<string>();
+
+type LoggerLike = { info?: (msg: string) => void; debug?: (msg: string) => void };
+
+/**
+ * Emit the disabled-reason log line for `surfaceId` at most once per
+ * process. Returns true if the log was emitted, false if it was suppressed
+ * (already logged, or no logger available). Only marks the surface as
+ * logged when the log was actually written, so a missing logger on first
+ * call does not consume the one-shot slot.
+ */
+function logSkipOnce(
+  surfaceId: string,
+  logger: LoggerLike | undefined,
+  message: string,
+): boolean {
+  if (loggedSkipSurfaces.has(surfaceId)) {
+    return false;
+  }
+  if (!logger?.info) {
+    return false;
+  }
+  loggedSkipSurfaces.add(surfaceId);
+  logger.info(message);
+  return true;
+}
+
+/**
+ * Reset the per-process surface-guard skip log bookkeeping. Intended for tests
+ * that need to assert on the first-fire log without cross-test pollution.
+ * Not part of the production API surface; do not call from runtime code.
+ */
+export function __resetSurfaceGuardSkipLogStateForTests(): void {
+  loggedSkipSurfaces.clear();
+}
+
 export function checkSurfaceGuard(): SurfaceGuardResult {
   const validation = validateSurfaceRegistry(PLUGIN_SURFACE_REGISTRY);
   const violations: string[] = [];
@@ -98,7 +145,7 @@ export type HookHandler<E, C, R> = (event: E, ctx: C) => R | Promise<R>;
 
 export function guardHook<E, C, R>(
   surfaceId: string,
-  logger: { info?: (msg: string) => void; debug?: (msg: string) => void } | undefined,
+  logger: LoggerLike | undefined,
   handler: HookHandler<E, C, R>,
 ): HookHandler<E, C, R> {
   const check = isSurfaceEnabled(surfaceId);
@@ -106,8 +153,15 @@ export function guardHook<E, C, R>(
     return handler;
   }
   const reason = check.reason ?? 'surface not enabled';
+  // Log on the first ACTUAL no-op invocation, not at construction time
+  // (PRI-298). Construction-time logging would emit a `SKIP` line at
+  // plugin startup for every registered quiet hook, regardless of
+  // whether the hook ever fires — which is exactly the startup log
+  // noise this change is meant to prevent. The one-shot is consumed only
+  // when the log was actually written, so `undefined` logger on first
+  // call does not eat the slot.
   return (_event: E, _ctx: C): R | Promise<R> => {
-    logger?.info?.(`[PD:surface-guard] SKIP ${surfaceId}: ${reason}`);
+    logSkipOnce(surfaceId, logger, `[PD:surface-guard] SKIP ${surfaceId}: ${reason}`);
     return undefined as R;
   };
 }
@@ -115,14 +169,18 @@ export function guardHook<E, C, R>(
 export function guardService<T extends OpenClawPluginService>(
   surfaceId: string,
   service: T,
-  logger?: { info?: (msg: string) => void; debug?: (msg: string) => void },
+  logger?: LoggerLike,
 ): T | null {
   const check = isSurfaceEnabled(surfaceId);
   if (check.enabled) {
     return service;
   }
   const reason = check.reason ?? 'surface not enabled';
-  logger?.info?.(`[PD:surface-guard] SKIP service ${surfaceId}: ${reason}`);
+  // guardService is called once per service during plugin registration,
+  // so the once-only check fires on the registration call itself. The
+  // shared helper makes the consumption rule identical to guardHook:
+  // a missing logger on first call does not consume the one-shot.
+  logSkipOnce(surfaceId, logger, `[PD:surface-guard] SKIP service ${surfaceId}: ${reason}`);
   return null;
 }
 

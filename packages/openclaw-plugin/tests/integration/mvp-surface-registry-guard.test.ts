@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -107,6 +107,42 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
         expect(surface.disabledReason).toBeDefined();
         expect(typeof surface.disabledReason).toBe('string');
         expect(surface.disabledReason!.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('no disabledReason references Story A / Story A\' / MVP 验收 / 测试任务 (PRI-298)', () => {
+      const disabled = PLUGIN_SURFACE_REGISTRY.filter(
+        s => s.category === 'quiet' || s.category === 'gone' || s.category === 'legacy_retire',
+      );
+      expect(disabled.length).toBeGreaterThan(0);
+      for (const surface of disabled) {
+        expect(surface.disabledReason).toBeDefined();
+        expect(surface.disabledReason).not.toMatch(/Story A/);
+        expect(surface.disabledReason).not.toMatch(/MVP\s*验收/);
+        expect(surface.disabledReason).not.toMatch(/测试任务/);
+      }
+    });
+
+    it('disabledReason copy is opt-in / feature-flag oriented for quiet surfaces (PRI-298)', () => {
+      const quiet = PLUGIN_SURFACE_REGISTRY.filter(s => s.category === 'quiet');
+      expect(quiet.length).toBeGreaterThan(0);
+      for (const surface of quiet) {
+        // Every quiet surface should anchor its reason in at least one
+        // stable, long-lived framing so the log copy can live in the product
+        // long after MVP. Acceptable framings:
+        //   - opt-in / disabled language (new quiet entries),
+        //   - feature-flag path (most existing entries),
+        //   - ADR reference (entries gated by a specific ADR section).
+        // What we still reject: ephemeral MVP-phase copy (covered by the
+        // Story A / MVP 验收 test above).
+        const reason = surface.disabledReason!.toLowerCase();
+        const hasOptInOrDisabled = /opt-?in|disabled/.test(reason);
+        const hasFeatureFlag = reason.includes('feature flag');
+        const hasAdrReference = /adr-?\d+|adr\s+\d+/.test(reason);
+        expect(
+          hasOptInOrDisabled || hasFeatureFlag || hasAdrReference,
+          `quiet surface ${surface.id} disabledReason must reference opt-in, feature flag, or an ADR: "${surface.disabledReason}"`,
+        ).toBe(true);
       }
     });
   });
@@ -292,6 +328,17 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
   });
 
   describe('surface guard runtime', () => {
+    let resetSurfaceGuardLogState: () => void;
+
+    beforeEach(async () => {
+      // Lazy import so the module state is freshly required per describe and
+      // we can reset the PRI-298 rate-limit bookkeeping before every runtime
+      // assertion that depends on the first-fire log firing.
+      const mod = await import('../../src/core/surface-guard.js');
+      resetSurfaceGuardLogState = mod.__resetSurfaceGuardSkipLogStateForTests;
+      resetSurfaceGuardLogState();
+    });
+
     it('checkSurfaceGuard passes with current registry', async () => {
       const { checkSurfaceGuard } = await import('../../src/core/surface-guard.js');
       const result = checkSurfaceGuard();
@@ -402,6 +449,89 @@ describe('MVP Surface Registry Guard (PRI-289)', () => {
       const service = { api: null, start: () => {} };
       const guarded = guardService('service:nonexistent_service', service);
       expect(guarded).toBeNull();
+    });
+
+    it('PRI-298 rate-limit: quiet surface logs once, not per invocation', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+      const logs: string[] = [];
+      const logger = { info: (msg: string) => { logs.push(msg); } };
+      const handler = () => 'result';
+      const guarded = guardHook('hook:after_tool_call.trajectory', logger, handler);
+
+      // First invocation must surface the disabled reason.
+      guarded({} as never, {} as never);
+      expect(logs.length).toBe(1);
+      expect(logs[0]).toContain('[PD:surface-guard] SKIP');
+      expect(logs[0]).toContain('hook:after_tool_call.trajectory');
+
+      // Subsequent invocations on the same surfaceId stay silent.
+      for (let i = 0; i < 10; i += 1) {
+        guarded({} as never, {} as never);
+      }
+      expect(logs.length).toBe(1);
+    });
+
+    it('PRI-298 rate-limit: resetSurfaceGuardSkipLogStateForTests re-arms first-fire', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+      const logs: string[] = [];
+      const logger = { info: (msg: string) => { logs.push(msg); } };
+      const handler = () => 'result';
+      const guarded = guardHook('hook:after_tool_call.trajectory', logger, handler);
+
+      guarded({} as never, {} as never);
+      expect(logs.length).toBe(1);
+
+      // Additional fires on the same surface: still 1 log.
+      guarded({} as never, {} as never);
+      expect(logs.length).toBe(1);
+
+      // Reset the per-process bookkeeping (simulating a fresh process / test
+      // isolation). The next fire on a freshly-constructed guarded handler
+      // should log again.
+      resetSurfaceGuardLogState();
+      const guarded2 = guardHook('hook:after_tool_call.trajectory', logger, handler);
+      guarded2({} as never, {} as never);
+      expect(logs.length).toBe(2);
+    });
+
+    it('PRI-298 / chatgpt P2: guardHook does NOT log at construction time', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+      const logs: string[] = [];
+      const logger = { info: (msg: string) => { logs.push(msg); } };
+      // The act of constructing the guard must not emit a SKIP line. Plugin
+      // startup that registers 7 quiet hooks would otherwise log 7 SKIP
+      // lines before any real traffic.
+      guardHook('hook:after_tool_call.trajectory', logger, () => 'result');
+      expect(logs.length).toBe(0);
+
+      // The first INVOCATION is when the log fires (and only once).
+      const guarded = guardHook('hook:llm_output.trajectory', logger, () => 'result');
+      guarded({} as never, {} as never);
+      expect(logs.length).toBe(1);
+    });
+
+    it('PRI-298 / coderabbit Major: guardHook logger undefined on first fire does not consume the one-shot slot', async () => {
+      const { guardHook } = await import('../../src/core/surface-guard.js');
+
+      // First call: no logger. The no-op suppresses the handler, but the
+      // once-only slot is preserved (a missing logger must not eat the
+      // chance to surface the disabled reason later).
+      const handler1 = guardHook('hook:after_tool_call.trajectory', undefined, () => 'result');
+      handler1({} as never, {} as never);
+
+      // Second call: real logger. This is now the first log emission for
+      // this surfaceId.
+      const logs: string[] = [];
+      const logger = { info: (msg: string) => { logs.push(msg); } };
+      const handler2 = guardHook('hook:after_tool_call.trajectory', logger, () => 'result');
+      handler2({} as never, {} as never);
+      expect(logs.length).toBe(1);
+      expect(logs[0]).toContain('[PD:surface-guard] SKIP');
+
+      // Third call: slot is now consumed; the third call is silent.
+      const handler3 = guardHook('hook:after_tool_call.trajectory', logger, () => 'result');
+      handler3({} as never, {} as never);
+      expect(logs.length).toBe(1);
     });
   });
 });
