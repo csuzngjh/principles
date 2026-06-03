@@ -11,6 +11,7 @@ import { DefaultEvaluatorValidator } from '../internalization/evaluator-output.j
 import { createPITaskDiagnosticJson } from '../internalization/pitask-metadata.js';
 import type { TaskRecord } from '../task-status.js';
 import { TestDoubleRuntimeAdapter } from '../adapter/test-double-runtime-adapter.js';
+import { RunnerPhase } from '../runner/runner-phase.js';
 
 const ARTIFICER_TASK_ID = 'artificer-001';
 const SCRIBE_TASK_ID = 'scribe-001';
@@ -97,7 +98,7 @@ function makeScribeArtifact(): PIArtifactRecord {
   };
 }
 
-function makeEvaluatorOutput(): EvaluatorOutputV1 {
+function makeEvaluatorOutput(overrides: Partial<EvaluatorOutputV1> = {}): EvaluatorOutputV1 {
   return {
     taskId: EVALUATOR_TASK_ID,
     sourceArtificerArtifactId: 'pi-art-artificer-001-run-001',
@@ -115,6 +116,7 @@ function makeEvaluatorOutput(): EvaluatorOutputV1 {
     },
     risks: ['May need additional integration tests'],
     generatedAt: new Date().toISOString(),
+    ...overrides,
   };
 }
 
@@ -418,6 +420,81 @@ describe('EvaluatorRunner (vertical slice)', () => {
     const artificerArtifact = await store.getArtifactById('pi-art-artificer-001-run-001');
     expect(artificerArtifact).not.toBeNull();
     expect(artificerArtifact?.validationStatus).toBe('pending');
+  });
+
+  it('rejected evaluation does not validate any artifact', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+    const deps = createMockDeps({ artifactStore: store });
+
+    const rejectedOutput = makeEvaluatorOutput({
+      evaluation: {
+        decision: 'rejected',
+        summary: 'Plan is fundamentally flawed',
+        score: 0.2,
+        strengths: [],
+        concerns: ['No test coverage', 'High risk'],
+        requiredChanges: ['Rewrite entire plan'],
+      },
+    });
+
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
+      payload: rejectedOutput,
+    });
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // Neither artifact should be validated when evaluation is rejected
+    const scribeArtifact = await store.getArtifactById('pi-art-scribe-001');
+    expect(scribeArtifact?.validationStatus).toBe('pending');
+
+    const artificerArtifact = await store.getArtifactById('pi-art-artificer-001-run-001');
+    expect(artificerArtifact?.validationStatus).toBe('pending');
+  });
+
+  it('needs_revision evaluation does not validate any artifact', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+    const deps = createMockDeps({ artifactStore: store });
+
+    const needsRevisionOutput = makeEvaluatorOutput({
+      evaluation: {
+        decision: 'needs_revision',
+        summary: 'Plan has issues but is salvageable',
+        score: 0.5,
+        strengths: ['Good structure'],
+        concerns: ['Missing error handling'],
+        requiredChanges: ['Add error handling'],
+      },
+    });
+
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
+      payload: needsRevisionOutput,
+    });
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // Neither artifact should be validated when evaluation is needs_revision
+    const scribeArtifact = await store.getArtifactById('pi-art-scribe-001');
+    expect(scribeArtifact?.validationStatus).toBe('pending');
   });
 
   it('missing scribe artifact emits evaluator_no_principle_bearer_found telemetry', async () => {
@@ -874,6 +951,141 @@ describe('EvaluatorRunner (vertical slice)', () => {
     expect(artifacts).toHaveLength(0);
     expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
   });
+
+  it('malformed output does not update validationStatus', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+    const deps = createMockDeps({ artifactStore: store });
+
+    const malformedOutput = {
+      notAnEvaluatorOutput: true,
+    };
+
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
+      payload: malformedOutput,
+    });
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('failed');
+
+    // No artifact should be validated when output is malformed
+    const scribeArtifact = await store.getArtifactById('pi-art-scribe-001');
+    expect(scribeArtifact?.validationStatus).toBe('pending');
+  });
+
+  it('valid output after success sets currentPhase to Completed', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+    const deps = createMockDeps({ artifactStore: store });
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+    expect(runner.currentPhase).toBe(RunnerPhase.Completed);
+  });
+
+  it('failure path does not mark succeeded', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+    const deps = createMockDeps({ artifactStore: store });
+
+    // Runtime fails
+    const failedStatus: RunStatus = { status: 'failed', runId: 'run-evaluator-001' };
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).pollRun = vi.fn().mockResolvedValue(failedStatus);
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('failed');
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+    expect(runner.currentPhase).toBe(RunnerPhase.Failed);
+  });
+
+  it('sourceTrace.scribeArtifactId mismatch with store emits scribe_artifact_not_principle', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+    // No scribe artifact in store, but output references one
+    const deps = createMockDeps({ artifactStore: store });
+
+    const output = makeEvaluatorOutput();
+    (output.sourceTrace as unknown as Record<string, unknown>).scribeArtifactId = 'pi-art-scribe-nonexistent';
+
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({
+      payload: output,
+    });
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    const events = (deps.eventEmitter.emitTelemetry as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call: unknown[]) => call[0] as { eventType: string; payload: Record<string, unknown> },
+    );
+    const notPrincipleEvent = events.find((e) => e.eventType === 'evaluator_scribe_artifact_not_principle');
+    expect(notPrincipleEvent).toBeDefined();
+    expect(notPrincipleEvent?.payload?.scribeArtifactId).toBe('pi-art-scribe-nonexistent');
+  });
+
+  // ── Telemetry dedup regression test ───────────────────────────────────────
+
+  it('successful run emits exactly 1 evaluator_output_validated and 1 evaluator_decision_recorded', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const deps = createMockDeps({ artifactStore: store });
+    const emitTelemetry = vi.fn();
+    (deps.eventEmitter as unknown as Record<string, unknown>).emitTelemetry = emitTelemetry;
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test-dedup',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 5000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // Count telemetry events by type
+    const outputValidatedCalls = emitTelemetry.mock.calls.filter(
+      (c: unknown[]) => typeof c[0] === 'object' && c[0] !== null && 'eventType' in c[0] && c[0].eventType === 'evaluator_output_validated',
+    );
+    const decisionRecordedCalls = emitTelemetry.mock.calls.filter(
+      (c: unknown[]) => typeof c[0] === 'object' && c[0] !== null && 'eventType' in c[0] && c[0].eventType === 'evaluator_decision_recorded',
+    );
+
+    // Exactly 1 output_validated (from BasePeerRunner), not 2
+    expect(outputValidatedCalls).toHaveLength(1);
+    // Exactly 1 decision_recorded (from emitSuccessTelemetry)
+    expect(decisionRecordedCalls).toHaveLength(1);
+  });
 });
 
 describe('DefaultEvaluatorValidator (vertical slice)', () => {
@@ -1046,6 +1258,94 @@ describe('DefaultEvaluatorValidator (vertical slice)', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('dreamerArtifactId'))).toBe(true);
   });
+
+  it('rejects prototype-inherited taskId (ERR-013)', async () => {
+    const proto = { taskId: EVALUATOR_TASK_ID };
+    const output = Object.create(proto) as Record<string, unknown>;
+    // Copy all own properties from a valid output except taskId
+    const valid = makeEvaluatorOutput();
+    output.sourceArtificerArtifactId = valid.sourceArtificerArtifactId;
+    output.evaluation = valid.evaluation;
+    output.sourceTrace = valid.sourceTrace;
+    output.risks = valid.risks;
+    output.generatedAt = valid.generatedAt;
+    // taskId is only on prototype, not own property
+    expect(Object.hasOwn(output, 'taskId')).toBe(false);
+
+    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('taskId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited sourceArtificerArtifactId (ERR-013)', async () => {
+    const output = makeEvaluatorOutput() as unknown as Record<string, unknown>;
+    const validValue = output.sourceArtificerArtifactId as string;
+    delete output.sourceArtificerArtifactId;
+    const proto = { sourceArtificerArtifactId: validValue };
+    Object.setPrototypeOf(output, proto);
+    // sourceArtificerArtifactId is now only on prototype, not own property
+    expect(Object.hasOwn(output, 'sourceArtificerArtifactId')).toBe(false);
+
+    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('sourceArtificerArtifactId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited sourceTrace.artificerArtifactId (ERR-013)', async () => {
+    const output = makeEvaluatorOutput();
+    const sourceTrace = output.sourceTrace as unknown as Record<string, unknown>;
+    const validValue = sourceTrace.artificerArtifactId as string;
+    delete sourceTrace.artificerArtifactId;
+    const proto = { artificerArtifactId: validValue };
+    Object.setPrototypeOf(sourceTrace, proto);
+    // artificerArtifactId is now only on prototype, not own property
+    expect(Object.hasOwn(sourceTrace, 'artificerArtifactId')).toBe(false);
+
+    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('sourceTrace.artificerArtifactId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited evaluation.decision (ERR-013)', async () => {
+    const output = makeEvaluatorOutput();
+    const evaluation = output.evaluation as unknown as Record<string, unknown>;
+    delete evaluation.decision;
+    const proto = { decision: 'approved' };
+    Object.setPrototypeOf(evaluation, proto);
+    // decision is now only on prototype, not own property
+    expect(Object.hasOwn(evaluation, 'decision')).toBe(false);
+
+    const result = await validator.validate(output as unknown, EVALUATOR_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('evaluation.decision'))).toBe(true);
+  });
+
+  it('accepts unknown input that is structurally valid (ERR-001)', async () => {
+    // Build a plain object (not typed as EvaluatorOutputV1) and verify
+    // the unknown-typed validate interface works correctly
+    const plainObject: unknown = {
+      taskId: EVALUATOR_TASK_ID,
+      sourceArtificerArtifactId: 'pi-art-artificer-001-run-001',
+      evaluation: {
+        decision: 'approved',
+        summary: 'Implementation plan is well-structured and feasible',
+        score: 0.85,
+        strengths: ['Clear change descriptions', 'Good test coverage plan'],
+        concerns: ['Rollout notes could be more specific'],
+        requiredChanges: [],
+      },
+      sourceTrace: {
+        artificerArtifactId: 'pi-art-artificer-001-run-001',
+        scribeArtifactId: 'pi-art-scribe-001',
+      },
+      risks: ['May need additional integration tests'],
+      generatedAt: new Date().toISOString(),
+    };
+
+    const result = await validator.validate(plainObject, EVALUATOR_TASK_ID);
+    expect(result.valid).toBe(true);
+  });
+
 });
 
 describe('EvaluatorRunner integration: test-double captures sourceArtificerArtifactId from prompt', () => {

@@ -190,6 +190,7 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('evaluator_output_extraction_failed'),
   Type.Literal('evaluator_mark_failed_error'),
   Type.Literal('evaluator_mark_retry_error'),
+  Type.Literal('evaluator_decision_recorded'),
   // PRI-302: Scribe runner events (BasePeerRunner migration)
   Type.Literal('scribe_task_leased'),
   Type.Literal('scribe_context_built'),
