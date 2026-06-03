@@ -564,6 +564,64 @@ describe('DefaultArtificerValidator (PRI-111)', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('must match'))).toBe(true);
   });
+
+  it('rejects prototype-inherited taskId (ERR-013)', async () => {
+    const proto = { taskId: ARTIFICER_TASK_ID };
+    const output = Object.create(proto) as ArtificerOutputV1;
+    // Copy all own properties from a valid output except taskId
+    const valid = makeArtificerOutput();
+    Object.assign(output, { ...valid, taskId: undefined });
+    delete (output as unknown as Record<string, unknown>).taskId;
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('taskId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited sourceScribeArtifactId (ERR-013)', async () => {
+    const output = makeArtificerOutput();
+    const ownValue = output.sourceScribeArtifactId;
+    delete (output as unknown as Record<string, unknown>).sourceScribeArtifactId;
+    Object.setPrototypeOf(output, { sourceScribeArtifactId: ownValue });
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('sourceScribeArtifactId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited sourceTrace.scribeArtifactId (ERR-013)', async () => {
+    const output = makeArtificerOutput();
+    const ownValue = output.sourceTrace.scribeArtifactId;
+    delete (output.sourceTrace as unknown as Record<string, unknown>).scribeArtifactId;
+    Object.setPrototypeOf(output.sourceTrace, { scribeArtifactId: ownValue });
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('sourceTrace.scribeArtifactId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited implementationPlan.summary (ERR-013)', async () => {
+    const output = makeArtificerOutput();
+    const ownValue = output.implementationPlan.summary;
+    delete (output.implementationPlan as unknown as Record<string, unknown>).summary;
+    Object.setPrototypeOf(output.implementationPlan, { summary: ownValue });
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('implementationPlan.summary'))).toBe(true);
+  });
+
+  it('rejects empty string sourceTrace.philosopherArtifactId when present', async () => {
+    const output = makeArtificerOutput();
+    (output.sourceTrace as unknown as Record<string, unknown>).philosopherArtifactId = '';
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('philosopherArtifactId'))).toBe(true);
+  });
+
+  it('rejects empty string sourceTrace.dreamerArtifactId when present', async () => {
+    const output = makeArtificerOutput();
+    (output.sourceTrace as unknown as Record<string, unknown>).dreamerArtifactId = '';
+    const result = await validator.validate(output, ARTIFICER_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('dreamerArtifactId'))).toBe(true);
+  });
 });
 
 describe('ArtificerRunner integration: test-double captures sourceScribeArtifactId from prompt', () => {
