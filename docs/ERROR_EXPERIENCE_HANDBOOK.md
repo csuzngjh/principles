@@ -64,6 +64,7 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-012 | PR branch based on stale main reverts already-merged telemetry fields | PR #659 |
 | ERR-025 | Test coverage proves isolated helper behavior, not real production defense | PRI-209 |
 | ERR-026 | Hand-written test database schema drifts from production, allowing invalid SQL to pass tests | PRI-209 |
+| ERR-050 | Once-only observability guard fires at wrong abstraction level and consumes slot without producing output | PRI-298 |
 
 ---
 
@@ -519,7 +520,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When a strategy ADR defines a precise scope (like MVP-Core), all documentation and test comments must be audited to align with that scope. Any label that claims something is "core" must trace directly to the ADR's definition. Review trigger: any PR that introduces or modifies `mvp_core_dependency` labels must cross-reference ADR-0014's explicit MVP-Core list.
 - **Source**: PRI-227 / PR #698
 - **Date**: 2026-05-24
-- **Recurrence**: Yes - same class as ERR-027
+- **Recurrence**: Yes - same class as ERR-027. Also 2026-06-02 PRI-298 (PR #799): quiet surface `disabledReason` copy said "enable via feature flag override" but the runtime guard path (`isSurfaceEnabled(surfaceId)` with no overrides argument) does not consume `.pd/feature-flags.yaml`, so the copy gave operators an impossible next action. Fixed by rephrasing to "default off per ADR-0014 §2.5 (preserved in plugin code, not active in production)" which honestly describes the state without promising a non-existent override path.
 
 ---
 
@@ -674,10 +675,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 47 |
-| Last updated | 2026-06-01 |
+| Total lessons | 48 |
+| Last updated | 2026-06-02 |
 | Top category | Schema & Type |
-| Recurring errors | 24 |
+| Recurring errors | 25 |
 
 ---
 
@@ -762,3 +763,15 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Source**: PRI-294 / PR #790
 - **Date**: 2026-06-02
 - **Recurrence**: Same class as ERR-008 (lineage fields must not be trusted from LLM output)
+
+---
+
+**[ERR-050]** | Once-only observability guard fires at wrong abstraction level and consumes slot without producing output
+
+- **What happened**: In `surface-guard.ts`, the once-only SKIP log for quiet surfaces was implemented at `guardHook()` construction time (when the guarded wrapper is created) instead of at first-fire time (when the returned no-op is actually invoked). Two bugs resulted: (1) plugin startup emitted one SKIP line per registered quiet hook before any real traffic, creating the same startup log noise the change was meant to prevent; (2) when `logger` was `undefined` on the first `guardHook()` call, the `Set.add(surfaceId)` still consumed the once-only slot, so a later call that supplied a logger could never emit the disabled reason — the observability guarantee was silently lost.
+- **Why it's wrong**: The once-only guard's purpose is to suppress *repeated* log noise on hot hooks while preserving *first-fire* observability (ERR-002). Firing at construction time defeats the purpose (startup noise). Consuming the slot without producing output violates ERR-002 (graceful degradation must include a reason) — the operator never sees why the surface was skipped, and the slot is permanently consumed. This is the same class as ERR-009 (silently skip instead of failing loud) and ERR-039 (test `filter(isRecord)` silently discards malformed items).
+- **Correct approach**: (1) Move the log emission into the returned no-op handler so it fires on first *invocation*, not at construction time. (2) Only mark the surface as logged when the log was actually written (`logger?.info` was called). A missing logger on first call preserves the slot for a later call that does have a logger. Extract a `logSkipOnce(surfaceId, logger, message)` helper that returns `true` only when the log was emitted, making the consumption rule explicit and testable.
+- **How to prevent**: When implementing a once-only / rate-limited observability guard: (a) fire at the point of *actual effect* (invocation), not at registration/construction time; (b) only consume the one-shot slot when the observable output was actually produced; (c) add tests for: first-fire visible, subsequent-fire silent, logger-undefined does not consume slot, logger-supplied-later still gets first-fire. This is a 30-second review check: "Does the once-only guard fire at the right time? Does a missing output channel consume the slot?"
+- **Source**: PRI-298 / PR #799
+- **Date**: 2026-06-02
+- **Recurrence**: Same class as ERR-002, ERR-009, ERR-039
