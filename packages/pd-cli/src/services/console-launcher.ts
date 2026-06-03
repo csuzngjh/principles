@@ -100,11 +100,33 @@ export async function probeConsoleHealth(host: string, port: number, timeoutMs =
     const req = http.request(
       { host, port, path: '/api/health', method: 'GET', timeout: timeoutMs },
       (res) => {
-        if (!res.statusCode || res.statusCode >= 500) {
-          resolve({ healthy: false, reason: `console health endpoint returned ${res.statusCode ?? 'no-status'}` });
+        if (res.statusCode !== 200) {
+          resolve({ healthy: false, reason: `console health endpoint returned status ${res.statusCode ?? 'no-status'}` });
           return;
         }
-        resolve({ healthy: true });
+        let data = '';
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          try {
+            const body = JSON.parse(data) as unknown;
+            if (body && typeof body === 'object') {
+              const isHealthy = 
+                (Object.hasOwn(body, 'healthy') && (body as { healthy: unknown }).healthy === true) ||
+                (Object.hasOwn(body, 'success') && (body as { success: unknown }).success === true);
+              if (isHealthy) {
+                resolve({ healthy: true });
+              } else {
+                resolve({ healthy: false, reason: 'console health JSON was missing healthy/success markers' });
+              }
+            } else {
+              resolve({ healthy: false, reason: 'console health endpoint returned non-object JSON' });
+            }
+          } catch (err) {
+            resolve({ healthy: false, reason: `failed to parse console health JSON: ${err instanceof Error ? err.message : String(err)}` });
+          }
+        });
       },
     );
     req.on('timeout', () => {
@@ -124,7 +146,7 @@ export async function findAvailablePort(
   preferred: number,
   limit = PORT_FALLBACK_LIMIT,
 ): Promise<number | null> {
-  for (let i = 0; i <= limit; i++) {
+  for (let i = 0; i < limit; i++) {
     const candidate = preferred + i;
     if (!(await isPortInUse(host, candidate))) return candidate;
   }
@@ -145,16 +167,19 @@ export async function openBrowser(url: string): Promise<{ opened: boolean; reaso
     if (platform === 'win32') {
       // Use `cmd /c start` so the process detaches and we don't hang.
       const child = spawn('cmd', ['/c', 'start', '""', url], { detached: true, stdio: 'ignore' });
+      child.on('error', () => { /* ignore */ });
       child.unref();
       return { opened: true };
     }
     if (platform === 'darwin') {
       const child = spawn('open', [url], { detached: true, stdio: 'ignore' });
+      child.on('error', () => { /* ignore */ });
       child.unref();
       return { opened: true };
     }
     // Linux / others
     const child = spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
+    child.on('error', () => { /* ignore */ });
     child.unref();
     return { opened: true };
   } catch (err) {

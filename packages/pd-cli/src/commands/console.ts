@@ -396,6 +396,39 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     fn();
   };
 
+  const cleanup = () => {
+    resolveOnce(() => {
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      process.exit(0);
+    });
+  };
+
+  child.on('error', (err) => {
+    resolveOnce(() => {
+      const result: ConsoleLaunchResult = {
+        status: 'failed',
+        url: '',
+        port: plan.port,
+        host: plan.host,
+        workspaceDir,
+        reused: false,
+        browserOpened: false,
+        reason: `console_spawn_failed: ${err.message}`,
+        nextAction: 'Check Node.js and package path configuration.',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`error: ${result.reason}`);
+      }
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      process.exit(1);
+    });
+  });
+
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+
   // 6) Wait for console ready (bounded poll)
   const readyDeadline = Date.now() + 15_000;
   let ready = false;
@@ -491,12 +524,5 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     }
   }
 
-  const cleanup = () => {
-    resolveOnce(() => {
-      try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      process.exit(0);
-    });
-  };
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
+
 }

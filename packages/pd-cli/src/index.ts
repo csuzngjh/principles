@@ -55,8 +55,9 @@ const program = new Command();
 
 program
   .name('pd')
-  .description('PD CLI 鈥?Pain recording, sample management, and evolution tasks')
-  .version(pkg.version);
+  .description('PD CLI — Pain recording, sample management, and evolution tasks')
+  .version(pkg.version)
+  .enablePositionalOptions();
 
 const painCmd = program
   .command('pain')
@@ -815,7 +816,12 @@ const _legacyCleanupCmd = legacyCmd
 
 const consoleCmd = program
   .command('console')
-  .description('Start the pd-console web UI for principle review (default: legacy launcher)');
+  .description('Start the pd-console web UI for principle review (default: legacy launcher)')
+  .passThroughOptions()
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-p, --port <port>', 'Port to listen on', '3100')
+  .option('--no-auth', 'Disable authentication (local dev only)', false)
+  .option('--json', 'Output JSON status', false);
 
 consoleCmd
   .command('start')
@@ -829,7 +835,7 @@ consoleCmd
     await handleConsole({
       workspace: opts.workspace,
       port: opts.port,
-      noAuth: opts.noAuth,
+      noAuth: opts.auth === false,
       json: opts.json,
     });
   });
@@ -850,7 +856,7 @@ consoleCmd
       workspace: opts.workspace,
       port: opts.port,
       host: opts.host,
-      noAuth: opts.noAuth,
+      noAuth: opts.auth === false,
       noBrowser: opts.browser === false,
       json: opts.json,
     });
@@ -862,7 +868,7 @@ consoleCmd.action(async (opts) => {
   await handleConsole({
     workspace: opts.workspace,
     port: opts.port,
-    noAuth: opts.noAuth,
+    noAuth: opts.auth === false,
     json: opts.json,
   });
 });

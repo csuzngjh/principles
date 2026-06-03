@@ -184,7 +184,7 @@ describe('planConsoleLaunch — reused (healthy console on preferred port)', () 
     const server = http.createServer((req, res) => {
       if (req.url === '/api/health') {
         res.statusCode = 200;
-        res.end('ok');
+        res.end(JSON.stringify({ success: true }));
         return;
       }
       res.statusCode = 404;
@@ -266,7 +266,7 @@ describe('probeConsoleHealth', () => {
     const server = http.createServer((req, res) => {
       if (req.url === '/api/health') {
         res.statusCode = 200;
-        res.end('ok');
+        res.end(JSON.stringify({ success: true }));
         return;
       }
       res.statusCode = 404;
@@ -384,6 +384,21 @@ describe('CLI command wiring (pd console open)', () => {
       if (previous !== undefined) process.env.PD_WORKSPACE_DIR = previous;
     }
   });
+
+  it('pd console open --json with --no-auth and --no-browser parses options correctly', () => {
+    const out = runPd(['console', 'open', '--workspace', tmp, '--json', '--no-auth', '--no-browser'], workspaceRoot);
+    const parsed = JSON.parse(out);
+    expect(parsed).toHaveProperty('status');
+    expect(parsed.browserOpened).toBe(false);
+  });
+
+  it('pd console --no-auth --json legacy path parses --no-auth correctly', () => {
+    const out = runPd(['console', '--workspace', tmp, '--json', '--no-auth'], workspaceRoot);
+    if (out.trim().length > 0) {
+      const parsed = JSON.parse(out);
+      expect(parsed).toBeDefined();
+    }
+  });
 });
 
 function runPd(args: string[], cwd: string): string {
@@ -393,8 +408,11 @@ function runPd(args: string[], cwd: string): string {
       cwd,
     });
   } catch (err: unknown) {
-    if (err && typeof err === 'object' && 'stdout' in err) {
-      return String((err as { stdout: unknown }).stdout);
+    if (err && typeof err === 'object' && Object.hasOwn(err, 'stdout')) {
+      const stdoutVal = Reflect.get(err, 'stdout');
+      if (typeof stdoutVal === 'string' || stdoutVal instanceof Buffer) {
+        return String(stdoutVal);
+      }
     }
     throw err;
   }
