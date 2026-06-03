@@ -1,4 +1,4 @@
-# Error Experience Handbook
+﻿# Error Experience Handbook
 
 > **MUST READ before starting any task.** This document records real errors made by AI coding assistants during code reviews. Reading it prevents repeating the same mistakes.
 
@@ -64,7 +64,6 @@ Errors where AI assistants skipped required testing or verification steps.
 | ERR-012 | PR branch based on stale main reverts already-merged telemetry fields | PR #659 |
 | ERR-025 | Test coverage proves isolated helper behavior, not real production defense | PRI-209 |
 | ERR-026 | Hand-written test database schema drifts from production, allowing invalid SQL to pass tests | PRI-209 |
-| ERR-050 | Once-only observability guard fires at wrong abstraction level and consumes slot without producing output | PRI-298 |
 
 ---
 
@@ -139,6 +138,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 | ID | Summary | Source |
 |----|---------|--------|
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
+| ERR-050 | Modified bundled/generated copy instead of source of truth | PRI-250 |
+| ERR-051 | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path | PRI-297 |
+| ERR-052 | Cherry-pick from stacked feature branch cross-contaminates unrelated PR | PRI-299 |
+| ERR-053 | New CLI subcommand never registered in Commander program - 4 of 22 wiring tests silently fail | PRI-299 |
 
 ---
 
@@ -520,7 +523,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When a strategy ADR defines a precise scope (like MVP-Core), all documentation and test comments must be audited to align with that scope. Any label that claims something is "core" must trace directly to the ADR's definition. Review trigger: any PR that introduces or modifies `mvp_core_dependency` labels must cross-reference ADR-0014's explicit MVP-Core list.
 - **Source**: PRI-227 / PR #698
 - **Date**: 2026-05-24
-- **Recurrence**: Yes - same class as ERR-027. Also 2026-06-02 PRI-298 (PR #799): quiet surface `disabledReason` copy said "enable via feature flag override" but the runtime guard path (`isSurfaceEnabled(surfaceId)` with no overrides argument) does not consume `.pd/feature-flags.yaml`, so the copy gave operators an impossible next action. Fixed by rephrasing to "default off per ADR-0014 §2.5 (preserved in plugin code, not active in production)" which honestly describes the state without promising a non-existent override path.
+- **Recurrence**: Yes - same class as ERR-027
 
 ---
 
@@ -675,10 +678,10 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 48 |
-| Last updated | 2026-06-02 |
+| Total lessons | 51 |
+| Last updated | 2026-06-03 |
 | Top category | Schema & Type |
-| Recurring errors | 25 |
+| Recurring errors | 26 |
 
 ---
 
@@ -766,12 +769,47 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-050]** | Once-only observability guard fires at wrong abstraction level and consumes slot without producing output
+**[ERR-050]** | Modified bundled/generated copy instead of source of truth — fix overwritten on next build
 
-- **What happened**: In `surface-guard.ts`, the once-only SKIP log for quiet surfaces was implemented at `guardHook()` construction time (when the guarded wrapper is created) instead of at first-fire time (when the returned no-op is actually invoked). Two bugs resulted: (1) plugin startup emitted one SKIP line per registered quiet hook before any real traffic, creating the same startup log noise the change was meant to prevent; (2) when `logger` was `undefined` on the first `guardHook()` call, the `Set.add(surfaceId)` still consumed the once-only slot, so a later call that supplied a logger could never emit the disabled reason — the observability guarantee was silently lost.
-- **Why it's wrong**: The once-only guard's purpose is to suppress *repeated* log noise on hot hooks while preserving *first-fire* observability (ERR-002). Firing at construction time defeats the purpose (startup noise). Consuming the slot without producing output violates ERR-002 (graceful degradation must include a reason) — the operator never sees why the surface was skipped, and the slot is permanently consumed. This is the same class as ERR-009 (silently skip instead of failing loud) and ERR-039 (test `filter(isRecord)` silently discards malformed items).
-- **Correct approach**: (1) Move the log emission into the returned no-op handler so it fires on first *invocation*, not at construction time. (2) Only mark the surface as logged when the log was actually written (`logger?.info` was called). A missing logger on first call preserves the slot for a later call that does have a logger. Extract a `logSkipOnce(surfaceId, logger, message)` helper that returns `true` only when the log was emitted, making the consumption rule explicit and testable.
-- **How to prevent**: When implementing a once-only / rate-limited observability guard: (a) fire at the point of *actual effect* (invocation), not at registration/construction time; (b) only consume the one-shot slot when the observable output was actually produced; (c) add tests for: first-fire visible, subsequent-fire silent, logger-undefined does not consume slot, logger-supplied-later still gets first-fire. This is a 30-second review check: "Does the once-only guard fire at the right time? Does a missing output channel consume the slot?"
-- **Source**: PRI-298 / PR #799
+- **What happened**: During PR #794, `better-sqlite3` was added to `packages/create-principles-disciple/console/package.json` (a bundled copy generated by `bundle-plugin.mjs`) instead of the source `packages/pd-console/package.json`. The next `prepack`/`prepublishOnly` would run `bundle-plugin.mjs` and overwrite the fix, silently losing the dependency.
+- **Why it's wrong**: `packages/create-principles-disciple/console/` is a generated artifact — `bundle-plugin.mjs` copies from `packages/pd-console/` and rewrites `@principles/core` to `file:../core`. Editing the generated copy is the same class as editing `dist/` output: it works until the next build. This is a process error: the agent did not trace the file's provenance before editing.
+- **Correct approach**: Always trace a file's provenance before editing. If the file is generated (by a bundle script, build step, or codegen), edit the SOURCE and re-run the generator. For this case: add `better-sqlite3` to `packages/pd-console/package.json`, then run `node scripts/bundle-plugin.mjs` to sync.
+- **How to prevent**: Before editing any `package.json` (or any file), check if it's listed in a bundle/build script's copy/rewrite step. If the file has a source of truth, edit the source and re-run the generator. Add a comment in generated files: `// GENERATED — edit packages/pd-console/ and re-run bundle-plugin.mjs`.
+- **Source**: PRI-250 / PR #794
 - **Date**: 2026-06-02
-- **Recurrence**: Same class as ERR-002, ERR-009, ERR-039
+- **Recurrence**: Same class as ERR-040 (published artifact missing components) — editing a generated artifact instead of its source.
+
+
+---
+**[ERR-051]** | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path
+
+- **What happened**: PRI-297 added security redaction to _extractParamsSummary() in gate.ts, which is called before RuleHost.evaluate() receives the params. This meant raw exec commands containing Authorization: Bearer or LINEAR_API_KEY= were redacted before RuleHost implementations could match against input.action.paramsSummary.command. A live rule intended to block a command by URL/argument after an auth header would fail to match. The EventLog.record() chokepoint correctly redacted before persistence, but the gate.ts source-level redaction was premature.
+- **Why it's wrong**: Security redaction must happen at the persistence boundary (before event log write), not at the enforcement boundary (before RuleHost evaluation). Redacting before RuleHost evaluation silently degrades rule matching accuracy — rules that match on command strings stop working for commands containing secrets. This is the same class as ERR-002 (silent degradation) — the mechanism exists, but it's applied at the wrong layer, creating a hidden behavior change.
+- **Correct approach**: Apply redaction only in EventLog.record() as a chokepoint before JSON persistence. Leave _extractParamsSummary() raw — it feeds into RuleHost evaluation for command-matching rules. If a future requirement needs redacted versions in both places, two separate calls are needed: one for RuleHost input (preserving structure), one for EventLog (redacting).
+- **How to prevent**: When adding security/privacy transformations, identify the data flow boundaries first: (1) enforcement boundary (where conditions are matched), (2) persistence boundary (where data is written). Always apply transformations at the persistence boundary. If enforcement needs sanitized data, create a separate cleaned copy — never mutate the enforcement input. Add a test that proves the enforcement path receives raw data.
+- **Source**: PRI-297 / PR #797
+- **Date**: 2026-06-03
+- **Recurrence**: Same class as ERR-002 (silent degradation at wrong layer)
+---
+
+**[ERR-052]** | Cherry-pick from stacked feature branch cross-contaminates unrelated PR
+
+- **What happened**: When creating PR #800 (PRI-300 console-launcher) from the `feat/pri-300-console-launcher` branch, a cherry-pick from `feat/pri-299-config-doctor` was used to bring in the ERR-050 handbook entry. This cherry-pick also brought in the `pd config doctor` CLI source files from PRI-299, which were completely unrelated to the console launcher PR. PR #800's diff included config-doctor code that belonged in PR #801 (PRI-299).
+- **Why it's wrong**: Cherry-picking from a stacked feature branch carries all commits on that branch, not just the intended one. This cross-contaminates PRs with unrelated code, making reviews confusing and creating merge conflicts when both PRs target main. The reviewer sees changes that don't belong and must investigate whether they're intentional.
+- **Correct approach**: When a new PR needs a handbook entry from another branch, create the entry fresh on the new branch instead of cherry-picking. For code dependencies between stacked branches, use `git rebase` or create the dependent branch from the tip of the first branch. Never cherry-pick from a feature branch that contains unrelated work.
+- **How to prevent**: Before cherry-picking, inspect the source branch's full commit list (`git log main..source-branch`). If it contains commits unrelated to the target, create the needed changes manually instead. Add a pre-cherry-pick checklist: (1) list source commits, (2) verify all are relevant, (3) if not, create fresh.
+- **Source**: PRI-299 / PR #800
+- **Date**: 2026-06-03
+- **Recurrence**: None
+
+---
+
+**[ERR-053]** | New CLI subcommand never registered in Commander program - 4 of 22 wiring tests silently fail
+
+- **What happened**: `pd config doctor` subcommand was implemented in `config-doctor.ts` with full handler logic, but the subcommand was never registered in `packages/pd-cli/src/index.ts`. The Commander program had no `.command('config')` or `.command('doctor')` registration, so `pd config doctor` would fail with "unknown command". Meanwhile, 4 of 22 CLI wiring tests in `cli-wiring-registration.test.ts` were silently failing because they tested registration existence without asserting the command actually runs.
+- **Why it's wrong**: A CLI subcommand that is not registered is completely unreachable to users. The implementation exists but the wiring is missing - same class as ERR-024 (security validator not wired into enforcement path) and ERR-048 (activation write path disconnected from read path). The silently failing tests are the same class as ERR-025 (tests prove isolated behavior, not production defense).
+- **Correct approach**: When adding a new CLI subcommand, the implementation checklist must include: (1) handler file, (2) Commander registration in `index.ts`, (3) wiring test that calls `program.parseAsync(['node', 'pd', 'config', 'doctor', ...])` and asserts it reaches the handler, (4) no test should silently pass when the command is unregistered.
+- **How to prevent**: Add a mandatory "Commander registration" checklist item for every new CLI subcommand. The wiring test must call `program.parseAsync()` with the full command path, not just test handler existence. Add a global test that enumerates all registered commands and verifies each has a corresponding handler file.
+- **Source**: PRI-299 / PR #801
+- **Date**: 2026-06-03
+- **Recurrence**: Same class as ERR-024, ERR-048 (code exists but is not wired into production path)
