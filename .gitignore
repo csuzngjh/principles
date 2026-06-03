@@ -83,9 +83,13 @@ code-concise/
 docs/*
 # Exception: AI assistant handbook must be committed
 !docs/ERROR_EXPERIENCE_HANDBOOK.md
+!docs/ERROR_PATTERN_INDEX.md
 # Exception: architecture docs must be committed
 !docs/architecture/
 !docs/architecture/**
+# Exception: ADRs must be committed
+!docs/adr/
+!docs/adr/**
 # Exception: website docs must be committed
 !packages/website/docs/
 !packages/website/zh/docs/
