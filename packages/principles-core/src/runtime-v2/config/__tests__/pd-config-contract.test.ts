@@ -401,6 +401,22 @@ describe('Scenario 6: Per-agent override beats default runtime', () => {
     expect(nn(effective.config.internalAgents.agents.dreamer).runtimeProfile).toBe('openclaw.default');
   });
 
+  it('agent without override uses user-configured defaultRuntime, not hard-coded default', () => {
+    const raw = makeValidConfig();
+    // User configures a custom defaultRuntime
+    raw.internalAgents.defaultRuntime = 'pd.anthropic-sonnet';
+    const result = validatePdConfig(raw);
+    if (!result.ok) throw new Error('Expected ok');
+    const effective = computeEffectivePdConfig(result.value);
+
+    // dreamer has no explicit runtimeProfile, so it should use the user's defaultRuntime
+    expect(nn(effective.config.internalAgents.agents.dreamer).runtimeProfile).toBe('pd.anthropic-sonnet');
+    // scribe also has no explicit runtimeProfile
+    expect(nn(effective.config.internalAgents.agents.scribe).runtimeProfile).toBe('pd.anthropic-sonnet');
+    // diagnostician has explicit override, so it keeps its own profile
+    expect(nn(effective.config.internalAgents.agents.diagnostician).runtimeProfile).toBe('openclaw.model.lmstudio.qwen3');
+  });
+
   it('redacted summary reflects per-agent override', () => {
     const raw = makeValidConfig();
     const result = validatePdConfig(raw);

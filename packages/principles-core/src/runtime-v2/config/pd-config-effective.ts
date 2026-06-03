@@ -106,10 +106,10 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
         runtimeProfile: userBinding.runtimeProfile ?? userConfig.internalAgents.defaultRuntime,
       };
     } else {
-      // No override: use default enabled + user's defaultRuntime
+      // No override: use default enabled + user's defaultRuntime (not the hard-coded default)
       agents[name] = {
         enabled: defaultBinding.enabled,
-        runtimeProfile: defaultBinding.runtimeProfile ?? userConfig.internalAgents.defaultRuntime,
+        runtimeProfile: userConfig.internalAgents.defaultRuntime,
       };
     }
   }
