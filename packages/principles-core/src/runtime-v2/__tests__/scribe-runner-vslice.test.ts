@@ -938,4 +938,78 @@ describe('DefaultScribeValidator (PRI-109)', () => {
     const result = await validator.validate(output, SCRIBE_TASK_ID, 'pi-art-philosopher-001-run-001');
     expect(result.valid).toBe(true);
   });
+
+  // ── ERR-013: prototype-inherited required fields must be rejected ────────
+
+  it('rejects prototype-inherited taskId (e.g. toString) — ERR-013', async () => {
+    const proto = { taskId: 'inherited-task-id' };
+    const output = Object.create(proto) as Record<string, unknown>;
+    output.sourcePhilosopherArtifactId = 'pi-art-philosopher-001-run-001';
+    output.principleDraft = {
+      title: 't', statement: 's', rationale: 'r',
+      applicability: [], antiPatterns: [], confidence: 0.9,
+    };
+    output.sourceTrace = { philosopherArtifactId: 'pi-art-philosopher-001-run-001' };
+    output.risks = [];
+    output.generatedAt = new Date().toISOString();
+    // taskId is only on prototype, not own property — must fail
+    const result = await validator.validate(output, SCRIBE_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('taskId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited sourcePhilosopherArtifactId — ERR-013', async () => {
+    const output = makeScribeOutput();
+    // Delete own property, put on prototype
+    const obj = output as unknown as Record<string, unknown>;
+    const originalValue = obj.sourcePhilosopherArtifactId;
+    delete obj.sourcePhilosopherArtifactId;
+    Object.setPrototypeOf(obj, { sourcePhilosopherArtifactId: originalValue });
+    const result = await validator.validate(output, SCRIBE_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('sourcePhilosopherArtifactId'))).toBe(true);
+  });
+
+  it('rejects prototype-inherited sourceTrace.philosopherArtifactId — ERR-013', async () => {
+    const output = makeScribeOutput();
+    const st = output.sourceTrace as unknown as Record<string, unknown>;
+    const originalValue = st.philosopherArtifactId;
+    delete st.philosopherArtifactId;
+    Object.setPrototypeOf(st, { philosopherArtifactId: originalValue });
+    const result = await validator.validate(output, SCRIBE_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('sourceTrace.philosopherArtifactId'))).toBe(true);
+  });
+
+  // ── dreamerArtifactId validation ────────────────────────────────────────
+
+  it('accepts valid dreamerArtifactId when present', async () => {
+    const output = makeScribeOutput();
+    (output.sourceTrace as unknown as Record<string, unknown>).dreamerArtifactId = 'pi-art-dreamer-001';
+    const result = await validator.validate(output, SCRIBE_TASK_ID);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects malformed dreamerArtifactId (non-string) — ERR-001', async () => {
+    const output = makeScribeOutput();
+    (output.sourceTrace as unknown as Record<string, unknown>).dreamerArtifactId = 42;
+    const result = await validator.validate(output, SCRIBE_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('dreamerArtifactId'))).toBe(true);
+  });
+
+  it('rejects empty dreamerArtifactId — ERR-001', async () => {
+    const output = makeScribeOutput();
+    (output.sourceTrace as unknown as Record<string, unknown>).dreamerArtifactId = '';
+    const result = await validator.validate(output, SCRIBE_TASK_ID);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('dreamerArtifactId'))).toBe(true);
+  });
+
+  it('accepts output without dreamerArtifactId (optional)', async () => {
+    const output = makeScribeOutput();
+    // makeScribeOutput() doesn't include dreamerArtifactId by default
+    const result = await validator.validate(output, SCRIBE_TASK_ID);
+    expect(result.valid).toBe(true);
+  });
 });

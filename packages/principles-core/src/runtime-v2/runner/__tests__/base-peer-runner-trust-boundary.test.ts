@@ -341,3 +341,162 @@ describe('BasePeerRunner trust boundary (ERR-001, ERR-005)', () => {
     expect(runner.currentPhase).toBe(RunnerPhase.Failed);
   });
 });
+
+// ── Timeout parity regression tests ─────────────────────────────────────────
+
+class TimeoutTestRunner extends BasePeerRunner<TestContext, TestOutput> {
+  constructor(deps: PeerRunnerDeps) {
+    super(
+      deps,
+      { owner: 'test', runtimeKind: 'test-double', timeoutMs: 10, pollIntervalMs: 1 },
+      {
+        runnerName: 'timeout-test',
+        expectedTaskKind: 'dreamer',
+        defaultAgentId: 'test',
+        resultRefPrefix: 'test',
+      },
+    );
+  }
+
+  // Override sleep to be instant for testing
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  protected override sleep(_ms: number): Promise<void> {
+    return Promise.resolve();
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  get permanentErrorCategories(): ReadonlySet<PDErrorCategory> {
+    return new Set(['output_invalid', 'cancelled']);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  async buildContext(_taskId: string): Promise<TestContext> {
+    return { contextHash: 'test-hash' };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  async invokeRuntime(_taskId: string, _context: TestContext): Promise<RunHandle> {
+    return { runId: 'run-timeout-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+  async validateOutput(output: unknown, _taskId: string): Promise<PeerRunnerValidationResult> {
+    if (typeof output !== 'object' || output === null) {
+      return { valid: false, errors: ['not an object'], errorCategory: 'output_invalid' };
+    }
+    const record = output as Record<string, unknown>;
+    if (typeof record.data !== 'string') {
+      return { valid: false, errors: ['missing data'], errorCategory: 'output_invalid' };
+    }
+    return { valid: true, errors: [] };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/max-params, @typescript-eslint/class-methods-use-this
+  async succeedTask(
+    taskId: string,
+    runId: string,
+    output: TestOutput,
+    task: TaskRecord,
+    _contextHash: string,
+    _context: TestContext,
+  ): Promise<PeerRunnerResult<TestOutput>> {
+    return { status: 'succeeded', taskId, runId, output, attemptCount: task.attemptCount };
+  }
+}
+
+describe('BasePeerRunner timeout parity — final poll before cancel', () => {
+  it('run succeeding at deadline boundary is NOT cancelled', async () => {
+    let pollCallCount = 0;
+    const pollRun = vi.fn().mockImplementation(async () => {
+      pollCallCount++;
+      // First poll: running. Add a small delay so deadline passes before second poll.
+      if (pollCallCount === 1) {
+        await new Promise((r) => { setTimeout(r, 5); });
+        return { status: 'running', runId: 'run-timeout-001' } as RunStatus;
+      }
+      // Final poll (after deadline): succeeded
+      return { status: 'succeeded', runId: 'run-timeout-001' } as RunStatus;
+    });
+
+    const cancelRun = vi.fn();
+
+    const deps = createMockDeps({
+      runtimeAdapter: {
+        startRun: vi.fn().mockResolvedValue({ runId: 'run-timeout-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() } satisfies RunHandle),
+        pollRun,
+        fetchOutput: vi.fn().mockResolvedValue({ payload: { taskId: 'task-001', data: 'result' }, runtimeKind: 'test-double' }),
+        cancelRun,
+      } as unknown as PDRuntimeAdapter,
+    });
+
+    // Very short timeout (10ms) so deadline passes during first poll's delay
+    const runner = new TimeoutTestRunner(deps);
+
+    const result = await runner.run('task-001');
+
+    // Run should succeed (final poll caught the terminal state)
+    expect(result.status).toBe('succeeded');
+
+    // cancelRun must NOT have been called
+    expect(cancelRun).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it('run still non-terminal after final poll IS cancelled', async () => {
+    const pollRun = vi.fn()
+      .mockResolvedValue({ status: 'running', runId: 'run-timeout-001' } as RunStatus);
+
+    const cancelRun = vi.fn();
+
+    const deps = createMockDeps({
+      runtimeAdapter: {
+        startRun: vi.fn().mockResolvedValue({ runId: 'run-timeout-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() } satisfies RunHandle),
+        pollRun,
+        fetchOutput: vi.fn(),
+        cancelRun,
+      } as unknown as PDRuntimeAdapter,
+    });
+
+    const runner = new TimeoutTestRunner(deps);
+
+    const result = await runner.run('task-001');
+
+    // Should fail with timeout → retry policy converts to max_attempts_exceeded
+    expect(result.status).toBe('failed');
+
+    // cancelRun SHOULD have been called
+    expect(cancelRun).toHaveBeenCalled();
+  }, 15_000);
+
+  it('final poll throwing still cancels gracefully', async () => {
+    let pollCallCount = 0;
+    const pollRun = vi.fn().mockImplementation(async () => {
+      pollCallCount++;
+      if (pollCallCount === 1) {
+        await new Promise((r) => { setTimeout(r, 5); });
+        return { status: 'running', runId: 'run-timeout-001' } as RunStatus;
+      }
+      throw new Error('poll network error');
+    });
+
+    const cancelRun = vi.fn();
+
+    const deps = createMockDeps({
+      runtimeAdapter: {
+        startRun: vi.fn().mockResolvedValue({ runId: 'run-timeout-001', runtimeKind: 'test-double', startedAt: new Date().toISOString() } satisfies RunHandle),
+        pollRun,
+        fetchOutput: vi.fn(),
+        cancelRun,
+      } as unknown as PDRuntimeAdapter,
+    });
+
+    const runner = new TimeoutTestRunner(deps);
+
+    const result = await runner.run('task-001');
+
+    // Should fail with timeout → retry policy converts to max_attempts_exceeded
+    expect(result.status).toBe('failed');
+
+    // cancelRun SHOULD have been called (final poll failed)
+    expect(cancelRun).toHaveBeenCalled();
+  }, 15_000);
+});
