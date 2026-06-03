@@ -6,6 +6,7 @@ import {
   planConsoleLaunch,
   openBrowser,
   isLoopbackHost,
+  normalizeLoopbackHost,
   probeConsoleHealth,
   type ConsoleLaunchResult,
 } from '../services/console-launcher.js';
@@ -156,7 +157,9 @@ export async function handleConsole(opts: ConsoleOptions = {}): Promise<void> {
 export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<void> {
   // 1) Loopback safety (ERR-049: refuse non-loopback) — check FIRST so we
   //    never reveal runtime information about non-loopback hosts and refuse before workspace resolution.
-  const host = opts.host ?? '127.0.0.1';
+  const rawHost = opts.host ?? '127.0.0.1';
+  // Normalize IPv6 bracket notation: [::1] → ::1 (ERR-049)
+  const host = normalizeLoopbackHost(rawHost);
   if (!isLoopbackHost(host)) {
     const result: ConsoleLaunchResult = {
       status: 'refused',
@@ -300,10 +303,13 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
     return;
   }
 
-  // 4) Plan the launch (reuse or fresh bind)
+  // 4) Read auth token for health probes (PD_CONSOLE_TOKEN)
+  const token = process.env.PD_CONSOLE_TOKEN;
+
+  // 5) Plan the launch (reuse or fresh bind)
   let plan;
   try {
-    plan = await planConsoleLaunch({ workspaceDir, preferredPort, host });
+    plan = await planConsoleLaunch({ workspaceDir, preferredPort, host, token });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (opts.json) {
@@ -344,7 +350,7 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
 
   if (plan.status === 'reused') {
     // Existing console — verify health one more time (already healthy from plan, but be safe)
-    const health = await probeConsoleHealth(plan.host, plan.port);
+    const health = await probeConsoleHealth({ host: plan.host, port: plan.port, token });
     if (!health.healthy) {
       const result: ConsoleLaunchResult = {
         status: 'failed',
@@ -454,12 +460,12 @@ export async function handleConsoleOpen(opts: ConsoleOpenOptions = {}): Promise<
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 
-  // 6) Wait for console ready (bounded poll)
+  // 7) Wait for console ready (bounded poll)
   const readyDeadline = Date.now() + 15_000;
   let ready = false;
   while (Date.now() < readyDeadline) {
     if (child.exitCode !== null) break;
-    const h = await probeConsoleHealth(plan.host, plan.port, 1000);
+    const h = await probeConsoleHealth({ host: plan.host, port: plan.port, timeoutMs: 1000, token });
     if (h.healthy) { ready = true; break; }
     await sleep(250);
   }

@@ -23,6 +23,7 @@ import * as childProcessModule from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import {
   isLoopbackHost,
+  normalizeLoopbackHost,
   isPortInUse,
   findAvailablePort,
   planConsoleLaunch,
@@ -61,6 +62,30 @@ describe('isLoopbackHost', () => {
     expect(isLoopbackHost('172.16.0.1')).toBe(false);
     expect(isLoopbackHost('8.8.8.8')).toBe(false);
     expect(isLoopbackHost('myhost.example.com')).toBe(false);
+  });
+});
+
+// ─── IPv6 loopback normalization ─────────────────────────────────────────────
+
+describe('normalizeLoopbackHost', () => {
+  it('strips brackets from [::1] → ::1', () => {
+    expect(normalizeLoopbackHost('[::1]')).toBe('::1');
+  });
+
+  it('passes through 127.0.0.1 unchanged', () => {
+    expect(normalizeLoopbackHost('127.0.0.1')).toBe('127.0.0.1');
+  });
+
+  it('passes through localhost unchanged', () => {
+    expect(normalizeLoopbackHost('localhost')).toBe('localhost');
+  });
+
+  it('passes through ::1 unchanged (already normalized)', () => {
+    expect(normalizeLoopbackHost('::1')).toBe('::1');
+  });
+
+  it('passes through non-loopback as-is (caller must reject)', () => {
+    expect(normalizeLoopbackHost('0.0.0.0')).toBe('0.0.0.0');
   });
 });
 
@@ -185,6 +210,20 @@ describe('planConsoleLaunch — refused (non-loopback host)', () => {
     expect(result.status).toBe('refused');
     expect(result.reason).toMatch(/192\.168\.1\.5/);
   });
+
+  it('normalizes [::1] to ::1 and uses it for port probing', async () => {
+    // [::1] should be normalized to ::1 and NOT refused
+    const preferred = 49250;
+    expect(await isPortInUse('::1', preferred)).toBe(false);
+    const result = await planConsoleLaunch({
+      workspaceDir: '/tmp/anywhere',
+      preferredPort: preferred,
+      host: '[::1]',
+    });
+    expect(result.status).toBe('started');
+    expect(result.host).toBe('::1');
+    expect(result.url).toBe(`http://::1:${preferred}`);
+  });
 });
 
 // ─── planConsoleLaunch: started (port free) ─────────────────────────────────
@@ -305,7 +344,7 @@ describe('probeConsoleHealth', () => {
     const addr = server.address();
     if (typeof addr !== 'object' || !addr) throw new Error('no addr');
     try {
-      const h = await probeConsoleHealth('127.0.0.1', addr.port);
+      const h = await probeConsoleHealth({ host: '127.0.0.1', port: addr.port });
       expect(h.healthy).toBe(true);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -321,9 +360,89 @@ describe('probeConsoleHealth', () => {
     const addr = server.address();
     if (typeof addr !== 'object' || !addr) throw new Error('no addr');
     try {
-      const h = await probeConsoleHealth('127.0.0.1', addr.port);
+      const h = await probeConsoleHealth({ host: '127.0.0.1', port: addr.port });
       expect(h.healthy).toBe(false);
       expect(h.reason).toBeDefined();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('sends Authorization header when token is provided', async () => {
+    let receivedAuth: string | undefined;
+    const server = http.createServer((req, res) => {
+      receivedAuth = req.headers.authorization;
+      res.statusCode = 200;
+      res.end(JSON.stringify({ success: true }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      const h = await probeConsoleHealth({ host: '127.0.0.1', port: addr.port, token: 'test-token-123' });
+      expect(h.healthy).toBe(true);
+      expect(receivedAuth).toBe('Bearer test-token-123');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('does NOT send Authorization header when token is undefined', async () => {
+    let receivedAuth: string | undefined;
+    const server = http.createServer((req, res) => {
+      receivedAuth = req.headers.authorization;
+      res.statusCode = 200;
+      res.end(JSON.stringify({ success: true }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      const h = await probeConsoleHealth({ host: '127.0.0.1', port: addr.port });
+      expect(h.healthy).toBe(true);
+      expect(receivedAuth).toBeUndefined();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('returns healthy=false with reason when server returns 401 (unauthorized)', async () => {
+    const server = http.createServer((req, res) => {
+      res.statusCode = 401;
+      res.end('unauthorized');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      const h = await probeConsoleHealth({ host: '127.0.0.1', port: addr.port });
+      expect(h.healthy).toBe(false);
+      expect(h.reason).toMatch(/401/);
+      expect(h.reason).not.toMatch(/non-console/i);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('401 is NOT misclassified as healthy even with a valid token', async () => {
+    const server = http.createServer((req, res) => {
+      // Simulate a console that requires auth and rejects bad tokens
+      if (req.headers.authorization !== 'Bearer correct-token') {
+        res.statusCode = 401;
+        res.end('unauthorized');
+        return;
+      }
+      res.statusCode = 200;
+      res.end(JSON.stringify({ success: true }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const addr = server.address();
+    if (typeof addr !== 'object' || !addr) throw new Error('no addr');
+    try {
+      // Wrong token → 401 → should NOT be healthy
+      const h = await probeConsoleHealth({ host: '127.0.0.1', port: addr.port, token: 'wrong-token' });
+      expect(h.healthy).toBe(false);
+      expect(h.reason).toMatch(/401/);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -570,6 +689,15 @@ describe('CLI command wiring (pd console open)', () => {
       } finally {
         if (previous !== undefined) process.env.PD_WORKSPACE_DIR = previous;
       }
+    });
+
+    it('[::1] is accepted and normalized to ::1 (not refused)', () => {
+      const out = runPd(['console', 'open', '--workspace', tmp, '--host', '[::1]', '--json', '--no-browser'], workspaceRoot);
+      const parsed = JSON.parse(out);
+      // Should NOT be refused — [::1] is loopback
+      expect(parsed.status).not.toBe('refused');
+      // Host should be normalized to ::1 (without brackets)
+      expect(parsed.host).toBe('::1');
     });
   });
 });

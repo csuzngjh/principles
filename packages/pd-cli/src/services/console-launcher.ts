@@ -62,6 +62,17 @@ export function isLoopbackHost(host: string): boolean {
   return false;
 }
 
+/**
+ * Normalize loopback host for safe use in listen/http.request.
+ * - [::1] → ::1 (strip brackets; Node net/http don't want brackets in host field)
+ * - localhost, 127.x.x.x, ::1 → pass through
+ * - non-loopback → return as-is (caller must reject via isLoopbackHost first)
+ */
+export function normalizeLoopbackHost(host: string): string {
+  if (host === '[::1]') return '::1';
+  return host;
+}
+
 // ─── Port detection (ERR-022: bounded) ───────────────────────────────────────
 
 /** Returns true if the port on the given host accepts a TCP connection. */
@@ -102,33 +113,50 @@ export async function isPortInUse(host: string, port: number, timeoutMs = 800): 
   });
 }
 
+export interface HealthProbeOptions {
+  host: string;
+  port: number;
+  timeoutMs?: number;
+  /** Optional auth token (PD_CONSOLE_TOKEN) for authenticated health probes. */
+  token?: string;
+}
+
 /** Probe a port to see if it serves a healthy PD Console. */
-export async function probeConsoleHealth(host: string, port: number, timeoutMs = 1500): Promise<{ healthy: boolean; reason?: string }> {
+export async function probeConsoleHealth(opts: HealthProbeOptions): Promise<{ healthy: boolean; reason?: string }> {
+  const { host, port, timeoutMs = 1500, token } = opts;
+
   if (Object.hasOwn(globalThis, '__mockProbeConsoleHealth')) {
     const mock = Reflect.get(globalThis, '__mockProbeConsoleHealth') as (
-      h: string,
-      p: number,
-      t: number
+      o: HealthProbeOptions
     ) => Promise<{ healthy: boolean; reason?: string }>;
-    return mock(host, port, timeoutMs);
+    return mock(opts);
   }
   return new Promise((resolve) => {
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     const req = http.request(
-      { host, port, path: '/api/health', method: 'GET', timeout: timeoutMs },
+      { host, port, path: '/api/health', method: 'GET', timeout: timeoutMs, headers },
       (res) => {
+        // 401 means auth required — treat as unhealthy, not a generic error
+        if (res.statusCode === 401) {
+          resolve({ healthy: false, reason: 'console health endpoint returned 401 (unauthorized) — check PD_CONSOLE_TOKEN' });
+          return;
+        }
         if (res.statusCode !== 200) {
           resolve({ healthy: false, reason: `console health endpoint returned status ${res.statusCode ?? 'no-status'}` });
           return;
         }
         let data = '';
-        res.on('data', (chunk) => {
+        res.on('data', (chunk: string) => {
           data += chunk;
         });
         res.on('end', () => {
           try {
             const body = JSON.parse(data) as unknown;
             if (body && typeof body === 'object') {
-              const isHealthy = 
+              const isHealthy =
                 (Object.hasOwn(body, 'healthy') && Reflect.get(body, 'healthy') === true) ||
                 (Object.hasOwn(body, 'success') && Reflect.get(body, 'success') === true);
               if (isHealthy) {
@@ -149,7 +177,7 @@ export async function probeConsoleHealth(host: string, port: number, timeoutMs =
       req.destroy();
       resolve({ healthy: false, reason: 'console health probe timed out' });
     });
-    req.on('error', (err) => {
+    req.on('error', (err: Error) => {
       resolve({ healthy: false, reason: `console health probe error: ${err.message}` });
     });
     req.end();
@@ -257,6 +285,8 @@ export interface OrchestratorInput {
   workspaceDir: string;
   preferredPort?: number;
   host?: string;
+  /** Optional auth token for health probes (PD_CONSOLE_TOKEN). */
+  token?: string;
 }
 
 export async function planConsoleLaunch(input: OrchestratorInput): Promise<OrchestratorResult> {
@@ -266,7 +296,9 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
     ) => Promise<OrchestratorResult>;
     return mock(input);
   }
-  const host = input.host ?? DEFAULT_HOST;
+  const { token } = input;
+  const rawHost = input.host ?? DEFAULT_HOST;
+  const host = normalizeLoopbackHost(rawHost);
   const preferredPort = input.preferredPort ?? DEFAULT_PORT;
 
   if (!isLoopbackHost(host)) {
@@ -282,7 +314,7 @@ export async function planConsoleLaunch(input: OrchestratorInput): Promise<Orche
   }
 
   // Step 1: Is there already a healthy console on the preferred port?
-  const health = await probeConsoleHealth(host, preferredPort);
+  const health = await probeConsoleHealth({ host, port: preferredPort, token });
   if (health.healthy) {
     return {
       status: 'reused',
