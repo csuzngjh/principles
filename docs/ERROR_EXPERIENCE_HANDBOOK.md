@@ -1,6 +1,6 @@
 # Error Experience Handbook
 
-> **MUST READ before starting any task.** This document records real errors made by AI coding assistants during code reviews. Reading it prevents repeating the same mistakes.
+> **INCIDENT LOG.** For ordinary coding tasks, start with `docs/ERROR_PATTERN_INDEX.md` and then read the detailed entries it references. Read this full file when recording a new error, auditing error history, or when the compact index does not cover the task.
 
 ---
 
@@ -12,7 +12,9 @@ When a code review catches an AI assistant error, use the `record-error` skill. 
 2. **Tag the issue** with `lesson-learned` label (via Linear MCP tool)
 3. **Edit this file** — add a row to the category table AND add a detailed entry in the "Detailed Entries" section
 4. **Update statistics** at the bottom of this file
-5. **Commit and create a PR** with message `docs: add ERR-XXX to error experience handbook`
+5. **Update `docs/ERROR_PATTERN_INDEX.md`** if the error creates or changes a recurring pattern
+6. **Run `npm run check:error-handbook`** to catch duplicate IDs and stale pattern references
+7. **Commit and create a PR** with message `docs: add ERR-XXX to error experience handbook`
 
 The reviewer (human) only needs to point out the error. The AI assistant invokes `record-error` to handle all recording steps.
 
@@ -92,9 +94,9 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-018 | repairAttempts records stale initialValidationErrors instead of per-attempt currentErrors | PRI-200 |
 | ERR-019 | schemaCheck failure branch writes next iteration's errors into current attempt's record | PRI-200 |
 | ERR-020 | Commander negated boolean `--no-intake` ignored — checking wrong property name | PRI-217 |
-| ERR-047 | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through to String(err) | PRI-285 |
+| ERR-057 | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through to String(err) | PRI-285 |
 | ERR-054 | `as TOutput` cast on untrusted LLM/runtime payload before validation — typed hooks receive unverified data | PRI-302 |
-| ERR-055 | Emitted telemetry event not registered in schema — event silently dropped or degraded | PR #808/#809/#810 |
+| ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded | PR #808/#809/#810 |
 
 ---
 
@@ -127,9 +129,11 @@ Errors where AI assistants introduced security risks or bypassed safety checks.
 | ID | Summary | Source |
 |----|---------|--------|
 | ERR-022 | process.exit(1) without return allows fallthrough to intake on failed diagnosis | PRI-217 |
-| ERR-045 | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys like github_token pass through unredacted | PRI-285 |
-| ERR-046 | Redaction pipeline truncates string values without running path/token/env redactors — secrets in values like buildId or cwd slip through | PRI-285 |
+| ERR-055 | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys like github_token pass through unredacted | PRI-285 |
+| ERR-056 | Redaction pipeline truncates string values without running path/token/env redactors — secrets in values like buildId or cwd slip through | PRI-285 |
 | ERR-049 | Unconditional taskId reinjection bypasses validator mismatch check — malicious LLM lineage fields pass validation | PRI-294 |
+| ERR-058 | Inconsistent forbidden-key lists across validation paths — gateway_token passes pi-ai profile validation | PRI-304 |
+| ERR-059 | Nullish coalescing dead code — always-defined default shadows user override in effective config merge | PRI-304 |
 
 ---
 
@@ -139,6 +143,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | ID | Summary | Source |
 |----|---------|--------|
+| ERR-006 | Missed Codex PR review comments due to API failure + no retry | PR review |
 | ERR-021 | Handler-only tests miss Commander flag→opts mapping bugs | PRI-217 |
 | ERR-050 | Modified bundled/generated copy instead of source of truth | PRI-250 |
 | ERR-051 | Security redaction inserted into RuleHost input path before evaluation, not just telemetry output path | PRI-297 |
@@ -680,7 +685,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 | Metric | Value |
 |--------|-------|
-| Total lessons | 52 |
+| Total lessons | 60 |
 | Last updated | 2026-06-03 |
 | Top category | Schema & Type |
 | Recurring errors | 27 |
@@ -723,7 +728,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-045]** | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys pass through unredacted
+**[ERR-055]** | Privacy redaction helper uses ALL-segment logic instead of ANY — composite sensitive keys pass through unredacted
 
 - **What happened**: `isSensitiveKey()` required EVERY segment of a composite key to match `SENSITIVE_KEY_SEGMENTS`. This meant `github_token` (segments: `["github", "token"]`) was NOT flagged because "github" is not in the sensitive set. Only keys where ALL segments were sensitive (e.g., `auth_token` where both "auth" and "token" are in the set) were caught.
 - **Why it's wrong**: The privacy guarantee is that any key containing a sensitive segment should be redacted. Using ALL-segment logic inverts this — it only redacts when the entire key name is composed of sensitive words. This is a security vulnerability: `db_password`, `github_token`, `api_key`, `aws_secret` all pass through unredacted.
@@ -735,7 +740,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-046]** | Redaction pipeline truncates string values without running path/token/env redactors — secrets slip through
+**[ERR-056]** | Redaction pipeline truncates string values without running path/token/env redactors — secrets slip through
 
 - **What happened**: In `redactSensitiveFields()`, the `t === 'string'` branch only truncated strings to `REDACT_MAX_STRING` without running them through `redactAbsolutePaths()`, `redactTokenLikeValues()`, and `redactEnvLikeValues()`. Similarly, `render-github-url.ts` used `shortSummary` with only truncation but no redaction before putting it into the URL body.
 - **Why it's wrong**: The redaction pipeline has two layers: (1) key-based redaction (redact entire values for sensitive keys), and (2) value-based redaction (redact secrets embedded in any string value regardless of key name). Layer 2 was not applied to the string branch. This means secrets embedded in non-sensitive-key values (e.g., `buildId` containing a token, `cwd` containing an absolute path) slip through. Same class as ERR-014/ERR-016/ERR-017 (previews and serialization not bounded/safe).
@@ -747,7 +752,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-047]** | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through
+**[ERR-057]** | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through
 
 - **What happened**: `errMsg(e: { code?: string } | undefined, err: unknown)` was designed to extract a readable message from caught errors. The first parameter `e` is a typed narrower (`err as { code?: string }`) used for `code === 'ENOENT'` checks. The second parameter `err` is the raw `unknown` caught value. But the function body checked `e` for a `.message` property — which `e` (typed as `{ code?: string }`) never has. This meant the function always fell through to `String(err)`, producing less useful error messages like `[object Object]`.
 - **Why it's wrong**: The parameter naming was confusing and led to checking the wrong variable. The typed narrower is for `code` checks (done by the caller before calling errMsg), not for message extraction. Message extraction should operate on the raw `unknown` value.
@@ -834,7 +839,7 @@ Errors in how AI assistants approached the task — not reading context, not fol
 
 ---
 
-**[ERR-055]** | Emitted telemetry event not registered in schema — event silently dropped or degraded
+**[ERR-060]** | Emitted telemetry event not registered in schema — event silently dropped or degraded
 
 - **What happened**: After migrating Scribe/Evaluator/Artificer runners to BasePeerRunner, the runners emit events like `artificer_implementation_plan_generated`, `scribe_principle_draft_generated`, etc. via `this.emitEvent()`. BasePeerRunner prefixes these with the runner name (e.g., `artificer_implementation_plan_generated`). But `telemetry-event.ts` TelemetryEventType union did not include any `artificer_*`, `evaluator_*`, or `scribe_*` event literals. Events not in the schema are silently dropped or degraded by the telemetry pipeline.
 - **Why it's wrong**: The telemetry schema is the contract for what events are valid. If an emitted event is not registered, it's silently lost — no error, no warning, no observability. This is the same class as ERR-024 (mechanism exists but is not wired) and ERR-002 (silent degradation). The runner believes it's emitting telemetry, but the pipeline discards it. Operators cannot observe runner behavior through the telemetry dashboard.
@@ -844,3 +849,26 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **Date**: 2026-06-03
 - **Recurrence**: None
 
+---
+
+**[ERR-058]** | Inconsistent forbidden-key lists across validation paths — gateway_token passes pi-ai profile validation
+
+- **What happened**: `validateOpenClawProfile` and `validatePdLocalProfile` each defined their own local `forbiddenKeys` arrays for rejecting secret-bearing fields. The openclaw list included `gatewayToken` and `gateway_token`, but the pd-local list only had `apiKey`, `api_key`, `token`, `secret`, `password`, `auth`. This inconsistency meant `gateway_token` and `gatewayToken` would pass validation in pi-ai profiles, potentially allowing secret values through.
+- **Why it's wrong**: When security deny-lists are defined in multiple places, any inconsistency creates a bypass path. The openclaw validator would correctly reject `gateway_token`, but the pi-ai validator would accept it. A user or LLM could place secrets in a pi-ai profile under `gateway_token` and they would pass validation.
+- **Correct approach**: Define forbidden-key lists as a single shared constant (e.g., `FORBIDDEN_SECRET_KEYS`) and reference it from all validation paths. When adding a key to one list, it must appear in all lists that serve the same security purpose.
+- **How to prevent**: When implementing security validation that rejects dangerous fields by name, (1) define the list as a shared constant, (2) reference it from all validation paths, (3) add a test that each forbidden key is rejected in every validation path that uses the list. Review checklist: (1) Are there multiple lists serving the same security purpose? (2) Are they identical? (3) Is there a test for each list × forbidden key combination?
+- **Source**: PRI-304 / PR #811
+- **Date**: 2026-06-03
+- **Recurrence**: First occurrence
+
+---
+
+**[ERR-059]** | Nullish coalescing dead code — always-defined default shadows user override in effective config merge
+
+- **What happened**: In `computeEffectivePdConfig()`, the else branch for agents without user override used `defaultBinding.runtimeProfile ?? userConfig.internalAgents.defaultRuntime`. Since `getDefaultInternalAgents()` always sets `runtimeProfile` to `'openclaw.default'` for every agent, the `??` operator never reached the right-hand side. This meant agents without explicit override always got the hard-coded `'openclaw.default'` instead of the user's configured `defaultRuntime`.
+- **Why it's wrong**: When a function always returns a defined value for a field, using `??` with a fallback for that field is dead code. The intent was "use the user's defaultRuntime as fallback", but the always-defined `defaultBinding.runtimeProfile` prevented the fallback from ever being reached. This is a logic error that silently breaks the user's expectation.
+- **Correct approach**: When merging user config with defaults, distinguish between (1) user-provided values, (2) hard-coded defaults, and (3) user-configured defaults. For agents without explicit override, the correct behavior is to use the user's `defaultRuntime`, not the hard-coded default's `runtimeProfile`.
+- **How to prevent**: When writing `a ?? b`, verify that `a` can actually be null/undefined. If `a` is always defined (e.g., from a function that always returns a value), the `?? b` is dead code. Test the fallback path explicitly: set the user's default to a non-default value and verify agents without override use it.
+- **Source**: PRI-304 / PR #811
+- **Date**: 2026-06-03
+- **Recurrence**: First occurrence
