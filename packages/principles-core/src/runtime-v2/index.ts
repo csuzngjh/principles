@@ -632,6 +632,22 @@ export {
 
 export { DreamerRunner } from './internalization/dreamer-runner.js';
 
+// ── Base Peer Runner (PRI-302) ───────────────────────────────────────────────
+
+export { BasePeerRunner } from './runner/base-peer-runner.js';
+
+export type {
+  PeerRunnerOptions,
+  ResolvedPeerRunnerOptions,
+  PeerRunnerDeps,
+  PeerRunnerConfig,
+  PeerRunnerResult,
+  PeerRunnerResultStatus,
+  PeerRunnerValidationResult,
+  FailureContext,
+  ValidationErrorContext,
+} from './runner/peer-runner-types.js';
+
 // ── Philosopher Runner (PRI-90) ────────────────────────────────────────────────
 
 export type {
