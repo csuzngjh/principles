@@ -46,6 +46,7 @@ import { handleRuntimeActivationDispatch } from './commands/runtime-activation.j
 import { handleProvenChannelBaseline } from './commands/proven-channel-baseline.js';
 import { handleDemoStoryA } from './commands/demo-story-a.js';
 import { handleRuntimeFeaturesStatus } from './commands/runtime-features.js';
+import { handleConfigDoctor } from './commands/config-doctor.js';
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -55,8 +56,9 @@ const program = new Command();
 
 program
   .name('pd')
-  .description('PD CLI 鈥?Pain recording, sample management, and evolution tasks')
-  .version(pkg.version);
+  .description('PD CLI — Pain recording, sample management, and evolution tasks')
+  .version(pkg.version)
+  .enablePositionalOptions();
 
 const painCmd = program
   .command('pain')
@@ -365,6 +367,19 @@ runtimeCmd
       workspace: opts.workspace,
       json: opts.json,
     });
+  });
+
+const configCmd = program
+  .command('config')
+  .description('PD configuration discovery and diagnosis');
+
+configCmd
+  .command('doctor')
+  .description('Show PD + OpenClaw config locations, feature flags, and provider connectivity (PRI-299)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handleConfigDoctor({ workspace: opts.workspace, json: opts.json });
   });
 
 const demoCmd = program
@@ -813,9 +828,18 @@ const _legacyCleanupCmd = legacyCmd
     await handleLegacyCleanup(opts.workspace, apply);
   });
 
-program
+const consoleCmd = program
   .command('console')
-  .description('Start the pd-console web UI for principle review')
+  .description('Start the pd-console web UI for principle review (default: legacy launcher)')
+  .passThroughOptions()
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-p, --port <port>', 'Port to listen on', '3100')
+  .option('--no-auth', 'Disable authentication (local dev only)', false)
+  .option('--json', 'Output JSON status', false);
+
+consoleCmd
+  .command('start')
+  .description('Legacy launcher — start the pd-console on the requested port (no reuse, no browser open)')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-p, --port <port>', 'Port to listen on', '3100')
   .option('--no-auth', 'Disable authentication (local dev only)', false)
@@ -825,27 +849,42 @@ program
     await handleConsole({
       workspace: opts.workspace,
       port: opts.port,
-      noAuth: opts.noAuth,
+      noAuth: opts.auth === false,
       json: opts.json,
     });
   });
 
-// PRI-299: PD Config Doctor 鈥?surface config paths, feature flags, and provider connectivity
-const configCmd = program
-  .command('config')
-  .description('PD config diagnostics');
-
-configCmd
-  .command('doctor')
-  .description('Inspect PD / OpenClaw config paths, feature flags, and provider connectivity (PRI-299)')
+// PRI-300: seed-friendly Console launcher with reuse + auto-port + browser open
+consoleCmd
+  .command('open')
+  .description('Open the pd-console in your browser (PRI-300) — auto-port, reuses running console, loopback-only')
   .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--json', 'Output a single parseable JSON object on stdout', false)
+  .option('-p, --port <port>', 'Preferred port (default 3100; auto-falls back to next free port)')
+  .option('--host <host>', 'Loopback host (default 127.0.0.1; non-loopback refused)')
+  .option('--no-auth', 'Disable authentication (local dev only)', false)
+  .option('--no-browser', 'Do not open the system browser on success', false)
+  .option('--json', 'Output JSON status (suppresses browser open)', false)
   .action(async (opts) => {
-    const { handleConfigDoctor } = await import('./commands/config-doctor.js');
-    await handleConfigDoctor({
+    const { handleConsoleOpen } = await import('./commands/console.js');
+    await handleConsoleOpen({
       workspace: opts.workspace,
+      port: opts.port,
+      host: opts.host,
+      noAuth: opts.auth === false,
+      noBrowser: opts.browser === false,
       json: opts.json,
     });
   });
+
+// Default `pd console` → legacy launcher (backward compat)
+consoleCmd.action(async (opts) => {
+  const { handleConsole } = await import('./commands/console.js');
+  await handleConsole({
+    workspace: opts.workspace,
+    port: opts.port,
+    noAuth: opts.auth === false,
+    json: opts.json,
+  });
+});
 
 program.parse();
