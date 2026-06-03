@@ -189,7 +189,7 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
     });
   }
 
-  async validateOutput(output: DreamerOutput, taskId: string): Promise<PeerRunnerValidationResult> {
+  async validateOutput(output: unknown, taskId: string): Promise<PeerRunnerValidationResult> {
     const result = await this.validator.validate(output, taskId);
     return {
       valid: result.valid,
@@ -305,8 +305,8 @@ export class DreamerRunner extends BasePeerRunner<DreamerContext, DreamerOutput>
    * must reach validation and fail loud (Runtime Contract Rule 3).
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  protected override postFetchTransform(taskId: string, output: DreamerOutput): void {
-    injectRunnerLineageIfAbsent(output as unknown, 'taskId', taskId);
+  protected override postFetchTransform(taskId: string, untrustedOutput: unknown): void {
+    injectRunnerLineageIfAbsent(untrustedOutput, 'taskId', taskId);
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: DreamerOutput): void {

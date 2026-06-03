@@ -113,8 +113,8 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   /** Invoke the runtime with runner-specific prompt builder. */
   abstract invokeRuntime(taskId: string, context: TContext): Promise<RunHandle>;
 
-  /** Validate the LLM output. */
-  abstract validateOutput(output: TOutput, taskId: string, context: TContext): Promise<PeerRunnerValidationResult>;
+  /** Validate the LLM output. Receives untrusted data — must perform runtime validation. */
+  abstract validateOutput(output: unknown, taskId: string, context: TContext): Promise<PeerRunnerValidationResult>;
 
   /** Commit artifact + mark task succeeded. Runner-specific commit strategy. */
   abstract succeedTask(
@@ -134,7 +134,10 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
     // default no-op
   }
 
-  /** Check lineage strip contract. Called after fetchAndParseOutput. */
+  /**
+   * Check lineage strip contract. Called AFTER validation passes.
+   * Receives validated output — safe to treat as TOutput.
+   */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   protected checkLineageIntegrity(_taskId: string, _output: TOutput): void {
     // default no-op
@@ -143,10 +146,10 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
   /**
    * Transform output after fetch, before validation.
    * Used by runners that need to re-inject lineage fields stripped by the adapter.
-   * Called after fetchAndParseOutput, before validateOutput.
+   * Receives untrusted data — must NOT assume TOutput shape.
    */
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  protected postFetchTransform(_taskId: string, _output: TOutput): void {
+  protected postFetchTransform(_taskId: string, _untrustedOutput: unknown): void {
     // default no-op
   }
 
@@ -222,19 +225,17 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         return await this.handleRuntimeFailure(taskId, leasedTask, finalStatus);
       }
 
-      // 7. Fetch output
+      // 7. Fetch output (returns unknown — untrusted LLM/runtime payload)
       this.phase = RunnerPhase.FetchingOutput;
-      const output = await this.fetchAndParseOutput(runHandle.runId, taskId);
+      const untrustedOutput = await this.fetchAndParseOutput(runHandle.runId, taskId);
 
-      // 7b. Post-fetch transform (re-inject lineage fields, etc.)
-      this.postFetchTransform(taskId, output);
+      // 7b. Post-fetch transform on untrusted data (e.g., re-inject lineage fields).
+      // Operates on `unknown` — must NOT assume TOutput shape (ERR-001).
+      this.postFetchTransform(taskId, untrustedOutput);
 
-      // 7c. Check lineage integrity (optional hook)
-      this.checkLineageIntegrity(taskId, output);
-
-      // 8. Validate
+      // 8. Validate — the trust boundary. Only validated output becomes TOutput.
       this.phase = RunnerPhase.Validating;
-      const validationResult = await this.validateOutput(output, taskId, context);
+      const validationResult = await this.validateOutput(untrustedOutput, taskId, context);
       if (!validationResult.valid) {
         return await this.handleValidationError({
           taskId,
@@ -244,9 +245,15 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
         });
       }
 
+      // Validation passed — safe to treat as TOutput.
+      const output: TOutput = untrustedOutput as TOutput;
+
       this.emitEvent('output_validated', taskId, {});
 
-      // 8b. Emit success telemetry (optional hook)
+      // 8b. Check lineage integrity (receives validated output)
+      this.checkLineageIntegrity(taskId, output);
+
+      // 8c. Emit success telemetry (receives validated output)
       this.emitSuccessTelemetry(taskId, output, context);
 
       // 9. Succeed task (abstract — subclass implements commit strategy)
@@ -309,7 +316,13 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
 
   // ── Output fetching ────────────────────────────────────────────────────────
 
-  private async fetchAndParseOutput(runId: string, taskId: string): Promise<TOutput> {
+  /**
+   * Fetch raw output from the runtime adapter.
+   *
+   * Returns `unknown` — the payload is untrusted LLM/runtime output.
+   * Callers MUST validate before treating as TOutput (ERR-001, ERR-005).
+   */
+  private async fetchAndParseOutput(runId: string, taskId: string): Promise<unknown> {
     let result: Awaited<ReturnType<PDRuntimeAdapter['fetchOutput']>>;
     try {
       result = await this.runtimeAdapter.fetchOutput(runId);
@@ -331,7 +344,9 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       throw new PDRuntimeError('output_invalid', `No output available for run ${runId}`);
     }
 
-    const payload = result.payload as Record<string, unknown>;
+    // Structural check: payload must be a non-null object.
+    // This is NOT a type assertion — we still return `unknown`.
+    const { payload } = result;
     if (typeof payload !== 'object' || payload === null) {
       this.emitEvent('output_extraction_failed', taskId, {
         runId,
@@ -341,7 +356,7 @@ export abstract class BasePeerRunner<TContext extends { contextHash: string }, T
       throw new PDRuntimeError('output_invalid', `Output payload is not an object for run ${runId}`);
     }
 
-    return result.payload as TOutput;
+    return payload;
   }
 
   // ── Lineage resolution ─────────────────────────────────────────────────────
