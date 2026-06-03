@@ -409,9 +409,9 @@ describe('BasePeerRunner timeout parity — final poll before cancel', () => {
     let pollCallCount = 0;
     const pollRun = vi.fn().mockImplementation(async () => {
       pollCallCount++;
-      // First poll: running. Add a small delay so deadline passes before second poll.
+      // First poll: running. Add a delay so deadline passes before second poll.
       if (pollCallCount === 1) {
-        await new Promise((r) => { setTimeout(r, 5); });
+        await new Promise((r) => { setTimeout(r, 30); });
         return { status: 'running', runId: 'run-timeout-001' } as RunStatus;
       }
       // Final poll (after deadline): succeeded
@@ -472,7 +472,7 @@ describe('BasePeerRunner timeout parity — final poll before cancel', () => {
     const pollRun = vi.fn().mockImplementation(async () => {
       pollCallCount++;
       if (pollCallCount === 1) {
-        await new Promise((r) => { setTimeout(r, 5); });
+        await new Promise((r) => { setTimeout(r, 30); });
         return { status: 'running', runId: 'run-timeout-001' } as RunStatus;
       }
       throw new Error('poll network error');
