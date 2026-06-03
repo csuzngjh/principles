@@ -11,6 +11,7 @@ import {
   redactEnvLikeValues,
   redactStackTrace,
   redactSensitiveFields,
+  redactTelemetryString,
   REDACTED_PATH,
   REDACTED_VALUE,
 } from '../../feedback/redact-sensitive.js';
@@ -250,5 +251,157 @@ describe('redactSensitiveFields', () => {
     if (!result.ok) return;
     expect(result.notes.some((n: string) => n.includes('string value redacted'))).toBe(false);
     expect(result.notes.some((n: string) => n.includes('truncated'))).toBe(false);
+  });
+});
+
+describe('redactTokenLikeValues (extended)', () => {
+  it('redacts lin_api_ tokens', () => {
+    const text = 'lin_api_TEST_REDACT_ME_1234567890ABCDEF';
+    const result = redactTokenLikeValues(text);
+    expect(result).toBe('[REDACTED]');
+  });
+
+  it('redacts lin_api_ tokens in command context', () => {
+    const text = 'curl -H "Authorization: lin_api_TEST_REDACT_ME_1234567890ABCDEF" https://api.linear.app';
+    const result = redactTokenLikeValues(text);
+    expect(result).not.toContain('lin_api_');
+    expect(result).toContain('[REDACTED]');
+  });
+
+  it('redacts Authorization header value while preserving label', () => {
+    const text = 'curl -H "Authorization: Bearer sk-TEST_REDACT_ME_1234567890" https://api.example.com';
+    const result = redactTokenLikeValues(text);
+    expect(result).toContain('Authorization:');
+    expect(result).toContain('[REDACTED]');
+    expect(result).not.toContain('sk-TEST_REDACT_ME');
+  });
+
+  it('redacts PowerShell env $env:LINEAR_API_KEY', () => {
+    const text = '$env:LINEAR_API_KEY="lin_api_TEST_REDACT_ME_1234567890ABCDEF"';
+    const result = redactTokenLikeValues(text);
+    expect(result).toContain('$env:LINEAR_API_KEY');
+    expect(result).toContain('[REDACTED]');
+    expect(result).not.toContain('lin_api_TEST_REDACT_ME');
+  });
+
+  it('redacts inline env assignment LINEAR_API_KEY with redactEnvLikeValues', () => {
+    const text = 'set LINEAR_API_KEY=lin_api_TEST_REDACT_ME_1234567890ABCDEF';
+    const result = redactEnvLikeValues(text);
+    expect(result).toContain('LINEAR_API_KEY');
+    expect(result).toContain('[REDACTED]');
+    expect(result).not.toContain('lin_api_TEST_REDACT_ME');
+  });
+
+  it('redacts ghp_ tokens', () => {
+    const text = 'ghp_TEST_REDACT_ME_1234567890ABCDEFGHIJKLMN';
+    const result = redactTokenLikeValues(text);
+    expect(result).toBe('[REDACTED]');
+  });
+});
+
+describe('redactTelemetryString', () => {
+  it('redacts exec command containing lin_api_ token', () => {
+    const cmd = 'curl -s -H "Authorization: lin_api_TEST_REDACT_ME_1234567890ABCDEF" https://api.linear.app/issues';
+    const result = redactTelemetryString(cmd);
+    expect(result).not.toContain('lin_api_TEST_REDACT_ME');
+    expect(result).toContain('[REDACTED]');
+  });
+
+  it('redacts Authorization header in composite command', () => {
+    const cmd = 'curl -X POST -H "Authorization: Bearer sk-TEST_REDACT_ME" -d "{}" https://api.example.com/data';
+    const result = redactTelemetryString(cmd);
+    expect(result).toContain('Authorization:');
+    expect(result).toContain('[REDACTED]');
+    expect(result).not.toContain('Bearer sk-TEST_REDACT_ME');
+  });
+
+  it('redacts Bearer token', () => {
+    const cmd = 'curl -H "Authorization: Bearer TEST_REDACT_ME_TOKEN_VALUE_1234567890"';
+    const result = redactTelemetryString(cmd);
+    expect(result).toContain('[REDACTED]');
+    expect(result).not.toContain('TEST_REDACT_ME_TOKEN_VALUE');
+  });
+
+  it('redacts env assignment in command', () => {
+    const cmd = 'LINEAR_API_KEY=lin_api_TEST_REDACT_ME_1234567890ABCDEF curl -s https://api.linear.app';
+    const result = redactTelemetryString(cmd);
+    expect(result).toContain('[REDACTED]');
+    expect(result).not.toContain('lin_api_TEST_REDACT_ME');
+    expect(result).not.toContain('LINEAR_API_KEY=lin_api');
+  });
+
+  it('redacts PowerShell $env:LINEAR_API_KEY', () => {
+    const cmd = '$env:LINEAR_API_KEY="lin_api_TEST_REDACT_ME_1234567890ABCDEF"';
+    const result = redactTelemetryString(cmd);
+    expect(result).toContain('$env:LINEAR_API_KEY');
+    expect(result).toContain('[REDACTED]');
+    expect(result).not.toContain('lin_api_TEST_REDACT_ME');
+  });
+
+  it('preserves normal file path', () => {
+    const path = 'src/app.ts';
+    const result = redactTelemetryString(path);
+    expect(result).toBe('src/app.ts');
+  });
+
+  it('redacts sk- tokens in file path context', () => {
+    const path = 'config/sk-TEST_REDACT_ME_1234567890file.json';
+    const result = redactTelemetryString(path);
+    expect(result).toContain('[REDACTED]');
+    expect(result).not.toContain('sk-TEST_REDACT_ME');
+  });
+
+  it('returns original string when no secrets present', () => {
+    const text = 'echo hello world';
+    const result = redactTelemetryString(text);
+    expect(result).toBe('echo hello world');
+  });
+
+  it('handles non-string input (fail safe - returns original value)', () => {
+    const undef = redactTelemetryString(undefined);
+    expect(undef).toBe(undefined);
+    const nullVal = redactTelemetryString(null);
+    expect(nullVal).toBe(null);
+    const num = redactTelemetryString(42);
+    expect(num).toBe(42);
+    const obj = redactTelemetryString({ x: 1 });
+    expect(obj).toEqual({ x: 1 });
+  });
+
+  it('redacts Windows absolute paths', () => {
+    const text = 'C:\\Users\\alice\\project\\secret.txt';
+    const result = redactTelemetryString(text);
+    expect(result).toContain('<redacted-path>');
+    expect(result).not.toContain('alice');
+  });
+
+  it('redacts POSIX absolute paths starting with /home/ and /Users/', () => {
+    const text1 = '/home/alice/.config/credentials.json';
+    const result1 = redactTelemetryString(text1);
+    expect(result1).toContain('<redacted-path>');
+    expect(result1).not.toContain('alice');
+
+    const text2 = '/Users/wesley/secret-project/config.yaml';
+    const result2 = redactTelemetryString(text2);
+    expect(result2).toContain('<redacted-path>');
+    expect(result2).not.toContain('wesley');
+  });
+
+  it('preserves relative path alongside absolute path redaction', () => {
+    const text = 'cp /home/alice/secret.txt src/app.ts';
+    const result = redactTelemetryString(text);
+    expect(result).toContain('<redacted-path>');
+    expect(result).toContain('src/app.ts');
+  });
+
+  it('preserves relative paths starting with ./ or ../ or plain words', () => {
+    const text1 = './usr/bin/local';
+    expect(redactTelemetryString(text1)).toBe(text1);
+
+    const text2 = '../home/secret';
+    expect(redactTelemetryString(text2)).toBe(text2);
+
+    const text3 = 'usr/local/bin';
+    expect(redactTelemetryString(text3)).toBe(text3);
   });
 });
