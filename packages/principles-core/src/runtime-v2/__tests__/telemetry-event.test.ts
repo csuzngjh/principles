@@ -44,6 +44,20 @@ describe('TelemetryEvent schema — runner event registration', () => {
     expect(result.event?.eventType).toBe('scribe_principle_draft_generated');
   });
 
+  it('accepts evaluator_decision_recorded event', () => {
+    const event = {
+      eventType: 'evaluator_decision_recorded',
+      traceId: 'trace-005',
+      timestamp: new Date().toISOString(),
+      sessionId: 'session-005',
+      payload: { decision: 'approved', score: 0.9 },
+    };
+    const result = validateTelemetryEvent(event);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.event?.eventType).toBe('evaluator_decision_recorded');
+  });
+
   it('rejects unknown event type artificer_nonexistent_event', () => {
     const event = {
       eventType: 'artificer_nonexistent_event',

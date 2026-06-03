@@ -1051,6 +1051,41 @@ describe('EvaluatorRunner (vertical slice)', () => {
     expect(notPrincipleEvent).toBeDefined();
     expect(notPrincipleEvent?.payload?.scribeArtifactId).toBe('pi-art-scribe-nonexistent');
   });
+
+  // ── Telemetry dedup regression test ───────────────────────────────────────
+
+  it('successful run emits exactly 1 evaluator_output_validated and 1 evaluator_decision_recorded', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makeArtificerArtifact());
+    await store.upsertArtifact(makeScribeArtifact());
+
+    const deps = createMockDeps({ artifactStore: store });
+    const emitTelemetry = vi.fn();
+    (deps.eventEmitter as unknown as Record<string, unknown>).emitTelemetry = emitTelemetry;
+
+    const runner = new EvaluatorRunner(deps, {
+      owner: 'test-dedup',
+      runtimeKind: 'evaluator',
+      pollIntervalMs: 10,
+      timeoutMs: 5000,
+    });
+
+    const result = await runner.run(EVALUATOR_TASK_ID);
+    expect(result.status).toBe('succeeded');
+
+    // Count telemetry events by type
+    const outputValidatedCalls = emitTelemetry.mock.calls.filter(
+      (c: unknown[]) => typeof c[0] === 'object' && c[0] !== null && 'eventType' in c[0] && c[0].eventType === 'evaluator_output_validated',
+    );
+    const decisionRecordedCalls = emitTelemetry.mock.calls.filter(
+      (c: unknown[]) => typeof c[0] === 'object' && c[0] !== null && 'eventType' in c[0] && c[0].eventType === 'evaluator_decision_recorded',
+    );
+
+    // Exactly 1 output_validated (from BasePeerRunner), not 2
+    expect(outputValidatedCalls).toHaveLength(1);
+    // Exactly 1 decision_recorded (from emitSuccessTelemetry)
+    expect(decisionRecordedCalls).toHaveLength(1);
+  });
 });
 
 describe('DefaultEvaluatorValidator (vertical slice)', () => {

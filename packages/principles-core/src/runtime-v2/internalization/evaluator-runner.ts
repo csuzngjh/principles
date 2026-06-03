@@ -378,7 +378,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   protected override emitSuccessTelemetry(taskId: string, output: EvaluatorOutputV1): void {
-    this.emitEvent('output_validated', taskId, {
+    this.emitEvent('decision_recorded', taskId, {
       evaluationDecision: output.evaluation.decision,
       evaluationScore: output.evaluation.score,
     });
