@@ -38,6 +38,7 @@ import { handleAgentsRoute, disposeAgentModels } from './routes/agents.js';
 import { handleUpdateRoute } from './routes/update.js';
 import { handleUpdateHistoryRoute } from './routes/update-history.js';
 import { handleStateRoute } from './routes/state.js';
+import { handleConfigRoute } from './routes/config.js';
 import { sendJson, sendSuccess, sendError, sendNotFound, sendUnauthorized } from './utils/response.js';
 import { 
   parseDiagnosticianOutput, 
@@ -454,6 +455,14 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath === '/api/v1/state' || urlPath.startsWith('/api/v1/state/')) {
         const subPath = urlPath.slice('/api/v1/state'.length);
         asyncHandler(() => handleStateRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // Config API routes (PRI-309): /api/v1/config/summary, /api/v1/config/catalog,
+      // /api/v1/config/agents/:name/binding, /api/v1/config/readiness/:name
+      if (urlPath === '/api/v1/config' || urlPath.startsWith('/api/v1/config/')) {
+        const subPath = urlPath.slice('/api/v1/config'.length);
+        asyncHandler(() => handleConfigRoute(req, res, { workspaceDir: services.workspaceDir, subPath }))(req, res);
         return;
       }
 
