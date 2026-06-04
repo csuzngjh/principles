@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" width="100%" alt="Principles Disciple Banner">
+  <img src="assets/banner.webp" width="100%" alt="Principles Disciple Banner">
 </p>
 
 <p align="center">
