@@ -100,7 +100,13 @@ export async function handleConfigRoute(
       sendMethodNotAllowed(res);
       return;
     }
-    const agentName = decodeURIComponent(agentBindingMatch[1] ?? '');
+    let agentName: string;
+    try {
+      agentName = decodeURIComponent(agentBindingMatch[1] ?? '');
+    } catch {
+      sendBadRequest(res, 'Invalid agent name encoding');
+      return;
+    }
     let bodyText: string;
     try {
       bodyText = await readBody(req);
@@ -136,7 +142,13 @@ export async function handleConfigRoute(
       sendMethodNotAllowed(res);
       return;
     }
-    const agentName = decodeURIComponent(readinessMatch[1] ?? '');
+    let agentName: string;
+    try {
+      agentName = decodeURIComponent(readinessMatch[1] ?? '');
+    } catch {
+      sendBadRequest(res, 'Invalid agent name encoding');
+      return;
+    }
     const result = checkReadiness(workspaceDir, agentName);
 
     if (!result.ok) {

@@ -401,11 +401,47 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
     expect(err.error).toBeTruthy();
   });
 
-  it('rejects payload with secret-like fields', async () => {
+  it('rejects payload with unknown fields (strict whitelist)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
       url: '/api/v1/config/agents/diagnostician/binding',
       body: { runtimeProfile: 'openclaw.default', enabled: true, apiKey: 'sk-ant-12345' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/agents/diagnostician/binding',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('unknown field');
+  });
+
+  it('rejects payload with unknown non-secret fields', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/diagnostician/binding',
+      body: { runtimeProfile: 'openclaw.default', enabled: true, extraField: 'value' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/agents/diagnostician/binding',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('unknown field');
+  });
+
+  it('rejects payload with nested secret-like keys (ANY-segment)', async () => {
+    writeConfig(VALID_CONFIG);
+    // Even though the nested key is secret-like, the whitelist check catches
+    // the unknown top-level key 'provider' first. Both paths reject.
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/diagnostician/binding',
+      body: { runtimeProfile: 'openclaw.default', enabled: true, provider: { api_key: 'sk-ant-12345' } },
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -542,10 +578,14 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const data = okEnvelope<{ agent: string; readiness: string; reason: string; nextAction: string }>(res);
+    const data = okEnvelope<{ agent: string; readiness: string; reason: string; nextAction: string; profileId: string; profileLabel: string }>(res);
     expect(data.readiness).toBe('needs_setup');
     expect(data.reason).toBeTruthy();
     expect(data.nextAction).toBeTruthy();
+    // profileId must be the missing profile, not the default
+    expect(data.profileId).toBe('nonexistent-profile');
+    // profileLabel must clearly indicate unknown, not show default label
+    expect(data.profileLabel).toContain('unknown:');
   });
 
   it('returns not_ready for pi-ai profile with missing env var', async () => {
@@ -610,6 +650,24 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
     expect(data.agent).toBe('diagnostician');
     // Default profile is openclaw.default with source=default → ready
     expect(data.readiness).toBe('ready');
+  });
+
+  it('returns unknown readiness when config is malformed', async () => {
+    writeMalformedConfig('version: 999\nfeatures: not-an-object\n');
+    const req = createMockRequest('GET', {
+      url: '/api/v1/config/readiness/diagnostician',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/readiness/diagnostician',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ agent: string; readiness: string; reason: string; nextAction: string }>(res);
+    expect(data.readiness).toBe('unknown');
+    expect(data.reason).toContain('malformed');
+    expect(data.nextAction).toBeTruthy();
   });
 });
 
@@ -687,5 +745,72 @@ describe('Config API edge cases', () => {
       subPath: '/agents/diagnostician/binding',
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 400 for malformed URI encoding in agent name', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/%E0%A4%A/binding',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/agents/%E0%A4%A/binding',
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 400 for malformed URI encoding in readiness agent name', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('GET', {
+      url: '/api/v1/config/readiness/%E0%A4%A',
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/readiness/%E0%A4%A',
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+// ===========================================================================
+// Unit tests for validateBindingPayload (deep secret detection)
+// ===========================================================================
+
+import { validateBindingPayload } from '../../../src/server/config/pd-config-store.js';
+
+describe('validateBindingPayload — deep secret detection', () => {
+  it('allows valid payload with only runtimeProfile and enabled', () => {
+    const result = validateBindingPayload({ runtimeProfile: 'openclaw.default', enabled: true });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects unknown top-level keys', () => {
+    const result = validateBindingPayload({ runtimeProfile: 'openclaw.default', enabled: true, extra: 'value' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toContain('unknown field');
+    }
+  });
+
+  it('rejects nested secret-like keys via ANY-segment detection', () => {
+    // This tests the deep scan path — whitelist passes because keys are allowed,
+    // but the nested value contains a secret-like key
+    const result = validateBindingPayload({
+      runtimeProfile: { 'access_token': 'sk-123' },
+      enabled: true,
+    });
+    // runtimeProfile must be a string, so this fails type validation
+    // but the secret detection would also catch it if runtimeProfile were an object
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects payload with access_token top-level key', () => {
+    const result = validateBindingPayload({ runtimeProfile: 'openclaw.default', enabled: true, access_token: 'sk-123' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toContain('unknown field');
+    }
   });
 });

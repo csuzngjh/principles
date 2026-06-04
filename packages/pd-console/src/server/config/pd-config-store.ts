@@ -11,6 +11,7 @@
  * - ERR-002: Graceful degradation includes reason
  * - ERR-009/ERR-010: Required fields fail loud
  * - ERR-013: Object.hasOwn() for untrusted keys
+ * - ERR-045: ANY-segment redaction for sensitive keys
  */
 
 import * as fs from 'fs';
@@ -38,6 +39,15 @@ import type {
 
 const PD_CONFIG_DIR = '.pd';
 const PD_CONFIG_FILENAME = 'config.yaml';
+
+/** Allowed top-level keys in PATCH /agents/:name/binding payload */
+const ALLOWED_PAYLOAD_KEYS = new Set(['runtimeProfile', 'enabled']);
+
+/** Secret-like key segments for ANY-segment detection (ERR-045) */
+const SECRET_KEY_SEGMENTS = [
+  'apikey', 'api_key', 'key', 'token', 'secret', 'password', 'auth',
+  'credential', 'gatewaytoken', 'gateway_token', 'accesstoken', 'access_token',
+];
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -166,30 +176,73 @@ function writeConfigAtomic(configPath: string, config: Record<string, unknown>):
   fs.renameSync(tmpPath, configPath);
 }
 
-const SENSITIVE_PAYLOAD_KEYS = new Set([
-  'apiKey', 'api_key', 'token', 'gatewayToken', 'gateway_token',
-  'secret', 'password', 'auth', 'credential',
-]);
-
 function isValidAgentName(name: string): name is InternalAgentName {
   return (INTERNAL_AGENT_NAMES as readonly string[]).includes(name);
 }
 
-function validateBindingPayload(payload: unknown): { ok: true; value: AgentBindingUpdate } | { ok: false; error: string; message: string } {
-  if (payload === null || payload === undefined || typeof payload !== 'object' || Array.isArray(payload)) {
+/**
+ * Type guard: is `value` a plain Record<string, unknown>?
+ * Replaces `payload as Record<string, unknown>` (ERR-001/ERR-005).
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * ANY-segment secret key detection (ERR-045).
+ * Checks if any segment of a dotted key path matches a secret-like pattern.
+ * E.g. "provider.api_key" → detected; "runtimeProfile" → not detected.
+ */
+function containsSecretSegment(key: string): boolean {
+  const lower = key.toLowerCase();
+  const segments = lower.split(/[._-]/);
+  return segments.some(seg => SECRET_KEY_SEGMENTS.includes(seg));
+}
+
+/**
+ * Recursively scan an object for secret-like keys at any depth (ERR-045).
+ */
+function hasSecretLikeKeyDeep(obj: Record<string, unknown>, prefix = ''): string | null {
+  for (const key of Object.keys(obj)) {
+    const fullPath = prefix ? `${prefix}.${key}` : key;
+    if (containsSecretSegment(key)) {
+      return fullPath;
+    }
+    const val = obj[key];
+    if (isRecord(val)) {
+      const nested = hasSecretLikeKeyDeep(val, fullPath);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+export function validateBindingPayload(payload: unknown): { ok: true; value: AgentBindingUpdate } | { ok: false; error: string; message: string } {
+  // Use isRecord() type guard instead of `as` (ERR-001/ERR-005)
+  if (!isRecord(payload)) {
     return { ok: false, error: 'bad_request', message: 'Payload must be a JSON object with runtimeProfile and enabled fields' };
   }
 
-  const obj = payload as Record<string, unknown>;
-
-  // Check for sensitive keys (ERR-045)
-  for (const key of Object.keys(obj)) {
-    if (SENSITIVE_PAYLOAD_KEYS.has(key)) {
-      return { ok: false, error: 'bad_request', message: `Payload contains forbidden key '${key}'. Remove secret fields from the request.` };
+  // Strict whitelist: reject unknown top-level keys
+  const payloadKeys = Object.keys(payload);
+  for (const key of payloadKeys) {
+    if (!ALLOWED_PAYLOAD_KEYS.has(key)) {
+      return { ok: false, error: 'bad_request', message: `Payload contains unknown field '${key}'. Only 'runtimeProfile' and 'enabled' are allowed.` };
     }
   }
 
-  const runtimeProfileRaw = Object.hasOwn(obj, 'runtimeProfile') ? obj.runtimeProfile : undefined;
+  // ANY-segment secret key detection on nested values (ERR-045)
+  for (const key of payloadKeys) {
+    const val = payload[key];
+    if (isRecord(val)) {
+      const secretPath = hasSecretLikeKeyDeep(val, key);
+      if (secretPath) {
+        return { ok: false, error: 'bad_request', message: `Payload contains secret-like field '${secretPath}'. Remove secret fields from the request.` };
+      }
+    }
+  }
+
+  const runtimeProfileRaw = Object.hasOwn(payload, 'runtimeProfile') ? payload.runtimeProfile : undefined;
   if (runtimeProfileRaw === undefined) {
     return { ok: false, error: 'bad_request', message: 'Missing required field: runtimeProfile' };
   }
@@ -197,7 +250,7 @@ function validateBindingPayload(payload: unknown): { ok: true; value: AgentBindi
     return { ok: false, error: 'bad_request', message: 'runtimeProfile must be a non-empty string' };
   }
 
-  const enabledRaw = Object.hasOwn(obj, 'enabled') ? obj.enabled : undefined;
+  const enabledRaw = Object.hasOwn(payload, 'enabled') ? payload.enabled : undefined;
   if (enabledRaw === undefined) {
     return { ok: false, error: 'bad_request', message: 'Missing required field: enabled' };
   }
@@ -414,23 +467,44 @@ export function checkReadiness(
     };
   }
 
-  // 2. Load config
+  // 2. Load config — if malformed, return unknown (not defaults pretending normal)
   const loadResult = loadPdConfig(workspaceDir);
-  const effective = loadResult.ok ? loadResult.effective : loadResult.defaults;
+  if (!loadResult.ok) {
+    return {
+      ok: true,
+      agent: agentName,
+      readiness: 'unknown',
+      profileId: '',
+      profileLabel: '',
+      reason: `Config file is malformed: ${loadResult.errors[0]?.reason ?? 'unknown error'}`,
+      nextAction: 'Fix .pd/config.yaml errors before checking readiness',
+    };
+  }
+
+  const { effective } = loadResult;
 
   // 3. Resolve agent binding
   const bindingResult = resolveAgentRuntimeBinding(effective, agentName);
 
   if (!bindingResult.ok) {
     // Agent is disabled or profile not found
-    const profileId = effective.config.internalAgents.defaultRuntime;
-    const profile = effective.config.runtimeProfiles[profileId];
+    // Use the agent's override profile id if present, otherwise default
+    const unresolvedProfileId = effective.config.internalAgents.agents[agentName]?.runtimeProfile
+      ?? effective.config.internalAgents.defaultRuntime;
+    const resolvedProfileId = bindingResult.readiness === 'disabled'
+      ? effective.config.internalAgents.defaultRuntime
+      : unresolvedProfileId;
+    const resolvedProfile = effective.config.runtimeProfiles[resolvedProfileId];
+    // If profile not found, label must clearly indicate the missing profile
+    const profileLabel = resolvedProfile
+      ? buildProfileLabel(resolvedProfileId, resolvedProfile)
+      : `unknown:${resolvedProfileId}`;
     return {
       ok: true,
       agent: agentName,
       readiness: bindingResult.readiness,
-      profileId: bindingResult.readiness === 'disabled' ? profileId : (effective.config.internalAgents.agents[agentName]?.runtimeProfile ?? profileId),
-      profileLabel: profile ? buildProfileLabel(profileId, profile) : `unknown:${profileId}`,
+      profileId: resolvedProfileId,
+      profileLabel,
       reason: bindingResult.reason,
       nextAction: bindingResult.nextAction,
     };
