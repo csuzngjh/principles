@@ -42,12 +42,12 @@ describe('evaluateAdmission', () => {
     expect(result.nextAction).toBe('review_defer_disposition_manually');
   });
 
-  it('gates when provenance is owner_reported_no_host_trace', () => {
+  it('admits owner_reported_no_host_trace when confidence and evidence sufficient', () => {
     const result = evaluateAdmission(
       makeInput({ provenance: 'owner_reported_no_host_trace', confidence: 0.9, evidenceCount: 5 }),
     );
-    expect(result.decision).toBe('needs_evidence');
-    expect(result.reason).toBe('provenance_owner_reported_no_host_trace');
+    expect(result.decision).toBe('admitted');
+    expect(result.reason).toBe('evidence_sufficient');
     expect(result.evidenceStatus).toBe('owner_reported_no_host_trace');
   });
 
@@ -115,7 +115,7 @@ describe('evaluateCandidateAdmissions', () => {
     expect(ruleAdmitted?.admission.decision).toBe('admitted');
   });
 
-  it('gates all candidates when provenance is owner_reported_no_host_trace', () => {
+  it('admits owner_reported candidates when confidence and evidence sufficient', () => {
     const candidates = [
       { candidateId: 'c-1', recommendationKind: 'principle' as const },
       { candidateId: 'c-2', recommendationKind: 'rule' as const },
@@ -125,8 +125,8 @@ describe('evaluateCandidateAdmissions', () => {
 
     const first = results.find((r) => r.candidateId === 'c-1');
     const second = results.find((r) => r.candidateId === 'c-2');
-    expect(first?.admission.decision).toBe('needs_evidence');
-    expect(second?.admission.decision).toBe('needs_evidence');
+    expect(first?.admission.decision).toBe('admitted');
+    expect(second?.admission.decision).toBe('admitted');
   });
 
   it('reproduces the live sample: confidence 0.35 + owner_reported_no_host_trace', () => {

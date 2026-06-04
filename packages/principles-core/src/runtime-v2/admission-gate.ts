@@ -33,15 +33,6 @@ export function evaluateAdmission(input: AdmissionGateInput): AdmissionGateResul
     };
   }
 
-  if (input.provenance === 'owner_reported_no_host_trace') {
-    return {
-      decision: 'needs_evidence',
-      reason: 'provenance_owner_reported_no_host_trace',
-      nextAction: 'provide_host_session_evidence_or_manual_review',
-      evidenceStatus: 'owner_reported_no_host_trace',
-    };
-  }
-
   if (input.confidence < ADMISSION_CONFIDENCE_THRESHOLD) {
     return {
       decision: 'needs_evidence',

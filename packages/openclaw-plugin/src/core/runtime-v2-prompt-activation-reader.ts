@@ -1,20 +1,12 @@
-import * as path from 'path';
-import * as fs from 'fs';
-import * as yaml from 'js-yaml';
-import { SqliteConnection, SqliteActivationStateStore, computeEffectiveFlags, DEFAULT_FEATURE_FLAGS, filterPromptActivations, resolvePrincipleFromArtifact } from '@principles/core/runtime-v2';
-import type { EffectiveFeatureFlags, ActivatedPrinciple, PromptActivationReaderResult } from '@principles/core/runtime-v2';
+import { SqliteConnection, SqliteActivationStateStore, computeFeatureFlagsFromConfig, filterPromptActivations, resolvePrincipleFromArtifact } from '@principles/core/runtime-v2';
+import type { FeatureFlagsResult, ActivatedPrinciple, PromptActivationReaderResult } from '@principles/core/runtime-v2';
+import { loadPdConfigForPlugin } from './pd-config-loader.js';
 
 export { RUNTIME_V2_PRINCIPLE_BUDGET } from '@principles/core/runtime-v2';
 export type { ActivatedPrinciple, PromptActivationReaderResult };
 
 export interface PromptActivationReaderDeps {
   logger?: { warn?: (msg: string) => void; info?: (msg: string) => void; error?: (msg: string) => void };
-}
-
-const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 export class PromptActivationReader {
@@ -103,60 +95,20 @@ export class PromptActivationReader {
     }
   }
 
-  private loadFeatureFlags(): EffectiveFeatureFlags {
-    const configPath = path.join(this.workspaceDir, '.pd', 'feature-flags.yaml');
+  /**
+   * PRI-305/PRI-307: Load feature flags from .pd/config.yaml instead of .pd/feature-flags.yaml.
+   * Uses the shared plugin config loader for consistency.
+   */
+  private loadFeatureFlags(): FeatureFlagsResult {
+    const result = loadPdConfigForPlugin(this.workspaceDir);
+    const flags = computeFeatureFlagsFromConfig(result.effective);
 
-    if (!fs.existsSync(configPath)) {
-      return computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
-    }
-
-    let raw: string;
-    try {
-      raw = fs.readFileSync(configPath, 'utf8');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      this.deps.logger?.warn?.(`[PD:RuntimeV2] Feature flags unreadable: ${msg} — using defaults`);
-      return computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
-    } catch {
-      this.deps.logger?.warn?.(`[PD:RuntimeV2] Feature flags YAML parse error — using defaults`);
-      return {
-        ...computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath),
-        warnings: ['feature-flags.yaml: YAML parse error, using defaults'],
-      };
-    }
-
-    if (!isRecord(parsed)) {
-      this.deps.logger?.warn?.(`[PD:RuntimeV2] Feature flags not a mapping — using defaults`);
-      return {
-        ...computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath),
-        warnings: ['feature-flags.yaml: expected a mapping, using defaults'],
-      };
-    }
-
-    const parsedRecord: Record<string, unknown> = Object.create(null);
-    const yamlWarnings: string[] = [];
-    for (const key of Object.keys(parsed)) {
-      if (DANGEROUS_KEYS.has(key)) {
-        yamlWarnings.push(`feature-flags.yaml: dangerous key '${key}' rejected`);
-        continue;
-      }
-      if (Object.hasOwn(parsed, key)) {
-        parsedRecord[key] = parsed[key];
+    if (!result.ok) {
+      for (const err of result.errors) {
+        this.deps.logger?.warn?.(`[PD:RuntimeV2] Config error at ${err.path}: ${err.reason}`);
       }
     }
 
-    const result = computeEffectiveFlags(parsedRecord, DEFAULT_FEATURE_FLAGS, configPath);
-    if (yamlWarnings.length > 0) {
-      result.warnings = [...yamlWarnings, ...result.warnings];
-      for (const w of yamlWarnings) {
-        this.deps.logger?.warn?.(`[PD:RuntimeV2] ${w}`);
-      }
-    }
-    return result;
+    return flags;
   }
 }

@@ -3,13 +3,13 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import {
-    WorkflowFunnelLoader,
     PiAiRuntimeAdapter,
     CorrectionObserver,
     AgentScheduler,
 } from '@principles/core/runtime-v2';
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { SystemLogger } from '../core/system-logger.js';
+import { resolveObserverConfig } from '../core/pd-config-loader.js';
 
 export interface CorrectionObserverServiceShape {
     id: string;
@@ -26,43 +26,53 @@ const CORRECTION_OBSERVER_INITIAL_DELAY_MS = 10_000;
 const CORRECTION_OBSERVER_MAX_RECENT_SESSIONS = 20;
 const CORRECTION_OBSERVER_MAX_PAYLOAD_SESSIONS = 5;
 
+/**
+ * PRI-307: Resolve CorrectionObserver from .pd/config.yaml.
+ *
+ * States:
+ * - disabled: feature flag off → return null, no noisy logs
+ * - needs_setup: enabled but missing API key or profile → return null with structured reason
+ * - ready/not_ready: enabled and configured → return observer instance
+ */
 export function resolveCorrectionObserver(wctx: WorkspaceContext, logger?: Pick<PluginLogger, 'info' | 'warn' | 'error' | 'debug'>): CorrectionObserver | null {
     try {
-        const loader = new WorkflowFunnelLoader(wctx.stateDir);
-        const funnel = loader.getFunnel('pd-correction-observer');
-        const policy = funnel?.policy;
-        if (!policy || policy.runtimeKind !== 'pi-ai') {
-            logger?.debug?.('[PD:CorrectionObserver] workflows.yaml pd-correction-observer policy not found. Falling back to environment variables.');
-            const provider = process.env.PD_CORRECTION_PROVIDER || 'anthropic';
-            const model = process.env.PD_CORRECTION_MODEL || 'anthropic/claude-3-5-sonnet';
-            const apiKeyEnv = process.env.PD_CORRECTION_API_KEY_ENV || 'ANTHROPIC_API_KEY';
-            const baseUrl = process.env.PD_CORRECTION_BASE_URL;
+        const observerConfig = resolveObserverConfig(
+            wctx.workspaceDir,
+            'correction_observer',
+            'correctionObserver',
+            logger,
+        );
 
-            if (!process.env[apiKeyEnv]) {
-                logger?.debug?.(`[PD:CorrectionObserver] API key env ${apiKeyEnv} is not set. Periodic optimization disabled.`);
-                return null;
+        if (!observerConfig.enabled) {
+            if (observerConfig.readiness === 'config_malformed') {
+                logger?.warn?.(`[PD:CorrectionObserver] Config malformed: ${observerConfig.reason}. ${observerConfig.nextAction}`);
+            } else {
+                logger?.debug?.(`[PD:CorrectionObserver] ${observerConfig.reason}`);
             }
-
-            const adapter = new PiAiRuntimeAdapter({
-                provider,
-                model,
-                apiKeyEnv,
-                baseUrl,
-                workspace: wctx.workspaceDir,
-            });
-            return new CorrectionObserver({ runtimeAdapter: adapter });
+            return null;
         }
 
-        const adapter = new PiAiRuntimeAdapter({
-            provider: String(policy.provider),
-            model: String(policy.model),
-            apiKeyEnv: String(policy.apiKeyEnv),
-            maxRetries: policy.maxRetries,
-            timeoutMs: policy.timeoutMs ?? 30_000,
-            baseUrl: policy.baseUrl,
-            workspace: wctx.workspaceDir,
-        });
-        return new CorrectionObserver({ runtimeAdapter: adapter }, { timeoutMs: policy.timeoutMs });
+        if (observerConfig.readiness === 'needs_setup') {
+            logger?.info?.(`[PD:CorrectionObserver] ${observerConfig.reason}. ${observerConfig.nextAction}`);
+            return null;
+        }
+
+        // ready or not_ready — create the observer
+        if (observerConfig.runtimeProfileType === 'pi-ai') {
+            const adapter = new PiAiRuntimeAdapter({
+                provider: observerConfig.provider ?? 'anthropic',
+                model: observerConfig.model ?? 'anthropic/claude-3-5-sonnet',
+                apiKeyEnv: observerConfig.apiKeyEnv ?? 'ANTHROPIC_API_KEY',
+                timeoutMs: observerConfig.timeoutMs ?? undefined,
+                baseUrl: observerConfig.baseUrl ?? undefined,
+                workspace: wctx.workspaceDir,
+            });
+            return new CorrectionObserver({ runtimeAdapter: adapter }, { timeoutMs: observerConfig.timeoutMs ?? undefined });
+        }
+
+        // OpenClaw profile — not yet supported for observer runtime
+        logger?.info?.(`[PD:CorrectionObserver] OpenClaw runtime profile not yet supported for correction observer. Skipping.`);
+        return null;
     } catch (err) {
         logger?.warn?.(`[PD:CorrectionObserver] Failed to resolve CorrectionObserver: ${String(err)}`);
         return null;
@@ -73,7 +83,8 @@ export async function runCorrectionObserverCycle(wctx: WorkspaceContext, logger:
     try {
         const observer = resolveCorrectionObserver(wctx, logger);
         if (!observer) {
-            logger?.info?.('[PD:CorrectionObserver] Observer not resolved (no API key or config). Skipping cycle.');
+            // PRI-307: No noisy "no API key" cycling. Only log at debug level.
+            logger?.debug?.(`[PD:CorrectionObserver] Observer not resolved. Skipping cycle.`);
             return;
         }
 
@@ -163,8 +174,28 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
             if (logger) logger.info(`[PD:CorrectionObserver] Already started for workspace: ${workspaceDir}. Skipping duplicate start.`);
             return;
         }
-        startedWorkspaces.add(workspaceDir);
 
+        // PRI-307: Check observer config before starting
+        const observerConfig = resolveObserverConfig(
+            workspaceDir,
+            'correction_observer',
+            'correctionObserver',
+            logger,
+        );
+
+        if (!observerConfig.enabled) {
+            // Disabled → no start, no noisy cycling. Single structured log.
+            logger?.info?.(`[PD:CorrectionObserver] ${observerConfig.reason}. ${observerConfig.nextAction}`);
+            return;
+        }
+
+        if (observerConfig.readiness === 'needs_setup') {
+            // Enabled but missing setup → structured needs_setup, no noisy cycling
+            logger?.info?.(`[PD:CorrectionObserver] ${observerConfig.reason}. ${observerConfig.nextAction}`);
+            return;
+        }
+
+        startedWorkspaces.add(workspaceDir);
         correctionObserverStopped = false;
 
         const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });

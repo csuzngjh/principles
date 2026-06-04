@@ -28,9 +28,63 @@ function createTempWorkspace(): string {
   return dir;
 }
 
-function writeFeatureFlags(workspaceDir: string, flags: Record<string, unknown>): void {
-  const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
-  const content = yaml.dump(flags, { schema: yaml.JSON_SCHEMA });
+function deepMergeFeatures(
+  defaults: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...defaults };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (
+      value != null &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      Object.hasOwn(result, key) &&
+      result[key] != null &&
+      typeof result[key] === 'object' &&
+      !Array.isArray(result[key])
+    ) {
+      result[key] = { ...(result[key] as Record<string, unknown>), ...(value as Record<string, unknown>) };
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function writeConfigYaml(workspaceDir: string, featureOverrides: Record<string, unknown>): void {
+  const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+  const defaultFeatures: Record<string, unknown> = {
+    prompt: { category: 'core', enabled: true },
+    code_tool_hook: { category: 'core', enabled: true },
+    defer_archive: { category: 'core', enabled: true },
+    correction_observer: { category: 'quiet', enabled: false },
+    empathy_observer: { category: 'quiet', enabled: false },
+    evolution_worker: { category: 'quiet', enabled: false },
+    nocturnal: { category: 'gone', enabled: false },
+  };
+  const config = {
+    version: 1,
+    features: deepMergeFeatures(defaultFeatures, featureOverrides),
+    runtimeProfiles: {
+      'openclaw.default': { type: 'openclaw', source: 'default' },
+    },
+    internalAgents: {
+      defaultRuntime: 'openclaw.default',
+      agents: {
+        diagnostician: { enabled: true },
+        dreamer: { enabled: true },
+        scribe: { enabled: true },
+        artificer: { enabled: true },
+        philosopher: { enabled: false },
+        evaluator: { enabled: false },
+        rolloutReviewer: { enabled: false },
+        trainer: { enabled: false },
+        correctionObserver: { enabled: false },
+        empathyObserver: { enabled: false },
+      },
+    },
+  };
+  const content = yaml.dump(config, { schema: yaml.JSON_SCHEMA });
   fs.writeFileSync(configPath, content, 'utf8');
 }
 
@@ -151,6 +205,9 @@ describe('PRI-294: CorrectionObserver independence from EvolutionWorker', () => 
   });
 
   it('CorrectionObserver starts when EvolutionWorker is disabled (default)', () => {
+    writeConfigYaml(workspaceDir, {
+      correction_observer: { enabled: true },
+    });
     const logger = createMockLogger();
 
     // Verify EvolutionWorker is disabled
@@ -164,8 +221,9 @@ describe('PRI-294: CorrectionObserver independence from EvolutionWorker', () => 
   });
 
   it('CorrectionObserver starts when EvolutionWorker is explicitly enabled', () => {
-    writeFeatureFlags(workspaceDir, {
+    writeConfigYaml(workspaceDir, {
       evolution_worker: { enabled: true },
+      correction_observer: { enabled: true },
     });
     const logger = createMockLogger();
 
@@ -177,7 +235,7 @@ describe('PRI-294: CorrectionObserver independence from EvolutionWorker', () => 
   });
 
   it('CorrectionObserver can be independently disabled', () => {
-    writeFeatureFlags(workspaceDir, {
+    writeConfigYaml(workspaceDir, {
       correction_observer: { enabled: false },
     });
     const logger = createMockLogger();

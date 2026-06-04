@@ -14,7 +14,7 @@ describe('Correction Observer Ownership — Feature Flag & Surface Registry Cons
     const result = computeEffectiveFlags(
       { correction_observer: { enabled: false } },
       DEFAULT_FEATURE_FLAGS,
-      '.pd/feature-flags.yaml',
+      '.pd/config.yaml',
     );
     expect(result.flags['correction_observer'].enabled).toBe(false);
     expect(result.warnings).not.toContain(expect.stringContaining('core flag cannot be disabled'));
