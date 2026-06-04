@@ -206,4 +206,23 @@ describe('redactDiagnosticsForCopy', () => {
     expect(result).toContain('Errors');
     expect(result).toContain('Missing provider');
   });
+
+  it('truncates sections exceeding MAX_ITEMS_PER_SECTION', () => {
+    // Create diagnostics with 60 features (exceeds limit of 50)
+    const manyFeatures = Array.from({ length: 60 }, (_, i) => ({
+      id: `feature-${i}`,
+      category: 'core',
+      enabled: true,
+    }));
+    const diag: ControlCenterDiagnostics = {
+      ...sampleDiagnostics,
+      features: manyFeatures,
+    };
+    const result = redactDiagnosticsForCopy(diag);
+    // Should show first 50 items and a truncation notice
+    expect(result).toContain('feature-0');
+    expect(result).toContain('feature-49');
+    expect(result).not.toContain('feature-50');
+    expect(result).toContain('+10 more');
+  });
 });

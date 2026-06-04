@@ -380,20 +380,23 @@ function DefaultRuntimeCard({
 }: {
   defaultRuntime: string;
   profiles: RedactedRuntimeProfileSummary[];
-  onDefaultRuntimeChange: (profileId: string) => void;
+  onDefaultRuntimeChange: (profileId: string) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState(defaultRuntime);
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const handleChange = (value: string) => {
     setSelected(value);
     setDirty(true);
   };
 
-  const handleSave = () => {
-    onDefaultRuntimeChange(selected);
-    setDirty(false);
+  const handleSave = async () => {
+    setSaving(true);
+    const ok = await onDefaultRuntimeChange(selected);
+    setSaving(false);
+    if (ok) setDirty(false);
   };
 
   return (
@@ -427,8 +430,8 @@ function DefaultRuntimeCard({
             </SelectContent>
           </Select>
           {dirty && (
-            <Button size="sm" onClick={handleSave}>
-              {t('common:save')}
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving ? t('pages:controlCenter.saving') : t('common:save')}
             </Button>
           )}
         </div>
@@ -493,7 +496,7 @@ export function ControlCenterPage() {
   );
 
   const handleDefaultRuntimeChange = useCallback(
-    async (profileId: string) => {
+    async (profileId: string): Promise<boolean> => {
       setSaving(true);
       setSaveError(null);
 
@@ -502,10 +505,11 @@ export function ControlCenterPage() {
 
       if (!result.success) {
         setSaveError(result.error ?? 'Failed to update default runtime');
-        return;
+        return false;
       }
 
       await loadData();
+      return true;
     },
     [loadData],
   );

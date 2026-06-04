@@ -128,6 +128,17 @@ export function groupAgentsByReadiness(
 
 // ── Redacted Diagnostics for Copy ────────────────────────────────────────────
 
+/** Maximum items per section in diagnostics output (ERR-014/ERR-016/ERR-017) */
+const MAX_ITEMS_PER_SECTION = 50;
+
+function takeBounded<T>(arr: T[]): { items: T[]; truncated: number } {
+  if (arr.length <= MAX_ITEMS_PER_SECTION) return { items: arr, truncated: 0 };
+  return {
+    items: arr.slice(0, MAX_ITEMS_PER_SECTION),
+    truncated: arr.length - MAX_ITEMS_PER_SECTION,
+  };
+}
+
 export function redactDiagnosticsForCopy(diag: ControlCenterDiagnostics): string {
   const overall = computeOverallReadiness(diag);
   const lines: string[] = [];
@@ -140,14 +151,17 @@ export function redactDiagnosticsForCopy(diag: ControlCenterDiagnostics): string
 
   // Features
   lines.push('--- Features ---');
-  for (const f of diag.features) {
+  const features = takeBounded(diag.features);
+  for (const f of features.items) {
     lines.push(`  ${f.id}: ${f.category} / ${f.enabled ? 'enabled' : 'disabled'}`);
   }
+  if (features.truncated > 0) lines.push(`  ... +${features.truncated} more`);
   lines.push('');
 
   // Runtime Profiles (redacted)
   lines.push('--- Runtime Profiles ---');
-  for (const p of diag.runtimeProfiles) {
+  const profiles = takeBounded(diag.runtimeProfiles);
+  for (const p of profiles.items) {
     const parts = [`  ${p.id}: ${p.label} [${getReadinessLabel(p.readiness)}]`];
     // apiKeyEnv is a secret-like key — redact it (ERR-045)
     if (p.apiKeyEnv) {
@@ -155,6 +169,7 @@ export function redactDiagnosticsForCopy(diag: ControlCenterDiagnostics): string
     }
     lines.push(parts.join('\n'));
   }
+  if (profiles.truncated > 0) lines.push(`  ... +${profiles.truncated} more`);
   lines.push('');
 
   // Default Runtime
@@ -163,27 +178,33 @@ export function redactDiagnosticsForCopy(diag: ControlCenterDiagnostics): string
 
   // Agents
   lines.push('--- Agents ---');
-  for (const a of diag.agents) {
+  const agents = takeBounded(diag.agents);
+  for (const a of agents.items) {
     const status = a.enabled ? getReadinessLabel(a.readiness) : 'Disabled';
     lines.push(`  ${a.name}: ${status} (profile: ${a.runtimeProfileLabel})`);
   }
+  if (agents.truncated > 0) lines.push(`  ... +${agents.truncated} more`);
   lines.push('');
 
   // Warnings
   if (diag.warnings.length > 0) {
     lines.push('--- Warnings ---');
-    for (const w of diag.warnings) {
+    const warnings = takeBounded(diag.warnings);
+    for (const w of warnings.items) {
       lines.push(`  - ${w}`);
     }
+    if (warnings.truncated > 0) lines.push(`  ... +${warnings.truncated} more`);
     lines.push('');
   }
 
   // Errors
   if (diag.errors && diag.errors.length > 0) {
     lines.push('--- Errors ---');
-    for (const e of diag.errors) {
+    const errors = takeBounded(diag.errors);
+    for (const e of errors.items) {
       lines.push(`  ${e.path}: ${e.reason} → ${e.nextAction}`);
     }
+    if (errors.truncated > 0) lines.push(`  ... +${errors.truncated} more`);
     lines.push('');
   }
 
