@@ -165,15 +165,19 @@ function AgentCard({
   }, []);
 
   const handleSave = useCallback(async () => {
-    await onSave(agent.name, selectedProfile, enabled);
-    // After save, check readiness
-    const result = await checkAgentReadiness(agent.name);
-    if (result.success && result.data) {
-      setReadiness(result.data.readiness);
-      setReadinessReason(result.data.reason ?? null);
-      setNextAction(result.data.nextAction ?? null);
+    try {
+      await onSave(agent.name, selectedProfile, enabled);
+      // After save, check readiness
+      const result = await checkAgentReadiness(agent.name);
+      if (result.success && result.data) {
+        setReadiness(result.data.readiness);
+        setReadinessReason(result.data.reason ?? null);
+        setNextAction(result.data.nextAction ?? null);
+      }
+      setDirty(false);
+    } catch {
+      // Save failed — keep dirty so user can retry
     }
-    setDirty(false);
   }, [agent.name, selectedProfile, enabled, onSave]);
 
   const badgeVariant = getReadinessBadgeVariant(readiness);
@@ -476,8 +480,9 @@ export function ControlCenterPage() {
       setSaving(false);
 
       if (!result.success) {
-        setSaveError(result.error ?? 'Failed to update agent binding');
-        return;
+        const msg = result.error ?? 'Failed to update agent binding';
+        setSaveError(msg);
+        throw new Error(msg);
       }
 
       // Reload summary to reflect changes
@@ -488,19 +493,29 @@ export function ControlCenterPage() {
 
   const handleDefaultRuntimeChange = useCallback(
     async (profileId: string) => {
-      // Update all agents that use the default to the new default
-      // This is a simple approach: just update the first enabled agent
-      // In practice, the default runtime is a config-level setting
-      // For now, we save it by updating each agent that doesn't have an override
+      if (!summary) return;
       setSaving(true);
       setSaveError(null);
 
-      // We need to update agents that are using the current default
-      // The simplest approach: reload and let the user manage per-agent
+      // Update all agents that use the current default runtime to the new default
+      const agentsOnDefault = summary.agents.filter(
+        a => a.enabled && a.runtimeProfileId === summary.defaultRuntime,
+      );
+
+      for (const agent of agentsOnDefault) {
+        const result = await updateAgentBinding(agent.name, profileId, agent.enabled);
+        if (!result.success) {
+          const msg = result.error ?? `Failed to update agent ${agent.name}`;
+          setSaveError(msg);
+          setSaving(false);
+          return;
+        }
+      }
+
       setSaving(false);
       await loadData();
     },
-    [loadData],
+    [summary, loadData],
   );
 
   const diag: ControlCenterDiagnostics | null = summary
