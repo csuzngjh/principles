@@ -189,6 +189,15 @@ describe('owner_reported fair admission', () => {
     expect(result.evidenceStatus).toBe('owner_reported_no_host_trace');
   });
 
+  it('kill switch does not override defer priority', () => {
+    setOwnerReportedFairAdmission(false);
+    const result = evaluateAdmission(
+      makeInput({ recommendationKind: 'defer', provenance: 'owner_reported_no_host_trace', confidence: 0.9, evidenceCount: 5 }),
+    );
+    expect(result.decision).toBe('deferred');
+    expect(result.reason).toBe('recommendation_kind_defer_not_actionable');
+  });
+
   it('kill switch getter reports current state', () => {
     expect(isOwnerReportedFairAdmissionEnabled()).toBe(true);
     setOwnerReportedFairAdmission(false);
