@@ -14,6 +14,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { KnownProvider } from '@mariozechner/pi-ai';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { loadPdConfig } from '../services/pd-config-loader.js';
 
 interface RecordOptions {
   reason?: string;
@@ -40,12 +41,25 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   const painId = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
+  // PRI-306: Load .pd/config.yaml for config-driven runtime binding
+  const configResult = loadPdConfig(workspaceDir);
+  if (!configResult.ok) {
+    // ERR-009 / Runtime Contract Rule 9: fail loud with reason, don't silently swallow
+    console.error(`Warning: .pd/config.yaml has errors — using defaults:`);
+    for (const e of configResult.errors) {
+      console.error(`  ${e.path}: ${e.reason}`);
+      if (e.nextAction) console.error(`    nextAction: ${e.nextAction}`);
+    }
+  }
+  const effectiveConfig = configResult.ok ? configResult.effective : configResult.defaults;
   const service = new PainToPrincipleService({
     workspaceDir,
     stateDir,
     ledgerAdapter,
     owner: 'pd-cli',
     autoIntakeEnabled: true,
+    effectiveConfig,
+    getEnvVar: (name: string) => process.env[name],
   });
 
   const result = await service.recordPain({
@@ -62,8 +76,8 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
 
   // Show diagnostic info for config failures
   if (result.failureCategory === 'config_missing') {
-    const configResult = resolveRuntimeConfig(stateDir);
-    if (isRuntimeConfigError(configResult)) {
+    const legacyConfig = resolveRuntimeConfig(stateDir);
+    if (isRuntimeConfigError(legacyConfig)) {
       if (opts.json) {
         console.log(JSON.stringify({
           status: 'failed',
@@ -72,20 +86,20 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
           failureCategory: result.failureCategory,
           message: result.message,
           configError: {
-            reason: configResult.reason,
-            message: configResult.message,
-            nextAction: configResult.nextAction,
+            reason: legacyConfig.reason,
+            message: legacyConfig.message,
+            nextAction: legacyConfig.nextAction,
           },
         }, null, 2));
       } else {
-        console.error(`  Config resolution failed: ${configResult.reason}`);
-        console.error(`  ${configResult.message}`);
-        console.error(`  nextAction: ${configResult.nextAction}`);
+        console.error(`  Config resolution failed: ${legacyConfig.reason}`);
+        console.error(`  ${legacyConfig.message}`);
+        console.error(`  nextAction: ${legacyConfig.nextAction}`);
       }
       process.exit(1);
       return;
     }
-    const config = configResult;
+    const config = legacyConfig;
     const missing: string[] = [];
     if (!config.provider) missing.push('provider');
     if (!config.model) missing.push('model');

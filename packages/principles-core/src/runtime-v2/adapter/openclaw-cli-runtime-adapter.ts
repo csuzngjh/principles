@@ -37,14 +37,16 @@ import type {
  *
  * Per DPB-09 (LOCKED): No silent fallback. Calling code must specify runtimeMode.
  * Per HG-03 (HARD GATE): --openclaw-local/--openclaw-gateway must be explicit.
+ * PRI-306: 'default' delegates mode resolution to OpenClaw (no mode flag appended).
  */
 export interface OpenClawCliRuntimeAdapterOptions {
   /**
-   * Runtime mode — must be explicitly 'local' or 'gateway'.
+   * Runtime mode — 'local' or 'gateway' appends the corresponding CLI flag.
+   * 'default' delegates to OpenClaw's own mode resolution (no flag appended).
    * Per DPB-09 (LOCKED): No silent fallback. Calling code must specify.
    * Per HG-03 (HARD GATE): --openclaw-local/--openclaw-gateway must be explicit.
    */
-  runtimeMode: 'local' | 'gateway';
+  runtimeMode: 'local' | 'gateway' | 'default';
   /**
    * PD workspace directory — used as cwd for the CLI process.
    * Per DPB-08 (LOCKED): Three-layer control includes cwd passed to CliProcessRunner.
@@ -286,7 +288,7 @@ function extractProbeResult(parsed: unknown): unknown | null {
 
 export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   private readonly runStateMap = new Map<string, RunState>();
-  private readonly runtimeMode: 'local' | 'gateway';
+  private readonly runtimeMode: 'local' | 'gateway' | 'default';
   private readonly workspaceDir?: string;
   private readonly agentId: string;
   private readonly eventEmitter: StoreEventEmitter;
@@ -774,7 +776,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
 
     // OCRA-03: Parse CliOutput — the stdout may be raw JSON, or wrapped in an OpenClaw envelope
     // (local or gateway). First extract the JSON value, then navigate to the diagnosis JSON.
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let parsed: unknown;
     const rawParsed = extractPayloadFromCliOutput(cliOutput.stdout, cliOutput.stderr);
     if (rawParsed !== null) {

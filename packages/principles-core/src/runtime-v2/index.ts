@@ -260,7 +260,7 @@ export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bri
 export { recordPainSignalObservability } from './pain-signal-observability.js';
 export type { PainSignalObservabilityResult, RecordPainSignalObservabilityOptions } from './pain-signal-observability.js';
 /** @deprecated Internal factory — use PainToPrincipleService constructor instead */
-export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
+export { createPainSignalBridge, invalidatePainSignalBridge, resolveRuntimeConfig, validateRuntimeConfig, isRuntimeConfigError, resolveRuntimeConfigFromPdConfig, type PainSignalRuntimeFactoryOptions, type RuntimeConfig, type RuntimeConfigError, type RuntimeConfigResult, type ResolveRuntimeConfigOptions } from './pain-signal-runtime-factory.js';
 
 // Pain-to-Principle service facade (PRI-12)
 export { PainToPrincipleService } from './pain-to-principle-service.js';
@@ -1404,6 +1404,23 @@ export {
   computeFeatureFlagsFromConfig,
   isFeatureEnabled,
   getEnabledFlagIds,
+} from './config/index.js';
+
+// Agent runtime binding — PRI-306
+export {
+  resolveAgentRuntimeBinding,
+  checkAgentRuntimeReadiness,
+  createAdapterConfigFromProfile,
+} from './config/index.js';
+
+export type {
+  AgentRuntimeBindingOk,
+  AgentRuntimeBindingErr,
+  AgentRuntimeBindingResult,
+  AgentRuntimeReadinessResult,
+  PiAiAdapterConfigResult,
+  OpenClawAdapterConfigResult,
+  AdapterConfigResult,
 } from './config/index.js';
 
 export type {

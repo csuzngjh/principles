@@ -77,3 +77,20 @@ export {
   isFeatureEnabled,
   getEnabledFlagIds,
 } from './pd-config-feature-flags.js';
+
+// Agent runtime binding — PRI-306
+export type {
+  AgentRuntimeBindingOk,
+  AgentRuntimeBindingErr,
+  AgentRuntimeBindingResult,
+  AgentRuntimeReadinessResult,
+  PiAiAdapterConfigResult,
+  OpenClawAdapterConfigResult,
+  AdapterConfigResult,
+} from './pd-config-agent-binding.js';
+
+export {
+  resolveAgentRuntimeBinding,
+  checkAgentRuntimeReadiness,
+  createAdapterConfigFromProfile,
+} from './pd-config-agent-binding.js';
