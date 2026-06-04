@@ -241,8 +241,8 @@ describe('Multiple concurrent errors collection', () => {
       model: 'test',
       apiKeyEnv: 'TEST_KEY',
     } as RuntimeProfile;
-    // Third error: missing required internalAgents.defaultRuntime
-    delete raw.internalAgents.defaultRuntime;
+    // Third error: invalid internalAgents.defaultRuntime (empty string)
+    raw.internalAgents.defaultRuntime = '' as unknown as string;
 
     const result = validatePdConfig(raw);
     expect(result.ok).toBe(false);
