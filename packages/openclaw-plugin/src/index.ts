@@ -18,9 +18,6 @@ import type {
   PluginHookSubagentContext,
 } from './openclaw-sdk.js';
 import * as path from 'path';
-import * as fs from 'fs';
-import * as yaml from 'js-yaml';
-import { computeEffectiveFlags, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
 import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
@@ -76,8 +73,6 @@ const pendingShadowObservations = new Map<string, string>();
 // ── Feature Flag Loader (plugin I/O boundary) ─────────────────────────────
 // Reads workspace feature-flags.yaml and checks a specific flag.
 // Returns the flag definition with effective enabled state.
-const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
