@@ -1,0 +1,444 @@
+/**
+ * PD Config Store — PRI-309
+ *
+ * I/O boundary for reading and writing `.pd/config.yaml`.
+ * Uses core validation and effective config computation.
+ * Safe partial writes: validate before write, preserve unrelated sections,
+ * reject malformed existing file.
+ *
+ * ERR entries:
+ * - ERR-001/ERR-005: No `as` bypasses on untrusted parsed YAML
+ * - ERR-002: Graceful degradation includes reason
+ * - ERR-009/ERR-010: Required fields fail loud
+ * - ERR-013: Object.hasOwn() for untrusted keys
+ */
+
+import * as fs from 'fs';
+import * as path from 'path';
+import yaml from 'js-yaml';
+import {
+  validatePdConfig,
+  computeEffectivePdConfig,
+  redactPdConfig,
+  checkAgentRuntimeReadiness,
+  resolveAgentRuntimeBinding,
+  INTERNAL_AGENT_NAMES,
+} from '@principles/core/runtime-v2';
+import type {
+  EffectivePdConfig,
+  PdConfigValidationResult,
+  RedactedPdConfigSummary,
+  InternalAgentName,
+  AgentRuntimeReadinessResult,
+  RuntimeProfile,
+  PdConfig,
+} from '@principles/core/runtime-v2';
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const PD_CONFIG_DIR = '.pd';
+const PD_CONFIG_FILENAME = 'config.yaml';
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+export interface ConfigLoadResultOk {
+  ok: true;
+  effective: EffectivePdConfig;
+  source: 'defaults' | 'user_config';
+  configPath: string;
+  warnings: string[];
+}
+
+export interface ConfigLoadResultErr {
+  ok: false;
+  source: 'malformed';
+  configPath: string;
+  errors: { path: string; reason: string; nextAction: string }[];
+  defaults: EffectivePdConfig;
+  warnings: string[];
+}
+
+export type ConfigLoadResult = ConfigLoadResultOk | ConfigLoadResultErr;
+
+export interface AgentBindingUpdate {
+  runtimeProfile: string;
+  enabled: boolean;
+}
+
+export interface AgentBindingUpdateResultOk {
+  ok: true;
+  agent: InternalAgentName;
+  runtimeProfile: string;
+  enabled: boolean;
+}
+
+export interface AgentBindingUpdateResultErr {
+  ok: false;
+  statusCode: number;
+  error: string;
+  message: string;
+}
+
+export type AgentBindingUpdateResult = AgentBindingUpdateResultOk | AgentBindingUpdateResultErr;
+
+export interface ReadinessResult {
+  agent: InternalAgentName;
+  readiness: 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
+  profileId: string;
+  profileLabel: string;
+  reason?: string;
+  nextAction?: string;
+}
+
+// ── Private Helpers (defined before public functions) ────────────────────────
+
+function buildProfileLabel(_id: string, profile: RuntimeProfile): string {
+  if (profile.type === 'openclaw') {
+    const parts: string[] = ['openclaw'];
+    if (profile.provider) parts.push(profile.provider);
+    if (profile.model) parts.push(profile.model);
+    if (profile.source && !profile.provider && !profile.model) parts.push(profile.source);
+    return parts.join(': ');
+  }
+  return `pi-ai: ${profile.provider}/${profile.model}`;
+}
+
+interface AgentBindingEntry {
+  enabled: boolean;
+  runtimeProfile?: string;
+}
+
+function buildUpdatedConfig(
+  currentConfig: PdConfig,
+  update: { agentName: InternalAgentName; runtimeProfile: string; enabled: boolean },
+): Record<string, unknown> {
+  const { agentName, runtimeProfile, enabled } = update;
+  const agentsMap: Record<string, AgentBindingEntry> = {};
+
+  // Copy all agent bindings, updating the target one
+  for (const name of INTERNAL_AGENT_NAMES) {
+    const existing = currentConfig.internalAgents.agents[name];
+    if (name === agentName) {
+      agentsMap[name] = { enabled, runtimeProfile };
+    } else if (existing) {
+      agentsMap[name] = {
+        enabled: existing.enabled,
+        ...(existing.runtimeProfile ? { runtimeProfile: existing.runtimeProfile } : {}),
+      };
+    }
+  }
+
+  return {
+    version: currentConfig.version,
+    features: { ...currentConfig.features },
+    runtimeProfiles: { ...currentConfig.runtimeProfiles },
+    internalAgents: {
+      defaultRuntime: currentConfig.internalAgents.defaultRuntime,
+      agents: agentsMap,
+    },
+    ui: { ...currentConfig.ui },
+  };
+}
+
+function writeConfigAtomic(configPath: string, config: Record<string, unknown>): void {
+  // Ensure directory exists
+  const dir = path.dirname(configPath);
+  fs.mkdirSync(dir, { recursive: true });
+
+  // Serialize to YAML
+  const content = yaml.dump(config, {
+    lineWidth: 120,
+    noRefs: true,
+    sortKeys: false,
+  });
+
+  // Atomic write: tmp → rename
+  const tmpPath = configPath + '.tmp';
+  fs.writeFileSync(tmpPath, content, 'utf8');
+  fs.renameSync(tmpPath, configPath);
+}
+
+const SENSITIVE_PAYLOAD_KEYS = new Set([
+  'apiKey', 'api_key', 'token', 'gatewayToken', 'gateway_token',
+  'secret', 'password', 'auth', 'credential',
+]);
+
+function isValidAgentName(name: string): name is InternalAgentName {
+  return (INTERNAL_AGENT_NAMES as readonly string[]).includes(name);
+}
+
+function validateBindingPayload(payload: unknown): { ok: true; value: AgentBindingUpdate } | { ok: false; error: string; message: string } {
+  if (payload === null || payload === undefined || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, error: 'bad_request', message: 'Payload must be a JSON object with runtimeProfile and enabled fields' };
+  }
+
+  const obj = payload as Record<string, unknown>;
+
+  // Check for sensitive keys (ERR-045)
+  for (const key of Object.keys(obj)) {
+    if (SENSITIVE_PAYLOAD_KEYS.has(key)) {
+      return { ok: false, error: 'bad_request', message: `Payload contains forbidden key '${key}'. Remove secret fields from the request.` };
+    }
+  }
+
+  const runtimeProfileRaw = Object.hasOwn(obj, 'runtimeProfile') ? obj.runtimeProfile : undefined;
+  if (runtimeProfileRaw === undefined) {
+    return { ok: false, error: 'bad_request', message: 'Missing required field: runtimeProfile' };
+  }
+  if (typeof runtimeProfileRaw !== 'string' || runtimeProfileRaw.length === 0) {
+    return { ok: false, error: 'bad_request', message: 'runtimeProfile must be a non-empty string' };
+  }
+
+  const enabledRaw = Object.hasOwn(obj, 'enabled') ? obj.enabled : undefined;
+  if (enabledRaw === undefined) {
+    return { ok: false, error: 'bad_request', message: 'Missing required field: enabled' };
+  }
+  if (typeof enabledRaw !== 'boolean') {
+    return { ok: false, error: 'bad_request', message: 'enabled must be a boolean' };
+  }
+
+  return { ok: true, value: { runtimeProfile: runtimeProfileRaw, enabled: enabledRaw } };
+}
+
+// ── Config Path ──────────────────────────────────────────────────────────────
+
+export function getPdConfigPath(workspaceDir: string): string {
+  return path.join(workspaceDir, PD_CONFIG_DIR, PD_CONFIG_FILENAME);
+}
+
+// ── Load Config ──────────────────────────────────────────────────────────────
+
+export function loadPdConfig(workspaceDir: string): ConfigLoadResult {
+  const configPath = getPdConfigPath(workspaceDir);
+
+  // Missing file → defaults
+  if (!fs.existsSync(configPath)) {
+    const effective = computeEffectivePdConfig(null);
+    return {
+      ok: true,
+      effective,
+      source: 'defaults',
+      configPath,
+      warnings: effective.warnings,
+    };
+  }
+
+  // Read
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf8');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const defaults = computeEffectivePdConfig(null);
+    return {
+      ok: false,
+      source: 'malformed',
+      configPath,
+      errors: [{ path: '', reason: `Failed to read .pd/config.yaml: ${message}`, nextAction: 'Check file permissions for .pd/config.yaml' }],
+      defaults,
+      warnings: [],
+    };
+  }
+
+  // Parse YAML — treat as unknown (ERR-001)
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const defaults = computeEffectivePdConfig(null);
+    return {
+      ok: false,
+      source: 'malformed',
+      configPath,
+      errors: [{ path: '', reason: `YAML parse error: ${message}`, nextAction: 'Fix YAML syntax in .pd/config.yaml' }],
+      defaults,
+      warnings: [],
+    };
+  }
+
+  // Validate via core (ERR-001, ERR-005)
+  const validationResult: PdConfigValidationResult = validatePdConfig(parsed);
+
+  if (!validationResult.ok) {
+    const defaults = computeEffectivePdConfig(null);
+    return {
+      ok: false,
+      source: 'malformed',
+      configPath,
+      errors: validationResult.errors.map(e => ({
+        path: e.path,
+        reason: e.reason,
+        nextAction: e.nextAction,
+      })),
+      defaults,
+      warnings: [],
+    };
+  }
+
+  // Compute effective config
+  const effective = computeEffectivePdConfig(validationResult.value);
+  return {
+    ok: true,
+    effective,
+    source: 'user_config',
+    configPath,
+    warnings: effective.warnings,
+  };
+}
+
+// ── Get Redacted Summary ─────────────────────────────────────────────────────
+
+export function getConfigSummary(workspaceDir: string): {
+  summary: RedactedPdConfigSummary;
+  errors?: { path: string; reason: string; nextAction: string }[];
+} {
+  const result = loadPdConfig(workspaceDir);
+  const effective = result.ok ? result.effective : result.defaults;
+  const summary = redactPdConfig(effective);
+
+  if (!result.ok) {
+    return { summary, errors: result.errors };
+  }
+  return { summary };
+}
+
+// ── Get Catalog ──────────────────────────────────────────────────────────────
+
+export function getConfigCatalog(workspaceDir: string): {
+  profiles: RedactedPdConfigSummary['runtimeProfiles'];
+} {
+  const result = loadPdConfig(workspaceDir);
+  const effective = result.ok ? result.effective : result.defaults;
+  const summary = redactPdConfig(effective);
+  return { profiles: summary.runtimeProfiles };
+}
+
+// ── Update Agent Binding ─────────────────────────────────────────────────────
+
+export function updateAgentBinding(
+  workspaceDir: string,
+  agentName: string,
+  payload: unknown,
+): AgentBindingUpdateResult {
+  // 1. Validate agent name
+  if (!isValidAgentName(agentName)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Unknown agent name '${agentName}'. Valid agents: ${INTERNAL_AGENT_NAMES.join(', ')}`,
+    };
+  }
+
+  // 2. Validate payload
+  const payloadResult = validateBindingPayload(payload);
+  if (!payloadResult.ok) {
+    return { ok: false, statusCode: 400, error: payloadResult.error, message: payloadResult.message };
+  }
+  const { runtimeProfile, enabled } = payloadResult.value;
+
+  // 3. Load existing config
+  const loadResult = loadPdConfig(workspaceDir);
+
+  // 4. If malformed, refuse to write (AC: malformed existing config 拒绝写入)
+  if (!loadResult.ok) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'conflict',
+      message: `Cannot update agent binding: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${loadResult.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  const { effective } = loadResult;
+
+  // 5. Validate runtime profile reference exists
+  if (!Object.hasOwn(effective.config.runtimeProfiles, runtimeProfile)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Runtime profile '${runtimeProfile}' does not exist. Available profiles: ${Object.keys(effective.config.runtimeProfiles).join(', ')}`,
+    };
+  }
+
+  // 6. Build updated config
+  const updatedConfig = buildUpdatedConfig(effective.config, { agentName, runtimeProfile, enabled });
+
+  // 7. Validate the updated config before writing
+  const validation = validatePdConfig(updatedConfig);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Updated config would be invalid: ${validation.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  // 8. Write to disk (atomic: write to tmp, then rename)
+  const configPath = getPdConfigPath(workspaceDir);
+  writeConfigAtomic(configPath, updatedConfig);
+
+  return {
+    ok: true,
+    agent: agentName,
+    runtimeProfile,
+    enabled,
+  };
+}
+
+// ── Check Readiness ──────────────────────────────────────────────────────────
+
+export function checkReadiness(
+  workspaceDir: string,
+  agentName: string,
+  getEnvVar: (name: string) => string | undefined = (name: string) => process.env[name],
+): ReadinessResult | { ok: false; statusCode: number; error: string; message: string } {
+  // 1. Validate agent name
+  if (!isValidAgentName(agentName)) {
+    return {
+      ok: false,
+      statusCode: 404,
+      error: 'not_found',
+      message: `Unknown agent name '${agentName}'. Valid agents: ${INTERNAL_AGENT_NAMES.join(', ')}`,
+    };
+  }
+
+  // 2. Load config
+  const loadResult = loadPdConfig(workspaceDir);
+  const effective = loadResult.ok ? loadResult.effective : loadResult.defaults;
+
+  // 3. Resolve agent binding
+  const bindingResult = resolveAgentRuntimeBinding(effective, agentName);
+
+  if (!bindingResult.ok) {
+    // Agent is disabled or profile not found
+    const profileId = effective.config.internalAgents.defaultRuntime;
+    const profile = effective.config.runtimeProfiles[profileId];
+    return {
+      agent: agentName,
+      readiness: bindingResult.readiness,
+      profileId: bindingResult.readiness === 'disabled' ? profileId : (effective.config.internalAgents.agents[agentName]?.runtimeProfile ?? profileId),
+      profileLabel: profile ? buildProfileLabel(profileId, profile) : `unknown:${profileId}`,
+      reason: bindingResult.reason,
+      nextAction: bindingResult.nextAction,
+    };
+  }
+
+  // 4. Check runtime readiness
+  const readinessResult: AgentRuntimeReadinessResult = checkAgentRuntimeReadiness(
+    bindingResult.profile,
+    getEnvVar,
+  );
+
+  return {
+    agent: agentName,
+    readiness: readinessResult.readiness,
+    profileId: bindingResult.profileId,
+    profileLabel: buildProfileLabel(bindingResult.profileId, bindingResult.profile),
+    reason: readinessResult.reason,
+    nextAction: readinessResult.nextAction,
+  };
+}
