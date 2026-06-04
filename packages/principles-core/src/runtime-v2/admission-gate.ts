@@ -3,7 +3,8 @@ import type { DiagnosticianOutputV1, RecommendationKind } from './diagnostician-
 // ── Owner-Reported Fair Admission (MVP1 fix) ──────────────────────────────
 // When true (default), owner_reported_no_host_trace goes through normal
 // confidence + evidence checks instead of being unconditionally blocked.
-// Set to false to restore the old blocking behavior (emergency rollback).
+// Wired to the owner_reported_fair_admission feature flag (quiet category)
+// at plugin startup. Set to false to restore old blocking behavior.
 let _ownerReportedFairAdmission = true;
 
 export function setOwnerReportedFairAdmission(enabled: boolean): void {

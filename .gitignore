@@ -145,10 +145,3 @@ evidence/*
 .opencode/
 .trae/
 .plan/
-packages/principles-core/CONTEXT.md
-docs/adr/0007-cli-vs-console-audience-separation.md
-docs/adr/0006-hybrid-activation-mechanism.md
-docs/adr/0004-l2-auto-correction-and-replay.md
-docs/adr/0003-peer-agent-state-machine-orchestration.md
-docs/adr/0002-hard-internalization-core-boundary.md
-docs/adr/0001-runtime-v2-service-boundaries.md
