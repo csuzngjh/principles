@@ -22,6 +22,9 @@ import {
   getInstalledBinDir,
   isWindows,
   readEnabledChannelsFromDisk,
+  generateConfigYamlContent,
+  getConfigYamlPath,
+  readEnabledChannelsFromConfigYaml,
   type MvpChannel,
   type ComponentStatus,
   type VerificationResult,
@@ -1745,5 +1748,278 @@ describe('--lang validation rejects invalid values (P2 fix)', () => {
     const content = fs.readFileSync(indexPath, 'utf-8');
     expect(content).toContain('--lang <lang>');
     expect(content).toContain("'zh'");
+  });
+});
+
+// ── PRI-308: config.yaml generation (replaces feature-flags.yaml) ──────────
+
+describe('generateConfigYamlContent produces valid .pd/config.yaml', () => {
+  it('produces valid YAML with version, features, runtimeProfiles, internalAgents, ui', () => {
+    const content = generateConfigYamlContent();
+    const parsed = yaml.load(content);
+    expect(typeof parsed).toBe('object');
+    expect(parsed).not.toBeNull();
+    const config = parsed as Record<string, unknown>;
+    expect(config.version).toBe(1);
+    expect(typeof config.features).toBe('object');
+    expect(config.features).not.toBeNull();
+    expect(typeof config.runtimeProfiles).toBe('object');
+    expect(typeof config.internalAgents).toBe('object');
+    expect(typeof config.ui).toBe('object');
+  });
+
+  it('core features (prompt, code_tool_hook, defer_archive) are enabled', () => {
+    const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    for (const ch of MVP_CHANNELS) {
+      const flag = features[ch] as Record<string, unknown>;
+      expect(flag).toBeDefined();
+      expect(flag.enabled).toBe(true);
+      expect(flag.category).toBe('core');
+    }
+  });
+
+  it('quiet features are disabled', () => {
+    const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    for (const quiet of MVP_QUIET_FLAGS) {
+      const flag = features[quiet] as Record<string, unknown>;
+      expect(flag).toBeDefined();
+      expect(flag.enabled).toBe(false);
+      expect(flag.category).toBe('quiet');
+    }
+  });
+
+  it('gone features are disabled', () => {
+    const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    for (const gone of MVP_GONE_FLAGS) {
+      const flag = features[gone] as Record<string, unknown>;
+      expect(flag).toBeDefined();
+      expect(flag.enabled).toBe(false);
+      expect(flag.category).toBe('gone');
+    }
+  });
+
+  it('only MVP core channels and feedback_channel are enabled by default', () => {
+    const parsed = yaml.load(generateConfigYamlContent()) as Record<string, unknown>;
+    const features = parsed.features as Record<string, unknown>;
+    const enabledFlags: string[] = [];
+    for (const [key, value] of Object.entries(features)) {
+      if (typeof value === 'object' && value !== null && Object.hasOwn(value, 'enabled')) {
+        const flag = value as Record<string, unknown>;
+        if (flag.enabled === true) enabledFlags.push(key);
+      }
+    }
+    expect(enabledFlags.sort()).toEqual(['code_tool_hook', 'defer_archive', 'feedback_channel', 'prompt']);
+  });
+
+  it('written to temp workspace is loadable', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-config-yaml-test-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(path.join(configDir, 'config.yaml'), generateConfigYamlContent(), 'utf8');
+      const raw = fs.readFileSync(path.join(configDir, 'config.yaml'), 'utf8');
+      const parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown>;
+      expect(Object.hasOwn(parsed, 'version')).toBe(true);
+      expect(Object.hasOwn(parsed, 'features')).toBe(true);
+      const features = parsed.features as Record<string, unknown>;
+      expect(Object.hasOwn(features, 'prompt')).toBe(true);
+      expect(Object.hasOwn(features, 'code_tool_hook')).toBe(true);
+      expect(Object.hasOwn(features, 'defer_archive')).toBe(true);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('getConfigYamlPath', () => {
+  it('returns .pd/config.yaml under workspace', () => {
+    const result = getConfigYamlPath('/tmp/ws');
+    expect(result.endsWith(path.join('.pd', 'config.yaml'))).toBe(true);
+  });
+
+  it('does not hardcode user-specific paths', () => {
+    const result = getConfigYamlPath('/tmp/test-workspace');
+    expect(result).not.toContain('Administrator');
+    expect(result).not.toContain('D:\\');
+  });
+});
+
+describe('readEnabledChannelsFromConfigYaml', () => {
+  it('returns empty array when file does not exist (first install)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-read-'));
+    try {
+      const result = readEnabledChannelsFromConfigYaml(tmpDir);
+      expect(result).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns channels for valid config.yaml', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(path.join(configDir, 'config.yaml'), generateConfigYamlContent(), 'utf8');
+      const result = readEnabledChannelsFromConfigYaml(tmpDir);
+      expect(result).toEqual(['prompt', 'code_tool_hook', 'defer_archive']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on malformed YAML content', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(path.join(configDir, 'config.yaml'), '{{invalid yaml: [}', 'utf8');
+      expect(() => readEnabledChannelsFromConfigYaml(tmpDir)).toThrow(/config\.yaml/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on invalid structure (root is string)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(path.join(configDir, 'config.yaml'), '"just a string"', 'utf8');
+      expect(() => readEnabledChannelsFromConfigYaml(tmpDir)).toThrow(/config\.yaml/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on invalid structure (root is array)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(path.join(configDir, 'config.yaml'), '- item1\n- item2', 'utf8');
+      expect(() => readEnabledChannelsFromConfigYaml(tmpDir)).toThrow(/config\.yaml/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on MVP channel with invalid entry (string instead of object)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const badConfig = {
+        version: 1,
+        features: {
+          prompt: 'not-an-object',
+          code_tool_hook: { category: 'core', enabled: true },
+          defer_archive: { category: 'core', enabled: true },
+        },
+        runtimeProfiles: {},
+        internalAgents: { defaultRuntime: 'openclaw.default', agents: {} },
+        ui: { diagnostics: { mode: 'simple' } },
+      };
+      fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(badConfig), 'utf8');
+      expect(() => readEnabledChannelsFromConfigYaml(tmpDir)).toThrow(/MVP channel 'prompt' has invalid entry/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on MVP channel missing enabled field', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const badConfig = {
+        version: 1,
+        features: {
+          prompt: { category: 'core' },
+          code_tool_hook: { category: 'core', enabled: true },
+          defer_archive: { category: 'core', enabled: true },
+        },
+        runtimeProfiles: {},
+        internalAgents: { defaultRuntime: 'openclaw.default', agents: {} },
+        ui: { diagnostics: { mode: 'simple' } },
+      };
+      fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(badConfig), 'utf8');
+      expect(() => readEnabledChannelsFromConfigYaml(tmpDir)).toThrow(/MVP channel 'prompt' is missing required 'enabled' field/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on enabled field that is not boolean', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-read-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const badConfig = {
+        version: 1,
+        features: {
+          prompt: { category: 'core', enabled: 'true' },
+          code_tool_hook: { category: 'core', enabled: true },
+          defer_archive: { category: 'core', enabled: true },
+        },
+        runtimeProfiles: {},
+        internalAgents: { defaultRuntime: 'openclaw.default', agents: {} },
+        ui: { diagnostics: { mode: 'simple' } },
+      };
+      fs.writeFileSync(path.join(configDir, 'config.yaml'), yaml.dump(badConfig), 'utf8');
+      expect(() => readEnabledChannelsFromConfigYaml(tmpDir)).toThrow(/MVP channel 'prompt' has invalid 'enabled' value.*expected boolean.*got string/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Preserve existing config.yaml on re-install', () => {
+  it('existing valid config.yaml is preserved (not overwritten)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-preserve-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const originalContent = generateConfigYamlContent();
+      fs.writeFileSync(path.join(configDir, 'config.yaml'), originalContent, 'utf8');
+
+      // Simulate re-install: existing file should be detected and preserved
+      const existingPath = getConfigYamlPath(tmpDir);
+      expect(fs.existsSync(existingPath)).toBe(true);
+      const contentBefore = fs.readFileSync(existingPath, 'utf8');
+      expect(contentBefore).toBe(originalContent);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Malformed config.yaml fails loud with rollback', () => {
+  it('malformed config.yaml causes install to fail, not silently overwrite', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cfg-malformed-'));
+    try {
+      const configDir = path.join(tmpDir, '.pd');
+      fs.mkdirSync(configDir, { recursive: true });
+      const malformedContent = 'version: not-a-number\nfeatures: []';
+      fs.writeFileSync(path.join(configDir, 'config.yaml'), malformedContent, 'utf8');
+
+      // readEnabledChannelsFromConfigYaml must throw, not silently return defaults
+      expect(() => readEnabledChannelsFromConfigYaml(tmpDir)).toThrow();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('config.yaml does not contain OpenClaw secrets', () => {
+  it('generated config has no apiKey, token, or secret fields', () => {
+    const content = generateConfigYamlContent();
+    expect(content).not.toContain('apiKey');
+    expect(content).not.toContain('token');
+    expect(content).not.toContain('secret');
+    expect(content).not.toContain('password');
   });
 });

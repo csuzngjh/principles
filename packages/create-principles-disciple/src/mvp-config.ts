@@ -303,6 +303,122 @@ export function readEnabledChannelsFromDisk(workspaceDir: string): string[] {
 }
 
 /**
+ * PRI-308: Generate .pd/config.yaml content.
+ *
+ * This replaces the old feature-flags.yaml generation.
+ * The config.yaml follows the PdConfig schema from principles-core
+ * (pd-config-types.ts), inlined to avoid a runtime dependency.
+ */
+export function generateConfigYamlContent(): string {
+  const config: Record<string, unknown> = {
+    version: 1,
+    features: {
+      // MVP-Core (ADR-0014 §2.4)
+      prompt:             { category: 'core',  enabled: true },
+      code_tool_hook:     { category: 'core',  enabled: true },
+      defer_archive:      { category: 'core',  enabled: true },
+      // MVP-Quiet (ADR-0014 §2.5)
+      correction_observer:{ category: 'quiet', enabled: false },
+      feedback_channel:   { category: 'quiet', enabled: true },
+      gfi:                { category: 'quiet', enabled: false },
+      evolution_worker:   { category: 'quiet', enabled: false },
+      empathy_observer:   { category: 'quiet', enabled: false },
+      // MVP-Gone (ADR-0014 §2.6)
+      nocturnal:          { category: 'gone',  enabled: false },
+      idle_trigger:       { category: 'gone',  enabled: false },
+      model_training:     { category: 'gone',  enabled: false },
+      trainer:            { category: 'gone',  enabled: false },
+    },
+    runtimeProfiles: {
+      'openclaw.default': {
+        type: 'openclaw',
+        source: 'default',
+      },
+    },
+    internalAgents: {
+      defaultRuntime: 'openclaw.default',
+      agents: {
+        diagnostician:     { enabled: true,  runtimeProfile: 'openclaw.default' },
+        dreamer:           { enabled: true,  runtimeProfile: 'openclaw.default' },
+        philosopher:       { enabled: false, runtimeProfile: 'openclaw.default' },
+        scribe:            { enabled: true,  runtimeProfile: 'openclaw.default' },
+        artificer:         { enabled: true,  runtimeProfile: 'openclaw.default' },
+        evaluator:         { enabled: false, runtimeProfile: 'openclaw.default' },
+        rolloutReviewer:   { enabled: false, runtimeProfile: 'openclaw.default' },
+        trainer:           { enabled: false, runtimeProfile: 'openclaw.default' },
+        correctionObserver:{ enabled: false, runtimeProfile: 'openclaw.default' },
+        empathyObserver:   { enabled: false, runtimeProfile: 'openclaw.default' },
+      },
+    },
+    ui: {
+      diagnostics: { mode: 'simple' },
+    },
+  };
+
+  return yaml.dump(config, { lineWidth: -1, quotingType: '"' });
+}
+
+/**
+ * PRI-308: Get the path to .pd/config.yaml for a workspace.
+ */
+export function getConfigYamlPath(workspaceDir: string): string {
+  return path.join(workspaceDir, '.pd', 'config.yaml');
+}
+
+/**
+ * PRI-308: Read enabled MVP channels from .pd/config.yaml.
+ *
+ * Fail-loud: throws on malformed or missing required fields.
+ * Returns empty array if file does not exist (first install).
+ */
+export function readEnabledChannelsFromConfigYaml(workspaceDir: string): string[] {
+  const configPath = getConfigYamlPath(workspaceDir);
+  if (!existsSync(configPath)) return [];
+
+  const rawYaml = readFileSync(configPath, 'utf-8');
+  const parsed: unknown = (() => {
+    try {
+      return yaml.load(rawYaml);
+    } catch (e) {
+      throw new Error(`config.yaml parse error at ${configPath}: ${e instanceof Error ? e.message : String(e)}. Delete the file and re-run the installer.`, { cause: e });
+    }
+  })();
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`config.yaml at ${configPath} has invalid structure (expected object, got ${Array.isArray(parsed) ? 'array' : typeof parsed}). Delete the file and re-run the installer.`);
+  }
+
+  const configObj = parsed as Record<string, unknown>;
+
+  if (!Object.hasOwn(configObj, 'features') || typeof configObj.features !== 'object' || configObj.features === null || Array.isArray(configObj.features)) {
+    throw new Error(`config.yaml at ${configPath} is missing or has invalid 'features' field. Delete the file and re-run the installer.`);
+  }
+
+  const features = configObj.features as Record<string, unknown>;
+  const enabled: string[] = [];
+
+  for (const key of MVP_CHANNELS) {
+    if (!Object.hasOwn(features, key)) continue;
+    const value = features[key];
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' has invalid entry (expected object, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}). Delete the file and re-run the installer.`);
+    }
+    const flag = value as Record<string, unknown>;
+    if (!Object.hasOwn(flag, 'enabled')) {
+      throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' is missing required 'enabled' field. Delete the file and re-run the installer.`);
+    }
+    if (typeof flag.enabled !== 'boolean') {
+      throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' has invalid 'enabled' value (expected boolean, got ${flag.enabled === null ? 'null' : typeof flag.enabled}). Delete the file and re-run the installer.`);
+    }
+    if (flag.enabled === true) {
+      enabled.push(key);
+    }
+  }
+
+  return enabled;
+}
+
+/**
  * 获取 npm global bin 目录路径
  */
 export function getNpmGlobalBinDir(): string | null {

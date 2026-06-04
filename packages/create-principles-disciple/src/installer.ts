@@ -9,8 +9,9 @@ import { logger } from './utils/logger.js';
 import { checkOpenClawGateway } from './utils/env.js';
 import type { InstallOptions } from './prompts.js';
 import {
-  generateFeatureFlagsYamlContent,
-  getFeatureFlagsPath,
+  generateConfigYamlContent,
+  getConfigYamlPath,
+  readEnabledChannelsFromConfigYaml,
   getOpenClawDir,
   getPluginExtDir,
   getInstalledPdCliDir,
@@ -18,7 +19,6 @@ import {
   getInstalledConsoleDir,
   isWindows,
   validateOpenClawConfig,
-  readEnabledChannelsFromDisk,
   type ComponentStatus,
   type VerificationResult,
 } from './mvp-config.js';
@@ -137,7 +137,7 @@ const INSTALL_STEPS: InstallStep[] = [
   { name: 'Installing console dependencies', weight: 10 },
   { name: 'Verifying pd-console', weight: 3 },
   { name: 'Copying templates', weight: 3 },
-  { name: 'Generating feature flags', weight: 2 },
+  { name: 'Generating config.yaml', weight: 2 },
   { name: 'Creating config', weight: 2 },
   { name: 'Verifying pd demo story-a', weight: 5 },
   { name: 'Updating OpenClaw config', weight: 3 },
@@ -816,12 +816,25 @@ async function copyPrinciplesLayer(opts: CopyOptions): Promise<number> {
   return count;
 }
 
-async function generateFeatureFlagsConfig(workspaceDir: string, channels: string[]): Promise<string> {
-  const configPath = getFeatureFlagsPath(workspaceDir);
+async function generateConfigYamlConfig(workspaceDir: string): Promise<string> {
+  const configPath = getConfigYamlPath(workspaceDir);
   const configDir = path.dirname(configPath);
 
+  // PRI-308: preserve existing valid config.yaml
+  if (existsSync(configPath)) {
+    try {
+      readEnabledChannelsFromConfigYaml(workspaceDir);
+      // Existing config is valid — preserve it
+      logger.info(`Existing .pd/config.yaml is valid, preserving it`);
+      return configPath;
+    } catch {
+      // Existing config is malformed — fail loud, do not overwrite
+      throw new Error(`Existing .pd/config.yaml is malformed at ${configPath}. Delete the file and re-run the installer, or fix it manually.`);
+    }
+  }
+
   await fse.ensureDir(configDir);
-  writeFileSync(configPath, generateFeatureFlagsYamlContent(channels), 'utf8');
+  writeFileSync(configPath, generateConfigYamlContent(), 'utf8');
   return configPath;
 }
 
@@ -865,7 +878,7 @@ async function createConfigFile(workspaceDir: string, channels: string[]): Promi
 export interface InstallResult {
   success: boolean;
   workspaceDir: string;
-  featureFlagsPath: string;
+  configYamlPath: string;
   templatesCount: number;
   components: ComponentStatus;
   verification: VerificationResult;
@@ -993,8 +1006,8 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     });
     stepIndex++;
 
-    if (spinner) updateProgress(spinner, stepIndex, 'Generating feature flags...');
-    const featureFlagsPath = await generateFeatureFlagsConfig(options.workspaceDir, options.channels);
+    if (spinner) updateProgress(spinner, stepIndex, 'Generating config.yaml...');
+    const configYamlPath = await generateConfigYamlConfig(options.workspaceDir);
     verification.features = 'passed';
     stepIndex++;
 
@@ -1023,7 +1036,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
 
     killConsoleChild();
 
-    const actualEnabledChannels = readEnabledChannelsFromDisk(options.workspaceDir);
+    const actualEnabledChannels = readEnabledChannelsFromConfigYaml(options.workspaceDir);
     const cliWorking = components.cli === 'verified' || components.cli === 'verified_local_only';
     const isComplete = components.plugin === 'verified' && cliWorking && components.console === 'configured';
     const nextActions: string[] = [];
@@ -1039,7 +1052,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     return {
       success: isComplete,
       workspaceDir: options.workspaceDir,
-      featureFlagsPath,
+      configYamlPath,
       templatesCount: templatesCount + principlesCount,
       components,
       verification,
@@ -1067,7 +1080,7 @@ export async function install(options: InstallOptions, pluginDir: string, quiet 
     return {
       success: false,
       workspaceDir: options.workspaceDir,
-      featureFlagsPath: getFeatureFlagsPath(options.workspaceDir),
+      configYamlPath: getConfigYamlPath(options.workspaceDir),
       templatesCount: 0,
       components,
       verification,
