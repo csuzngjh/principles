@@ -303,6 +303,195 @@ export function readEnabledChannelsFromDisk(workspaceDir: string): string[] {
 }
 
 /**
+ * PRI-308: Generate .pd/config.yaml content.
+ *
+ * This replaces the old feature-flags.yaml generation.
+ * The config.yaml follows the PdConfig schema from principles-core
+ * (pd-config-types.ts), inlined to avoid a runtime dependency.
+ */
+export function generateConfigYamlContent(): string {
+  const config: Record<string, unknown> = {
+    version: 1,
+    features: {
+      // MVP-Core (ADR-0014 §2.4)
+      prompt:             { category: 'core',  enabled: true },
+      code_tool_hook:     { category: 'core',  enabled: true },
+      defer_archive:      { category: 'core',  enabled: true },
+      // MVP-Quiet (ADR-0014 §2.5)
+      correction_observer:{ category: 'quiet', enabled: false },
+      feedback_channel:   { category: 'quiet', enabled: true },
+      gfi:                { category: 'quiet', enabled: false },
+      evolution_worker:   { category: 'quiet', enabled: false },
+      empathy_observer:   { category: 'quiet', enabled: false },
+      // MVP-Gone (ADR-0014 §2.6)
+      nocturnal:          { category: 'gone',  enabled: false },
+      idle_trigger:       { category: 'gone',  enabled: false },
+      model_training:     { category: 'gone',  enabled: false },
+      trainer:            { category: 'gone',  enabled: false },
+    },
+    runtimeProfiles: {
+      'openclaw.default': {
+        type: 'openclaw',
+        source: 'default',
+      },
+    },
+    internalAgents: {
+      defaultRuntime: 'openclaw.default',
+      agents: {
+        diagnostician:     { enabled: true,  runtimeProfile: 'openclaw.default' },
+        dreamer:           { enabled: true,  runtimeProfile: 'openclaw.default' },
+        philosopher:       { enabled: false, runtimeProfile: 'openclaw.default' },
+        scribe:            { enabled: true,  runtimeProfile: 'openclaw.default' },
+        artificer:         { enabled: true,  runtimeProfile: 'openclaw.default' },
+        evaluator:         { enabled: false, runtimeProfile: 'openclaw.default' },
+        rolloutReviewer:   { enabled: false, runtimeProfile: 'openclaw.default' },
+        trainer:           { enabled: false, runtimeProfile: 'openclaw.default' },
+        correctionObserver:{ enabled: false, runtimeProfile: 'openclaw.default' },
+        empathyObserver:   { enabled: false, runtimeProfile: 'openclaw.default' },
+      },
+    },
+    ui: {
+      diagnostics: { mode: 'simple' },
+    },
+  };
+
+  return yaml.dump(config, { lineWidth: -1, quotingType: '"' });
+}
+
+/**
+ * PRI-308: Get the path to .pd/config.yaml for a workspace.
+ */
+export function getConfigYamlPath(workspaceDir: string): string {
+  return path.join(workspaceDir, '.pd', 'config.yaml');
+}
+
+/**
+ * PRI-308: Full structural validation of .pd/config.yaml.
+ *
+ * Checks all required top-level sections (version, features, runtimeProfiles,
+ * internalAgents) exist and have correct types. This is a lightweight structural
+ * check — deep field validation is done by validatePdConfig() in principles-core.
+ *
+ * Used by the installer to decide whether an existing config.yaml is safe to
+ * preserve. A config missing runtimeProfiles/internalAgents would cause runtime
+ * failures, so it must be rejected.
+ *
+ * Throws on any structural problem with reason + nextAction.
+ */
+export function validateConfigYamlFull(workspaceDir: string): void {
+  const configPath = getConfigYamlPath(workspaceDir);
+  if (!existsSync(configPath)) {
+    throw new Error(`config.yaml not found at ${configPath}. This should not happen during preserve-existing validation.`);
+  }
+
+  const rawYaml = readFileSync(configPath, 'utf-8');
+  const parsed: unknown = (() => {
+    try {
+      return yaml.load(rawYaml);
+    } catch (e) {
+      throw new Error(`config.yaml parse error at ${configPath}: ${e instanceof Error ? e.message : String(e)}. Delete the file and re-run the installer.`, { cause: e });
+    }
+  })();
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`config.yaml at ${configPath} has invalid structure (expected object, got ${Array.isArray(parsed) ? 'array' : typeof parsed}). Delete the file and re-run the installer.`);
+  }
+
+  const config = parsed as Record<string, unknown>;
+
+  // version — must be number 1
+  if (!Object.hasOwn(config, 'version') || typeof config.version !== 'number' || config.version !== 1) {
+    throw new Error(`config.yaml at ${configPath}: 'version' must be 1, got ${!Object.hasOwn(config, 'version') ? 'missing' : config.version}. Delete the file and re-run the installer.`);
+  }
+
+  // features — must be non-null object
+  if (!Object.hasOwn(config, 'features') || typeof config.features !== 'object' || config.features === null || Array.isArray(config.features)) {
+    throw new Error(`config.yaml at ${configPath}: 'features' must be an object, got ${!Object.hasOwn(config, 'features') ? 'missing' : Array.isArray(config.features) ? 'array' : typeof config.features}. Delete the file and re-run the installer.`);
+  }
+
+  // MVP channels must have valid entries
+  const features = config.features as Record<string, unknown>;
+  for (const key of MVP_CHANNELS) {
+    if (!Object.hasOwn(features, key)) continue;
+    const value = features[key];
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' has invalid entry (expected object, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}). Delete the file and re-run the installer.`);
+    }
+    const flag = value as Record<string, unknown>;
+    if (!Object.hasOwn(flag, 'enabled') || typeof flag.enabled !== 'boolean') {
+      throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' has invalid 'enabled' field. Delete the file and re-run the installer.`);
+    }
+  }
+
+  // runtimeProfiles — must be non-null object
+  if (!Object.hasOwn(config, 'runtimeProfiles') || typeof config.runtimeProfiles !== 'object' || config.runtimeProfiles === null || Array.isArray(config.runtimeProfiles)) {
+    throw new Error(`config.yaml at ${configPath}: 'runtimeProfiles' must be an object, got ${!Object.hasOwn(config, 'runtimeProfiles') ? 'missing' : Array.isArray(config.runtimeProfiles) ? 'array' : typeof config.runtimeProfiles}. Delete the file and re-run the installer.`);
+  }
+
+  // internalAgents — must be non-null object with defaultRuntime
+  if (!Object.hasOwn(config, 'internalAgents') || typeof config.internalAgents !== 'object' || config.internalAgents === null || Array.isArray(config.internalAgents)) {
+    throw new Error(`config.yaml at ${configPath}: 'internalAgents' must be an object, got ${!Object.hasOwn(config, 'internalAgents') ? 'missing' : Array.isArray(config.internalAgents) ? 'array' : typeof config.internalAgents}. Delete the file and re-run the installer.`);
+  }
+  const agents = config.internalAgents as Record<string, unknown>;
+  if (!Object.hasOwn(agents, 'defaultRuntime') || typeof agents.defaultRuntime !== 'string' || agents.defaultRuntime.length === 0) {
+    throw new Error(`config.yaml at ${configPath}: 'internalAgents.defaultRuntime' must be a non-empty string, got ${!Object.hasOwn(agents, 'defaultRuntime') ? 'missing' : typeof agents.defaultRuntime}. Delete the file and re-run the installer.`);
+  }
+}
+
+/**
+ * PRI-308: Read enabled MVP channels from .pd/config.yaml.
+ *
+ * Fail-loud: throws on malformed or missing required fields.
+ * Returns empty array if file does not exist (first install).
+ */
+export function readEnabledChannelsFromConfigYaml(workspaceDir: string): string[] {
+  const configPath = getConfigYamlPath(workspaceDir);
+  if (!existsSync(configPath)) return [];
+
+  const rawYaml = readFileSync(configPath, 'utf-8');
+  const parsed: unknown = (() => {
+    try {
+      return yaml.load(rawYaml);
+    } catch (e) {
+      throw new Error(`config.yaml parse error at ${configPath}: ${e instanceof Error ? e.message : String(e)}. Delete the file and re-run the installer.`, { cause: e });
+    }
+  })();
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`config.yaml at ${configPath} has invalid structure (expected object, got ${Array.isArray(parsed) ? 'array' : typeof parsed}). Delete the file and re-run the installer.`);
+  }
+
+  const configObj = parsed as Record<string, unknown>;
+
+  if (!Object.hasOwn(configObj, 'features') || typeof configObj.features !== 'object' || configObj.features === null || Array.isArray(configObj.features)) {
+    throw new Error(`config.yaml at ${configPath} is missing or has invalid 'features' field. Delete the file and re-run the installer.`);
+  }
+
+  const features = configObj.features as Record<string, unknown>;
+  const enabled: string[] = [];
+
+  for (const key of MVP_CHANNELS) {
+    if (!Object.hasOwn(features, key)) continue;
+    const value = features[key];
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' has invalid entry (expected object, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}). Delete the file and re-run the installer.`);
+    }
+    const flag = value as Record<string, unknown>;
+    if (!Object.hasOwn(flag, 'enabled')) {
+      throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' is missing required 'enabled' field. Delete the file and re-run the installer.`);
+    }
+    if (typeof flag.enabled !== 'boolean') {
+      throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' has invalid 'enabled' value (expected boolean, got ${flag.enabled === null ? 'null' : typeof flag.enabled}). Delete the file and re-run the installer.`);
+    }
+    if (flag.enabled === true) {
+      enabled.push(key);
+    }
+  }
+
+  return enabled;
+}
+
+/**
  * 获取 npm global bin 目录路径
  */
 export function getNpmGlobalBinDir(): string | null {
