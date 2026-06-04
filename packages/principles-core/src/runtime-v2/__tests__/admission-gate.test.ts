@@ -1,10 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   evaluateAdmission,
   evaluateCandidateAdmissions,
   ADMISSION_CONFIDENCE_THRESHOLD,
-  setOwnerReportedFairAdmission,
-  isOwnerReportedFairAdmissionEnabled,
 } from '../admission-gate.js';
 import type { AdmissionGateInput } from '../admission-gate.js';
 import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
@@ -152,57 +150,5 @@ describe('evaluateCandidateAdmissions', () => {
     expect(actionable).toHaveLength(0);
     expect(deferred).toHaveLength(1);
     expect(gated).toHaveLength(4);
-  });
-});
-
-describe('owner_reported fair admission', () => {
-  afterEach(() => {
-    setOwnerReportedFairAdmission(true);
-  });
-
-  it('gates owner_reported with low confidence', () => {
-    const result = evaluateAdmission(
-      makeInput({ provenance: 'owner_reported_no_host_trace', confidence: 0.3, evidenceCount: 2 }),
-    );
-    expect(result.decision).toBe('needs_evidence');
-    expect(result.reason).toContain('confidence_below_threshold');
-    expect(result.evidenceStatus).toBe('owner_reported_no_host_trace');
-  });
-
-  it('gates owner_reported with zero evidence', () => {
-    const result = evaluateAdmission(
-      makeInput({ provenance: 'owner_reported_no_host_trace', confidence: 0.8, evidenceCount: 0 }),
-    );
-    expect(result.decision).toBe('needs_evidence');
-    expect(result.reason).toBe('evidence_array_empty');
-    expect(result.evidenceStatus).toBe('owner_reported_no_host_trace');
-  });
-
-  it('kill switch restores old blocking behavior', () => {
-    setOwnerReportedFairAdmission(false);
-    const result = evaluateAdmission(
-      makeInput({ provenance: 'owner_reported_no_host_trace', confidence: 0.9, evidenceCount: 5 }),
-    );
-    expect(result.decision).toBe('needs_evidence');
-    expect(result.reason).toBe('provenance_owner_reported_no_host_trace');
-    expect(result.nextAction).toBe('provide_host_session_evidence_or_manual_review');
-    expect(result.evidenceStatus).toBe('owner_reported_no_host_trace');
-  });
-
-  it('kill switch does not override defer priority', () => {
-    setOwnerReportedFairAdmission(false);
-    const result = evaluateAdmission(
-      makeInput({ recommendationKind: 'defer', provenance: 'owner_reported_no_host_trace', confidence: 0.9, evidenceCount: 5 }),
-    );
-    expect(result.decision).toBe('deferred');
-    expect(result.reason).toBe('recommendation_kind_defer_not_actionable');
-  });
-
-  it('kill switch getter reports current state', () => {
-    expect(isOwnerReportedFairAdmissionEnabled()).toBe(true);
-    setOwnerReportedFairAdmission(false);
-    expect(isOwnerReportedFairAdmissionEnabled()).toBe(false);
-    setOwnerReportedFairAdmission(true);
-    expect(isOwnerReportedFairAdmissionEnabled()).toBe(true);
   });
 });

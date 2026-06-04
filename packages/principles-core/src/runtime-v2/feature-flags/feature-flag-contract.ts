@@ -95,7 +95,6 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlagDefinition[] = [
   { id: 'prompt', category: 'core', enabled: true, since: '2026-05-24', description: 'Prompt injection for principle application' },
   { id: 'code_tool_hook', category: 'core', enabled: true, since: '2026-05-24', description: 'Code tool hook for rule host enforcement' },
   { id: 'defer_archive', category: 'core', enabled: true, since: '2026-05-24', description: 'Defer/archive activation writer' },
-  { id: 'owner_reported_fair_admission', category: 'quiet', enabled: true, since: '2026-06-04', description: 'Owner-reported pain uses normal confidence+evidence admission path instead of unconditional block (MVP1 semantic inversion fix; quiet to allow runtime rollback)' },
   { id: 'correction_observer', category: 'quiet', enabled: true, since: '2026-06-02', description: 'Independent correction observer service for keyword self-correction (MVP-Core per ADR-0014 amendment, PRI-293; quiet flag to allow runtime disable)' },
 
   // MVP-Quiet — opt-in or opt-out via config; enabled value varies per flag

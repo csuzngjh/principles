@@ -24,7 +24,6 @@ export const DEFAULT_FEATURE_FLAGS: Record<string, FeatureFlagEntry> = {
   prompt:             { category: 'core',  enabled: true },
   code_tool_hook:     { category: 'core',  enabled: true },
   defer_archive:      { category: 'core',  enabled: true },
-  owner_reported_fair_admission: { category: 'quiet', enabled: true },
   correction_observer:{ category: 'quiet', enabled: false },
 
   // MVP-Quiet (ADR-0014 §2.5)

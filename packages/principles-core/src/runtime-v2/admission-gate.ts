@@ -1,20 +1,5 @@
 import type { DiagnosticianOutputV1, RecommendationKind } from './diagnostician-output.js';
 
-// ── Owner-Reported Fair Admission (MVP1 fix) ──────────────────────────────
-// When true (default), owner_reported_no_host_trace goes through normal
-// confidence + evidence checks instead of being unconditionally blocked.
-// Wired to the owner_reported_fair_admission feature flag (quiet category)
-// at plugin startup. Set to false to restore old blocking behavior.
-let _ownerReportedFairAdmission = true;
-
-export function setOwnerReportedFairAdmission(enabled: boolean): void {
-  _ownerReportedFairAdmission = enabled;
-}
-
-export function isOwnerReportedFairAdmissionEnabled(): boolean {
-  return _ownerReportedFairAdmission;
-}
-
 export type PainProvenance =
   | 'openclaw_context_bound'
   | 'owner_reported_no_host_trace'
@@ -45,15 +30,6 @@ export function evaluateAdmission(input: AdmissionGateInput): AdmissionGateResul
       reason: 'recommendation_kind_defer_not_actionable',
       nextAction: 'review_defer_disposition_manually',
       evidenceStatus: input.provenance ?? 'unknown',
-    };
-  }
-
-  if (!_ownerReportedFairAdmission && input.provenance === 'owner_reported_no_host_trace') {
-    return {
-      decision: 'needs_evidence',
-      reason: 'provenance_owner_reported_no_host_trace',
-      nextAction: 'provide_host_session_evidence_or_manual_review',
-      evidenceStatus: 'owner_reported_no_host_trace',
     };
   }
 

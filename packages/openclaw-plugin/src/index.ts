@@ -20,7 +20,7 @@ import type {
 import * as path from 'path';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
-import { computeEffectiveFlags, DEFAULT_FEATURE_FLAGS, setOwnerReportedFairAdmission } from '@principles/core/runtime-v2';
+import { computeEffectiveFlags, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
 import { getCommandDescription } from './i18n/commands.js';
@@ -189,22 +189,6 @@ export function shouldStartCorrectionObserver(
   return { shouldStart: false, flagSource: flag.source, disabledInfo };
 }
 
-// ── Admission Kill Switch Sync (MVP1 fix) ─────────────────────────────────
-// Reads the owner_reported_fair_admission feature flag from workspace config
-// and syncs the module-level kill switch in admission-gate.ts.
-// Quiet category: user can set enabled=false in .pd/feature-flags.yaml
-// to restore the old unconditional blocking behavior.
-function syncAdmissionKillSwitch(
-  workspaceDir: string,
-  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
-): void {
-  const flag = loadFeatureFlagFromWorkspace(workspaceDir, 'owner_reported_fair_admission', logger);
-  setOwnerReportedFairAdmission(flag.enabled);
-  logger.info?.(
-    `[PD] Admission kill switch synced: owner_reported_fair_admission=${flag.enabled} (source: ${flag.source})`,
-  );
-}
-
 const plugin = {
   name: "Principles Disciple",
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
@@ -302,11 +286,6 @@ const plugin = {
               api.logger.info(`[PD] CorrectionObserver NOT started for workspace: ${workspaceDir}. ${corrGate.disabledInfo}`);
               SystemLogger.log(workspaceDir, 'CORRECTION_OBSERVER_DISABLED', corrGate.disabledInfo ?? '');
             }
-
-            // ── Sync Admission Kill Switch for THIS workspace ──
-            // Reads owner_reported_fair_admission flag (quiet, default ON)
-            // and syncs the module-level kill switch in admission-gate.ts.
-            syncAdmissionKillSwitch(workspaceDir, api.logger);
           }
 
           const result = await handleBeforePromptBuild(event, { ...ctx, api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'], workspaceDir });

@@ -211,8 +211,6 @@ describe('computeEffectiveFlags', () => {
       // feedback_channel is a quiet flag that defaults on (MVP seed channel)
       if (flag.id === 'feedback_channel') continue;
       if (flag.id === 'correction_observer') continue;
-      // owner_reported_fair_admission defaults on (MVP1 fix, quiet to allow runtime rollback)
-      if (flag.id === 'owner_reported_fair_admission') continue;
       expect(flag.enabled, `quiet flag ${flag.id} should default off`).toBe(false);
     }
   });
@@ -236,16 +234,6 @@ describe('computeEffectiveFlags', () => {
     if (goneFlag) {
       expect(goneFlag.enabled).toBe(false);
     }
-  });
-
-  it('owner_reported_fair_admission quiet flag can be disabled by user config', () => {
-    const userFlags = {
-      owner_reported_fair_admission: { enabled: false },
-    };
-    const result = computeEffectiveFlags(userFlags, DEFAULT_FEATURE_FLAGS, '/test/.pd/feature-flags.yaml');
-    const flag = result.flags.owner_reported_fair_admission;
-    expect(flag).toBeDefined();
-    expect(flag?.enabled).toBe(false);
   });
 });
 
