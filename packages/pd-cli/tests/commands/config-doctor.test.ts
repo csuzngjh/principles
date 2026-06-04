@@ -8,14 +8,16 @@
  *   - Malformed config → fail loud
  *   - No secret output
  *   - Legacy file detection
+ *   - CLI handler: --json stdout purity and exit code
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as yaml from 'js-yaml';
 import { buildDoctorOutput, type DoctorOutput } from '../../src/services/config-doctor.js';
+import { handleConfigDoctor } from '../../src/commands/config-doctor.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -250,6 +252,74 @@ describe('Feature flags from config.yaml', () => {
       expect(output.featureFlags.enabledMvpChannels).toContain('prompt');
       expect(output.featureFlags.enabledMvpChannels).toContain('code_tool_hook');
       expect(output.featureFlags.enabledMvpChannels).toContain('defer_archive');
+    } finally { rmTmpDir(tmp); }
+  });
+});
+
+// ── CLI handler: --json stdout purity and exit code ──────────────────────────
+
+describe('CLI handler: --json stdout purity and exit code', () => {
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
+  let originalExitCode: number | undefined;
+
+  beforeEach(() => {
+    stdoutSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    originalExitCode = process.exitCode;
+    process.exitCode = undefined;
+  });
+
+  afterEach(() => {
+    stdoutSpy.mockRestore();
+    stderrSpy.mockRestore();
+    process.exitCode = originalExitCode;
+  });
+
+  it('--json outputs exactly one parseable JSON object to stdout', async () => {
+    const tmp = mkTmpDir();
+    try {
+      await handleConfigDoctor({ workspace: tmp, json: true });
+      expect(stdoutSpy).toHaveBeenCalledTimes(1);
+      const output = stdoutSpy.mock.calls[0][0] as string;
+      const parsed = JSON.parse(output);
+      expect(typeof parsed).toBe('object');
+      expect(parsed).not.toBeNull();
+      expect(Array.isArray(parsed)).toBe(false);
+      expect(parsed).toHaveProperty('status');
+      expect(parsed).toHaveProperty('featureFlags');
+      expect(parsed).toHaveProperty('internalAgents');
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('--json sets process.exitCode=1 on failed status', async () => {
+    const tmp = mkTmpDir();
+    writeConfig(tmp, 'version: [unterminated');
+    try {
+      await handleConfigDoctor({ workspace: tmp, json: true });
+      expect(process.exitCode).toBe(1);
+      const output = stdoutSpy.mock.calls[0][0] as string;
+      const parsed = JSON.parse(output);
+      expect(parsed.status).toBe('failed');
+      expect(parsed.reason).toBeTruthy();
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('--json does not set exitCode=1 on ok status', async () => {
+    const tmp = mkTmpDir();
+    try {
+      await handleConfigDoctor({ workspace: tmp, json: true });
+      expect(process.exitCode).toBeUndefined();
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('--json output contains no extra stdout lines (no banners, headers)', async () => {
+    const tmp = mkTmpDir();
+    try {
+      await handleConfigDoctor({ workspace: tmp, json: true });
+      expect(stdoutSpy).toHaveBeenCalledTimes(1);
+      const output = stdoutSpy.mock.calls[0][0] as string;
+      expect(() => JSON.parse(output)).not.toThrow();
     } finally { rmTmpDir(tmp); }
   });
 });

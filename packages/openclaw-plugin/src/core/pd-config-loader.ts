@@ -35,7 +35,7 @@ export const PD_CONFIG_FILENAME = 'config.yaml';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type ObserverReadiness = 'disabled' | 'needs_setup' | 'ready' | 'not_ready';
+export type ObserverReadiness = 'disabled' | 'needs_setup' | 'ready' | 'not_ready' | 'config_malformed';
 
 export interface ObserverConfigResult {
   /** Whether the observer feature is enabled in config */
@@ -64,6 +64,8 @@ export interface ObserverConfigResult {
   timeoutMs: number | null;
   /** Base URL from runtime profile */
   baseUrl: string | null;
+  /** Config validation errors (only present when readiness=config_malformed) */
+  configErrors?: Array<{ path: string; reason: string; nextAction: string }>;
 }
 
 export interface PluginConfigLoadResult {
@@ -200,9 +202,10 @@ export function loadFeatureFlagFromConfig(
  * Resolve observer configuration from .pd/config.yaml.
  *
  * Returns structured state:
- * - disabled: observer feature flag is off → no start, no noisy logs
- * - needs_setup: observer enabled but runtime profile missing or API key not set
- * - ready: observer enabled and configured
+ * - config_malformed: config file is invalid — no guessing, fail loud
+ * - disabled: observer feature flag is off OR agent.enabled=false → no start, no noisy logs
+ * - needs_setup: observer enabled but runtime profile missing, API key not set, or unsupported profile type
+ * - ready: observer enabled and fully configured (pi-ai with key present)
  * - not_ready: observer enabled, API key present, but runtime availability unknown
  */
 export function resolveObserverConfig(
@@ -212,9 +215,30 @@ export function resolveObserverConfig(
   _logger?: { warn?: (msg: string) => void; info?: (msg: string) => void; debug?: (msg: string) => void },
 ): ObserverConfigResult {
   const result = loadPdConfigForPlugin(workspaceDir);
+
+  // 0) Malformed config → fail loud, do NOT swallow as "disabled"
+  if (!result.ok) {
+    return {
+      enabled: false,
+      readiness: 'config_malformed',
+      source: 'malformed',
+      reason: `Config validation failed: ${result.errors.map(e => e.reason).join('; ')}`,
+      nextAction: result.errors[0]?.nextAction ?? 'Fix .pd/config.yaml and retry',
+      runtimeProfileId: null,
+      runtimeProfileType: null,
+      apiKeyEnv: null,
+      apiKeyPresent: false,
+      provider: null,
+      model: null,
+      timeoutMs: null,
+      baseUrl: null,
+      configErrors: result.errors,
+    };
+  }
+
   const config = result.effective.config;
 
-  // 1) Check if the observer feature is enabled
+  // 1) Check if the observer feature flag is enabled
   const featureFlag = config.features[observerFlagId];
   if (!featureFlag || !featureFlag.enabled) {
     return {
@@ -234,12 +258,11 @@ export function resolveObserverConfig(
     };
   }
 
-  // 2) Find the agent's runtime profile
-  // Validate agent name against known names (EP-01: no `as` bypass)
+  // 2) Check if the agent itself is enabled (feature flag ≠ agent.enabled)
   const knownNames: readonly string[] = INTERNAL_AGENT_NAMES;
   if (!knownNames.includes(observerAgentName)) {
     return {
-      enabled: true,
+      enabled: false,
       readiness: 'needs_setup',
       source: result.source,
       reason: `Unknown agent name '${observerAgentName}'`,
@@ -254,10 +277,30 @@ export function resolveObserverConfig(
       baseUrl: null,
     };
   }
-  // After validation, safe to cast — runtime check passed (EP-01 compliant)
   const agentKey = observerAgentName as InternalAgentName;
   const agentConfig = config.internalAgents.agents[agentKey];
-  const runtimeProfileId = agentConfig?.runtimeProfile ?? config.internalAgents.defaultRuntime;
+
+  // Feature flag on but agent.enabled=false → disabled (not enabled)
+  if (!agentConfig || !agentConfig.enabled) {
+    return {
+      enabled: false,
+      readiness: 'disabled',
+      source: result.source,
+      reason: `${observerFlagId} feature flag is enabled but internalAgents.agents.${observerAgentName}.enabled is false`,
+      nextAction: `Set internalAgents.agents.${observerAgentName}.enabled=true in .pd/config.yaml, or disable features.${observerFlagId}`,
+      runtimeProfileId: null,
+      runtimeProfileType: null,
+      apiKeyEnv: null,
+      apiKeyPresent: false,
+      provider: null,
+      model: null,
+      timeoutMs: null,
+      baseUrl: null,
+    };
+  }
+
+  // 3) Find the agent's runtime profile
+  const runtimeProfileId = agentConfig.runtimeProfile ?? config.internalAgents.defaultRuntime;
   const profile = config.runtimeProfiles[runtimeProfileId];
 
   if (!profile) {
@@ -278,9 +321,8 @@ export function resolveObserverConfig(
     };
   }
 
-  // 3) For pi-ai profiles, check API key
+  // 4) For pi-ai profiles, check API key
   if (profile.type === 'pi-ai') {
-    // TypeScript narrows profile to PdLocalRuntimeProfile here (discriminated union)
     const apiKeyEnv = profile.apiKeyEnv ?? null;
     const apiKeyPresent = !!apiKeyEnv && Object.prototype.hasOwnProperty.call(process.env, apiKeyEnv) && !!process.env[apiKeyEnv];
 
@@ -338,13 +380,14 @@ export function resolveObserverConfig(
     };
   }
 
-  // 4) OpenClaw profile — TypeScript narrows to OpenClawRuntimeProfile here
+  // 5) OpenClaw profile — CorrectionObserver does NOT support OpenClaw runtime
+  //    Mark as needs_setup with nextAction to configure a pi-ai profile
   return {
     enabled: true,
-    readiness: 'ready',
+    readiness: 'needs_setup',
     source: result.source,
-    reason: `OpenClaw profile '${runtimeProfileId}' is configured and ready`,
-    nextAction: 'No action required',
+    reason: `OpenClaw profile '${runtimeProfileId}' is not supported for observer runtime. Observers require a pi-ai profile with an API key.`,
+    nextAction: `Configure a pi-ai runtime profile for ${observerAgentName} in .pd/config.yaml (e.g., add a pi-ai profile with provider, model, and apiKeyEnv)`,
     runtimeProfileId,
     runtimeProfileType: profile.type,
     apiKeyEnv: null,

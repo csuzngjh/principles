@@ -44,7 +44,11 @@ export function resolveCorrectionObserver(wctx: WorkspaceContext, logger?: Pick<
         );
 
         if (!observerConfig.enabled) {
-            logger?.debug?.(`[PD:CorrectionObserver] ${observerConfig.reason}`);
+            if (observerConfig.readiness === 'config_malformed') {
+                logger?.warn?.(`[PD:CorrectionObserver] Config malformed: ${observerConfig.reason}. ${observerConfig.nextAction}`);
+            } else {
+                logger?.debug?.(`[PD:CorrectionObserver] ${observerConfig.reason}`);
+            }
             return null;
         }
 

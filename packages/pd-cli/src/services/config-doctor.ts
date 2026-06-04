@@ -42,6 +42,7 @@ export type DoctorClassification =
   | 'healthy'
   | 'config_missing'
   | 'auth_missing'
+  | 'needs_probe'
   | 'rate_limit'
   | 'unavailable'
   | 'parse_failure'
@@ -459,12 +460,16 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
   // Check for enabled agents that need setup
   const needsSetupAgents = internalAgents.filter(a => a.enabled && (a.readiness === 'needs_setup' || a.readiness === 'not_ready'));
   for (const agent of needsSetupAgents) {
+    // not_ready = key present but not probed → needs_probe (degraded), NOT auth_missing (failed)
+    const classification: DoctorClassification = agent.readiness === 'needs_setup'
+      ? 'config_missing'
+      : 'needs_probe';
     providerHealth.push({
       provider: null,
       model: null,
       apiKeyEnv: agent.apiKeyEnv,
       apiKeyPresent: agent.apiKeyPresent,
-      classification: agent.readiness === 'needs_setup' ? 'config_missing' : 'auth_missing',
+      classification,
       reason: agent.reason,
       nextAction: agent.nextAction,
       source: 'config.yaml',
@@ -509,7 +514,7 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
   // 5) Compute overall status
   let status: DoctorStatus = 'ok';
   const classifications = providerHealth.map((p) => p.classification);
-  if (classifications.includes('rate_limit') || classifications.includes('unavailable')) {
+  if (classifications.includes('rate_limit') || classifications.includes('unavailable') || classifications.includes('needs_probe')) {
     status = 'degraded';
   }
   if (classifications.includes('auth_missing') || classifications.includes('config_missing')) {
@@ -534,7 +539,7 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
         : 'Configuration is missing required fields';
     }
   } else if (status === 'degraded') {
-    const degraded = providerHealth.filter((p) => p.classification === 'rate_limit' || p.classification === 'unavailable');
+    const degraded = providerHealth.filter((p) => p.classification === 'rate_limit' || p.classification === 'unavailable' || p.classification === 'needs_probe');
     if (degraded.length > 0) {
       reason = `Provider connectivity degraded: ${degraded.map((p) => p.classification).join(', ')}`;
     } else if (warnings.length > 0) {

@@ -213,7 +213,7 @@ describe('Observer ready', () => {
     }
   });
 
-  it('returns readiness=ready for OpenClaw profile', () => {
+  it('returns readiness=needs_setup for OpenClaw profile (not supported for observers)', () => {
     const tmp = mkTmpDir();
     const config = yaml.dump({
       version: 1,
@@ -247,8 +247,10 @@ describe('Observer ready', () => {
     try {
       const result = resolveObserverConfig(tmp, 'correction_observer', 'correctionObserver');
       expect(result.enabled).toBe(true);
-      expect(result.readiness).toBe('ready');
+      expect(result.readiness).toBe('needs_setup');
       expect(result.runtimeProfileType).toBe('openclaw');
+      expect(result.reason).toContain('not supported');
+      expect(result.nextAction).toContain('pi-ai');
     } finally { rmTmpDir(tmp); }
   });
 });
@@ -328,6 +330,78 @@ describe('Plugin config load', () => {
       expect(result.source).toBe('malformed');
       expect(result.errors.length).toBeGreaterThan(0);
       expect(result.effective.config.version).toBe(1); // defaults still available
+    } finally { rmTmpDir(tmp); }
+  });
+});
+
+// ── Config malformed → fail loud ────────────────────────────────────────────
+
+describe('Config malformed → fail loud', () => {
+  it('returns readiness=config_malformed when config is invalid YAML', () => {
+    const tmp = mkTmpDir();
+    writeConfig(tmp, 'version: [unterminated');
+    try {
+      const result = resolveObserverConfig(tmp, 'correction_observer', 'correctionObserver');
+      expect(result.enabled).toBe(false);
+      expect(result.readiness).toBe('config_malformed');
+      expect(result.reason).toContain('Config validation failed');
+      expect(result.nextAction).toBeTruthy();
+      expect(result.configErrors).toBeDefined();
+      expect(result.configErrors!.length).toBeGreaterThan(0);
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('returns readiness=config_malformed for invalid version', () => {
+    const tmp = mkTmpDir();
+    writeConfig(tmp, yaml.dump({ version: 99, features: {}, runtimeProfiles: {}, internalAgents: { defaultRuntime: 'x', agents: {} } }));
+    try {
+      const result = resolveObserverConfig(tmp, 'correction_observer', 'correctionObserver');
+      expect(result.readiness).toBe('config_malformed');
+    } finally { rmTmpDir(tmp); }
+  });
+});
+
+// ── Feature flag vs agent enabled mismatch ──────────────────────────────────
+
+describe('Feature flag vs agent enabled mismatch', () => {
+  it('returns readiness=disabled when feature flag is on but agent.enabled=false', () => {
+    const tmp = mkTmpDir();
+    const config = yaml.dump({
+      version: 1,
+      features: {
+        prompt: { category: 'core', enabled: true },
+        code_tool_hook: { category: 'core', enabled: true },
+        defer_archive: { category: 'core', enabled: true },
+        correction_observer: { category: 'quiet', enabled: true },  // feature flag ON
+        empathy_observer: { category: 'quiet', enabled: false },
+      },
+      runtimeProfiles: {
+        'openclaw.default': { type: 'openclaw', source: 'default' },
+        'pd.anthropic-sonnet': { type: 'pi-ai', provider: 'anthropic', model: 'claude-3-5-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY' },
+      },
+      internalAgents: {
+        defaultRuntime: 'openclaw.default',
+        agents: {
+          diagnostician: { enabled: true },
+          dreamer: { enabled: true },
+          scribe: { enabled: true },
+          artificer: { enabled: true },
+          philosopher: { enabled: false },
+          evaluator: { enabled: false },
+          rolloutReviewer: { enabled: false },
+          trainer: { enabled: false },
+          correctionObserver: { enabled: false },  // agent.enabled OFF
+          empathyObserver: { enabled: false },
+        },
+      },
+    });
+    writeConfig(tmp, config);
+    try {
+      const result = resolveObserverConfig(tmp, 'correction_observer', 'correctionObserver');
+      expect(result.enabled).toBe(false);
+      expect(result.readiness).toBe('disabled');
+      expect(result.reason).toContain('enabled is false');
+      expect(result.nextAction).toContain('internalAgents.agents.correctionObserver.enabled=true');
     } finally { rmTmpDir(tmp); }
   });
 });
