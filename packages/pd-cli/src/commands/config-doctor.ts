@@ -1,12 +1,9 @@
 /**
  * pd config doctor — Discover and explain PD / OpenClaw configuration state.
  *
- * PRI-299 MVP UX:
- *   - Reports workspace + OpenClaw config paths and existence
- *   - Lists effective feature flags and enabled MVP channels
- *   - Classifies provider/model/auth connectivity (healthy, auth_missing, rate_limit, etc.)
- *   - Emits `reason` + `nextActions` for failures
- *   - NEVER leaks tokens, env var values, or raw config bytes
+ * PRI-305: Cutover to .pd/config.yaml.
+ *   - Feature flags and internal agent runtime bindings come from .pd/config.yaml
+ *   - .pd/feature-flags.yaml and .state/workflows.yaml are no longer production inputs
  *
  * Usage:
  *   pd config doctor [--workspace <path>] [--json]
@@ -33,7 +30,8 @@ function formatTextOutput(output: DoctorOutput): string {
   lines.push('PD config paths:');
   for (const [k, v] of Object.entries(output.pdConfigPaths)) {
     const exists = v.exists ? '[exists]' : '[missing]';
-    lines.push(`  ${k.padEnd(16)} ${exists.padEnd(10)} ${v.path}`);
+    const parseable = v.parseable === false ? ' [unparseable]' : '';
+    lines.push(`  ${k.padEnd(16)} ${exists.padEnd(10)}${parseable} ${v.path}`);
   }
   lines.push('');
 
@@ -54,17 +52,34 @@ function formatTextOutput(output: DoctorOutput): string {
   }
   lines.push('');
 
+  lines.push('Internal agents:');
+  if (output.internalAgents.length === 0) {
+    lines.push('  (no internal agents diagnosed)');
+  } else {
+    for (const agent of output.internalAgents) {
+      const readiness = agent.readiness.toUpperCase();
+      const enabledLabel = agent.enabled ? 'enabled' : 'disabled';
+      lines.push(`  ${agent.name}: [${readiness}] (${enabledLabel})`);
+      lines.push(`    profile:      ${agent.runtimeProfileLabel} (${agent.runtimeProfileId})`);
+      if (agent.apiKeyEnv) {
+        const apiKeyState = agent.apiKeyPresent ? 'present' : 'absent';
+        lines.push(`    apiKeyEnv:    ${agent.apiKeyEnv} (${apiKeyState})`);
+      }
+      lines.push(`    reason:       ${agent.reason}`);
+      lines.push(`    nextAction:   ${agent.nextAction}`);
+    }
+  }
+  lines.push('');
+
   lines.push('Provider health:');
   if (output.providerHealth.length === 0) {
     lines.push('  (no providers discovered)');
   } else {
     for (const p of output.providerHealth) {
       const cls = p.classification.toUpperCase();
-      const provider = p.provider ?? '(unset)';
-      const model = p.model ?? '(unset)';
       const apiKeyEnv = p.apiKeyEnv ?? '(unset)';
       const apiKeyState = p.apiKeyPresent ? 'present' : 'absent';
-      lines.push(`  [${cls}] ${provider} / ${model}`);
+      lines.push(`  [${cls}]`);
       lines.push(`    apiKeyEnv:   ${apiKeyEnv} (${apiKeyState})`);
       lines.push(`    source:      ${p.source}`);
       lines.push(`    reason:      ${p.reason}`);
@@ -73,28 +88,13 @@ function formatTextOutput(output: DoctorOutput): string {
   }
   lines.push('');
 
-  lines.push('Internal agents:');
-  if (output.internalAgents && output.internalAgents.correctionObserver) {
-    const co = output.internalAgents.correctionObserver;
-    const coStatus = co.status.toUpperCase();
-    const coProvider = co.provider ?? '(unset)';
-    const coModel = co.model ?? '(unset)';
-    const coApiKeyEnv = co.apiKeyEnv ?? '(unset)';
-    const coApiKeyState = co.apiKeyPresent ? 'present' : 'absent';
-    lines.push(`  correctionObserver: [${coStatus}]`);
-    lines.push(`    enabled:     ${co.enabled}`);
-    lines.push(`    flagSource:  ${co.flagSource}`);
-    lines.push(`    configSource:${co.configSource}`);
-    if (co.provider || co.model) {
-      lines.push(`    provider:    ${coProvider} / ${coModel}`);
+  if (output.legacyFilesDetected.length > 0) {
+    lines.push('Legacy files detected (not used for resolution):');
+    for (const f of output.legacyFilesDetected) {
+      lines.push(`  [!] ${f}`);
     }
-    lines.push(`    apiKeyEnv:   ${coApiKeyEnv} (${coApiKeyState})`);
-    lines.push(`    reason:      ${co.reason}`);
-    lines.push(`    nextAction:  ${co.nextAction}`);
-  } else {
-    lines.push('  (no internal agents diagnosed)');
+    lines.push('');
   }
-  lines.push('');
 
   if (output.warnings.length > 0) {
     lines.push('Warnings:');

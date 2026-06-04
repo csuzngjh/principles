@@ -2,8 +2,8 @@
  * PRI-288: Quarantine EvolutionWorkerService default startup behind MVP feature flag.
  *
  * Tests prove:
- * 1. Default config (no feature-flags.yaml) → EvolutionWorkerService does NOT start.
- * 2. Explicit enable in feature-flags.yaml → EvolutionWorkerService starts.
+ * 1. Default config (no config.yaml) → EvolutionWorkerService does NOT start.
+ * 2. Explicit enable in config.yaml → EvolutionWorkerService starts.
  * 3. Disabled state has structured observability from real helper, not hand-written JSON.
  * 4. api.registerService still works regardless of flag state.
  *
@@ -60,9 +60,63 @@ function createTempWorkspace(): string {
   return dir;
 }
 
-function writeFeatureFlags(workspaceDir: string, flags: Record<string, unknown>): void {
-  const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
-  const content = yaml.dump(flags, { schema: yaml.JSON_SCHEMA });
+function deepMergeFeatures(
+  defaults: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...defaults };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (
+      value != null &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      Object.hasOwn(result, key) &&
+      result[key] != null &&
+      typeof result[key] === 'object' &&
+      !Array.isArray(result[key])
+    ) {
+      result[key] = { ...(result[key] as Record<string, unknown>), ...(value as Record<string, unknown>) };
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function writeConfigYaml(workspaceDir: string, featureOverrides: Record<string, unknown>): void {
+  const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+  const defaultFeatures: Record<string, unknown> = {
+    prompt: { category: 'core', enabled: true },
+    code_tool_hook: { category: 'core', enabled: true },
+    defer_archive: { category: 'core', enabled: true },
+    correction_observer: { category: 'quiet', enabled: false },
+    empathy_observer: { category: 'quiet', enabled: false },
+    evolution_worker: { category: 'quiet', enabled: false },
+    nocturnal: { category: 'gone', enabled: false },
+  };
+  const config = {
+    version: 1,
+    features: deepMergeFeatures(defaultFeatures, featureOverrides),
+    runtimeProfiles: {
+      'openclaw.default': { type: 'openclaw', source: 'default' },
+    },
+    internalAgents: {
+      defaultRuntime: 'openclaw.default',
+      agents: {
+        diagnostician: { enabled: true },
+        dreamer: { enabled: true },
+        scribe: { enabled: true },
+        artificer: { enabled: true },
+        philosopher: { enabled: false },
+        evaluator: { enabled: false },
+        rolloutReviewer: { enabled: false },
+        trainer: { enabled: false },
+        correctionObserver: { enabled: false },
+        empathyObserver: { enabled: false },
+      },
+    },
+  };
+  const content = yaml.dump(config, { schema: yaml.JSON_SCHEMA });
   fs.writeFileSync(configPath, content, 'utf8');
 }
 
@@ -112,32 +166,32 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
   // ── 2. loadFeatureFlagFromWorkspace ──
 
   describe('loadFeatureFlagFromWorkspace', () => {
-    it('returns enabled=false when no feature-flags.yaml exists', () => {
+    it('returns enabled=false when no config.yaml exists', () => {
       const logger = createMockLogger();
       const result = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', logger);
       expect(result.enabled).toBe(false);
       expect(result.source).toBe('defaults');
     });
 
-    it('returns enabled=false when feature-flags.yaml has no evolution_worker entry', () => {
-      writeFeatureFlags(workspaceDir, { prompt: { enabled: true } });
+    it('returns enabled=false when config.yaml has no evolution_worker entry', () => {
+      writeConfigYaml(workspaceDir, { prompt: { enabled: true } });
       const logger = createMockLogger();
       const result = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', logger);
       expect(result.enabled).toBe(false);
     });
 
-    it('returns enabled=true when feature-flags.yaml explicitly enables evolution_worker', () => {
-      writeFeatureFlags(workspaceDir, {
+    it('returns enabled=true when config.yaml explicitly enables evolution_worker', () => {
+      writeConfigYaml(workspaceDir, {
         evolution_worker: { enabled: true },
       });
       const logger = createMockLogger();
       const result = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', logger);
       expect(result.enabled).toBe(true);
-      expect(result.source).toBe('workspace_file');
+      expect(result.source).toBe('user_config');
     });
 
     it('returns enabled=false when YAML is malformed and warning includes error detail', () => {
-      const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
+      const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
       fs.writeFileSync(configPath, '  bad: [yaml: content', 'utf8');
       const logger = createMockLogger();
       const result = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', logger);
@@ -152,7 +206,7 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
 
     it('returns defaults when file is unreadable', () => {
       // Create a directory where a file should be — causes read error
-      const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
+      const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
       fs.mkdirSync(configPath, { recursive: true });
       const logger = createMockLogger();
       const result = loadFeatureFlagFromWorkspace(workspaceDir, 'evolution_worker', logger);
@@ -162,7 +216,7 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
 
     it('rejects dangerous keys (__proto__) and does not enable via prototype pollution', () => {
       // Write raw YAML with __proto__ to test dangerous key rejection on raw parsed output
-      writeFeatureFlags(workspaceDir, {
+      writeConfigYaml(workspaceDir, {
         __proto__: { enabled: true },
         evolution_worker: { enabled: false },
       });
@@ -175,7 +229,7 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
   // ── 3. shouldStartEvolutionWorker — real helper, real output ──
 
   describe('shouldStartEvolutionWorker gate helper', () => {
-    it('returns shouldStart=false by default (no feature-flags.yaml)', () => {
+    it('returns shouldStart=false by default (no config.yaml)', () => {
       const logger = createMockLogger();
       const gate = shouldStartEvolutionWorker(workspaceDir, logger);
       expect(gate.shouldStart).toBe(false);
@@ -184,13 +238,13 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
     });
 
     it('returns shouldStart=true when explicitly enabled', () => {
-      writeFeatureFlags(workspaceDir, {
+      writeConfigYaml(workspaceDir, {
         evolution_worker: { enabled: true },
       });
       const logger = createMockLogger();
       const gate = shouldStartEvolutionWorker(workspaceDir, logger);
       expect(gate.shouldStart).toBe(true);
-      expect(gate.flagSource).toBe('workspace_file');
+      expect(gate.flagSource).toBe('user_config');
       expect(gate.disabledInfo).toBeNull();
     });
 
@@ -248,18 +302,18 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
 
   describe('explicit enable: worker starts', () => {
     it('shouldStartEvolutionWorker returns true when enabled in config', () => {
-      writeFeatureFlags(workspaceDir, {
+      writeConfigYaml(workspaceDir, {
         evolution_worker: { enabled: true },
       });
 
       const logger = createMockLogger();
       const gate = shouldStartEvolutionWorker(workspaceDir, logger);
       expect(gate.shouldStart).toBe(true);
-      expect(gate.flagSource).toBe('workspace_file');
+      expect(gate.flagSource).toBe('user_config');
     });
 
     it('EvolutionWorkerService.start actually runs when gate is true', () => {
-      writeFeatureFlags(workspaceDir, {
+      writeConfigYaml(workspaceDir, {
         evolution_worker: { enabled: true },
       });
 
@@ -292,17 +346,18 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
     });
 
     it('computeEffectiveFlags preserves core flags even with evolution_worker override', () => {
-      writeFeatureFlags(workspaceDir, {
+      writeConfigYaml(workspaceDir, {
         evolution_worker: { enabled: true },
       });
 
-      const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
+      const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
       const raw = fs.readFileSync(configPath, 'utf8');
       const parsed: unknown = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
 
       // Use isRecord type guard instead of `as`
       expect(isRecord(parsed)).toBe(true);
-      const flags = computeEffectiveFlags(parsed as Record<string, unknown>, DEFAULT_FEATURE_FLAGS, configPath);
+      const features = (parsed as Record<string, unknown>).features;
+      const flags = computeEffectiveFlags(features as Record<string, unknown>, DEFAULT_FEATURE_FLAGS, configPath);
       expect(flags.flags['prompt']?.enabled).toBe(true);
       expect(flags.flags['code_tool_hook']?.enabled).toBe(true);
       expect(flags.flags['defer_archive']?.enabled).toBe(true);
@@ -310,17 +365,18 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
     });
 
     it('core flags cannot be disabled by user override', () => {
-      writeFeatureFlags(workspaceDir, {
+      writeConfigYaml(workspaceDir, {
         prompt: { enabled: false },
         code_tool_hook: { enabled: false },
       });
 
-      const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
+      const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
       const raw = fs.readFileSync(configPath, 'utf8');
       const parsed: unknown = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
 
       expect(isRecord(parsed)).toBe(true);
-      const flags = computeEffectiveFlags(parsed as Record<string, unknown>, DEFAULT_FEATURE_FLAGS, configPath);
+      const features = (parsed as Record<string, unknown>).features;
+      const flags = computeEffectiveFlags(features as Record<string, unknown>, DEFAULT_FEATURE_FLAGS, configPath);
       expect(flags.flags['prompt']?.enabled).toBe(true); // core cannot be disabled
       expect(flags.flags['code_tool_hook']?.enabled).toBe(true); // core cannot be disabled
       expect(flags.warnings.length).toBeGreaterThan(0); // warnings about core override attempt
@@ -331,7 +387,7 @@ describe('PRI-288: EvolutionWorkerService quarantine', () => {
 
   describe('no confirm-first gate regression', () => {
     it('no PLAN.md or confirm-first files are created in workspace', () => {
-      writeFeatureFlags(workspaceDir, {
+      writeConfigYaml(workspaceDir, {
         evolution_worker: { enabled: false },
       });
 

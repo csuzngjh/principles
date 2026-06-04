@@ -494,9 +494,11 @@ describe('Runtime V2 prompt activation — additional guard tests', () => {
 
   it('malformed DB/config input fails loud with warning', async () => {
     const pdDir = path.join(tempWorkspaceDir, '.pd');
+    // PRI-305/PRI-307: Write a malformed .pd/config.yaml with dangerous keys
+    // The core validator rejects __proto__ and constructor as dangerous keys
     fs.writeFileSync(
-      path.join(pdDir, 'feature-flags.yaml'),
-      '__proto__:\n  enabled: true\nprompt:\n  enabled: true\nconstructor:\n  enabled: false\n',
+      path.join(pdDir, 'config.yaml'),
+      'version: 1\nfeatures:\n  __proto__:\n    category: core\n    enabled: true\n  prompt:\n    category: core\n    enabled: true\n  constructor:\n    category: core\n    enabled: false\nruntimeProfiles:\n  openclaw.default:\n    type: openclaw\n    source: default\ninternalAgents:\n  defaultRuntime: openclaw.default\n  agents:\n    diagnostician:\n      enabled: true\n    dreamer:\n      enabled: true\n    scribe:\n      enabled: true\n    artificer:\n      enabled: true\n    philosopher:\n      enabled: false\n    evaluator:\n      enabled: false\n    rolloutReviewer:\n      enabled: false\n    trainer:\n      enabled: false\n    correctionObserver:\n      enabled: false\n    empathyObserver:\n      enabled: false\n',
       'utf8',
     );
 
@@ -507,10 +509,14 @@ describe('Runtime V2 prompt activation — additional guard tests', () => {
     const result = await reader.readActivatedPrinciples();
 
     const warnCalls = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    // PRI-305/PRI-307: Core validator rejects dangerous keys as errors.
+    // The plugin config loader logs config errors as warnings.
     const hasDangerousKeyWarning = warnCalls.some(
-      (c: string) => c.includes('dangerous key') || c.includes('__proto__') || c.includes('constructor'),
+      (c: string) => c.includes('dangerous key') || c.includes('__proto__') || c.includes('constructor') || c.includes('Config error'),
     );
     expect(hasDangerousKeyWarning).toBe(true);
+    // With malformed config, defaults are used (prompt enabled by default),
+    // but no DB data exists, so principles should be empty
     expect(result.principles).toEqual([]);
   });
 

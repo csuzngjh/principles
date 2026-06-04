@@ -1,91 +1,140 @@
+/**
+ * pd runtime features — Show effective feature flags from .pd/config.yaml.
+ *
+ * PRI-305: Cutover from .pd/feature-flags.yaml to .pd/config.yaml.
+ * Uses core computeFeatureFlagsFromConfig for flag computation.
+ * --json outputs a single parseable JSON object.
+ * Missing config uses core defaults with nextAction.
+ * Malformed config fails loud with reason and nextAction.
+ * No secret output.
+ */
+
 import * as path from 'path';
-import { loadEffectiveFeatureFlags } from '../services/feature-flag-loader.js';
+import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
-export interface FeatureFlagsStatusOutput {
-  status: 'ok' | 'degraded';
-  source: string;
+// ── Output types ─────────────────────────────────────────────────────────────
+
+export interface RuntimeFeaturesOutput {
+  status: 'ok' | 'degraded' | 'failed';
+  source: 'defaults' | 'user_config' | 'malformed';
   configPath: string;
-  flags: {
+  features: {
     id: string;
     category: string;
     enabled: boolean;
-    since: string;
-    description?: string;
   }[];
-  warnings: string[];
+  enabledMvpChannels: string[];
   totalFlags: number;
   enabledCount: number;
   disabledCount: number;
+  warnings: string[];
   reason?: string;
   nextAction?: string;
+  /** Malformed config errors (only present when source=malformed) */
+  errors?: { path: string; reason: string; nextAction: string }[];
 }
 
-interface FeaturesOptions {
-  workspace?: string;
-  json?: boolean;
-}
+// ── Build output ─────────────────────────────────────────────────────────────
 
-export function buildFeatureFlagsStatus(workspaceDir: string): FeatureFlagsStatusOutput {
-  const effective = loadEffectiveFeatureFlags(workspaceDir);
-  const flags = Object.values(effective.flags);
-  const enabledCount = flags.filter(f => f.enabled).length;
-  const hasWarnings = effective.warnings.length > 0;
+export function buildRuntimeFeaturesStatus(workspaceDir: string): RuntimeFeaturesOutput {
+  const loadResult = loadPdConfig(workspaceDir);
+  const flags = computeFlagsFromLoadResult(loadResult);
 
-  return {
-    status: hasWarnings ? 'degraded' : 'ok',
-    source: effective.source,
-    configPath: effective.configPath,
-    flags: flags.map(f => ({
-      id: f.id,
-      category: f.category,
-      enabled: f.enabled,
-      since: f.since,
-      ...(f.description ? { description: f.description } : {}),
-    })),
-    warnings: effective.warnings,
-    totalFlags: flags.length,
+  const allFlags = Object.values(flags.flags);
+  const enabledCount = allFlags.filter(f => f.enabled).length;
+  const features = allFlags.map(f => ({
+    id: f.id,
+    category: f.category,
+    enabled: f.enabled,
+  }));
+
+  // Determine status
+  let status: RuntimeFeaturesOutput['status'] = 'ok';
+  const warnings = [...loadResult.warnings, ...flags.warnings];
+
+  if (!loadResult.ok) {
+    status = 'failed';
+  } else if (warnings.length > 0) {
+    status = 'degraded';
+  }
+
+  const output: RuntimeFeaturesOutput = {
+    status,
+    source: loadResult.ok ? loadResult.source : 'malformed',
+    configPath: loadResult.configPath,
+    features,
+    enabledMvpChannels: [...flags.enabledChannels],
+    totalFlags: allFlags.length,
     enabledCount,
-    disabledCount: flags.length - enabledCount,
-    ...(hasWarnings ? {
-      reason: `Config warnings: ${effective.warnings.join('; ')}`,
-      nextAction: 'Review feature-flags.yaml for malformed overrides or unknown flags',
-    } : {}),
+    disabledCount: allFlags.length - enabledCount,
+    warnings,
   };
+
+  // Add reason and nextAction for non-ok states
+  if (!loadResult.ok) {
+    output.reason = `Config validation failed: ${loadResult.errors.map(e => e.reason).join('; ')}`;
+    output.nextAction = loadResult.errors[0]?.nextAction ?? 'Fix .pd/config.yaml and retry';
+    output.errors = loadResult.errors;
+  } else if (warnings.length > 0) {
+    output.reason = `Config warnings: ${warnings.slice(0, 3).join('; ')}`;
+    output.nextAction = 'Review .pd/config.yaml for warnings';
+  }
+
+  return output;
 }
 
-function formatTextOutput(output: FeatureFlagsStatusOutput): string {
+// ── Text formatting ──────────────────────────────────────────────────────────
+
+function formatTextOutput(output: RuntimeFeaturesOutput): string {
   const lines: string[] = [];
 
-  lines.push('PD Feature Flags Status');
+  lines.push('PD Runtime Features');
   lines.push(`source: ${output.source}`);
   lines.push(`config: ${output.configPath}`);
   lines.push('');
 
-  const categoryOrder = ['core', 'quiet', 'gone', 'legacy_retire'] as const;
+  const categoryOrder = ['core', 'quiet', 'gone'] as const;
   for (const category of categoryOrder) {
-    const categoryFlags = output.flags.filter(f => f.category === category);
+    const categoryFlags = output.features.filter(f => f.category === category);
     if (categoryFlags.length === 0) continue;
 
     lines.push(`  ${category.toUpperCase()} (${categoryFlags.length})`);
     for (const flag of categoryFlags) {
       const icon = flag.enabled ? '+' : '-';
-      lines.push(`    [${icon}] ${flag.id} (since ${flag.since})${flag.description ? ` — ${flag.description}` : ''}`);
+      lines.push(`    [${icon}] ${flag.id}`);
     }
     lines.push('');
   }
 
   lines.push(`Total: ${output.totalFlags} flags, ${output.enabledCount} enabled, ${output.disabledCount} disabled`);
+  lines.push(`MVP channels: ${output.enabledMvpChannels.length > 0 ? output.enabledMvpChannels.join(', ') : '(none)'}`);
 
   if (output.warnings.length > 0) {
     lines.push('');
     lines.push('Warnings:');
-    for (const warning of output.warnings) {
-      lines.push(`  [!] ${warning}`);
+    for (const w of output.warnings) {
+      lines.push(`  [!] ${w}`);
+    }
+  }
+
+  if (output.errors && output.errors.length > 0) {
+    lines.push('');
+    lines.push('Errors:');
+    for (const e of output.errors) {
+      lines.push(`  [x] ${e.path}: ${e.reason}`);
+      lines.push(`      → ${e.nextAction}`);
     }
   }
 
   return lines.join('\n');
+}
+
+// ── CLI handler ──────────────────────────────────────────────────────────────
+
+interface FeaturesOptions {
+  workspace?: string;
+  json?: boolean;
 }
 
 export async function handleRuntimeFeaturesStatus(opts: FeaturesOptions): Promise<void> {
@@ -93,11 +142,16 @@ export async function handleRuntimeFeaturesStatus(opts: FeaturesOptions): Promis
     ? path.resolve(opts.workspace)
     : resolveWorkspaceDir();
 
-  const output = buildFeatureFlagsStatus(workspaceDir);
+  const output = buildRuntimeFeaturesStatus(workspaceDir);
 
   if (opts.json) {
+    // JSON mode: single parseable object on stdout
     console.log(JSON.stringify(output, null, 2));
   } else {
     console.log(formatTextOutput(output));
+  }
+
+  if (output.status === 'failed') {
+    process.exitCode = 1;
   }
 }
