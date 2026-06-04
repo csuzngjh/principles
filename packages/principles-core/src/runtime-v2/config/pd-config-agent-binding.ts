@@ -119,13 +119,21 @@ function checkPdLocalReadiness(
     };
   }
 
-  // Check if the env var actually exists
+  // Check if the env var actually exists (empty string counts as "set but empty")
   const apiKeyValue = getEnvVar(profile.apiKeyEnv);
-  if (!apiKeyValue) {
+  if (apiKeyValue === undefined) {
     return {
       readiness: 'not_ready',
       reason: `Environment variable '${profile.apiKeyEnv}' is not set. The profile is configured correctly but the API key is not available in the environment.`,
       nextAction: `Set the environment variable '${profile.apiKeyEnv}' with your API key before running PD, or change apiKeyEnv in .pd/config.yaml to reference an existing env var`,
+    };
+  }
+
+  if (apiKeyValue.length === 0) {
+    return {
+      readiness: 'not_ready',
+      reason: `Environment variable '${profile.apiKeyEnv}' is set but empty. An API key value is required.`,
+      nextAction: `Provide a non-empty value for '${profile.apiKeyEnv}' or change apiKeyEnv in .pd/config.yaml to reference a different env var`,
     };
   }
 

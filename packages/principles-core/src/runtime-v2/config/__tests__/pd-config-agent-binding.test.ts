@@ -297,6 +297,21 @@ describe('checkAgentRuntimeReadiness', () => {
     expect(result.readiness).toBe('ready');
   });
 
+  it('returns not_ready for pi-ai profile when apiKeyEnv is set but empty', () => {
+    const result = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        apiKeyEnv: 'ANTHROPIC_API_KEY',
+      },
+      (name) => name === 'ANTHROPIC_API_KEY' ? '' : undefined,
+    );
+    expect(result.readiness).toBe('not_ready');
+    expect(result.reason).toContain('empty');
+    expect(result.nextAction).toBeTruthy();
+  });
+
   it('returns needs_setup for pi-ai profile with empty provider', () => {
     const result = checkAgentRuntimeReadiness(
       {
