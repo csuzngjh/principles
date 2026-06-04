@@ -14,6 +14,7 @@ import { resolveWorkspaceDirForRuntimeV2 } from '../utils/workspace-resolver.js'
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter, type PainDetectedData, type PainEvidenceEntry, MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from '@principles/core/runtime-v2';
 import { evaluatePainDiagnosticGate } from '../core/pain-diagnostic-gate.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
+import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 
 /**
  * Interface for tool parameters to avoid 'any'
@@ -34,12 +35,17 @@ const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 
 
 function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleService {
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
+  // PRI-306: Load .pd/config.yaml and pass effectiveConfig to PainToPrincipleService
+  // so createPainSignalBridge uses config-driven runtime binding resolution.
+  const configResult = loadPdConfigForPlugin(wctx.workspaceDir);
   return new PainToPrincipleService({
     workspaceDir: wctx.workspaceDir,
     stateDir: wctx.stateDir,
     ledgerAdapter,
     owner: 'openclaw-plugin',
     autoIntakeEnabled: true,
+    effectiveConfig: configResult.effective,
+    getEnvVar: (name: string) => process.env[name],
   });
 }
 

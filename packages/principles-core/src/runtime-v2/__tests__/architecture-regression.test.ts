@@ -285,6 +285,8 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'runtime-v2-prompt-activation-reader.ts',
   'workspace-guidance-migrator.ts',
   'surface-guard.ts',
+  // PRI-307: Plugin I/O boundary — reads .pd/config.yaml, delegates validation to core
+  'pd-config-loader.ts',
 
   // ── Test Files ──────────────────────────────────────────────────────────
   '__tests__/focus-history.test.ts',
@@ -338,7 +340,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/reviews/plugin-core-inventory-2026-05.md §7
     // PRI-286: Removed confirm-first-gate.ts (95 → 94)
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(96);
+    // PRI-307: Added pd-config-loader.ts (96 → 97)
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(97);
   });
 });
 

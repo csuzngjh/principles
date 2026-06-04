@@ -12,13 +12,13 @@ import * as os from 'os';
 
 describe('Runtime Config Boundary (PRI-162)', () => {
   describe('validateRuntimeConfig', () => {
-    it('throws when openclaw-cli has no openclawMode', () => {
+    it('passes when openclaw-cli has no openclawMode (delegated/default)', () => {
       const config: RuntimeConfig = {
         runtimeKind: 'openclaw-cli',
         timeoutMs: 300_000,
         agentId: 'main',
       };
-      expect(() => validateRuntimeConfig(config)).toThrow(/requires openclawMode/);
+      expect(() => validateRuntimeConfig(config)).not.toThrow();
     });
 
     it('passes when openclaw-cli has openclawMode local', () => {
@@ -62,9 +62,10 @@ describe('Runtime Config Boundary (PRI-162)', () => {
       expect(() => validateRuntimeConfig(config)).not.toThrow();
     });
 
-    it('throws with nextAction when openclaw-cli has no mode', () => {
+    it('throws with nextAction when openclaw-cli has invalid openclawMode', () => {
       const config: RuntimeConfig = {
         runtimeKind: 'openclaw-cli',
+        openclawMode: 'invalid' as 'local',
         timeoutMs: 300_000,
         agentId: 'main',
       };
@@ -75,6 +76,7 @@ describe('Runtime Config Boundary (PRI-162)', () => {
         expect(err instanceof Error).toBe(true);
         if (err instanceof Error) {
           expect(err.message).toContain('nextAction');
+          expect(err.message).toContain('Invalid openclawMode');
         }
       }
     });
