@@ -43,6 +43,14 @@ export async function handlePainRecord(opts: RecordOptions): Promise<void> {
   const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir });
   // PRI-306: Load .pd/config.yaml for config-driven runtime binding
   const configResult = loadPdConfig(workspaceDir);
+  if (!configResult.ok) {
+    // ERR-009 / Runtime Contract Rule 9: fail loud with reason, don't silently swallow
+    console.error(`Warning: .pd/config.yaml has errors — using defaults:`);
+    for (const e of configResult.errors) {
+      console.error(`  ${e.path}: ${e.reason}`);
+      if (e.nextAction) console.error(`    nextAction: ${e.nextAction}`);
+    }
+  }
   const effectiveConfig = configResult.ok ? configResult.effective : configResult.defaults;
   const service = new PainToPrincipleService({
     workspaceDir,

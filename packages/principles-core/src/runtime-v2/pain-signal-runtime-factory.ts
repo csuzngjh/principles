@@ -224,11 +224,16 @@ export function resolveRuntimeConfig(stateDir: string, explicitConfig?: ResolveR
  */
 export function validateRuntimeConfig(config: RuntimeConfig): void {
   if (config.runtimeKind === 'openclaw-cli') {
-    if (!config.openclawMode) {
+    // PRI-306: openclawMode may be undefined when source='default' (delegated).
+    // The adapter will not append any mode flag, letting OpenClaw decide.
+    // Only reject an explicit invalid string value.
+    if (config.openclawMode !== undefined
+      && config.openclawMode !== 'local'
+      && config.openclawMode !== 'gateway') {
       throw new Error(
-        `[PainSignalRuntimeFactory] runtimeKind 'openclaw-cli' requires openclawMode. ` +
-        `Provide --openclaw-local or --openclaw-gateway, or set openclawMode in workflows.yaml. ` +
-        `nextAction: Add openclawMode: local|gateway to your funnel policy or use CLI flags.`,
+        `[PainSignalRuntimeFactory] Invalid openclawMode '${String(config.openclawMode)}'. ` +
+        `Must be 'local', 'gateway', or undefined (delegate to OpenClaw). ` +
+        `nextAction: Set openclawMode: local|gateway in your config, or omit for delegated mode.`,
       );
     }
   }
@@ -391,7 +396,7 @@ export async function createPainSignalBridge(
         workspace: opts.workspaceDir,
       })
     : new OpenClawCliRuntimeAdapter({
-        runtimeMode: runtimeConfig.openclawMode ?? 'local',
+        runtimeMode: runtimeConfig.openclawMode ?? 'default',
         workspaceDir: opts.workspaceDir,
       });
 
