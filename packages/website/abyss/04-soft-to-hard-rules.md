@@ -331,11 +331,15 @@ Therefore, PD must make a crucial distinction:
 >
 > Boundaries must be left to the system.
 
+Five hundred years ago, the Eastern philosopher Wang Yangming proposed a profound cognitive thesis: "**There is no knowing without acting. Knowing but not acting is simply not knowing.**"
+
+If we translate this into the cyber age: writing over 40 bottom lines into the Prompt means the large model has "read" them, but due to the squeeze of context debt, it cannot guarantee 100% deterministic compliance in action. For the system, this is "knowing but not acting."
+
 If a bottom line is absolutely not allowed to be forgotten, it should not continue to stay in the Prompt.
 
-It must be moved out of the probabilistic world and into a more deterministic execution environment.
+It must be moved out of the probabilistic world and into a more deterministic physical execution environment (RuleHost). When a dangerous operation is triggered, the interception code takes effect immediately.
 
-This is "internalization."
+This is what silicon lifeforms achieve in engineering as "**The Unity of Knowledge and Action.**" This is also the internalization path where we transform "memory" into "system instinct."
 
 ---
 
@@ -681,7 +685,9 @@ It is merely the system saying:
 
 > Pain occurred here; something worth remembering happened here.
 
-Next, the role truly responsible for distilling the principle should not be the human Owner making a snap summary.
+A true guardrail can never be produced by a large model "meditating" in a vacuum. To borrow another insight from Eastern philosophy—"**One must forge oneself through practice in action.**" The hard bottom lines of a system must be tempered through the repeated friction and crashes (Pain Signals) of real projects.
+
+Next, the role truly responsible for distilling commonalities from these pain scenes and extracting the principle should not be the human Owner making a snap summary.
 
 In the PD system, this role is closer to a **Diagnostician**.
 
@@ -1227,13 +1233,15 @@ AI can help discover conflicts.
 
 AI can help write pruning reports.
 
-But the final decision on "what is an inviolable bottom line" must still be made by humans.
+But no matter how powerful AI is at diagnosing and generating rules, these remain external "Methods/Algorithms". The final decision on "what is an inviolable bottom line" must still be made by humans.
 
-Because only humans bear the real consequences.
+In this silicon-based system, the human Owner plays the philosophical role of the "**Innate Compass (The Ultimate Sovereign)**".
 
-Only humans understand the business context.
+Because only the Innate Compass bears the real consequences.
 
-Only humans know what a pain truly means behind the scenes.
+Only the Innate Compass understands the ultimate business context.
+
+Only the Innate Compass knows what a pain truly means behind the scenes, and which long-term value trajectory has been deviated from.
 
 ---
 
