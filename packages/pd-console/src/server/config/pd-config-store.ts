@@ -462,6 +462,157 @@ export function updateAgentBinding(
   };
 }
 
+// ── Update Default Runtime ───────────────────────────────────────────────────
+
+export interface DefaultRuntimeUpdateResultOk {
+  ok: true;
+  defaultRuntime: string;
+}
+
+export interface DefaultRuntimeUpdateResultErr {
+  ok: false;
+  statusCode: number;
+  error: string;
+  message: string;
+}
+
+export type DefaultRuntimeUpdateResult = DefaultRuntimeUpdateResultOk | DefaultRuntimeUpdateResultErr;
+
+export function updateDefaultRuntime(
+  workspaceDir: string,
+  payload: unknown,
+): DefaultRuntimeUpdateResult {
+  // 1. Validate payload
+  if (!isRecord(payload)) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Payload must be a JSON object with a defaultRuntime field' };
+  }
+
+  const defaultRuntimeRaw = Object.hasOwn(payload, 'defaultRuntime') ? payload.defaultRuntime : undefined;
+  if (defaultRuntimeRaw === undefined) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Missing required field: defaultRuntime' };
+  }
+  if (typeof defaultRuntimeRaw !== 'string' || defaultRuntimeRaw.length === 0) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'defaultRuntime must be a non-empty string' };
+  }
+
+  // ANY-segment secret key detection (ERR-045)
+  const secretPath = hasSecretLikeKeyDeep(payload);
+  if (secretPath) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: `Payload contains secret-like field '${secretPath}'. Remove secret fields from the request.` };
+  }
+
+  // 2. Load existing config
+  const loadResult = loadPdConfig(workspaceDir);
+
+  // 3. If malformed, refuse to write
+  if (!loadResult.ok) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'conflict',
+      message: `Cannot update default runtime: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${loadResult.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  const { effective } = loadResult;
+
+  // 4. Validate runtime profile reference exists
+  if (!Object.hasOwn(effective.config.runtimeProfiles, defaultRuntimeRaw)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Runtime profile '${defaultRuntimeRaw}' does not exist. Available profiles: ${Object.keys(effective.config.runtimeProfiles).join(', ')}`,
+    };
+  }
+
+  // 5. Build updated config — read original file to preserve unknown root entries
+  //    and preserve agent inheritance (agents without explicit runtimeProfile
+  //    should NOT get one written back — they inherit defaultRuntime)
+  const configPath = getPdConfigPath(workspaceDir);
+  let rawConfig: Record<string, unknown>;
+  let rawAgentsMap: Record<string, unknown> | undefined;
+  if (fs.existsSync(configPath)) {
+    const rawContent = fs.readFileSync(configPath, 'utf8');
+    const rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
+    if (isRecord(rawParsed)) {
+      rawConfig = { ...rawParsed };
+      // Extract the raw agents map from the file to preserve inheritance
+      const rawInternalAgents = rawParsed.internalAgents;
+      if (isRecord(rawInternalAgents) && Object.hasOwn(rawInternalAgents, 'agents')) {
+        const rawAgents = rawInternalAgents.agents;
+        if (isRecord(rawAgents)) {
+          rawAgentsMap = rawAgents;
+        }
+      }
+    } else {
+      rawConfig = {};
+    }
+  } else {
+    rawConfig = {};
+  }
+
+  // Build agents map preserving ONLY explicit overrides from the original file.
+  // Agents that omit runtimeProfile in the file should continue to inherit
+  // defaultRuntime — we must NOT write back the effective (resolved) value.
+  // Only write agents that already exist in the file — do not add new ones.
+  const agentsMap: Record<string, AgentBindingEntry> = {};
+  if (rawAgentsMap) {
+    for (const name of Object.keys(rawAgentsMap)) {
+      const rawEntry = rawAgentsMap[name];
+      if (!isRecord(rawEntry)) continue;
+
+      // Preserve enabled if present, default to true
+      const enabledRaw = Object.hasOwn(rawEntry, 'enabled') ? rawEntry.enabled : undefined;
+      const enabled = typeof enabledRaw === 'boolean' ? enabledRaw : true;
+
+      // Only include runtimeProfile if the original file had an explicit one
+      const hasExplicitProfile = Object.hasOwn(rawEntry, 'runtimeProfile')
+        && typeof rawEntry.runtimeProfile === 'string'
+        && (rawEntry.runtimeProfile).length > 0;
+
+      agentsMap[name] = {
+        enabled,
+        ...(hasExplicitProfile ? { runtimeProfile: rawEntry.runtimeProfile as string } : {}),
+      };
+    }
+  } else {
+    // No agents in file — write nothing (all agents inherit default)
+  }
+
+  // Merge: update only defaultRuntime, preserve agent overrides
+  const updatedConfig: Record<string, unknown> = {
+    ...rawConfig,
+    version: effective.config.version,
+    features: { ...effective.config.features },
+    runtimeProfiles: { ...effective.config.runtimeProfiles },
+    internalAgents: {
+      defaultRuntime: defaultRuntimeRaw,
+      agents: agentsMap,
+    },
+    ui: { ...effective.config.ui },
+  };
+
+  // 6. Validate the updated config before writing
+  const validation = validatePdConfig(updatedConfig);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Updated config would be invalid: ${validation.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  // 7. Write to disk (atomic)
+  writeConfigAtomic(configPath, updatedConfig);
+
+  return {
+    ok: true,
+    defaultRuntime: defaultRuntimeRaw,
+  };
+}
+
 // ── Check Readiness ──────────────────────────────────────────────────────────
 
 export function checkReadiness(
