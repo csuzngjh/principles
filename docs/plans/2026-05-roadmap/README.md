@@ -29,6 +29,7 @@ PD 进入 **MVP-First 阶段**。所有架构演进暂停，目标是在 **4-6 �
 | [05-integrated-stability-and-refactoring-blueprint.md](./05-integrated-stability-and-refactoring-blueprint.md) | 稳定性基线参考 |
 | ~~[06-ahe-informed-architecture-review.md](./06-ahe-informed-architecture-review.md)~~ | **Superseded by 07**；保留作历史档案 |
 | **[07-mvp-first-pivot.md](./07-mvp-first-pivot.md) ★** | **MVP-First 当前执行文档** |
+| **[09-plugin-slimming-and-sdk-hardening.md](./09-plugin-slimming-and-sdk-hardening.md)** | **插件瘦身、旧功能删除、SDK/Core 固化执行方案** |
 | [`../post-mvp-conditional-roadmap.md`](../post-mvp-conditional-roadmap.md) ★ | 被推迟工作的重启条件清单 |
 
 ## 阶段状态

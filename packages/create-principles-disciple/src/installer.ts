@@ -831,7 +831,7 @@ async function generateConfigYamlConfig(workspaceDir: string): Promise<string> {
     } catch (e) {
       // Existing config is malformed — fail loud, do not overwrite
       const reason = e instanceof Error ? e.message : String(e);
-      throw new Error(`Existing .pd/config.yaml is malformed: ${reason}. Delete the file and re-run the installer, or fix it manually.`);
+      throw new Error(`Existing .pd/config.yaml is malformed: ${reason}. Delete the file and re-run the installer, or fix it manually.`, { cause: e });
     }
   }
 
