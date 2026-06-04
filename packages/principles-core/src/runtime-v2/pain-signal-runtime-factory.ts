@@ -30,6 +30,12 @@ import { storeEmitter } from './store/event-emitter.js';
 import { WorkflowFunnelLoader } from '../workflow-funnel-loader.js';
 import type { RuntimeKind, PDRuntimeAdapter } from './runtime-protocol.js';
 import type { LedgerAdapter } from './candidate-intake.js';
+import {
+  resolveAgentRuntimeBinding,
+  checkAgentRuntimeReadiness,
+  createAdapterConfigFromProfile,
+} from './config/pd-config-agent-binding.js';
+import type { EffectivePdConfig } from './config/pd-config-types.js';
 
 export interface PainSignalRuntimeFactoryOptions {
   workspaceDir: string;
@@ -37,6 +43,11 @@ export interface PainSignalRuntimeFactoryOptions {
   ledgerAdapter: LedgerAdapter;
   owner?: string;
   autoIntakeEnabled?: boolean;
+  /** PRI-306: Effective PD config for config-driven runtime binding.
+   *  When provided, takes precedence over WorkflowFunnelLoader. */
+  effectiveConfig?: EffectivePdConfig;
+  /** PRI-306: Env var accessor for readiness checks. Defaults to process.env. */
+  getEnvVar?: (name: string) => string | undefined;
 }
 
 /** Funnel name for the Runtime v2 diagnosis path. */
@@ -253,6 +264,65 @@ export function validateRuntimeConfig(config: RuntimeConfig): void {
   }
 }
 
+/**
+ * PRI-306: Resolve runtime configuration from EffectivePdConfig.
+ *
+ * Uses resolveAgentRuntimeBinding() to determine which profile the diagnostician
+ * should use, then checks readiness and produces adapter config.
+ *
+ * This is the new config-driven path that replaces WorkflowFunnelLoader.
+ * When effectiveConfig is provided, this path takes precedence.
+ */
+export function resolveRuntimeConfigFromPdConfig(
+  effectiveConfig: EffectivePdConfig,
+  getEnvVar: (name: string) => string | undefined,
+): RuntimeConfigResult {
+  // Resolve binding for the diagnostician agent
+  const bindingResult = resolveAgentRuntimeBinding(effectiveConfig, 'diagnostician');
+  if (!bindingResult.ok) {
+    return {
+      ok: false,
+      reason: bindingResult.readiness,
+      message: bindingResult.reason,
+      nextAction: bindingResult.nextAction,
+    };
+  }
+
+  // Check readiness (env vars, provider, etc.)
+  const readiness = checkAgentRuntimeReadiness(bindingResult.profile, getEnvVar);
+  if (readiness.readiness !== 'ready') {
+    return {
+      ok: false,
+      reason: readiness.readiness,
+      message: readiness.reason ?? `Agent runtime profile '${bindingResult.profileId}' is not ready`,
+      nextAction: readiness.nextAction ?? 'Check .pd/config.yaml runtime profile configuration',
+    };
+  }
+
+  // Convert profile to adapter config
+  const adapterConfig = createAdapterConfigFromProfile(bindingResult.profile, '');
+
+  if (adapterConfig.runtimeKind === 'pi-ai') {
+    return {
+      runtimeKind: 'pi-ai',
+      provider: adapterConfig.provider,
+      model: adapterConfig.model,
+      apiKeyEnv: adapterConfig.apiKeyEnv,
+      baseUrl: adapterConfig.baseUrl,
+      timeoutMs: adapterConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      agentId: 'main',
+    };
+  }
+
+  // openclaw-cli
+  return {
+    runtimeKind: 'openclaw-cli',
+    openclawMode: adapterConfig.openclawMode,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    agentId: 'main',
+  };
+}
+
 // Per-workspace+runtime+mode bridge cache — same lifetime as process
 // Key format: `${workspaceDir}:${runtimeKind}:${openclawMode ?? ''}` (D-03)
 const bridgeCache = new Map<string, PainSignalBridge>();
@@ -268,7 +338,15 @@ const bridgeCache = new Map<string, PainSignalBridge>();
 export async function createPainSignalBridge(
   opts: PainSignalRuntimeFactoryOptions,
 ): Promise<PainSignalBridge> {
-  const runtimeConfig = resolveRuntimeConfig(opts.stateDir);
+  // PRI-306: Prefer config-driven binding when effectiveConfig is provided
+  let runtimeConfig: RuntimeConfigResult;
+  if (opts.effectiveConfig) {
+    const getEnv = opts.getEnvVar ?? ((name: string) => process.env[name]);
+    runtimeConfig = resolveRuntimeConfigFromPdConfig(opts.effectiveConfig, getEnv);
+  } else {
+    runtimeConfig = resolveRuntimeConfig(opts.stateDir);
+  }
+
   if (isRuntimeConfigError(runtimeConfig)) {
     throw new Error(
       `[PainSignalRuntimeFactory] Config resolution failed: ${runtimeConfig.reason}. ` +
