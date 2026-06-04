@@ -314,12 +314,13 @@ describe('checkAgentRuntimeReadiness', () => {
 
   it('returns needs_setup for pi-ai profile with empty provider', () => {
     const result = checkAgentRuntimeReadiness(
+      // Empty provider is type-valid string but semantically invalid — tests runtime validation
       {
         type: 'pi-ai',
         provider: '',
         model: 'claude-3-5-sonnet',
         apiKeyEnv: 'ANTHROPIC_API_KEY',
-      } as never, // intentionally malformed for test
+      },
       (name) => name === 'ANTHROPIC_API_KEY' ? 'sk-ant-test-key' : undefined,
     );
     expect(result.readiness).toBe('needs_setup');
