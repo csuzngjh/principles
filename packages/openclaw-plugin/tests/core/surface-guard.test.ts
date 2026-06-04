@@ -324,7 +324,7 @@ describe('surface-guard', () => {
 
     it('no quiet surface disabledReason promises a feature flag override (PRI-298 / chatgpt P2)', () => {
       // The runtime guard path (`isSurfaceEnabled(surfaceId)` with no
-      // overrides argument) does not consume `.pd/feature-flags.yaml`, so
+      // overrides argument) does not consume `.pd/config.yaml`, so
       // telling operators to "enable via feature flag override" would be
       // an impossible next action. Quiet copy must describe the surface
       // honestly without pointing to a non-existent override path.

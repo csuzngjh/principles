@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'js-yaml';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 
 const mockLearner = {
@@ -35,6 +36,89 @@ vi.mock('../../src/service/keyword-optimization-service.js', () => ({
   KeywordOptimizationService: { get: vi.fn(() => mockOptimizationService) },
 }));
 
+// PRI-307: Mock the pd-config-loader instead of @principles/core/runtime-v2
+// The service now reads .pd/config.yaml via resolveObserverConfig
+vi.mock('../../src/core/pd-config-loader.js', () => {
+  return {
+    loadPdConfigForPlugin: vi.fn(() => ({
+      ok: true,
+      effective: {
+        config: {
+          version: 1,
+          features: {
+            prompt: { category: 'core', enabled: true },
+            code_tool_hook: { category: 'core', enabled: true },
+            defer_archive: { category: 'core', enabled: true },
+            correction_observer: { category: 'quiet', enabled: true },
+            empathy_observer: { category: 'quiet', enabled: false },
+          },
+          runtimeProfiles: {
+            'openclaw.default': { type: 'openclaw', source: 'default' },
+            'pd.anthropic-sonnet': { type: 'pi-ai', provider: 'anthropic', model: 'claude-3-5-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY', timeoutMs: 30000 },
+          },
+          internalAgents: {
+            defaultRuntime: 'openclaw.default',
+            agents: {
+              diagnostician: { enabled: true },
+              dreamer: { enabled: true },
+              scribe: { enabled: true },
+              artificer: { enabled: true },
+              philosopher: { enabled: false },
+              evaluator: { enabled: false },
+              rolloutReviewer: { enabled: false },
+              trainer: { enabled: false },
+              correctionObserver: { enabled: true, runtimeProfile: 'pd.anthropic-sonnet' },
+              empathyObserver: { enabled: false },
+            },
+          },
+        },
+        warnings: [],
+      },
+      source: 'defaults',
+      configPath: '.pd/config.yaml',
+      warnings: [],
+      errors: [],
+    })),
+    loadFeatureFlagFromConfig: vi.fn(() => ({ enabled: true, source: 'defaults' })),
+    resolveObserverConfig: vi.fn((_workspaceDir: string, flagId: string, _agentName: string) => {
+      // Default: return disabled for correction_observer (no config file in test tmp dirs)
+      if (flagId === 'correction_observer') {
+        return {
+          enabled: true,
+          readiness: 'not_ready',
+          source: 'defaults',
+          reason: 'pi-ai profile configured with apiKeyEnv',
+          nextAction: 'Run pd runtime probe',
+          runtimeProfileId: 'pd.anthropic-sonnet',
+          runtimeProfileType: 'pi-ai',
+          apiKeyEnv: 'ANTHROPIC_API_KEY',
+          apiKeyPresent: !!process.env.ANTHROPIC_API_KEY,
+          provider: 'anthropic',
+          model: 'claude-3-5-sonnet',
+          timeoutMs: 30000,
+          baseUrl: null,
+        };
+      }
+      return {
+        enabled: false,
+        readiness: 'disabled',
+        source: 'defaults',
+        reason: `${flagId} is disabled`,
+        nextAction: `Set features.${flagId}.enabled=true in .pd/config.yaml`,
+        runtimeProfileId: null,
+        runtimeProfileType: null,
+        apiKeyEnv: null,
+        apiKeyPresent: false,
+        provider: null,
+        model: null,
+        timeoutMs: null,
+        baseUrl: null,
+      };
+    }),
+    getPdConfigPath: vi.fn((workspaceDir: string) => path.join(workspaceDir, '.pd', 'config.yaml')),
+  };
+});
+
 const mockDispatch = vi.fn().mockResolvedValue({
   updated: true,
   summary: 'Keyword store optimized',
@@ -45,23 +129,12 @@ const mockRegister = vi.fn();
 
 vi.mock('@principles/core/runtime-v2', () => {
   return {
-    WorkflowFunnelLoader: class {
-      getFunnel = vi.fn(() => ({
-        policy: {
-          runtimeKind: 'pi-ai',
-          provider: 'anthropic',
-          model: 'anthropic/claude-3-5-sonnet',
-          apiKeyEnv: 'ANTHROPIC_API_KEY',
-          timeoutMs: 30000,
-        }
-      }));
-    },
     PiAiRuntimeAdapter: class {},
     CorrectionObserver: class {},
     AgentScheduler: class {
       register = mockRegister;
       dispatch = mockDispatch;
-    }
+    },
   };
 });
 
@@ -330,12 +403,12 @@ describe('runCorrectionObserverCycle — Independent Execution', () => {
   });
 });
 
-describe('resolveCorrectionObserver — Configuration Resolution', () => {
+describe('resolveCorrectionObserver — Configuration Resolution (PRI-307)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('returns observer when API key env is set with mocked policy', async () => {
+  it('returns observer when API key env is set with pi-ai profile', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-resolve-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -348,7 +421,7 @@ describe('resolveCorrectionObserver — Configuration Resolution', () => {
       const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
       const result = resolveCorrectionObserver(wctx, logger as any);
 
-      // With mocked WorkflowFunnelLoader returning valid policy, should return observer
+      // With mocked resolveObserverConfig returning enabled + not_ready, should return observer
       expect(result).not.toBeNull();
     } finally {
       delete process.env.ANTHROPIC_API_KEY;
@@ -356,23 +429,76 @@ describe('resolveCorrectionObserver — Configuration Resolution', () => {
     }
   });
 
-  it('returns observer when workflows.yaml provides valid policy', async () => {
-    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-policy-'));
+  it('returns null when observer is disabled in config', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-disabled-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
 
-    process.env.ANTHROPIC_API_KEY = 'test-key';
-
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    // Override the mock to return disabled
+    const { resolveObserverConfig } = await import('../../src/core/pd-config-loader.js');
+    vi.mocked(resolveObserverConfig).mockReturnValueOnce({
+      enabled: false,
+      readiness: 'disabled',
+      source: 'defaults',
+      reason: 'correction_observer is disabled in .pd/config.yaml',
+      nextAction: 'Set features.correction_observer.enabled=true in .pd/config.yaml to enable',
+      runtimeProfileId: null,
+      runtimeProfileType: null,
+      apiKeyEnv: null,
+      apiKeyPresent: false,
+      provider: null,
+      model: null,
+      timeoutMs: null,
+      baseUrl: null,
+    });
 
     try {
       const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
       const result = resolveCorrectionObserver(wctx, logger as any);
 
-      // With mocked WorkflowFunnelLoader returning valid policy, should return observer
-      expect(result).not.toBeNull();
+      expect(result).toBeNull();
     } finally {
-      delete process.env.ANTHROPIC_API_KEY;
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('returns null when observer needs setup (no API key)', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-needs-setup-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    // Override the mock to return needs_setup
+    const { resolveObserverConfig } = await import('../../src/core/pd-config-loader.js');
+    vi.mocked(resolveObserverConfig).mockReturnValueOnce({
+      enabled: true,
+      readiness: 'needs_setup',
+      source: 'defaults',
+      reason: "Environment variable 'ANTHROPIC_API_KEY' is not set or empty",
+      nextAction: 'Set the environment variable ANTHROPIC_API_KEY with a valid API key',
+      runtimeProfileId: 'pd.anthropic-sonnet',
+      runtimeProfileType: 'pi-ai',
+      apiKeyEnv: 'ANTHROPIC_API_KEY',
+      apiKeyPresent: false,
+      provider: 'anthropic',
+      model: 'claude-3-5-sonnet',
+      timeoutMs: 30000,
+      baseUrl: null,
+    });
+
+    try {
+      const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+      const result = resolveCorrectionObserver(wctx, logger as any);
+
+      expect(result).toBeNull();
+      // Should log the needs_setup reason, not noisy "no API key" cycling
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('ANTHROPIC_API_KEY')
+      );
+    } finally {
       safeRmDir(workspaceDir);
     }
   });

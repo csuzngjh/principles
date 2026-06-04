@@ -124,6 +124,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'runtime-v2-prompt-activation-reader.ts',
     'workspace-guidance-migrator.ts',
     'surface-guard.ts',
+    'pd-config-loader.ts',
   ] as const;
 
   // Category 6: Test files
