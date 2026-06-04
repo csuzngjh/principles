@@ -7,6 +7,7 @@ import type { EmpathyEventStats } from '../types/event-types.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import { computeHash } from '../utils/hashing.js';
 import { PainToPrincipleService, PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
+import { loadPdConfigForPlugin } from '../core/pd-config-loader.js';
 
 /**
  * Creates a visual progress bar (e.g., [██████░░░░])
@@ -310,12 +311,16 @@ export async function handlePainReportCommand(ctx: PluginCommandContext): Promis
 
   try {
     const ledgerAdapter = new PrincipleTreeLedgerAdapter({ stateDir: wctx.stateDir });
+    // PRI-306: Load .pd/config.yaml for config-driven runtime binding
+    const configResult = loadPdConfigForPlugin(wctx.workspaceDir);
     const service = new PainToPrincipleService({
       workspaceDir: wctx.workspaceDir,
       stateDir: wctx.stateDir,
       ledgerAdapter,
       owner: 'openclaw-plugin',
       autoIntakeEnabled: true,
+      effectiveConfig: configResult.effective,
+      getEnvVar: (name: string) => process.env[name],
     });
 
     const result = await service.recordPain({

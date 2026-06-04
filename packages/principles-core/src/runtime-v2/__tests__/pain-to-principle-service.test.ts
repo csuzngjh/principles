@@ -9,6 +9,7 @@ import { PDRuntimeError, PD_ERROR_CATEGORIES, FAILURE_CATEGORY_MAP } from '../er
 import type { PainSignalBridgeResult, PainDetectedData } from '../pain-signal-bridge.js';
 import type { RecordPainSignalObservabilityOptions, PainSignalObservabilityResult } from '../pain-signal-observability.js';
 import type { PainSignalRuntimeFactoryOptions } from '../pain-signal-runtime-factory.js';
+import type { EffectivePdConfig } from '../config/pd-config-types.js';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -20,9 +21,11 @@ let mockBridgeInitError: Error | null = null;
 let observabilityCalled = false;
 let mockObservabilityWarnings: string[] = [];
 let lastPainDetectedData: PainDetectedData | null = null;
+let lastFactoryOpts: PainSignalRuntimeFactoryOptions | null = null;
 
 vi.mock('../pain-signal-runtime-factory.js', () => ({
-  createPainSignalBridge: vi.fn(async (_opts: PainSignalRuntimeFactoryOptions) => {
+  createPainSignalBridge: vi.fn(async (opts: PainSignalRuntimeFactoryOptions) => {
+    lastFactoryOpts = opts;
     if (mockBridgeInitError) throw mockBridgeInitError;
     return {
       onPainDetected: vi.fn(async (data: PainDetectedData) => {
@@ -59,7 +62,7 @@ function makeOpts(overrides?: Partial<PainToPrincipleServiceOptions>): PainToPri
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('PainToPrincipleService', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let service: PainToPrincipleService;
 
   beforeEach(() => {
@@ -212,12 +215,62 @@ describe('PainToPrincipleService', () => {
     expect(observabilityCalled).toBe(false);
     expect(r.observabilityWarnings).toEqual([]);
   });
+
+  // 15. PRI-306 production path: effectiveConfig forwarded to createPainSignalBridge
+  it('recordPain forwards effectiveConfig and getEnvVar to createPainSignalBridge', async () => {
+    const mockGetEnvVar = (name: string) => name === 'MY_KEY' ? 'val' : undefined;
+    const effectiveConfig: EffectivePdConfig = {
+      config: {
+        version: 1,
+        features: {},
+        runtimeProfiles: { 'oc-default': { type: 'openclaw', source: 'default' } },
+        internalAgents: {
+          defaultRuntime: 'oc-default',
+          agents: {
+            diagnostician: { enabled: true, runtimeProfile: 'oc-default' },
+            dreamer: { enabled: true },
+            philosopher: { enabled: true },
+            scribe: { enabled: true },
+            artificer: { enabled: true },
+            evaluator: { enabled: true },
+            rolloutReviewer: { enabled: true },
+            trainer: { enabled: false },
+            correctionObserver: { enabled: true },
+            empathyObserver: { enabled: true },
+          },
+        },
+        ui: { diagnostics: { mode: 'simple' } },
+      },
+      source: 'user_config',
+      warnings: [],
+    };
+
+    const svc = new PainToPrincipleService(makeOpts({ effectiveConfig, getEnvVar: mockGetEnvVar }));
+    await svc.recordPain({ painId: 'p', painType: 'tool_failure', source: 's', reason: 'r' });
+
+    expect(lastFactoryOpts).not.toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by not.toBeNull() above
+    expect(lastFactoryOpts!.effectiveConfig).toBe(effectiveConfig);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by not.toBeNull() above
+    expect(lastFactoryOpts!.getEnvVar).toBe(mockGetEnvVar);
+  });
+
+  // 16. PRI-306: without effectiveConfig, factory opts omit it (legacy path)
+  it('recordPain omits effectiveConfig from factory opts when not provided', async () => {
+    await service.recordPain({ painId: 'p', painType: 'tool_failure', source: 's', reason: 'r' });
+
+    expect(lastFactoryOpts).not.toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by not.toBeNull() above
+    expect(lastFactoryOpts!.effectiveConfig).toBeUndefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by not.toBeNull() above
+    expect(lastFactoryOpts!.getEnvVar).toBeUndefined();
+  });
 });
 
 // ── Parity: all 17 PDErrorCategory → FAILURE_CATEGORY_MAP ──────────────────
 
 describe('PainToPrincipleService error classification parity', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let service: PainToPrincipleService;
 
   beforeEach(() => {
