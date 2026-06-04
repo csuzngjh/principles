@@ -11,6 +11,7 @@ import type { InstallOptions } from './prompts.js';
 import {
   generateConfigYamlContent,
   getConfigYamlPath,
+  validateConfigYamlFull,
   readEnabledChannelsFromConfigYaml,
   getOpenClawDir,
   getPluginExtDir,
@@ -823,13 +824,14 @@ async function generateConfigYamlConfig(workspaceDir: string): Promise<string> {
   // PRI-308: preserve existing valid config.yaml
   if (existsSync(configPath)) {
     try {
-      readEnabledChannelsFromConfigYaml(workspaceDir);
-      // Existing config is valid — preserve it
+      validateConfigYamlFull(workspaceDir);
+      // Existing config is structurally valid — preserve it
       logger.info(`Existing .pd/config.yaml is valid, preserving it`);
       return configPath;
-    } catch {
+    } catch (e) {
       // Existing config is malformed — fail loud, do not overwrite
-      throw new Error(`Existing .pd/config.yaml is malformed at ${configPath}. Delete the file and re-run the installer, or fix it manually.`);
+      const reason = e instanceof Error ? e.message : String(e);
+      throw new Error(`Existing .pd/config.yaml is malformed: ${reason}. Delete the file and re-run the installer, or fix it manually.`);
     }
   }
 

@@ -366,6 +366,79 @@ export function getConfigYamlPath(workspaceDir: string): string {
 }
 
 /**
+ * PRI-308: Full structural validation of .pd/config.yaml.
+ *
+ * Checks all required top-level sections (version, features, runtimeProfiles,
+ * internalAgents) exist and have correct types. This is a lightweight structural
+ * check — deep field validation is done by validatePdConfig() in principles-core.
+ *
+ * Used by the installer to decide whether an existing config.yaml is safe to
+ * preserve. A config missing runtimeProfiles/internalAgents would cause runtime
+ * failures, so it must be rejected.
+ *
+ * Throws on any structural problem with reason + nextAction.
+ */
+export function validateConfigYamlFull(workspaceDir: string): void {
+  const configPath = getConfigYamlPath(workspaceDir);
+  if (!existsSync(configPath)) {
+    throw new Error(`config.yaml not found at ${configPath}. This should not happen during preserve-existing validation.`);
+  }
+
+  const rawYaml = readFileSync(configPath, 'utf-8');
+  const parsed: unknown = (() => {
+    try {
+      return yaml.load(rawYaml);
+    } catch (e) {
+      throw new Error(`config.yaml parse error at ${configPath}: ${e instanceof Error ? e.message : String(e)}. Delete the file and re-run the installer.`, { cause: e });
+    }
+  })();
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`config.yaml at ${configPath} has invalid structure (expected object, got ${Array.isArray(parsed) ? 'array' : typeof parsed}). Delete the file and re-run the installer.`);
+  }
+
+  const config = parsed as Record<string, unknown>;
+
+  // version — must be number 1
+  if (!Object.hasOwn(config, 'version') || typeof config.version !== 'number' || config.version !== 1) {
+    throw new Error(`config.yaml at ${configPath}: 'version' must be 1, got ${!Object.hasOwn(config, 'version') ? 'missing' : config.version}. Delete the file and re-run the installer.`);
+  }
+
+  // features — must be non-null object
+  if (!Object.hasOwn(config, 'features') || typeof config.features !== 'object' || config.features === null || Array.isArray(config.features)) {
+    throw new Error(`config.yaml at ${configPath}: 'features' must be an object, got ${!Object.hasOwn(config, 'features') ? 'missing' : Array.isArray(config.features) ? 'array' : typeof config.features}. Delete the file and re-run the installer.`);
+  }
+
+  // MVP channels must have valid entries
+  const features = config.features as Record<string, unknown>;
+  for (const key of MVP_CHANNELS) {
+    if (!Object.hasOwn(features, key)) continue;
+    const value = features[key];
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' has invalid entry (expected object, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}). Delete the file and re-run the installer.`);
+    }
+    const flag = value as Record<string, unknown>;
+    if (!Object.hasOwn(flag, 'enabled') || typeof flag.enabled !== 'boolean') {
+      throw new Error(`config.yaml at ${configPath}: MVP channel '${key}' has invalid 'enabled' field. Delete the file and re-run the installer.`);
+    }
+  }
+
+  // runtimeProfiles — must be non-null object
+  if (!Object.hasOwn(config, 'runtimeProfiles') || typeof config.runtimeProfiles !== 'object' || config.runtimeProfiles === null || Array.isArray(config.runtimeProfiles)) {
+    throw new Error(`config.yaml at ${configPath}: 'runtimeProfiles' must be an object, got ${!Object.hasOwn(config, 'runtimeProfiles') ? 'missing' : Array.isArray(config.runtimeProfiles) ? 'array' : typeof config.runtimeProfiles}. Delete the file and re-run the installer.`);
+  }
+
+  // internalAgents — must be non-null object with defaultRuntime
+  if (!Object.hasOwn(config, 'internalAgents') || typeof config.internalAgents !== 'object' || config.internalAgents === null || Array.isArray(config.internalAgents)) {
+    throw new Error(`config.yaml at ${configPath}: 'internalAgents' must be an object, got ${!Object.hasOwn(config, 'internalAgents') ? 'missing' : Array.isArray(config.internalAgents) ? 'array' : typeof config.internalAgents}. Delete the file and re-run the installer.`);
+  }
+  const agents = config.internalAgents as Record<string, unknown>;
+  if (!Object.hasOwn(agents, 'defaultRuntime') || typeof agents.defaultRuntime !== 'string' || agents.defaultRuntime.length === 0) {
+    throw new Error(`config.yaml at ${configPath}: 'internalAgents.defaultRuntime' must be a non-empty string, got ${!Object.hasOwn(agents, 'defaultRuntime') ? 'missing' : typeof agents.defaultRuntime}. Delete the file and re-run the installer.`);
+  }
+}
+
+/**
  * PRI-308: Read enabled MVP channels from .pd/config.yaml.
  *
  * Fail-loud: throws on malformed or missing required fields.
