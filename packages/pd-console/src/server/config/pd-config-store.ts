@@ -32,7 +32,6 @@ import type {
   InternalAgentName,
   AgentRuntimeReadinessResult,
   RuntimeProfile,
-  PdConfig,
 } from '@principles/core/runtime-v2';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -124,38 +123,6 @@ function buildProfileLabel(_id: string, profile: RuntimeProfile): string {
 interface AgentBindingEntry {
   enabled: boolean;
   runtimeProfile?: string;
-}
-
-function buildUpdatedConfig(
-  currentConfig: PdConfig,
-  update: { agentName: InternalAgentName; runtimeProfile: string; enabled: boolean },
-): Record<string, unknown> {
-  const { agentName, runtimeProfile, enabled } = update;
-  const agentsMap: Record<string, AgentBindingEntry> = {};
-
-  // Copy all agent bindings, updating the target one
-  for (const name of INTERNAL_AGENT_NAMES) {
-    const existing = currentConfig.internalAgents.agents[name];
-    if (name === agentName) {
-      agentsMap[name] = { enabled, runtimeProfile };
-    } else if (existing) {
-      agentsMap[name] = {
-        enabled: existing.enabled,
-        ...(existing.runtimeProfile ? { runtimeProfile: existing.runtimeProfile } : {}),
-      };
-    }
-  }
-
-  return {
-    version: currentConfig.version,
-    features: { ...currentConfig.features },
-    runtimeProfiles: { ...currentConfig.runtimeProfiles },
-    internalAgents: {
-      defaultRuntime: currentConfig.internalAgents.defaultRuntime,
-      agents: agentsMap,
-    },
-    ui: { ...currentConfig.ui },
-  };
 }
 
 function writeConfigAtomic(configPath: string, config: Record<string, unknown>): void {
@@ -368,10 +335,17 @@ export function getConfigSummary(workspaceDir: string): {
 
 export function getConfigCatalog(workspaceDir: string): {
   profiles: RedactedPdConfigSummary['runtimeProfiles'];
+  errors?: { path: string; reason: string; nextAction: string }[];
 } {
   const result = loadPdConfig(workspaceDir);
-  const effective = result.ok ? result.effective : result.defaults;
-  const summary = redactPdConfig(effective);
+  if (!result.ok) {
+    // Surface malformed config errors instead of silently using defaults
+    return {
+      profiles: [],
+      errors: result.errors,
+    };
+  }
+  const summary = redactPdConfig(result.effective);
   return { profiles: summary.runtimeProfiles };
 }
 
@@ -424,8 +398,47 @@ export function updateAgentBinding(
     };
   }
 
-  // 6. Build updated config
-  const updatedConfig = buildUpdatedConfig(effective.config, { agentName, runtimeProfile, enabled });
+  // 6. Build updated config — read original file to preserve unknown root entries
+  const configPath = getPdConfigPath(workspaceDir);
+  let rawConfig: Record<string, unknown>;
+  if (fs.existsSync(configPath)) {
+    const rawContent = fs.readFileSync(configPath, 'utf8');
+    const rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
+    if (isRecord(rawParsed)) {
+      rawConfig = { ...rawParsed };
+    } else {
+      rawConfig = {};
+    }
+  } else {
+    rawConfig = {};
+  }
+
+  // Update only the agent binding section
+  const agentsMap: Record<string, AgentBindingEntry> = {};
+  for (const name of INTERNAL_AGENT_NAMES) {
+    const existing = effective.config.internalAgents.agents[name];
+    if (name === agentName) {
+      agentsMap[name] = { enabled, runtimeProfile };
+    } else if (existing) {
+      agentsMap[name] = {
+        enabled: existing.enabled,
+        ...(existing.runtimeProfile ? { runtimeProfile: existing.runtimeProfile } : {}),
+      };
+    }
+  }
+
+  // Merge: start from raw config, overlay known sections, update internalAgents.agents
+  const updatedConfig: Record<string, unknown> = {
+    ...rawConfig,
+    version: effective.config.version,
+    features: { ...effective.config.features },
+    runtimeProfiles: { ...effective.config.runtimeProfiles },
+    internalAgents: {
+      defaultRuntime: effective.config.internalAgents.defaultRuntime,
+      agents: agentsMap,
+    },
+    ui: { ...effective.config.ui },
+  };
 
   // 7. Validate the updated config before writing
   const validation = validatePdConfig(updatedConfig);
@@ -439,7 +452,6 @@ export function updateAgentBinding(
   }
 
   // 8. Write to disk (atomic: write to tmp, then rename)
-  const configPath = getPdConfigPath(workspaceDir);
   writeConfigAtomic(configPath, updatedConfig);
 
   return {

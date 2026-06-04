@@ -300,6 +300,22 @@ describe('GET /api/v1/config/catalog', () => {
     expect(body).not.toMatch(/"token"\s*:/);
     expect(body).not.toMatch(/"secret"\s*:/);
   });
+
+  it('catalog returns empty profiles with errors when config is malformed', async () => {
+    writeMalformedConfig('version: 999\nfeatures: not-an-object\n');
+    const req = createMockRequest('GET', { url: '/api/v1/config/catalog' });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/catalog' });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{
+      profiles: { id: string }[];
+      errors?: { path: string; reason: string; nextAction: string }[];
+    }>(res);
+    expect(data.profiles).toHaveLength(0);
+    expect(data.errors).toBeDefined();
+    expect(data.errors!.length).toBeGreaterThan(0);
+  });
 });
 
 // ===========================================================================
@@ -492,6 +508,34 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
     // diagnostician should still have its original override
     const diag = agents.diagnostician as Record<string, unknown>;
     expect(diag.runtimeProfile).toBe('lmstudio-local');
+  });
+
+  it('preserves unknown root entries when updating agent binding', async () => {
+    // Write config with an extra root-level section
+    writeConfig({
+      ...VALID_CONFIG,
+      customSection: { note: 'user-owned data', count: 42 },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/dreamer/binding',
+      body: { runtimeProfile: 'anthropic-cloud', enabled: true },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/agents/dreamer/binding',
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    // Verify the custom section is preserved
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    expect(Object.hasOwn(parsed, 'customSection')).toBe(true);
+    const custom = parsed.customSection as Record<string, unknown>;
+    expect(custom.note).toBe('user-owned data');
+    expect(custom.count).toBe(42);
   });
 });
 
