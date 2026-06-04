@@ -781,6 +781,57 @@ describe('PATCH /api/v1/config/default-runtime', () => {
     expect(agents.diagnostician.runtimeProfile).toBe('anthropic-cloud');
   });
 
+  it('preserves agent inheritance — agents without explicit runtimeProfile do not get one written back', async () => {
+    // Write a config where dreamer has NO explicit runtimeProfile (inherits default)
+    const inheritedConfig = {
+      version: 1,
+      features: {
+        prompt: { category: 'core', enabled: true },
+        defer_archive: { category: 'core', enabled: true },
+        code_tool_hook: { category: 'core', enabled: false },
+      },
+      runtimeProfiles: {
+        'openclaw.default': { type: 'openclaw', source: 'default' },
+        'lmstudio-local': { type: 'openclaw', provider: 'lmstudio', model: 'qwen3' },
+      },
+      internalAgents: {
+        defaultRuntime: 'openclaw.default',
+        agents: {
+          diagnostician: { enabled: true, runtimeProfile: 'openclaw.default' },
+          dreamer: { enabled: true },  // No runtimeProfile — inherits default
+          philosopher: { enabled: true },  // No runtimeProfile — inherits default
+        },
+      },
+      ui: { diagnostics: { mode: 'simple' } },
+    };
+    writeConfig(inheritedConfig);
+
+    // Update default runtime
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/default-runtime',
+      body: { defaultRuntime: 'lmstudio-local' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/default-runtime',
+    });
+
+    expect(res.statusCode).toBe(200);
+    // (they should inherit the new default)
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    const internalAgents = parsed.internalAgents as Record<string, unknown>;
+    expect(internalAgents.defaultRuntime).toBe('lmstudio-local');
+    const agents = internalAgents.agents as Record<string, Record<string, unknown>>;
+    // dreamer and philosopher should NOT have runtimeProfile written
+    expect(Object.hasOwn(agents.dreamer, 'runtimeProfile')).toBe(false);
+    expect(Object.hasOwn(agents.philosopher, 'runtimeProfile')).toBe(false);
+    // diagnostician keeps its explicit override
+    expect(agents.diagnostician.runtimeProfile).toBe('openclaw.default');
+  });
+
   it('rejects missing defaultRuntime field', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {

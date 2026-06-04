@@ -527,13 +527,24 @@ export function updateDefaultRuntime(
   }
 
   // 5. Build updated config — read original file to preserve unknown root entries
+  //    and preserve agent inheritance (agents without explicit runtimeProfile
+  //    should NOT get one written back — they inherit defaultRuntime)
   const configPath = getPdConfigPath(workspaceDir);
   let rawConfig: Record<string, unknown>;
+  let rawAgentsMap: Record<string, unknown> | undefined;
   if (fs.existsSync(configPath)) {
     const rawContent = fs.readFileSync(configPath, 'utf8');
     const rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
     if (isRecord(rawParsed)) {
       rawConfig = { ...rawParsed };
+      // Extract the raw agents map from the file to preserve inheritance
+      const rawInternalAgents = rawParsed.internalAgents;
+      if (isRecord(rawInternalAgents) && Object.hasOwn(rawInternalAgents, 'agents')) {
+        const rawAgents = rawInternalAgents.agents;
+        if (isRecord(rawAgents)) {
+          rawAgentsMap = rawAgents;
+        }
+      }
     } else {
       rawConfig = {};
     }
@@ -541,16 +552,32 @@ export function updateDefaultRuntime(
     rawConfig = {};
   }
 
-  // Build agents map preserving existing overrides
+  // Build agents map preserving ONLY explicit overrides from the original file.
+  // Agents that omit runtimeProfile in the file should continue to inherit
+  // defaultRuntime — we must NOT write back the effective (resolved) value.
+  // Only write agents that already exist in the file — do not add new ones.
   const agentsMap: Record<string, AgentBindingEntry> = {};
-  for (const name of INTERNAL_AGENT_NAMES) {
-    const existing = effective.config.internalAgents.agents[name];
-    if (existing) {
+  if (rawAgentsMap) {
+    for (const name of Object.keys(rawAgentsMap)) {
+      const rawEntry = rawAgentsMap[name];
+      if (!isRecord(rawEntry)) continue;
+
+      // Preserve enabled if present, default to true
+      const enabledRaw = Object.hasOwn(rawEntry, 'enabled') ? rawEntry.enabled : undefined;
+      const enabled = typeof enabledRaw === 'boolean' ? enabledRaw : true;
+
+      // Only include runtimeProfile if the original file had an explicit one
+      const hasExplicitProfile = Object.hasOwn(rawEntry, 'runtimeProfile')
+        && typeof rawEntry.runtimeProfile === 'string'
+        && (rawEntry.runtimeProfile).length > 0;
+
       agentsMap[name] = {
-        enabled: existing.enabled,
-        ...(existing.runtimeProfile ? { runtimeProfile: existing.runtimeProfile } : {}),
+        enabled,
+        ...(hasExplicitProfile ? { runtimeProfile: rawEntry.runtimeProfile as string } : {}),
       };
     }
+  } else {
+    // No agents in file — write nothing (all agents inherit default)
   }
 
   // Merge: update only defaultRuntime, preserve agent overrides
