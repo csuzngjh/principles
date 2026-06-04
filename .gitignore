@@ -90,6 +90,9 @@ docs/*
 # Exception: ADRs must be committed
 !docs/adr/
 !docs/adr/**
+# Exception: brand guidelines must be committed
+!docs/brand/
+!docs/brand/**
 # Exception: website docs must be committed
 !packages/website/docs/
 !packages/website/zh/docs/
