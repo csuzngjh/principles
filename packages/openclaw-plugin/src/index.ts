@@ -21,6 +21,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
 import { computeEffectiveFlags, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
+import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
 import { getCommandDescription } from './i18n/commands.js';
@@ -81,60 +82,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * PRI-305/PRI-307: Load feature flag from .pd/config.yaml instead of .pd/feature-flags.yaml.
+ * Delegates to the shared plugin config loader for consistency.
+ */
 function loadFeatureFlagFromWorkspace(
   workspaceDir: string,
   flagId: string,
   logger?: { warn?: (msg: string) => void; info?: (msg: string) => void },
 ): { enabled: boolean; source: string } {
-  const configPath = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
-
-  if (!fs.existsSync(configPath)) {
-    const flags = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
-    const flag = flags.flags[flagId];
-    return { enabled: flag?.enabled ?? false, source: 'defaults' };
-  }
-
-  let raw: string;
-  try {
-    raw = fs.readFileSync(configPath, 'utf8');
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logger?.warn?.(`[PD:FeatureFlags] Feature flags unreadable: ${msg} — using defaults`);
-    const flags = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
-    const flag = flags.flags[flagId];
-    return { enabled: flag?.enabled ?? false, source: 'defaults' };
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
-  } catch (e) {
-    const parseMsg = e instanceof Error ? e.message : String(e);
-    logger?.warn?.(`[PD:FeatureFlags] Feature flags YAML parse error: ${parseMsg} — using defaults`);
-    const flags = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
-    const flag = flags.flags[flagId];
-    return { enabled: flag?.enabled ?? false, source: 'defaults' };
-  }
-
-  if (!isRecord(parsed)) {
-    logger?.warn?.(`[PD:FeatureFlags] Feature flags not a mapping — using defaults`);
-    const flags = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, configPath);
-    const flag = flags.flags[flagId];
-    return { enabled: flag?.enabled ?? false, source: 'defaults' };
-  }
-
-  // parsed is now narrowed to Record<string, unknown> by isRecord guard
-  const parsedRecord: Record<string, unknown> = Object.create(null);
-  for (const key of Object.keys(parsed)) {
-    if (DANGEROUS_KEYS.has(key)) continue;
-    if (Object.hasOwn(parsed, key)) {
-      parsedRecord[key] = parsed[key];
-    }
-  }
-
-  const flags = computeEffectiveFlags(parsedRecord, DEFAULT_FEATURE_FLAGS, configPath);
-  const flag = flags.flags[flagId];
-  return { enabled: flag?.enabled ?? false, source: flags.source };
+  return loadFeatureFlagFromConfig(workspaceDir, flagId, logger);
 }
 
 // ── Evolution Worker Startup Gate (shared between index.ts and tests) ───────
@@ -157,7 +114,7 @@ export function shouldStartEvolutionWorker(
   }
   const disabledInfo = JSON.stringify({
     reason: 'mvp_quiet_per_adr0014',
-    nextAction: 'set evolution_worker.enabled=true in .pd/feature-flags.yaml to enable',
+    nextAction: 'set features.evolution_worker.enabled=true in .pd/config.yaml to enable',
     featureFlag: 'evolution_worker',
     boundedContext: 'legacy_evolution_worker',
     flagSource: flag.source,
@@ -181,7 +138,7 @@ export function shouldStartCorrectionObserver(
   }
   const disabledInfo = JSON.stringify({
     reason: 'correction_observer_disabled',
-    nextAction: 'set correction_observer.enabled=true in .pd/feature-flags.yaml to enable',
+    nextAction: 'set features.correction_observer.enabled=true in .pd/config.yaml to enable',
     featureFlag: 'correction_observer',
     boundedContext: 'correction_observer_service',
     flagSource: flag.source,
