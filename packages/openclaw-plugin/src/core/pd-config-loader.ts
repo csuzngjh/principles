@@ -26,8 +26,6 @@ import type {
   EffectivePdConfig,
   PdConfigValidationResult,
   InternalAgentName,
-  PdLocalRuntimeProfile,
-  OpenClawRuntimeProfile,
 } from '@principles/core/runtime-v2';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -237,11 +235,28 @@ export function resolveObserverConfig(
   }
 
   // 2) Find the agent's runtime profile
-  // Use type-safe access via InternalAgentName
+  // Validate agent name against known names (EP-01: no `as` bypass)
+  const knownNames: readonly string[] = INTERNAL_AGENT_NAMES;
+  if (!knownNames.includes(observerAgentName)) {
+    return {
+      enabled: true,
+      readiness: 'needs_setup',
+      source: result.source,
+      reason: `Unknown agent name '${observerAgentName}'`,
+      nextAction: `Use one of the known agent names: ${INTERNAL_AGENT_NAMES.join(', ')}`,
+      runtimeProfileId: null,
+      runtimeProfileType: null,
+      apiKeyEnv: null,
+      apiKeyPresent: false,
+      provider: null,
+      model: null,
+      timeoutMs: null,
+      baseUrl: null,
+    };
+  }
+  // After validation, safe to cast — runtime check passed (EP-01 compliant)
   const agentKey = observerAgentName as InternalAgentName;
-  const agentConfig = INTERNAL_AGENT_NAMES.includes(agentKey)
-    ? config.internalAgents.agents[agentKey]
-    : undefined;
+  const agentConfig = config.internalAgents.agents[agentKey];
   const runtimeProfileId = agentConfig?.runtimeProfile ?? config.internalAgents.defaultRuntime;
   const profile = config.runtimeProfiles[runtimeProfileId];
 
@@ -265,8 +280,8 @@ export function resolveObserverConfig(
 
   // 3) For pi-ai profiles, check API key
   if (profile.type === 'pi-ai') {
-    const piProfile = profile as PdLocalRuntimeProfile;
-    const apiKeyEnv = piProfile.apiKeyEnv ?? null;
+    // TypeScript narrows profile to PdLocalRuntimeProfile here (discriminated union)
+    const apiKeyEnv = profile.apiKeyEnv ?? null;
     const apiKeyPresent = !!apiKeyEnv && Object.prototype.hasOwnProperty.call(process.env, apiKeyEnv) && !!process.env[apiKeyEnv];
 
     if (!apiKeyEnv) {
@@ -280,10 +295,10 @@ export function resolveObserverConfig(
         runtimeProfileType: profile.type,
         apiKeyEnv: null,
         apiKeyPresent: false,
-        provider: piProfile.provider ?? null,
-        model: piProfile.model ?? null,
-        timeoutMs: piProfile.timeoutMs ?? null,
-        baseUrl: piProfile.baseUrl ?? null,
+        provider: profile.provider ?? null,
+        model: profile.model ?? null,
+        timeoutMs: profile.timeoutMs ?? null,
+        baseUrl: profile.baseUrl ?? null,
       };
     }
 
@@ -298,10 +313,10 @@ export function resolveObserverConfig(
         runtimeProfileType: profile.type,
         apiKeyEnv,
         apiKeyPresent: false,
-        provider: piProfile.provider ?? null,
-        model: piProfile.model ?? null,
-        timeoutMs: piProfile.timeoutMs ?? null,
-        baseUrl: piProfile.baseUrl ?? null,
+        provider: profile.provider ?? null,
+        model: profile.model ?? null,
+        timeoutMs: profile.timeoutMs ?? null,
+        baseUrl: profile.baseUrl ?? null,
       };
     }
 
@@ -316,15 +331,14 @@ export function resolveObserverConfig(
       runtimeProfileType: profile.type,
       apiKeyEnv,
       apiKeyPresent: true,
-      provider: piProfile.provider ?? null,
-      model: piProfile.model ?? null,
-      timeoutMs: piProfile.timeoutMs ?? null,
-      baseUrl: piProfile.baseUrl ?? null,
+      provider: profile.provider ?? null,
+      model: profile.model ?? null,
+      timeoutMs: profile.timeoutMs ?? null,
+      baseUrl: profile.baseUrl ?? null,
     };
   }
 
-  // 4) OpenClaw profile — ready
-  const ocProfile = profile as OpenClawRuntimeProfile;
+  // 4) OpenClaw profile — TypeScript narrows to OpenClawRuntimeProfile here
   return {
     enabled: true,
     readiness: 'ready',
@@ -335,8 +349,8 @@ export function resolveObserverConfig(
     runtimeProfileType: profile.type,
     apiKeyEnv: null,
     apiKeyPresent: false,
-    provider: ocProfile.provider ?? null,
-    model: ocProfile.model ?? null,
+    provider: profile.provider ?? null,
+    model: profile.model ?? null,
     timeoutMs: null,
     baseUrl: null,
   };
