@@ -17,6 +17,7 @@ import { SamplesPage } from "./pages/SamplesPage.js";
 import { EvolutionPage } from "./pages/EvolutionPage.js";
 import { ThinkingModelsPage } from "./pages/ThinkingModelsPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
+import { ControlCenterPage } from "./pages/ControlCenterPage.js";
 import { CentralPage } from "./pages/CentralPage.js";
 import { DataFlowPage } from "./pages/DataFlowPage.js";
 import { EventLogPage } from "./pages/EventLogPage.js";
@@ -127,6 +128,7 @@ export function App() {
                     <Route path="/event-log" element={<EventLogPage />} />
                     <Route path="/thinking-models" element={<ThinkingModelsPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
+                    <Route path="/control-center" element={<ControlCenterPage />} />
                     <Route path="/settings/update" element={<UpdatePage />} />
                     <Route path="/report-problem" element={<ReportProblemPage />} />
                   </Routes>
