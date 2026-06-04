@@ -622,6 +622,14 @@ Therefore, in PD, L3 is more suitable for shaping "temperament" and "habits";
 
 L2 is more suitable for guarding "bottom lines" and "boundaries."
 
+**Extended Perspective: The Data Barrier of L3 Training and PD's Niche**
+
+The industry is currently exploring post-training techniques (like Reinforcement Learning) to help large models internalize complex, high-level reasoning and even "architectural wisdom." However, this remains a long-term endeavor. Top-tier decisions often involve extremely long time spans and incredibly sparse reward signals, making them difficult to master quickly within current training paradigms.
+
+In this context, PD offers a pragmatic compromise: **"outsourcing" long-term macro judgments to human experts to be distilled into Principles, delegating local micro-execution to AI, and forcefully locking them in with hard rules (L2).**
+
+More meaningfully, as human experts use PD and continually feel the "pain" from the "AI's mediocre performance," they abstract principles to correct the AI. This process automatically accumulates extremely precious "expert correction trajectories." Perhaps in the future, these data filled with Constructive Friction will be exactly the high-quality nutrients needed to help the next generation of models cross the sparse reward trap and move towards L3-level wisdom. We look forward to the ultimate convergence of different technical paths in the future.
+
 ### Relations Between the Four Channels
 
 These four channels do not replace each other, but work in division of labor:
