@@ -27,6 +27,7 @@ import {
   getConfigSummary,
   getConfigCatalog,
   updateAgentBinding,
+  updateDefaultRuntime,
   checkReadiness,
 } from '../config/pd-config-store.js';
 
@@ -90,6 +91,33 @@ export async function handleConfigRoute(
     }
     const catalog = getConfigCatalog(workspaceDir);
     sendSuccess(res, catalog);
+    return;
+  }
+
+  // PATCH /default-runtime
+  if (subPath === '/default-runtime') {
+    if (method !== 'PATCH') {
+      sendMethodNotAllowed(res);
+      return;
+    }
+    let bodyText: string;
+    try {
+      bodyText = await readBody(req);
+    } catch {
+      sendBadRequest(res, 'Request body exceeds maximum allowed size');
+      return;
+    }
+    const payload = safeParseBody(bodyText);
+    if (payload === null) {
+      sendBadRequest(res, 'Invalid JSON body');
+      return;
+    }
+    const result = updateDefaultRuntime(workspaceDir, payload);
+    if (!result.ok) {
+      sendError(res, result.statusCode, result.error, result.message);
+      return;
+    }
+    sendSuccess(res, { defaultRuntime: result.defaultRuntime });
     return;
   }
 

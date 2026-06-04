@@ -687,6 +687,102 @@ async function deleteFeedbackReport(id: string): Promise<ApiResponse<FeedbackDel
   });
 }
 
+// ── Config / Control Center API (PRI-303, PRI-309) ───────────────────────────
+
+type ReadinessStatus = 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
+
+interface RedactedRuntimeProfileSummary {
+  id: string;
+  type: string;
+  label: string;
+  apiKeyEnv?: string;
+  readiness: ReadinessStatus;
+}
+
+interface RedactedAgentSummary {
+  name: string;
+  enabled: boolean;
+  runtimeProfileId: string;
+  runtimeProfileLabel: string;
+  readiness: ReadinessStatus;
+}
+
+interface RedactedFeatureSummary {
+  id: string;
+  category: string;
+  enabled: boolean;
+}
+
+interface ConfigSummaryData {
+  version: number;
+  source: 'defaults' | 'user_config';
+  features: RedactedFeatureSummary[];
+  runtimeProfiles: RedactedRuntimeProfileSummary[];
+  defaultRuntime: string;
+  agents: RedactedAgentSummary[];
+  ui: { diagnostics: { mode: string } };
+  warnings: string[];
+  errors?: { path: string; reason: string; nextAction: string }[];
+}
+
+interface ConfigCatalogData {
+  profiles: RedactedRuntimeProfileSummary[];
+  errors?: { path: string; reason: string; nextAction: string }[];
+}
+
+interface AgentBindingUpdateData {
+  agent: string;
+  runtimeProfile: string;
+  enabled: boolean;
+}
+
+interface ReadinessCheckData {
+  agent: string;
+  readiness: ReadinessStatus;
+  profileId: string;
+  profileLabel: string;
+  reason?: string;
+  nextAction?: string;
+}
+
+async function fetchConfigSummary(): Promise<ApiResponse<ConfigSummaryData>> {
+  return request<ConfigSummaryData>('/api/v1/config/summary');
+}
+
+async function fetchConfigCatalog(): Promise<ApiResponse<ConfigCatalogData>> {
+  return request<ConfigCatalogData>('/api/v1/config/catalog');
+}
+
+async function updateAgentBinding(
+  agentName: string,
+  runtimeProfile: string,
+  enabled: boolean,
+): Promise<ApiResponse<AgentBindingUpdateData>> {
+  return request<AgentBindingUpdateData>(
+    `/api/v1/config/agents/${encodeURIComponent(agentName)}/binding`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ runtimeProfile, enabled }),
+    },
+  );
+}
+
+async function checkAgentReadiness(agentName: string): Promise<ApiResponse<ReadinessCheckData>> {
+  return request<ReadinessCheckData>(
+    `/api/v1/config/readiness/${encodeURIComponent(agentName)}`,
+  );
+}
+
+async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse<{ defaultRuntime: string }>> {
+  return request<{ defaultRuntime: string }>(
+    '/api/v1/config/default-runtime',
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ defaultRuntime }),
+    },
+  );
+}
+
 export {
   getToken,
   setToken,
@@ -738,6 +834,11 @@ export {
   listFeedbackReports,
   getFeedbackReport,
   deleteFeedbackReport,
+  fetchConfigSummary,
+  fetchConfigCatalog,
+  updateAgentBinding,
+  checkAgentReadiness,
+  updateDefaultRuntime,
 };
 
 export type {
@@ -783,4 +884,12 @@ export type {
   AgentDetail,
   ApprovalRecord,
   ApprovalListResult,
+  ConfigSummaryData,
+  ConfigCatalogData,
+  AgentBindingUpdateData,
+  ReadinessCheckData,
+  RedactedRuntimeProfileSummary,
+  RedactedAgentSummary,
+  RedactedFeatureSummary,
+  ReadinessStatus,
 };
