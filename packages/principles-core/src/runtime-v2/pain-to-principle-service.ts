@@ -14,6 +14,7 @@ import { createDiagnosticianTaskId } from './pain-signal-bridge.js';
 import type { PainDetectedData, PainSignalBridgeResult, PainProvenance, PainEvidenceEntry } from './pain-signal-bridge.js';
 import { PDRuntimeError } from './error-categories.js';
 import type { LedgerAdapter } from './candidate-intake.js';
+import type { EffectivePdConfig } from './config/pd-config-types.js';
 
 export type FailureCategory =
   | 'runtime_unavailable'
@@ -32,6 +33,12 @@ export interface PainToPrincipleServiceOptions {
   ledgerAdapter: LedgerAdapter;
   owner?: string;
   autoIntakeEnabled?: boolean;
+  /** PRI-306: Effective PD config for config-driven runtime binding.
+   *  When provided, createPainSignalBridge uses config-based binding resolution
+   *  instead of the legacy WorkflowFunnelLoader path. */
+  effectiveConfig?: EffectivePdConfig;
+  /** PRI-306: Env var accessor for readiness checks. Defaults to process.env. */
+  getEnvVar?: (name: string) => string | undefined;
 }
 
 export interface PainToPrincipleInput {
@@ -127,6 +134,8 @@ export class PainToPrincipleService {
         ledgerAdapter: this.opts.ledgerAdapter,
         owner: this.opts.owner,
         autoIntakeEnabled: this.opts.autoIntakeEnabled,
+        effectiveConfig: this.opts.effectiveConfig,
+        getEnvVar: this.opts.getEnvVar,
       });
 
       const bridgeResult = await bridge.onPainDetected(painData);

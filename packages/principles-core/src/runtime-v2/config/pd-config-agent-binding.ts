@@ -65,7 +65,9 @@ export interface PiAiAdapterConfigResult {
 export interface OpenClawAdapterConfigResult {
   runtimeKind: 'openclaw-cli';
   workspaceDir: string;
-  openclawMode: 'local' | 'gateway';
+  /** 'default' = delegate to OpenClaw's own mode resolution (CLI flags, workflows.yaml).
+   *  'local' | 'gateway' = explicit mode from profile config. */
+  openclawMode: 'local' | 'gateway' | 'default';
 }
 
 export type AdapterConfigResult = PiAiAdapterConfigResult | OpenClawAdapterConfigResult;
@@ -266,10 +268,14 @@ export function createAdapterConfigFromProfile(
     return result;
   }
 
-  // openclaw profile
+  // openclaw profile — preserve delegated/default semantics
+  // source='default' → openclawMode='default' (let downstream resolve via CLI flags/workflows.yaml)
+  // explicit provider+model → openclawMode='local' (explicit profile, default to local mode)
+  const openclawMode: 'local' | 'gateway' | 'default' =
+    profile.source === 'default' ? 'default' : 'local';
   return {
     runtimeKind: 'openclaw-cli',
     workspaceDir,
-    openclawMode: 'local', // default mode; can be overridden by caller
+    openclawMode,
   };
 }

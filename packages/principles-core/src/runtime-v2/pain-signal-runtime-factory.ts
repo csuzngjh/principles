@@ -315,12 +315,17 @@ export function resolveRuntimeConfigFromPdConfig(
   }
 
   // openclaw-cli
-  return {
+  // openclawMode='default' means "delegate to OpenClaw's own mode resolution" → omit openclawMode
+  // so the factory's existing mode resolution (CLI flags, workflows.yaml) decides
+  const result: RuntimeConfig = {
     runtimeKind: 'openclaw-cli',
-    openclawMode: adapterConfig.openclawMode,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     agentId: 'main',
   };
+  if (adapterConfig.openclawMode !== 'default') {
+    result.openclawMode = adapterConfig.openclawMode;
+  }
+  return result;
 }
 
 // Per-workspace+runtime+mode bridge cache — same lifetime as process

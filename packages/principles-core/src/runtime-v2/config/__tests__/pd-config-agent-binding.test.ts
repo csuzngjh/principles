@@ -366,6 +366,8 @@ describe('createAdapterConfigFromProfile', () => {
     expect(result.runtimeKind).toBe('openclaw-cli');
     if (result.runtimeKind !== 'openclaw-cli') return;
     expect(result.workspaceDir).toBe('/workspace/test');
+    // Explicit provider+model → openclawMode='local' (not delegated)
+    expect(result.openclawMode).toBe('local');
   });
 
   it('creates openclaw config with source=default (delegated mode)', () => {
@@ -378,6 +380,9 @@ describe('createAdapterConfigFromProfile', () => {
     );
 
     expect(result.runtimeKind).toBe('openclaw-cli');
+    if (result.runtimeKind !== 'openclaw-cli') return;
+    // source='default' → openclawMode='default' (delegate to OpenClaw's own mode resolution)
+    expect(result.openclawMode).toBe('default');
   });
 
   it('pi-ai profile without baseUrl still produces valid config', () => {

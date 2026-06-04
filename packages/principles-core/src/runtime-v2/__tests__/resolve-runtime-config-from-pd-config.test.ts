@@ -135,6 +135,8 @@ describe('resolveRuntimeConfigFromPdConfig', () => {
     expect(isRuntimeConfigError(result)).toBe(false);
     if (isRuntimeConfigError(result)) return;
     expect(result.runtimeKind).toBe('openclaw-cli');
+    // source='default' → openclawMode is undefined (delegated, not forced to 'local')
+    expect(result.openclawMode).toBeUndefined();
   });
 
   it('returns error for disabled agent', () => {
