@@ -55,9 +55,17 @@ describe('Port competition scenarios', () => {
   });
 
   it('findAvailablePort skips occupied ports in sequence', async () => {
-    // Occupy 3 consecutive ports
+    // Occupy 3 consecutive ports using dynamically allocated base port
     const servers: net.Server[] = [];
-    const basePort = 49300;
+    // First, get a dynamic port to use as base
+    const probeServer = net.createServer();
+    const basePort = await new Promise<number>((resolve) => {
+      probeServer.listen(0, '127.0.0.1', () => {
+        const addr = probeServer.address();
+        if (typeof addr === 'object' && addr) resolve(addr.port);
+      });
+    });
+    await new Promise<void>((resolve) => probeServer.close(() => resolve()));
 
     for (let i = 0; i < 3; i++) {
       const s = net.createServer();
@@ -79,9 +87,16 @@ describe('Port competition scenarios', () => {
   });
 
   it('returns null when all fallback ports are exhausted', async () => {
-    // Occupy a range of ports
+    // Occupy a range of ports using dynamically allocated base port
     const servers: net.Server[] = [];
-    const basePort = 49400;
+    const probeServer = net.createServer();
+    const basePort = await new Promise<number>((resolve) => {
+      probeServer.listen(0, '127.0.0.1', () => {
+        const addr = probeServer.address();
+        if (typeof addr === 'object' && addr) resolve(addr.port);
+      });
+    });
+    await new Promise<void>((resolve) => probeServer.close(() => resolve()));
 
     for (let i = 0; i < 10; i++) {
       const s = net.createServer();
