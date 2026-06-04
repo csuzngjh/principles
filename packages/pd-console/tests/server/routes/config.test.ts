@@ -716,6 +716,129 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
 });
 
 // ===========================================================================
+// PATCH /api/v1/config/default-runtime
+// ===========================================================================
+
+describe('PATCH /api/v1/config/default-runtime', () => {
+  it('updates default runtime and persists to config.yaml', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/default-runtime',
+      body: { defaultRuntime: 'lmstudio-local' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/default-runtime',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ defaultRuntime: string }>(res);
+    expect(data.defaultRuntime).toBe('lmstudio-local');
+
+    // Verify persisted
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    const internalAgents = parsed.internalAgents as Record<string, unknown>;
+    expect(internalAgents.defaultRuntime).toBe('lmstudio-local');
+  });
+
+  it('preserves agent overrides when updating default runtime', async () => {
+    writeConfig(VALID_CONFIG);
+    // First set an explicit override for diagnostician
+    const overrideReq = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/diagnostician/binding',
+      body: { runtimeProfile: 'anthropic-cloud', enabled: true },
+    });
+    const overrideRes = createMockResponse();
+    await handleConfigRoute(overrideReq, overrideRes, {
+      workspaceDir,
+      subPath: '/agents/diagnostician/binding',
+    });
+    expect(overrideRes.statusCode).toBe(200);
+
+    // Now update default runtime
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/default-runtime',
+      body: { defaultRuntime: 'lmstudio-local' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/default-runtime',
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    // Verify diagnostician's override is preserved
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = yaml.load(raw) as Record<string, unknown>;
+    const internalAgents = parsed.internalAgents as Record<string, unknown>;
+    expect(internalAgents.defaultRuntime).toBe('lmstudio-local');
+    const agents = internalAgents.agents as Record<string, Record<string, unknown>>;
+    expect(agents.diagnostician.runtimeProfile).toBe('anthropic-cloud');
+  });
+
+  it('rejects missing defaultRuntime field', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/default-runtime',
+      body: { something: 'else' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/default-runtime',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('defaultRuntime');
+  });
+
+  it('rejects nonexistent runtime profile', async () => {
+    writeConfig(VALID_CONFIG);
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/default-runtime',
+      body: { defaultRuntime: 'nonexistent-profile' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/default-runtime',
+    });
+
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.message).toContain('does not exist');
+  });
+
+  it('rejects malformed config (refuses to write)', async () => {
+    writeMalformedConfig('version: 999\nfeatures: not-an-object\n');
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/default-runtime',
+      body: { defaultRuntime: 'lmstudio-local' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/default-runtime',
+    });
+
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('returns 405 for GET on default-runtime', async () => {
+    const req = createMockRequest('GET', { url: '/api/v1/config/default-runtime' });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/default-runtime' });
+    expect(res.statusCode).toBe(405);
+  });
+});
+
+// ===========================================================================
 // Route-level edge cases
 // ===========================================================================
 

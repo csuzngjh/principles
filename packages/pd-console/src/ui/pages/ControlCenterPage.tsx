@@ -22,6 +22,7 @@ import {
   fetchConfigCatalog,
   updateAgentBinding,
   checkAgentReadiness,
+  updateDefaultRuntime,
 } from '../api.js';
 import type {
   ConfigSummaryData,
@@ -493,29 +494,20 @@ export function ControlCenterPage() {
 
   const handleDefaultRuntimeChange = useCallback(
     async (profileId: string) => {
-      if (!summary) return;
       setSaving(true);
       setSaveError(null);
 
-      // Update all agents that use the current default runtime to the new default
-      const agentsOnDefault = summary.agents.filter(
-        a => a.enabled && a.runtimeProfileId === summary.defaultRuntime,
-      );
+      const result = await updateDefaultRuntime(profileId);
+      setSaving(false);
 
-      for (const agent of agentsOnDefault) {
-        const result = await updateAgentBinding(agent.name, profileId, agent.enabled);
-        if (!result.success) {
-          const msg = result.error ?? `Failed to update agent ${agent.name}`;
-          setSaveError(msg);
-          setSaving(false);
-          return;
-        }
+      if (!result.success) {
+        setSaveError(result.error ?? 'Failed to update default runtime');
+        return;
       }
 
-      setSaving(false);
       await loadData();
     },
-    [summary, loadData],
+    [loadData],
   );
 
   const diag: ControlCenterDiagnostics | null = summary

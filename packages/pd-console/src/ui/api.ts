@@ -773,6 +773,16 @@ async function checkAgentReadiness(agentName: string): Promise<ApiResponse<Readi
   );
 }
 
+async function updateDefaultRuntime(defaultRuntime: string): Promise<ApiResponse<{ defaultRuntime: string }>> {
+  return request<{ defaultRuntime: string }>(
+    '/api/v1/config/default-runtime',
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ defaultRuntime }),
+    },
+  );
+}
+
 export {
   getToken,
   setToken,
@@ -828,6 +838,7 @@ export {
   fetchConfigCatalog,
   updateAgentBinding,
   checkAgentReadiness,
+  updateDefaultRuntime,
 };
 
 export type {

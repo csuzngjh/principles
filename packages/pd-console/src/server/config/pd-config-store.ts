@@ -462,6 +462,130 @@ export function updateAgentBinding(
   };
 }
 
+// ── Update Default Runtime ───────────────────────────────────────────────────
+
+export interface DefaultRuntimeUpdateResultOk {
+  ok: true;
+  defaultRuntime: string;
+}
+
+export interface DefaultRuntimeUpdateResultErr {
+  ok: false;
+  statusCode: number;
+  error: string;
+  message: string;
+}
+
+export type DefaultRuntimeUpdateResult = DefaultRuntimeUpdateResultOk | DefaultRuntimeUpdateResultErr;
+
+export function updateDefaultRuntime(
+  workspaceDir: string,
+  payload: unknown,
+): DefaultRuntimeUpdateResult {
+  // 1. Validate payload
+  if (!isRecord(payload)) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Payload must be a JSON object with a defaultRuntime field' };
+  }
+
+  const defaultRuntimeRaw = Object.hasOwn(payload, 'defaultRuntime') ? payload.defaultRuntime : undefined;
+  if (defaultRuntimeRaw === undefined) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'Missing required field: defaultRuntime' };
+  }
+  if (typeof defaultRuntimeRaw !== 'string' || defaultRuntimeRaw.length === 0) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: 'defaultRuntime must be a non-empty string' };
+  }
+
+  // ANY-segment secret key detection (ERR-045)
+  const secretPath = hasSecretLikeKeyDeep(payload);
+  if (secretPath) {
+    return { ok: false, statusCode: 400, error: 'bad_request', message: `Payload contains secret-like field '${secretPath}'. Remove secret fields from the request.` };
+  }
+
+  // 2. Load existing config
+  const loadResult = loadPdConfig(workspaceDir);
+
+  // 3. If malformed, refuse to write
+  if (!loadResult.ok) {
+    return {
+      ok: false,
+      statusCode: 409,
+      error: 'conflict',
+      message: `Cannot update default runtime: existing .pd/config.yaml is malformed. Fix config errors first. Errors: ${loadResult.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  const { effective } = loadResult;
+
+  // 4. Validate runtime profile reference exists
+  if (!Object.hasOwn(effective.config.runtimeProfiles, defaultRuntimeRaw)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Runtime profile '${defaultRuntimeRaw}' does not exist. Available profiles: ${Object.keys(effective.config.runtimeProfiles).join(', ')}`,
+    };
+  }
+
+  // 5. Build updated config — read original file to preserve unknown root entries
+  const configPath = getPdConfigPath(workspaceDir);
+  let rawConfig: Record<string, unknown>;
+  if (fs.existsSync(configPath)) {
+    const rawContent = fs.readFileSync(configPath, 'utf8');
+    const rawParsed = yaml.load(rawContent, { schema: yaml.JSON_SCHEMA });
+    if (isRecord(rawParsed)) {
+      rawConfig = { ...rawParsed };
+    } else {
+      rawConfig = {};
+    }
+  } else {
+    rawConfig = {};
+  }
+
+  // Build agents map preserving existing overrides
+  const agentsMap: Record<string, AgentBindingEntry> = {};
+  for (const name of INTERNAL_AGENT_NAMES) {
+    const existing = effective.config.internalAgents.agents[name];
+    if (existing) {
+      agentsMap[name] = {
+        enabled: existing.enabled,
+        ...(existing.runtimeProfile ? { runtimeProfile: existing.runtimeProfile } : {}),
+      };
+    }
+  }
+
+  // Merge: update only defaultRuntime, preserve agent overrides
+  const updatedConfig: Record<string, unknown> = {
+    ...rawConfig,
+    version: effective.config.version,
+    features: { ...effective.config.features },
+    runtimeProfiles: { ...effective.config.runtimeProfiles },
+    internalAgents: {
+      defaultRuntime: defaultRuntimeRaw,
+      agents: agentsMap,
+    },
+    ui: { ...effective.config.ui },
+  };
+
+  // 6. Validate the updated config before writing
+  const validation = validatePdConfig(updatedConfig);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'bad_request',
+      message: `Updated config would be invalid: ${validation.errors.map(e => e.reason).join('; ')}`,
+    };
+  }
+
+  // 7. Write to disk (atomic)
+  writeConfigAtomic(configPath, updatedConfig);
+
+  return {
+    ok: true,
+    defaultRuntime: defaultRuntimeRaw,
+  };
+}
+
 // ── Check Readiness ──────────────────────────────────────────────────────────
 
 export function checkReadiness(
