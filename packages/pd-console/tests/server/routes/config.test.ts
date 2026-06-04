@@ -673,4 +673,19 @@ describe('Config API edge cases', () => {
     // Should be valid JSON
     expect(() => JSON.parse(body)).not.toThrow();
   });
+
+  it('rejects oversized request body on PATCH', async () => {
+    writeConfig(VALID_CONFIG);
+    const largeBody = { runtimeProfile: 'openclaw.default', enabled: true, padding: 'x'.repeat(1024 * 100) };
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/agents/diagnostician/binding',
+      body: largeBody,
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, {
+      workspaceDir,
+      subPath: '/agents/diagnostician/binding',
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });

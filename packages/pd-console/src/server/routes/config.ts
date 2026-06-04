@@ -29,14 +29,25 @@ import {
   updateAgentBinding,
   checkReadiness,
 } from '../config/pd-config-store.js';
-import type { ReadinessResult } from '../config/pd-config-store.js';
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const MAX_BODY_SIZE = 1024 * 64; // 64 KB — generous for config binding updates
 
 // ── Request Body Reader ──────────────────────────────────────────────────────
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    let totalSize = 0;
+    req.on('data', (chunk: Buffer) => {
+      totalSize += chunk.length;
+      if (totalSize > MAX_BODY_SIZE) {
+        reject(new Error('Request body exceeds maximum allowed size'));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
@@ -90,7 +101,13 @@ export async function handleConfigRoute(
       return;
     }
     const agentName = decodeURIComponent(agentBindingMatch[1] ?? '');
-    const bodyText = await readBody(req);
+    let bodyText: string;
+    try {
+      bodyText = await readBody(req);
+    } catch {
+      sendBadRequest(res, 'Request body exceeds maximum allowed size');
+      return;
+    }
     const payload = safeParseBody(bodyText);
 
     if (payload === null) {
@@ -122,20 +139,18 @@ export async function handleConfigRoute(
     const agentName = decodeURIComponent(readinessMatch[1] ?? '');
     const result = checkReadiness(workspaceDir, agentName);
 
-    if (!('agent' in result)) {
-      // Error result
+    if (!result.ok) {
       sendError(res, result.statusCode, result.error, result.message);
       return;
     }
 
-    const readiness: ReadinessResult = result;
     sendSuccess(res, {
-      agent: readiness.agent,
-      readiness: readiness.readiness,
-      profileId: readiness.profileId,
-      profileLabel: readiness.profileLabel,
-      ...(readiness.reason ? { reason: readiness.reason } : {}),
-      ...(readiness.nextAction ? { nextAction: readiness.nextAction } : {}),
+      agent: result.agent,
+      readiness: result.readiness,
+      profileId: result.profileId,
+      profileLabel: result.profileLabel,
+      ...(result.reason ? { reason: result.reason } : {}),
+      ...(result.nextAction ? { nextAction: result.nextAction } : {}),
     });
     return;
   }

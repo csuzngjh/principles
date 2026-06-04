@@ -81,7 +81,15 @@ export interface AgentBindingUpdateResultErr {
 
 export type AgentBindingUpdateResult = AgentBindingUpdateResultOk | AgentBindingUpdateResultErr;
 
+export interface ReadinessError {
+  ok: false;
+  statusCode: number;
+  error: string;
+  message: string;
+}
+
 export interface ReadinessResult {
+  ok: true;
   agent: InternalAgentName;
   readiness: 'ready' | 'not_ready' | 'needs_setup' | 'disabled' | 'unknown';
   profileId: string;
@@ -395,7 +403,7 @@ export function checkReadiness(
   workspaceDir: string,
   agentName: string,
   getEnvVar: (name: string) => string | undefined = (name: string) => process.env[name],
-): ReadinessResult | { ok: false; statusCode: number; error: string; message: string } {
+): ReadinessResult | ReadinessError {
   // 1. Validate agent name
   if (!isValidAgentName(agentName)) {
     return {
@@ -418,6 +426,7 @@ export function checkReadiness(
     const profileId = effective.config.internalAgents.defaultRuntime;
     const profile = effective.config.runtimeProfiles[profileId];
     return {
+      ok: true,
       agent: agentName,
       readiness: bindingResult.readiness,
       profileId: bindingResult.readiness === 'disabled' ? profileId : (effective.config.internalAgents.agents[agentName]?.runtimeProfile ?? profileId),
@@ -434,6 +443,7 @@ export function checkReadiness(
   );
 
   return {
+    ok: true,
     agent: agentName,
     readiness: readinessResult.readiness,
     profileId: bindingResult.profileId,
