@@ -73,6 +73,7 @@ export interface ActivationStateReadModel {
   getActivationStatus(idempotencyKey: string): Promise<ActivationStatusRecord | null>;
   recordActivation(record: ActivationStatusRecord): Promise<void>;
   listPromptActivations(): Promise<ActivationStatusRecord[]>;
+  listAllActivations(): Promise<ActivationStatusRecord[]>;
 }
 
 export interface WriterInput {
