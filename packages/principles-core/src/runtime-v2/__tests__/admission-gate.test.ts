@@ -151,4 +151,81 @@ describe('evaluateCandidateAdmissions', () => {
     expect(deferred).toHaveLength(1);
     expect(gated).toHaveLength(4);
   });
+
+  // ── Additional edge cases for provenance handling ──────────────────────────────
+
+  it('gates owner_reported_no_host_trace when confidence below threshold regardless of evidence', () => {
+    // Regression test: owner_reported should use normal confidence+evidence checks
+    const result = evaluateAdmission(
+      makeInput({ provenance: 'owner_reported_no_host_trace', confidence: 0.4, evidenceCount: 10 }),
+    );
+    expect(result.decision).toBe('needs_evidence');
+    expect(result.reason).toContain('confidence_below_threshold');
+  });
+
+  it('gates owner_reported_no_host_trace when evidence count is zero', () => {
+    // Regression test: evidence array empty should gate even for owner_reported
+    const result = evaluateAdmission(
+      makeInput({ provenance: 'owner_reported_no_host_trace', confidence: 0.9, evidenceCount: 0 }),
+    );
+    expect(result.decision).toBe('needs_evidence');
+    expect(result.reason).toBe('evidence_array_empty');
+  });
+
+  it('admits automatic_hook provenance when confidence and evidence sufficient', () => {
+    const result = evaluateAdmission(
+      makeInput({ provenance: 'automatic_hook', confidence: 0.8, evidenceCount: 3 }),
+    );
+    expect(result.decision).toBe('admitted');
+    expect(result.evidenceStatus).toBe('automatic_hook');
+  });
+
+  it('gates automatic_hook provenance when confidence below threshold', () => {
+    const result = evaluateAdmission(
+      makeInput({ provenance: 'automatic_hook', confidence: 0.4, evidenceCount: 5 }),
+    );
+    expect(result.decision).toBe('needs_evidence');
+    expect(result.evidenceStatus).toBe('automatic_hook');
+  });
+
+  it('admits at confidence boundary exactly 0.50', () => {
+    // Boundary test: exactly at threshold should admit
+    const result = evaluateAdmission(
+      makeInput({ confidence: 0.50, evidenceCount: 1 }),
+    );
+    expect(result.decision).toBe('admitted');
+  });
+
+  it('gates at confidence boundary 0.49', () => {
+    // Boundary test: just below threshold should gate
+    const result = evaluateAdmission(
+      makeInput({ confidence: 0.49, evidenceCount: 1 }),
+    );
+    expect(result.decision).toBe('needs_evidence');
+  });
+
+  it('admits at confidence boundary 0.51', () => {
+    // Boundary test: just above threshold should admit
+    const result = evaluateAdmission(
+      makeInput({ confidence: 0.51, evidenceCount: 1 }),
+    );
+    expect(result.decision).toBe('admitted');
+  });
+
+  it('defer priority over low confidence + owner_reported', () => {
+    // Priority test: defer should win even when owner_reported + low confidence
+    const result = evaluateAdmission(
+      makeInput({ recommendationKind: 'defer', provenance: 'owner_reported_no_host_trace', confidence: 0.2 }),
+    );
+    expect(result.decision).toBe('deferred');
+    expect(result.reason).toBe('recommendation_kind_defer_not_actionable');
+  });
+
+  it('defer priority over empty evidence', () => {
+    // Priority test: defer should win even when evidence is empty
+    const result = evaluateAdmission(
+      makeInput({ recommendationKind: 'defer', evidenceCount: 0 }),
+    );
+    expect(result.decision).toBe('deferred');
+  });
 });
