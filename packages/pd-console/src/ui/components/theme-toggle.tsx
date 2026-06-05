@@ -5,28 +5,9 @@ import { useTheme } from "./theme-provider.js";
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
-  const [systemDark, setSystemDark] = React.useState(false);
-
-  React.useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setSystemDark(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
-
-  const isDark =
-    theme === "dark" ||
-    (theme === "system" && systemDark);
 
   const toggleTheme = () => {
-    if (theme === "light") {
-      setTheme("dark");
-    } else if (theme === "dark") {
-      setTheme("light");
-    } else {
-      setTheme(isDark ? "light" : "dark");
-    }
+    setTheme(theme === "dark" ? "light" : "dark");
   };
 
   return (
@@ -35,10 +16,10 @@ export function ThemeToggle() {
       size="icon"
       onClick={toggleTheme}
       className="transition-transform duration-300 hover:rotate-180 motion-reduce:transition-none motion-reduce:hover:rotate-0"
-      title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
     >
-      {isDark ? (
+      {theme === "dark" ? (
         <Sun className="h-5 w-5" />
       ) : (
         <Moon className="h-5 w-5" />

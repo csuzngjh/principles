@@ -1,11 +1,9 @@
-import * as path from 'path';
 import {
   OperatorHealthReadModel,
   PainChainReadModel,
   PruningReadModel,
   RuntimeStateManager,
 } from '@principles/core/runtime-v2';
-import { EventLogReadModel } from './EventLogReadModel.js';
 
 export interface HealthCheckResult {
   id: string;
@@ -33,22 +31,18 @@ const noop = (): void => { /* intentional no-op for promise catch */ };
 
 export class HealthCheckModel {
   private readonly workspaceDir: string;
-  private readonly stateDir: string;
   private operatorHealth: OperatorHealthReadModel | null = null;
   private painChain: PainChainReadModel | null = null;
   private pruning: PruningReadModel | null = null;
   private runtime: RuntimeStateManager | null = null;
-  private eventLog: EventLogReadModel | null = null;
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
-    this.stateDir = path.join(workspaceDir, '.state');
   }
 
   async checkSystemHealth(): Promise<SystemHealthStatus> {
     const checks: HealthCheckResult[] = [];
 
-    checks.push(await this.checkEventLog());
     checks.push(await this.checkSqlite());
     checks.push(await this.checkPainChainFlow());
     checks.push(await this.checkTaskQueue());
@@ -66,54 +60,6 @@ export class HealthCheckModel {
       pipeline: await this.getPipelineTimestamps(),
       generatedAt: new Date().toISOString(),
     };
-  }
-
-  private async checkEventLog(): Promise<HealthCheckResult> {
-    try {
-      const eventLog = this.getEventLogReadModel();
-      const recentEvents = await eventLog.getEventsByTypes([], 1);
-      const now = new Date();
-
-      if (recentEvents.length === 0) {
-        return {
-          id: 'event_log',
-          name: '事件日志',
-          status: 'warning',
-          message: '暂无事件记录',
-          lastCheck: now.toISOString(),
-        };
-      }
-
-      const [lastEvent] = recentEvents;
-      const eventTime = new Date(lastEvent.ts);
-      const diffMinutes = (now.getTime() - eventTime.getTime()) / (1000 * 60);
-
-      if (diffMinutes > 60) {
-        return {
-          id: 'event_log',
-          name: '事件日志',
-          status: 'warning',
-          message: `最后事件超过 ${Math.floor(diffMinutes)} 分钟前`,
-          lastCheck: now.toISOString(),
-        };
-      }
-
-      return {
-        id: 'event_log',
-        name: '事件日志',
-        status: 'healthy',
-        message: `正常记录中，最后事件 ${Math.floor(diffMinutes)} 分钟前`,
-        lastCheck: now.toISOString(),
-      };
-    } catch (e) {
-      return {
-        id: 'event_log',
-        name: '事件日志',
-        status: 'error',
-        message: `读取失败: ${(e as Error).message}`,
-        lastCheck: new Date().toISOString(),
-      };
-    }
   }
 
   private async checkSqlite(): Promise<HealthCheckResult> {
@@ -323,28 +269,47 @@ export class HealthCheckModel {
   }
 
   private async getPipelineTimestamps(): Promise<PipelineTimestamps> {
-    const eventLog = this.getEventLogReadModel();
+    try {
+      const runtime = this.getRuntime();
 
-    const [painSignals, tasks, candidates, promotions] = await Promise.all([
-      eventLog.getEventsByTypes(['pain_signal'], 1),
-      eventLog.getEventsByTypes(['diagnosis_task', 'heartbeat_diagnosis', 'evolution_task'], 1),
-      eventLog.getEventsByTypes(['principle_candidate'], 1),
-      eventLog.getEventsByTypes(['rule_promotion'], 1),
-    ]);
+      const [painTasks, diagTasks, candidates] = await Promise.all([
+        runtime.listTasks({ taskKind: 'pain_collector', limit: 1 }),
+        runtime.listTasks({ taskKind: 'diagnostician', limit: 1 }),
+        runtime.listTasks({ status: 'succeeded', limit: 1 }),
+      ]);
 
-    return {
-      lastPainSignal: painSignals[0]?.ts ?? null,
-      lastTaskCreated: tasks[0]?.ts ?? null,
-      lastCandidateGenerated: candidates[0]?.ts ?? null,
-      lastPrincipleAdded: promotions[0]?.ts ?? null,
-    };
-  }
+      const lastPainSignal = painTasks[0]?.updatedAt ?? null;
+      const lastTaskCreated = diagTasks[0]?.createdAt ?? null;
+      const lastCandidateGenerated = candidates[0]?.updatedAt ?? null;
 
-  private getEventLogReadModel(): EventLogReadModel {
-    if (!this.eventLog) {
-      this.eventLog = new EventLogReadModel(this.stateDir);
+      let lastPrincipleAdded: string | null = null;
+      try {
+        const pruning = this.getPruning();
+        const summary = pruning.getHealthSummary();
+        const { byStatus } = summary;
+        if ((byStatus.active ?? 0) > 0) {
+          const signals = pruning.getPrincipleSignals();
+          const latestSignal = signals.length > 0 ? signals[0] : null;
+          lastPrincipleAdded = latestSignal?.updatedAt ?? null;
+        }
+      } catch {
+        // Pruning not available — leave as null
+      }
+
+      return {
+        lastPainSignal,
+        lastTaskCreated,
+        lastCandidateGenerated,
+        lastPrincipleAdded,
+      };
+    } catch {
+      return {
+        lastPainSignal: null,
+        lastTaskCreated: null,
+        lastCandidateGenerated: null,
+        lastPrincipleAdded: null,
+      };
     }
-    return this.eventLog;
   }
 
   private getRuntime(): RuntimeStateManager {
@@ -394,10 +359,6 @@ export class HealthCheckModel {
     if (this.runtime) {
       this.runtime.close().catch(noop);
       this.runtime = null;
-    }
-    if (this.eventLog) {
-      this.eventLog.dispose();
-      this.eventLog = null;
     }
   }
 }
