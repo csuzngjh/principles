@@ -259,7 +259,7 @@ src/server/
 `handleGatesRoute`, `disposeGateModels`, `handleFeedbackRoute`,
 `disposeFeedbackModels`, `handleSamplesRoute`, `disposeSampleModels`,
 `handleEvolutionRoute`, `disposeEvolutionModels`,
-`handleThinkingModelsRoute`, `disposeThinkingModelsModels`, `handlePipelineRoute`,
+`handleThinkingModelsRoute`, `disposeThinkingModels`, `handlePipelineRoute`,
 `disposePipelineModels`, `handleEventsRoute`, `disposeEventsModels`,
 `handleAgentsRoute`, `disposeAgentModels`, `createCentralRoutes`
 注意：`handleHealthRoute` / `disposeHealthModels` 保留（checkAuth 和控制中心依赖）
@@ -272,7 +272,7 @@ src/server/
 
 **删除的 dispose 调用**：`disposeOverviewModels()`, `disposeGateModels()`,
 `disposeFeedbackModels()`, `disposeSampleModels()`, `disposeEvolutionModels()`,
-`disposeThinkingModelsModels()`, `disposePipelineModels()`,
+`disposeThinkingModels()`, `disposePipelineModels()`,
 `disposeEventsModels()`, `disposeAgentModels()`
 注意：`disposeHealthModels()` 保留
 
