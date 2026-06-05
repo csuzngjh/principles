@@ -60,7 +60,14 @@ export async function handleActivationsRoute(
   // POST /api/v1/activations/:id/disable
   const disableExec = /^\/([^/]+)\/disable$/.exec(subPath);
   if (req.method === 'POST' && disableExec) {
-    const [, activationId] = disableExec;
+    const [, rawId] = disableExec;
+    let activationId: string;
+    try {
+      activationId = decodeURIComponent(rawId);
+    } catch {
+      sendError(res, 400, 'invalid_id', 'Activation ID contains invalid URI encoding');
+      return;
+    }
     const model = getModel(workspaceDir);
 
     // Read and validate request body
