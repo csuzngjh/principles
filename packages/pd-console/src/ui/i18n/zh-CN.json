@@ -131,6 +131,7 @@
       "disabling": "停用中…",
       "disableSuccess": "原则已停用",
       "disableSuccessDescription": "原则 {{id}} 已停用。",
+      "disableFailed": "停用原则失败",
       "undoDisable": "停用操作已撤销",
       "viewDebt": "在原则债务中查看",
       "loadError": "无法加载生效数据。你可以尝试刷新页面。",

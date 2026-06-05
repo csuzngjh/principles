@@ -18,6 +18,7 @@ function makeActivation(overrides: Partial<ActivationStatusRecord> = {}): Activa
     action: 'prompt_activate',
     targetRef: 'prependSystemContext',
     activatedAt: '2026-01-01T00:00:00Z',
+    deactivatedAt: null,
     ...overrides,
   };
 }

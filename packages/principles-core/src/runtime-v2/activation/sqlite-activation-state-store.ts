@@ -37,6 +37,7 @@ function mapRowToRecord(row: unknown): ActivationStatusRecord | null {
   }
 
   const targetRef = readStringField(row, 'target_ref');
+  const deactivatedAt = readStringField(row, 'deactivated_at');
 
   return {
     activationId,
@@ -46,6 +47,7 @@ function mapRowToRecord(row: unknown): ActivationStatusRecord | null {
     action,
     targetRef: targetRef ?? '',
     activatedAt,
+    deactivatedAt: deactivatedAt ?? null,
   };
 }
 
@@ -55,7 +57,7 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
   async getActivationStatus(idempotencyKey: string): Promise<ActivationStatusRecord | null> {
     const db = this.connection.getDb();
     const row = db.prepare(`
-      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at
+      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at
       FROM activations
       WHERE idempotency_key = ?
     `).get(idempotencyKey);
@@ -67,9 +69,9 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
     const db = this.connection.getDb();
     db.prepare(`
       INSERT OR REPLACE INTO activations
-        (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at)
+        (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES
-        (?, ?, ?, ?, ?, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.activationId,
       record.idempotencyKey,
@@ -78,13 +80,14 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
       record.action,
       record.targetRef,
       record.activatedAt,
+      record.deactivatedAt,
     );
   }
 
   async listPromptActivations(): Promise<ActivationStatusRecord[]> {
     const db = this.connection.getDb();
     const rows = db.prepare(`
-      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at
+      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at
       FROM activations
       WHERE channel = 'prompt'
       ORDER BY activated_at ASC
@@ -103,7 +106,7 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
   async listAllActivations(): Promise<ActivationStatusRecord[]> {
     const db = this.connection.getDb();
     const rows = db.prepare(`
-      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at
+      SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at
       FROM activations
       ORDER BY activated_at ASC
     `).all();
@@ -116,5 +119,15 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
       if (record) result.push(record);
     }
     return result;
+  }
+
+  async deactivateActivation(activationId: string, deactivatedAt: string): Promise<boolean> {
+    const db = this.connection.getDb();
+    const result = db.prepare(`
+      UPDATE activations
+      SET deactivated_at = ?
+      WHERE activation_id = ? AND deactivated_at IS NULL
+    `).run(deactivatedAt, activationId);
+    return result.changes > 0;
   }
 }

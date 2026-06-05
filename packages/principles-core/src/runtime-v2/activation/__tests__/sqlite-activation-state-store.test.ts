@@ -42,6 +42,7 @@ describe('SqliteActivationStateStore', () => {
         action: 'prompt_activate',
         target_ref: 'ledger://P_001',
         activated_at: '2026-05-17T00:00:00.000Z',
+        deactivated_at: null,
       });
       mockDb.prepare.mockReturnValue({ get: mockGet });
 
@@ -56,6 +57,7 @@ describe('SqliteActivationStateStore', () => {
         action: 'prompt_activate',
         targetRef: 'ledger://P_001',
         activatedAt: '2026-05-17T00:00:00.000Z',
+        deactivatedAt: null,
       });
     });
 
@@ -68,6 +70,7 @@ describe('SqliteActivationStateStore', () => {
         action: 'defer_archive',
         target_ref: 'ledger://P_002#archived',
         activated_at: '2026-05-17T01:00:00.000Z',
+        deactivated_at: null,
       });
       mockDb.prepare.mockReturnValue({ get: mockGet });
 
@@ -82,6 +85,7 @@ describe('SqliteActivationStateStore', () => {
         action: 'defer_archive',
         targetRef: 'ledger://P_002#archived',
         activatedAt: '2026-05-17T01:00:00.000Z',
+        deactivatedAt: null,
       });
     });
   });
@@ -99,6 +103,7 @@ describe('SqliteActivationStateStore', () => {
         action: 'prompt_activate',
         targetRef: 'ledger://P_001',
         activatedAt: '2026-05-17T00:00:00.000Z',
+        deactivatedAt: null,
       };
 
       const store = new SqliteActivationStateStore(mockConnection);
@@ -113,6 +118,7 @@ describe('SqliteActivationStateStore', () => {
         'prompt_activate',
         'ledger://P_001',
         '2026-05-17T00:00:00.000Z',
+        null,
       );
     });
 
@@ -128,6 +134,7 @@ describe('SqliteActivationStateStore', () => {
         action: 'defer_archive',
         targetRef: 'ledger://P_003#archived',
         activatedAt: '2026-05-17T02:00:00.000Z',
+        deactivatedAt: null,
       };
 
       const store = new SqliteActivationStateStore(mockConnection);
@@ -141,6 +148,7 @@ describe('SqliteActivationStateStore', () => {
         'defer_archive',
         'ledger://P_003#archived',
         '2026-05-17T02:00:00.000Z',
+        null,
       );
     });
   });

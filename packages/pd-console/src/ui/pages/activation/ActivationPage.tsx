@@ -6,6 +6,7 @@ import { PageShell } from "../../components/layout/page-shell.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import {
   fetchAllActivations,
+  disableActivation,
   fetchLifecycleMetrics,
 } from "../../api.js";
 import type {
@@ -315,24 +316,34 @@ export function ActivationPage() {
   const handleDisable = useCallback(async (record: ActivationRecord) => {
     setDisablingIds((prev) => new Set(prev).add(record.id));
 
-    // Simulate disable — backend doesn't have a disable endpoint yet
-    // This is a placeholder that shows the confirmation flow works
-    // When the backend endpoint is available, replace this with an actual API call
-    toast.success(t("pages.activation.disableSuccess"), {
-      description: t("pages.activation.disableSuccessDescription", { id: record.principleId }),
-      duration: 5000,
-    });
+    const result = await disableActivation(record.id);
 
-    // For now, optimistically update the UI
-    setActivationsData((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        activations: prev.activations.map((a) =>
-          a.id === record.id ? { ...a, status: "inactive" as const } : a
-        ),
-      };
-    });
+    if (result.success) {
+      toast.success(t("pages.activation.disableSuccess"), {
+        description: t("pages.activation.disableSuccessDescription", { id: record.principleId }),
+        duration: 5000,
+      });
+
+      // Update local state only on real backend success
+      setActivationsData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          activations: prev.activations.map((a) =>
+            a.id === record.id ? { ...a, status: "inactive" as const } : a
+          ),
+        };
+      });
+    } else {
+      // EP-03: failure surfaces reason + nextAction
+      toast.error(t("pages.activation.disableFailed"), {
+        description: result.error,
+        duration: 8000,
+      });
+      if (result.nextAction) {
+        toast.info(result.nextAction, { duration: 8000 });
+      }
+    }
 
     setDisablingIds((prev) => {
       const next = new Set(prev);

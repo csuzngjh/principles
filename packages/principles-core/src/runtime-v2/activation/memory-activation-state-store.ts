@@ -28,6 +28,16 @@ export class MemoryActivationStateStore implements ActivationStateReadModel {
     }
     return result.sort((a, b) => a.activatedAt.localeCompare(b.activatedAt));
   }
+
+  async deactivateActivation(activationId: string, deactivatedAt: string): Promise<boolean> {
+    for (const [key, record] of this.activations.entries()) {
+      if (record.activationId === activationId && record.deactivatedAt === null) {
+        this.activations.set(key, { ...record, deactivatedAt });
+        return true;
+      }
+    }
+    return false;
+  }
 }
 
 export class MemoryArtifactReadModel implements ActivationArtifactReadModel {

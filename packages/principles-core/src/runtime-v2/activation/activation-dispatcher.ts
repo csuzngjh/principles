@@ -213,7 +213,7 @@ export class ActivationDispatcher {
       now: input.now,
     };
 
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let writerResult: WriterResult;
     try {
       writerResult = await writer.activate(writerInput, artifact);
@@ -239,6 +239,7 @@ export class ActivationDispatcher {
         action: writerResult.action,
         targetRef: writerResult.targetRef,
         activatedAt: input.now,
+        deactivatedAt: null,
       });
     } catch {
       return { decision: 'refused', reason: 'activation_record_failed', channel: input.channel };

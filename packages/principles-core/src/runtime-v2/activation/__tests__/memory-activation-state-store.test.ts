@@ -11,12 +11,13 @@ function makeActivationRecord(overrides: Partial<ActivationStatusRecord> = {}): 
     action: 'prompt_activate',
     targetRef: 'ledger://P_001',
     activatedAt: '2026-05-17T00:00:00.000Z',
+    deactivatedAt: null,
     ...overrides,
   };
 }
 
 describe('MemoryActivationStateStore', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let store: MemoryActivationStateStore;
 
   beforeEach(() => {
@@ -109,6 +110,7 @@ describe('MemoryActivationStateStore', () => {
         action: 'test',
         targetRef: 'ledger://MIN',
         activatedAt: '2026-05-17T00:00:00.000Z',
+        deactivatedAt: null,
       };
 
       await store.recordActivation(minimalRecord);
@@ -134,7 +136,7 @@ describe('MemoryActivationStateStore', () => {
 });
 
 describe('MemoryArtifactReadModel', () => {
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let model: MemoryArtifactReadModel;
 
   beforeEach(() => {

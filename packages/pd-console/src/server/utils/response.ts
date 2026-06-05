@@ -23,8 +23,13 @@ export function sendError(
   statusCode: number,
   error: string,
   message?: string,
+  extras?: Record<string, unknown>,
 ): void {
-  sendJson(res, statusCode, { success: false, error, message: message ?? error });
+  const payload: Record<string, unknown> = { success: false, error, message: message ?? error };
+  if (extras) {
+    Object.assign(payload, extras);
+  }
+  sendJson(res, statusCode, payload);
 }
 
 export function sendNotFound(res: ServerResponse, message = 'Not found'): void {
