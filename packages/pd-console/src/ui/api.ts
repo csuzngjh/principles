@@ -464,34 +464,6 @@ async function fetchLifecycleMetrics(principleId: string): Promise<ApiResponse<L
   return request<LifecycleMetricsData>(`/api/v1/lifecycle/principles/${encodeURIComponent(principleId)}`);
 }
 
-// ── CR5: Pain Evidence (G.2 data contract) ───────────────────────────────────
-
-interface PainEvidenceItem {
-  id: string;
-  title: string;
-  context: string;
-  agentBehavior: string;
-  expectedBehavior?: string;
-  source: 'tool_call' | 'prompt';
-  recommendationState: 'pending' | 'candidate' | 'principle' | 'dismissed';
-  trajectorySummary: {
-    taskId: string;
-    toolName: string;
-    timestamp: string;
-  };
-  createdAt: string;
-}
-
-interface PainEvidenceListEnvelope {
-  evidence: PainEvidenceItem[];
-  generatedAt: string;
-  note?: string;
-}
-
-async function fetchPainEvidence(): Promise<ApiResponse<PainEvidenceListEnvelope>> {
-  return request<PainEvidenceListEnvelope>('/api/v1/pain-evidence');
-}
-
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 export {
@@ -524,7 +496,6 @@ export {
   fetchApprovalsGrouped,
   fetchAllActivations,
   fetchLifecycleMetrics,
-  fetchPainEvidence,
 };
 
 export type {
@@ -561,6 +532,4 @@ export type {
   LifecycleAdherence,
   LifecycleRuleMetric,
   LifecycleMetricsData,
-  PainEvidenceItem,
-  PainEvidenceListEnvelope,
 };

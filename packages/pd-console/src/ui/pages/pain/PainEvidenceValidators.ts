@@ -1,24 +1,34 @@
 /**
- * Runtime validators for Pain Evidence page data.
+ * Runtime validators and derivation logic for Pain Evidence page data.
  *
- * All data from the backend is treated as `unknown` and validated at the boundary.
+ * Derives behavior evidence from existing principles data — no new backend
+ * route needed. Principles with `derivedFromPainIds` or `painPreventedCount > 0`
+ * represent evidence that was captured and internalized.
+ *
  * This follows H-section rules and ERR-001/005/009/010.
  */
 
-// ── PainEvidence type (matches G.2 data contract) ────────────────────────────
+// ── PainEvidence type (derived from existing principles data) ─────────────────
 
 export interface PainEvidence {
+  /** The principle ID that was derived from this pain evidence */
   id: string;
+  /** Principle text — serves as the evidence title */
   title: string;
+  /** The trigger pattern — describes the context where the deviation occurred */
   context: string;
-  agentBehavior: string;
+  /** The action — describes what the agent should do instead */
   expectedBehavior: string;
-  source: 'tool_call' | 'prompt';
+  /** Source: always 'principle_derivation' since we derive from principles */
+  source: 'principle_derivation';
+  /** Maps principle status to recommendation state */
   recommendationState: 'pending' | 'candidate' | 'principle' | 'dismissed';
+  /** Pain-related metadata from the principle */
   trajectorySummary: {
-    taskId: string;
-    toolName: string;
-    timestamp: string;
+    principleId: string;
+    painPreventedCount: number;
+    lastPainPreventedAt: string;
+    derivedFromPainIds: string[];
   };
   createdAt: string;
 }
@@ -37,11 +47,14 @@ export interface PainEvidenceDegraded {
 
 // ── Validators ────────────────────────────────────────────────────────────────
 
-const VALID_SOURCES: readonly string[] = ['tool_call', 'prompt'];
-const VALID_RECOMMENDATION_STATES: readonly string[] = ['pending', 'candidate', 'principle', 'dismissed'];
+const VALID_PRINCIPLE_STATUSES: readonly string[] = ['candidate', 'active', 'archived', 'deprecated', 'probation'];
 
 function isString(value: unknown): value is string {
   return typeof value === 'string';
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && !Number.isNaN(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -49,73 +62,79 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Validate a single trajectory summary object.
- * Returns null if required fields are missing or malformed.
+ * Map a principle status to a pain evidence recommendationState.
+ * - candidate → pending (not yet reviewed)
+ * - active → principle (internalized)
+ * - probation → candidate (under review)
+ * - archived/deprecated → dismissed
  */
-export function parseTrajectorySummary(raw: unknown): PainEvidence['trajectorySummary'] | null {
-  if (!isRecord(raw)) return null;
-
-  const { taskId, toolName, timestamp } = raw;
-
-  if (!isString(taskId) || !isString(toolName) || !isString(timestamp)) {
-    return null;
+function mapRecommendationState(status: string): PainEvidence['recommendationState'] {
+  switch (status) {
+    case 'candidate': return 'pending';
+    case 'active': return 'principle';
+    case 'probation': return 'candidate';
+    case 'archived':
+    case 'deprecated': return 'dismissed';
+    default: return 'pending';
   }
-
-  return { taskId, toolName, timestamp };
 }
 
 /**
- * Validate a single PainEvidence record from backend data.
- * Returns null if required fields are missing or malformed (ERR-009/010).
+ * Derive a single PainEvidence from a principle list item + detail.
+ * Returns null if the principle has no pain-related data.
  */
-export function parsePainEvidence(raw: unknown): PainEvidence | null {
-  if (!isRecord(raw)) return null;
+export function derivePainEvidenceFromPrinciple(
+  listItem: unknown,
+  detail?: unknown,
+): PainEvidence | null {
+  if (!isRecord(listItem)) return null;
 
-  // Required string fields
-  const { id, title, context, agentBehavior, createdAt } = raw;
+  // Must have pain-related fields
+  const { painPreventedCount, derivedFromPainIds, lastPainPreventedAt } =
+    detail && isRecord(detail) ? detail : listItem;
 
-  if (!isString(id) || !isString(title) || !isString(context) || !isString(agentBehavior) || !isString(createdAt)) {
+  const painCount = isNumber(painPreventedCount) ? painPreventedCount : 0;
+  const painIds = Array.isArray(derivedFromPainIds)
+    ? derivedFromPainIds.filter(isString)
+    : [];
+  const lastPainAt = isString(lastPainPreventedAt) ? lastPainPreventedAt : '';
+
+  // Only derive evidence if there's actual pain data
+  if (painCount === 0 && painIds.length === 0 && !lastPainAt) {
     return null;
   }
 
-  // Optional string fields
-  const { expectedBehavior: rawExpectedBehavior } = raw;
-  const expectedBehavior = isString(rawExpectedBehavior) ? rawExpectedBehavior : '';
+  // Required fields from list item
+  const { id, text, triggerPattern, action, status, createdAt } = listItem;
 
-  // Enum fields
-  const { source, recommendationState } = raw;
-  if (!isString(source) || !VALID_SOURCES.includes(source)) {
-    return null;
-  }
+  if (!isString(id) || !isString(text)) return null;
 
-  if (!isString(recommendationState) || !VALID_RECOMMENDATION_STATES.includes(recommendationState)) {
-    return null;
-  }
-
-  // Nested object
-  const trajectorySummary = parseTrajectorySummary(raw.trajectorySummary);
-  if (!trajectorySummary) {
-    return null;
-  }
+  const principleStatus = isString(status) && VALID_PRINCIPLE_STATUSES.includes(status)
+    ? status
+    : 'candidate';
 
   return {
     id,
-    title,
-    context,
-    agentBehavior,
-    expectedBehavior,
-    source: source as 'tool_call' | 'prompt',
-    recommendationState: recommendationState as 'pending' | 'candidate' | 'principle' | 'dismissed',
-    trajectorySummary,
-    createdAt,
+    title: isString(text) ? text : '',
+    context: isString(triggerPattern) ? triggerPattern : '',
+    expectedBehavior: isString(action) ? action : '',
+    source: 'principle_derivation',
+    recommendationState: mapRecommendationState(principleStatus),
+    trajectorySummary: {
+      principleId: id,
+      painPreventedCount: painCount,
+      lastPainPreventedAt: lastPainAt,
+      derivedFromPainIds: painIds,
+    },
+    createdAt: isString(createdAt) ? createdAt : new Date().toISOString(),
   };
 }
 
 /**
- * Validate the full PainEvidenceListData response.
- * Returns a degraded result with reason if the envelope is malformed (ERR-002).
+ * Validate the principles list response and derive pain evidence.
+ * Uses existing /api/principles data — no new backend route needed.
  */
-export function parsePainEvidenceListResponse(raw: unknown): PainEvidenceListData | PainEvidenceDegraded {
+export function derivePainEvidenceFromPrinciplesList(raw: unknown): PainEvidenceListData | PainEvidenceDegraded {
   if (!isRecord(raw)) {
     return {
       reason: 'Invalid response format from server',
@@ -123,39 +142,26 @@ export function parsePainEvidenceListResponse(raw: unknown): PainEvidenceListDat
     };
   }
 
-  const { generatedAt, evidence: rawEvidence, note: rawNote } = raw;
-  if (!isString(generatedAt)) {
+  const { principles: rawPrinciples } = raw;
+  if (!Array.isArray(rawPrinciples)) {
     return {
-      reason: 'Response missing generatedAt timestamp',
+      reason: 'Response missing principles array',
       nextAction: 'Try refreshing the page.',
     };
   }
 
-  if (!Array.isArray(rawEvidence)) {
-    // Missing evidence array could mean the endpoint doesn't exist yet
-    const note = isString(rawNote) ? rawNote : undefined;
-    return {
-      evidence: [],
-      generatedAt,
-      ...(note ? { note } : {}),
-    };
-  }
-
-  // Validate each element (ERR-005/007: validate array element types)
+  // Derive evidence from each principle (ERR-005/007: validate array element types)
   const evidence: PainEvidence[] = [];
-  for (const item of rawEvidence) {
-    const parsed = parsePainEvidence(item);
-    if (parsed !== null) {
-      evidence.push(parsed);
+  for (const item of rawPrinciples) {
+    const derived = derivePainEvidenceFromPrinciple(item);
+    if (derived !== null) {
+      evidence.push(derived);
     }
   }
 
-  const note = isString(rawNote) ? rawNote : undefined;
-
   return {
     evidence,
-    generatedAt,
-    ...(note ? { note } : {}),
+    generatedAt: new Date().toISOString(),
   };
 }
 

@@ -5,9 +5,9 @@ import { SectionTitle } from '../../components/layout/section-title.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
-import { fetchPainEvidence } from '../../api.js';
+import { fetchPrinciples } from '../../api.js';
 import {
-  parsePainEvidenceListResponse,
+  derivePainEvidenceFromPrinciplesList,
   isDegraded,
   getErrorMessage,
 } from './PainEvidenceValidators.js';
@@ -27,31 +27,20 @@ export function PainPage() {
 
   const loadData = useCallback(async () => {
     setState({ status: 'loading' });
-    const result = await fetchPainEvidence();
+    const result = await fetchPrinciples();
 
     if (!result.success) {
-      // API endpoint may not exist yet — show honest boundary
-      if (result.error?.includes('404') || result.error?.includes('not found')) {
-        setState({
-          status: 'degraded',
-          degraded: {
-            reason: t('pages.pain.capabilityBoundary'),
-            nextAction: t('pages.pain.capabilityNextAction'),
-          },
-        });
-      } else {
-        setState({ status: 'error', message: result.error ?? 'Unknown error' });
-      }
+      setState({ status: 'error', message: result.error ?? 'Unknown error' });
       return;
     }
 
-    const parsed = parsePainEvidenceListResponse(result.data);
-    if (isDegraded(parsed)) {
-      setState({ status: 'degraded', degraded: parsed });
+    const derived = derivePainEvidenceFromPrinciplesList(result.data);
+    if (isDegraded(derived)) {
+      setState({ status: 'degraded', degraded: derived });
     } else {
-      setState({ status: 'loaded', data: parsed });
+      setState({ status: 'loaded', data: derived });
     }
-  }, [t]);
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -175,9 +164,7 @@ interface EvidenceCardProps {
 }
 
 function EvidenceCard({ evidence, expanded, onToggle, t }: EvidenceCardProps) {
-  const sourceLabel = evidence.source === 'tool_call'
-    ? t('pages.pain.sourceToolCall')
-    : t('pages.pain.sourcePrompt');
+  const sourceLabel = t('pages.pain.sourcePrincipleDerivation');
 
   const stateVariant = evidence.recommendationState === 'pending'
     ? 'amber'
@@ -209,18 +196,14 @@ function EvidenceCard({ evidence, expanded, onToggle, t }: EvidenceCardProps) {
         {/* Layer 2: Context and behavior — why */}
         <SectionTitle>{t('pages.pain.layerContext')}</SectionTitle>
         <div className="space-y-3 mb-4">
-          <div>
-            <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
-              {t('pages.pain.fieldContext')}
+          {evidence.context && (
+            <div>
+              <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
+                {t('pages.pain.fieldContext')}
+              </div>
+              <p className="text-ink-2 text-sm leading-relaxed">{evidence.context}</p>
             </div>
-            <p className="text-ink-2 text-sm leading-relaxed">{evidence.context}</p>
-          </div>
-          <div>
-            <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
-              {t('pages.pain.fieldAgentBehavior')}
-            </div>
-            <p className="text-ink-2 text-sm leading-relaxed">{evidence.agentBehavior}</p>
-          </div>
+          )}
           {evidence.expectedBehavior && (
             <div>
               <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4 mb-1">
@@ -231,19 +214,29 @@ function EvidenceCard({ evidence, expanded, onToggle, t }: EvidenceCardProps) {
           )}
         </div>
 
-        {/* Layer 3: Full trajectory — collapsed by default (D section) */}
+        {/* Layer 3: Pain metadata — collapsed by default (D section) */}
         <details open={expanded} onToggle={onToggle}>
           <summary className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 cursor-pointer select-none hover:text-ink transition-colors">
             {t('pages.pain.trajectoryToggle')}
           </summary>
           <div className="mt-3 p-3 bg-paper-2 border border-line rounded-[var(--radius-sm)]">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13px]">
-              <span className="font-mono text-ink-4">{t('pages.pain.trajectoryTaskId')}</span>
-              <span className="font-mono text-ink-2">{evidence.trajectorySummary.taskId}</span>
-              <span className="font-mono text-ink-4">{t('pages.pain.trajectoryTool')}</span>
-              <span className="font-mono text-ink-2">{evidence.trajectorySummary.toolName}</span>
-              <span className="font-mono text-ink-4">{t('pages.pain.trajectoryTime')}</span>
-              <span className="font-mono text-ink-2">{formatDate(evidence.trajectorySummary.timestamp)}</span>
+              <span className="font-mono text-ink-4">{t('pages.pain.trajectoryPrincipleId')}</span>
+              <span className="font-mono text-ink-2">{evidence.trajectorySummary.principleId}</span>
+              <span className="font-mono text-ink-4">{t('pages.pain.trajectoryPainCount')}</span>
+              <span className="font-mono text-ink-2">{evidence.trajectorySummary.painPreventedCount}</span>
+              {evidence.trajectorySummary.lastPainPreventedAt && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.trajectoryLastPain')}</span>
+                  <span className="font-mono text-ink-2">{formatDate(evidence.trajectorySummary.lastPainPreventedAt)}</span>
+                </>
+              )}
+              {evidence.trajectorySummary.derivedFromPainIds.length > 0 && (
+                <>
+                  <span className="font-mono text-ink-4">{t('pages.pain.trajectoryPainIds')}</span>
+                  <span className="font-mono text-ink-2">{evidence.trajectorySummary.derivedFromPainIds.join(', ')}</span>
+                </>
+              )}
             </div>
           </div>
         </details>
