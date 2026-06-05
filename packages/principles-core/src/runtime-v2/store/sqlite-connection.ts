@@ -334,10 +334,19 @@ export class SqliteConnection {
         channel TEXT NOT NULL,
         action TEXT NOT NULL,
         target_ref TEXT NOT NULL,
-        activated_at TEXT NOT NULL
+        activated_at TEXT NOT NULL,
+        deactivated_at TEXT
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_activations_idempotency ON activations(idempotency_key);
     `);
+
+    // Migration: add deactivated_at column if missing (existing databases)
+    {
+      const activationCols = db.prepare("PRAGMA table_info(activations)").all() as { name: string }[];
+      if (!activationCols.some(c => c.name === 'deactivated_at')) {
+        db.exec('ALTER TABLE activations ADD COLUMN deactivated_at TEXT');
+      }
+    }
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS confirm_first_state (

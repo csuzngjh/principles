@@ -32,6 +32,7 @@ function isMissingTableError(err: unknown): boolean {
 
 export class ActivationsConsoleModel {
   private readConnection: SqliteConnection | null = null;
+  private writeConnection: SqliteConnection | null = null;
   private readonly workspaceDir: string;
 
   constructor(workspaceDir: string) {
@@ -43,6 +44,13 @@ export class ActivationsConsoleModel {
       this.readConnection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     }
     return this.readConnection;
+  }
+
+  private getWriteConnection(): SqliteConnection {
+    if (!this.writeConnection) {
+      this.writeConnection = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
+    }
+    return this.writeConnection;
   }
 
   async getActivations(): Promise<ActivationsResponse> {
@@ -90,7 +98,7 @@ export class ActivationsConsoleModel {
       action: record.action,
       targetRef: record.targetRef,
       activatedAt: record.activatedAt,
-      status: 'active' as const,
+      status: record.deactivatedAt === null ? 'active' as const : 'inactive' as const,
     }));
 
     return {
@@ -99,10 +107,34 @@ export class ActivationsConsoleModel {
     };
   }
 
-  dispose(): void {
-    if (this.readConnection) {
-      try { this.readConnection.close(); } catch (err) { console.warn('ActivationsConsoleModel.dispose: failed to close connection:', err instanceof Error ? err.message : String(err)); }
-      this.readConnection = null;
+  async deactivateActivation(activationId: string): Promise<{ ok: true } | { ok: false; reason: string; nextAction: string }> {
+    const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
+    if (!fs.existsSync(stateDbPath)) {
+      return { ok: false, reason: 'state.db not found — workspace may not be initialized', nextAction: 'Ensure the workspace has been initialized with PD before disabling activations.' };
     }
+
+    const conn = this.getWriteConnection();
+    const activationStore = new SqliteActivationStateStore(conn);
+
+    try {
+      const deactivated = await activationStore.deactivateActivation(activationId, new Date().toISOString());
+      if (!deactivated) {
+        return { ok: false, reason: `Activation '${activationId}' not found or already inactive`, nextAction: 'Refresh the activation list and verify the activation ID is correct.' };
+      }
+      return { ok: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, reason: `Failed to deactivate activation: ${message}`, nextAction: 'Check server logs for details. The activation state has not been changed.' };
+    }
+  }
+
+  dispose(): void {
+    for (const conn of [this.readConnection, this.writeConnection]) {
+      if (conn) {
+        try { conn.close(); } catch (err) { console.warn('ActivationsConsoleModel.dispose: failed to close connection:', err instanceof Error ? err.message : String(err)); }
+      }
+    }
+    this.readConnection = null;
+    this.writeConnection = null;
   }
 }
