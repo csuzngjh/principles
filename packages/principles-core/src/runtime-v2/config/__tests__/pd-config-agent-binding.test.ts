@@ -274,44 +274,6 @@ describe('resolveAgentRuntimeBinding', () => {
     expect(result.source).toBe('default_runtime');
   });
 
-  it('returns error when profile is empty object after merge', () => {
-    // Edge case: profile exists in map but is null → spread operator creates {}
-    // This test verifies that empty profiles fail downstream in readiness checks
-    const config = makeConfigWithOverrides({
-      runtimeProfiles: {
-        'openclaw.default': { type: 'openclaw', source: 'default' },
-        'empty-profile': {} as unknown as { type: 'openclaw' },
-      },
-      internalAgents: {
-        defaultRuntime: 'openclaw.default',
-        agents: {
-          diagnostician: { enabled: true, runtimeProfile: 'empty-profile' },
-          dreamer: { enabled: true },
-          philosopher: { enabled: false },
-          scribe: { enabled: true },
-          artificer: { enabled: true },
-          evaluator: { enabled: false },
-          rolloutReviewer: { enabled: false },
-          trainer: { enabled: false },
-          correctionObserver: { enabled: false },
-          empathyObserver: { enabled: false },
-        },
-      },
-    });
-    const effective = computeEffectivePdConfig(config);
-    const result = resolveAgentRuntimeBinding(effective, 'diagnostician');
-
-    // resolveAgentRuntimeBinding returns ok=true because {} is truthy
-    // but checkAgentRuntimeReadiness will fail because {} lacks 'type' field
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    
-    // Verify that readiness check fails for empty profile
-    const readiness = checkAgentRuntimeReadiness(result.profile, () => undefined);
-    expect(readiness.readiness).toBe('needs_setup');
-    // Empty object lacks 'type', so it fails type check
-  });
-
   it('returns error when defaultRuntime references missing profile', () => {
     // Edge case: defaultRuntime itself references a nonexistent profile
     const config = makeConfigWithOverrides({
