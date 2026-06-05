@@ -429,3 +429,107 @@ describe("Owner reflection three questions", () => {
     expect(q3).toMatch(/回滚|错了/);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// 12. Validators use isRecord + Object.hasOwn + per-field checks (H section)
+// ════════════════════════════════════════════════════════════════════════════
+describe("Validators use isRecord + Object.hasOwn + per-field checks", () => {
+  it("PrinciplesPage defines isRecord helper", () => {
+    expect(principlesPageSrc).toMatch(/function isRecord/);
+  });
+
+  it("PrinciplesPage uses Object.hasOwn for key checks", () => {
+    expect(principlesPageSrc).toMatch(/Object\.hasOwn/);
+  });
+
+  it("PrinciplesPage validates each principle element's required fields", () => {
+    // Must check id, text, status, updatedAt, createdAt per item
+    expect(principlesPageSrc).toMatch(/Object\.hasOwn\(item, "id"\)/);
+    expect(principlesPageSrc).toMatch(/Object\.hasOwn\(item, "text"\)/);
+    expect(principlesPageSrc).toMatch(/Object\.hasOwn\(item, "status"\)/);
+  });
+
+  it("PrinciplesPage validates each approval group element's fields", () => {
+    expect(principlesPageSrc).toMatch(/Object\.hasOwn\(g, "principleId"\)/);
+    expect(principlesPageSrc).toMatch(/Object\.hasOwn\(g, "status"\)/);
+    expect(principlesPageSrc).toMatch(/Object\.hasOwn\(g, "records"\)/);
+  });
+
+  it("PrinciplesPage validates each approval record element's fields", () => {
+    expect(principlesPageSrc).toMatch(/Object\.hasOwn\(r, "id"\)/);
+    expect(principlesPageSrc).toMatch(/Object\.hasOwn\(r, "channel"\)/);
+  });
+
+  it("PrincipleDetailPage defines isRecord helper", () => {
+    expect(principleDetailSrc).toMatch(/function isRecord/);
+  });
+
+  it("PrincipleDetailPage uses Object.hasOwn for key checks", () => {
+    expect(principleDetailSrc).toMatch(/Object\.hasOwn/);
+  });
+
+  it("PrincipleDetailPage validates principle detail fields", () => {
+    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(p, "id"\)/);
+    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(p, "text"\)/);
+    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(p, "status"\)/);
+    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(p, "rules"\)/);
+  });
+
+  it("PrincipleDetailPage validates lifecycle adherence fields", () => {
+    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(a, "insufficientData"\)/);
+    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(a, "note"\)/);
+  });
+
+  it("no shallow 'as Record<string, unknown>' cast without isRecord guard", () => {
+    // After the fix, the pattern "data as Record<string, unknown>" should not
+    // appear in the new code (only the final "as unknown as T" after validation)
+    const lines = principlesPageSrc.split("\n");
+    for (const line of lines) {
+      if (line.includes("as Record<string, unknown>") && !line.includes("is Record<string, unknown>")) {
+        // This is a cast, not a type guard — should not exist in new code
+        expect.fail(`Found shallow cast in PrinciplesPage: ${line.trim()}`);
+      }
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 13. Grouped decision applies to all records (P1 fix)
+// ════════════════════════════════════════════════════════════════════════════
+describe("Grouped decision applies to all records", () => {
+  it("PrincipleDetailPage has applyDecisionToAllRecords function", () => {
+    expect(principleDetailSrc).toMatch(/applyDecisionToAllRecords/);
+  });
+
+  it("applyDecisionToAllRecords iterates all records in the group", () => {
+    expect(principleDetailSrc).toMatch(/for.*record.*of.*records/);
+  });
+
+  it("partial failure is reported with specific count (fail loud)", () => {
+    expect(principleDetailSrc).toMatch(/partialFailure/);
+    expect(principleDetailSrc).toMatch(/failedCount/);
+    expect(principleDetailSrc).toMatch(/totalCount/);
+  });
+
+  it("partialFailure i18n key exists in both languages", () => {
+    expect(getPagesKey("principles.detail.partialFailure")).toBeTruthy();
+    expect(getPagesKeyZh("principles.detail.partialFailure")).toBeTruthy();
+  });
+
+  it("approve does NOT only process records[0]", () => {
+    // The old pattern "approvalGroup.records[0]" should not appear in confirmApprove
+    const approveSection = principleDetailSrc.substring(
+      principleDetailSrc.indexOf("confirmApprove"),
+      principleDetailSrc.indexOf("handleReject"),
+    );
+    expect(approveSection).not.toMatch(/records\[0\]/);
+  });
+
+  it("reject does NOT only process records[0]", () => {
+    const rejectSection = principleDetailSrc.substring(
+      principleDetailSrc.indexOf("confirmReject"),
+      principleDetailSrc.indexOf("handlePark"),
+    );
+    expect(rejectSection).not.toMatch(/records\[0\]/);
+  });
+});

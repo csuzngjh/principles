@@ -21,25 +21,52 @@ import type {
 } from "../../api.js";
 
 // ── Runtime validation (H section) ──────────────────────────────────────────
+function isString(v: unknown): v is string {
+  return typeof v === "string";
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 function validatePrincipleDetail(data: unknown): PrincipleDetailData | null {
-  if (!data || typeof data !== "object") return null;
-  const d = data as Record<string, unknown>;
-  if (!d.principle || typeof d.principle !== "object") return null;
-  return d as unknown as PrincipleDetailData;
+  if (!isRecord(data)) return null;
+  if (!Object.hasOwn(data, "principle") || !isRecord(data.principle)) return null;
+  const p = data.principle;
+  if (!Object.hasOwn(p, "id") || !isString(p.id)) return null;
+  if (!Object.hasOwn(p, "text") || !isString(p.text)) return null;
+  if (!Object.hasOwn(p, "status") || !isString(p.status)) return null;
+  if (!Object.hasOwn(p, "rules") || !Array.isArray(p.rules)) return null;
+  return data as unknown as PrincipleDetailData;
 }
 
 function validateApprovalsGrouped(data: unknown): ApprovalsGroupedData | null {
-  if (!data || typeof data !== "object") return null;
-  const d = data as Record<string, unknown>;
-  if (!Array.isArray(d.groups)) return null;
-  return d as unknown as ApprovalsGroupedData;
+  if (!isRecord(data)) return null;
+  if (!Object.hasOwn(data, "groups") || !Array.isArray(data.groups)) return null;
+  for (const g of data.groups) {
+    if (!isRecord(g)) return null;
+    if (!Object.hasOwn(g, "principleId") || !isString(g.principleId)) return null;
+    if (!Object.hasOwn(g, "status") || !isString(g.status)) return null;
+    if (!Object.hasOwn(g, "records") || !Array.isArray(g.records)) return null;
+    for (const r of g.records) {
+      if (!isRecord(r)) return null;
+      if (!Object.hasOwn(r, "id") || !isString(r.id)) return null;
+      if (!Object.hasOwn(r, "channel") || !isString(r.channel)) return null;
+    }
+  }
+  return data as unknown as ApprovalsGroupedData;
 }
 
 function validateLifecycleMetrics(data: unknown): LifecycleMetricsData | null {
-  if (!data || typeof data !== "object") return null;
-  const d = data as Record<string, unknown>;
-  if (!d.adherence || typeof d.adherence !== "object") return null;
-  return d as unknown as LifecycleMetricsData;
+  if (!isRecord(data)) return null;
+  if (!Object.hasOwn(data, "adherence") || !isRecord(data.adherence)) return null;
+  const a = data.adherence;
+  if (!Object.hasOwn(a, "insufficientData") || typeof a.insufficientData !== "boolean") return null;
+  if (!Object.hasOwn(a, "note") || !isString(a.note)) return null;
+  // rate can be number or null
+  if (Object.hasOwn(a, "rate") && a.rate !== null && typeof a.rate !== "number") return null;
+  if (!Object.hasOwn(data, "ruleMetrics") || !Array.isArray(data.ruleMetrics)) return null;
+  return data as unknown as LifecycleMetricsData;
 }
 
 // ── Trajectory stages for Layer 3 ───────────────────────────────────────────
@@ -117,23 +144,56 @@ export function PrincipleDetailPage() {
   const handleApprove = () => setShowConfirm(true);
   const cancelConfirm = () => setShowConfirm(false);
 
+  // ── Apply decision to all records in the group ──────────────────────────
+  // Constraint: "多通道审批记录在 UI 上收拢成对一条原则的单次治理决策"
+  // When owner approves/rejects a principle, ALL pending records must receive
+  // the same decision. Partial failure is reported loudly (ERR-002 / EP-03).
+  async function applyDecisionToAllRecords(
+    action: "approve" | "reject",
+    reason?: string,
+  ): Promise<{ allSucceeded: boolean; failedCount: number; totalCount: number }> {
+    if (!approvalGroup) return { allSucceeded: false, failedCount: 0, totalCount: 0 };
+
+    const records = approvalGroup.records;
+    let failedCount = 0;
+
+    for (const record of records) {
+      const result =
+        action === "approve"
+          ? await approveApproval(record.id)
+          : await rejectApproval(record.id, reason ?? "");
+
+      if (!result.success) {
+        failedCount++;
+      }
+    }
+
+    return {
+      allSucceeded: failedCount === 0,
+      failedCount,
+      totalCount: records.length,
+    };
+  }
+
   const confirmApprove = async () => {
     if (!approvalGroup || actionLoading) return;
     setActionLoading(true);
     try {
-      // Approve the first pending record in the group
-      const pendingRecord = approvalGroup.records[0];
-      if (!pendingRecord) {
-        toast.error(t("principles.detail.approveFailed"));
-        return;
-      }
-      const result = await approveApproval(pendingRecord.id);
-      if (result.success) {
+      const { allSucceeded, failedCount, totalCount } = await applyDecisionToAllRecords("approve");
+      if (allSucceeded) {
         toast.success(t("principles.detail.approved"));
         setShowConfirm(false);
         loadData();
       } else {
-        toast.error(t("principles.detail.approveFailed"));
+        // Partial failure — fail loud (EP-03)
+        toast.error(
+          t("principles.detail.partialFailure", {
+            defaultValue: `批准完成，但 ${failedCount}/${totalCount} 条记录失败。请检查后重试。`,
+            failedCount,
+            totalCount,
+          }),
+        );
+        loadData();
       }
     } catch {
       toast.error(t("principles.detail.approveFailed"));
@@ -152,19 +212,22 @@ export function PrincipleDetailPage() {
     if (!approvalGroup || !rejectReason.trim() || actionLoading) return;
     setActionLoading(true);
     try {
-      const pendingRecord = approvalGroup.records[0];
-      if (!pendingRecord) {
-        toast.error(t("principles.detail.rejectFailed"));
-        return;
-      }
-      const result = await rejectApproval(pendingRecord.id, rejectReason.trim());
-      if (result.success) {
+      const { allSucceeded, failedCount, totalCount } = await applyDecisionToAllRecords("reject", rejectReason.trim());
+      if (allSucceeded) {
         toast.success(t("principles.detail.rejected"));
         setShowRejectInput(false);
         setRejectReason("");
         loadData();
       } else {
-        toast.error(t("principles.detail.rejectFailed"));
+        // Partial failure — fail loud (EP-03)
+        toast.error(
+          t("principles.detail.partialFailure", {
+            defaultValue: `拒绝完成，但 ${failedCount}/${totalCount} 条记录失败。请检查后重试。`,
+            failedCount,
+            totalCount,
+          }),
+        );
+        loadData();
       }
     } catch {
       toast.error(t("principles.detail.rejectFailed"));

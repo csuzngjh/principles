@@ -71,18 +71,45 @@ function isString(v: unknown): v is string {
   return typeof v === "string";
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every(isString);
+}
+
 function validatePrinciplesData(data: unknown): PrinciplesListData | null {
-  if (!data || typeof data !== "object") return null;
-  const d = data as Record<string, unknown>;
-  if (!Array.isArray(d.principles)) return null;
-  return d as unknown as PrinciplesListData;
+  if (!isRecord(data)) return null;
+  if (!Object.hasOwn(data, "principles") || !Array.isArray(data.principles)) return null;
+  // Validate each principle element has required string fields
+  for (const item of data.principles) {
+    if (!isRecord(item)) return null;
+    if (!Object.hasOwn(item, "id") || !isString(item.id)) return null;
+    if (!Object.hasOwn(item, "text") || !isString(item.text)) return null;
+    if (!Object.hasOwn(item, "status") || !isString(item.status)) return null;
+    if (!Object.hasOwn(item, "updatedAt") || !isString(item.updatedAt)) return null;
+    if (!Object.hasOwn(item, "createdAt") || !isString(item.createdAt)) return null;
+  }
+  return data as unknown as PrinciplesListData;
 }
 
 function validateApprovalsGrouped(data: unknown): ApprovalsGroupedData | null {
-  if (!data || typeof data !== "object") return null;
-  const d = data as Record<string, unknown>;
-  if (!Array.isArray(d.groups)) return null;
-  return d as unknown as ApprovalsGroupedData;
+  if (!isRecord(data)) return null;
+  if (!Object.hasOwn(data, "groups") || !Array.isArray(data.groups)) return null;
+  // Validate each group element
+  for (const g of data.groups) {
+    if (!isRecord(g)) return null;
+    if (!Object.hasOwn(g, "principleId") || !isString(g.principleId)) return null;
+    if (!Object.hasOwn(g, "status") || !isString(g.status)) return null;
+    if (!Object.hasOwn(g, "records") || !Array.isArray(g.records)) return null;
+    for (const r of g.records) {
+      if (!isRecord(r)) return null;
+      if (!Object.hasOwn(r, "id") || !isString(r.id)) return null;
+      if (!Object.hasOwn(r, "channel") || !isString(r.channel)) return null;
+    }
+  }
+  return data as unknown as ApprovalsGroupedData;
 }
 
 // ── Component ───────────────────────────────────────────────────────────────

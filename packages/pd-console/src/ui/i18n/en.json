@@ -416,6 +416,7 @@
         "parked": "Parked",
         "viewActivation": "View activation status",
         "approveFailed": "Approval failed. Please try again later.",
+        "partialFailure": "Decision applied, but {{failedCount}}/{{totalCount}} records failed. Please verify and retry.",
         "rejectFailed": "Rejection failed. Please try again later."
       }
     },
