@@ -9,7 +9,7 @@
 
 这是本批**唯一允许碰后端的工单**，且只碰**返回结构**，不碰数据访问层、不碰回路。
 目标：把已计算但未暴露的 lifecycle 指标（MVP6）暴露给前端，并把激活记录从
-`artifactId` join 到 Owner 可读的 `principleId`。两者都是"数据契约微调"，不是新回路。
+`artifactId` join 到拥有者可读的 `principleId`。两者都是"数据契约微调"，不是新回路。
 
 ## What to build
 

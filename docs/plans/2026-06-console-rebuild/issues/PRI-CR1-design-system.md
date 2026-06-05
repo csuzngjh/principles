@@ -3,14 +3,15 @@
 **Type**: AFK
 **Priority**: P0（最先做，所有页面依赖）
 **Blocked by**: 无
-**必读**: `../01-shared-constraints.md`（**A.1 技术栈、A.2 主题系统**、B 节全部、E 节）、`packages/pd-console/design-prototype/governance-focus.html` 与 `principle-review.html`（token 参考实现，含亮色/暗色双模式）、`docs/brand/PD_BRAND_CONSTITUTION.md` §5
+**必读**: `../01-shared-constraints.md`（**A.1 技术栈、A.2 主题系统**、B 节全部、E 节）、`packages/pd-console/design-prototype/index.html`（token 参考实现，含亮色/暗色双模式）、`docs/brand/PD_BRAND_CONSTITUTION.md` §5
 
 ## 背景
 
 当前 `src/ui/styles/globals.css` 的 `@theme` 用的是偏亮的 SaaS 蓝
 （`--color-primary: hsl(210 80% 50%)`），偏离品牌宪章 §5.2 要求的暖纸背景 +
-Governance Blue。本工单把品牌视觉基线固化为 design tokens 和一组基础组件样式，
-作为后续所有页面的唯一视觉来源。
+治理蓝。本工单把品牌视觉基线固化为 design tokens 和一组基础组件样式，
+作为后续所有页面的唯一视觉来源。设计方向已从冷调 Blueprint 切换为 Warm Paper +
+Blueprint 网格（暖纸底色 + 蓝图网格 + 低饱和治理蓝），详见 B 节。
 
 ## What to build
 
@@ -40,7 +41,8 @@ Governance Blue。本工单把品牌视觉基线固化为 design tokens 和一�
 
 ## Acceptance criteria
 
-- [ ] `globals.css` 不再包含 `hsl(210 80% 50%)` 这类高饱和蓝；主色为 `--gov: #1E3A5F`（B.1）。
+- [ ] `globals.css` 不再包含 `hsl(210 80% 50%)` 这类高饱和蓝；主色为 `--gov: #1e3a5f`（B.1）。
+- [ ] 页面背景为暖纸底色 `--paper: #f7f3ea`（不是冷调灰 `#F0F1F4`）。
 - [ ] 所有颜色集中在 `@theme`，页面/组件**不出现**硬编码十六进制色值（除 token 定义处）。
 - [ ] 暗色模式 token 完整实现（B.1.1），通过 `[data-theme="dark"]` 选择器覆盖，
       **不是** `.dark` class（A.2）。
@@ -54,9 +56,10 @@ Governance Blue。本工单把品牌视觉基线固化为 design tokens 和一�
 
 ## 实施提示（防漂移）
 
-- 直接把 `design-prototype/governance-focus.html` 的 `:root` 段当作 token 的**事实
+- 直接把 `design-prototype/index.html` 的 `:root` 段当作 token 的**事实
   来源**逐条搬运，不要自行调整色值或新增颜色。暗色 token 参考同文件的
-  `[data-theme="dark"]` 段。
+  `[data-theme="dark"]` 段。注意：设计方向已从冷调 Blueprint 切换为 Warm Paper，
+  页面背景为暖纸底色 `#f7f3ea`，不是冷调灰 `#F0F1F4`。
 - 不要引入新依赖（除 `@fontsource/jetbrains-mono`）、新 UI 库、新动画库。只用现有
   Tailwind v4 + shadcn。
 - 组件改造保持 API 兼容（props 不变），只改样式，避免破坏未迁移页面的编译。

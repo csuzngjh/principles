@@ -3,13 +3,13 @@
 **Type**: AFK
 **Priority**: P1
 **Blocked by**: PRI-CR1, PRI-CR2, PRI-CR8
-**必读**: `../01-shared-constraints.md`（全节）、`packages/pd-console/design-prototype/governance-focus.html`（像素级视觉参考）
+**必读**: `../01-shared-constraints.md`（全节）、`packages/pd-console/design-prototype/index.html`（像素级视觉参考，查看 focus 屏幕段）
 
 ## 背景
 
 首页是整个控制台心智的锚点。它的**唯一职责**是回答"现在该做什么判断"，是一个
-判断队列，**不是**概览大屏。视觉与结构以 `design-prototype/governance-focus.html`
-为准（已含原型 token、卡片、证据 inset well、停滞信号、章节节奏）。
+判断队列，**不是**概览大屏。视觉与结构以 `design-prototype/index.html` 的 focus
+屏幕段为准（已含原型 token、卡片、证据 inset well、停滞信号、章节节奏）。
 
 ## What to build
 
@@ -30,7 +30,7 @@
 
 ## Acceptance criteria
 
-- [ ] 视觉与 `design-prototype/governance-focus.html` 一致（布局、间距、字号、颜色、
+- [ ] 视觉与 `design-prototype/index.html` focus 屏幕段一致（布局、间距、字号、颜色、
       hover、证据 inset well、停滞信号样式），用 CR1 的 token，无硬编码色值。
 - [ ] 首页**不出现**任何指标图表、趋势线、彩色指标块、排行榜、全局健康灯。
 - [ ] "待审查"数据来自 CR8 的审批聚合（一条原则一个条目），点击进入原则审查页。
@@ -50,7 +50,7 @@
 
 ## MVP 三问
 
-- **不做会怎样**：没有判断入口，Owner 无法被引导进入慢思考决策。
+- **不做会怎样**：没有判断入口，拥有者无法被引导进入慢思考决策。
 - **怎么观察**：打开首页即见判断队列；点击卡片进入对应详情页。
 - **怎么关闭**：页面级，路由摘除即回退。
 

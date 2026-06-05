@@ -3,14 +3,17 @@
 **Type**: AFK
 **Priority**: P1
 **Blocked by**: PRI-CR1, PRI-CR2, PRI-CR8
-**必读**: `../01-shared-constraints.md`（全节）、`packages/pd-console/design-prototype/principle-review.html`（像素级视觉参考）
+**必读**: `../01-shared-constraints.md`（全节）、`packages/pd-console/design-prototype/index.html`（像素级视觉参考，查看 review 屏幕段）
 
 ## 背景
 
-这是 Owner 做最高质量判断的页面，吸收原 `ApprovalsPage` 与 `PrinciplesPage` 的
+这是拥有者做最高质量判断的页面，吸收原 `ApprovalsPage` 与 `PrinciplesPage` 的
 详情。一条原则的"审查"和"批准/拒绝"是**同一个判断动作**，合并为一页。多通道审批
 记录在 UI 上**收拢成对一条原则的单次治理决策**（数据来自 CR8 聚合）。视觉以
-`design-prototype/principle-review.html` 为准（含三层信息结构）。
+`design-prototype/index.html` 的 review 屏幕段为准（含三层信息结构、拥有者决策三问）。
+
+**样例原则规则（E.2）**：禁止使用"confirm-first / 变更前确认需求"作为默认样例，
+应使用"修改配置前展示影响范围"等中性种子用户场景。
 
 ## What to build
 
@@ -23,7 +26,7 @@
      "这是面向未来相似场景的行为政策，可批准/修改/拒绝/暂存"。
    - **第二层 为什么**：适用场景 / 预期行为 / 不适用场景 / 可能副作用（来自原则元
      信息）；来自哪些行为证据（编号证据列表）。
-   - **第三层 完整轨迹**：`<details>` 默认折叠，展开显示 Evidence→诊断→提案→Owner
+   - **第三层 完整轨迹**：`<details>` 默认折叠，展开显示 Evidence→诊断→提案→拥有者
      审查→部署通道→可观察行为 的轨迹。
 3. **通道如实呈现**（F.4）：显示"将通过 提示通道 激活 · 可回滚"，**不放**选通道/
    选强度控件。
@@ -35,10 +38,10 @@
 
 ## Acceptance criteria
 
-- [ ] 视觉与 `design-prototype/principle-review.html` 一致（三层结构、inset、轨迹
-      折叠、吸底决策栏），用 CR1 token，无硬编码色值。
+- [ ] 视觉与 `design-prototype/index.html` review 屏幕段一致（三层结构、inset、轨迹
+      折叠、决策栏、拥有者决策三问），用 CR1 token，无硬编码色值。
 - [ ] 一条原则一个审查页；多通道审批记录被收拢为单次决策（数据来自 CR8 聚合），
-      Owner 不需要逐通道分别批。
+      拥有者不需要逐通道分别批。
 - [ ] 批准/拒绝走现有 `approvals.ts` 端点；拒绝必填理由。
 - [ ] 「修改措辞」为禁用占位且有诚实旁注；**不**伪造 modify 功能。
 - [ ] 通道区只读如实，无选通道/选强度控件。
@@ -59,7 +62,7 @@
 
 ## MVP 三问
 
-- **不做会怎样**：Owner 无法审查/批准原则，PD 治理核心动作缺失。
+- **不做会怎样**：拥有者无法审查/批准原则，PD 治理核心动作缺失。
 - **怎么观察**：进入详情可完成 批准/拒绝；列表状态更新。
 - **怎么关闭**：页面级，路由摘除即回退；后端审批端点不变。
 

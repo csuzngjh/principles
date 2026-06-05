@@ -118,7 +118,7 @@ src/ui/
   hooks/
     useAutoRefresh.ts            # 保留
     useDebounce.ts               # 保留
-    useKeyboardShortcuts.ts      # ★ 新增：Cmd+1~5 快捷键（J.3）
+    useKeyboardShortcuts.ts      # ★ 新增：Alt+1~0 快捷键（J.3）
     useUndoAction.ts             # ★ 新增：5 秒撤销窗口（J.2）
     # useBookmarks.ts            # CR2 删除
     # useKeyboardNavigation.ts   # CR2 删除（被 useKeyboardShortcuts 替代）
@@ -342,6 +342,36 @@ main ─────────────────────────
 - 合并前跑 `cd packages/pd-console && npm run build && npm run test && npm run lint`
 - 合并前跑 `npm run verify:merge`（如可用）
 
+### A.9.1 分支命名规则
+
+| 场景 | 分支名 | 示例 |
+|------|--------|------|
+| 主重构分支 | `feature/console-rebuild` | — |
+| 单个 CR 的子分支 | `feature/console-rebuild-cr<N>` | `feature/console-rebuild-cr1` |
+| 紧急修复 | `fix/console-rebuild-<desc>` | `fix/console-rebuild-dark-mode-contrast` |
+
+**规则**：
+- 所有 console 重做相关代码**必须**从 `feature/console-rebuild` 分出，不得直接在 `main` 上开发
+- 子分支完成后合并回 `feature/console-rebuild`（不是 `main`），用 squash merge 保持历史清晰
+- 禁止在 `main` 上直接 commit 任何 `packages/pd-console/` 下的文件
+
+### A.9.2 PR 规则
+
+1. **每个 CR 开一个 PR**，目标分支为 `feature/console-rebuild`（不是 `main`）
+2. **PR 标题格式**：`feat(console): CR<N> — <简要描述>`，如 `feat(console): CR1 — design tokens + base components`
+3. **PR 描述必须包含**：
+   - 对应的 Linear 工单链接
+   - 满足了哪些 F 节诚实约束
+   - 考虑了哪些 ERR 条目
+   - 跑了哪些测试命令及结果
+   - 视觉对比截图（如有 UI 变更）
+4. **PR 审查**：
+   - 每个 PR 至少需要一次 self-review（对照 I 节 DoD 逐条检查）
+   - AI 可以创建 PR 和推送代码，但**禁止 AI 合并 PR**
+   - 合并由 Owner 手动执行
+5. **最终合并**：CR10 验收通过后，Owner 将 `feature/console-rebuild` 合并到 `main`
+6. **禁止 force push**：任何情况下不得对 `feature/console-rebuild` 或 `main` 执行 `--force`
+
 ### A.10 构建管线
 
 当前构建流程不需要改动：
@@ -386,34 +416,30 @@ rg "/api/(health|tasks|status|activity|overview|gate|feedback|events|pipeline)" 
 ## B. Design Tokens（唯一配色与尺度来源）
 
 落地时写入 `src/ui/styles/globals.css` 的 `@theme`，替换现有偏亮的 SaaS 蓝。
-原型 `design-prototype/*.html` 顶部 `:root` 是这套 token 的参考实现。
+原型 `design-prototype/index.html` 顶部 `:root` 是这套 token 的参考实现。
 
-**设计方向：Blueprint** — 技术蓝图风格，冷调中性、锐角几何、等宽字体点缀、默认无阴影。
-气质：精密仪器面板，冷静、可信赖、不装饰。
+**设计方向：Warm Paper + Blueprint 网格** — 暖纸底色 + 蓝图网格 + 低饱和治理蓝。
+气质：安静的技术工作台，温暖但不随意，精密但不冰冷。
 
 ### B.1 颜色（HSL/HEX 二选一，全项目统一，禁止页面内自定义色值）
 
 | Token | 值 | 用途 |
 |-------|-----|------|
-| `--paper` | `#F0F1F4` | 页面背景（冷调灰纸） |
-| `--paper-edge` | `#E4E5E9` | 页面边缘 |
-| `--surface` | `#FFFFFF` | 卡片表面 |
-| `--surface-warm` | `#F6F7FA` | 次级表面 / hover |
-| `--surface-sunk` | `#E8E9ED` | 下沉证据区 inset well |
-| `--ink` | `#1A1D23` | 主文字 |
-| `--ink-2` | `#2E323A` | 次文字 |
-| `--ink-3` | `#4A4F5A` | 正文辅助 |
+| `--paper` | `#f7f3ea` | 页面背景（暖纸底色） |
+| `--paper-2` | `#f2ede3` | 页面边缘 / 次级背景 |
+| `--surface` | `#fbf8f0` | 卡片表面 |
+| `--panel` | `#fffdf7` | 面板 / 弹出层 |
+| `--ink` | `#1f2933` | 主文字 |
+| `--ink-2` | `#384150` | 次文字 |
+| `--ink-3` | `#525966` | 正文辅助 |
 | `--ink-4` | `#5F6774` | 弱化/标签（WCAG AA 对比度 ≥ 4.5:1） |
-| `--ink-5` | `#9CA3AF` | 仅装饰（不用于可读文字） |
-| `--line` | `#D1D5DB` | 主边框/分割线 |
-| `--line-2` | `#E5E7EB` | 次边框 |
-| `--gov` | `#1E3A5F` | **唯一主色** Blueprint Navy |
-| `--gov-2` | `#152D4A` | 主色按压态 |
-| `--gov-tint` | `#E1E8F0` | 选中导航/标签底 |
-| `--gov-tint-2` | `#CDD9E8` | 主色次级底 |
-| `--amber` / `--amber-tint` | `#8B5E1A` / `#EDE3CC` | 需要注意（非告警） |
-| `--green` / `--green-tint` | `#1A6B45` / `#D5E8DC` | 状态稳定 |
-| `--danger` | `#8C2F1E` | **仅真实风险**（如拒绝/不可逆），不用于制造紧张 |
+| `--line` | `#d7d1c4` | 主边框/分割线 |
+| `--line-2` | `#c7bfaf` | 次边框 |
+| `--gov` | `#1e3a5f` | **唯一主色** 治理蓝 |
+| `--gov-2` | `#2f557f` | 主色按压态 |
+| `--amber` | `#a66a2a` | 需要注意（非告警） |
+| `--green` | `#4d6b52` | 状态稳定 |
+| `--danger` | `#8b3a3a` | **仅真实风险**（如拒绝/不可逆），不用于制造紧张 |
 
 **硬规则**：
 - 每个画面**主色只用 `--gov` 一种**，强调色最多一种。
@@ -428,33 +454,28 @@ rg "/api/(health|tasks|status|activity|overview|gate|feedback|events|pipeline)" 
 
 | Token | 暗色值 | 说明 |
 |-------|--------|------|
-| `--paper` | `#0F1117` | 深色页面背景 |
-| `--paper-edge` | `#1A1C24` | 深色页面边缘 |
-| `--surface` | `#1A1D25` | 深色卡片表面 |
-| `--surface-warm` | `#22252E` | 深色次级表面 / hover |
-| `--surface-sunk` | `#14161E` | 深色下沉区 |
-| `--ink` | `#E5E7EB` | 深色主文字 |
-| `--ink-2` | `#C9CDD5` | 深色次文字 |
-| `--ink-3` | `#9CA3AF` | 深色正文辅助 |
+| `--paper` | `#151a20` | 深色页面背景 |
+| `--paper-2` | `#1b222a` | 深色次级背景 |
+| `--surface` | `#202832` | 深色卡片表面 |
+| `--panel` | `#242d38` | 深色面板 |
+| `--ink` | `#f1eee6` | 深色主文字 |
+| `--ink-2` | `#d3cec3` | 深色次文字 |
+| `--ink-3` | `#b0b8c5` | 深色正文辅助 |
 | `--ink-4` | `#7C8494` | 深色弱化（WCAG AA 对比度 ≥ 4.5:1） |
-| `--ink-5` | `#4B5563` | 深色装饰 |
-| `--line` | `#2E323A` | 深色主边框 |
-| `--line-2` | `#22252E` | 深色次边框 |
-| `--gov` | `#5B93C8` | 深色主色（提亮以保证对比度） |
-| `--gov-2` | `#7BAAD8` | 深色主色按压态 |
-| `--gov-tint` | `#1A2A3E` | 深色选中底 |
-| `--gov-tint-2` | `#1E3148` | 深色主色次级底 |
-| `--amber` / `--amber-tint` | `#D4A24E` / `#2A2218` | 深色需要注意 |
-| `--green` / `--green-tint` | `#4CAF7A` / `#1A2E22` | 深色状态稳定 |
-| `--danger` | `#D45A4A` | 深色真实风险 |
-| `--e1` | `none` | 深色默认无阴影 |
-| `--e2` | `0 1px 3px rgba(0,0,0,.25)` | 深色 hover 阴影 |
-| `--e3` | `0 2px 8px rgba(0,0,0,.35)` | 深色弹出阴影 |
+| `--line` | `#38414d` | 深色主边框 |
+| `--line-2` | `#4b5563` | 深色次边框 |
+| `--gov` | `#9db9d8` | 深色主色（提亮以保证对比度） |
+| `--gov-2` | `#c2d6ed` | 深色主色按压态 |
+| `--amber` | `#d4a15d` | 深色需要注意 |
+| `--green` | `#90b892` | 深色状态稳定 |
+| `--danger` | `#d28b8b` | 深色真实风险 |
+| `--shadow` | `none` | 深色默认无阴影 |
 
 **暗色模式硬规则**：
-- `--gov` 从 `#1E3A5F` 提亮为 `#5B93C8`，确保在 `#0F1117` 背景上对比度 ≥ 4.5:1。
-- 蓝图网格背景在暗色模式下使用 `--line-2`（更暗），保持可见但不刺眼。
-- 侧边栏在暗色模式下使用 `--surface`（`#1A1D25`），与主内容区形成层次。
+- `--gov` 从 `#1e3a5f` 提亮为 `#9db9d8`，确保在 `#151a20` 背景上对比度 ≥ 4.5:1。
+- 蓝图网格背景在暗色模式下使用 `color-mix(in srgb, var(--gov) 3.5%, transparent)`，
+  保持可见但不刺眼。
+- 侧边栏在暗色模式下使用 `--surface`（`#202832`），与主内容区形成层次。
 - 品牌 mark SVG 在暗色模式下自动适配（`stroke:var(--gov)` 跟随 token 变化）。
 - 切换按钮显示太阳图标（亮色模式）或月亮图标（暗色模式）。
 
@@ -462,9 +483,9 @@ rg "/api/(health|tasks|status|activity|overview|gate|feedback|events|pipeline)" 
 
 - 间距走 **8px 系统**（4/8/12/16/20/24/32/44/60…）。正文容器最大宽 **712px**，
   居中，左右留白充足（这是"慢思考"的物理实现，不要做满屏宽）。
-- 圆角：`--r-sm:3px / --r:4px / --r-lg:8px`（锐角几何，Blueprint 风格）。
-- 阴影三档：`--e1: none / --e2 / --e3`。**默认无阴影**（`--e1: none`），卡片仅用
-  边框；hover 时出现 `--e2` 阴影 + 边框加深。这是"平直到交互"哲学。
+- 圆角：`--r-sm:3px / --r:4px / --r-lg:8px`（锐角几何）。
+- 阴影：`--shadow: 0 18px 48px rgba(31, 41, 51, .08)`。卡片默认有阴影，
+  暗色模式 `--shadow: none`。
 - 动效：缓动统一 `cubic-bezier(.4,0,.2,1)`；过渡 120–180ms；**必须**包 `@media
   (prefers-reduced-motion: reduce)` 关闭动效。禁止高频动画、粒子、发光、脉冲。
 - **焦点样式**：所有可交互元素**必须**有 `:focus-visible` 样式（`outline: 2px solid
@@ -472,30 +493,31 @@ rg "/api/(health|tasks|status|activity|overview|gate|feedback|events|pipeline)" 
 
 ### B.3 字体
 
-- 字体栈：`--sans: "Inter","SF Pro Text",-apple-system,...,"Noto Sans SC","PingFang SC",...`。
-- 等宽字体栈：`--mono: "JetBrains Mono","SF Mono","Fira Code",monospace`。
-  **标签、元数据、时间戳、状态码**使用 `var(--mono)` 12px（Blueprint 特征）。
+- 字体栈：`--sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`。
+- 等宽字体栈：`--mono: "SFMono-Regular", "Cascadia Mono", "JetBrains Mono", Consolas, monospace`。
+  **标签、元数据、时间戳、状态码**使用 `var(--mono)` 12px。
 - 字号阶梯（光学）：页标题 29 / 卡标题 17 / 区标题 13 / 正文 15 / 卡正文 14 /
   辅助 13 / eyebrow·标签 11。
 - 大标题用负字距（`-.015em`），正文几乎不收。**所有数字用 `tabular-nums`**。
 
-### B.4 Blueprint 视觉特征
+### B.4 视觉特征（Warm Paper + Blueprint 网格）
 
-以下特征是 Blueprint 方向的标志性差异，开发时必须遵守：
+以下特征是 Warm Paper 方向的标志性差异，开发时必须遵守：
 
-1. **蓝图网格背景**：`.canvas` 区域使用 24px 方格网格（`repeating-linear-gradient`），
-   线色 `var(--line-2)`，营造技术图纸感。
-2. **侧边栏**：纯白 `var(--surface)` 背景，232px 宽，1px `var(--line)` 右边框。
-   Active 项：2px `var(--gov)` 左边框 + `var(--gov-tint)` 背景。无圆角背景。
+1. **蓝图网格背景**：`body` 使用 32px 方格网格（`linear-gradient`），
+   线色 `color-mix(in srgb, var(--gov) 3.5%, transparent)`，营造技术图纸感。
+2. **侧边栏**：`var(--surface)` 背景，1px `var(--line)` 右边框。
+   Active 项：`var(--gov)` 左边框 + 背景加深。无圆角背景。
 3. **品牌 mark**：门形 SVG，`var(--gov)` 描边，`fill: none`，1.5px stroke，
    外框 `rx="4"` + 描边而非填充。24×24 尺寸。
-4. **卡片 hover**：无 transform（无 translateY/scale），仅阴影出现 + 边框色加深。
+4. **卡片**：有阴影（`var(--shadow)`），hover 时阴影加深 + 边框色加深。
+   无 transform（无 translateY/scale）。
 5. **标签**：`border-radius: 2px`，`font-family: var(--mono)`，`font-size: 11px`，
    `letter-spacing: .02em`。方角等宽，像状态码。
-6. **节标题**：11px 大写等宽字，`letter-spacing: .1em`，`color: var(--ink-5)`，
-   底部 1px `var(--line-2)` 分割线。
+6. **节标题**：11px 大写等宽字，`letter-spacing: .1em`，`color: var(--ink-3)`，
+   底部 1px `var(--line)` 分割线。
 7. **按钮**：`border-radius: var(--r-sm)` (3px)，`font-size: 12.5px`，`padding: 6px 14px`。
-   比其他方向更紧凑。
+   紧凑风格。
 
 ---
 
@@ -543,7 +565,7 @@ Central、Agents、Tasks、Samples、Thinking Models、Trust/GFI Monitor（`/fee
 
 ## E. 文案规则（治理化语气，中英双语都遵守）
 
-- 语气：冷静、准确、克制、尊重 Owner，不夸张、不神化 AI。
+- 语气：冷静、准确、克制、尊重拥有者，不夸张、不神化 AI。
 - **必须用**的动词：批准 / 修改 / 拒绝 / 暂存 / 回滚 / 归档 / 查看证据 / 对比行为。
 - **禁止词**：自动优化 / 一键进化 / 永不犯错 / 彻底解决 / 智能修复 / AI 替你决定 /
   Burn pain / drive evolution / Optimize / Auto Fix / Evolve。
@@ -555,6 +577,36 @@ Central、Agents、Tasks、Samples、Thinking Models、Trust/GFI Monitor（`/fee
   「还没有可审查原则。当 PD 捕获到行为偏差信号时，会在这里生成原则候选，等待你审查。」
 - 错误提示冷静，不制造恐慌。示例：
   「无法加载这条原则的证据来源。原则本身未受影响。你可以稍后重试，或暂时保留在待审查状态。」
+
+### E.1 中英混排规则
+
+中文原型和中文 i18n 文案中，**禁止**将英文术语直接混入中文句子。替换规则：
+
+| 英文术语 | 中文替换 | 保留条件 |
+|----------|----------|----------|
+| Owner | 拥有者 | — |
+| Agent | 智能体 | — |
+| Prompt | 提示词 | — |
+| Console | 控制台 | — |
+
+**可保留的英文**（产品名/组件名/技术术语）：
+- PD、RuleHost、OpenClaw、Defer Archive — 产品/组件名
+- Console API — 技术术语（API 后缀保留英文）
+- Code Tool Hook — 技术术语
+- Bearer Token — 技术术语
+
+**原则**：要么做纯英文版，要么中文版里尽量用中文。PD/RuleHost/OpenClaw 这类产品/组件名可保留。
+
+### E.2 样例原则规则
+
+**禁止**使用"confirm-first / 变更前确认需求"作为默认样例原则。原因：
+- 我们刚从源码里移除了内置 confirm-first/PLAN gate
+- 用它当默认样例容易误导实现者重新把它做成产品默认行为
+
+**替代样例**：使用更中性的种子用户场景，如：
+- "修改配置前展示影响范围"
+- "完成任务前说明验证结果"
+- "删除操作前确认影响对象"
 
 ---
 
@@ -738,8 +790,11 @@ interface PainEvidence {
 
 ### J.3 键盘快捷键
 
-- 5 个主导航页支持 `Cmd/Ctrl + 1~5` 快捷键切换。
-- 侧边栏导航项右侧显示快捷键提示（`--ink-4` 色，字号 11px）。
+- 10 个页面支持 `Alt + 1~0` 快捷键切换（1=启动页, 2=登录页, 3=治理焦点, 4=原则审查,
+  5=行为证据, 6=生效情况, 7=原则债务, 8=控制中心, 9=反馈, 0=更新）。
+- **禁止使用 `Cmd/Ctrl + 数字`**：这是浏览器切换标签页的保留快捷键，会冲突。
+- **禁止使用 `⌘` 符号**：Windows 用户看到 ⌘ 会困惑，统一用 `Alt`。
+- 侧边栏导航项右侧显示快捷键提示（`--ink-4` 色，字号 11px），格式为 `Alt+N`。
 - 原则审查页决策栏支持：`Enter` 批准 / `D` 暂存 / `R` 拒绝（仅当焦点在决策栏内时生效）。
 - 快捷键不得与浏览器/系统快捷键冲突。
 
@@ -784,5 +839,5 @@ interface PainEvidence {
 ### K.5 品牌 mark 渲染
 
 - 侧边栏"门"形 mark 使用内联 SVG，`fill: none`，`stroke: var(--gov)`，1.5px stroke，
-  外框 `rx="4"` + 描边（Blueprint 风格：描边而非填充）。SVG 尺寸 24×24，
+  外框 `rx="4"` + 描边（Warm Paper 风格：描边而非填充）。SVG 尺寸 24×24，
   `viewBox="0 0 28 28"`。

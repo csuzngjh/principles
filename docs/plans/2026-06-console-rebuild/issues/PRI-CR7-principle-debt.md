@@ -3,11 +3,11 @@
 **Type**: AFK
 **Priority**: P2
 **Blocked by**: PRI-CR1, PRI-CR2, PRI-CR8
-**必读**: `../01-shared-constraints.md`（全节，**尤其 G.1 数据契约**）、`packages/pd-console/design-prototype/principle-debt.html`（视觉参考）
+**必读**: `../01-shared-constraints.md`（全节，**尤其 G.1 数据契约**）、`packages/pd-console/design-prototype/index.html`（视觉参考，查看 debt 屏幕段）
 
 ## 背景
 
-新建页面（当前没有）。帮助 Owner 管理原则债务——原则本身也会成为系统风险。对应
+新建页面（当前没有）。帮助拥有者管理原则债务——原则本身也会成为系统风险。对应
 Reader Companion "原则债务阻尼回路" 与 UX 规范 Page 5。
 
 ## What to build
@@ -17,7 +17,7 @@ Reader Companion "原则债务阻尼回路" 与 UX 规范 Page 5。
 
 1. 列出可能成为债务的原则：
    - 长期未触发/未激活（接 CR8 激活数据："已批准但从未激活"）。
-   - Owner 标记为可疑的。
+   - 拥有者标记为可疑的。
    - 建议归档或降权的。
    - 注：**冲突检测**若后端无现成数据，**不要**自造检测逻辑（可能涉及 MVP5）；
      仅展示已有字段，缺失则诚实留白。

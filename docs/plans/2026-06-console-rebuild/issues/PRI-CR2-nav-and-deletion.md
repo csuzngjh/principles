@@ -3,7 +3,7 @@
 **Type**: AFK
 **Priority**: P0
 **Blocked by**: PRI-CR1
-**必读**: `../01-shared-constraints.md`（**尤其 A 节全部子节**：技术栈、目录结构、api.ts 清理、服务端清理、旧代码处理策略、分支策略；C 节 IA；E 节文案）、`packages/pd-console/design-prototype/governance-focus.html`（侧边栏参考）
+**必读**: `../01-shared-constraints.md`（**尤其 A 节全部子节**：技术栈、目录结构、api.ts 清理、服务端清理、旧代码处理策略、分支策略；C 节 IA；E 节文案）、`packages/pd-console/design-prototype/index.html`（侧边栏参考，查看 focus 屏幕段）
 
 ## 背景
 
@@ -21,7 +21,7 @@
      原则审查 / 生效情况 / 原则债务。
    - 次级工具区（弱化）：控制中心 / 产品反馈 / 设置 / 更新。
    - **删除**侧边栏全局 health 告警红点（`fetchSystemHealth` 轮询 + `alertCount` badge）。
-   - 快捷键提示：导航项右侧显示 `Cmd/Ctrl+1~5`（J.3）。
+   - 快捷键提示：导航项右侧显示 `Alt+1~0`（J.3，禁止 Cmd/Ctrl+数字）。
 2. **路由表更新**（`src/ui/App.tsx`）：建立 5 个治理路由 + 工具路由的占位（页面本体
    由 CR3–CR9 实现，这里先放空壳/Loading 占位，保证可导航、可编译）。
    - 新增启动页路由 `/splash` 和登录页路由 `/login`（C.0）。

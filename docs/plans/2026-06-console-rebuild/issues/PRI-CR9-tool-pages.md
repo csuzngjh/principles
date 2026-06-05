@@ -3,7 +3,7 @@
 **Type**: AFK
 **Priority**: P2
 **Blocked by**: PRI-CR1, PRI-CR2
-**必读**: `../01-shared-constraints.md`（B 视觉、E 文案、F 诚实约束、H 安全）、`packages/pd-console/design-prototype/control-center.html`、`packages/pd-console/design-prototype/settings.html`、`packages/pd-console/design-prototype/report-problem.html`、`packages/pd-console/design-prototype/update.html`
+**必读**: `../01-shared-constraints.md`（B 视觉、E 文案、F 诚实约束、H 安全）、`packages/pd-console/design-prototype/index.html`（视觉参考，查看 control/feedback/updates 屏幕段）
 
 ## 背景
 

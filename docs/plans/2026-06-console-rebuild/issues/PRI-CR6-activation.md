@@ -3,7 +3,7 @@
 **Type**: AFK
 **Priority**: P2
 **Blocked by**: PRI-CR1, PRI-CR2, PRI-CR8
-**必读**: `../01-shared-constraints.md`（全节，**尤其 F 诚实约束 + G.1 数据契约**）、`packages/pd-console/design-prototype/activation.html`（视觉参考）
+**必读**: `../01-shared-constraints.md`（全节，**尤其 F 诚实约束 + G.1 数据契约**）、`packages/pd-console/design-prototype/index.html`（视觉参考，查看 activation 屏幕段）
 
 ## 背景
 
@@ -47,7 +47,7 @@
 
 ## MVP 三问
 
-- **不做会怎样**：Owner 无法看到"我批准的原则到底有没有在生效"（Reader Companion
+- **不做会怎样**：拥有者无法看到"我批准的原则到底有没有在生效"（Reader Companion
   Q1/Q3 的核心诉求）。
 - **怎么观察**：打开页面见已激活原则列表 + 边界声明。
 - **怎么关闭**：页面级，路由摘除即回退。
