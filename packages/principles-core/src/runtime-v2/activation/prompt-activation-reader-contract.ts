@@ -31,7 +31,7 @@ export function filterPromptActivations(
   activations: ActivationStatusRecord[],
 ): ActivationStatusRecord[] {
   return activations.filter(
-    (a) => a.channel === 'prompt' && a.action === 'prompt_activate',
+    (a) => a.channel === 'prompt' && a.action === 'prompt_activate' && a.deactivatedAt === null,
   );
 }
 

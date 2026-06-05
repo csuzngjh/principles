@@ -93,7 +93,13 @@ export async function handleApprovalsRoute(
   // GET /api/v1/approvals/:id - detail
   const detailMatch = /^[/]([^/]+)$/.exec(subPath);
   if (req.method === 'GET' && detailMatch) {
-    const approvalId = decodeURIComponent(detailMatch[1]);
+    let approvalId: string;
+    try {
+      approvalId = decodeURIComponent(detailMatch[1]);
+    } catch {
+      sendError(res, 400, 'invalid_id', 'Approval ID contains invalid URI encoding');
+      return;
+    }
     try {
       const detail = await model.getApprovalDetail(approvalId);
       if (!detail) {
@@ -110,7 +116,13 @@ export async function handleApprovalsRoute(
   // POST /api/v1/approvals/:id/approve
   const approveMatch = /^[/]([^/]+)[/]approve$/.exec(subPath);
   if (req.method === 'POST' && approveMatch) {
-    const approvalId = decodeURIComponent(approveMatch[1]);
+    let approvalId: string;
+    try {
+      approvalId = decodeURIComponent(approveMatch[1]);
+    } catch {
+      sendError(res, 400, 'invalid_id', 'Approval ID contains invalid URI encoding');
+      return;
+    }
     try {
       const body = await readBody(req);
       const parsed = parseJsonBody(body, res);
@@ -132,7 +144,7 @@ export async function handleApprovalsRoute(
         }
         return;
       }
-      sendSuccess(res, { record: result.record, activation: result.activation });
+      sendSuccess(res, { ...result.record, activation: result.activation });
     } catch (err: unknown) {
       const message = getErrorMessage(err);
       if (message === 'Request body too large') {
@@ -147,7 +159,13 @@ export async function handleApprovalsRoute(
   // POST /api/v1/approvals/:id/reject
   const rejectMatch = /^[/]([^/]+)[/]reject$/.exec(subPath);
   if (req.method === 'POST' && rejectMatch) {
-    const approvalId = decodeURIComponent(rejectMatch[1]);
+    let approvalId: string;
+    try {
+      approvalId = decodeURIComponent(rejectMatch[1]);
+    } catch {
+      sendError(res, 400, 'invalid_id', 'Approval ID contains invalid URI encoding');
+      return;
+    }
     try {
       const body = await readBody(req);
       const parsed = parseJsonBody(body, res);

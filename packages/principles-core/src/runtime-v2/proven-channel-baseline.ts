@@ -173,6 +173,7 @@ function makeInMemoryStateReadModel(): ActivationStateReadModel {
     recordActivation: async () => { void 0; },
     listPromptActivations: async () => [],
     listAllActivations: async () => [],
+    deactivateActivation: async () => false,
   };
 }
 

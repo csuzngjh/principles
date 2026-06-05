@@ -68,7 +68,13 @@ export function createWorkspacesRoutes(configStore: WorkspaceConfigStore, worksp
     }
 
     const [, wsName, rest] = nameMatch;
-    const decodedWsName = decodeURIComponent(wsName);
+    let decodedWsName: string;
+    try {
+      decodedWsName = decodeURIComponent(wsName);
+    } catch {
+      sendError(res, 400, 'invalid_name', 'Workspace name contains invalid URI encoding');
+      return;
+    }
 
     if (req.method === 'GET' && (rest === '' || rest === '/')) {
       const entry = configStore.getWorkspace(decodedWsName);

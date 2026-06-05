@@ -18,6 +18,7 @@ function makeActivation(overrides: Partial<ActivationStatusRecord> = {}): Activa
     action: 'prompt_activate',
     targetRef: 'prependSystemContext',
     activatedAt: '2026-01-01T00:00:00Z',
+    deactivatedAt: null,
     ...overrides,
   };
 }
@@ -74,6 +75,16 @@ describe('prompt-activation-reader-contract', () => {
         makeActivation({ channel: 'code_tool_hook', action: 'activate' }),
       ];
       expect(filterPromptActivations(activations)).toHaveLength(0);
+    });
+
+    it('excludes deactivated activations', () => {
+      const activations = [
+        makeActivation({ activationId: 'act-active', deactivatedAt: null }),
+        makeActivation({ activationId: 'act-deactivated', deactivatedAt: '2026-06-01T00:00:00Z' }),
+      ];
+      const result = filterPromptActivations(activations);
+      expect(result).toHaveLength(1);
+      expect(result[0]?.activationId).toBe('act-active');
     });
 
     it('returns empty for empty input', () => {

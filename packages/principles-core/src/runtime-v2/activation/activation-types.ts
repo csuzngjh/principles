@@ -67,6 +67,7 @@ export interface ActivationStatusRecord {
   action: string;
   targetRef: string;
   activatedAt: string;
+  deactivatedAt: string | null;
 }
 
 export interface ActivationStateReadModel {
@@ -74,6 +75,7 @@ export interface ActivationStateReadModel {
   recordActivation(record: ActivationStatusRecord): Promise<void>;
   listPromptActivations(): Promise<ActivationStatusRecord[]>;
   listAllActivations(): Promise<ActivationStatusRecord[]>;
+  deactivateActivation(activationId: string, deactivatedAt: string): Promise<boolean>;
 }
 
 export interface WriterInput {
