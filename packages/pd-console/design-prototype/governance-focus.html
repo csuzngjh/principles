@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PD Console — 治理焦点</title>
+<style>
+  :root {
+    --paper:        #F0F1F4;
+    --paper-edge:   #E4E5E9;
+    --surface:      #FFFFFF;
+    --surface-warm: #F6F7FA;
+    --surface-sunk: #E8E9ED;
+    --ink:          #1A1D23;
+    --ink-2:        #2E323A;
+    --ink-3:        #4A4F5A;
+    --ink-4:        #5F6774;
+    --ink-5:        #9CA3AF;
+    --line:         #D1D5DB;
+    --line-2:       #E5E7EB;
+    --gov:          #1E3A5F;
+    --gov-2:        #152D4A;
+    --gov-tint:     #E1E8F0;
+    --gov-tint-2:   #CDD9E8;
+    --amber:        #8B5E1A;
+    --amber-tint:   #EDE3CC;
+    --green:        #1A6B45;
+    --green-tint:   #D5E8DC;
+    --danger:       #8C2F1E;
+    --sans: "Inter","SF Pro Text",-apple-system,BlinkMacSystemFont,"Segoe UI",
+            "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --mono: "JetBrains Mono","SF Mono","Fira Code",monospace;
+    --e1: none;
+    --e2: 0 1px 3px rgba(26,29,35,.08);
+    --e3: 0 2px 8px rgba(26,29,35,.10);
+    --r-sm: 3px; --r: 4px; --r-lg: 8px;
+    --ease: cubic-bezier(.4,0,.2,1);
+  }
+
+  [data-theme="dark"] {
+    --paper:        #0F1117;
+    --paper-edge:   #1A1C24;
+    --surface:      #1A1D25;
+    --surface-warm: #22252E;
+    --surface-sunk: #14161E;
+    --ink:          #E5E7EB;
+    --ink-2:        #C9CDD5;
+    --ink-3:        #9CA3AF;
+    --ink-4:        #7C8494;
+    --ink-5:        #4B5563;
+    --line:         #2E323A;
+    --line-2:       #22252E;
+    --gov:          #5B93C8;
+    --gov-2:        #7BAAD8;
+    --gov-tint:     #1A2A3E;
+    --gov-tint-2:   #1E3148;
+    --amber:        #D4A24E;
+    --amber-tint:   #2A2218;
+    --green:        #4CAF7A;
+    --green-tint:   #1A2E22;
+    --danger:       #D45A4A;
+    --e1: none;
+    --e2: 0 1px 3px rgba(0,0,0,.25);
+    --e3: 0 2px 8px rgba(0,0,0,.35);
+  }
+
+  *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+  html { -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+  body {
+    font-family:var(--sans); background:var(--paper); color:var(--ink);
+    font-size:14px; line-height:1.6; letter-spacing:-.003em;
+  }
+  ::selection { background:var(--gov-tint-2); color:var(--gov); }
+  [data-theme="dark"] ::selection { background:var(--gov-tint-2); color:var(--gov); }
+
+  .app { display:grid; grid-template-columns:232px 1fr; min-height:100vh; }
+
+  /* ── Sidebar ── */
+  .side {
+    position:sticky; top:0; width:232px; height:100vh;
+    background:var(--surface); color:var(--ink-3);
+    display:flex; flex-direction:column; overflow-y:auto;
+    border-right:1px solid var(--line);
+  }
+  .brand { padding:20px 20px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--line-2); }
+  .brand .name { font-size:14px; font-weight:600; color:var(--ink); letter-spacing:-.01em; }
+  .brand .name small { display:block; font-size:10px; font-weight:400; color:var(--ink-5); letter-spacing:.06em; text-transform:uppercase; font-family:var(--mono); }
+  .nav-item {
+    display:flex; align-items:center; gap:8px;
+    padding:7px 20px; font-size:13px; color:var(--ink-3);
+    text-decoration:none; border-left:2px solid transparent;
+    font-family:var(--sans);
+    transition:color .12s var(--ease), border-color .12s var(--ease), background .12s var(--ease);
+  }
+  .nav-item:hover { color:var(--ink); background:var(--surface-warm); }
+  .nav-item.active { color:var(--gov); border-left-color:var(--gov); background:var(--gov-tint); font-weight:500; }
+  .nav-label { padding:10px 20px 4px; font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:var(--ink-5); font-family:var(--mono); }
+  .nav-spacer { flex:1; }
+  .nav-item .dot {
+    margin-left:auto; min-width:18px; height:18px; padding:0 5px;
+    border-radius:2px; font-size:10px; font-weight:600; font-family:var(--mono);
+    display:flex; align-items:center; justify-content:center;
+    background:var(--amber-tint); color:var(--amber);
+  }
+
+  .theme-toggle {
+    margin:8px 20px; padding:6px 8px; cursor:pointer;
+    border-radius:var(--r-sm); border:1px solid var(--line-2);
+    display:flex; align-items:center; gap:6px;
+    color:var(--ink-4); transition:all .15s var(--ease);
+    font-size:11px; font-family:var(--mono);
+  }
+  .theme-toggle:hover { color:var(--ink-2); border-color:var(--line); background:var(--surface-warm); }
+  .theme-icon { display:none; }
+  :root .theme-icon.sun { display:block; }
+  [data-theme="dark"] .theme-icon.moon { display:block; }
+  [data-theme="dark"] .theme-icon.sun { display:none; }
+
+  /* ── Main ── */
+  .main { overflow-x:hidden; }
+  .canvas {
+    max-width:712px; margin:0 auto; padding:48px 36px 100px;
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 23px, var(--line-2) 23px, var(--line-2) 24px),
+      repeating-linear-gradient(90deg, transparent, transparent 23px, var(--line-2) 23px, var(--line-2) 24px);
+    background-size: 24px 24px;
+  }
+  [data-theme="dark"] .canvas {
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 23px, var(--line-2) 23px, var(--line-2) 24px),
+      repeating-linear-gradient(90deg, transparent, transparent 23px, var(--line-2) 23px, var(--line-2) 24px);
+  }
+
+  .sec-title {
+    font-size:11px; font-weight:500; text-transform:uppercase;
+    letter-spacing:.1em; color:var(--ink-5); font-family:var(--mono);
+    margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--line-2);
+  }
+  .title { font-size:26px; font-weight:650; letter-spacing:-.02em; line-height:1.25; color:var(--ink); }
+  .sub { color:var(--ink-3); margin-top:10px; font-size:14.5px; line-height:1.6; max-width:52ch; }
+
+  .today {
+    margin-top:28px; padding:12px 16px;
+    background:var(--surface); border:1px solid var(--line-2); border-radius:var(--r);
+    display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 0;
+    color:var(--ink-3); font-size:13.5px;
+  }
+  .today .seg { display:inline-flex; align-items:baseline; gap:6px; padding:0 14px; position:relative; }
+  .today .seg + .seg::before { content:""; position:absolute; left:0; top:2px; bottom:2px; width:1px; background:var(--line-2); }
+  .today .seg:first-child { padding-left:0; }
+  .today b { color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
+  .today .lead { color:var(--ink-5); font-size:10px; letter-spacing:.1em; text-transform:uppercase; font-family:var(--mono); font-weight:500; }
+
+  .sec { margin:36px 0 14px; display:flex; align-items:baseline; gap:10px; }
+  .sec h2 { font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:.1em; color:var(--ink-5); font-family:var(--mono); }
+  .sec .n { font-size:11px; color:var(--ink-5); font-variant-numeric:tabular-nums; font-family:var(--mono); }
+  .sec .rule { flex:1; height:1px; background:var(--line-2); align-self:center; }
+
+  /* ── Card ── */
+  .card {
+    background:var(--surface); border:1px solid var(--line-2);
+    border-radius:var(--r); padding:16px 18px;
+    box-shadow:var(--e1); transition:box-shadow .15s var(--ease), border-color .15s var(--ease);
+    margin-bottom:12px;
+  }
+  .card:hover { box-shadow:var(--e2); border-color:var(--line); }
+
+  .card-top { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .tag { display:inline-block; font-size:11px; font-weight:500; padding:2px 7px; border-radius:2px; font-family:var(--mono); letter-spacing:.02em; }
+  .tag.gov { background:var(--gov-tint); color:var(--gov); }
+  .tag.amber { background:var(--amber-tint); color:var(--amber); }
+  .tag.green { background:var(--green-tint); color:var(--green); }
+  .card-meta { margin-left:auto; font-size:11px; color:var(--ink-4); display:flex; align-items:center; gap:8px; font-family:var(--mono); }
+  .card-meta .key { display:inline-flex; align-items:center; gap:4px; }
+  .card-meta .mid { width:3px; height:3px; border-radius:50%; background:var(--ink-5); }
+
+  .card-title { font-size:16px; font-weight:600; color:var(--ink); letter-spacing:-.01em; line-height:1.4; }
+  .card-body { color:var(--ink-3); margin-top:6px; font-size:13.5px; line-height:1.58; }
+
+  .evidence {
+    margin-top:12px; padding:10px 14px;
+    background:var(--surface-sunk);
+    border:1px solid var(--line-2); border-radius:var(--r);
+    display:grid; grid-template-columns:16px 1fr auto; gap:10px;
+    font-size:13px; color:var(--ink-3); line-height:1.55;
+  }
+  .evidence .ic { width:14px; height:14px; margin-top:2px; color:var(--ink-4); }
+  .evidence .lab { color:var(--ink-4); font-weight:600; font-size:11px; font-family:var(--mono); text-transform:uppercase; letter-spacing:.06em; }
+  .evidence .more {
+    grid-column:3; align-self:end; color:var(--gov); text-decoration:none; white-space:nowrap;
+    font-weight:500; font-size:12px; font-family:var(--mono);
+    transition:opacity .12s var(--ease);
+  }
+  .evidence .more:hover { opacity:.7; }
+
+  .actions { margin-top:14px; display:flex; gap:8px; align-items:center; }
+  .btn {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:12.5px; font-weight:500; padding:6px 14px;
+    border-radius:var(--r-sm); border:1px solid transparent;
+    cursor:pointer; transition:all .12s var(--ease);
+    font-family:var(--sans);
+  }
+  .btn.primary { background:var(--gov); color:#fff; }
+  .btn.primary:hover { background:var(--gov-2); }
+  .btn.ghost { background:transparent; color:var(--ink-3); border-color:var(--line); }
+  .btn.ghost:hover { border-color:var(--ink-4); color:var(--ink-2); }
+  .btn.quiet { background:transparent; color:var(--ink-4); }
+  .btn.quiet:hover { color:var(--ink-2); }
+  .link { margin-left:auto; color:var(--ink-4); font-size:12px; text-decoration:none; font-family:var(--mono); transition:color .12s var(--ease); }
+  .link:hover { color:var(--gov); }
+
+  .signal {
+    margin-bottom:12px; padding:14px 18px;
+    border:1px solid var(--line-2); border-left:2.5px solid var(--amber);
+    border-radius:var(--r); background:var(--surface);
+    display:grid; grid-template-columns:16px 1fr; gap:10px;
+    color:var(--ink-3); font-size:13.5px; line-height:1.58;
+  }
+  .signal .ic { width:15px; height:15px; margin-top:2px; color:var(--amber); }
+  .signal b { color:var(--ink); font-weight:600; }
+
+  .foot { margin-top:36px; padding-top:18px; border-top:1px solid var(--line-2); color:var(--ink-4); font-size:12px; line-height:1.6; max-width:56ch; font-family:var(--mono); }
+
+  svg { stroke:currentColor; stroke-width:1.5; fill:none; stroke-linecap:round; stroke-linejoin:round; }
+
+  @media (prefers-reduced-motion:reduce) { * { transition:none !important; animation:none !important; } }
+  :focus-visible { outline: 2px solid var(--gov); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="side">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 28 28" width="24" height="24" aria-label="PD">
+        <rect x="0" y="0" width="28" height="28" rx="4" fill="none" stroke="var(--gov)" stroke-width="1.5"/>
+        <line x1="9" y1="7" x2="9" y2="21" stroke="var(--gov)" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="19" y1="7" x2="19" y2="21" stroke="var(--gov)" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="9" y1="7" x2="19" y2="7" stroke="var(--gov)" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <div class="name">PD<small>Governance Workspace</small></div>
+    </div>
+    <div class="nav-group">
+      <a class="nav-item active" href="governance-focus.html">治理焦点</a>
+      <a class="nav-item" href="pain-evidence.html">行为证据</a>
+      <a class="nav-item" href="principle-review.html">原则审查</a>
+      <a class="nav-item" href="activation.html">生效情况</a>
+      <a class="nav-item" href="principle-debt.html">原则债务</a>
+    </div>
+    <div class="theme-toggle" title="切换主题" tabindex="0" role="button" aria-label="切换亮色/暗色主题">
+        <svg class="theme-icon sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="1.6" fill="none"/>
+            <line x1="12" y1="1" x2="12" y2="3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <line x1="12" y1="21" x2="12" y2="23" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <line x1="1" y1="12" x2="3" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <line x1="21" y1="12" x2="23" y2="12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <svg class="theme-icon moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </div>
+    <div class="nav-spacer"></div>
+    <div class="nav-group nav-tools">
+      <div class="nav-label">工具</div>
+      <a class="nav-item" href="control-center.html">控制中心</a>
+      <a class="nav-item" href="report-problem.html">产品反馈</a>
+      <a class="nav-item" href="settings.html">设置</a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="canvas">
+
+      <div class="sec-title">治理焦点</div>
+      <h1 class="title">现在，值得你判断的事</h1>
+      <p class="sub">PD 只把需要你判断的少数事项放在这里。其余的复杂度，由系统替你封装。</p>
+
+      <div class="today">
+        <span class="seg"><span class="lead">当前</span></span>
+        <span class="seg"><b>2</b> 条原则待审查</span>
+        <span class="seg"><b>1</b> 条行为偏差</span>
+        <span class="seg"><b>1</b> 条停滞信号</span>
+      </div>
+
+      <div class="sec"><h2>待你审查</h2><span class="n">2</span><span class="rule"></span></div>
+
+      <article class="card">
+        <div class="card-top">
+          <span class="tag gov">待审查</span>
+          <span class="card-meta">
+            <span class="key">提示通道</span>
+            <span class="mid"></span>
+            <span class="key">可回滚</span>
+          </span>
+        </div>
+        <h3 class="card-title">跨模块修改前，先向我说明范围、风险与验证计划</h3>
+        <p class="card-body">系统从近期工作中提炼出这条原则，试图改变 Agent 在大范围改动时不先确认的行为倾向。</p>
+        <div class="evidence">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5l3 1.8"/></svg>
+          <div><span class="lab">来源</span> · 在一次任务中，Agent 未确认范围即修改跨模块代码。<br/>
+               <span class="lab">预期</span> · 大面积改动前主动给出范围、风险与验证计划。</div>
+          <a class="more" href="principle-review.html">展开证据 →</a>
+        </div>
+        <div class="actions">
+          <button class="btn primary">审查并决定</button>
+          <button class="btn ghost">暂存</button>
+          <a class="link" href="principle-review.html">查看完整链路 →</a>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-top">
+          <span class="tag gov">待审查</span>
+          <span class="card-meta">
+            <span class="key">提示通道</span>
+            <span class="mid"></span>
+            <span class="key">可回滚</span>
+          </span>
+        </div>
+        <h3 class="card-title">完成代码修改后，运行相关测试或说明无法运行的原因</h3>
+        <p class="card-body">这条原则针对 Agent 改完即收工、遗漏验证的倾向。措辞你可以修改后再批准。</p>
+        <div class="evidence">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5l3 1.8"/></svg>
+          <div><span class="lab">来源</span> · 近期多次"修改后未跑测试"的行为证据。<br/>
+               <span class="lab">预期</span> · 改动后主动验证，或诚实说明无法验证。</div>
+          <a class="more" href="#">展开证据 →</a>
+        </div>
+        <div class="actions">
+          <button class="btn primary">审查并决定</button>
+          <button class="btn ghost">暂存</button>
+          <a class="link" href="#">查看完整链路 →</a>
+        </div>
+      </article>
+
+      <div class="sec"><h2>值得关注的行为偏差</h2><span class="n">1</span><span class="rule"></span></div>
+
+      <article class="card">
+        <div class="card-top">
+          <span class="tag amber">行为偏差</span>
+          <span class="card-meta"><span class="key">尚未沉淀为原则</span></span>
+        </div>
+        <h3 class="card-title">Agent 在长任务中途偏离最初目标</h3>
+        <p class="card-body">这类行为目前按单条呈现。PD 暂未自动识别"同类反复"——语义识别是后续能力。你可以手动判断它是否值得沉淀。</p>
+        <div class="actions">
+          <button class="btn ghost">查看证据</button>
+          <button class="btn quiet">沉淀为原则候选</button>
+        </div>
+      </article>
+
+      <div class="sec"><h2>系统信号</h2><span class="n">1</span><span class="rule"></span></div>
+
+      <div class="signal">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5v4M12 16h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+        <div><b>一条已批准原则尚未激活。</b>「完成代码修改后运行测试」已批准 6 天，但还没有在后续任务中生效。可能是近期没有匹配场景，也可能值得你检查它的通道配置。</div>
+      </div>
+
+      <p class="foot">这一页只回答一个问题：现在该做什么判断。</p>
+
+    </div>
+  </main>
+</div>
+<script>
+(function(){
+    var t = document.documentElement;
+    var s = localStorage.getItem('pd-theme') || 'light';
+    t.setAttribute('data-theme', s);
+    document.querySelector('.theme-toggle').addEventListener('click', function(){
+        var next = t.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        t.setAttribute('data-theme', next);
+        localStorage.setItem('pd-theme', next);
+    });
+})();
+</script>
+</body>
+</html>

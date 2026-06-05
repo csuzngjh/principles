@@ -1,6 +1,6 @@
 import * as React from "react";
 
-type Theme = "light" | "dark" | "system";
+type Theme = "light" | "dark";
 
 interface ThemeProviderProps {
   children: React.ReactNode;
@@ -14,7 +14,7 @@ interface ThemeProviderState {
 }
 
 const initialState: ThemeProviderState = {
-  theme: "system",
+  theme: "light",
   setTheme: () => {},
 };
 
@@ -22,25 +22,28 @@ const ThemeProviderContext = React.createContext<ThemeProviderState>(initialStat
 
 export function ThemeProvider({
   children,
-  defaultTheme = "system",
+  defaultTheme,
   storageKey = "pd-theme",
 }: ThemeProviderProps) {
   const [theme, setThemeState] = React.useState<Theme>(() => {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem(storageKey);
-      return (stored as Theme) || defaultTheme;
+      if (stored === "light" || stored === "dark") {
+        return stored;
+      }
+      if (defaultTheme) {
+        return defaultTheme;
+      }
+      return window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
     }
-    return defaultTheme;
+    return defaultTheme ?? "light";
   });
 
   React.useEffect(() => {
     const root = window.document.documentElement;
-    const isDark =
-      theme === "dark" ||
-      (theme === "system" &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches);
-
-    root.classList.toggle("dark", isDark);
+    root.setAttribute("data-theme", theme);
     localStorage.setItem(storageKey, theme);
   }, [theme, storageKey]);
 

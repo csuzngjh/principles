@@ -20,6 +20,14 @@ export class MemoryActivationStateStore implements ActivationStateReadModel {
     }
     return result.sort((a, b) => a.activatedAt.localeCompare(b.activatedAt));
   }
+
+  async listAllActivations(): Promise<ActivationStatusRecord[]> {
+    const result: ActivationStatusRecord[] = [];
+    for (const record of this.activations.values()) {
+      result.push(record);
+    }
+    return result.sort((a, b) => a.activatedAt.localeCompare(b.activatedAt));
+  }
 }
 
 export class MemoryArtifactReadModel implements ActivationArtifactReadModel {
