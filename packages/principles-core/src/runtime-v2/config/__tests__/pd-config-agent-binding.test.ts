@@ -238,6 +238,72 @@ describe('resolveAgentRuntimeBinding', () => {
     if (result.ok) return;
     expect(result.readiness).toBe('disabled');
   });
+
+  // ── Additional edge cases for runtimeProfile resolution ──────────────────────
+
+  it('treats explicit override equal to defaultRuntime as default_runtime source', () => {
+    // Edge case: when runtimeProfile === defaultRuntime, it's NOT an override
+    const config = makeConfigWithOverrides({
+      runtimeProfiles: {
+        'openclaw.default': { type: 'openclaw', source: 'default' },
+        'custom-profile': { type: 'openclaw', provider: 'lmstudio', model: 'qwen3' },
+      },
+      internalAgents: {
+        defaultRuntime: 'openclaw.default',
+        agents: {
+          diagnostician: { enabled: true, runtimeProfile: 'openclaw.default' },
+          dreamer: { enabled: true },
+          philosopher: { enabled: false },
+          scribe: { enabled: true },
+          artificer: { enabled: true },
+          evaluator: { enabled: false },
+          rolloutReviewer: { enabled: false },
+          trainer: { enabled: false },
+          correctionObserver: { enabled: false },
+          empathyObserver: { enabled: false },
+        },
+      },
+    });
+    const effective = computeEffectivePdConfig(config);
+    const result = resolveAgentRuntimeBinding(effective, 'diagnostician');
+
+    // runtimeProfile === defaultRuntime → source='default_runtime', not 'agent_override'
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profileId).toBe('openclaw.default');
+    expect(result.source).toBe('default_runtime');
+  });
+
+  it('returns error when defaultRuntime references missing profile', () => {
+    // Edge case: defaultRuntime itself references a nonexistent profile
+    const config = makeConfigWithOverrides({
+      runtimeProfiles: {
+        'openclaw.default': { type: 'openclaw', source: 'default' },
+      },
+      internalAgents: {
+        defaultRuntime: 'nonexistent-default',
+        agents: {
+          diagnostician: { enabled: true },
+          dreamer: { enabled: true },
+          philosopher: { enabled: false },
+          scribe: { enabled: true },
+          artificer: { enabled: true },
+          evaluator: { enabled: false },
+          rolloutReviewer: { enabled: false },
+          trainer: { enabled: false },
+          correctionObserver: { enabled: false },
+          empathyObserver: { enabled: false },
+        },
+      },
+    });
+    const effective = computeEffectivePdConfig(config);
+    const result = resolveAgentRuntimeBinding(effective, 'diagnostician');
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.readiness).toBe('needs_setup');
+    expect(result.reason).toContain('nonexistent-default');
+  });
 });
 
 // ── checkAgentRuntimeReadiness ───────────────────────────────────────────────
@@ -326,6 +392,94 @@ describe('checkAgentRuntimeReadiness', () => {
     expect(result.readiness).toBe('needs_setup');
     expect(result.reason).toContain('provider');
   });
+
+  // ── Additional edge cases for readiness checking ──────────────────────────────
+
+  it('returns needs_setup for pi-ai profile with empty model', () => {
+    const result = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: '',
+        apiKeyEnv: 'ANTHROPIC_API_KEY',
+      },
+      (name) => name === 'ANTHROPIC_API_KEY' ? 'sk-ant-test-key' : undefined,
+    );
+    expect(result.readiness).toBe('needs_setup');
+    expect(result.reason).toContain('model');
+  });
+
+  it('returns needs_setup for pi-ai profile with empty apiKeyEnv', () => {
+    // Edge case: apiKeyEnv is empty string (type-valid but semantically invalid)
+    const result = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        apiKeyEnv: '',
+      },
+      () => 'some-value',
+    );
+    expect(result.readiness).toBe('needs_setup');
+    expect(result.reason).toContain('apiKeyEnv');
+  });
+
+  it('returns ready for pi-ai profile with optional baseUrl', () => {
+    const result = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'openrouter',
+        model: 'openai/gpt-4o',
+        apiKeyEnv: 'OPENROUTER_API_KEY',
+        baseUrl: 'https://openrouter.ai/api/v1',
+      },
+      (name) => name === 'OPENROUTER_API_KEY' ? 'sk-or-test-key' : undefined,
+    );
+    expect(result.readiness).toBe('ready');
+  });
+
+  it('returns ready for pi-ai profile with optional timeoutMs', () => {
+    const result = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        apiKeyEnv: 'ANTHROPIC_API_KEY',
+        timeoutMs: 60000,
+      },
+      (name) => name === 'ANTHROPIC_API_KEY' ? 'sk-ant-test-key' : undefined,
+    );
+    expect(result.readiness).toBe('ready');
+  });
+
+  it('distinguishes unset vs empty apiKeyEnv correctly', () => {
+    // Regression test for EP-01: empty string env var is set but invalid; undefined means not set
+    // apiKeyEnv='EMPTY_VAR' with getEnvVar returning '' → not_ready (set but empty)
+    const resultEmpty = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        apiKeyEnv: 'EMPTY_VAR',
+      },
+      (name) => name === 'EMPTY_VAR' ? '' : undefined,
+    );
+    expect(resultEmpty.readiness).toBe('not_ready');
+    expect(resultEmpty.reason).toContain('empty');
+
+    // apiKeyEnv='UNSET_VAR' with getEnvVar returning undefined → not_ready (not set)
+    const resultUnset = checkAgentRuntimeReadiness(
+      {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        apiKeyEnv: 'UNSET_VAR',
+      },
+      (name) => name === 'UNSET_VAR' ? undefined : 'some-value',
+    );
+    expect(resultUnset.readiness).toBe('not_ready');
+    expect(resultUnset.reason).toContain('not set');
+  });
 });
 
 // ── createAdapterConfigFromProfile ───────────────────────────────────────────
@@ -401,5 +555,116 @@ describe('createAdapterConfigFromProfile', () => {
     if (result.runtimeKind !== 'pi-ai') return;
     expect(result.provider).toBe('openrouter');
     expect(result.baseUrl).toBeUndefined();
+  });
+
+  // ── Additional edge cases for adapter config creation ───────────────────────
+
+  it('pi-ai profile without timeoutMs still produces valid config', () => {
+    const result = createAdapterConfigFromProfile(
+      {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        apiKeyEnv: 'ANTHROPIC_API_KEY',
+      },
+      '/workspace/test',
+    );
+
+    expect(result.runtimeKind).toBe('pi-ai');
+    if (result.runtimeKind !== 'pi-ai') return;
+    expect(result.timeoutMs).toBeUndefined();
+  });
+
+  it('openclaw profile with explicit provider+model uses local mode', () => {
+    // Regression test: explicit provider+model → openclawMode='local' (not 'default')
+    const result = createAdapterConfigFromProfile(
+      {
+        type: 'openclaw',
+        provider: 'lmstudio',
+        model: 'qwen3.6-27b-mtp',
+      },
+      '/workspace/test',
+    );
+
+    expect(result.runtimeKind).toBe('openclaw-cli');
+    if (result.runtimeKind !== 'openclaw-cli') return;
+    expect(result.openclawMode).toBe('local');
+    expect(result.workspaceDir).toBe('/workspace/test');
+  });
+
+  it('openclaw profile with source=default uses default mode', () => {
+    // Regression test: source='default' → openclawMode='default' (delegate to OpenClaw)
+    const result = createAdapterConfigFromProfile(
+      {
+        type: 'openclaw',
+        source: 'default',
+      },
+      '/workspace/test',
+    );
+
+    expect(result.runtimeKind).toBe('openclaw-cli');
+    if (result.runtimeKind !== 'openclaw-cli') return;
+    expect(result.openclawMode).toBe('default');
+  });
+
+  it('openclaw profile without source or provider+model uses local mode', () => {
+    // Edge case: incomplete openclaw profile defaults to 'local' mode
+    const result = createAdapterConfigFromProfile(
+      {
+        type: 'openclaw',
+      },
+      '/workspace/test',
+    );
+
+    expect(result.runtimeKind).toBe('openclaw-cli');
+    if (result.runtimeKind !== 'openclaw-cli') return;
+    // No source='default', so defaults to 'local'
+    expect(result.openclawMode).toBe('local');
+  });
+
+  it('openclaw profile with source=default ignores provider+model for mode', () => {
+    // Edge case: source='default' wins over provider+model for mode selection
+    const result = createAdapterConfigFromProfile(
+      {
+        type: 'openclaw',
+        source: 'default',
+        provider: 'lmstudio',
+        model: 'qwen3',
+      },
+      '/workspace/test',
+    );
+
+    expect(result.runtimeKind).toBe('openclaw-cli');
+    if (result.runtimeKind !== 'openclaw-cli') return;
+    // source='default' → openclawMode='default' regardless of provider+model
+    expect(result.openclawMode).toBe('default');
+  });
+
+  it('preserves workspace directory in all adapter configs', () => {
+    const piAiResult = createAdapterConfigFromProfile(
+      {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        apiKeyEnv: 'ANTHROPIC_API_KEY',
+      },
+      '/custom/workspace/path',
+    );
+
+    expect(piAiResult.runtimeKind).toBe('pi-ai');
+    if (piAiResult.runtimeKind !== 'pi-ai') return;
+    expect(piAiResult.workspace).toBe('/custom/workspace/path');
+
+    const openclawResult = createAdapterConfigFromProfile(
+      {
+        type: 'openclaw',
+        source: 'default',
+      },
+      '/another/workspace/path',
+    );
+
+    expect(openclawResult.runtimeKind).toBe('openclaw-cli');
+    if (openclawResult.runtimeKind !== 'openclaw-cli') return;
+    expect(openclawResult.workspaceDir).toBe('/another/workspace/path');
   });
 });
