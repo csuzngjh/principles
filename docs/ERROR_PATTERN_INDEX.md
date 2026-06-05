@@ -27,7 +27,7 @@ For a task, pick the matching pattern cards, read the listed ERR entries, and st
 - **Use when**: adding catch blocks, validators, degraded modes, installer results, JSON output, or fallback behavior.
 - **Failure mode**: invalid input, failed cleanup, malformed config, or incomplete delivery silently becomes success or an unexplained fallback.
 - **Must check**: every refusal/degradation includes a structured reason and next action; no `catch {}`; no `if (valid) { assert }` tests that pass when data is absent.
-- **Representative ERRs**: ERR-002, ERR-009, ERR-010, ERR-014, ERR-016, ERR-017, ERR-029, ERR-033, ERR-041, ERR-044, ERR-046.
+- **Representative ERRs**: ERR-002, ERR-009, ERR-010, ERR-014, ERR-016, ERR-017, ERR-029, ERR-033, ERR-041, ERR-044, ERR-046, ERR-062.
 - **Automation target**: grep/static guard for empty catch blocks and test assertions hidden behind truthy conditionals.
 
 ### EP-04 CLI and Operator Contract
