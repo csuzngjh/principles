@@ -97,6 +97,7 @@ Errors where AI assistants created incorrect schemas, missed type safety, or bro
 | ERR-057 | errMsg helper checks typed narrower parameter instead of unknown caught value — error message extraction always falls through to String(err) | PRI-285 |
 | ERR-054 | `as TOutput` cast on untrusted LLM/runtime payload before validation — typed hooks receive unverified data | PRI-302 |
 | ERR-060 | Emitted telemetry event not registered in schema — event silently dropped or degraded | PR #808/#809/#810 |
+| ERR-061 | Runtime shape check validates wrong field name — guessed structure instead of verifying against actual type | PR #823 |
 
 ---
 
@@ -847,6 +848,18 @@ Errors in how AI assistants approached the task — not reading context, not fol
 - **How to prevent**: When creating a new BasePeerRunner subclass, the PR checklist must include: (1) list all events the runner can emit, (2) verify each is in TelemetryEventType, (3) add a test proving the schema accepts each event. Review trigger: any PR that adds a new runner or new emitEvent() call must also update telemetry-event.ts.
 - **Source**: PR #808/#809/#810
 - **Date**: 2026-06-03
+- **Recurrence**: None
+
+---
+
+**[ERR-061]** | Runtime shape check validates wrong field name — guessed structure instead of verifying against actual type
+
+- **What happened**: When fixing a P0 review finding (ERR-001 recurrence: `as` cast bypassing validation in `ConsoleLifecycleDatasource.loadLedger()`), the AI replaced the `as LedgerTreeStore` cast with a runtime shape check. However, the shape check validated `nodes` (an array field) instead of `principles` (a record field). The actual `LedgerTreeStore` interface is `{ principles: Record<string, LedgerPrinciple>, rules: Record<string, LedgerRule>, implementations: Record<string, Implementation>, metrics: Record<string, PrincipleValueMetrics>, lastUpdated: string }` — it has no `nodes` field at all. The check `!Array.isArray(tree.nodes)` always evaluated to `true`, causing `loadLedger()` to throw "ledger tree is malformed" for every valid ledger, which made all lifecycle route tests return 500 instead of 200/404.
+- **Why it's wrong**: The AI guessed the structure instead of reading the actual `LedgerTreeStore` interface definition. The fix replaced one form of invalid validation (`as` cast) with another form of invalid validation (checking the wrong field). Both bypass the purpose of runtime validation: ensuring the data matches the expected shape. A shape check that validates a non-existent field is equivalent to no shape check at all — it rejects valid data and provides a false sense of security.
+- **Correct approach**: When writing a runtime shape check, read the actual type/interface definition first. The check should validate the most discriminating required field(s) of the actual type. For `LedgerTreeStore`, the correct check is `isRecord(tree.principles)` (the `principles` field is the primary discriminator — a valid ledger must have a `principles` record). Always verify the shape check matches the actual type definition, not an assumed one.
+- **How to prevent**: Before writing a runtime shape check, read the target type's interface definition. The shape check must validate at least one required field that exists in the actual type. Add a test that proves the shape check passes for valid data and fails for malformed data. Review trigger: any PR that adds or modifies a runtime shape check must include a test proving the check works against the actual type structure.
+- **Source**: PR #823
+- **Date**: 2026-06-05
 - **Recurrence**: None
 
 ---
