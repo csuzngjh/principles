@@ -28,7 +28,13 @@ export async function handleLifecycleRoute(
   // GET /api/v1/lifecycle/principles/:principleId
   const principleMatch = /^[/]principles[/]([^/]+)$/.exec(subPath);
   if (principleMatch) {
-    const principleId = decodeURIComponent(principleMatch[1]);
+    let principleId: string;
+    try {
+      principleId = decodeURIComponent(principleMatch[1]);
+    } catch {
+      sendError(res, 400, 'invalid_encoding', 'Principle ID contains invalid percent encoding');
+      return;
+    }
     const model = getModel(workspaceDir);
     try {
       const result = model.getLifecycleMetrics(principleId);

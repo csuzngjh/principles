@@ -99,7 +99,7 @@ export class ActivationsConsoleModel {
 
   dispose(): void {
     if (this.readConnection) {
-      try { this.readConnection.close(); } catch { /* best-effort */ }
+      try { this.readConnection.close(); } catch (err) { console.warn('ActivationsConsoleModel.dispose: failed to close connection:', err instanceof Error ? err.message : String(err)); }
       this.readConnection = null;
     }
   }
