@@ -73,9 +73,13 @@ function validateGovernanceQueueData(raw: unknown): GovernanceQueueData | null {
   ) {
     return null;
   }
-  const signals = stagnationSignals
-    .map(validateStagnationSignal)
-    .filter((s: StagnationSignal | null): s is StagnationSignal => s !== null);
+  // Fail loud: any invalid signal rejects the entire payload (ERR-009)
+  const signals: StagnationSignal[] = [];
+  for (const s of stagnationSignals) {
+    const validated = validateStagnationSignal(s);
+    if (validated === null) return null;
+    signals.push(validated);
+  }
   return {
     pendingReviewCount,
     behaviorDeviationCount,
@@ -107,19 +111,29 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
   ) {
     return null;
   }
-  const validRecords = records.filter((r: unknown): r is ApprovalGroup["records"][number] => {
-    if (!isRecord(r)) return false;
-    return (
-      Object.hasOwn(r, "id") &&
-      Object.hasOwn(r, "artifactId") &&
-      Object.hasOwn(r, "channel") &&
-      Object.hasOwn(r, "createdAt") &&
-      typeof r.id === "string" &&
-      typeof r.artifactId === "string" &&
-      typeof r.channel === "string" &&
-      typeof r.createdAt === "string"
-    );
-  });
+  // Fail loud: any invalid record rejects the entire group (ERR-009)
+  const validRecords: ApprovalGroup["records"] = [];
+  for (const r of records) {
+    if (!isRecord(r)) return null;
+    if (
+      !Object.hasOwn(r, "id") ||
+      !Object.hasOwn(r, "artifactId") ||
+      !Object.hasOwn(r, "channel") ||
+      !Object.hasOwn(r, "createdAt") ||
+      typeof r.id !== "string" ||
+      typeof r.artifactId !== "string" ||
+      typeof r.channel !== "string" ||
+      typeof r.createdAt !== "string"
+    ) {
+      return null;
+    }
+    validRecords.push({
+      id: r.id,
+      artifactId: r.artifactId,
+      channel: r.channel,
+      createdAt: r.createdAt,
+    });
+  }
   return {
     principleId,
     principleTitle,
@@ -141,9 +155,13 @@ function validateApprovalsGroupedData(raw: unknown): ApprovalsGroupedData | null
   if (!Array.isArray(groups) || typeof generatedAt !== "string") {
     return null;
   }
-  const validatedGroups = groups
-    .map(validateApprovalGroup)
-    .filter((g: ApprovalGroup | null): g is ApprovalGroup => g !== null);
+  // Fail loud: any invalid group rejects the entire payload (ERR-009)
+  const validatedGroups: ApprovalGroup[] = [];
+  for (const g of groups) {
+    const validated = validateApprovalGroup(g);
+    if (validated === null) return null;
+    validatedGroups.push(validated);
+  }
   return {
     groups: validatedGroups,
     generatedAt,
@@ -219,7 +237,7 @@ function PendingReviewCard({
         </span>
         {isReversible && (
           <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
-            {primaryChannel === "prompt" ? "可撤销" : "低风险"}
+            {primaryChannel === "prompt" ? t("pages.focus.tagReversible") : t("pages.focus.tagLowRisk")}
           </span>
         )}
       </div>
@@ -232,7 +250,7 @@ function PendingReviewCard({
       {/* Evidence summary (inset well) */}
       <div className="mt-2 px-3 py-2 bg-surface/60 border-l-2 border-gov text-ink-3 text-[13px] leading-snug">
         {t("pages.focus.evidenceLabel")}：{group.records.length}{" "}
-        {group.records.length === 1 ? "条记录" : "条记录"}
+        {t("pages.focus.recordCount", { count: group.records.length })}
       </div>
 
       {/* Actions */}
@@ -460,7 +478,7 @@ export function FocusPage() {
           <>
             <div className="text-ink-2 text-sm mb-3">
               <span className="font-mono font-semibold text-ink">{deviationCount}</span>{" "}
-              {deviationCount === 1 ? "条偏差" : "条偏差"}
+              {t("pages.focus.deviationCount", { count: deviationCount })}
             </div>
             {/* Deviation disclaimer (F.2: no fake aggregation) */}
             <div className="text-ink-4 text-[13px] bg-surface/60 border-l-2 border-amber px-3 py-2 mb-4">

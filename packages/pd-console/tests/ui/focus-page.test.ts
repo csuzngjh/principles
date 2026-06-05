@@ -171,7 +171,13 @@ function validateGovernanceQueueData(raw: unknown): { pendingReviewCount: number
   if (!Object.hasOwn(raw, "pendingReviewCount") || !Object.hasOwn(raw, "behaviorDeviationCount") || !Object.hasOwn(raw, "stagnationSignals")) return null;
   const { pendingReviewCount, behaviorDeviationCount, stagnationSignals } = raw;
   if (typeof pendingReviewCount !== "number" || pendingReviewCount < 0 || typeof behaviorDeviationCount !== "number" || behaviorDeviationCount < 0 || !Array.isArray(stagnationSignals)) return null;
-  const signals = stagnationSignals.map(validateStagnationSignal).filter((s: unknown): s is NonNullable<ReturnType<typeof validateStagnationSignal>> => s !== null);
+  // Fail loud: any invalid signal rejects the entire payload (ERR-009)
+  const signals: unknown[] = [];
+  for (const s of stagnationSignals) {
+    const validated = validateStagnationSignal(s);
+    if (validated === null) return null;
+    signals.push(validated);
+  }
   return { pendingReviewCount, behaviorDeviationCount, stagnationSignals: signals, note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined };
 }
 
@@ -180,10 +186,13 @@ function validateApprovalGroup(raw: unknown): { principleId: string; principleTi
   if (!Object.hasOwn(raw, "principleId") || !Object.hasOwn(raw, "principleTitle") || !Object.hasOwn(raw, "status") || !Object.hasOwn(raw, "records")) return null;
   const { principleId, principleTitle, status, records } = raw;
   if (typeof principleId !== "string" || typeof principleTitle !== "string" || typeof status !== "string" || !["pending", "approved", "rejected"].includes(status) || !Array.isArray(records)) return null;
-  const validRecords = records.filter((r: unknown): r is Record<string, unknown> => {
-    if (!isRecord(r)) return false;
-    return Object.hasOwn(r, "id") && Object.hasOwn(r, "artifactId") && Object.hasOwn(r, "channel") && Object.hasOwn(r, "createdAt") && typeof r.id === "string" && typeof r.artifactId === "string" && typeof r.channel === "string" && typeof r.createdAt === "string";
-  });
+  // Fail loud: any invalid record rejects the entire group (ERR-009)
+  const validRecords: unknown[] = [];
+  for (const r of records) {
+    if (!isRecord(r)) return null;
+    if (!Object.hasOwn(r, "id") || !Object.hasOwn(r, "artifactId") || !Object.hasOwn(r, "channel") || !Object.hasOwn(r, "createdAt") || typeof r.id !== "string" || typeof r.artifactId !== "string" || typeof r.channel !== "string" || typeof r.createdAt !== "string") return null;
+    validRecords.push(r);
+  }
   return { principleId, principleTitle, status, records: validRecords };
 }
 
@@ -192,7 +201,13 @@ function validateApprovalsGroupedData(raw: unknown): { groups: unknown[]; genera
   if (!Object.hasOwn(raw, "groups") || !Object.hasOwn(raw, "generatedAt")) return null;
   const { groups, generatedAt } = raw;
   if (!Array.isArray(groups) || typeof generatedAt !== "string") return null;
-  const validatedGroups = groups.map(validateApprovalGroup).filter((g: unknown): g is NonNullable<ReturnType<typeof validateApprovalGroup>> => g !== null);
+  // Fail loud: any invalid group rejects the entire payload (ERR-009)
+  const validatedGroups: unknown[] = [];
+  for (const g of groups) {
+    const validated = validateApprovalGroup(g);
+    if (validated === null) return null;
+    validatedGroups.push(validated);
+  }
   return { groups: validatedGroups, generatedAt, note: Object.hasOwn(raw, "note") && typeof raw.note === "string" ? raw.note : undefined };
 }
 
@@ -236,15 +251,14 @@ describe("FocusPage: validateGovernanceQueueData edge cases", () => {
   it("rejects negative pendingReviewCount", () => expect(validateGovernanceQueueData({ pendingReviewCount: -1, behaviorDeviationCount: 0, stagnationSignals: [] })).toBeNull());
   it("rejects missing stagnationSignals", () => expect(validateGovernanceQueueData({ pendingReviewCount: 0, behaviorDeviationCount: 0 })).toBeNull());
   it("rejects non-array stagnationSignals", () => expect(validateGovernanceQueueData({ pendingReviewCount: 0, behaviorDeviationCount: 0, stagnationSignals: {} })).toBeNull());
-  it("filters invalid signals from array", () => {
+  it("rejects invalid signals in array (fail loud)", () => {
     const raw = { pendingReviewCount: 2, behaviorDeviationCount: 1, stagnationSignals: [
       { type: "no_pain", principleId: "p-1", daysSince: 5 },
       { type: "bad_type", principleId: "p-2", daysSince: 3 },
     ]};
     const result = validateGovernanceQueueData(raw);
-    expect(result).not.toBeNull();
-    expect(result!.stagnationSignals).toHaveLength(1);
-    expect(result!.stagnationSignals[0].principleId).toBe("p-1");
+    // Any invalid signal rejects the entire payload
+    expect(result).toBeNull();
   });
   it("accepts valid data with optional note", () => {
     const raw = { pendingReviewCount: 1, behaviorDeviationCount: 2, stagnationSignals: [], note: "test" };
@@ -265,24 +279,24 @@ describe("FocusPage: validateApprovalGroup edge cases", () => {
   it("rejects missing records", () => expect(validateApprovalGroup({ principleId: "p-1", principleTitle: "Test", status: "pending" })).toBeNull());
   it("rejects invalid status", () => expect(validateApprovalGroup({ principleId: "p-1", principleTitle: "Test", status: "unknown", records: [] })).toBeNull());
   it("rejects non-array records", () => expect(validateApprovalGroup({ principleId: "p-1", principleTitle: "Test", status: "pending", records: "not-array" })).toBeNull());
-  it("filters records missing required fields", () => {
+  it("rejects records missing required fields (fail loud)", () => {
     const raw = { principleId: "p-1", principleTitle: "Test", status: "pending", records: [
       { id: "a-1", artifactId: "art-1", channel: "prompt", createdAt: "2026-01-01" },
       { id: "a-2" }, // missing fields
     ]};
     const result = validateApprovalGroup(raw);
-    expect(result).not.toBeNull();
-    expect(result!.records).toHaveLength(1);
+    // Any invalid record rejects the entire group
+    expect(result).toBeNull();
   });
-  it("rejects record with inherited property", () => {
+  it("rejects record with inherited property (fail loud)", () => {
     const rec = Object.create({ id: "inherited" });
     rec.artifactId = "art-1";
     rec.channel = "prompt";
     rec.createdAt = "2026-01-01";
     const raw = { principleId: "p-1", principleTitle: "Test", status: "pending", records: [rec] };
     const result = validateApprovalGroup(raw);
-    expect(result).not.toBeNull();
-    expect(result!.records).toHaveLength(0); // id is inherited, not own
+    // Inherited id is not own, so the record is invalid → entire group rejected
+    expect(result).toBeNull();
   });
 });
 
@@ -290,14 +304,14 @@ describe("FocusPage: validateApprovalsGroupedData edge cases", () => {
   it("rejects null", () => expect(validateApprovalsGroupedData(null)).toBeNull());
   it("rejects missing generatedAt", () => expect(validateApprovalsGroupedData({ groups: [] })).toBeNull());
   it("rejects non-string generatedAt", () => expect(validateApprovalsGroupedData({ groups: [], generatedAt: 123 })).toBeNull());
-  it("filters invalid groups", () => {
+  it("rejects invalid groups (fail loud)", () => {
     const raw = { groups: [
       { principleId: "p-1", principleTitle: "Valid", status: "pending", records: [] },
       { principleId: 42, principleTitle: "Bad", status: "pending", records: [] }, // non-string principleId
     ], generatedAt: "2026-01-01" };
     const result = validateApprovalsGroupedData(raw);
-    expect(result).not.toBeNull();
-    expect(result!.groups).toHaveLength(1);
+    // Any invalid group rejects the entire payload
+    expect(result).toBeNull();
   });
   it("accepts valid data with optional note", () => {
     const raw = { groups: [], generatedAt: "2026-01-01", note: "test" };
@@ -364,6 +378,15 @@ describe("FocusPage: forbidden terms never appear", () => {
       expect(typeof value, `zh.pages.focus.${key} should be a string`).toBe("string");
       expect(value as string, `zh.pages.focus.${key} should not contain "暂无数据"`).not.toContain("暂无数据");
       expect((value as string).length, `zh.pages.focus.${key} should have guidance text`).toBeGreaterThan(10);
+    }
+  });
+
+  it("English i18n focus keys contain no Chinese characters", () => {
+    const cjkPattern = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+    const entries = Object.entries(enFocusCopy);
+    for (const [key, value] of entries) {
+      if (typeof value !== "string") continue;
+      expect(value, `en.pages.focus.${key} should not contain Chinese characters`).not.toMatch(cjkPattern);
     }
   });
 });
