@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ActivationsConsoleModel } from '../models/ActivationsConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 
+const MAX_BODY_SIZE = 1024 * 1024; // 1 MB
+
 const models = new Map<string, ActivationsConsoleModel>();
 
 function getModel(workspaceDir: string): ActivationsConsoleModel {
@@ -74,12 +76,20 @@ export async function handleActivationsRoute(
     let body: unknown;
     try {
       const chunks: Buffer[] = [];
+      let totalSize = 0;
       for await (const chunk of req) {
-        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+        const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        totalSize += buf.length;
+        if (totalSize > MAX_BODY_SIZE) {
+          sendError(res, 413, 'payload_too_large', 'Request body exceeds maximum allowed size');
+          return;
+        }
+        chunks.push(buf);
       }
       const rawBody = Buffer.concat(chunks).toString('utf-8');
       body = JSON.parse(rawBody);
     } catch {
+      if (res.writableEnded) return;
       sendError(res, 400, 'invalid_body', 'Request body must be valid JSON');
       return;
     }

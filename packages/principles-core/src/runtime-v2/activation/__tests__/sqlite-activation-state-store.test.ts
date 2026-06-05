@@ -90,6 +90,20 @@ describe('SqliteActivationStateStore', () => {
     });
   });
 
+  describe('listPromptActivations', () => {
+    it('SQL query includes deactivated_at IS NULL filter', async () => {
+      const mockAll = vi.fn().mockReturnValue([]);
+      mockDb.prepare.mockReturnValue({ all: mockAll });
+
+      const store = new SqliteActivationStateStore(mockConnection);
+      await store.listPromptActivations();
+
+      expect(mockDb.prepare).toHaveBeenCalledWith(
+        expect.stringContaining('deactivated_at IS NULL'),
+      );
+    });
+  });
+
   describe('recordActivation', () => {
     it('inserts activation record with INSERT OR REPLACE', async () => {
       const mockRun = vi.fn();

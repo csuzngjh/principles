@@ -14,7 +14,7 @@ export class MemoryActivationStateStore implements ActivationStateReadModel {
   async listPromptActivations(): Promise<ActivationStatusRecord[]> {
     const result: ActivationStatusRecord[] = [];
     for (const record of this.activations.values()) {
-      if (record.channel === 'prompt') {
+      if (record.channel === 'prompt' && record.deactivatedAt === null) {
         result.push(record);
       }
     }

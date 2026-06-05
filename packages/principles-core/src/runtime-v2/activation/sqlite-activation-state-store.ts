@@ -89,7 +89,7 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
     const rows = db.prepare(`
       SELECT activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at
       FROM activations
-      WHERE channel = 'prompt'
+      WHERE channel = 'prompt' AND deactivated_at IS NULL
       ORDER BY activated_at ASC
     `).all();
 

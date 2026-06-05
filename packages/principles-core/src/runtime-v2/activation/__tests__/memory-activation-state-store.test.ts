@@ -68,6 +68,22 @@ describe('MemoryActivationStateStore', () => {
     });
   });
 
+  describe('listPromptActivations', () => {
+    it('returns only active prompt activations, excluding deactivated', async () => {
+      const active = makeActivationRecord({ activationId: 'act-active', idempotencyKey: 'art-a::prompt' });
+      const deactivated = makeActivationRecord({ activationId: 'act-dead', idempotencyKey: 'art-b::prompt', deactivatedAt: '2026-06-01T00:00:00Z' });
+      const deferArchive = makeActivationRecord({ activationId: 'act-defer', idempotencyKey: 'art-c::defer_archive', channel: 'defer_archive', action: 'defer_archive' });
+
+      await store.recordActivation(active);
+      await store.recordActivation(deactivated);
+      await store.recordActivation(deferArchive);
+
+      const result = await store.listPromptActivations();
+      expect(result).toHaveLength(1);
+      expect(result[0]?.activationId).toBe('act-active');
+    });
+  });
+
   describe('idempotency semantics', () => {
     it('multiple records with different channels are independent', async () => {
       const record1 = makeActivationRecord({ idempotencyKey: 'art-001::prompt', channel: 'prompt' });

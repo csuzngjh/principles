@@ -77,6 +77,16 @@ describe('prompt-activation-reader-contract', () => {
       expect(filterPromptActivations(activations)).toHaveLength(0);
     });
 
+    it('excludes deactivated activations', () => {
+      const activations = [
+        makeActivation({ activationId: 'act-active', deactivatedAt: null }),
+        makeActivation({ activationId: 'act-deactivated', deactivatedAt: '2026-06-01T00:00:00Z' }),
+      ];
+      const result = filterPromptActivations(activations);
+      expect(result).toHaveLength(1);
+      expect(result[0]?.activationId).toBe('act-active');
+    });
+
     it('returns empty for empty input', () => {
       expect(filterPromptActivations([])).toHaveLength(0);
     });
