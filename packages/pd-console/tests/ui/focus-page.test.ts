@@ -389,6 +389,17 @@ describe("FocusPage: forbidden terms never appear", () => {
       expect(value, `en.pages.focus.${key} should not contain Chinese characters`).not.toMatch(cjkPattern);
     }
   });
+
+  it("evidenceSummary does not duplicate count", () => {
+    // evidenceSummary should use {{count}} interpolation, not output the number separately
+    const enValue = enFocusCopy.evidenceSummary;
+    const zhValue = zhFocusCopy.evidenceSummary;
+    expect(typeof enValue).toBe("string");
+    expect(typeof zhValue).toBe("string");
+    // Should contain exactly one {{count}} placeholder
+    expect((enValue as string).match(/\{\{count\}\}/g)).toHaveLength(1);
+    expect((zhValue as string).match(/\{\{count\}\}/g)).toHaveLength(1);
+  });
 });
 
 // ── Component import test ────────────────────────────────────────────────────

@@ -249,8 +249,7 @@ function PendingReviewCard({
 
       {/* Evidence summary (inset well) */}
       <div className="mt-2 px-3 py-2 bg-surface/60 border-l-2 border-gov text-ink-3 text-[13px] leading-snug">
-        {t("pages.focus.evidenceLabel")}：{group.records.length}{" "}
-        {t("pages.focus.recordCount", { count: group.records.length })}
+        {t("pages.focus.evidenceSummary", { count: group.records.length })}
       </div>
 
       {/* Actions */}

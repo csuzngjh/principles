@@ -85,7 +85,7 @@
       "tagLowRisk": "Low Risk",
       "recordCount": "{{count}} record(s)",
       "deviationCount": "deviation(s)",
-      "evidenceLabel": "Evidence",
+      "evidenceSummary": "Evidence: {{count}} record(s)",
       "onboardingTitle": "How PD Works",
       "onboardingStep1": "Observe deviations — PD watches for behavior that diverges from owner expectations",
       "onboardingStep2": "Capture evidence — Pain signals are recorded with bounded context",
