@@ -226,6 +226,7 @@ async function insertPromptActivation(overrides: {
     action,
     targetRef,
     activatedAt: now,
+    deactivatedAt: null,
   });
 }
 
