@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-label="Principles Disciple threshold mark logo sheet">
+  <defs>
+    <style>
+      .paper{fill:#f7f3ea}.ink{fill:#1f2933}.gov{stroke:#1e3a5f}.muted{fill:#5f6774}.line{stroke:#d7d1c4}.amber{fill:#a66a2a}.small{font:12px Inter,Arial,sans-serif;letter-spacing:.12em}.body{font:16px Inter,Arial,sans-serif}.title{font:24px Inter,Arial,sans-serif;font-weight:600;letter-spacing:.12em}.mono{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em}
+    </style>
+  </defs>
+  <rect class="paper" width="1200" height="760"/>
+  <path class="line" d="M60 128H1140M60 620H1140" fill="none"/>
+  <text class="title ink" x="60" y="82">PRINCIPLES DISCIPLE / THRESHOLD MARK</text>
+  <text class="body muted" x="60" y="112">Owner boundary. Evidence crossing. Reversible activation.</text>
+  <g transform="translate(88 190)">
+    <path class="gov" d="M52 0V160M168 0V160M0 80H220" stroke-width="8" stroke-linecap="square" fill="none"/>
+    <circle class="amber" cx="110" cy="80" r="10"/>
+    <text class="mono ink" x="0" y="210">RECOMMENDED MARK</text>
+    <text class="body muted" x="0" y="242">Two boundaries define owner control.</text>
+    <text class="body muted" x="0" y="270">The dot is an evidence-backed activation.</text>
+  </g>
+
+  <g transform="translate(420 172)">
+    <text class="mono muted" x="0" y="0">LIGHT APP ICON</text>
+    <rect x="0" y="28" width="156" height="156" rx="22" fill="#fbf8f0" stroke="#d7d1c4"/>
+    <path class="gov" d="M54 40V144M102 40V144M32 92H124" stroke-width="4" fill="none"/>
+    <circle class="amber" cx="78" cy="92" r="6"/>
+    <text class="mono muted" x="210" y="0">DARK APP ICON</text>
+    <rect x="210" y="28" width="156" height="156" rx="22" fill="#1e3a5f"/>
+    <path d="M264 40V144M312 40V144M242 92H334" stroke="#f7f3ea" stroke-width="4" fill="none"/>
+    <circle class="amber" cx="288" cy="92" r="6"/>
+  </g>
+
+  <g transform="translate(420 415)">
+    <text class="mono muted" x="0" y="0">WORDMARK LOCKUP</text>
+    <path class="gov" d="M32 38V124M88 38V124M10 82H110" stroke-width="4" fill="none"/>
+    <circle class="amber" cx="60" cy="82" r="5"/>
+    <path class="line" d="M150 36V130" fill="none"/>
+    <text class="title ink" x="178" y="76">PRINCIPLES</text>
+    <text class="title ink" x="178" y="114">DISCIPLE</text>
+  </g>
+
+  <g transform="translate(820 172)">
+    <text class="mono muted" x="0" y="0">USAGE RULES</text>
+    <text class="body ink" x="0" y="42">Use on console shell, splash, favicon,</text>
+    <text class="body ink" x="0" y="70">and empty-state illustrations.</text>
+    <text class="body ink" x="0" y="112">Do not animate continuously.</text>
+    <text class="body ink" x="0" y="140">Do not combine with brain/DNA/fire imagery.</text>
+    <text class="body ink" x="0" y="182">Motion: one-time 420ms stroke draw</text>
+    <text class="body ink" x="0" y="210">when entering the governance workspace.</text>
+  </g>
+
+  <g transform="translate(60 664)">
+    <rect width="32" height="32" fill="#f7f3ea" stroke="#d7d1c4"/><text class="mono muted" x="44" y="22">paper #F7F3EA</text>
+    <rect x="210" width="32" height="32" fill="#1e3a5f"/><text class="mono muted" x="254" y="22">governance blue #1E3A5F</text>
+    <rect x="520" width="32" height="32" fill="#1f2933"/><text class="mono muted" x="564" y="22">ink #1F2933</text>
+    <rect x="742" width="32" height="32" fill="#a66a2a"/><text class="mono muted" x="786" y="22">amber #A66A2A</text>
+  </g>
+</svg>
