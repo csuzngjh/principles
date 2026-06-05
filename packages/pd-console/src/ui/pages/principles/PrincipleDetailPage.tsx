@@ -29,15 +29,44 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+function safeStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(isString);
+}
+
+function safeString(v: unknown, fallback = ""): string {
+  return typeof v === "string" ? v : fallback;
+}
+
+/**
+ * Validate and normalize a PrincipleDetail from untrusted network data.
+ * Returns a normalized object with safe defaults for all fields the page
+ * actually accesses. Never returns null for individual fields — only for
+ * completely unparseable top-level structures.
+ *
+ * Fields the page uses: id, text, status, triggerPattern, action,
+ * derivedFromPainIds (length + map), rules (length).
+ */
 function validatePrincipleDetail(data: unknown): PrincipleDetailData | null {
   if (!isRecord(data)) return null;
   if (!Object.hasOwn(data, "principle") || !isRecord(data.principle)) return null;
-  const p = data.principle;
-  if (!Object.hasOwn(p, "id") || !isString(p.id)) return null;
-  if (!Object.hasOwn(p, "text") || !isString(p.text)) return null;
-  if (!Object.hasOwn(p, "status") || !isString(p.status)) return null;
-  if (!Object.hasOwn(p, "rules") || !Array.isArray(p.rules)) return null;
-  return data as unknown as PrincipleDetailData;
+  const raw = data.principle;
+
+  // Required fields — fail loud if missing
+  if (!Object.hasOwn(raw, "id") || !isString(raw.id)) return null;
+  if (!Object.hasOwn(raw, "text") || !isString(raw.text)) return null;
+  if (!Object.hasOwn(raw, "status") || !isString(raw.status)) return null;
+
+  // Normalize fields the page accesses with safe defaults
+  const normalized: Record<string, unknown> = {
+    ...raw,
+    triggerPattern: safeString(raw.triggerPattern),
+    action: safeString(raw.action),
+    derivedFromPainIds: safeStringArray(raw.derivedFromPainIds),
+    rules: Array.isArray(raw.rules) ? raw.rules : [],
+  };
+
+  return { principle: normalized } as unknown as PrincipleDetailData;
 }
 
 function validateApprovalsGrouped(data: unknown): ApprovalsGroupedData | null {

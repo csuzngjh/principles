@@ -469,10 +469,10 @@ describe("Validators use isRecord + Object.hasOwn + per-field checks", () => {
   });
 
   it("PrincipleDetailPage validates principle detail fields", () => {
-    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(p, "id"\)/);
-    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(p, "text"\)/);
-    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(p, "status"\)/);
-    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(p, "rules"\)/);
+    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(raw, "id"\)/);
+    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(raw, "text"\)/);
+    expect(principleDetailSrc).toMatch(/Object\.hasOwn\(raw, "status"\)/);
+    expect(principleDetailSrc).toMatch(/rules/);
   });
 
   it("PrincipleDetailPage validates lifecycle adherence fields", () => {
@@ -531,5 +531,50 @@ describe("Grouped decision applies to all records", () => {
       principleDetailSrc.indexOf("handlePark"),
     );
     expect(rejectSection).not.toMatch(/records\[0\]/);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 14. PrincipleDetail validator normalizes all page-accessed fields
+// ════════════════════════════════════════════════════════════════════════════
+describe("PrincipleDetail validator normalizes all page-accessed fields", () => {
+  it("validator normalizes derivedFromPainIds with safeStringArray", () => {
+    expect(principleDetailSrc).toMatch(/safeStringArray\(raw\.derivedFromPainIds\)/);
+  });
+
+  it("validator normalizes triggerPattern with safeString", () => {
+    expect(principleDetailSrc).toMatch(/safeString\(raw\.triggerPattern\)/);
+  });
+
+  it("validator normalizes action with safeString", () => {
+    expect(principleDetailSrc).toMatch(/safeString\(raw\.action\)/);
+  });
+
+  it("validator normalizes rules with safe default empty array", () => {
+    expect(principleDetailSrc).toMatch(/Array\.isArray\(raw\.rules\).*raw\.rules.*:\s*\[\]/);
+  });
+
+  it("validator builds a normalized object, not raw data passthrough", () => {
+    expect(principleDetailSrc).toMatch(/const normalized.*Record<string, unknown>/);
+    expect(principleDetailSrc).toMatch(/return \{ principle: normalized \}/);
+  });
+
+  it("safeStringArray returns empty array for non-array input", () => {
+    expect(principleDetailSrc).toMatch(/function safeStringArray/);
+    expect(principleDetailSrc).toMatch(/if \(!Array\.isArray\(v\)\) return \[\]/);
+  });
+
+  it("safeStringArray filters elements to only strings", () => {
+    expect(principleDetailSrc).toMatch(/v\.filter\(isString\)/);
+  });
+
+  it("page accesses derivedFromPainIds safely (won't crash if missing)", () => {
+    // The page uses .length and .map() on derivedFromPainIds
+    // After normalization, derivedFromPainIds is always string[]
+    // Verify the page actually uses the field
+    expect(principleDetailSrc).toMatch(/derivedFromPainIds\.length/);
+    expect(principleDetailSrc).toMatch(/derivedFromPainIds\.map/);
+    // And the validator ensures it's always a string array
+    expect(principleDetailSrc).toMatch(/safeStringArray\(raw\.derivedFromPainIds\)/);
   });
 });
