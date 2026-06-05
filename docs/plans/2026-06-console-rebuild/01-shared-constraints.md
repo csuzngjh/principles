@@ -651,8 +651,9 @@ interface ActivationRecord {
 interface LifecycleMetricsResponse {
   principleId: string;
   adherence: {
-    rate: number | null;     // null = insufficientData
-    note: string;            // "规则质量信号，不等于行为变化"（F.1）
+    insufficientData: boolean;  // true = 无 rule 或数据不足
+    rate: number | null;        // null when insufficientData
+    note: string;               // "规则质量信号，不等于行为变化"（F.1）
   };
   ruleMetrics: Array<{
     ruleId: string;

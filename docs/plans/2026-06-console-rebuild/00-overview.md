@@ -2,12 +2,12 @@
 
 > **状态**: Draft for owner review / 待发布到 Linear
 > **日期**: 2026-06-04
-> **主决策**: [ADR-0017](../../adr/0017-console-presentation-rebuild.md)（Console 表现层重建）
+> **主决策**: ADR-0017 Console 表现层重建（背景参考，未提交；关键决策已纳入本文档）
 > **上位约束**: [ADR-0014](../../adr/0014-mvp-first-strategy-and-product-pivot.md)、[PRODUCT_IDENTITY.md](../../../PRODUCT_IDENTITY.md)
 > **品牌/UX 权威**: [PD_BRAND_CONSTITUTION.md](../../brand/PD_BRAND_CONSTITUTION.md)、[PD_UX_PRINCIPLES.md](../../brand/PD_UX_PRINCIPLES.md)
-> **领域语言**: [packages/pd-console/CONTEXT.md](../../../packages/pd-console/CONTEXT.md)
-> **重做规格**: [packages/pd-console/REDESIGN.md](../../../packages/pd-console/REDESIGN.md)
-> **视觉原型**: [packages/pd-console/design-prototype/](../../../packages/pd-console/design-prototype/)（Blueprint 方向）
+> **领域语言**: packages/pd-console/CONTEXT.md（背景参考，未提交；关键术语见 01-shared-constraints.md E 节）
+> **重做规格**: packages/pd-console/REDESIGN.md（背景参考，未提交；关键规格已纳入 01-shared-constraints.md）
+> **视觉原型**: packages/pd-console/design-prototype/（本地参考，未提交；token 基准见 01-shared-constraints.md B 节）
 > **设计方向**: Blueprint — 技术蓝图风格，冷调中性、锐角几何、等宽字体点缀、默认无阴影
 > **共享实施约束（每个工单必读）**: [01-shared-constraints.md](./01-shared-constraints.md)
 

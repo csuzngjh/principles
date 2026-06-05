@@ -9,7 +9,12 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const workspaceDir = process.argv[2] || path.resolve(__dirname, '../..', '.openclaw', 'workspace');
+const workspaceDir = process.argv[2];
+if (!workspaceDir) {
+  console.error('Usage: node verify-config-cutover.mjs <workspaceDir>');
+  console.error('Example: node verify-config-cutover.mjs D:\\.openclaw\\workspace');
+  process.exit(2);
+}
 
 const configYaml = path.join(workspaceDir, '.pd', 'config.yaml');
 const legacyFeatureFlags = path.join(workspaceDir, '.pd', 'feature-flags.yaml');
@@ -21,12 +26,17 @@ console.log('=== PRI-305/307 Config Cutover Verification ===\n');
 const primaryExists = fs.existsSync(configYaml);
 console.log(`[${primaryExists ? 'PASS' : 'FAIL'}] .pd/config.yaml exists: ${primaryExists}`);
 
+let hasVersion = false;
+let hasFeatures = false;
+let hasRuntimeProfiles = false;
+let hasInternalAgents = false;
+
 if (primaryExists) {
   const content = fs.readFileSync(configYaml, 'utf8');
-  const hasVersion = content.includes('version:');
-  const hasFeatures = content.includes('features:');
-  const hasRuntimeProfiles = content.includes('runtimeProfiles:');
-  const hasInternalAgents = content.includes('internalAgents:');
+  hasVersion = content.includes('version:');
+  hasFeatures = content.includes('features:');
+  hasRuntimeProfiles = content.includes('runtimeProfiles:');
+  hasInternalAgents = content.includes('internalAgents:');
   
   console.log(`[${hasVersion ? 'PASS' : 'FAIL'}] Has version field: ${hasVersion}`);
   console.log(`[${hasFeatures ? 'PASS' : 'FAIL'}] Has features section: ${hasFeatures}`);
@@ -41,6 +51,6 @@ console.log(`\n[INFO] Legacy .pd/feature-flags.yaml exists: ${legacyFeatureExist
 console.log(`[INFO] Legacy .state/workflows.yaml exists: ${legacyWorkflowExists} (expected: may exist, not used)`);
 
 // 3. Summary
-const allPass = primaryExists;
+const allPass = primaryExists && hasVersion && hasFeatures && hasRuntimeProfiles && hasInternalAgents;
 console.log(`\n=== Result: ${allPass ? 'PASS' : 'FAIL'} ===`);
 process.exit(allPass ? 0 : 1);
