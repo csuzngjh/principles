@@ -418,14 +418,7 @@ export function FocusPage() {
                 {t("pages.focus.viewFullChain")}
               </summary>
               <div className="mt-2 pl-4 border-l-2 border-line text-ink-3 text-[13px]">
-                {pendingGroups.length > 0
-                  ? pendingGroups.map((g) => (
-                      <div key={g.principleId} className="py-1">
-                        {g.principleTitle} — {g.records.length}{" "}
-                        {g.records.length === 1 ? "条记录" : "条记录"}
-                      </div>
-                    ))
-                  : t("pages.focus.emptyDeviation")}
+                {t("pages.focus.deviationDetailPending")}
               </div>
             </details>
           </>

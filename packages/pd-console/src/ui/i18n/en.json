@@ -72,6 +72,7 @@
       "stagnationNoPain": "No pain signals received",
       "stagnationDaysSince": "days ago",
       "deviationDisclaimer": "PD presents each deviation individually. Automatic similarity detection is post-MVP.",
+      "deviationDetailPending": "Individual deviation evidence will be available here once the backend provides pain signal details (CR5).",
       "footer": "This page answers one question: what deserves your judgment right now.",
       "reviewAction": "Review & Decide",
       "parkAction": "Park",
