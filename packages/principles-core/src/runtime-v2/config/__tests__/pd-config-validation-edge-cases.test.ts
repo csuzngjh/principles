@@ -483,3 +483,102 @@ describe('OpenClaw profile edge cases', () => {
     )).toBe(true);
   });
 });
+
+// ── Malformed Profile Validation (validated config path) ─────────────────────
+
+describe('Malformed profile validation through validatePdConfig', () => {
+  it('rejects profile with missing type field (empty object)', () => {
+    // Regression test: {} profile must be rejected at validation layer,
+    // not silently passed to binding resolution
+    const raw: Record<string, unknown> = {
+      version: 1,
+      features: {
+        prompt: { category: 'core', enabled: true },
+        code_tool_hook: { category: 'core', enabled: true },
+        defer_archive: { category: 'core', enabled: true },
+        correction_observer: { category: 'quiet', enabled: true },
+        gfi: { category: 'quiet', enabled: false },
+        nocturnal: { category: 'gone', enabled: false },
+      },
+      runtimeProfiles: {
+        'openclaw.default': { type: 'openclaw', source: 'default' },
+        'malformed-profile': {},  // Missing 'type' field
+      },
+      internalAgents: {
+        defaultRuntime: 'openclaw.default',
+        agents: {
+          diagnostician: { enabled: true, runtimeProfile: 'malformed-profile' },
+        },
+      },
+      ui: { diagnostics: { mode: 'simple' } },
+    };
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected error');
+    expect(result.errors.some(e =>
+      e.path.includes('malformed-profile') &&
+      e.reason.includes('type')
+    )).toBe(true);
+  });
+
+  it('rejects profile with null value', () => {
+    // Regression test: null profile must be rejected at validation layer
+    const raw: Record<string, unknown> = {
+      version: 1,
+      features: {
+        prompt: { category: 'core', enabled: true },
+        code_tool_hook: { category: 'core', enabled: true },
+        defer_archive: { category: 'core', enabled: true },
+        correction_observer: { category: 'quiet', enabled: true },
+        gfi: { category: 'quiet', enabled: false },
+        nocturnal: { category: 'gone', enabled: false },
+      },
+      runtimeProfiles: {
+        'openclaw.default': { type: 'openclaw', source: 'default' },
+        'null-profile': null,
+      },
+      internalAgents: {
+        defaultRuntime: 'openclaw.default',
+        agents: {},
+      },
+      ui: { diagnostics: { mode: 'simple' } },
+    };
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected error');
+    expect(result.errors.some(e =>
+      e.path.includes('null-profile')
+    )).toBe(true);
+  });
+
+  it('rejects profile with invalid type value', () => {
+    // Regression test: invalid type must be rejected at validation layer
+    const raw: Record<string, unknown> = {
+      version: 1,
+      features: {
+        prompt: { category: 'core', enabled: true },
+        code_tool_hook: { category: 'core', enabled: true },
+        defer_archive: { category: 'core', enabled: true },
+        correction_observer: { category: 'quiet', enabled: true },
+        gfi: { category: 'quiet', enabled: false },
+        nocturnal: { category: 'gone', enabled: false },
+      },
+      runtimeProfiles: {
+        'openclaw.default': { type: 'openclaw', source: 'default' },
+        'bad-type-profile': { type: 'invalid_type' },
+      },
+      internalAgents: {
+        defaultRuntime: 'openclaw.default',
+        agents: {},
+      },
+      ui: { diagnostics: { mode: 'simple' } },
+    };
+    const result = validatePdConfig(raw);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected error');
+    expect(result.errors.some(e =>
+      e.path.includes('bad-type-profile') &&
+      e.reason.includes('type')
+    )).toBe(true);
+  });
+});
