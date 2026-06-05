@@ -326,85 +326,45 @@ describe("FocusPage: forbidden terms never appear", () => {
     "暂无数据",
   ];
 
-  // These are the i18n keys we'll add for the focus page.
-  // We check that none of the forbidden terms appear in the
-  // English or Chinese copy.
-  const enFocusCopy: Record<string, string> = {
-    eyebrow: "Governance Focus",
-    title: "What deserves your judgment right now",
-    subtitle: "This page answers one question: what should the owner review next?",
-    summaryLabel: "Current:",
-    summaryPending: "pending review",
-    summaryDeviation: "behavior deviations",
-    summaryStagnation: "stagnation signals",
-    sectionPending: "Pending Your Review",
-    sectionDeviation: "Behavior Deviations Worth Noting",
-    sectionSignals: "System Signals",
-    emptyPending: "No principles pending review. When PD captures behavior deviation signals, principle candidates will appear here for your review.",
-    emptyDeviation: "No behavior deviations captured yet. PD will detect deviations when the agent's behavior diverges from owner expectations.",
-    emptySignals: "No stagnation signals. All approved principles appear to be active.",
-    stagnationNeverActivated: "Approved but never activated",
-    stagnationNoPain: "No pain signals received",
-    stagnationDaysSince: "days ago",
-    deviationDisclaimer: "PD presents each deviation individually. Automatic similarity detection is post-MVP.",
-    deviationDetailPending: "Individual deviation evidence will be available here once the backend provides pain signal details (CR5).",
-    footer: "This page answers one question: what deserves your judgment right now.",
-    reviewAction: "Review & Decide",
-    parkAction: "Park",
-    viewFullChain: "View full chain",
-    loadError: "Unable to load governance data. You can try refreshing the page.",
-  };
+  // Read real i18n files so the test catches production regressions
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const enJson = require("../../src/ui/i18n/en.json") as Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const zhJson = require("../../src/ui/i18n/zh-CN.json") as Record<string, unknown>;
 
-  const zhFocusCopy: Record<string, string> = {
-    eyebrow: "治理焦点",
-    title: "现在，值得你判断的事",
-    subtitle: "这一页只回答一个问题：现在该做什么判断。",
-    summaryLabel: "当前：",
-    summaryPending: "条待审",
-    summaryDeviation: "条行为偏差",
-    summaryStagnation: "条停滞信号",
-    sectionPending: "待你审查",
-    sectionDeviation: "值得关注的行为偏差",
-    sectionSignals: "系统信号",
-    emptyPending: "还没有可审查原则。当 PD 捕获到行为偏差信号时，会在这里生成原则候选，等待你审查。",
-    emptyDeviation: "尚未捕获行为偏差。当智能体的行为偏离拥有者期望时，PD 会检测到偏差信号。",
-    emptySignals: "没有停滞信号。所有已批准的原则似乎都已激活。",
-    stagnationNeverActivated: "已批准但从未激活",
-    stagnationNoPain: "未收到行为偏差信号",
-    stagnationDaysSince: "天",
-    deviationDisclaimer: "PD 暂按单条呈现，自动同类识别为 post-MVP。",
-    deviationDetailPending: "单条偏差证据将在后端提供行为偏差信号详情后显示（CR5）。",
-    footer: "这一页只回答一个问题：现在该做什么判断。",
-    reviewAction: "审查并决定",
-    parkAction: "暂存",
-    viewFullChain: "查看完整链路",
-    loadError: "无法加载治理数据。你可以尝试刷新页面。",
-  };
+  const enFocusCopy = (enJson.pages as Record<string, unknown>)?.focus as Record<string, unknown> ?? {};
+  const zhFocusCopy = (zhJson.pages as Record<string, unknown>)?.focus as Record<string, unknown> ?? {};
 
-  it("English copy contains no forbidden terms", () => {
-    for (const [key, value] of Object.entries(enFocusCopy)) {
+  it("English i18n focus keys exist and contain no forbidden terms", () => {
+    const entries = Object.entries(enFocusCopy);
+    expect(entries.length, "should have focus i18n keys").toBeGreaterThan(0);
+    for (const [key, value] of entries) {
+      if (typeof value !== "string") continue;
       for (const term of forbiddenTerms) {
-        expect(value, `en.${key} should not contain "${term}"`).not.toContain(term);
+        expect(value, `en.pages.focus.${key} should not contain "${term}"`).not.toContain(term);
       }
     }
   });
 
-  it("Chinese copy contains no forbidden terms", () => {
-    for (const [key, value] of Object.entries(zhFocusCopy)) {
+  it("Chinese i18n focus keys exist and contain no forbidden terms", () => {
+    const entries = Object.entries(zhFocusCopy);
+    expect(entries.length, "should have focus i18n keys").toBeGreaterThan(0);
+    for (const [key, value] of entries) {
+      if (typeof value !== "string") continue;
       for (const term of forbiddenTerms) {
-        expect(value, `zh.${key} should not contain "${term}"`).not.toContain(term);
+        expect(value, `zh.pages.focus.${key} should not contain "${term}"`).not.toContain(term);
       }
     }
   });
 
   it("empty states guide next steps, not '暂无数据'", () => {
-    // Chinese empty states should not contain "暂无数据"
-    expect(zhFocusCopy.emptyPending).not.toContain("暂无数据");
-    expect(zhFocusCopy.emptyDeviation).not.toContain("暂无数据");
-    expect(zhFocusCopy.emptySignals).not.toContain("暂无数据");
-    // They should contain guidance text
-    expect(zhFocusCopy.emptyPending.length).toBeGreaterThan(10);
-    expect(zhFocusCopy.emptyDeviation.length).toBeGreaterThan(10);
+    const emptyKeys = ["emptyPending", "emptyDeviation", "emptySignals"];
+    for (const key of emptyKeys) {
+      const value = zhFocusCopy[key];
+      expect(typeof value, `zh.pages.focus.${key} should be a string`).toBe("string");
+      expect(value as string, `zh.pages.focus.${key} should not contain "暂无数据"`).not.toContain("暂无数据");
+      expect((value as string).length, `zh.pages.focus.${key} should have guidance text`).toBeGreaterThan(10);
+    }
   });
 });
 

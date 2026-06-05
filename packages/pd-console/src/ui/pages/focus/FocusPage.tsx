@@ -316,10 +316,12 @@ export function FocusPage() {
   const [groupedData, setGroupedData] = useState<ApprovalsGroupedData | null>(null);
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [groupedErrorReason, setGroupedErrorReason] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadingState("loading");
     setErrorMessage(null);
+    setGroupedErrorReason(null);
 
     const [queueResult, groupedResult] = await Promise.all([
       fetchGovernanceQueue(),
@@ -340,13 +342,17 @@ export function FocusPage() {
     }
     setQueueData(validatedQueue);
 
-    // Validate grouped data
+    // Validate grouped data (ERR-002: degradation with reason)
     if (!groupedResult.success) {
       // Non-fatal: we can still show queue data without approval groups
       setGroupedData(null);
+      setGroupedErrorReason(groupedResult.error ?? "Approvals data unavailable");
     } else {
       const validatedGrouped = validateApprovalsGroupedData(groupedResult.data);
       setGroupedData(validatedGrouped);
+      if (validatedGrouped === null) {
+        setGroupedErrorReason("Approvals data has unexpected shape");
+      }
     }
 
     setLoadingState("loaded");
@@ -394,7 +400,7 @@ export function FocusPage() {
   const stagnationSignals = queueData?.stagnationSignals ?? [];
   const stagnationCount = stagnationSignals.length;
   const isAllEmpty = pendingCount === 0 && deviationCount === 0 && stagnationCount === 0;
-  const approvalDataUnavailable = groupedData === null && pendingCount > 0;
+  const approvalDataUnavailable = (groupedData === null || groupedData.groups.length === 0) && pendingCount > 0;
 
   return (
     <PageShell>
@@ -436,7 +442,9 @@ export function FocusPage() {
         ) : (
           <div className="text-ink-3 text-[13px] leading-relaxed py-3">
             {approvalDataUnavailable
-              ? t("pages.focus.loadError")
+              ? (groupedErrorReason
+                ? `${t("pages.focus.loadError")} (${groupedErrorReason})`
+                : t("pages.focus.loadError"))
               : t("pages.focus.emptyPending")}
           </div>
         )}
